@@ -193,6 +193,28 @@ Verification:
 No plugin version bump is needed. One stale comment remains in `editors/jetbrains/build.gradle.kts` (lines 78–80). The worker left it because that file is part of the plugin source digest, so editing it would force a version bump.
 
 I'm closing this head. Integration is tracked as gated `#gh249builddir`, blocked only on commit/push authorization (`#lzcommitpresetresolve`). The old worktree `~/worktrees/agent-doc-gh249-20261013` is superseded.
+
+### Re: #lzcoreciactivationfixes — opus-5-5 · 2026-10-14T21:11-04:00
+
+`subagent:ciactivation` reported back. The work is done, uncommitted, in `~/worktrees/lzcoreciactivationfixes-20261013/<repo>` on branch `task/lzcoreciactivationfixes-20261013`. The Phase 6 release callers are still missing, so I've gated the item rather than closing it.
+
+- **Already done by the earlier run:** named Core steps and exact reach mappings in all nine bindings, pinned consumer jobs and matrices, go's unnamed consumer step named, plus lazily-spec's `core` job and the Phase 6 reusable workflow that re-runs the aggregate gates.
+- **Bug fixed this run:** a mutation attack showed a step-level `if: false` or `continue-on-error: true` on a Core step kept the guard green in 7 of 9 bindings and in spec. Zig's consumer step also sat behind an unpinned `if: matrix.zig == '0.16.0'`. Gate steps must now be unconditional unless that exact value is pinned, and a pin naming a step that doesn't exist is refused. Zig's consumer now has its own unconditional job on 0.16.0.
+- **Verification:** every repo's `./scripts/check-ci-reach.sh` passes (rs has 59 gates; the others have 10–14). The mutation attacks were all killed; per repo that ranges from 10/10 to 15/15. Spec's `check-core-ci-reach.mjs` self-test kills 7/7 mutations per workflow. Logs are in `_logs/`.
+- **Integration constraint:** the new Makefile and CI wiring calls Phase 1–5 scripts that aren't integrated yet, so this has to land with or after Phases 1–5. `make check` fails in these worktrees by themselves.
+
+Worker request, verbatim:
+
+> [agent-doc] subagent operator request (#waypostrequest)
+> kind: question
+> blocking: true
+> request: How should the Phase 6 release-workflow callers be pinned and triggered: which lazily-spec commit pins `core-cohort-publish-gate.yml`, where does the candidate manifest live, what is the evidence artifact called, and should cpp/dart/go/zig get new tag-triggered release workflows to host their callers?
+> context: Everything else in #lzcoreciactivationfixes is done and green, uncommitted, in /home/brian/worktrees/lzcoreciactivationfixes-20261013. An exact caller needs a commit-hash pin on a reusable workflow that is not committed, and the spec commit must postdate the binding release commit the manifest lists. That points to a manually dispatched run on the tag with the spec commit as an input, which is a design decision belonging to #lzreleasepins/#lzcorecohort. Writing a placeholder or `@main` would break or float the release workflows. Separately, committing and pushing need authorization because #spec-test-commit-push is undefined.
+> choices: []
+
+**My recommendation:** don't put the cohort gate in each binding's release workflow. A reusable workflow's `uses:` ref has to be a literal, and the spec commit must postdate the binding release it verifies, so a binding-side caller can never be pinned correctly ahead of time. Run the cohort gate on the spec side instead: a `workflow_dispatch` (or tag-triggered) job in lazily-spec that takes the nine binding tags and SHAs as inputs, reads the manifest from spec (the `#lzcorecohort` location), and uploads one evidence artifact. Bindings then need no new release workflows, and the cpp/dart/go/zig question goes away.
+
+This needs your answer before the remaining part of the item can be written. Gated `#lzcoreciactivationfixes` holds the full state.
 <!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  
@@ -200,7 +222,7 @@ I'm closing this head. Integration is tracked as gated `#gh249builddir`, blocked
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - 🚧 do [#lzcoreevidencedarttimeout]
-- 🚧 do [#lzcoreciactivationfixes]
+- ~~do [#lzcoreciactivationfixes]~~
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~[from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
@@ -211,12 +233,12 @@ I'm closing this head. Integration is tracked as gated `#gh249builddir`, blocked
 - [/] [#gh249builddir] [operator-decision, btakita/agent-doc] Integrate the issue-249 follow-up fix: /home/brian/worktrees/agent-doc-gh249-restore on branch fix/gh249-263-local-build-dir from origin/main 6ddc004207 (uncommitted; src/plugin.rs, agent-doc-reliable-sync-io/src/liveness.rs, editors/jetbrains/SPEC.md, scripts/jetbrains-custom-repository.py; exclude the untracked .gh249-*.log files). build_project_dir now maps JetBrains 263 to editors/jetbrains-262 so 'agent-doc plugin install jetbrains --local' cannot pick a stale classic 263 ZIP without frame isolation. make check exit 0 (10505 passed), and a mutation check shows 2 regression tests fail when the old mapping is restored. No plugin version bump needed. Blocked only on commit/push authorization (#lzcommitpresetresolve); then commit, push, and run the single coordinator make install. Old worktree /home/brian/worktrees/agent-doc-gh249-20261013 is superseded.
 - [/] [#lzcohortrelease] [operator-decision] Lazily cohort release: no public main warrants a release today (readiness report /home/brian/worktrees/agent-loop-lzreleasepublish-readiness-20261014/.audit-work/lazily-release-readiness-20261014.md, 2026-10-14). Blocked on #lzcommitpresetresolve plus explicit commit/push/version-bump/tag/publish authorization, a pre-1.0-cohort vs Core Beta decision (#lzbetascope), and #lzrustpublish. Once unblocked: Go CI fix, #lzcoreevidencedarttimeout, Core Phases 1-5 (rebase the Zig/Go worktrees first), Phase 6, interop cold-start, then minor-version releases rs 0.60.0, py 0.44.0, js 0.36.0, kt 0.45.0, cs 0.8.0, go v0.30.0, cpp v0.32.0, zig v0.38.0, dart 0.34.0 (operator pub.dev login), spec v0.42.0 last, then refresh release pins.
 - [ ] 🚧 [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
-- [ ] 🚧 [#lzcoreciactivationfixes] Make every new Core Phase 1-5 gate CI-active and reach-pinned: add named workflow steps and exact reach mappings for profile/evidence/facade/compatibility/consumer targets, name the currently anonymous binding consumer steps, pin job activation and matrices, rerun aggregate gates in the Phase 6 reusable workflow, and add exact Phase 6 callers from all nine candidate binding release workflows.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] 🚧 [#lzcoreciactivationfixes] [operator-decision] Core Phase 1-5 CI activation is complete and verified but uncommitted in /home/brian/worktrees/lzcoreciactivationfixes-20261013/<repo> (branch task/lzcoreciactivationfixes-20261013 in all nine bindings plus lazily-spec). Every Core gate step is named, reach-pinned, and unconditional or has its step-level if:/continue-on-error: pinned. This run closed a guard bypass where those keys silently skipped steps in 7/9 bindings plus spec. All guards PASS and all mutation attacks are killed; logs are in _logs/. Remaining: (1) Phase 6 release-workflow callers, blocked on an operator design decision (see the #waypostrequest in exchange): the lazily-spec commit pin for core-cohort-publish-gate.yml, the candidate manifest location, the evidence artifact name, and whether cpp/dart/go/zig get new release workflows. (2) The wiring must land with or after the Phase 1-5 integration, since make check fails without their scripts. (3) Commit/push authorization (#lzcommitpresetresolve).
 - [/] [#lzrustcoreprofiledivergence] Rust corrected-profile provenance is implemented and verified in /home/brian/worktrees/lzrustcoreprofiledivergence-rs-20261012 on branch task/lzrustcoreprofiledivergence-20261012 from base 87da9e7494f6cec0cc5deb981361519f5af9eedf; profile-derived compatibility, 30 reactive-graph runs, full async tests, profile checks, and diff checks pass. Blocked only on #lzcoreevidencedarttimeout for a green nine-binding --require-all rerun and explicit commit/integration authorization because #spec-test-commit-push is undefined.
 - [/] [#lzcorecireachaudit] After #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1-5 integration are complete, run the supplied per-binding post-integration CI audit matrix against settled commits; require every standalone Core target to have a named workflow step, exact reach mapping, mutation evidence, Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates before Phase 6 finalization.
 - [/] [#lzcoreintegration] Integrate the prepared Core work only after #lzcommitpresetresolve, #lzrustcoreprofiledivergence, and #lzcoreconsumers clear: Phase 5 currently lacks core-artifact-consumer-check in all nine binding worktrees, and Phase 6 is scaffold-only with no settled cohort manifest and is 20 spec commits behind the current profile base. Then land Phases 1-5 in dependency order, replay Phase 6 from settled exact commits, and rerun aggregate profile/cohort gates after each batch.

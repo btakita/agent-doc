@@ -58,6 +58,28 @@ Every queued fix is claimed and running in its own background subagent. Each one
 **Claim anomaly (also sent to that subagent):** editing the #270 line from `agent-foc` to `agent-doc` kept its claim, but the same edit on the #272 line dropped it. I re-claimed #272 for `subagent:gh272`, so no duplicate worker was started. I treated the `agent-foc` lines as the same six issues throughout.
 
 **Next:** `release + publish` stays queued for me rather than a subagent, because subagents may not tag or release. As each subagent reports, I'll integrate its branch serially onto `main`, re-running the plugin-version bump to resolve `gradle.properties` conflicts. Then I'll run one `make install` for the batch and close the six GitHub issues and their queue items. Finally I'll cut and publish the release, which will also carry `d5f4cf9743` (the Clear Session Context notice fix).
+
+### Re: GH #268–#273 + queue duplication — all merged, v0.35.509 release running — opus-5-5 · 2026-10-15T14:50-04:00
+
+All seven subagents have reported, and every branch is merged into `batch-gh268-273` (pushed). Two more fixes found along the way are merged too. `make release` for **v0.35.509** is running now. It runs one full `make check` and `make tmux-ci` on the version-bumped tree, then pushes `HEAD:main` + `v0.35.509` and installs.
+
+| Item | Fix | Commit |
+|---|---|---|
+| #268 | `window-size manual` pin released when no attached client sees the window at its pinned size | `1664e19a25` |
+| #269 | Both orphan-reaper scans honour the drain lease before any age test | `b2ffd1a03b` |
+| #270 | A re-exec'd supervisor bridges its PTY from the first line of `main` until takeover | `e947cb3cb0` |
+| #271 | `/clear` proof treats rows below the closed composer frame as footer, by position | `22233f6c40` |
+| #272 | Run while typing waits ≤20 s for a transient `missing_replica`, then admits on the editor buffer | `9e79cfd138` |
+| #273 | A held splice batch beside a canonical change merges forward (guarded three-way); replica rebuilds bounded per content | `a39a004177` |
+| Queue duplication | Admission keeps the editor's version of any component both editor and disk changed | `d4313984b5` |
+| `state.db` overwrite (found under load) | `controller serve` closes only fds it can prove it inherited | `5c2da24c03` |
+| preflight-io flakes (found under load) | A controller that dies at launch is reported, not hidden as a timeout; unreadable rearm evidence fails closed | `6f54959182` |
+
+**Queue duplication, the mechanism:** when you pressed Run, the editor had delivered the `#gh-dix` lines while its save on disk already held `#gh-fix`. Admission's three-way merge treated those as two writers and wrote both: 5101 = 4411 + 342 + 348 bytes, so preflight listed 12 heads. Your late correction keystrokes then doubled the whole block. Every earlier fix tried to recognise "same item" from the text, and each missed the next shape. The new rule needs no such guess. TLC passes the new rule (9,656 distinct states), and must-violate configs reproduce this incident and GH #198 on the old merge.
+
+**`state.db` corruption, now proven:** `controller serve` closed every fd above stdio, including its own debug-log file. SQLite reused that number for `state.db`, and the queued `tracing initialized` line landed at byte 0 ("file is not a database"). This is the recurring production incident in memory. The flaky test reproduced it 9 of 600 times on an optimized pre-fix build, and 0 of 600 with the fix.
+
+**Process notes:** the claims expired after 2 h, so this cycle's preflight listed every item for dispatch again. I re-claimed them for the batch rather than starting new workers. I'll close the issues, the queue items and the release item once `make release` finishes; the queue-duplication commit and #273 close on merge to `main`.
 <!-- agent:boundary:06765b07 -->
 <!-- /agent:exchange -->
 
@@ -73,7 +95,7 @@ Every queued fix is claimed and running in its own background subagent. Each one
 - #gh-fix https://github.com/btakita/agent-doc/issues/272
 - #gh-fix https://github.com/btakita/agent-doc/issues/273
 - The content of the queue were duplicated by agent-doc on Run Agent Doc. This has been a reoccurring issue with multiple fix attempts. Use formal logic to prevent this from happening again.
-- release + publish
+- 🚧 release + publish
  <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -215,6 +214,24 @@ Not yet. **v0.35.508** is tagged and installed locally (`agent-doc --version` �
 - The latest GitHub Release and PyPI are both still **0.35.507** (published 14:25Z).
 
 The Clear Session Context fix is not in any version yet. Its subagent is still working on it, and it would go in a later release.
+
+### Re: Clear Session Context slow + IDEA error prompt — fixed — opus-5-5 · 2026-10-15T11:28-04:00
+
+> **Queue prompt:** Clear Session Context on sdk.md is slow and shows an error prompt in Idea.
+
+**Cause (from the logs for pane %180, 14:49Z):** a Run Agent Doc prompt was cancelled (probably Esc) while its hooks were running. Claude Code wrote the prompt's snapshot but never recorded the prompt itself. Both Clear presses were then queued behind that "turn live" marker (`session_clear_live_turn_deferred … evidence=turn_active_lease ui_outcome=queued`). The clear ran at 14:49:26Z, once the 20s settle window for an unrecorded prompt expired. The "error prompt" was IDEA's notice saying the clear was *queued until the turn in pane %180 ends*, shown over an idle pane. Nothing actually failed: the CLI exited 0, idea.log has no errors, and nothing ran on the EDT.
+
+**Why the 20s window stays:** of 30 unrecorded prompts in the last 21 days, several were followed 4.8–30s later by a record that means the prompt may still start. Clearing sooner could clear a turn just as it starts.
+
+**Fix** (`d5f4cf9743`, fast-forwarded onto `btakita/agent-doc` main):
+- **Binary:** a new read-only check `settling_abandoned_prompt_for_pane_for_file` spots this case. The queued clear now logs `evidence=abandoned_prompt_settling settles_in_secs=N` and names the wait. Exit 0 and `ui_outcome=queued` are unchanged, and the check never clears the turn marker early.
+- **JetBrains:** the notice now reads "Clear Session Context queued for <path>: it runs automatically in about Ns." A second press says it is already queued and that pressing again won't make it sooner. A clear queued behind a genuinely running turn keeps the old wording.
+- **Specs:** `specs/07-session-tmux-commands.md`, `specs/15-turn-lifecycle.md`, `editors/jetbrains/SPEC.md`. Plugin versions bumped to 0.2.636 / 262 → 0.2.637 / 263 → 0.2.638.
+- **Tests:** 4 new Rust tests (including a SimWorld one) and 1 new Kotlin test. `make check`: 10613 passed, 0 failed (167 skipped). JetBrains builds and the editor parity audit are green.
+
+**Installed:** `make install` exit 0. The IDEA plugin was upgraded in the live IDE, and 27 supervisors plus 4 controllers are marked to recycle at the next idle boundary. This is not in a published release; the next release will carry it.
+
+**To check:** cancel a Run on a Claude document, then press Clear. The notice should show a countdown, not "the turn … ends".
 <!-- agent:boundary:f8ebbf0a -->
 <!-- /agent:exchange -->
 
@@ -223,7 +240,6 @@ The Clear Session Context fix is not in any version yet. Its subagent is still w
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- Clear Session Context on sdk.md is slow and shows an error prompt in Idea. 
 <!-- /agent:queue -->
 
 ## Backlog

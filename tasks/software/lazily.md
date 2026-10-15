@@ -169,6 +169,30 @@ Needed from you:
 - Decide between a pre-1.0 cohort and Core Beta (`#lzbetascope`).
 - Decide on Rust Trusted Publishing, or authorize one more manual `cargo publish`.
 - Run the pub.dev publish under your own login.
+
+### Re: agent-doc issue 249 — opus-5-5 · 2026-10-14T21:08-04:00
+
+> **Queue prompt:** [from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249
+
+`subagent:issue249` reported back. Issue 249 is already closed, and the core fix is on agent-doc `main` (`6ddc004207`, v0.35.502). The worker found one gap still on `main`: `build_project_dir()` in `src/plugin.rs` still sent JetBrains 263 to the classic project, `editors/jetbrains`. But `make jetbrains-263-check` builds the 263 ZIP in `editors/jetbrains-262`. Effect on `agent-doc plugin install jetbrains --local`:
+- If there is no ZIP in the classic project, the install fails.
+- If a stale classic 263 ZIP is still there, it gets installed. That ZIP lacks the frame isolation, so the #249 bug comes back.
+
+The test fixtures used the same wrong path, which is why the tests stayed green.
+
+Fix, uncommitted, in `~/worktrees/agent-doc-gh249-restore` on branch `fix/gh249-263-local-build-dir` (based on `origin/main`), 4 files, +37/-24:
+- `src/plugin.rs`: 263 now maps to `editors/jetbrains-262`, plus a regression check and the corrected fixture path.
+- Doc and comment corrections in `editors/jetbrains/SPEC.md`, `scripts/jetbrains-custom-repository.py` and `agent-doc-reliable-sync-io/src/liveness.rs`.
+
+Verification:
+- `cargo test --bin agent-doc -- plugin::`: 97 passed.
+- Mutation check: putting back the old mapping fails 2 tests.
+- `make check-fast`: exit 0, 4004 passed.
+- `make check`: exit 0, 10505 passed, with all three Gradle builds green.
+
+No plugin version bump is needed. One stale comment remains in `editors/jetbrains/build.gradle.kts` (lines 78–80). The worker left it because that file is part of the plugin source digest, so editing it would force a version bump.
+
+I'm closing this head. Integration is tracked as gated `#gh249builddir`, blocked only on commit/push authorization (`#lzcommitpresetresolve`). The old worktree `~/worktrees/agent-doc-gh249-20261013` is superseded.
 <!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  
@@ -178,12 +202,13 @@ Needed from you:
 - 🚧 do [#lzcoreevidencedarttimeout]
 - 🚧 do [#lzcoreciactivationfixes]
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 [from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249
+- ~~[from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#gh249builddir] [operator-decision, btakita/agent-doc] Integrate the issue-249 follow-up fix: /home/brian/worktrees/agent-doc-gh249-restore on branch fix/gh249-263-local-build-dir from origin/main 6ddc004207 (uncommitted; src/plugin.rs, agent-doc-reliable-sync-io/src/liveness.rs, editors/jetbrains/SPEC.md, scripts/jetbrains-custom-repository.py; exclude the untracked .gh249-*.log files). build_project_dir now maps JetBrains 263 to editors/jetbrains-262 so 'agent-doc plugin install jetbrains --local' cannot pick a stale classic 263 ZIP without frame isolation. make check exit 0 (10505 passed), and a mutation check shows 2 regression tests fail when the old mapping is restored. No plugin version bump needed. Blocked only on commit/push authorization (#lzcommitpresetresolve); then commit, push, and run the single coordinator make install. Old worktree /home/brian/worktrees/agent-doc-gh249-20261013 is superseded.
 - [/] [#lzcohortrelease] [operator-decision] Lazily cohort release: no public main warrants a release today (readiness report /home/brian/worktrees/agent-loop-lzreleasepublish-readiness-20261014/.audit-work/lazily-release-readiness-20261014.md, 2026-10-14). Blocked on #lzcommitpresetresolve plus explicit commit/push/version-bump/tag/publish authorization, a pre-1.0-cohort vs Core Beta decision (#lzbetascope), and #lzrustpublish. Once unblocked: Go CI fix, #lzcoreevidencedarttimeout, Core Phases 1-5 (rebase the Zig/Go worktrees first), Phase 6, interop cold-start, then minor-version releases rs 0.60.0, py 0.44.0, js 0.36.0, kt 0.45.0, cs 0.8.0, go v0.30.0, cpp v0.32.0, zig v0.38.0, dart 0.34.0 (operator pub.dev login), spec v0.42.0 last, then refresh release pins.
 - [ ] 🚧 [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
 - [ ] 🚧 [#lzcoreciactivationfixes] Make every new Core Phase 1-5 gate CI-active and reach-pinned: add named workflow steps and exact reach mappings for profile/evidence/facade/compatibility/consumer targets, name the currently anonymous binding consumer steps, pin job activation and matrices, rerun aggregate gates in the Phase 6 reusable workflow, and add exact Phase 6 callers from all nine candidate binding release workflows.

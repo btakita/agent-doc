@@ -3,7 +3,7 @@ agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
   codex: 01a132ff-795c-7343-b9b7-11db2db32d87
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -110,6 +110,14 @@ choices:
 
 Please choose the intended handling before that worker can continue.
 - [ ] Choose release handling: pre-1.0 cohort, Core Beta promotion, or audit-only.
+
+### Re: harness switch to Claude — opus-5-5 · 2026-10-14T20:46-04:00
+
+Acknowledged: `agent: codex` → `agent: claude`. This cycle's only change was that frontmatter edit, so it carried no new prompt.
+
+Queue state at admission: `go` with 4 heads (`#lzcoreevidencedarttimeout`, `#lzcoreciactivationfixes`, `release + publish`, the restored `#gh-fix` for agent-doc issue 249). No claims are active. The earlier subagent claims (`darttimeout`, `ciactivation`, `issue249`, `releasepublish`) have all expired or been released, so every head can be picked up again. Preflight reported `queue_auto_clear_yield: true`, so I'm handing the next head to the supervisor's auto-clear path to dispatch to this Claude pane. I'm not draining it here.
+
+The queue-wide `#spec-test-commit-push` preset is still undefined (`#lzcommitpresetresolve`). Until it's defined, queue workers can implement and verify but cannot commit, push, install, or release.
 <!-- agent:boundary:74d7308e -->
 <!-- /agent:exchange -->
  
@@ -117,7 +125,7 @@ Please choose the intended handling before that worker can continue.
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ⏭️ do [#lzcoreevidencedarttimeout]
-- do [#lzcoreciactivationfixes]
+- ⏭️ do [#lzcoreciactivationfixes]
 - release + publish
 - [from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249
 <!-- /agent:queue -->

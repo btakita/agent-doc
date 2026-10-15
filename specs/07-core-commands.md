@@ -703,8 +703,9 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 - `backlog <FILE> set-attr <ATTR> [VALUE]` / `unset-attr <ATTR>` mutate the
   component's MARKER attributes rather than its content (`#bkqattrcli`), through the
   same editor-converging write path as `add`. Accepted: `queue` and `priority` on
-  `agent:backlog`, `priority` on `agent:icebox`; a `queue` value must be a
-  recognized sync mode. An unrecognized attribute is refused because it would parse
+  `agent:backlog`, `priority` on `agent:icebox` and `agent:review` (the latter via
+  `review set-attr <FILE> priority` / `review unset-attr <FILE> priority`); a
+  `queue` value must be a recognized sync mode. An unrecognized attribute is refused because it would parse
   and then be ignored. See `specs/pending-system.md`.
 
 ## boundary

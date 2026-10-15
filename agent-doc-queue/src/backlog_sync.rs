@@ -1569,6 +1569,26 @@ mod tests {
         assert_eq!(ranks.get("b"), Some(&1));
     }
 
+    /// `#reviewpriority`: `agent:review priority` orders the gated review list in
+    /// place only. Review items are gated work awaiting an external gate, not
+    /// queue-drainable heads, so they never contribute ranks to
+    /// `agent:queue priority` ordering.
+    #[test]
+    fn collect_backlog_priority_ranks_ignores_review_items() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#a] priority=5 one\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review priority -->\n",
+            "- [/] [#r] priority=1 gated\n",
+            "<!-- /agent:review -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let ranks = collect_backlog_priority_ranks(&components, content);
+        assert_eq!(ranks.get("a"), Some(&5));
+        assert_eq!(ranks.get("r"), None);
+    }
+
     #[test]
     fn collect_after_deps_reads_tracked_work_components() {
         let content = concat!(

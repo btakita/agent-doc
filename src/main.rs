@@ -4482,6 +4482,32 @@ enum ReviewAction {
         #[arg(long)]
         json: bool,
     },
+    /// Set a marker attribute on `agent:review` (`priority`) so preflight
+    /// stable-sorts review items by their `priority=<1..9>` token
+    /// (`#bkqattrcli`, `#reviewpriority`)
+    #[command(name = "set-attr")]
+    SetAttr {
+        /// Path to the session document
+        file: PathBuf,
+        /// Attribute name (`priority` is the only editable agent:review attribute)
+        attr: String,
+        /// Optional value; omit for a bare flag (`priority` takes no value)
+        value: Option<String>,
+        /// Bypass editor convergence for explicit recovery/headless writes.
+        #[arg(long)]
+        force_disk: bool,
+    },
+    /// Remove a marker attribute from `agent:review` (`#bkqattrcli`)
+    #[command(name = "unset-attr")]
+    UnsetAttr {
+        /// Path to the session document
+        file: PathBuf,
+        /// Attribute name to remove
+        attr: String,
+        /// Bypass editor convergence for explicit recovery/headless writes.
+        #[arg(long)]
+        force_disk: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -7303,6 +7329,46 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
+            ReviewAction::SetAttr {
+                file,
+                attr,
+                value,
+                force_disk,
+            } => agent_doc_element_backlog_io::with_backlog_command_effects(
+                &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+                || {
+                    agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                        force_disk,
+                        || {
+                            agent_doc_element_backlog_io::backlog_cmd::set_attr(
+                                &file,
+                                agent_doc_element_backlog::backlog::TrackedWorkList::Review,
+                                &attr,
+                                value.as_deref(),
+                            )
+                        },
+                    )
+                },
+            ),
+            ReviewAction::UnsetAttr {
+                file,
+                attr,
+                force_disk,
+            } => agent_doc_element_backlog_io::with_backlog_command_effects(
+                &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+                || {
+                    agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                        force_disk,
+                        || {
+                            agent_doc_element_backlog_io::backlog_cmd::unset_attr(
+                                &file,
+                                agent_doc_element_backlog::backlog::TrackedWorkList::Review,
+                                &attr,
+                            )
+                        },
+                    )
+                },
+            ),
         },
         Commands::Queue { action } => match action {
             QueueAction::Add {

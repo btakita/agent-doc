@@ -46,11 +46,29 @@ pub fn is_queue_bare_flag_attr(key: &str) -> bool {
     )
 }
 
+/// Whether a component (bare name, e.g. `review`) accepts the bare `priority`
+/// ordering attribute (`#backlog-priority-attribute`, `#reviewpriority`).
+///
+/// Tracked-work lists (`backlog` / legacy `pending`, `icebox`, `review`)
+/// stable-sort their items by per-item `priority=<1..9>`; `queue` sorts its
+/// `do [#id]` prompts by source-item rank. Preflight's attribute warning and
+/// the lint adapter both consult this one vocabulary.
+pub fn is_priority_component(name: &str) -> bool {
+    matches!(name, "backlog" | "icebox" | "pending" | "review" | "queue")
+}
+
 /// Whether tagpath's generic missing-value finding is expected for this
 /// component/attribute pair. Misplaced bare flags stay warning-only so
 /// preflight can report the component-specific mistake without lint failing
 /// first.
 pub fn is_recognized_bare_flag_attr(component: &str, key: &str) -> bool {
+    if key == "priority" {
+        // tagpath's own bare-`priority` allowlist predates `agent:review
+        // priority` (`#reviewpriority`); reconcile against agent-doc's vocabulary.
+        return component
+            .strip_prefix("agent:")
+            .is_some_and(is_priority_component);
+    }
     if is_queue_only_component_attr(key) {
         return component != "agent:queue" || is_queue_bare_flag_attr(key);
     }
@@ -133,14 +151,10 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                 issues.push(
                     "`queue` on `agent:icebox` does not auto-populate `agent:queue`; move the item to `agent:backlog` or use a per-item enqueue marker".to_string(),
                 );
-            } else if key == "priority"
-                && matches!(
-                    component.name.as_str(),
-                    "backlog" | "icebox" | "pending" | "queue"
-                )
-            {
+            } else if key == "priority" && is_priority_component(&component.name) {
                 // Bare component-level priority is recognized for tracked-work
-                // and queue ordering; per-item priority remains item syntax.
+                // (backlog/icebox/review) and queue ordering; per-item priority
+                // remains item syntax.
             } else if !KNOWN_COMPONENT_ATTRS.contains(&key.as_str()) {
                 issues.push(format!(
                     "`{key}` on `agent:{}` is not a recognized component attribute (possible typo)",
@@ -230,12 +244,40 @@ mod tests {
             "<!-- agent:backlog priority -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
             "<!-- agent:backlog priority queue -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
             "<!-- agent:queue priority -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:icebox priority -->\n- [ ] [#a] x\n<!-- /agent:icebox -->\n",
+            "<!-- agent:review priority -->\n- [/] [#a] x\n<!-- /agent:review -->\n",
         ] {
             assert!(
                 component_attr_warning(content).is_none(),
                 "priority attr must not warn: {content}"
             );
         }
+    }
+
+    /// `#reviewpriority`: `agent:review` accepts `priority` but not `queue` —
+    /// gated review work never auto-populates `agent:queue` — and `priority`
+    /// stays unrecognized on components that carry no tracked-work ordering.
+    #[test]
+    fn component_attr_warning_review_accepts_priority_but_not_queue() {
+        let warning = component_attr_warning(
+            "<!-- agent:review priority queue -->\n- [/] [#a] x\n<!-- /agent:review -->\n",
+        )
+        .expect("queue on agent:review must warn");
+        assert_eq!(warning.issues.len(), 1, "{:?}", warning.issues);
+        assert!(
+            warning.issues[0].contains("`queue` on `agent:review`"),
+            "{:?}",
+            warning.issues
+        );
+
+        let warning =
+            component_attr_warning("<!-- agent:exchange priority -->\n<!-- /agent:exchange -->\n")
+                .expect("priority on agent:exchange must still warn");
+        assert!(
+            warning.issues[0].contains("`priority` on `agent:exchange`"),
+            "{:?}",
+            warning.issues
+        );
     }
 
     #[test]
@@ -333,6 +375,30 @@ mod tests {
         assert!(is_recognized_bare_flag_attr("agent:backlog", "preset"));
         assert!(!is_recognized_bare_flag_attr("agent:queue", "preset"));
         assert!(!is_recognized_bare_flag_attr("agent:exchange", "preset"));
+    }
+
+    /// `#reviewpriority`: the lint adapter's bare-`priority` verdict follows the
+    /// same component vocabulary as preflight's attribute warning.
+    #[test]
+    fn bare_priority_is_recognized_on_tracked_work_and_queue_components_only() {
+        for component in [
+            "agent:backlog",
+            "agent:pending",
+            "agent:icebox",
+            "agent:review",
+            "agent:queue",
+        ] {
+            assert!(
+                is_recognized_bare_flag_attr(component, "priority"),
+                "{component} must accept bare priority"
+            );
+        }
+        for component in ["agent:exchange", "agent:done", "agent:status", "review"] {
+            assert!(
+                !is_recognized_bare_flag_attr(component, "priority"),
+                "{component} must not accept bare priority"
+            );
+        }
     }
 
     #[test]

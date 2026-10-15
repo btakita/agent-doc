@@ -1800,10 +1800,11 @@ fn run_pending_maintenance_with_options(
         }
         removed_items.extend(reaped_items);
 
-        // Priority sort (#backlog-priority-attribute): when the component marker
-        // carries `priority`, stable-sort items by their per-item `priority=<1..9>`
-        // token (1 = highest; absent = lowest) so a downstream `agent:queue` sync
-        // inherits the prioritized order.
+        // Priority sort (#backlog-priority-attribute, #reviewpriority): when the
+        // backlog/icebox/review marker carries `priority`, stable-sort items by
+        // their per-item `priority=<1..9>` token (1 = highest; absent = lowest) so
+        // a downstream `agent:queue` sync inherits the prioritized order (review
+        // has no queue sync; its sort only orders the gated list in place).
         if comp.attrs.contains_key("priority")
             && let Some(sorted) =
                 agent_doc_element_backlog::backlog::sort_by_priority(&current_body)
@@ -15185,6 +15186,75 @@ mod tests {
             "priority=1 item must sort before priority=5:\n{updated}"
         );
     }
+    fn review_body_after_maintenance(review_marker: &str) -> String {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+             <!-- agent:backlog -->\n- [ ] [#open1] backlog item\n<!-- /agent:backlog -->\n\n\
+             {review_marker}\n\
+             - [/] [#rlow] priority=5 later review\n\
+             - [/] [#runset] no rank review\n\
+             - [/release] [#rhigh] priority=1 first review\n\
+             <!-- /agent:review -->\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let report =
+            run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
+        assert_eq!(report.review_count, 3);
+        assert_eq!(report.review_gated_count, 3);
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let components = agent_doc_element::element::parse(&updated).unwrap();
+        components
+            .iter()
+            .find(|c| c.name == "review")
+            .unwrap()
+            .content(&updated)
+            .to_string()
+    }
+
+    #[test]
+    fn run_pending_maintenance_sorts_review_by_priority() {
+        // #reviewpriority: an `agent:review priority` marker stable-sorts gated
+        // review items by their per-item priority token, exactly like
+        // backlog/icebox; unranked items sink below every numbered item.
+        let review = review_body_after_maintenance("<!-- agent:review priority -->");
+        let high = review.find("[#rhigh]").unwrap();
+        let low = review.find("[#rlow]").unwrap();
+        let unset = review.find("[#runset]").unwrap();
+        assert!(
+            high < low && low < unset,
+            "review must sort priority=1, priority=5, then unranked:\n{review}"
+        );
+        assert!(
+            review.contains("- [/release] [#rhigh] priority=1 first review"),
+            "the sort must keep each item's gate state and text:\n{review}"
+        );
+    }
+
+    #[test]
+    fn run_pending_maintenance_leaves_review_order_without_priority_attr() {
+        // #reviewpriority regression: without the marker attribute, per-item
+        // priority tokens on review items never reorder the component.
+        let review = review_body_after_maintenance("<!-- agent:review -->");
+        let low = review.find("[#rlow]").unwrap();
+        let unset = review.find("[#runset]").unwrap();
+        let high = review.find("[#rhigh]").unwrap();
+        assert!(
+            low < unset && unset < high,
+            "review without `priority` must keep authored order:\n{review}"
+        );
+    }
+
     #[test]
     fn run_queue_maintenance_orders_synced_queue_by_priority() {
         // #backlog-priority-attribute + #backlog-queue-sync-attr: a priority queue

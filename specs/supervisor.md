@@ -994,6 +994,38 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   route against the successor (2026-10-10 `tools.md`: dispatched after 58s
   instead of ~12s, including a stale-supervisor re-exec the original route had
   already passed).
+  `#drainingpredecessor` retirement (GH #261): promotion ends the
+  predecessor's controller role at once, not when it exits. Before it waits on
+  anything, the draining predecessor
+  (`ControllerRuntime::retire_after_successor_promotion`, logged as
+  `controller_handoff_predecessor_retired_authority`):
+  1. stops its own periodic controller work. The supervisor watchdog and the
+     orphan-queue drain never tick again in that process, because the successor
+     owns both. It only finishes requests and async workers it had already
+     accepted;
+  2. releases every parked state-plane subscriber and makes later ones return
+     at once. The editor's `document_turn_authority_stream` (one per open
+     document) then ends, and the editor reconnects to the successor. That
+     stream used to end only at `should_stop`, which the drain set only after
+     the stream closed, so a predecessor on a deleted binary lived until the
+     IDE went away;
+  3. retires its relay hubs as document authority for its project root. Editor
+     replicas re-register with the successor at promotion, so those hubs froze
+     at the handoff, yet their `delivery_converged` witness still read `true`.
+     After retirement, `embedded_relay_is_available_for_file` is false, so
+     in-process callers read through the public socket like any client, and a
+     direct hub read reports `editor_attached_model_missing`
+     (`crdt_current_text_unavailable ... reason=relay_authority_retired`)
+     instead of serving pre-handoff text as current.
+  The drain is bounded for open client connections as well as for async
+  workers. The budget is the lease length (`ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET`),
+  because past the lease duplicate reaping no longer protects the process
+  anyway. Anything still open when the budget runs out is logged as
+  `controller_handoff_drain_abandoned_clients` or
+  `controller_handoff_drain_abandoned_async_workers`, and the process exits.
+  Retirement leaves the `#handoffsocketownership` contract unchanged: the
+  self-watchdog stays disarmed through the drain, and the predecessor never
+  unlinks the successor's `controller.sock`.
   `#lightweightadoption`: a client that finds an already-serving Stable
   controller adopts it from `handoff_status`, the lightweight generation and
   binary-identity receipt. That steady path neither requests the full operator

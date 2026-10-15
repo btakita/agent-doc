@@ -1247,12 +1247,61 @@ fn evict_hub_if_safe(file: &Path, document_hash: &str, source: &str) -> bool {
     evicted
 }
 
+/// `#drainingpredecessorrelay` (GH #261): project roots whose relay hubs this
+/// process no longer hosts as authority.
+///
+/// A controller that self-handed off to a successor keeps its process-local
+/// hubs while it drains, but the editor's replicas re-register with the
+/// successor at promotion, so those hubs stop receiving deltas at the handoff.
+/// Their `delivery_converged` witness still reads `true` (nothing is pending in
+/// a hub nobody writes to), so answering a read from them returns the
+/// pre-handoff document as if it were current. Retiring the root makes every
+/// in-process read go where any other client's read goes: the promoted
+/// controller.
+fn retired_relay_authority_roots() -> &'static Mutex<Vec<PathBuf>> {
+    static ROOTS: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+    ROOTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Stop treating this process's relay hubs under `project_root` as document
+/// authority (`#drainingpredecessorrelay`, GH #261). One-way: a predecessor
+/// whose successor was promoted never becomes authoritative again.
+pub fn retire_relay_authority_for_project(project_root: &Path) {
+    let mut roots = retired_relay_authority_roots().lock();
+    let mut push = |root: PathBuf| {
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    };
+    push(project_root.to_path_buf());
+    if let Ok(canonical) = std::fs::canonicalize(project_root) {
+        push(canonical);
+    }
+}
+
+/// Whether `file` lives under a project root whose relay authority this process
+/// retired (`#drainingpredecessorrelay`, GH #261).
+pub fn relay_authority_retired_for_file(file: &Path) -> bool {
+    let roots = retired_relay_authority_roots().lock();
+    if roots.is_empty() {
+        return false;
+    }
+    if roots.iter().any(|root| file.starts_with(root)) {
+        return true;
+    }
+    std::fs::canonicalize(file)
+        .is_ok_and(|canonical| roots.iter().any(|root| canonical.starts_with(root)))
+}
+
 /// Whether this process already owns an embedded Lazily relay for `file`.
 ///
 /// This is the in-process authority seam used by controller-hosted operation and
 /// simulation tests. It deliberately does not consult a filesystem marker: an
 /// allocated relay is the fact, so no second hot-path source of truth can drift.
 pub fn embedded_relay_is_available_for_file(file: &Path) -> bool {
+    if relay_authority_retired_for_file(file) {
+        return false;
+    }
     let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
         return false;
     };
@@ -1534,6 +1583,24 @@ fn current_text_for_file_with_authority_inner_before_log(
     }
 
     let hash = agent_doc_fs::document_state_hash(file)?;
+    // `#drainingpredecessorrelay` (GH #261): a hub this process stopped hosting
+    // at a promoted handoff froze at that instant yet still witnesses
+    // `delivery_converged=true`. It is not a replica of the current document, so
+    // report the replica as missing here instead of serving its text.
+    if relay_authority_retired_for_file(file) {
+        before_log();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{} file={} authority=multi_replica reason=relay_authority_retired disposition=successor_promoted doc_hash={} process_pid={}",
+                OpsLogEvent::CrdtCurrentTextUnavailable,
+                file.display(),
+                hash,
+                std::process::id(),
+            ),
+        );
+        return Ok(CurrentText::EditorAttachedMissingReplica);
+    }
     let mut handle = hub_handle(&hash);
     if handle.is_none() && recover_missing_from_projection {
         recover_missing_hub_from_retained_projection(file, &hash)?;
@@ -10768,6 +10835,59 @@ mod tests {
             }
             other => panic!("expected relay current text, got {other:?}"),
         }
+    }
+
+    /// `#drainingpredecessorrelay` (GH #261): after a promoted handoff the
+    /// predecessor's hub froze at the handoff instant but still witnessed
+    /// `delivery_converged=true`, so in-process reads served the pre-handoff
+    /// document as current. A retired root's hub is no longer authority: the
+    /// read reports a missing replica and the embedded relay is unavailable, so
+    /// callers ask the promoted controller instead.
+    #[test]
+    fn retired_relay_authority_never_serves_the_frozen_hub_as_current() {
+        let (dir, doc) = temp_doc("retired-relay-authority.md");
+        let (_other_dir, other) = temp_doc("still-authoritative.md");
+        for file in [&doc, &other] {
+            let editor = mint_client_id(&format!("intellij:{}", file.display()));
+            with_hub(file, |hub| {
+                hub.register(editor).unwrap();
+                hub.local_edit(editor, 0, 0, "FROZEN ").unwrap();
+            })
+            .unwrap();
+        }
+        assert!(matches!(
+            current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+            CurrentText::Current {
+                delivery_converged: true,
+                ..
+            }
+        ));
+        assert!(embedded_relay_is_available_for_file(&doc));
+
+        retire_relay_authority_for_project(dir.path());
+
+        assert!(relay_authority_retired_for_file(&doc));
+        assert!(
+            !embedded_relay_is_available_for_file(&doc),
+            "in-process callers must route to the promoted controller"
+        );
+        assert_eq!(
+            current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+            CurrentText::EditorAttachedMissingReplica,
+            "a retired hub must not answer as current"
+        );
+        assert_eq!(
+            current_text_for_file_with_authority_nonblocking(&doc, CrdtAuthority::MultiReplica)
+                .unwrap(),
+            CurrentText::EditorAttachedMissingReplica,
+        );
+        // Scoped to the retired root: another project's hub stays authority.
+        assert!(!relay_authority_retired_for_file(&other));
+        assert!(embedded_relay_is_available_for_file(&other));
+        assert!(matches!(
+            current_text_for_file_with_authority(&other, CrdtAuthority::MultiReplica).unwrap(),
+            CurrentText::Current { .. }
+        ));
     }
 
     #[test]

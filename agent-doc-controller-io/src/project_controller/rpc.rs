@@ -17386,6 +17386,7 @@ pub(crate) fn serve_with_options(
                                     &draining_runtime,
                                     &draining_clients,
                                     ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET,
+                                    Instant::now,
                                     std::thread::sleep,
                                 );
                                 stop_after_handoff.store(true, Ordering::SeqCst);
@@ -17436,24 +17437,27 @@ pub(crate) fn serve_with_options(
                         }
                     });
                 }
-                // #supresilience Part B — periodic dead-supervisor watchdog. Skipped
-                // on a recycling iteration above (the controller is going away, so a
-                // spawned replacement would be orphaned in a dying process).
-                let watchdog_now = Instant::now();
-                let watchdog_due = supervisor_watchdog_last_run
-                    .map(|last| watchdog_now.duration_since(last) >= supervisor_watchdog_interval)
-                    .unwrap_or(true);
-                if watchdog_due {
-                    supervisor_watchdog_last_run = Some(watchdog_now);
-                    controller_supervisor_watchdog_tick(
-                        &runtime,
-                        &mut supervisor_watchdog_halt_notified,
-                        &mut supervisor_watchdog_binding_skip_notified,
-                    );
-                    // `#orphandrain`: sweep the documents the supervisor watchdog
-                    // cannot help — those with no supervisor to revive.
-                    controller_orphan_drain_tick(&runtime);
-                }
+                // #supresilience Part B — periodic dead-supervisor watchdog.
+                // `#drainingpredecessor` (GH #261): never in a predecessor whose
+                // successor was promoted — the successor owns this work, and a
+                // supervisor spawned here would be orphaned in a dying process
+                // routing from relay hubs frozen at the handoff.
+                run_controller_background_ticks(
+                    &runtime,
+                    &mut supervisor_watchdog_last_run,
+                    supervisor_watchdog_interval,
+                    Instant::now(),
+                    |runtime| {
+                        controller_supervisor_watchdog_tick(
+                            runtime,
+                            &mut supervisor_watchdog_halt_notified,
+                            &mut supervisor_watchdog_binding_skip_notified,
+                        );
+                        // `#orphandrain`: sweep the documents the supervisor
+                        // watchdog cannot help — those with no supervisor to revive.
+                        controller_orphan_drain_tick(runtime);
+                    },
+                );
                 wait_for_pending_controller_client(&listener, CONNECT_POLL);
             }
             Err(err) => return Err(err).context("failed to accept project controller client"),
@@ -17465,6 +17469,35 @@ pub(crate) fn serve_with_options(
         recycle_handoff_promoted.load(Ordering::SeqCst),
     );
     Ok(())
+}
+
+/// Run the controller's periodic background work (supervisor watchdog, orphan
+/// drain) when `interval` has elapsed. Returns whether it ran.
+///
+/// `#drainingpredecessor` (GH #261): a predecessor whose successor was promoted
+/// runs none of it, ever. Before the fix the serve loop kept calling both ticks
+/// for the whole (then unbounded) drain, so a controller on a deleted binary
+/// re-dispatched an orphan queue head every 90s from a document replica frozen
+/// at the handoff.
+fn run_controller_background_ticks(
+    runtime: &Arc<ControllerRuntime>,
+    last_run: &mut Option<Instant>,
+    interval: Duration,
+    now: Instant,
+    ticks: impl FnOnce(&Arc<ControllerRuntime>),
+) -> bool {
+    if !agent_doc_controller::recycle::controller_background_work_allowed(
+        runtime.successor_promoted(),
+    ) {
+        return false;
+    }
+    let due = last_run.is_none_or(|last| now.saturating_duration_since(last) >= interval);
+    if !due {
+        return false;
+    }
+    *last_run = Some(now);
+    ticks(runtime);
+    true
 }
 
 /// Release the listener after the serve loop without letting a draining
@@ -17502,43 +17535,98 @@ pub(crate) fn retire_controller_listener(
 const ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET: Duration =
     CONTROLLER_HANDOFF_SETTLE_BUDGET.saturating_mul(2);
 
-/// `#handoffrouteforward`: retire a predecessor whose self-handoff promoted a
-/// successor. Already-accepted client connections drain unbounded, as before;
-/// async editor workers (answered `accepted` before they dispatch, so they hold
-/// no client connection) are told the successor exists — so a parked worker
-/// forwards its command there — and are waited out, bounded. Before this, the
-/// drain counted only client connections and exited under a parked
-/// `editor_route` worker: the route died with the process and the successor
-/// never learned of it. Returns the workers still in flight at exit (logged).
+/// What a promoted predecessor's drain left open when it retired.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PredecessorDrainExit {
+    abandoned_clients: usize,
+    abandoned_workers: usize,
+}
+
+/// `#handoffrouteforward` / `#drainingpredecessor`: retire a predecessor whose
+/// self-handoff promoted a successor.
+///
+/// First the process gives up every authority it held
+/// ([`ControllerRuntime::retire_after_successor_promotion`]): async editor
+/// workers (answered `accepted` before they dispatch, so they hold no client
+/// connection) learn the successor exists and forward to it, parked state-plane
+/// subscribers return, and its frozen relay hubs stop answering reads. Then it
+/// waits for already-accepted client requests and admitted workers to finish.
+///
+/// GH #261: the wait used to be unbounded for client connections. The editor
+/// holds one document-turn authority stream per open document, and that stream
+/// only ended when this process stopped — which waited for the stream to end.
+/// A predecessor on a deleted binary lived until the IDE went away, running
+/// orphan drain from hubs frozen at the handoff. Retiring the subscribers ends
+/// those streams at promotion (the editor reconnects to the successor), and
+/// `budget` — the `#drainingpredecessor` lease length — now bounds clients as
+/// well as workers. `now` and `sleep` are injected so tests pin the bound
+/// without wall-clock timing.
 fn drain_predecessor_after_promotion(
     runtime: &ControllerRuntime,
     active_clients: &AtomicUsize,
-    worker_budget: Duration,
+    budget: Duration,
+    mut now: impl FnMut() -> Instant,
     mut sleep: impl FnMut(Duration),
-) -> usize {
-    runtime.async_editor_commands.mark_successor_promoted();
-    let started = Instant::now();
+) -> PredecessorDrainExit {
+    use agent_doc_controller::recycle::{PredecessorDrainStep, predecessor_drain_step};
+
+    runtime.retire_after_successor_promotion();
+    let started = now();
+    if let Ok(bootstrap) = runtime.bootstrap_snapshot() {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_handoff_predecessor_retired_authority pid={} generation={} clients={} workers={} budget_ms={} note=background_work_stopped_streams_released_relay_retired (#drainingpredecessor)",
+                bootstrap.pid,
+                bootstrap.controller_generation,
+                active_clients.load(Ordering::SeqCst),
+                runtime.async_editor_commands.in_flight_worker_count(),
+                budget.as_millis(),
+            ),
+        );
+    }
     loop {
         let clients = active_clients.load(Ordering::SeqCst);
         let workers = runtime.async_editor_commands.in_flight_worker_count();
-        if clients == 0 && (workers == 0 || started.elapsed() >= worker_budget) {
-            if workers > 0
-                && let Ok(bootstrap) = runtime.bootstrap_snapshot()
-            {
+        let elapsed = now().saturating_duration_since(started);
+        let PredecessorDrainStep::Retire {
+            abandoned_clients,
+            abandoned_workers,
+        } = predecessor_drain_step(clients, workers, elapsed, budget)
+        else {
+            sleep(CONNECT_POLL);
+            continue;
+        };
+        if let Ok(bootstrap) = runtime.bootstrap_snapshot() {
+            if abandoned_workers > 0 {
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
                         "controller_handoff_drain_abandoned_async_workers pid={} generation={} workers={} budget_ms={}",
                         bootstrap.pid,
                         bootstrap.controller_generation,
-                        workers,
-                        worker_budget.as_millis(),
+                        abandoned_workers,
+                        budget.as_millis(),
                     ),
                 );
             }
-            return workers;
+            if abandoned_clients > 0 {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "controller_handoff_drain_abandoned_clients pid={} generation={} clients={} budget_ms={} (#drainingpredecessor)",
+                        bootstrap.pid,
+                        bootstrap.controller_generation,
+                        abandoned_clients,
+                        budget.as_millis(),
+                    ),
+                );
+            }
         }
-        sleep(CONNECT_POLL);
+        return PredecessorDrainExit {
+            abandoned_clients,
+            abandoned_workers,
+        };
     }
 }
 
@@ -17729,6 +17817,11 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainEvent,
         OrphanDrainObservation, OrphanDrainQueueControl, orphan_drain_decision,
     };
+
+    // `#drainingpredecessor` (GH #261): a promoted predecessor never routes.
+    if runtime.successor_promoted() {
+        return;
+    }
 
     let bootstrap = match runtime.bootstrap_snapshot() {
         Ok(bootstrap) => bootstrap,
@@ -18111,6 +18204,11 @@ fn controller_supervisor_watchdog_tick(
     halt_notified: &mut std::collections::HashSet<String>,
     binding_skip_notified: &mut std::collections::HashSet<String>,
 ) {
+    // `#drainingpredecessor` (GH #261): a promoted predecessor never respawns
+    // supervisors; the successor's watchdog owns them.
+    if runtime.successor_promoted() {
+        return;
+    }
     let bootstrap = match runtime.bootstrap_snapshot() {
         Ok(bootstrap) => bootstrap,
         Err(err) => {
@@ -19712,7 +19810,12 @@ fn serve_document_turn_authority_stream(
     let timeout = Duration::from_millis(invocation.timeout_ms).min(STATE_PLANE_SUBSCRIBE_MAX);
     let mut after_controller_generation = invocation.after_controller_generation;
     let mut after_version = invocation.after_version;
-    while !should_stop.load(Ordering::SeqCst) {
+    // `#drainingpredecessor` (GH #261): end the stream once a successor is
+    // promoted. It used to end only at `should_stop`, which a draining
+    // predecessor sets only after its accepted clients close — this stream
+    // among them — so every open editor document pinned the predecessor alive.
+    // Closing it makes the editor reconnect to the successor.
+    while !should_stop.load(Ordering::SeqCst) && !runtime.successor_promoted() {
         let subscription = runtime.subscribe_state_plane(
             &invocation.channel,
             after_controller_generation,
@@ -46618,6 +46721,22 @@ mod tests {
         assert!(message.contains("re-run the command"), "{message}");
     }
 
+    /// Injected drain clock: `sleep` advances `now`, so a drain bound is pinned
+    /// by poll count rather than by wall-clock time.
+    struct FakeDrainClock(std::cell::Cell<Instant>);
+
+    impl FakeDrainClock {
+        fn new() -> Self {
+            Self(std::cell::Cell::new(Instant::now()))
+        }
+        fn now(&self) -> Instant {
+            self.0.get()
+        }
+        fn sleep(&self, delay: Duration) {
+            self.0.set(self.0.get() + delay);
+        }
+    }
+
     /// `#handoffrouteforward`: the predecessor's exit waits for its admitted
     /// async workers (which hold no client connection) and tells them the
     /// successor exists — bounded, so a stuck worker cannot pin the process.
@@ -46627,29 +46746,187 @@ mod tests {
         let runtime = test_controller_runtime(&test_bootstrap(&dir));
         let clients = AtomicUsize::new(0);
         let mut worker = Some(ControllerAsyncEditorCommandGraph::begin_worker(&runtime));
+        let clock = FakeDrainClock::new();
         let mut sleeps = 0usize;
-        let abandoned =
-            drain_predecessor_after_promotion(&runtime, &clients, Duration::from_secs(30), |_| {
+        let exit = drain_predecessor_after_promotion(
+            &runtime,
+            &clients,
+            Duration::from_secs(30),
+            || clock.now(),
+            |delay| {
+                clock.sleep(delay);
                 sleeps += 1;
                 if sleeps == 3 {
                     worker.take();
                 }
-            });
-        assert_eq!(abandoned, 0);
+            },
+        );
+        assert_eq!(exit, PredecessorDrainExit::default());
         assert_eq!(sleeps, 3, "exit waited for the in-flight worker");
         assert!(runtime.async_editor_commands.successor_promoted());
 
         let _stuck = ControllerAsyncEditorCommandGraph::begin_worker(&runtime);
-        let abandoned = drain_predecessor_after_promotion(
+        let clock = FakeDrainClock::new();
+        let exit = drain_predecessor_after_promotion(
             &runtime,
             &clients,
-            Duration::from_millis(20),
-            std::thread::sleep,
+            Duration::from_millis(200),
+            || clock.now(),
+            |delay| clock.sleep(delay),
         );
         assert_eq!(
-            abandoned, 1,
+            exit.abandoned_workers, 1,
             "bounded: a stuck worker is reported, not waited forever"
         );
+    }
+
+    /// `#drainingpredecessor` (GH #261): the editor kept 38 connections open to
+    /// a promoted predecessor, and the drain waited for them without a bound.
+    /// It now retires the predecessor's authority at once and gives open
+    /// client connections the lease-length budget, then exits regardless.
+    #[test]
+    fn an_open_client_connection_cannot_hold_the_predecessor_drain_past_its_budget() {
+        let dir = async_handoff_test_project();
+        let runtime = test_controller_runtime(&test_bootstrap(&dir));
+        let clients = AtomicUsize::new(38);
+        let clock = FakeDrainClock::new();
+        let budget = ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET;
+        let expected_sleeps = budget.as_millis().div_ceil(CONNECT_POLL.as_millis());
+        let mut sleeps = 0u128;
+        let exit = drain_predecessor_after_promotion(
+            &runtime,
+            &clients,
+            budget,
+            || clock.now(),
+            |delay| {
+                clock.sleep(delay);
+                sleeps += 1;
+                assert!(
+                    sleeps <= expected_sleeps,
+                    "an open client connection held the drain past its budget"
+                );
+            },
+        );
+        assert_eq!(
+            exit,
+            PredecessorDrainExit {
+                abandoned_clients: 38,
+                abandoned_workers: 0,
+            }
+        );
+        assert_eq!(
+            sleeps, expected_sleeps,
+            "the drain ends exactly at its budget"
+        );
+        assert!(runtime.successor_promoted());
+        assert!(runtime.state_plane_graph.subscribers_retired());
+        assert!(
+            agent_doc_crdt_relay_io::relay_authority_retired_for_file(
+                &dir.path().join("tasks/one.md")
+            ),
+            "the predecessor's frozen relay hubs no longer answer as authority"
+        );
+    }
+
+    /// `#drainingpredecessor` (GH #261): the editor's document-turn authority
+    /// stream used to end only at `should_stop`, which a draining predecessor
+    /// set only after that same stream closed. Promotion must release it, so the
+    /// editor reconnects to the successor and the drain can finish.
+    #[test]
+    fn a_promoted_predecessor_releases_the_editors_authority_streams() {
+        // Hang ceiling only: the interleaving is forced by the parked count.
+        const HANG_CEILING: Duration = Duration::from_secs(30);
+        let dir = async_handoff_test_project();
+        let runtime = test_controller_runtime(&test_bootstrap(&dir));
+        let file = dir.path().join("tasks/one.md");
+        let channel = document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
+        let (request, _) = document_turn_authority_stream_request(&file, &channel, None).unwrap();
+        let dependency = runtime.state_plane_graph.channel_dependency(&channel);
+        let stream_runtime = Arc::clone(&runtime);
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let stream = std::thread::spawn(move || {
+            let should_stop = AtomicBool::new(false);
+            let mut written = Vec::new();
+            let result = serve_document_turn_authority_stream(
+                &stream_runtime,
+                request,
+                &should_stop,
+                &mut written,
+            );
+            let _ = done_tx.send(());
+            (result, written)
+        });
+        let parked_by = Instant::now() + HANG_CEILING;
+        while dependency.parked_subscribers.load(Ordering::SeqCst) == 0 {
+            assert!(!stream.is_finished(), "the stream ended before parking");
+            assert!(Instant::now() < parked_by, "the stream never parked");
+            std::thread::yield_now();
+        }
+
+        runtime.retire_after_successor_promotion();
+
+        done_rx
+            .recv_timeout(HANG_CEILING)
+            .expect("a promoted predecessor must end the authority stream");
+        let (result, written) = stream.join().unwrap();
+        result.unwrap();
+        let frames = String::from_utf8(written).unwrap();
+        assert!(
+            frames.lines().count() <= 1,
+            "at most the wake frame, then EOF: {frames}"
+        );
+        // A later subscriber returns immediately instead of parking.
+        let started = Instant::now();
+        let late = runtime.subscribe_state_plane(&channel, None, 0, HANG_CEILING);
+        assert!(late.timed_out);
+        assert!(started.elapsed() < HANG_CEILING);
+    }
+
+    /// `#drainingpredecessor` (GH #261): a promoted predecessor ran the
+    /// supervisor watchdog and orphan drain every interval for its whole drain,
+    /// re-dispatching an orphan queue head every 90s from a frozen replica.
+    #[test]
+    fn a_promoted_predecessor_runs_no_watchdog_or_orphan_drain() {
+        let dir = async_handoff_test_project();
+        let runtime = test_controller_runtime(&test_bootstrap(&dir));
+        let interval = Duration::from_secs(90);
+        let start = Instant::now();
+        let mut last_run = None;
+        let mut ran = 0usize;
+        assert!(run_controller_background_ticks(
+            &runtime,
+            &mut last_run,
+            interval,
+            start,
+            |_| ran += 1
+        ));
+        assert!(!run_controller_background_ticks(
+            &runtime,
+            &mut last_run,
+            interval,
+            start + Duration::from_secs(1),
+            |_| ran += 1
+        ));
+        assert!(run_controller_background_ticks(
+            &runtime,
+            &mut last_run,
+            interval,
+            start + interval,
+            |_| ran += 1
+        ));
+
+        runtime.retire_after_successor_promotion();
+
+        for tick in 2..10u32 {
+            assert!(!run_controller_background_ticks(
+                &runtime,
+                &mut last_run,
+                interval,
+                start + interval * tick,
+                |_| ran += 1
+            ));
+        }
+        assert_eq!(ran, 2, "no background tick after promotion");
     }
 
     /// GH #122 invariant 3: the settle budget covers a handoff whose successor

@@ -515,6 +515,52 @@ pub fn predecessor_drain_lease_protects(
     lease.is_some_and(|lease| lease.pid == pid && now_secs < lease.deadline_secs)
 }
 
+/// `#drainingpredecessor` (GH #261): what a predecessor whose successor was
+/// promoted does on one drain poll.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PredecessorDrainStep {
+    /// Accepted work is still running inside the drain budget.
+    Wait,
+    /// Retire the process. The counts are the accepted client connections and
+    /// admitted async editor workers still open at exit (zero on a clean drain).
+    Retire {
+        abandoned_clients: usize,
+        abandoned_workers: usize,
+    },
+}
+
+/// One drain poll of a promoted predecessor. Clean once no accepted client
+/// connection and no admitted async worker remains; otherwise bounded by
+/// `budget` — the `#drainingpredecessor` lease length — for BOTH. Before GH
+/// #261 only workers were bounded, so a client that kept a connection open
+/// (the editor's document-turn authority stream, one per open document) kept a
+/// predecessor alive, acting as a controller on a deleted binary, until the
+/// IDE itself went away. Past the lease, duplicate reaping no longer protects
+/// the process either, so the budget is also the longest a drain may run.
+pub fn predecessor_drain_step(
+    open_clients: usize,
+    in_flight_workers: usize,
+    elapsed: Duration,
+    budget: Duration,
+) -> PredecessorDrainStep {
+    if (open_clients == 0 && in_flight_workers == 0) || elapsed >= budget {
+        PredecessorDrainStep::Retire {
+            abandoned_clients: open_clients,
+            abandoned_workers: in_flight_workers,
+        }
+    } else {
+        PredecessorDrainStep::Wait
+    }
+}
+
+/// `#drainingpredecessor` (GH #261): may a controller run its own periodic
+/// controller work (supervisor watchdog, orphan-queue drain) this tick? Never
+/// once its successor is promoted: the successor owns that work, and the
+/// predecessor's view of every document froze at the handoff.
+pub fn controller_background_work_allowed(successor_promoted: bool) -> bool {
+    !successor_promoted
+}
+
 /// `#drainingpredecessor`: how a client's stale-binary restart, delegated to
 /// the stale controller's own (draining) self-recycle, ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -703,6 +749,51 @@ mod gh128_tests {
             stale_restart_recently_attempted(Some(&recent), Some(7), 35, 1_002, backoff),
             None
         );
+    }
+
+    /// `#drainingpredecessor` (GH #261): a clean drain retires at once; open
+    /// clients and workers hold it only until the lease-length budget. Before
+    /// the fix an open client connection held it forever.
+    #[test]
+    fn predecessor_drain_is_bounded_for_clients_as_well_as_workers() {
+        let budget = Duration::from_secs(360);
+        let early = Duration::from_secs(1);
+        assert_eq!(
+            predecessor_drain_step(0, 0, early, budget),
+            PredecessorDrainStep::Retire {
+                abandoned_clients: 0,
+                abandoned_workers: 0,
+            }
+        );
+        assert_eq!(
+            predecessor_drain_step(38, 0, early, budget),
+            PredecessorDrainStep::Wait
+        );
+        assert_eq!(
+            predecessor_drain_step(0, 1, early, budget),
+            PredecessorDrainStep::Wait
+        );
+        assert_eq!(
+            predecessor_drain_step(38, 0, budget, budget),
+            PredecessorDrainStep::Retire {
+                abandoned_clients: 38,
+                abandoned_workers: 0,
+            },
+            "an open client connection must not hold the drain past its lease"
+        );
+        assert_eq!(
+            predecessor_drain_step(2, 1, budget + early, budget),
+            PredecessorDrainStep::Retire {
+                abandoned_clients: 2,
+                abandoned_workers: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn promoted_predecessor_runs_no_background_controller_work() {
+        assert!(controller_background_work_allowed(false));
+        assert!(!controller_background_work_allowed(true));
     }
 
     /// `#drainingpredecessor`: only the leased pid, and only before its

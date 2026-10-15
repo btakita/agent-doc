@@ -528,8 +528,9 @@ Semantics:
   use `:pushpin:`. A bare `priority` attribute on the `agent:queue` marker still
   stable-sorts `do [#id]` prompts by their source item's priority after the sync
   (`queue::sort_prompts_by_priority`), covering manually edited queues.
-  `priority` is recognized on backlog/icebox/queue by both the lint and
-  preflight. See `specs/pending-system.md` for the per-item token grammar.
+  `priority` is recognized on backlog/icebox/review/queue by both the lint and
+  preflight (`agent:review priority` sorts gated review items in place; review
+  items never feed queue ranks). See `specs/pending-system.md` for the per-item token grammar.
 - **Append-stable backlog scheduling (`#backlog-queue-append-stable`).** A
   `do [#id]` queue prompt whose id is an **active backlog id** is *backlog-sourced*:
   the `queue` attribute appends it at the tail. Under `priority`, the recompute

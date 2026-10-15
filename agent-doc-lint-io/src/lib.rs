@@ -1119,6 +1119,38 @@ operator-owned scratch state\n\
         }
     }
 
+    /// `#reviewpriority`: a bare `priority` on `agent:review` is the tracked-work
+    /// ordering attribute, so lint must not block it as a malformed `key=value`
+    /// pair even though tagpath's own allowlist predates it; a bare `priority`
+    /// on a component with no priority ordering still fails closed.
+    #[test]
+    fn bare_priority_on_review_passes_lint_but_not_on_exchange() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:review priority -->\n\
+            - [/] [#r] priority=2 gated work\n\
+            <!-- /agent:review -->\n";
+        let file = write_doc(&dir, "review-priority.md", doc);
+        run(&file, None)
+            .unwrap_or_else(|error| panic!("`agent:review priority` must pass lint: {error:#}"));
+        run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+            panic!("`agent:review priority` must pass strict lint: {error:#}")
+        });
+
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange priority -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n";
+        let file = write_doc(&dir, "exchange-priority.md", doc);
+        let error = run(&file, None).expect_err("bare priority on exchange must stay invalid");
+        let message = format!("{error:#}");
+        assert!(message.contains("agent-doc/malformed-attr"), "{message}");
+        assert!(message.contains("attribute `priority`"), "{message}");
+    }
+
     #[test]
     fn queue_attributes_that_require_values_still_fail_closed() {
         let dir = TempDir::new().unwrap();

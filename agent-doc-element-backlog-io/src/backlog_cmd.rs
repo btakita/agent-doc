@@ -712,12 +712,13 @@ pub fn upsert(file: &Path, key: &str, text: &str) -> Result<Option<String>> {
 /// `#bkqattrcli`: an unrestricted set-attr would let a typo land a permanently
 /// ignored attribute on a live document, which is the class of silent failure this
 /// command exists to remove. `queue` and `priority` are the two that actually
-/// change tracked-work behaviour; `queue` on `agent:icebox` is deliberately absent
-/// because an icebox item never auto-populates `agent:queue`.
+/// change tracked-work behaviour; `queue` on `agent:icebox` and `agent:review` is
+/// deliberately absent because neither list ever auto-populates `agent:queue`
+/// (parked work, and gated work awaiting an external gate, respectively).
 fn editable_marker_attrs(list: backlog::TrackedWorkList) -> &'static [&'static str] {
     match list {
         backlog::TrackedWorkList::Backlog => &["queue", "priority"],
-        backlog::TrackedWorkList::Icebox => &["priority"],
+        backlog::TrackedWorkList::Icebox | backlog::TrackedWorkList::Review => &["priority"],
     }
 }
 
@@ -3220,5 +3221,84 @@ mod tests {
             .unwrap_or_default();
         assert!(done_body.contains("[#aa11]"), "{after}");
         assert!(done_body.contains("finished work"), "{after}");
+    }
+
+    fn doc_with_backlog_and_review(review_marker: &str, review_items: &str) -> (TempDir, PathBuf) {
+        let content = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:backlog -->\n- [ ] [#a1] open\n<!-- /agent:backlog -->\n\n{review_marker}\n{review_items}\n<!-- /agent:review -->\n",
+        );
+        let (tmp, doc) = setup_test_dir();
+        fs::write(&doc, content).unwrap();
+        (tmp, doc)
+    }
+
+    /// `#reviewpriority`: `priority` is the one editable `agent:review` marker
+    /// attribute; `queue` stays refused because review work never auto-populates
+    /// `agent:queue`.
+    #[test]
+    fn review_editable_marker_attrs_accept_priority_only() {
+        assert_eq!(
+            editable_marker_attrs(backlog::TrackedWorkList::Review),
+            &["priority"]
+        );
+        validate_editable_attr(backlog::TrackedWorkList::Review, "priority").unwrap();
+        let err = validate_editable_attr(backlog::TrackedWorkList::Review, "queue")
+            .expect_err("queue must not be editable on agent:review");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("not an editable `agent:review` attribute") && msg.contains("priority"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn review_set_attr_priority_round_trips_marker_only() {
+        let (_tmp, doc) =
+            doc_with_backlog_and_review("<!-- agent:review -->", "- [/] [#r1] gated one");
+        let before = fs::read_to_string(&doc).unwrap();
+
+        force_pending(|| set_attr(&doc, backlog::TrackedWorkList::Review, "priority", None));
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("<!-- agent:review priority -->"), "{after}");
+        assert!(
+            after.contains("<!-- agent:backlog -->\n"),
+            "backlog marker must be untouched:\n{after}"
+        );
+        assert_eq!(
+            after.replace("<!-- agent:review priority -->", "<!-- agent:review -->"),
+            before,
+            "only the review marker may change"
+        );
+
+        force_pending(|| unset_attr(&doc, backlog::TrackedWorkList::Review, "priority"));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+    }
+
+    #[test]
+    fn review_set_attr_refuses_queue_and_priority_values() {
+        let (_tmp, doc) =
+            doc_with_backlog_and_review("<!-- agent:review -->", "- [/] [#r1] gated one");
+        let before = fs::read_to_string(&doc).unwrap();
+        let queue = with_test_effects(|| {
+            with_force_disk_pending_writes(true, || {
+                set_attr(&doc, backlog::TrackedWorkList::Review, "queue", None)
+            })
+        });
+        assert!(queue.is_err(), "queue on agent:review must be refused");
+        let valued = with_test_effects(|| {
+            with_force_disk_pending_writes(true, || {
+                set_attr(
+                    &doc,
+                    backlog::TrackedWorkList::Review,
+                    "priority",
+                    Some("2"),
+                )
+            })
+        });
+        assert!(
+            format!("{:#}", valued.expect_err("priority is a bare flag"))
+                .contains("boolean marker attribute")
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before);
     }
 }

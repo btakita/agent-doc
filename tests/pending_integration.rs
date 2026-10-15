@@ -1653,6 +1653,107 @@ fn backlog_set_attr_refuses_an_attribute_that_would_be_ignored() {
     );
 }
 
+/// `#reviewpriority`: `agent-doc review set-attr <FILE> priority` adds the bare
+/// flag to the `agent:review` marker through the CLI, preflight then sorts the
+/// gated review items by their `priority=<1..9>` token without flagging the
+/// attribute as unrecognized, and `queue` stays refused on review.
+#[test]
+fn review_set_attr_priority_sorts_review_items_on_preflight() {
+    let (_tmp, doc) = setup_doc("- [ ] [#aaaa] open");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:pending -->\n",
+        "<!-- /agent:pending -->\n\n<!-- agent:review -->\n- [/] [#rlow] priority=4 later\n- [/] [#rhigh] priority=1 first\n<!-- /agent:review -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let refused = agent_doc()
+        .args(["review", "set-attr", doc.to_str().unwrap(), "queue"])
+        .output()
+        .unwrap();
+    assert!(
+        !refused.status.success(),
+        "queue must not be editable on agent:review"
+    );
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("not an editable `agent:review` attribute") && stderr.contains("priority"),
+        "the refusal must name what review accepts: {stderr}"
+    );
+
+    let output = agent_doc()
+        .args(["review", "set-attr", doc.to_str().unwrap(), "priority"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "review set-attr priority failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        after.contains("<!-- agent:review priority -->"),
+        "set-attr must add the bare priority flag to the review marker:\n{after}"
+    );
+
+    let output = agent_doc()
+        .args(["lint", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "`agent:review priority` must pass lint: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = agent_doc()
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    let warnings = parsed
+        .get("warnings")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.get("code").and_then(|v| v.as_str())
+                == Some("misplaced_component_attr")),
+        "priority on agent:review must be a recognized attribute: {}",
+        serde_json::Value::Array(warnings)
+    );
+    assert_eq!(parsed.get("review_count").and_then(|v| v.as_u64()), Some(2));
+
+    let sorted = fs::read_to_string(&doc).unwrap();
+    let review = sorted
+        .split("<!-- agent:review priority -->")
+        .nth(1)
+        .unwrap();
+    assert!(
+        review.find("[#rhigh]").unwrap() < review.find("[#rlow]").unwrap(),
+        "preflight must sort the priority review by item rank:\n{sorted}"
+    );
+
+    let output = agent_doc()
+        .args(["review", "unset-attr", doc.to_str().unwrap(), "priority"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "review unset-attr priority failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("<!-- agent:review -->"),
+        "unset-attr must restore the bare review marker"
+    );
+}
+
 #[test]
 fn preflight_warns_for_legacy_gated_backlog_items() {
     let (_tmp, doc) = setup_doc("- [/] [#bbbb] legacy gated");

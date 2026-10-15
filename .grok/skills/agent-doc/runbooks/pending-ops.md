@@ -329,6 +329,10 @@ token-efficiently instead of reading the whole component:
   drop), `--json` (structured output for programmatic triage).
 - `agent-doc review ungate-tasks <FILE>` — drive gated items back into the backlog
   pipeline by adding one ungate follow-up task per gated review item (idempotent).
+- `agent-doc review set-attr <FILE> priority` (`unset-attr` to remove) — mark
+  `<!-- agent:review priority -->` so preflight stable-sorts gated review items by
+  their `priority=<1..9>` token (1 first, unranked last), like backlog/icebox.
+  `queue` is refused on review.
 
 Annotate gated items with a token-efficient `[<gate-type|blocked:reason>] <summary>.
 NEXT: (1)… (2)…` so `review list --has-next` surfaces exactly what is actionable.

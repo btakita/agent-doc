@@ -1221,6 +1221,11 @@ pub fn normalize_pending_id(id: &str) -> String {
 pub enum TrackedWorkList {
     Backlog,
     Icebox,
+    /// `agent:review` — gated work awaiting an external gate. Only the
+    /// marker-attribute route (`agent-doc review set-attr|unset-attr`) addresses
+    /// it through this enum; review item mutations keep their own
+    /// `--review-*` paths.
+    Review,
 }
 
 impl TrackedWorkList {
@@ -1228,6 +1233,7 @@ impl TrackedWorkList {
         match self {
             Self::Backlog => "backlog",
             Self::Icebox => "icebox",
+            Self::Review => "review",
         }
     }
 
@@ -1235,6 +1241,7 @@ impl TrackedWorkList {
         match self {
             Self::Backlog => element::is_backlog_component(name),
             Self::Icebox => element::is_icebox_component(name),
+            Self::Review => element::is_review_component(name),
         }
     }
 }

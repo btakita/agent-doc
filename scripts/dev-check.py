@@ -221,7 +221,9 @@ def run_affected(base: str) -> None:
             run(cargo_command("run", "--quiet", "--", "audit-docs"))
     if current["jetbrains"]:
         run(
-            ["./gradlew", "--no-daemon", "--console=plain", "-q", "test"],
+            # `#keepidesnappy`: the Makefile exports the low-priority daemon
+            # and worker-cap flags; a direct `dev-check.py run` gets none.
+            ["./gradlew", *os.environ.get("AGENT_DOC_GRADLE_FLAGS", "").split(), "--no-daemon", "--console=plain", "-q", "test"],
             cwd=ROOT / "editors/jetbrains",
         )
     if current["vscode"]:

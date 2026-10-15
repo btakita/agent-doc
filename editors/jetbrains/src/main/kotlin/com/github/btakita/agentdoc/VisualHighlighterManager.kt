@@ -16,6 +16,7 @@ import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.markup.EffectType
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
+import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -39,6 +40,56 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
+
+/**
+ * What one agent-doc range highlighter covers and how it paints. [attributes] is
+ * compared by value, so a changed color or font style is re-applied.
+ */
+internal data class VisualHighlightKey(
+    val start: Int,
+    val end: Int,
+    val layer: Int,
+    val kind: String,
+    val attributes: Any?,
+)
+
+internal data class VisualHighlightPlan<H>(
+    val remove: List<H>,
+    val add: List<VisualHighlightKey>,
+)
+
+/**
+ * Match live highlighters to the desired tokens as a multiset: every existing
+ * highlighter whose current identity equals a desired token is kept untouched,
+ * every unmatched or invalid one (`null` identity) is removed, and only the
+ * remaining desired tokens are added. Unchanged text therefore costs no markup
+ * mutation at all (`#keepidesnappy`).
+ */
+internal fun <H> planVisualHighlightReconcile(
+    existing: List<Pair<H, VisualHighlightKey?>>,
+    desired: List<VisualHighlightKey>,
+): VisualHighlightPlan<H> {
+    val unmatched = HashMap<VisualHighlightKey, ArrayDeque<H>>()
+    val remove = ArrayList<H>()
+    for ((highlighter, key) in existing) {
+        if (key == null) {
+            remove.add(highlighter)
+        } else {
+            unmatched.getOrPut(key) { ArrayDeque() }.addLast(highlighter)
+        }
+    }
+    val add = ArrayList<VisualHighlightKey>()
+    for (key in desired) {
+        val candidates = unmatched[key]
+        if (candidates != null && candidates.isNotEmpty()) {
+            candidates.removeFirst()
+        } else {
+            add.add(key)
+        }
+    }
+    unmatched.values.forEach { remove.addAll(it) }
+    return VisualHighlightPlan(remove, add)
+}
 
 class VisualHighlighterManager private constructor(private val project: Project) : Disposable {
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(VisualHighlighterManager::class.java)
@@ -257,6 +308,14 @@ class VisualHighlighterManager private constructor(private val project: Project)
         DaemonCodeAnalyzer.getInstance(project).restart(psiFile)
     }
 
+    /**
+     * `#keepidesnappy`: reconcile instead of rebuild. This runs on the EDT after
+     * every 120 ms typing pause; tearing down and re-adding every agent-doc
+     * highlighter (hundreds on a long session document) fired a markup event and
+     * a repaint per highlighter while the operator typed. Range markers already
+     * track offset drift, so after a keystroke almost every highlighter still
+     * matches its token and only the changed ones are touched.
+     */
     private fun refreshEditor(editor: Editor, tokens: List<NativePatching.VisualToken>) {
         if (editor.isDisposed) return
         if (!isMarkdown(editor.document)) {
@@ -264,23 +323,64 @@ class VisualHighlighterManager private constructor(private val project: Project)
             return
         }
 
-        clearEditor(editor)
         val markup = editor.markupModel
-        for (token in tokens) {
-            if (token.end <= token.start || token.end > editor.document.textLength) continue
+        val textLength = editor.document.textLength
+        val attrsByKind = HashMap<String, TextAttributes>()
+        val desired =
+            tokens
+                .filter { it.end > it.start && it.end <= textLength }
+                .map { token ->
+                    VisualHighlightKey(
+                        start = token.start,
+                        end = token.end,
+                        layer = layerFor(token.kind),
+                        kind = token.kind,
+                        attributes = attrsByKind.getOrPut(token.kind) { attrsFor(editor, token.kind) },
+                    )
+                }
+        // First refresh of this editor: nothing is tracked yet, so sweep any
+        // agent-doc highlighter it carries (one full pass) before reconciling.
+        val tracked =
+            editor.getUserData(TRACKED_HIGHLIGHTERS_KEY) ?: run {
+                clearEditor(editor)
+                emptyList()
+            }
+        val plan =
+            planVisualHighlightReconcile(
+                tracked.map { highlighter -> highlighter to highlighter.visualHighlightKey() },
+                desired,
+            )
+        for (highlighter in plan.remove) {
+            if (highlighter.isValid) markup.removeHighlighter(highlighter)
+        }
+        val removed = plan.remove.toHashSet()
+        val next = ArrayList<RangeHighlighter>(desired.size)
+        tracked.filterTo(next) { it !in removed }
+        for (key in plan.add) {
             val highlighter = markup.addRangeHighlighter(
-                token.start,
-                token.end,
-                layerFor(token.kind),
-                attrsFor(editor, token.kind),
+                key.start,
+                key.end,
+                key.layer,
+                key.attributes as TextAttributes,
                 HighlighterTargetArea.EXACT_RANGE,
             )
             highlighter.putUserData(HIGHLIGHTER_KEY, true)
+            highlighter.putUserData(HIGHLIGHT_IDENTITY_KEY, key)
+            next.add(highlighter)
         }
+        editor.putUserData(TRACKED_HIGHLIGHTERS_KEY, next)
+    }
+
+    /** The identity this highlighter was created with, or null once it no longer matches it. */
+    private fun RangeHighlighter.visualHighlightKey(): VisualHighlightKey? {
+        if (!isValid) return null
+        val created = getUserData(HIGHLIGHT_IDENTITY_KEY) ?: return null
+        return created.copy(start = startOffset, end = endOffset)
     }
 
     private fun clearEditor(editor: Editor) {
         val markup = editor.markupModel
+        editor.putUserData(TRACKED_HIGHLIGHTERS_KEY, null)
         markup.allHighlighters
             .filter { it.getUserData(HIGHLIGHTER_KEY) == true }
             .forEach { markup.removeHighlighter(it) }
@@ -411,6 +511,8 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
     companion object {
         private val HIGHLIGHTER_KEY = Key.create<Boolean>("agent-doc.visual.highlighter")
+        private val HIGHLIGHT_IDENTITY_KEY = Key.create<VisualHighlightKey>("agent-doc.visual.highlight-identity")
+        private val TRACKED_HIGHLIGHTERS_KEY = Key.create<List<RangeHighlighter>>("agent-doc.visual.tracked-highlighters")
         private val INSTANCES = ConcurrentHashMap<Project, VisualHighlighterManager>()
 
         /** Share of the theme foreground mixed into a component body's background. */

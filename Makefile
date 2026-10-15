@@ -1,6 +1,38 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test jetbrains-repository-self-test python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test jetbrains-repository-self-test build-priority-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+# Build priority (`#keepidesnappy`): agent-doc's own builds and tests run below
+# interactive work. Parse time lowers THIS make process to nice $(BUILD_NICE) and
+# the idle I/O class, so every recipe, compiler, test binary, and Gradle/TLC JVM
+# it forks inherits that priority, and sizes parallelism from the cores that are
+# actually free (scripts/build-priority.py). Several concurrent worktree checks
+# otherwise inherited the tmux server's priority and out-ranked the IDE.
+# Opt out with AGENT_DOC_BUILD_PRIORITY=normal; every knob below is overridable.
+AGENT_DOC_BUILD_PRIORITY ?= low
+BUILD_NICE ?= 19
+BUILD_IONICE_CLASS ?= 3
+ifeq ($(AGENT_DOC_BUILD_PRIORITY),low)
+BUILD_PRIORITY_STATUS := $(shell python3 scripts/build-priority.py apply --pid $$PPID --nice $(BUILD_NICE) --ionice-class $(BUILD_IONICE_CLASS) 2>/dev/null || echo unavailable)
+GRADLE_PRIORITY_FLAG := --priority=low
+else
+BUILD_PRIORITY_STATUS := disabled
+GRADLE_PRIORITY_FLAG :=
+endif
+# Simply expanded (`:=`) so the load-average probe runs once per parse, not per use.
+ifndef BUILD_JOBS
+BUILD_JOBS := $(shell python3 scripts/build-priority.py jobs --cpus $(CPU_COUNT) 2>/dev/null || echo $(CPU_COUNT))
+endif
+export CARGO_BUILD_JOBS ?= $(BUILD_JOBS)
+export NEXTEST_TEST_THREADS ?= $(BUILD_JOBS)
+GRADLE_MAX_WORKERS ?= $(BUILD_JOBS)
+export AGENT_DOC_GRADLE_FLAGS := $(GRADLE_PRIORITY_FLAG) --max-workers=$(GRADLE_MAX_WORKERS)
+ifndef TLA_JOBS
+TLA_JOBS := $(shell n=$$(( $(BUILD_JOBS) / 4 )); [ $$n -gt 8 ] && n=8; [ $$n -ge 1 ] && echo $$n || echo 1)
+endif
+export TLA_JOBS
+export TLA_WORKERS ?= $(BUILD_JOBS)
+
 TEST_THREADS ?= 2
 TMUX_TEST_THREADS ?= 1
 CARGO_TARGET_DIR_ABS := $(abspath $(if $(strip $(CARGO_TARGET_DIR)),$(CARGO_TARGET_DIR),target))
@@ -35,7 +67,10 @@ NEXTEST_JUNIT := $(CARGO_TARGET_DIR_ABS)/nextest/default/junit.xml
 TEST_BUILD = $(CARGO_CLEAN_ENV) $(CARGO_CMD) build --workspace --all-targets --quiet
 # Concurrent batched test binaries (scripts/run-batched-tests). Each binary is
 # still one libtest process with --test-threads=$(TEST_THREADS).
-BATCHED_TEST_JOBS ?= $(shell n=$$(( $(CPU_COUNT) / 2 )); [ $$n -ge 1 ] && echo $$n || echo 1)
+# Sized from BUILD_JOBS so batched binaries x TEST_THREADS stay inside the headroom.
+ifndef BATCHED_TEST_JOBS
+BATCHED_TEST_JOBS := $(shell n=$$(( $(BUILD_JOBS) / 2 )); [ $$n -ge 1 ] && echo $$n || echo 1)
+endif
 TEST_RECORD = python3 scripts/test-run-record exec --run-dir "$(TEST_RUN_DIR)"
 LOCAL_INSTALL_PROFILE ?= release-local
 LOCAL_INSTALL_TARGET_DIR ?= target/local-install
@@ -186,7 +221,7 @@ cross-editor-simworld: $(VSCODE_NODE_LOCK)
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
 	$(TEST_BUILD); \
 	( cd editors/vscode && npm run compile ); \
-	( cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q testClasses ); \
+	( cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -q testClasses ); \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --test cross_editor_simworld native_plugin_harnesses_peer_through_real_agent_doc_controller -- --ignored --nocapture --test-threads=1
 
 # Live tmux integration sweep. These tests are intentionally ignored in the
@@ -227,7 +262,7 @@ version-sync:
 
 dev-harness-test: $(VSCODE_NODE_LOCK)
 	@python3 scripts/agent-doc-dev self-test
-	@cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q test
+	@cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -q test
 	@cd editors/vscode && npm test
 
 # Every release records coverage, tests both supported plugins, and executes
@@ -239,10 +274,10 @@ editor-parity: dev-harness-test cross-editor-simworld
 # disjoint compatibility range and the modular role/sandbox contract are release
 # gates.
 jetbrains-classic-check:
-	@cd editors/jetbrains && ./gradlew --no-daemon --console=plain verifyClassicArtifact
+	@cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain verifyClassicArtifact
 
 jetbrains-262-check:
-	@cd editors/jetbrains-262 && gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes
+	@cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes
 
 jetbrains-263-check:
 	@set -e; \
@@ -253,7 +288,7 @@ jetbrains-263-check:
 	platform=$$(sed -n 's/^platformVersion *= *//p' "$$props" | tr -d '[:space:]'); \
 	since=$$(sed -n 's/^compatibilitySinceBuild *= *//p' "$$props" | tr -d '[:space:]'); \
 	until=$$(sed -n 's/^compatibilityUntilBuild *= *//p' "$$props" | tr -d '[:space:]'); \
-	cd editors/jetbrains-262 && gradle --no-daemon --console=plain \
+	cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain \
 		-PpluginName="$$name" -PdistributionName="$$distribution" \
 		-PpluginVersion="$$version" -PplatformVersion="$$platform" \
 		-PcompatibilitySinceBuild="$$since" -PcompatibilityUntilBuild="$$until" \
@@ -269,7 +304,7 @@ bump-plugin:
 	@python3 scripts/check_plugin_versions.py --bump "JetBrains 263"
 	@cd editors/jetbrains && \
 	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
-	./gradlew buildPlugin signPlugin && \
+	./gradlew $(AGENT_DOC_GRADLE_FLAGS) buildPlugin signPlugin && \
 	ls -1 build/distributions/agent-doc-jetbrains-$$new*.zip
 	@$(MAKE) jetbrains-263-check
 
@@ -277,7 +312,7 @@ bump-plugin-262:
 	@python3 scripts/check_plugin_versions.py --bump "JetBrains 262"
 	@cd editors/jetbrains-262 && \
 	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
-	gradle --no-daemon --console=plain buildPlugin verifySplitArtifact && \
+	gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain buildPlugin verifySplitArtifact && \
 	ls -1 build/distributions/agent-doc-jetbrains-262-$$new.zip
 
 # `#installgenskew`: the binary embeds the JetBrains generation it expects
@@ -383,12 +418,29 @@ release-driver-self-test:
 jetbrains-repository-self-test:
 	@python3 scripts/jetbrains-custom-repository.py --self-test
 
+# `#keepidesnappy`: prove the parse-time priority wrapper reaches recipes and
+# that AGENT_DOC_BUILD_PRIORITY=normal and explicit job overrides are honoured.
+build-priority-self-test:
+	@python3 scripts/build-priority.py --self-test
+
+# Report what a recipe actually runs under (read by build-priority-self-test).
+build-priority-probe:
+	@echo "priority=$(BUILD_PRIORITY_STATUS)"
+	@echo "make_pid=$$PPID"
+	@echo "recipe_nice=$$(python3 -c 'import os; print(os.getpriority(os.PRIO_PROCESS, 0))')"
+	@echo "recipe_ionice=$$(ionice -p $$$$ 2>/dev/null || echo unavailable)"
+	@echo "cargo_build_jobs=$$CARGO_BUILD_JOBS"
+	@echo "nextest_test_threads=$$NEXTEST_TEST_THREADS"
+	@echo "gradle_max_workers=$(GRADLE_MAX_WORKERS)"
+	@echo "gradle_flags=$$AGENT_DOC_GRADLE_FLAGS"
+	@echo "tla_workers=$$TLA_WORKERS"
+
 # Fast edit-loop validation: helper checks plus Rust packages affected by the
 # diff and their reverse-dependency closure. This is not a release proof.
-check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test
+check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test build-priority-self-test
 	@python3 scripts/dev-check.py run
 
-check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check python-bootstrap-test lean tla-runner-self-test tla
+check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test build-priority-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check python-bootstrap-test lean tla-runner-self-test tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Target-specific, so it reaches the `audit-docs` prerequisite of `check` only.
@@ -497,13 +549,13 @@ install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
 		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
 		python3 scripts/check_plugin_versions.py --bump "JetBrains 263" || exit 1; \
-		( cd editors/jetbrains && ./gradlew buildPlugin ) || { \
+		( cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) buildPlugin ) || { \
 			echo "JetBrains classic plugin build failed. Its Gradle daemon is pinned to Temurin 21 (gradle/gradle-daemon-jvm.properties); check that Gradle can detect or download it. Refusing to install a stale package." >&2; \
 			exit 1; \
 		}; \
 		if [ -f editors/jetbrains-262/gradle.properties ]; then \
 			python3 scripts/check_plugin_versions.py --bump "JetBrains 262" || exit 1; \
-			( cd editors/jetbrains-262 && gradle --no-daemon --console=plain buildPlugin verifySplitArtifact ) || { \
+			( cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain buildPlugin verifySplitArtifact ) || { \
 				echo "JetBrains 262 modular plugin build failed. Refusing to install the classic package into a 262 IDE." >&2; \
 				exit 1; \
 			}; \

@@ -207,6 +207,7 @@ reread repair, or secondary full-content delivery channel.
 - Both JetBrains and VS Code must source their highlight ranges from the shared FFI surface (`agent_doc_visual_tokens_json`) so component markers, agent-managed component bodies, patch markers, boundary markers, `### Re:` headings, `❯` prompts, tracked `[#id]` tags, standalone bracket labels such as `[recommended]`, and ordinary HTML scratch comments plus their bodies stay in sync across editors.
 - `agent_doc_visual_tokens_json` returns UTF-16 document offsets, not raw UTF-8 byte positions. Plugins must treat those offsets as editor-ready range endpoints and pass them directly to native document APIs.
 - Matches inside fenced code blocks or inline code are excluded from this highlighting contract; example markup in code samples must remain untouched.
+- **Refresh cost (`#keepidesnappy`):** the highlight refresh is debounced off the editor event thread, and the event-thread apply must be incremental. An adapter whose editor API keeps one object per highlighted range (JetBrains `RangeHighlighter`) reconciles its live highlighters against the new tokens by range, layer, kind, and style, keeps every match untouched, and removes or adds only the difference. VS Code's `setDecorations` already replaces a whole decoration type in one call. A refresh after a pause in typing must not tear down and re-create every highlighter, because each one is a markup event and a repaint on the UI thread.
 
 ## 12. Component Outline (Folding, Gutter Markers, Structure View)
 

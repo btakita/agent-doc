@@ -19,9 +19,9 @@ pub fn authority_settle_ms(file: &Path) -> u64 {
 
 /// One Lazily current-transition observation, in the shape the shared settle
 /// decision consumes.
-struct Observation {
-    ready: bool,
-    state: &'static str,
+pub(crate) struct Observation {
+    pub(crate) ready: bool,
+    pub(crate) state: &'static str,
     /// `Some(live_editors)` when the transition is `delivery_pending` and an
     /// urgent CRDT delivery drain can be requested against those replicas.
     drain_targets: Option<usize>,
@@ -31,7 +31,7 @@ struct Observation {
     error: Option<String>,
 }
 
-fn observe_lazily_current(file: &Path, source: &str) -> Observation {
+pub(crate) fn observe_lazily_current(file: &Path, source: &str) -> Observation {
     use agent_doc_crdt_relay_io::CurrentText;
 
     let ready = |state| Observation {

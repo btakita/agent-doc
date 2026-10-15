@@ -169,6 +169,29 @@ pub fn resolve_current_preflight_document(file: &Path, source: &str) -> Result<S
     )
 }
 
+/// GH #272 (`#runtypingadmit`): preflight's admission read.
+///
+/// Same precedence as [`resolve_current_preflight_document`], but an
+/// attached-editor refusal whose replica can return on its own (a rebuild in
+/// flight after a controller recycle, a plugin re-registration racing the
+/// operator's typing) holds admission for a bounded, observation-only window
+/// and resolves again, instead of dropping the operator's `Run Agent Doc`.
+pub fn resolve_admission_preflight_document(
+    file: &Path,
+    source: &str,
+) -> Result<agent_doc_preflight_io::admission_replica_hold::AdmittedDocument> {
+    agent_doc_preflight_io::admission_replica_hold::resolve_admitting_transient_replica(
+        file,
+        source,
+        || resolve_current_preflight_document(file, source),
+        |error| {
+            agent_doc_document_realtime_io::attached_editor_disk_read_refusal(error)
+                .map(|refusal| refusal.recovery)
+        },
+        || agent_doc_preflight_io::admission_replica_hold::hold_for_replica(file),
+    )
+}
+
 pub fn enforce_no_uncommitted_closeout_drift(
     file: &Path,
     rc: &agent_doc_run_context_io::CycleContext,

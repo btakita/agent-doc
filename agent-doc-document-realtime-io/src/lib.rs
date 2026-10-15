@@ -8889,7 +8889,12 @@ fn try_resolve_current_doc_with_disk_inner(
 /// The disk fallback stays refused even for a superseded editor: its JVM still
 /// owns the buffer, which may hold unsaved operator text, so adopting disk could
 /// silently drop it. What changes is that the refusal now says how to leave.
-fn attached_editor_refusal_remedy(file: &std::path::Path) -> String {
+fn attached_editor_refusal_remedy(
+    file: &std::path::Path,
+) -> (
+    agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision,
+    String,
+) {
     let editors = agent_doc_crdt_relay_io::reliable_sync_editor_registrations_for_file(file)
         .into_iter()
         .filter_map(|reg| Some((reg.editor_kind, u32::try_from(reg.pid).ok()?)))
@@ -8925,12 +8930,21 @@ fn attached_editor_refusal_remedy(file: &std::path::Path) -> String {
             &refusal.editor_pids,
         )
     });
-    attached_editor_refusal_remedy_from(
-        &superseded,
-        &editors,
-        &unreachable,
-        refusal.and_then(|refusal| refusal.build_mismatch_refusal),
-        blocking_document.as_deref(),
+    let build_mismatch_refusal = refusal.and_then(|refusal| refusal.build_mismatch_refusal);
+    (
+        attached_editor_recovery_decision_from(
+            &superseded,
+            &editors,
+            &unreachable,
+            build_mismatch_refusal,
+        ),
+        attached_editor_refusal_remedy_from(
+            &superseded,
+            &editors,
+            &unreachable,
+            build_mismatch_refusal,
+            blocking_document.as_deref(),
+        ),
     )
 }
 
@@ -8948,6 +8962,11 @@ pub struct AttachedEditorDiskReadRefused {
     /// The exhausted observation family (`missing_replica`, `sync_pending`).
     pub reason: String,
     pub remedy: String,
+    /// The terminal recovery class the remedy was rendered from. Typed so
+    /// preflight admission can tell a replica that may return on its own
+    /// (`ReloadEditor`, `ReregisterEditor`) from one that needs an operator
+    /// action, without matching remedy prose (GH #272, `#runtypingadmit`).
+    pub recovery: agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision,
 }
 
 impl std::fmt::Display for AttachedEditorDiskReadRefused {
@@ -8972,6 +8991,24 @@ pub fn attached_editor_disk_read_refusal(
         .find_map(|cause| cause.downcast_ref::<AttachedEditorDiskReadRefused>())
 }
 
+/// The terminal recovery class behind [`attached_editor_refusal_remedy_from`].
+fn attached_editor_recovery_decision_from(
+    superseded: &[agent_doc_fs::plugin_jar::SupersededEditor],
+    editors: &[(String, u32)],
+    unreachable: &[u32],
+    build_mismatch_refusal: Option<agent_doc_turn::authority_recovery::BuildMismatchRefusal>,
+) -> agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision {
+    agent_doc_turn::authority_recovery::decide_attached_editor_recovery(
+        agent_doc_turn::authority_recovery::AttachedEditorRecoveryFacts {
+            build_mismatch_refusal,
+            plugin_bytes_superseded: !superseded.is_empty(),
+            endpoints_found: !editors.is_empty(),
+            all_endpoints_unreachable: !editors.is_empty()
+                && editors.iter().all(|(_, pid)| unreachable.contains(pid)),
+        },
+    )
+}
+
 /// Pure core of [`attached_editor_refusal_remedy`].
 ///
 /// `unreachable` names the editor pids whose IPC endpoint refused a connection.
@@ -8991,15 +9028,8 @@ fn attached_editor_refusal_remedy_from(
     } else {
         pids.join(", ")
     };
-    let decision = agent_doc_turn::authority_recovery::decide_attached_editor_recovery(
-        agent_doc_turn::authority_recovery::AttachedEditorRecoveryFacts {
-            build_mismatch_refusal,
-            plugin_bytes_superseded: !superseded.is_empty(),
-            endpoints_found: !editors.is_empty(),
-            all_endpoints_unreachable: !editors.is_empty()
-                && editors.iter().all(|(_, pid)| unreachable.contains(pid)),
-        },
-    );
+    let decision =
+        attached_editor_recovery_decision_from(superseded, editors, unreachable, build_mismatch_refusal);
     match decision {
         agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::WaitForSenderRecycle => {
             let blocker = blocking_document
@@ -9356,11 +9386,12 @@ fn resolve_editor_unavailable_disk_read_fallback(
                 },
             ),
         );
-        let remedy = attached_editor_refusal_remedy(file);
+        let (recovery, remedy) = attached_editor_refusal_remedy(file);
         return Err(anyhow::Error::new(AttachedEditorDiskReadRefused {
             file: file.to_path_buf(),
             reason: reason.to_string(),
             remedy,
+            recovery,
         }));
     }
     debug_assert_eq!(

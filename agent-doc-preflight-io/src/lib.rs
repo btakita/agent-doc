@@ -1,5 +1,6 @@
 //! Preflight maintenance I/O adapters.
 
+pub mod admission_replica_hold;
 pub mod debounce;
 pub mod gc;
 pub mod layout;

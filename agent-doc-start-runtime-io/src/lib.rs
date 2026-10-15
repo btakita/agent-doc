@@ -1784,6 +1784,11 @@ fn supervisor_perform_reexec(
     // launch — record the path + errno and fall through to the next. Re-using the
     // same inherited (CLOEXEC-cleared) fd across attempts is safe: a failed `exec`
     // never closed it.
+    // `#reexecptybridge` (GH #270): the replacement services the inherited
+    // master before start admission; these let it prove it is this image (same
+    // PID across `execve`) and filter output with this child's policy.
+    let supervisor_pid = std::process::id().to_string();
+    let current_harness = shared.current_harness();
     let candidates = supervisor_reexec_candidates();
     let mut attempts: Vec<String> = Vec::with_capacity(candidates.len());
     for (exe, note) in &candidates {
@@ -1795,6 +1800,14 @@ fn supervisor_perform_reexec(
         for (key, value) in state.to_env() {
             cmd.env(key, value);
         }
+        cmd.env(
+            agent_doc_supervisor_process::REEXEC_SUPERVISOR_PID_ENV,
+            &supervisor_pid,
+        );
+        cmd.env(
+            agent_doc_supervisor_process::REEXEC_HARNESS_ENV,
+            &current_harness,
+        );
         if let Some(contract) = shared.proven_capability_proof_contract() {
             cmd.env(
                 agent_doc_supervisor_process::REEXEC_CAPABILITY_PROOF_CONTRACT_ENV,

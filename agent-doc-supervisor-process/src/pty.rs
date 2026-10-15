@@ -598,12 +598,23 @@ pub struct PtyFilter {
 
 impl PtyFilter {
     pub fn for_harness(harness: &agent_doc_harness::HarnessConfig) -> Self {
+        Self::for_harness_binary(&harness.binary)
+    }
+
+    /// Filter policy keyed by the harness binary name alone, for callers that
+    /// run before the full harness config is resolved (`#reexecptybridge`).
+    pub fn for_harness_binary(binary: &str) -> Self {
         Self {
             inner: TerminalFilter::with_config(TerminalFilterConfig {
-                preserve_kitty_keyboard: harness.binary == "opencode",
+                preserve_kitty_keyboard: binary == "opencode",
             }),
             trace: Vec::new(),
         }
+    }
+
+    /// Take the buffered incomplete sequence (see [`TerminalFilter::take_carryover`]).
+    pub fn take_carryover(&mut self) -> Vec<u8> {
+        self.inner.take_carryover()
     }
 
     pub fn filter(&mut self, input: &[u8], output: &mut Vec<u8>) {

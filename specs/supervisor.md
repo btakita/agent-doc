@@ -301,6 +301,43 @@ a closed actor record is replaceable through the stale-authority path.
   Routine idle-watch, stale-busy reconcile, and stale-binary hot-reload
   diagnostics must stay in the session log / ops log instead of painting over
   the foreground TUI after `/clear`, restart, or inter-queue-item recycle.
+- A preserved child's PTY is never unserviced across an `execve` hot-reload
+  (`#reexecptybridge`, GH #270). The replacement image cannot adopt the
+  inherited master until start admission finishes, and admission (CLI-entry
+  stale-supervisor probe, config, registry publish, session re-entry) can wait
+  on `.agent-doc/state.db` in 30 s `busy_timeout` steps; a batch recycle of 21
+  supervisors queued on that lock froze every pane for 31-90 s, including a
+  pane streaming a mid-turn response. So the replacement starts a bounded
+  bridge (`agent-doc-supervisor-process::reexec_bridge`) as the first step of
+  `try_main`, before any of those steps: a self-contained pump over raw fds
+  that forwards filtered child output to the pane and pane keystrokes to the
+  child, and shares no lock with admission. Only the replacement image itself
+  may bridge: the outgoing image exports its PID
+  (`AGENT_DOC_REEXEC_SUPERVISOR_PID`, preserved by `execve`), so a subprocess
+  that inherited the handoff environment and the non-`CLOEXEC` master fd never
+  bridges; an older outgoing image without it is admitted only for the
+  replayed `start` command, and `start` itself starts the bridge if the CLI
+  entry did not. The outgoing image also exports its harness
+  (`AGENT_DOC_REEXEC_HARNESS`) so the bridge applies the reader thread's
+  terminal-filter policy; both variables are stripped from the child launch
+  environment. The bridge is finished at the spawn site of the first
+  generation, before that generation's reader/writer threads exist, on every
+  path (adopt or fresh spawn), so two pumps never compete for the pane's
+  bytes; the session log records `supervisor_reexec_pty_bridge_handoff` with
+  the serviced time and byte counts. Its handoff is lossless: it never closes
+  the master; bytes it read but could not write before stop (a stalled pane, a
+  child not reading input) are returned and written by the adopter first; an
+  escape sequence split across reads is completed within a 250 ms drain bound
+  or its prefix is handed over, so the adopter's fresh filter never drops half
+  a control sequence; and the bridged output tail (64 KiB) is replayed into the
+  adopter's terminal-screen model so readiness and prompt detection see the
+  screen the pane shows. Stop interrupts any write after at most one 1 KiB
+  chunk, so a stalled pane cannot wedge adoption. Input is not read once the
+  child's output has closed, leaving stdin to the restart path. `Ctrl+D` is
+  dropped while bridging, the same `#stale-ctrl-d-arm` contract as a byte
+  buffered across `execve`. The live regressions are `reexec_bridge::tests`
+  (real socketpair/pipe fds) plus source-order guards in `main.rs` and
+  `run.rs`.
 - An unchanged routine stale-binary recycle deferral is quiescent state, not a
   poll effect. The supervisor keeps the cheap 500 ms installed-binary identity
   check, emits one `supervisor_binary_stale_recycle_deferred` receipt on entry,

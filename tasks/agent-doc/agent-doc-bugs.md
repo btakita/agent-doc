@@ -234,6 +234,19 @@ Partly. The queue has two states of its own:
 - **`🚧` (in flight):** the binary adds this prefix when a worker claims the line (`agent-doc queue claim`) and removes it on release. That is what you see on the dispatched items now.
 
 There is no queue marker for `[/]` meaning *gated, waiting on something external*. A gated item lives in `agent:review` or as a `[/]` backlog item and leaves the queue. A queue line tagged `[operator-verify]` stays in the queue but is never drained by the agent. If you want a first-class gated queue state (for example `[/]` on a queue line that the drain skips and that re-arms when the gate clears), say so and I'll queue it.
+
+### Re: v0.35.509 published; batch 0.35.510 started — opus-5-5 · 2026-10-15T16:50-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.509 is published.** Release run `38788644925` succeeded (all 6 platform builds plus `plugins`). GitHub Release `v0.35.509` is marked Latest (19:20Z), and PyPI `agent-doc` is 0.35.509. It is also installed locally. This closes the GH #268–#273 / queue-duplication / `state.db` batch.
+
+**Next batch (`batch-0.35.510`, pushed):** `fix/execfailpipe` (`cb30c3f66a`), `fix/rearmreadfailclosed2` (`f937a38c6c`), and `fix/staleplugwarnflake` (`1c3d056f0b`) are merged.
+- **execfailpipe:** a real bug, now fixed. The pre-exec hook closed Rust's exec-failure pipe, so a missing controller binary reported a *successful* spawn, the child aborted with a core dump, and the launch-ENOENT retry never ran. It now marks fds close-on-exec (`close_range(CLOSE_RANGE_CLOEXEC)`) instead of closing them.
+- **rearmreadfailclosed2:** both remaining write-path reads now refuse instead of treating a failed read as "no evidence". The error-swallowing reader is deleted.
+- **staleplugwarnflake:** the test now uses the in-process relay route instead of cold-launching a controller (6/128 failures under load → 0/128).
+
+**Found along the way, dispatched:** that flake belongs to a class. Many lib tests cold-launch a separate `controller serve` and wait a fixed ~2 s for its socket, which gave ~500 panics in `agent-doc-preflight-io` under load. The same cause, plus a 5 s wall-clock assertion, explains the `queue-io` failures seen in two subagents' `make check` runs. `fix/cold-launch-test-flakes` makes these tests in-process or condition-based and adds a guard against new cold-launching lib tests, so the next release's single `make check` is reliable.
 <!-- agent:boundary:2e8e3946 -->
 <!-- /agent:exchange -->
 
@@ -253,10 +266,6 @@ There is no queue marker for `[/]` meaning *gated, waiting on something external
 - #gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.
 - Add `agent:queue` `interval` which sets the poll interval. Add a `time` attribute to set time of day. Allow multiple times of day. Make the loop efficiently run in the Controller. Ideally a single loop. Make sure the loop does not "go rogue" and thrash the CPU. Jobs use background workers. Add a `loop` attribute which loops through the items per interval/schedule and keeps the items in the queue. `loop` without a value will loop indefinately. `loop=3` will loop 3 times. Make sure realtime updates are supported. Use lazily for state management.  
 - Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked
-- #todo
-- sdk.md cleanup: delete the leftover half-typed `> **Queue prompt:** ... which is not f` echo (~line 1167; the full question is ~line 1147), and the open `[ ]` copies of #apimigrationcollide / #publicbundleadopt whose `[x]` duplicates exist: done?
-- Next Remote Dev session: confirm tab switches move tmux (GH #262 fix, plugin 263 0.2.617 after v0.35.504 is installed on the backend): confirmed
-- [#ahfe]: did not work I believe. Look out for bug reports
 - idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?
 ---
 sdk.md issue: I asked the agent to add ids on the todo items:
@@ -291,7 +300,6 @@ sdk.md issue: I asked the agent to add ids on the todo items:
   5. Chat about this
 ```
 ---
-- Does the queue have a way to represent the equilavent of `[/]`? `~...~` is equivalent to `[x]`.
 - tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.
 - 🚧 release + publish
 <!-- /agent:queue -->
@@ -299,9 +307,9 @@ sdk.md issue: I asked the agent to add ids on the todo items:
 ## Todo
 
 <!-- agent:todo -->
-- [ ] Next Remote Dev session: confirm tab switches move tmux (GH #262 fix, plugin 263 0.2.617 after v0.35.504 is installed on the backend)
-- [ ] sdk.md cleanup: delete the leftover half-typed `> **Queue prompt:** ... which is not f` echo (~line 1167; the full question is ~line 1147), and the open `[ ]` copies of #apimigrationcollide / #publicbundleadopt whose `[x]` duplicates exist
-- [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). This is the first route ever sent to an old plugin against a new binary; report it if it stalls.
+- [x] Next Remote Dev session: confirm tab switches move tmux (GH #262 fix, plugin 263 0.2.617 after v0.35.504 is installed on the backend)
+- [x] sdk.md cleanup: delete the leftover half-typed `> **Queue prompt:** ... which is not f` echo (~line 1167; the full question is ~line 1147), and the open `[ ]` copies of #apimigrationcollide / #publicbundleadopt whose `[x]` duplicates exist
+- [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 <!-- /agent:todo -->
 
 ## Backlog

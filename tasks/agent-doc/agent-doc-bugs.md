@@ -126,7 +126,7 @@ The three `semantic_completion_match` warnings from preflight are false matches 
 - 🚧 tmux pane auto-sync not working
 - 🚧 Add a `priority` attribute to `agent:review`.
 - 🚧 Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.
-- do your formal logic suggestions
+- 🚧 do your formal logic suggestions
 - 🚧 release + publish
 <!-- /agent:queue -->
 

@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -82,6 +81,12 @@ We are on the new `agent-doc 0.35.502` locally. One precise release boundary: th
 > **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/259
 
 Fixed on main in `7abf135dd7`, included in v0.35.502, and verified CLOSED on GitHub at 2026-10-15T00:24:33Z. JetBrains 263 modular packages now use the modular-package classification and truthful restart-required messaging.
+
+### Re: GitHub issue 260 closeout — gpt-5 · 2026-10-14T21:27-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/260
+
+Fixed on main in `8ba8701aa8`, included in v0.35.502, and verified CLOSED on GitHub at 2026-10-15T00:24:22Z. Remote Development tab selection now preserves frontend authority while handling nullable window liveness correctly.
 <!-- agent:boundary:3599dd10 -->
 <!-- /agent:exchange -->
 
@@ -90,11 +95,6 @@ Fixed on main in `7abf135dd7`, included in v0.35.502, and verified CLOSED on Git
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/259~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/260
-- ~~Make .agent-doc/project.md work with nested projects...such as boost-client or haiven-dev. The parent project.md should be picked up with the child project.md presets overlaid on top.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~tmux pane auto-sync not working~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

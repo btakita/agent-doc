@@ -1272,14 +1272,30 @@ those two observed states. There is no retained per-update ACK sidecar or ACK
 replay request. A missing or mismatched projection leaves that exact canonical
 revision pending and re-projects it to the editor. A single miss never requests
 an editor full state, force-refreshes, or re-registers from the editor buffer.
-If the same retained native-save epoch is refused three times without a newer
-delivery edge, however, the persistence Effect emits an
-`EditorReplicaReregister` recovery signal before continuing its capped retries,
-and repeats that signal every third refusal until exact persistence is proved.
+If the same retained native-save content is refused three times, however, the
+persistence Effect emits an `EditorReplicaReregister` recovery signal before
+continuing its capped retries, and repeats that signal every third refusal.
 Those recovery edges are independent of replica pull traffic, so a
 `projection_changed` endpoint that answers every save request cannot remain in
-a 30-second save-only retry loop indefinitely. A new epoch restarts the refusal
-cadence. In
+a 30-second save-only retry loop without one.
+
+The refusal streak belongs to the refused **content** (`content_hash`,
+`content_len`), not to its delivery epoch (`#rebuildconverge`, GH #273). A
+rebuild re-registers the replica, and that registration mints a new delivery
+epoch re-delivering the same bytes; when the streak was keyed by epoch, every
+rebuild restarted the backoff at one second and re-armed the next rebuild, so the
+escalation fed itself at ~20 refused saves and four full-bootstrap
+re-registrations a minute. Invariant: for one refused content, the backoff only
+grows to its cap, at most two *delivered* rebuilds are requested (a signal that
+reached no replica is refunded), and after them the capped level-triggered save
+retry continues alone. A rebuild replaces the replica, never the visible buffer,
+so a refusal that survives both rebuilds is the visible buffer diverging from
+the retained write; the controller logs
+`retained_persistence_replica_rebuild_exhausted ...
+state=editor_holds_unmerged_visible_text
+operator_action=reconcile_editor_buffer_with_retained_write` once and never
+overwrites that buffer. Only an applied save clears the streak, and only
+different content starts a new one. In
 particular, a stale native baseline quarantines the local delta and schedules a
 pull of the current controller canonical projection.
 
@@ -1297,7 +1313,37 @@ ingested whose receipt the editor never saw (`durable=false`). The merge emits
 only the insertions canonical lacks, so no canonical code point is deleted and
 the ingested burst is never inserted a second time. Every other overlap —
 controller text the operator never typed, a canonical deletion beside the edit, a
-whitespace-only insertion — still refuses and keeps the delta retained.
+whitespace-only insertion — refuses the exact translation.
+
+That refusal is not yet a hold (`#heldbatchmerge`, GH #273). Windows are widened
+over slide ranges and joined at touching boundaries, so independent edits that
+merely share a line boundary refuse too: typing under a heading whose
+` (HEAD)` suffix canonical moved, or a queue line added beside the line a
+closeout struck. Such a batch was held as `await-missing-base` forever; every
+re-registration then deferred canonical behind it ("a captured local delta owns
+the visible buffer") and the visible buffer stayed forked from the replica while
+every native save was refused. A refused batch therefore falls back to the
+formally checked three-way reconcile (`conflict_reconcile`, base = captured
+base, yours = captured cut, agent = canonical) — the editor text is the base and
+canonical's unapplied changes roll forward onto it — accepted only when all of
+these hold:
+
+1. no edit of either side overlaps the other (zero conflict regions), so no
+   winner is chosen;
+2. canonical gained no occurrence of a window's operator text, and no canonical
+   change in that window begins or ends with the operator text's start, so a
+   wholly or partly ingested burst (a lost receipt) is not inserted twice;
+3. no canonical insertion sits at the operator's own insertion point, where
+   controller text may be the transformation of a burst it already consumed.
+
+The answer is the canonical-relative splices that produce the merge, so the
+plugin forwards them exactly like a translated batch: on the attached endpoint
+when it already holds that canonical, otherwise on a replacement registered at
+that canonical cut. Invariant: a captured batch is held only by a true overlap
+or by evidence that canonical may already hold its text; changes beside it never
+hold it. Any batch that still refuses keeps the retained delta, and the
+controller's bounded rebuild budget above turns it into an operator-visible
+state instead of a loop.
 
 Before reaching that semantic overlap gate, an exact JetBrains event batch whose
 base disappeared from the replica may reconstruct its base by reversing the
@@ -2004,8 +2050,10 @@ balanced component markers, and at most one live exchange boundary marker.
   compact-settled receipt. Compact admission itself never issues this save.
 - Repeated refusal of one immutable retained native-save projection is an
   Effect receipt, not a second polling authority. On every third refusal the
-  existing persistence Effect requests an idempotent editor-replica rebuild for
-  that epoch; an unreachable first signal therefore does not latch recovery.
+  existing persistence Effect requests an idempotent editor-replica rebuild,
+  up to two delivered rebuilds per refused content (`#rebuildconverge`); an
+  unreachable signal is refunded and therefore does not latch recovery, and the
+  epochs a rebuild itself mints never restart the streak.
   The ordinary idempotent persistence retry remains responsible for the final
   exact-disk proof. This extracts recovery from the pull-only imperative path.
   The capped retry timer remains the one-shot wall-clock adapter.

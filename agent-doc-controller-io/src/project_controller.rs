@@ -4147,9 +4147,11 @@ struct ControllerDocumentGraphs {
     /// prevents an editor update RPC from synchronously waiting on a save that
     /// is correctly queued behind that same update in the editor lane.
     retained_persistence_sender: Arc<OnceLock<std::sync::mpsc::Sender<RetainedPersistenceCommand>>>,
-    /// `#retainedsaveretry`: refused-attempt count per document for its current
-    /// epoch. Bookkeeping for the bounded backoff only, never authority.
-    retained_persistence_retries: Mutex<std::collections::HashMap<String, (u64, u32)>>,
+    /// `#retainedsaveretry` / `#rebuildconverge`: the refusal streak per
+    /// document for the content it is trying to save. Bookkeeping for the
+    /// bounded backoff and replica-rebuild budget only, never authority.
+    retained_persistence_retries:
+        Mutex<std::collections::HashMap<String, RetainedPersistenceRefusalStreak>>,
     /// Non-authoritative adapter for retained-transition effects that can
     /// enter an editor, actor, state-ledger, or controller boundary. The
     /// reactive graph admits exact typed commands; this worker executes them
@@ -4721,11 +4723,38 @@ enum RetainedTransitionCompletion {
 /// (`formal/tla/VisibleDeliveryReceiptNet.tla`, `SaveOneShot` wedge).
 const RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES: u32 = 8;
 const RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS: u32 = 3;
+/// `#rebuildconverge` (GH #273): delivered replica rebuilds per refused
+/// content. A rebuild replaces the editor's replica, not its visible buffer, so
+/// once this many rebuilds have each been followed by the same refusal another
+/// one cannot change the outcome; it only re-registered a full bootstrap every
+/// ~15 s (2.4 MB per rebuild on a large document) and minted the new delivery
+/// epoch that restarted its own budget.
+const RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RetainedPersistenceRetryDecision {
     delay: Duration,
     request_replica_rebuild: bool,
+    /// `#rebuildconverge`: the rebuild budget for this content was spent and
+    /// the editor still refuses it. Surface the operator-visible state once.
+    report_rebuild_exhausted: bool,
+    refusals: u32,
+    rebuilds: u32,
+}
+
+/// `#rebuildconverge`: refusals of one immutable content, counted across the
+/// delivery epochs that re-deliver it. A replica rebuild (or any re-register)
+/// mints a new epoch carrying the SAME content; keying the streak by epoch let
+/// every rebuild restart the backoff at 1 s and re-arm another rebuild, so the
+/// loop the rebuild was meant to break ran at ~20 refusals a minute forever.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct RetainedPersistenceRefusalStreak {
+    content_hash: String,
+    content_len: usize,
+    epoch: u64,
+    refusals: u32,
+    rebuilds: u32,
+    exhausted_reported: bool,
 }
 
 /// Backoff before re-claim attempt `attempt` (1-based): 1s doubling, capped at 30s.
@@ -4735,39 +4764,84 @@ fn retained_persistence_retry_delay(attempt: u32) -> Duration {
 }
 
 /// Advance the refused-attempt bookkeeping for one completion and decide whether
-/// to retry. Only a refused CURRENT epoch retries: an applied save or a newer
-/// pending epoch clears the count, since each has its own edge.
+/// to retry. Only a refused CURRENT epoch retries: an applied save clears the
+/// streak, and a newer pending epoch has its own claim edge.
+///
+/// `#rebuildconverge` (GH #273): the streak belongs to the refused CONTENT
+/// (`content_hash`, `content_len`), not the epoch. A newer epoch that re-delivers
+/// the same bytes continues it, so neither the backoff nor the rebuild budget
+/// restarts; only different content (a real new write) starts a new streak.
+/// At most [`RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS`] delivered rebuilds are
+/// requested per content; after that the capped level-triggered retry
+/// (`#netadv3` F13) continues alone and the exhausted state is reported once.
 fn retained_persistence_retry_step(
-    retries: &mut std::collections::HashMap<String, (u64, u32)>,
+    retries: &mut std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
     key: &str,
     epoch: u64,
+    content: (&str, usize),
     applied: bool,
     newer_pending: bool,
 ) -> Option<RetainedPersistenceRetryDecision> {
-    if applied || newer_pending {
+    if applied {
         retries.remove(key);
         return None;
     }
-    let entry = retries.entry(key.to_string()).or_insert((epoch, 0));
-    if entry.0 != epoch {
-        *entry = (epoch, 0);
+    if newer_pending {
+        return None;
     }
-    entry.1 = entry.1.saturating_add(1);
+    let (content_hash, content_len) = content;
+    let entry = retries.entry(key.to_string()).or_default();
+    if entry.content_hash != content_hash || entry.content_len != content_len {
+        *entry = RetainedPersistenceRefusalStreak {
+            content_hash: content_hash.to_string(),
+            content_len,
+            ..RetainedPersistenceRefusalStreak::default()
+        };
+    }
+    entry.epoch = epoch;
+    entry.refusals = entry.refusals.saturating_add(1);
+    // A projection-changed refusal does not produce a replica pull, so the
+    // pull-driven nonconvergence detector cannot fire. Escalate from the
+    // existing persistence Effect completion instead of creating a second
+    // polling loop, on the slower cadence, and only while the per-content
+    // rebuild budget lasts: an undelivered signal is refunded by the caller.
+    let escalation_due = entry.refusals >= RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS
+        && entry
+            .refusals
+            .is_multiple_of(RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS);
+    let request_replica_rebuild =
+        escalation_due && entry.rebuilds < RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS;
+    if request_replica_rebuild {
+        entry.rebuilds += 1;
+    }
+    let report_rebuild_exhausted =
+        escalation_due && !request_replica_rebuild && !entry.exhausted_reported;
+    if report_rebuild_exhausted {
+        entry.exhausted_reported = true;
+    }
     Some(RetainedPersistenceRetryDecision {
         delay: retained_persistence_retry_delay(
-            entry.1.min(RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES),
+            entry.refusals.min(RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES),
         ),
-        // A projection-changed refusal does not produce a replica pull, so the
-        // pull-driven nonconvergence detector cannot fire. Escalate from the
-        // existing persistence Effect completion instead of creating a second
-        // polling loop. Repeat on this slower cadence because an unreachable
-        // first signal is not an acknowledgement; later save receipts are the
-        // fresh edges that re-arm recovery until exact persistence is proved.
-        request_replica_rebuild: entry.1 >= RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS
-            && entry
-                .1
-                .is_multiple_of(RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS),
+        request_replica_rebuild,
+        report_rebuild_exhausted,
+        refusals: entry.refusals,
+        rebuilds: entry.rebuilds,
     })
+}
+
+/// `#rebuildconverge`: a rebuild signal that reached no editor replica is not a
+/// rebuild attempt, so it does not spend the per-content budget.
+fn refund_undelivered_retained_persistence_rebuild(
+    retries: &mut std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
+    key: &str,
+    content_hash: &str,
+) {
+    if let Some(entry) = retries.get_mut(key)
+        && entry.content_hash == content_hash
+    {
+        entry.rebuilds = entry.rebuilds.saturating_sub(1);
+    }
 }
 
 /// Wait out the backoff off every lock, then re-claim the refused epoch.
@@ -5868,39 +5942,84 @@ impl ControllerDocumentGraphs {
                         let epoch = command.envelope.epoch;
                         let generation = command.envelope.generation;
                         let file = command.envelope.value.file.clone();
+                        let content_hash = command.envelope.value.content_hash.clone();
+                        let content_len = command.envelope.value.content_len;
                         let retry = runtime
                             .document_graphs
                             .complete_retained_persistence(command, applied);
                         drop(runtime);
                         if let Some(retry) = retry {
                             if retry.request_replica_rebuild {
-                                match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
+                                let delivered = match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
                                     &file,
                                     agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
                                     1,
                                 ) {
-                                    Ok(outcome) => agent_doc_ops_log_io::log_op(
-                                        &file,
-                                        &format!(
-                                            "retained_persistence_replica_rebuild_requested document_hash={} generation={} epoch={} found={} notified={} diagnosis={} source=repeated_native_save_refusal",
-                                            document_hash,
-                                            generation,
-                                            epoch,
-                                            outcome.found,
-                                            outcome.notified,
-                                            outcome.diagnosis(),
-                                        ),
-                                    ),
-                                    Err(error) => agent_doc_ops_log_io::log_op(
-                                        &file,
-                                        &format!(
-                                            "retained_persistence_replica_rebuild_deferred document_hash={} generation={} epoch={} source=repeated_native_save_refusal error={error:#}",
-                                            document_hash,
-                                            generation,
-                                            epoch,
-                                        ),
-                                    ),
+                                    Ok(outcome) => {
+                                        agent_doc_ops_log_io::log_op(
+                                            &file,
+                                            &format!(
+                                                "retained_persistence_replica_rebuild_requested document_hash={} generation={} epoch={} content_hash={} found={} notified={} diagnosis={} refusals={} rebuilds={} max_rebuilds={} source=repeated_native_save_refusal",
+                                                document_hash,
+                                                generation,
+                                                epoch,
+                                                content_hash,
+                                                outcome.found,
+                                                outcome.notified,
+                                                outcome.diagnosis(),
+                                                retry.refusals,
+                                                retry.rebuilds,
+                                                RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
+                                            ),
+                                        );
+                                        outcome.notified > 0
+                                    }
+                                    Err(error) => {
+                                        agent_doc_ops_log_io::log_op(
+                                            &file,
+                                            &format!(
+                                                "retained_persistence_replica_rebuild_deferred document_hash={} generation={} epoch={} content_hash={} source=repeated_native_save_refusal error={error:#}",
+                                                document_hash,
+                                                generation,
+                                                epoch,
+                                                content_hash,
+                                            ),
+                                        );
+                                        false
+                                    }
+                                };
+                                if !delivered
+                                    && let Some(runtime) = worker_sink.runtime.upgrade()
+                                {
+                                    runtime
+                                        .document_graphs
+                                        .refund_retained_persistence_rebuild(
+                                            &document_hash,
+                                            &content_hash,
+                                        );
                                 }
+                            }
+                            if retry.report_rebuild_exhausted {
+                                // `#rebuildconverge` (GH #273): every delivered
+                                // rebuild was answered by the same refusal, so
+                                // the editor's VISIBLE buffer, not its replica,
+                                // diverges from this content: typically operator
+                                // text held as an unmerged local batch. The
+                                // capped retry continues; nothing here
+                                // overwrites that buffer.
+                                agent_doc_ops_log_io::log_op(
+                                    &file,
+                                    &format!(
+                                        "retained_persistence_replica_rebuild_exhausted document_hash={} generation={} epoch={} content_hash={} content_len={} refusals={} rebuilds={} state=editor_holds_unmerged_visible_text recovery=capped_native_save_retry operator_action=reconcile_editor_buffer_with_retained_write",
+                                        document_hash,
+                                        generation,
+                                        epoch,
+                                        content_hash,
+                                        content_len,
+                                        retry.refusals,
+                                        retry.rebuilds,
+                                    ),
+                                );
                             }
                             schedule_refused_retained_persistence_retry(
                                 worker_sink.runtime.clone(),
@@ -7118,6 +7237,7 @@ impl ControllerDocumentGraphs {
                 &mut self.retained_persistence_retries.lock(),
                 &key,
                 envelope.epoch,
+                (&envelope.value.content_hash, envelope.value.content_len),
                 applied,
                 newer_pending,
             );
@@ -7147,6 +7267,15 @@ impl ControllerDocumentGraphs {
             self.dispatch_retained_persistence(command);
         }
         refused_retry
+    }
+
+    /// `#rebuildconverge`: return an undelivered rebuild to the content's budget.
+    fn refund_retained_persistence_rebuild(&self, document_hash: &str, content_hash: &str) {
+        refund_undelivered_retained_persistence_rebuild(
+            &mut self.retained_persistence_retries.lock(),
+            document_hash,
+            content_hash,
+        );
     }
 
     /// `#retainedsaveretry`: re-claim a refused epoch if it is still the latest
@@ -23361,13 +23490,15 @@ mod retained_persistence_retry_tests {
         assert!(!retained_persistence_has_exact_disk_proof(&projection).unwrap());
     }
 
+    const CONTENT: (&str, usize) = ("08f64ff1", 5687);
+
     #[test]
     fn a_refused_current_epoch_retries_on_a_capped_backoff_until_superseded() {
         // `#retainedsaveretry`: 2026-10-01 the editor refused the save during a
         // plugin reload and nothing re-armed it, so preflight refused every cycle.
         let mut retries = std::collections::HashMap::new();
         let delays: Vec<_> = (0..RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES)
-            .map(|_| retained_persistence_retry_step(&mut retries, "doc", 7, false, false))
+            .map(|_| retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false))
             .collect();
         assert!(delays.iter().all(Option::is_some));
         assert_eq!(
@@ -23398,33 +23529,138 @@ mod retained_persistence_retry_tests {
                 })
                 .collect::<Vec<_>>(),
             vec![3, 6],
-            "the save-receipt stream re-arms replica recovery after an unreachable signal"
+            "replica recovery escalates on the slower refusal cadence"
         );
         // `#netadv3` F13: past the growing phase the retry stays at the cap
         // for as long as the epoch is still refused; it never gives up and
-        // waits for an edge an idle document will not produce.
-        for attempt in 9u32..=40 {
-            let decision = retained_persistence_retry_step(&mut retries, "doc", 7, false, false)
-                .expect("a refused current epoch keeps retrying");
+        // waits for an edge an idle document will not produce. `#rebuildconverge`:
+        // the rebuild budget, however, is spent, so only the save retries.
+        let mut exhausted_reports = 0;
+        for _ in 9u32..=40 {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
+                    .expect("a refused current epoch keeps retrying");
             assert_eq!(decision.delay, Duration::from_secs(30));
-            assert_eq!(
-                decision.request_replica_rebuild,
-                attempt.is_multiple_of(RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS),
-                "rebuild attempts follow the slower refusal cadence"
+            assert!(
+                !decision.request_replica_rebuild,
+                "the rebuild budget is spent"
             );
+            exhausted_reports += usize::from(decision.report_rebuild_exhausted);
         }
-        let restarted = retained_persistence_retry_step(&mut retries, "doc", 8, false, false)
-            .expect("a new epoch restarts the budget");
+        assert_eq!(exhausted_reports, 1, "the exhausted state is reported once");
+        let restarted = retained_persistence_retry_step(
+            &mut retries,
+            "doc",
+            8,
+            ("a-new-write", 12),
+            false,
+            false,
+        )
+        .expect("new content restarts the budget");
         assert_eq!(restarted.delay, Duration::from_secs(1));
         assert!(!restarted.request_replica_rebuild);
+        assert_eq!((restarted.refusals, restarted.rebuilds), (1, 0));
+    }
+
+    /// GH #273 (`#rebuildconverge`): the measured loop. Every rebuild the
+    /// refusal requested re-registered the replica, the re-registration minted
+    /// a new delivery epoch carrying the SAME content, and the epoch-keyed
+    /// streak restarted at 1 s and re-armed another rebuild: ~20 refused saves
+    /// and 4 full-bootstrap re-registers a minute, forever. Model that feedback
+    /// exactly and require the loop to converge: a bounded number of rebuilds,
+    /// a backoff that only grows to its cap, and one operator-visible report.
+    #[test]
+    fn rebuild_minted_epochs_of_the_same_content_cannot_restart_the_rebuild_loop() {
+        let mut retries = std::collections::HashMap::new();
+        let mut epoch = 126u64;
+        let mut rebuilds = 0u32;
+        let mut reports = 0u32;
+        let mut last_delay = Duration::ZERO;
+        let mut elapsed = Duration::ZERO;
+        for _ in 0..200 {
+            let decision = retained_persistence_retry_step(
+                &mut retries,
+                "doc-a",
+                epoch,
+                CONTENT,
+                false,
+                false,
+            )
+            .expect("a refused save keeps retrying");
+            assert!(
+                decision.delay >= last_delay,
+                "the backoff never restarts for the same content"
+            );
+            last_delay = decision.delay;
+            elapsed += decision.delay;
+            reports += u32::from(decision.report_rebuild_exhausted);
+            if decision.request_replica_rebuild {
+                rebuilds += 1;
+                // The rebuild's re-registration re-delivers the same bytes.
+                epoch += 3;
+            }
+        }
+        assert_eq!(rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS);
+        assert_eq!(reports, 1);
+        assert_eq!(last_delay, Duration::from_secs(30));
+        assert!(
+            elapsed > Duration::from_secs(60 * 60),
+            "200 refusals span hours, not the measured ~10 minutes: {elapsed:?}"
+        );
+
+        // A newer epoch that is still pending neither clears nor restarts it.
+        assert_eq!(
+            retained_persistence_retry_step(&mut retries, "doc-a", epoch, CONTENT, false, true),
+            None
+        );
+        let after = retained_persistence_retry_step(
+            &mut retries,
+            "doc-a",
+            epoch + 1,
+            CONTENT,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(after.rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS);
+        assert!(after.refusals > 200);
+    }
+
+    #[test]
+    fn an_undelivered_rebuild_signal_does_not_spend_the_budget() {
+        let mut retries = std::collections::HashMap::new();
+        let mut delivered = 0;
+        for _ in 0..60 {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
+                    .unwrap();
+            if decision.request_replica_rebuild {
+                // The first three signals reach no editor replica.
+                if delivered < 3 {
+                    refund_undelivered_retained_persistence_rebuild(&mut retries, "doc", CONTENT.0);
+                }
+                delivered += 1;
+            }
+        }
+        assert_eq!(
+            delivered,
+            3 + RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
+            "undelivered signals are re-armed; delivered ones are bounded"
+        );
+        // A refund for different content never touches this streak.
+        refund_undelivered_retained_persistence_rebuild(&mut retries, "doc", "other");
+        assert_eq!(
+            retries["doc"].rebuilds,
+            RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS
+        );
     }
 
     #[test]
     fn an_applied_save_or_a_newer_epoch_never_schedules_a_retry() {
         let mut retries = std::collections::HashMap::new();
-        retained_persistence_retry_step(&mut retries, "doc", 3, false, false);
+        retained_persistence_retry_step(&mut retries, "doc", 3, CONTENT, false, false);
         assert_eq!(
-            retained_persistence_retry_step(&mut retries, "doc", 3, true, false),
+            retained_persistence_retry_step(&mut retries, "doc", 3, CONTENT, true, false),
             None
         );
         assert!(
@@ -23432,7 +23668,7 @@ mod retained_persistence_retry_tests {
             "an applied save clears the count"
         );
         assert_eq!(
-            retained_persistence_retry_step(&mut retries, "doc", 3, false, true),
+            retained_persistence_retry_step(&mut retries, "doc", 3, CONTENT, false, true),
             None,
             "a newer pending epoch has its own claim edge"
         );

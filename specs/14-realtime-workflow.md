@@ -704,6 +704,18 @@ rebased target and submits that scope to the relay. Stable exchange and backlog
 components therefore remain independent CRDT mutations during retry; only a
 structural component change may use the unscoped materialization fallback.
 
+Component scope is computed over top-level components. Components nest — an
+`agent:salient-response` node always lives inside `agent:exchange` — and a
+nested body lies inside its parent's body, so a change inside the nested node is
+a change to the parent's body and is declared as the parent's occurrence; the
+nested occurrence is never declared separately. Occurrence indexes still count
+every component of the same name in document order, nested or not. Text outside
+the scope is compared over the union of the scoped bodies: a scope that names
+both a parent and its nested child resolves to the parent's body alone, so the
+relay diffs each byte once and never slices between overlapping ranges. A
+component moving into or out of another component is a structural change and
+takes the unscoped fallback (GH #264).
+
 Every Run Agent Doc preflight invokes retained-write recovery before it admits a
 new cycle. The state-backbone policy classifies the retained verdict: satisfied
 or unobserved intent continues, authority/disk divergence waits for the existing

@@ -18828,7 +18828,9 @@ pub(crate) fn handle_request_for_client(
     runtime: &Arc<ControllerRuntime>,
 ) -> Result<(String, bool)> {
     let mut request_should_stop = false;
-    let handled = handle_request_locked(line, runtime, &mut request_should_stop);
+    let handled = handle_request_capturing_panic(line, || {
+        handle_request_locked(line, runtime, &mut request_should_stop)
+    });
     if agent_doc_state_wire::take_local_state_db_dirty()
         && let Err(err) = runtime.refresh_memory()
     {
@@ -18843,6 +18845,51 @@ pub(crate) fn handle_request_for_client(
         }
     };
     Ok((response, request_should_stop))
+}
+
+/// Run one controller request, answering a panic with a typed error (GH #264).
+///
+/// A request thread that unwinds without writing a response used to surface on
+/// the client as `project controller closed connection without a response`,
+/// which [`controller_transport_drop_is_retryable`] classifies as a transport
+/// drop: the caller retried, re-entered the same panic, and the log named
+/// neither the request nor the document. Catching the unwind here keeps the
+/// connection answered with an ordinary error envelope that names the command
+/// and document, so the failure is not mistaken for a recycled controller. The
+/// process panic hook still records the panic itself.
+fn handle_request_capturing_panic(
+    line: &str,
+    handle: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(handle)) {
+        Ok(handled) => handled,
+        Err(payload) => Err(controller_request_panic_error(line, payload.as_ref())),
+    }
+}
+
+fn controller_request_panic_error(
+    line: &str,
+    payload: &(dyn std::any::Any + Send),
+) -> anyhow::Error {
+    let message = payload
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic payload".to_string());
+    let request = serde_json::from_str::<serde_json::Value>(line.trim()).ok();
+    let field = |name: &str| {
+        request
+            .as_ref()
+            .and_then(|request| request.get(name))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    let command = field("command").unwrap_or_else(|| "<unparsed>".to_string());
+    let document = field("file").unwrap_or_else(|| "<none>".to_string());
+    eprintln!("[controller] request panicked command={command} file={document}: {message}");
+    anyhow::anyhow!(
+        "project controller request `{command}` for document {document} panicked: {message}"
+    )
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -49178,6 +49225,59 @@ mod tests {
             error.contains("missing actor record for supervisor missing.md"),
             "unexpected error envelope: {error}"
         );
+    }
+
+    #[test]
+    fn a_panicking_request_handler_answers_with_an_error_naming_the_document() {
+        // GH #264: a panic on a request thread used to drop the connection, so
+        // the client saw a retryable `closed connection without a response`.
+        let request = serde_json::json!({
+            "command": "session_check_terminal_convergence",
+            "file": "/project/doc-a.md",
+        })
+        .to_string()
+            + "\n";
+
+        let handled = handle_request_capturing_panic(&request, || -> Result<String> {
+            panic!("byte range starts at 10536 but ends at 10019")
+        });
+        let err = handled.expect_err("a panicking handler must answer with an error");
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("/project/doc-a.md")
+                && rendered.contains("session_check_terminal_convergence")
+                && rendered.contains("byte range starts at 10536 but ends at 10019"),
+            "unexpected panic error: {rendered}"
+        );
+        assert!(
+            !controller_transport_drop_is_retryable(&err),
+            "a request panic is not a transport drop and must not be retried"
+        );
+
+        let envelope: ControllerEnvelope<serde_json::Value> =
+            serde_json::from_str(&controller_envelope::<serde_json::Value>(Err(err)).unwrap())
+                .unwrap();
+        assert!(!envelope.ok);
+        assert!(
+            envelope
+                .error
+                .is_some_and(|error| error.contains("/project/doc-a.md"))
+        );
+
+        let formatted = handle_request_capturing_panic("{\"command\":\"status\"}\n", || {
+            std::panic::panic_any(format!("owned {}", "payload"))
+        })
+        .expect_err("owned panic payloads are captured too");
+        let formatted = format!("{formatted:#}");
+        assert!(
+            formatted.contains("`status`")
+                && formatted.contains("document <none>")
+                && formatted.contains("owned payload"),
+            "unexpected panic error: {formatted}"
+        );
+
+        let passthrough = handle_request_capturing_panic(&request, || Ok("answer".to_string()));
+        assert_eq!(passthrough.unwrap(), "answer");
     }
 
     #[test]

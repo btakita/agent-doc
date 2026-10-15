@@ -1308,8 +1308,7 @@ impl RelayHub {
         let liveness: ThreadSafeSourceMap<u64, bool> = ThreadSafeSourceMap::new(&ctx);
         let canonical_projection_required: ThreadSafeSourceMap<u64, bool> =
             ThreadSafeSourceMap::new(&ctx);
-        let replica_updates_fenced: ThreadSafeSourceMap<u64, bool> =
-            ThreadSafeSourceMap::new(&ctx);
+        let replica_updates_fenced: ThreadSafeSourceMap<u64, bool> = ThreadSafeSourceMap::new(&ctx);
         let delivery_subscription = DeliveryConvergenceSubscription::new(&ctx);
         let live_editor_count = {
             let liveness = liveness.clone();
@@ -3949,6 +3948,79 @@ mod tests {
         assert_eq!(hub.canonical_text(), SCOPED_BASE);
     }
 
+    /// #264 fixture: `agent:salient-response` nested inside `agent:exchange`.
+    const NESTED_SCOPED_BASE: &str = concat!(
+        "<!-- agent:exchange -->\n",
+        "Prompt.\n",
+        "<!-- agent:salient-response -->\n",
+        "Salient.\n",
+        "<!-- /agent:salient-response -->\n",
+        "Response.\n",
+        "<!-- /agent:exchange -->\n",
+        "<!-- agent:queue -->\n",
+        "- do [#a]\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    #[test]
+    fn a_scope_naming_a_parent_and_its_nested_child_applies_each_edit_once() {
+        // Overlapping scoped bodies used to panic in `text_outside_bodies`, and
+        // diffing both bodies would have emitted the child's edit twice.
+        let target = NESTED_SCOPED_BASE.replace("Salient.\n", "Salient, revised.\n");
+        let mut hub = RelayHub::from_text(1, NESTED_SCOPED_BASE);
+        let scope = agent_doc_element::ComponentWriteScope::new([
+            agent_doc_element::ScopedComponent::new("exchange", 0),
+            agent_doc_element::ScopedComponent::new("salient-response", 0),
+        ]);
+
+        let packet = hub
+            .apply_canonical_replace_scoped(NESTED_SCOPED_BASE, &target, Some(&scope))
+            .unwrap();
+
+        assert_eq!(packet.component_scope, ComponentScopeOutcome::Enforced);
+        assert_eq!(hub.canonical_text(), target);
+    }
+
+    #[test]
+    fn a_derived_scope_over_a_nested_component_edit_is_enforced() {
+        let target = NESTED_SCOPED_BASE.replace("Salient.\n", "Salient, revised.\n");
+        let scope = agent_doc_element::component_scope::changed_component_scope(
+            NESTED_SCOPED_BASE,
+            &target,
+        )
+        .expect("a nested body edit is expressible as a scope");
+        let mut hub = RelayHub::from_text(1, NESTED_SCOPED_BASE);
+
+        let packet = hub
+            .apply_canonical_replace_scoped(NESTED_SCOPED_BASE, &target, Some(&scope))
+            .unwrap();
+
+        assert_eq!(packet.component_scope, ComponentScopeOutcome::Enforced);
+        assert_eq!(hub.canonical_text(), target);
+    }
+
+    #[test]
+    fn a_child_only_scope_refuses_a_parent_edit_outside_the_child() {
+        let target = NESTED_SCOPED_BASE.replace("Response.\n", "Response, revised.\n");
+        let mut hub = RelayHub::from_text(1, NESTED_SCOPED_BASE);
+        let scope =
+            agent_doc_element::ComponentWriteScope::new([agent_doc_element::ScopedComponent::new(
+                "salient-response",
+                0,
+            )]);
+
+        let err = hub
+            .apply_canonical_replace_scoped(NESTED_SCOPED_BASE, &target, Some(&scope))
+            .expect_err("the parent text outside the child is outside the scope");
+
+        assert!(
+            err.to_string()
+                .contains("outside its declared component scope"),
+            "unexpected refusal: {err}"
+        );
+        assert_eq!(hub.canonical_text(), NESTED_SCOPED_BASE);
+    }
+
     #[test]
     fn live_document_projection_is_default_off_and_tracks_opt_in_canonical_deltas() {
         let _guard = CELL_DOC_TREE_ENV_LOCK.lock();
@@ -5013,7 +5085,10 @@ mod tests {
         for _ in 0..INITIAL_RECOVERY_RETRY_SKIP {
             assert!(!hub.claim_nonconverging_recovery(3).unwrap());
         }
-        assert!(hub.claim_nonconverging_recovery(3).unwrap(), "re-sent after backoff");
+        assert!(
+            hub.claim_nonconverging_recovery(3).unwrap(),
+            "re-sent after backoff"
+        );
         // Lost again: the backoff doubles.
         assert!(hub.rearm_nonconverging_recovery(3));
         for _ in 0..INITIAL_RECOVERY_RETRY_SKIP * 2 {
@@ -5027,7 +5102,10 @@ mod tests {
         // Forward progress clears the latch and the backoff together.
         let canonical_hash = content_hash(&hub.canonical_text());
         assert!(hub.observe_delivery_projection(3, &canonical_hash).unwrap());
-        assert!(!hub.rearm_nonconverging_recovery(3), "nothing pending any more");
+        assert!(
+            !hub.rearm_nonconverging_recovery(3),
+            "nothing pending any more"
+        );
     }
 
     #[test]

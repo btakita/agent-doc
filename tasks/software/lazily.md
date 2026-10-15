@@ -340,6 +340,39 @@ Phase 3 had no spec-side changes.
 | zig | Phases 2–5 and CI activation, rebased onto current `main`, with toolchain work and all three toolchains verified |
 
 Each agent pushes its own branch only. Fast-forwarding `main`, version bumps, tags and publishing stay with me.
+
+### Re: #release progress (all nine bindings integrated) — opus-5-5 · 2026-10-15T15:07-04:00
+
+All nine bindings are integrated and pushed on `integrate/core-cohort-20261015`. Each branch fast-forwards from its `main` and passes `make check`, its own Core evidence check and its artifact-consumer check. Worktrees are under `~/worktrees/integrate-core-20261015/`.
+
+| Repo | HEAD | What landed besides Phases 2–5 and CI activation |
+|---|---|---|
+| rs | `45d7540` | `#lzrustcoreprofiledivergence`. 7332 tests passed. |
+| py | `3eeee8e` | 1215 passed. Branch CI (`poe precommit`) was triggered by the push. |
+| js | `31e51ff` | Fix: formatting. 704/704 passed on a rerun; the earlier failures were two 30 s timeouts in `test/ci-reach-activation.test.js` at load average about 108. That timeout breaks under load; follow-up below. |
+| go | `adfc6f9` | `#lzgocireachability`, so main's red CI-reach guard is green here. Fix: `TestCoreAPI` never ran the snapshot test. |
+| kt | `68331ec` | 533 tests passed. |
+| cpp | `87dfa29` | ctest 67/67 and wasm green. |
+| cs | `ad25ef0` | Fix: negative controls were credited on runner crashes, not library divergence. 340 tests passed. |
+| dart | `a91a6f0` | `#lzcoreevidencedarttimeout` plus its self-test in `check` and CI. Fixes: formatting, and a committed `pubspec.yaml` template that would break `dart analyze` in CI. |
+| zig | `3fba5a6` | Rebased onto v0.37.0. Green on Zig 0.15.2, 0.16.0 and master. |
+
+`#lzcoreciactivationfixes` came in as part of this. Its Phase 6 callers stay out, as you chose, and its gated item stays open only for the caller-design question.
+
+**Coverage tables:** I ran `make coverage-sync` once across all siblings, then committed and pushed one README commit per binding. Spec `coverage-check` is now green with the siblings present. Some marks moved from ✅ to `~`: Reactive graph for py, kt and js, and Transport & FFI. Those are the honest Phase 2 claims.
+
+**Running now:** two audit agents. The cs negative-control defect may exist in the other eight report generators, so each repo gets an attack first and a fix only if it over-credits a kill.
+
+**Then, in order:**
+1. The aggregate spec gates (`core-evidence-check --require-all` and `core-artifact-consumers-check-all`).
+2. Fast-forward lazily-spec `main` first. Every binding's CI clones spec `main`.
+3. Fast-forward each binding's `main` and confirm its `main` CI.
+4. For each binding, the minor version bump, tag and publish. Every place the version string lives is recorded, including the new consumer pins in kt and cs and the stale interop-peer strings in cpp, zig and go.
+
+**Still open from you:**
+- lazily-rs publish: configure Trusted Publishing, or OK one more manual `cargo publish` (`#lzrustpublish`).
+- Dart: the pub.dev publish needs your login.
+- This machine is at 172/186 GB swap. Something besides these agents is probably leaking processes.
 <!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  

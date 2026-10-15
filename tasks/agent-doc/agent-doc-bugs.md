@@ -283,7 +283,7 @@ This one is done; the details are in the response above. The previous closeout d
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - #gh-fix https://github.com/btakita/agent-doc/issues/265
-- 🚧 do your formal logic suggestions
+- ~~do your formal logic suggestions~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#ctrltimingflakes]~~
 - release + publish
 <!-- /agent:queue -->

@@ -12,6 +12,7 @@ import com.intellij.platform.project.ProjectId
 import fleet.util.UID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 
@@ -64,6 +65,19 @@ class AuthenticatedSurfaceIngressStateTest {
             state.publish("client-a", lease, snapshot("frontend-a", 2)).status,
         )
         assertEquals(1, publisher.published.size)
+    }
+
+    @Test
+    fun frontendAvailabilityTracksAcceptedSnapshotsRatherThanOpenConnections() = runBlocking {
+        val state = AuthenticatedSurfaceIngressState(RecordingPublisher())
+        val lease = state.open("client-a", "frontend-a")
+
+        assertFalse(state.frontendSnapshotAvailable.value)
+        state.publish("client-a", lease, snapshot("frontend-a", 1))
+        assertTrue(state.frontendSnapshotAvailable.value)
+
+        state.open("client-a", "frontend-a-2")
+        assertFalse(state.frontendSnapshotAvailable.value)
     }
 
     @Test

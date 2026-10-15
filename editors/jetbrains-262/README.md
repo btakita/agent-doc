@@ -81,7 +81,11 @@ same update installed on both sides; installing a modular ZIP locally on only th
 backend or only JetBrains Client does not copy it to the other process. For
 local ZIP testing, install the same ZIP explicitly in both backend and
 Client/Gateway, or use `runIdeSplitMode`. A one-sided install is unsupported and
-the surface bridge must be treated as unavailable.
+the pane-tagged surface bridge must be treated as unavailable. The backend still
+observes guest selection changes while no frontend snapshot has been accepted, so
+main-layout tab switching continues for diagnostic/local installs. Detached-window
+identity and frontend presentation remain unavailable until the matching frontend
+module connects; accepted frontend authority automatically suppresses the fallback.
 
 Every Agent Doc tag packages both modular ZIPs as
 `agent-doc-jetbrains-{262,263}-<pluginVersion>.zip` alongside the compatibility-ranged
@@ -107,6 +111,11 @@ runtime probe verifies every internal editor/terminal shape used by the isolated
 adapter. Otherwise it remains false and controller policy freezes. A controller
 without the new atomic ingress rejects the command, so no detached surface
 reaches the legacy effect path.
+
+Every snapshot ingress writes `controller_editor_view_snapshot_observed` to
+`.agent-doc/logs/ops.log`, including client/generation/sequence, `accepted`, status,
+completeness, terminal capability, and surface count. Parse, identity, projection,
+stale, and frozen refusals are therefore distinguishable from accepted projections.
 
 The controller returns an explicit, revision-fenced presentation list. The
 frontend adapter resolves the exact split containing the document, mounts a

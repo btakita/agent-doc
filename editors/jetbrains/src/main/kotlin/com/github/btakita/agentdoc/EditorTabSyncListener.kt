@@ -367,9 +367,9 @@ companion object {
                 .filter { it.surfaceId !in liveSurfaceIds }
                 .sortedWith(compareBy(SurfaceEndpoint::projectRoot, SurfaceEndpoint::surfaceId))
 
-        fun markPublished(endpoint: SurfaceEndpoint, liveSurfaceIds: Set<String>): List<SurfaceEndpoint> {
+        fun markPublished(endpoint: SurfaceEndpoint, liveSurfaceIds: Set<String>?): List<SurfaceEndpoint> {
             record(endpoint)
-            return missing(liveSurfaceIds)
+            return liveSurfaceIds?.let(::missing).orEmpty()
         }
 
         fun markForgotten(endpoint: SurfaceEndpoint): Boolean = observed.remove(endpoint)
@@ -495,7 +495,7 @@ private data class PendingSurface(
     val surfaceId: String,
     val surfaceJson: String,
     val knownControllerRoots: List<String>,
-    val liveSurfaceIds: Set<String>,
+    val liveSurfaceIds: Set<String>?,
 )
 
 /**
@@ -507,7 +507,7 @@ private data class CapturedSurface(
     val project: Project,
     val projectBasePath: String?,
     val surfaceId: String,
-    val liveSurfaceIds: Set<String>,
+    val liveSurfaceIds: Set<String>?,
     val focusedFile: VirtualFile,
     val visibleMdFiles: List<String>,
     val openMdFiles: List<String>,
@@ -852,9 +852,9 @@ private data class CapturedSurface(
                                 )
                             } else {
                                 val missingEndpoints =
-                                    surfaceEndpoints.missing(
-                                        JetBrainsEditorSurfaces.liveSurfaceIds(observation.project),
-                                    )
+                                    JetBrainsEditorSurfaces.liveSurfaceIds(observation.project)
+                                        ?.let(surfaceEndpoints::missing)
+                                        .orEmpty()
                                 if (missingEndpoints.isNotEmpty()) {
                                     surfaceDeliveryExecutor.execute {
                                         retireClosedSurfaceEndpoints(
@@ -942,6 +942,15 @@ private data class CapturedSurface(
                         return@execute
                     }
                     surfaceDeliveryRetryAttempt.set(0)
+                    if (generation.get() != requestedGeneration) {
+                        // A newer observation or a frontend-authority handoff superseded this
+                        // delivery while the controller call was in flight. The serialized worker
+                        // guarantees the replacement has not published yet, so retire this exact
+                        // endpoint before allowing the newer source to proceed.
+                        CpRouteClient.forgetEditorSurface(pending.projectRoot, pending.surfaceId)
+                        CpRouteClient.forgetEditorFocus(pending.projectRoot, pending.surfaceId)
+                        return@execute
+                    }
                     val retiredEndpoints =
                         surfaceEndpoints.markPublished(
                             SurfaceEndpoint(pending.projectRoot, pending.surfaceId),
@@ -1035,8 +1044,9 @@ private data class CapturedSurface(
         val editorSurface = JetBrainsEditorSurfaces.forEditorWindow(project, anchorWindow)
         val liveSurfaceIds =
             editorWindows
-                .map { JetBrainsEditorSurfaces.forEditorWindow(project, it).surfaceId }
-                .toSet()
+                .takeIf { it.isNotEmpty() }
+                ?.map { JetBrainsEditorSurfaces.forEditorWindow(project, it).surfaceId }
+                ?.toSet()
         val surfaceWindows =
             anchorWindow?.owner?.let { owner ->
                 editorWindows.filter { it.owner === owner }
@@ -1443,6 +1453,39 @@ private data class CapturedSurface(
             }
             requestedGeneration
         }
+
+    /**
+     * Retires retained classic surface/focus sources without closing this listener.
+     *
+     * The modular Remote Dev backend uses this when an authenticated frontend snapshot becomes
+     * authoritative. If that frontend later retires, the same listener can accept a fresh guest
+     * selection edge and rebuild fallback ownership.
+     */
+    internal fun retireControllerProjection() {
+        generation.incrementAndGet()
+        invalidateFocusProjection()
+        latestSurfaceObservation.set(null)
+        val (roots, endpoints) = synchronized(lifecycleLock) {
+            surfaceRoots.drain() to surfaceEndpoints.drain()
+        }
+        Thread(
+                {
+                    roots.forEach { root ->
+                        CpRouteClient.forgetEditorSurface(root)
+                        CpRouteClient.forgetEditorFocus(root)
+                    }
+                    endpoints.forEach { endpoint ->
+                        CpRouteClient.forgetEditorSurface(endpoint.projectRoot, endpoint.surfaceId)
+                        CpRouteClient.forgetEditorFocus(endpoint.projectRoot, endpoint.surfaceId)
+                    }
+                },
+                "agent-doc-editor-surface-authority-handoff",
+            )
+            .apply {
+                isDaemon = true
+                start()
+            }
+    }
 
     private fun shutdown(policy: EditorSurfaceShutdownPolicy) {
         val (roots, endpoints) =

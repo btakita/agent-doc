@@ -55,10 +55,18 @@ internal object JetBrainsEditorSurfaces {
 
     fun isProjectSurfaceActive(project: Project): Boolean = activeProjectSurface(project) != null
 
-    fun liveSurfaceIds(project: Project): Set<String> =
+    /**
+     * Returns authoritative live-surface evidence, or null when the backend exposes no windows.
+     *
+     * Remote Dev guests can own visible editor windows entirely on the frontend. In that state an
+     * empty backend window list is absence of evidence, not evidence that every retained endpoint
+     * closed.
+     */
+    fun liveSurfaceIds(project: Project): Set<String>? =
         FileEditorManagerEx.getInstanceEx(project).windows
-            .map { forEditorWindow(project, it).surfaceId }
-            .toSet()
+            .takeIf { it.isNotEmpty() }
+            ?.map { forEditorWindow(project, it).surfaceId }
+            ?.toSet()
 
     fun belongsToAnyEditorSurface(project: Project, component: Component?): Boolean {
         if (component == null) return false

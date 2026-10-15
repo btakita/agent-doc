@@ -61,9 +61,11 @@ does not provide Marketplace's automatic cross-side synchronization.
 The modular surface bridge is available only after both processes load the same
 plugin generation and establish the authenticated, generation-fenced bridge. A
 missing, inactive, or mismatched peer is a one-sided install: detached-view and
-frontend presentation effects remain unavailable rather than falling back to
-the classic single-process path. This is a compatibility refusal, not a reason
-to widen either update's range.
+frontend presentation effects remain unavailable. While no accepted frontend
+snapshot exists, the backend observes the guest editor-manager selection flow so
+ordinary main-layout tab changes still reach the controller; accepted frontend
+authority suppresses that limited fallback. This degradation does not fabricate
+detached-window identities and is not a reason to widen either update's range.
 
 ## Release proof
 

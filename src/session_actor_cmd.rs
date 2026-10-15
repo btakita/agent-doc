@@ -173,6 +173,10 @@ struct SupervisorRuntime {
     supervisor_instance_id: Option<String>,
     child_pid: Option<u32>,
     cwd_source: Option<String>,
+    /// The harness binary the supervisor is running in the pane right now
+    /// (`current_harness` in its `State` reply; `None` from an older
+    /// supervisor or without one).
+    current_harness: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -2644,86 +2648,168 @@ fn upgrade_unobserved_clear_from_pane_history(
             return ContextClearSubmitStatus::Unobserved;
         }
     };
+    // Only Codex has a viewport-only proof; Claude Code's lives in the
+    // scrollback tail (`#claudeclearfreshchat`), which also covers a one-row
+    // stashed pane whose viewport shows a single row.
+    let viewport = if harness_config.binary == "codex" {
+        agent_doc_tmux_io::capture_pane(tmux, pane).ok()
+    } else {
+        None
+    };
+    let verdict =
+        unobserved_clear_history_verdict(&harness_config, &history, viewport.as_deref(), command);
+    let detail = match verdict.probe {
+        UnobservedClearProbe::ClearedStateProven | UnobservedClearProbe::ConversationRetained => {
+            format!(
+                " retained_lines={} max_lines={}",
+                verdict.retained_lines, CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES
+            )
+        }
+        UnobservedClearProbe::FreshChatProven => {
+            format!(" retained_lines={}", verdict.retained_lines)
+        }
+        UnobservedClearProbe::HarnessQueuedInput | UnobservedClearProbe::PaneRestarting => {
+            String::new()
+        }
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} harness_binary={} phase={phase} result={}{detail}",
+            file.display(),
+            harness_config.binary,
+            verdict.probe.as_str(),
+        ),
+    );
+    verdict.status
+}
+
+/// What the unobserved-clear probe found in the pane (the `result=` of
+/// `session_clear_submit_cleared_state_probe`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnobservedClearProbe {
+    HarnessQueuedInput,
+    PaneRestarting,
+    /// `#clearfreshchatproof` / `#claudeclearfreshchat`: the harness's
+    /// fresh-chat shape is the latest thing in the pane.
+    FreshChatProven,
+    /// The whole scrollback is short enough to hold no conversation.
+    ClearedStateProven,
+    ConversationRetained,
+}
+
+impl UnobservedClearProbe {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::HarnessQueuedInput => "harness_queued_input",
+            Self::PaneRestarting => "pane_restarting",
+            Self::FreshChatProven => "fresh_chat_proven",
+            Self::ClearedStateProven => "cleared_state_proven",
+            Self::ConversationRetained => "conversation_retained",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct UnobservedClearVerdict {
+    status: ContextClearSubmitStatus,
+    probe: UnobservedClearProbe,
+    retained_lines: usize,
+}
+
+/// The pure decision behind [`upgrade_unobserved_clear_from_pane_history`]:
+/// classify an unobserved clear from the pane's scrollback (and, for Codex,
+/// its viewport) using the RESOLVED harness's predicates. Dispatches on
+/// `harness_config.binary`, never on the raw harness label, so a session whose
+/// label resolved to `default` still gets the Claude Code proofs its
+/// `HarnessConfig` already implies (gh-266).
+fn unobserved_clear_history_verdict(
+    harness_config: &agent_doc_harness::HarnessConfig,
+    history: &str,
+    viewport: Option<&str>,
+    command: &str,
+) -> UnobservedClearVerdict {
+    let retained_lines = history
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    let verdict = |status, probe| UnobservedClearVerdict {
+        status,
+        probe,
+        retained_lines,
+    };
+    let is_ready = |line: &str| harness_config.is_dispatch_ready_prompt_line(line);
+    let is_chrome = |line: &str| harness_config.is_ignorable_output_line(line);
     // `#clearqueuedcomposer`: ask the cheaper, more specific question first. A
     // composer showing `❯ Press up to edit queued messages` proves the harness is
     // mid-turn and QUEUED the command rather than running it. That is a known
     // state with an exact unblocker, not the unknown `Unobserved` reports — and
     // it is why a resend 2s later lands in the same queue instead of clearing.
-    if context_clear_capture_shows_queued_input(&history, |line| {
+    // Only the ACTIVE composer counts: stale queued rows in scrollback are not
+    // the pane's state (gh-266).
+    if context_clear_capture_shows_queued_input(history, is_chrome, |line| {
         harness_config.is_queued_input_placeholder_line(line)
     }) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} result=harness_queued_input",
-                file.display()
-            ),
+        return verdict(
+            ContextClearSubmitStatus::HarnessQueuedInput,
+            UnobservedClearProbe::HarnessQueuedInput,
         );
-        return ContextClearSubmitStatus::HarnessQueuedInput;
     }
     if agent_doc_turn_executor_tmux::context_clear::context_clear_history_shows_pane_restarting(
-        &history,
-        harness,
-        |line| harness_config.is_dispatch_ready_prompt_line(line),
+        history,
+        &harness_config.binary,
+        is_ready,
     ) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} result=pane_restarting",
-                file.display()
-            ),
+        return verdict(
+            ContextClearSubmitStatus::PaneRestarting,
+            UnobservedClearProbe::PaneRestarting,
         );
-        return ContextClearSubmitStatus::PaneRestarting;
     }
     // `#clearfreshchatproof`: tmux scrollback keeps the old conversation after
-    // Codex's `/clear` starts a new chat, so the history-length proof below can
-    // never pass on a long session. The visible frame can: Codex paints a
-    // fresh chat's `Context 0% used` footer, or the new-chat banner beside the
-    // previous chat's `codex resume` exit summary.
-    let fresh_chat_visible = harness == "codex"
-        && (agent_doc_tmux_io::capture_pane(tmux, pane)
-            .is_ok_and(|viewport| codex_viewport_shows_fresh_chat(&viewport))
-            || agent_doc_turn_executor_tmux::context_clear::context_clear_codex_history_shows_fresh_chat(
-                &history,
-                command,
-                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
-                |line| harness_config.is_dispatch_ready_prompt_line(line),
-            ));
-    let proven = fresh_chat_visible
-        || (live_pane_prompt_ready_at_cursor(&harness_config, &history, None)
-            && context_clear_history_proves_cleared_state(
-                &history,
-                command,
-                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
-                |line| harness_config.is_dispatch_ready_prompt_line(line),
-            ));
-    let retained_lines = history
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .count();
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} result={} retained_lines={retained_lines} max_lines={}",
-            file.display(),
-            if proven {
-                "cleared_state_proven"
-            } else {
-                "conversation_retained"
-            },
-            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES
-        ),
-    );
-    if proven {
-        ContextClearSubmitStatus::AcceptedClearedState
-    } else {
-        ContextClearSubmitStatus::Unobserved
+    // `/clear` starts a new chat — for Codex and Claude Code alike — so the
+    // history-length proof below can never pass on a long session. The latest
+    // chat can: Codex paints a fresh chat's `Context 0% used` footer, or the
+    // new-chat banner beside the previous chat's `codex resume` exit summary;
+    // Claude Code repaints its banner and echoes `/clear` above an empty
+    // composer (`#claudeclearfreshchat`).
+    let fresh_chat_visible = (harness_config.binary == "codex"
+        && viewport.is_some_and(codex_viewport_shows_fresh_chat))
+        || agent_doc_turn_executor_tmux::context_clear::context_clear_history_shows_fresh_chat(
+            &harness_config.binary,
+            history,
+            command,
+            is_ready,
+            is_chrome,
+        );
+    if fresh_chat_visible {
+        return verdict(
+            ContextClearSubmitStatus::AcceptedClearedState,
+            UnobservedClearProbe::FreshChatProven,
+        );
     }
+    if live_pane_prompt_ready_at_cursor(harness_config, history, None)
+        && context_clear_history_proves_cleared_state(
+            history,
+            command,
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            is_ready,
+        )
+    {
+        return verdict(
+            ContextClearSubmitStatus::AcceptedClearedState,
+            UnobservedClearProbe::ClearedStateProven,
+        );
+    }
+    verdict(
+        ContextClearSubmitStatus::Unobserved,
+        UnobservedClearProbe::ConversationRetained,
+    )
 }
 
 /// Resolve a blank-viewport (`Unrendered`) clear window against the pane's
 /// scrollback. Returns [`ContextClearSubmitStatus::AcceptedClearedState`] only
-/// when the history positively proves a fresh Codex chat; a capture error or
+/// when the history positively proves a fresh Codex or Claude Code chat
+/// (`#clearfreshchatproof`, `#claudeclearfreshchat`); a capture error or
 /// any retained conversation keeps `Unrendered`, which never resends.
 fn upgrade_unrendered_clear_from_pane_history(
     tmux: &Tmux,
@@ -2738,10 +2824,11 @@ fn upgrade_unrendered_clear_from_pane_history(
     let capture_ok = history.is_ok();
     let status =
         agent_doc_turn_executor_tmux::context_clear::context_clear_unrendered_window_status(
-            harness,
+            &harness_config.binary,
             history.as_deref().ok(),
             command,
             |line| harness_config.is_dispatch_ready_prompt_line(line),
+            |line| harness_config.is_ignorable_output_line(line),
         );
     agent_doc_ops_log_io::log_op(
         file,
@@ -3579,6 +3666,7 @@ fn build_context(file: &Path) -> Result<SessionContext> {
             .record
             .as_ref()
             .map(|record| record.harness.as_str()),
+        supervisor_runtime.current_harness.as_deref(),
         detected_harness,
     );
     let actor_record = operator_status.record.clone();
@@ -3608,13 +3696,36 @@ fn build_context(file: &Path) -> Result<SessionContext> {
 /// document selection remains highest authority; otherwise the durable actor
 /// record must win over ambient harness detection so a Codex shell cannot make
 /// a Claude actor look like Codex (or vice versa).
+///
+/// `default` is not an authority at any layer: it is what ambient detection
+/// writes when the caller runs outside every harness (a JetBrains backend
+/// command, a plain shell). gh-266: 6 of 11 Clear Session Context probes on a
+/// Claude Code pane ran as `harness=default` — the actor record had been bound
+/// from such a caller — while the supervisor for the same pane logged
+/// `harness=claude`. When no named layer above it resolves, the harness the
+/// live supervisor reports running in the pane decides, normalized the way a
+/// document's `agent:` value is (`claude` -> `claude-code`).
 fn status_harness(
     explicit_document_harness: Option<String>,
     actor_harness: Option<&str>,
+    supervisor_harness: Option<&str>,
     ambient_harness: String,
 ) -> String {
+    let resolved = |value: &str| {
+        let value = value.trim();
+        (!value.is_empty() && value != "default").then(|| value.to_string())
+    };
     explicit_document_harness
-        .or_else(|| actor_harness.map(str::to_string))
+        .as_deref()
+        .and_then(resolved)
+        .or_else(|| actor_harness.and_then(resolved))
+        .or_else(|| {
+            supervisor_harness
+                .map(agent_doc_harness::normalize_harness_name)
+                .as_deref()
+                .and_then(resolved)
+        })
+        .or_else(|| resolved(&ambient_harness))
         .unwrap_or(ambient_harness)
 }
 
@@ -3867,6 +3978,7 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
             supervisor_instance_id: None,
             child_pid: None,
             cwd_source: None,
+            current_harness: None,
         };
     }
     match agent_doc_supervisor_io::ipc::send_command(socket, &IpcMethod::State) {
@@ -3927,6 +4039,12 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
                     .get("cwd_source")
                     .and_then(|value| value.as_str())
                     .map(ToOwned::to_owned),
+                current_harness: data
+                    .get("current_harness")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
             }
         }
         Ok(_) | Err(_) => SupervisorRuntime {
@@ -3941,6 +4059,7 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
             supervisor_instance_id: None,
             child_pid: None,
             cwd_source: None,
+            current_harness: None,
         },
     }
 }
@@ -4843,14 +4962,62 @@ mod tests {
     #[test]
     fn status_harness_prefers_document_then_actor_over_ambient_detection() {
         assert_eq!(
-            super::status_harness(Some("opencode".into()), Some("claude"), "codex".into()),
+            super::status_harness(
+                Some("opencode".into()),
+                Some("claude"),
+                Some("codex"),
+                "codex".into()
+            ),
             "opencode"
         );
         assert_eq!(
-            super::status_harness(None, Some("claude"), "codex".into()),
+            super::status_harness(None, Some("claude"), Some("codex"), "codex".into()),
             "claude"
         );
-        assert_eq!(super::status_harness(None, None, "codex".into()), "codex");
+        assert_eq!(
+            super::status_harness(None, None, None, "codex".into()),
+            "codex"
+        );
+    }
+
+    /// gh-266: an actor record bound from a caller outside every harness
+    /// carries `default`, and the clear probe then ran with `harness=default`
+    /// on a pane whose supervisor logged `harness=claude`. `default` is never
+    /// an authority; the live supervisor's harness resolves it.
+    #[test]
+    fn status_harness_resolves_default_from_the_live_supervisor_harness() {
+        assert_eq!(
+            super::status_harness(None, Some("default"), Some("claude"), "default".into()),
+            "claude-code"
+        );
+        assert_eq!(
+            super::status_harness(None, None, Some("codex"), "default".into()),
+            "codex"
+        );
+        assert_eq!(
+            super::status_harness(
+                Some("default".into()),
+                Some(""),
+                Some("claude"),
+                "default".into()
+            ),
+            "claude-code"
+        );
+        // A named actor record still outranks the supervisor and ambient
+        // detection; ambient only decides when nothing else is named.
+        assert_eq!(
+            super::status_harness(None, Some("codex"), Some("claude"), "default".into()),
+            "codex"
+        );
+        assert_eq!(
+            super::status_harness(None, Some("default"), None, "claude-code".into()),
+            "claude-code"
+        );
+        // Nothing resolves: the ambient label stands.
+        assert_eq!(
+            super::status_harness(None, Some("default"), Some(" "), "default".into()),
+            "default"
+        );
     }
 
     /// `#restartselfpane` / `#restartselfdefer`: detecting that the caller IS the
@@ -5162,6 +5329,7 @@ mod tests {
             supervisor_instance_id: Some("sup-1".to_string()),
             child_pid: Some(101),
             cwd_source: Some("config".to_string()),
+            current_harness: None,
         }
     }
 
@@ -6587,6 +6755,87 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         ));
     }
 
+    const CLAUDE_POST_CLEAR_TAIL: &str = include_str!(
+        "../agent-doc-turn-executor-tmux/src/fixtures/claude_clear_post_clear_tail.txt"
+    );
+
+    /// A Claude Code pane's tmux scrollback after `turns` conversation turns,
+    /// with the composer-frame residue (including stale queued-message rows)
+    /// Claude repaints into history.
+    fn claude_pane_history(turns: usize) -> String {
+        let mut out = String::from(
+            " \u{2590}\u{259b}\u{2588}\u{2588}\u{2588}\u{259b}\u{2588}   Claude Code v2.1.283\n\
+             \u{259d}\u{259c}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2580}  Opus 5 \u{b7} Claude Max\n\n",
+        );
+        for turn in 0..turns {
+            out.push_str(&format!(
+                "\u{276f} /agent-doc tasks/plan.md turn {turn}\n\n\
+                 \u{25cf} Bash(agent-doc plan tasks/plan.md)\n  \u{23bf}  [plan] ok\n\n\
+                 \u{25cf} Answer for turn {turn}.\n  More of the answer.\n\n\u{273b} Baked for 41s\n\n"
+            ));
+            if turn % 40 == 3 {
+                out.push_str(
+                    "\u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f} Press up to edit queued messages\n\u{2500}\u{2500}\u{2500}\u{2500}\n  Opus 5 ctx:31% ~/work/example/project main user@host\n  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle) \u{b7} \u{2190} 3 agents\n",
+                );
+            }
+        }
+        out
+    }
+
+    const CLAUDE_IDLE_COMPOSER: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f} \n\u{2500}\u{2500}\u{2500}\u{2500}\n  Opus 5 ctx:62% ~/work/example/project main user@host\n  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)\n";
+
+    /// gh-266 end to end through the real `HarnessConfig` predicates, for both
+    /// labels the reported probes carried (`claude-code` and the unresolved
+    /// `default`): a long Claude Code pane where `/clear` ran is proven, and
+    /// stale queued-message residue in its scrollback is not read as a queue.
+    #[test]
+    fn unobserved_claude_clear_on_a_long_pane_is_proven_for_every_claude_label() {
+        let history = format!("{}{CLAUDE_POST_CLEAR_TAIL}", claude_pane_history(800));
+        for label in ["claude-code", "claude", "default"] {
+            let config = agent_doc_harness::HarnessConfig::from_agent_name(label);
+            let verdict = unobserved_clear_history_verdict(&config, &history, None, "/clear");
+            assert_eq!(
+                verdict.status,
+                ContextClearSubmitStatus::AcceptedClearedState,
+                "label {label}: {verdict:?}"
+            );
+            assert_eq!(verdict.probe, UnobservedClearProbe::FreshChatProven);
+            assert!(verdict.retained_lines > 3000, "{verdict:?}");
+        }
+    }
+
+    /// The fail-closed half: when the old conversation is still the latest
+    /// thing in the pane, the verdict stays `Unobserved`; a genuinely queued
+    /// clear stays `HarnessQueuedInput`.
+    #[test]
+    fn unobserved_claude_clear_with_the_conversation_still_visible_stays_blocked() {
+        let config = agent_doc_harness::HarnessConfig::from_agent_name("default");
+        let retained = format!("{}{CLAUDE_IDLE_COMPOSER}", claude_pane_history(800));
+        let verdict = unobserved_clear_history_verdict(&config, &retained, None, "/clear");
+        assert_eq!(verdict.status, ContextClearSubmitStatus::Unobserved);
+        assert_eq!(verdict.probe, UnobservedClearProbe::ConversationRetained);
+
+        // An earlier `/clear` followed by a new conversation is not this one.
+        let earlier_clear = format!(
+            "{}{CLAUDE_POST_CLEAR_TAIL}{}{CLAUDE_IDLE_COMPOSER}",
+            claude_pane_history(400),
+            claude_pane_history(2)
+                .lines()
+                .skip(3)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let verdict = unobserved_clear_history_verdict(&config, &earlier_clear, None, "/clear");
+        assert_eq!(verdict.status, ContextClearSubmitStatus::Unobserved);
+
+        let queued = format!(
+            "{}\u{2722} Hatching\u{2026} (6m 18s)\n\u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f} Press up to edit queued messages\n\u{2500}\u{2500}\u{2500}\u{2500}\n  Opus 5 ctx:14% ~/work/example/project main user@host\n  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle) \u{b7} \u{2190} 3 agents\n",
+            claude_pane_history(60)
+        );
+        let verdict = unobserved_clear_history_verdict(&config, &queued, None, "/clear");
+        assert_eq!(verdict.status, ContextClearSubmitStatus::HarnessQueuedInput);
+    }
+
     #[test]
     fn clear_change_detection_ignores_harness_chrome_but_not_the_conversation() {
         let before = "• Ran make check\n  └ ok\n\n• Working (4m 57s • esc to interrupt)\n  └ Tip: Use /statusline to configure which items appear in the status line.\n› Ask Codex to do anything\n  GPT-5.6-Sol high · ~/work · Context 34% used\n  ? for shortcuts        ⚠ 2 warnings · f2 to view\n";
@@ -6664,6 +6913,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 supervisor_instance_id: Some("sup-1".to_string()),
                 child_pid: Some(101),
                 cwd_source: Some("config".to_string()),
+                current_harness: None,
             },
             supervisor_socket: PathBuf::from("/tmp/supervisor.sock"),
             live_pane_window: None,
@@ -6856,6 +7106,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             supervisor_instance_id: None,
             child_pid: None,
             cwd_source: None,
+            current_harness: None,
         };
         let ctx = SessionContext {
             canonical_file: PathBuf::from("/tmp/doc.md"),
@@ -7115,6 +7366,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 supervisor_instance_id: Some("sup".to_string()),
                 child_pid: Some(2),
                 cwd_source: Some("config".to_string()),
+                current_harness: None,
             },
             supervisor_socket: dir.path().join("session-clear.sock"),
             live_pane_window: None,
@@ -7182,6 +7434,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 supervisor_instance_id: Some("sup".to_string()),
                 child_pid: Some(2),
                 cwd_source: Some("config".to_string()),
+                current_harness: None,
             },
             supervisor_socket: dir.path().join("session-clear.sock"),
             live_pane_window: None,

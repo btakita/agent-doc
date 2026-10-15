@@ -1291,6 +1291,35 @@ must never receive another command. A recognized harness startup banner without
 a dispatch-ready prompt is the distinct non-accepted `pane_restarting` state;
 its only recovery is to wait for harness startup to finish, and it must never
 authorize a full-command resend (`#clearsubmitpanesettle`).
+Proof that the pane is already in the cleared state is read from the LATEST
+chat in the pane, never from the length of the whole tmux scrollback: both
+Codex and Claude Code keep the old conversation in tmux history after
+`/clear`, so a whole-history line bound can only pass on a pane shorter than
+a screen (`#clearfreshchatproof`). Codex proves a fresh chat by its
+`Context 0% used` footer or by the tail after its last `>_ OpenAI Codex`
+banner. Claude Code proves it by the tail after its last startup banner
+(`#claudeclearfreshchat`): `/clear` repaints the banner, echoes the command
+as the new conversation's first prompt, and draws an empty composer. That
+tail passes only when it is short, carries the command echo, holds no
+submitted prompt, operator draft, assistant/tool bullet, tool result,
+spinner, or any other row that is not composer chrome after the echo, and
+ends at a dispatch-ready composer; a command still sitting in the composer
+fails closed first. A clear that did not run cannot pass, because a lost
+clear paints no new banner and the tail after the last one holds the
+retained conversation. The same proofs resolve a blank-viewport
+(`pane_not_rendered`) window from scrollback for both harnesses. The
+`harness_queued_input` label (`#clearqueuedcomposer`) is read from the ACTIVE
+composer only — the bottom-most row that is not harness chrome — because
+Claude Code repaints its composer frame into scrollback and stale
+`❯ Press up to edit queued messages` rows from ended turns are not the pane's
+state. The probe dispatches on the resolved `HarnessConfig` binary, not on
+the raw harness label, and the session commands resolve that label with
+`default` treated as unresolved at every layer: explicit document `agent:`,
+then the actor record, then the harness the live supervisor reports in its
+`State` reply (`current_harness`, normalized `claude` -> `claude-code`), then
+ambient detection. A clear probe on a Claude Code pane must therefore never
+run, or be reported, as `harness=default` while a live supervisor names the
+harness (gh-266).
   is an explicit operator action and must not fail solely because direct tmux
   evidence classifies the resolved pane as `alive-busy` or because the current
   pane command is an agent wrapper; ordinary active/status panes are allowed

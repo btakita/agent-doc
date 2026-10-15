@@ -1,0 +1,15 @@
+ ▐▛███▛█   Claude Code v2.1.283
+▝▜██████▀  Opus 5 with high effort · Claude Max
+ ▝▝   ▝▝   ~/work/example/project
+
+
+❯ /clear
+
+──────────────────────────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────────────────────────
+  Opus 5 ctx:0% ~/work/example/project main user@host
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+  Opus 5 ctx:0% ~/work/example/project main user@host
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

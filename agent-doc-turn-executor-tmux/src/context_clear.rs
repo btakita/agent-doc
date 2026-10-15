@@ -111,14 +111,26 @@ impl ContextClearSubmitStatus {
 ///
 /// A queued clear is still NOT accepted: this changes the label and the
 /// unblocker, never the acceptance rule (same contract as `#clearsubmitlabel`).
+///
+/// Only the ACTIVE composer counts: the bottom-most line that is not harness
+/// chrome (`is_ignorable_chrome_line`: status line, permission-mode row,
+/// composer rules). Claude Code repaints its composer frame into tmux
+/// scrollback, so a long session's history carries stale
+/// `❯ Press up to edit queued messages` rows from turns that ended hours ago.
+/// Scanning the whole capture read those as the current state and reported
+/// `harness_queued_input` for clears that Claude Code ran within a second
+/// (gh-266, 2026-10-14 18:43Z and 2026-10-15 01:27Z).
 pub fn context_clear_capture_shows_queued_input(
     capture: &str,
+    is_ignorable_chrome_line: impl Fn(&str) -> bool,
     is_queued_input_placeholder_line: impl Fn(&str) -> bool,
 ) -> bool {
     capture
         .lines()
-        .map(crate::prompt::strip_ansi)
-        .any(|line| is_queued_input_placeholder_line(line.trim()))
+        .rev()
+        .map(|line| crate::prompt::strip_ansi(line).trim().to_string())
+        .find(|line| !line.is_empty() && !is_ignorable_chrome_line(line))
+        .is_some_and(|line| is_queued_input_placeholder_line(&line))
 }
 
 /// (`#clearsubmitpanesettle`) Distinguish a pane that is visibly booting its
@@ -286,6 +298,156 @@ pub fn context_clear_codex_history_shows_fresh_chat(
     saw_ready_prompt
 }
 
+/// Claude Code's startup banner: the logo row naming the version
+/// (` ▐▛███▜▌   Claude Code v2.1.283`), the logo's second row
+/// (`▝▜█████▛▘  Opus 5 · Claude Max`), or the older boxed
+/// `✻ Welcome to Claude Code!` header.
+///
+/// The second logo row counts on its own because Claude Code repaints can
+/// overwrite the first one in tmux scrollback (seen live: a table redraw left
+/// only `▝▜██████▀  Opus 5.5 · Claude Max` above the `❯ /clear` echo).
+fn is_claude_code_banner_line(line: &str) -> bool {
+    if line.contains("Welcome to Claude Code") {
+        return true;
+    }
+    if line.starts_with("\u{259d}\u{259c}\u{2588}") || line.starts_with("\u{2590}\u{259b}\u{2588}")
+    {
+        return true;
+    }
+    line.find("Claude Code v").is_some_and(|idx| {
+        line[idx + "Claude Code v".len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    })
+}
+
+/// A line Claude Code only renders while a conversation exists: an assistant
+/// or tool bullet (`●`), a tool-result branch (`⎿`, other than the empty
+/// `⎿  (no content)` some versions print under a slash command), or a
+/// spinner / turn-summary row (`✻ Baked for 58s`, `✢ Hatching…`).
+fn is_claude_conversation_line(line: &str) -> bool {
+    if let Some(rest) = line.strip_prefix('⎿') {
+        return rest.trim() != "(no content)";
+    }
+    line.starts_with('●')
+        || ['✻', '✢', '✶', '✳', '✽', '·', '*'].iter().any(|glyph| {
+            line.strip_prefix(*glyph)
+                .is_some_and(|rest| rest.starts_with(' '))
+        })
+        || line.contains("esc to interrupt")
+}
+
+/// A row that begins with a Claude Code input glyph: the composer, or an echo
+/// of a prompt that was submitted.
+fn claude_prompt_glyph_body(line: &str) -> Option<&str> {
+    line.strip_prefix('❯')
+        .or_else(|| line.strip_prefix('>'))
+        .map(str::trim)
+}
+
+/// (`#claudeclearfreshchat`) Does the pane's scrollback prove the CURRENT
+/// Claude Code conversation is the fresh one `/clear` starts?
+///
+/// The Claude Code counterpart of [`context_clear_codex_history_shows_fresh_chat`].
+/// Claude Code's `/clear` leaves tmux scrollback in place, so
+/// [`context_clear_history_proves_cleared_state`]'s whole-history length bound
+/// can never pass on a session longer than a screen: gh-266 measured 11 of 11
+/// operator clears reported `submission_unobserved` with 3525..34229 retained
+/// lines, every one of which Claude Code had run within a second. What
+/// `/clear` does leave is a fixed shape at the END of the scrollback: it
+/// repaints the startup banner, then echoes the command as the new
+/// conversation's first prompt, then draws an empty composer:
+///
+/// ```text
+///  ▐▛███▜▌   Claude Code v2.1.283
+/// ▝▜█████▛▘  Opus 5 · Claude Max
+///   ▘▘ ▝▝    ~/work/project
+///
+/// ❯ /clear
+///
+/// ────────────────
+/// ❯
+/// ────────────────
+///   ⏵⏵ bypass permissions on (shift+tab to cycle)
+/// ```
+///
+/// The proof is scoped to the tail after the LAST banner, never the length of
+/// the whole capture. It passes only when that tail is short, carries the
+/// command echo, holds nothing a conversation renders after the echo (no
+/// submitted prompt, assistant/tool bullet, tool result, spinner, or any line
+/// that is not composer chrome), and ends at a dispatch-ready composer.
+///
+/// It cannot pass a clear that was lost: then the last banner is the one that
+/// began the retained conversation (a cold start, or an earlier `/clear`), and
+/// the tail after it holds that conversation's prompts and output. A lost
+/// clear never paints a NEW banner. When the conversation after an earlier
+/// `/clear` really is still empty, the cleared state already holds — the same
+/// idempotent-state argument as [`context_clear_history_proves_cleared_state`].
+/// A command still sitting unconsumed in the composer fails closed first.
+pub fn context_clear_claude_history_shows_fresh_chat(
+    history: &str,
+    command: &str,
+    max_tail_lines: usize,
+    is_dispatch_ready_prompt_line: impl Fn(&str) -> bool + Copy,
+    is_ignorable_chrome_line: impl Fn(&str) -> bool,
+) -> bool {
+    if context_clear_command_visible_in_active_input(
+        history,
+        command,
+        is_dispatch_ready_prompt_line,
+    ) {
+        return false;
+    }
+    let lines: Vec<String> = history
+        .lines()
+        .map(|line| crate::prompt::strip_ansi(line).trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    let Some(banner) = lines
+        .iter()
+        .rposition(|line| is_claude_code_banner_line(line))
+    else {
+        return false;
+    };
+    let tail = &lines[banner + 1..];
+    if tail.len() > max_tail_lines {
+        return false;
+    }
+    let command = command.trim();
+    let mut saw_echo = false;
+    let mut saw_ready_prompt = false;
+    for line in tail {
+        if is_claude_conversation_line(line) {
+            return false;
+        }
+        if let Some(body) = claude_prompt_glyph_body(line) {
+            if !saw_echo && body == command {
+                saw_echo = true;
+            } else if saw_echo && is_dispatch_ready_prompt_line(line) {
+                saw_ready_prompt = true;
+            } else {
+                // A submitted prompt, an operator draft, or a composer drawn
+                // before the clear ran.
+                return false;
+            }
+            continue;
+        }
+        if !saw_echo {
+            // Banner continuation rows: model, account, working directory.
+            continue;
+        }
+        if is_dispatch_ready_prompt_line(line) {
+            saw_ready_prompt = true;
+        } else if !(is_ignorable_chrome_line(line) || line == "? for shortcuts") {
+            // Anything else after the echo is output the fresh chat should not
+            // hold yet; fail closed rather than guess it is chrome.
+            return false;
+        }
+    }
+    saw_echo && saw_ready_prompt
+}
+
 /// A Codex status footer (`model · cwd · Context N% used`) with `N > 0`, or
 /// one whose percentage cannot be read (fail closed).
 fn codex_footer_reports_nonzero_context(line: &str) -> bool {
@@ -299,26 +461,62 @@ fn codex_footer_reports_nonzero_context(line: &str) -> bool {
     percent.trim().parse::<u32>().map_or(true, |n| n > 0)
 }
 
+/// (`#clearfreshchatproof`) The harness-specific fresh-chat proof over a
+/// pane's scrollback: Codex's new-chat banner tail, or Claude Code's
+/// banner + `/clear` echo tail (`#claudeclearfreshchat`). `harness` is the
+/// resolved harness binary; any other harness has no fresh-chat proof and
+/// fails closed.
+pub fn context_clear_history_shows_fresh_chat(
+    harness: &str,
+    history: &str,
+    command: &str,
+    is_dispatch_ready_prompt_line: impl Fn(&str) -> bool + Copy,
+    is_ignorable_chrome_line: impl Fn(&str) -> bool,
+) -> bool {
+    match harness.trim().to_ascii_lowercase().as_str() {
+        "codex" => context_clear_codex_history_shows_fresh_chat(
+            history,
+            command,
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            is_dispatch_ready_prompt_line,
+        ),
+        "claude" | "claude-code" | "claude_code" => context_clear_claude_history_shows_fresh_chat(
+            history,
+            command,
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            is_dispatch_ready_prompt_line,
+            is_ignorable_chrome_line,
+        ),
+        _ => false,
+    }
+}
+
 /// Resolve an acceptance window whose last capture was blank. A blank viewport
 /// is absence of evidence, so `Unrendered` stays the verdict unless the
 /// scrollback positively proves the cleared state. It never becomes
 /// `Unobserved`: that label can earn a full-command resend, and a blank
 /// viewport cannot show that the first `/clear` was lost.
+///
+/// `harness` is the resolved harness binary (`codex`, `claude`, ...). Claude
+/// Code panes use [`context_clear_claude_history_shows_fresh_chat`]
+/// (`#claudeclearfreshchat`): a one-row stash scrolls Claude's post-clear
+/// repaint into history exactly as it does Codex's.
 pub fn context_clear_unrendered_window_status(
     harness: &str,
     history: Option<&str>,
     command: &str,
     is_dispatch_ready_prompt_line: impl Fn(&str) -> bool + Copy,
+    is_ignorable_chrome_line: impl Fn(&str) -> bool,
 ) -> ContextClearSubmitStatus {
-    let proven = harness.trim().eq_ignore_ascii_case("codex")
-        && history.is_some_and(|history| {
-            context_clear_codex_history_shows_fresh_chat(
-                history,
-                command,
-                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
-                is_dispatch_ready_prompt_line,
-            )
-        });
+    let proven = history.is_some_and(|history| {
+        context_clear_history_shows_fresh_chat(
+            harness,
+            history,
+            command,
+            is_dispatch_ready_prompt_line,
+            is_ignorable_chrome_line,
+        )
+    });
     if proven {
         ContextClearSubmitStatus::AcceptedClearedState
     } else {
@@ -1008,6 +1206,258 @@ mod tests {
     const ONE_ROW_PANE_HISTORY: &str =
         include_str!("fixtures/codex_clear_one_row_pane_history.txt");
 
+    fn no_chrome(_line: &str) -> bool {
+        false
+    }
+
+    /// Claude Code composer chrome, mirroring `HarnessConfig::claude()`'s
+    /// ignorable rows: composer rules, the `ctx:N%` status line, and the
+    /// permission-mode row.
+    fn claude_chrome(line: &str) -> bool {
+        let line = line.trim();
+        (!line.is_empty() && line.chars().all(|c| c == '\u{2500}'))
+            || line.starts_with("\u{23f5}\u{23f5} ")
+            || (!line.starts_with('\u{276f}') && line.contains("ctx:"))
+    }
+
+    /// Claude Code's dispatch-ready composer rows, mirroring
+    /// `HarnessConfig::claude().is_dispatch_ready_prompt_line`.
+    fn claude_ready(line: &str) -> bool {
+        let line = line.trim();
+        matches!(
+            line,
+            "\u{276f}"
+                | "\u{276f} Press up to edit queued messages"
+                | "\u{276f} describe a task for a new session"
+        ) || (line.starts_with("\u{23f5}\u{23f5} ") && line.contains("(shift+tab to cycle)"))
+    }
+
+    fn claude_queued(line: &str) -> bool {
+        line.trim() == "\u{276f} Press up to edit queued messages"
+    }
+
+    /// What `/clear` leaves at the end of a Claude Code pane: the repainted
+    /// banner, the command echo, and an empty composer with its residue.
+    const CLAUDE_POST_CLEAR_TAIL: &str = include_str!("fixtures/claude_clear_post_clear_tail.txt");
+
+    /// A long Claude Code session as tmux retains it: the cold-start banner, a
+    /// conversation thousands of lines long, an earlier `/clear` followed by
+    /// more conversation, and the composer-frame residue Claude repaints into
+    /// scrollback — including a stale `Press up to edit queued messages` row
+    /// from a turn that ended long ago.
+    fn claude_long_conversation(turns: usize) -> String {
+        let mut out = String::from(
+            " \u{2590}\u{259b}\u{2588}\u{2588}\u{2588}\u{259b}\u{2588}   Claude Code v2.1.283\n\
+             \u{259d}\u{259c}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2580}  Opus 5 \u{b7} Claude Max\n \
+             ~/work/example/project\n\n",
+        );
+        for turn in 0..turns {
+            if turn == turns / 2 {
+                out.push_str(
+                    " \u{2590}\u{259b}\u{2588}\u{2588}\u{2588}\u{259b}\u{2588}   Claude Code v2.1.283\n\n\u{276f} /clear\n\n",
+                );
+            }
+            out.push_str(&format!(
+                "\u{276f} /agent-doc tasks/plan.md turn {turn}\n\n\
+                 \u{25cf} Reading the session document.\n\n\
+                 \u{25cf} Bash(agent-doc plan tasks/plan.md)\n  \u{23bf}  [plan] ok\n     \u{2026} +40 lines (ctrl+o to expand)\n\n\
+                 \u{25cf} Answer for turn {turn}, line one.\n  Answer for turn {turn}, line two.\n\n\
+                 \u{273b} Baked for 41s\n\n"
+            ));
+            if turn % 50 == 7 {
+                out.push_str(
+                    "\u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f} Press up to edit queued messages\n\u{2500}\u{2500}\u{2500}\u{2500}\n  Opus 5 ctx:31% ~/work/example/project main user@host\n",
+                );
+            }
+        }
+        out
+    }
+
+    fn idle_claude_composer() -> &'static str {
+        "\u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f} \n\u{2500}\u{2500}\u{2500}\u{2500}\n  Opus 5 ctx:62% ~/work/example/project main user@host\n  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)\n"
+    }
+
+    /// `#claudeclearfreshchat` (gh-266): Claude Code's `/clear` keeps tmux
+    /// scrollback, so 11 of 11 operator clears on panes holding 3525..34229
+    /// lines were reported `submission_unobserved` although Claude Code ran
+    /// each within a second. The whole-history length proof can never pass
+    /// there; the tail after the last banner proves the clear ran.
+    #[test]
+    fn claude_clear_on_a_long_scrollback_is_proven_from_the_post_clear_tail() {
+        let history = format!("{}{CLAUDE_POST_CLEAR_TAIL}", claude_long_conversation(700));
+        assert!(
+            history.lines().filter(|l| !l.trim().is_empty()).count() > 3000,
+            "the fixture must reproduce the reported scrollback scale"
+        );
+        assert!(
+            !context_clear_history_proves_cleared_state(
+                &history,
+                "/clear",
+                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+                claude_ready,
+            ),
+            "the whole-history bound is what failed every real clear"
+        );
+        assert!(context_clear_claude_history_shows_fresh_chat(
+            &history,
+            "/clear",
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            claude_ready,
+            claude_chrome,
+        ));
+        for harness in ["claude", "claude-code"] {
+            assert!(context_clear_history_shows_fresh_chat(
+                harness,
+                &history,
+                "/clear",
+                claude_ready,
+                claude_chrome,
+            ));
+        }
+        // A one-row stash leaves the viewport blank; the same tail upgrades it.
+        assert_eq!(
+            context_clear_unrendered_window_status(
+                "claude",
+                Some(&history),
+                "/clear",
+                claude_ready,
+                claude_chrome,
+            ),
+            ContextClearSubmitStatus::AcceptedClearedState
+        );
+        // gh-266 also: stale queued-composer residue in scrollback is not the
+        // pane's current state.
+        assert!(!context_clear_capture_shows_queued_input(
+            &history,
+            claude_chrome,
+            claude_queued,
+        ));
+    }
+
+    /// The half that must never regress: when `/clear` did not run, the old
+    /// conversation is still the latest one, and every shape of it stays
+    /// blocked — however short or long the scrollback.
+    #[test]
+    fn claude_clear_that_did_not_run_keeps_the_old_conversation_blocked() {
+        let proves = |history: &str| {
+            context_clear_claude_history_shows_fresh_chat(
+                history,
+                "/clear",
+                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+                claude_ready,
+                claude_chrome,
+            )
+        };
+        // Lost delivery: the conversation after the earlier `/clear` (and
+        // after the cold-start banner) ends at an idle composer.
+        let lost = format!(
+            "{}{}",
+            claude_long_conversation(700),
+            idle_claude_composer()
+        );
+        assert!(!proves(&lost));
+        // Short too: one turn after the last banner is a conversation.
+        let short = format!("{}{}", claude_long_conversation(1), idle_claude_composer());
+        assert!(!proves(&short));
+        // The command is still sitting unconsumed in the composer.
+        let unconsumed = format!(
+            "{}\u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f} /clear\n\u{2500}\u{2500}\u{2500}\u{2500}\n",
+            claude_long_conversation(3)
+        );
+        assert!(!proves(&unconsumed));
+        // The fresh chat has already started a new turn.
+        let used = format!(
+            "{CLAUDE_POST_CLEAR_TAIL}\u{276f} /agent-doc tasks/plan.md\n\n\u{25cf} Reading.\n{}",
+            idle_claude_composer()
+        );
+        assert!(!proves(&used));
+        // A turn submitted in the fresh chat whose output has not drawn yet,
+        // and an operator draft typed after the clear: prompt rows alone.
+        let submitted = CLAUDE_POST_CLEAR_TAIL.replace(
+            "\u{276f} /clear\n",
+            "\u{276f} /clear\n\n\u{276f} /agent-doc tasks/plan.md\n",
+        );
+        assert!(!proves(&submitted));
+        let drafted =
+            CLAUDE_POST_CLEAR_TAIL.replace("\u{276f} \n", "\u{276f} half-typed question\n");
+        assert!(!proves(&drafted));
+        // Assistant output alone (no new prompt row) after the echo.
+        let answered = CLAUDE_POST_CLEAR_TAIL.replace(
+            "\u{276f} /clear\n",
+            "\u{276f} /clear\n\n\u{25cf} Leftover answer text.\n",
+        );
+        assert!(!proves(&answered));
+        // A repainted banner with no `/clear` echo is a restart mid-render
+        // (`claude --continue` draws the banner before the replayed
+        // conversation), not proof that this clear ran.
+        let restart = CLAUDE_POST_CLEAR_TAIL.replace("\u{276f} /clear\n", "");
+        assert!(!proves(&restart));
+        // The "banner" is tool output quoting the version, and conversation
+        // rows sit between it and a `/clear` row: not a repainted fresh chat.
+        let quoted = "\u{25cf} Bash(claude --version)\n  \u{23bf}  Claude Code v2.1.283\n\u{25cf} The CLI is current.\n\u{276f} /clear\n\u{276f} \n";
+        assert!(!proves(quoted));
+        // Unknown output after the echo is not assumed to be chrome.
+        let unknown = CLAUDE_POST_CLEAR_TAIL.replace(
+            "\u{276f} /clear\n",
+            "\u{276f} /clear\nsomething the fresh chat should not hold\n",
+        );
+        assert!(!proves(&unknown));
+        // Banner and echo, but no settled composer yet.
+        let unsettled = " \u{2590}\u{259b}\u{2588}   Claude Code v2.1.283\n\n\u{276f} /clear\n";
+        assert!(!proves(unsettled));
+        // A different command's echo (`/compact` also repaints the banner).
+        let compact = CLAUDE_POST_CLEAR_TAIL.replace("\u{276f} /clear", "\u{276f} /compact");
+        assert!(!proves(&compact));
+        // No Claude banner at all, and non-Claude harnesses.
+        assert!(!proves(idle_claude_composer()));
+        assert!(!context_clear_history_shows_fresh_chat(
+            "opencode",
+            CLAUDE_POST_CLEAR_TAIL,
+            "/clear",
+            claude_ready,
+            claude_chrome,
+        ));
+        assert_eq!(
+            context_clear_unrendered_window_status(
+                "claude",
+                Some(&lost),
+                "/clear",
+                claude_ready,
+                claude_chrome,
+            ),
+            ContextClearSubmitStatus::Unrendered
+        );
+    }
+
+    /// `#clearqueuedcomposer` keeps working on the ACTIVE composer: a clear
+    /// queued behind a busy turn is still recognized, and is never proven.
+    #[test]
+    fn claude_queued_clear_is_recognized_from_the_active_composer_only() {
+        let queued = format!(
+            "{}\u{2722} Hatching\u{2026} (6m 18s \u{b7} \u{2193} 21.2k tokens)\n\n\u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f} Press up to edit queued messages\n\u{2500}\u{2500}\u{2500}\u{2500}\n  Opus 5 ctx:14% ~/work/example/project main user@host\n  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle) \u{b7} \u{2190} 3 agents\n",
+            claude_long_conversation(40)
+        );
+        assert!(context_clear_capture_shows_queued_input(
+            &queued,
+            claude_chrome,
+            claude_queued,
+        ));
+        assert!(!context_clear_claude_history_shows_fresh_chat(
+            &queued,
+            "/clear",
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            claude_ready,
+            claude_chrome,
+        ));
+        // Stale residue above an idle composer is not a queue.
+        let idle = format!("{}{}", claude_long_conversation(40), idle_claude_composer());
+        assert!(!context_clear_capture_shows_queued_input(
+            &idle,
+            claude_chrome,
+            claude_queued,
+        ));
+    }
+
     fn codex_ready(line: &str) -> bool {
         is_dispatch_ready_prompt_line(line)
             || crate::prompt::is_codex_idle_placeholder_prompt(line.trim())
@@ -1058,6 +1508,7 @@ mod tests {
             Some(ONE_ROW_PANE_HISTORY),
             "/clear",
             codex_ready,
+            no_chrome,
         );
         assert_eq!(resolved, ContextClearSubmitStatus::AcceptedClearedState);
         assert!(resolved.is_accepted());
@@ -1075,8 +1526,13 @@ mod tests {
             CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
             codex_ready,
         ));
-        let status =
-            context_clear_unrendered_window_status("codex", Some(&history), "/clear", codex_ready);
+        let status = context_clear_unrendered_window_status(
+            "codex",
+            Some(&history),
+            "/clear",
+            codex_ready,
+            no_chrome,
+        );
         assert_eq!(status, ContextClearSubmitStatus::Unrendered);
         let observation = ContextClearSubmitObservation {
             status,
@@ -1123,7 +1579,7 @@ mod tests {
             codex_ready,
         ));
         assert_eq!(
-            context_clear_unrendered_window_status("codex", None, "/clear", codex_ready),
+            context_clear_unrendered_window_status("codex", None, "/clear", codex_ready, no_chrome),
             ContextClearSubmitStatus::Unrendered
         );
         assert_eq!(
@@ -1131,7 +1587,8 @@ mod tests {
                 "claude",
                 Some(ONE_ROW_PANE_HISTORY),
                 "/clear",
-                codex_ready
+                codex_ready,
+                no_chrome,
             ),
             ContextClearSubmitStatus::Unrendered
         );
@@ -1363,6 +1820,7 @@ mod tests {
         );
         assert!(context_clear_capture_shows_queued_input(
             busy_with_queued_clear,
+            claude_chrome,
             is_queued
         ));
 
@@ -1373,9 +1831,17 @@ mod tests {
             "\u{276f}\n",
             "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
         );
-        assert!(!context_clear_capture_shows_queued_input(idle, is_queued));
+        assert!(!context_clear_capture_shows_queued_input(
+            idle,
+            claude_chrome,
+            is_queued
+        ));
         let fresh = "\u{276f} describe a task for a new session\n";
-        assert!(!context_clear_capture_shows_queued_input(fresh, is_queued));
+        assert!(!context_clear_capture_shows_queued_input(
+            fresh,
+            claude_chrome,
+            is_queued
+        ));
     }
 
     /// `#clearqueuedcomposer`: a queued clear did NOT run, so the acceptance rule

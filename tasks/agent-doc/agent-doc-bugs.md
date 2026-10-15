@@ -138,6 +138,11 @@ If you'd rather ship now, I can release the integrated batch without the formal 
 
 ### Re: v0.35.504 installed locally, tmux auto-sync restored, release re-running — opus-5.5 · 2026-10-15T01:00-04:00
 
+> **Queue prompt:**
+>
+> do [#sensemixdeterministic]: Is there any precedence of agentic programming languages? How about an embedded programming language for markdown? How about a template-driven approach? Perhaps we can support functions + a built in `prompt("...")` function, support conditional logic? Could we use fenced python or js? If we support functions, could we setup events or hooks? Would Jupyter be a good inspiration or since agent-doc is more of a graph, some sort of event-driven graph programming language?
+
+
 **Local install: yes.** I ran `make install` from the integrated tree, so `agent-doc --version` now reports **0.35.504**. The JetBrains plugin hot-upgraded in your running IDE (classic 0.2.615). 27 supervisors and 4 controllers are marked to recycle at their next idle boundary. The 262 package (0.2.616) went to the Rider install, which loads it on next start.
 
 **tmux auto-sync works again.** The cause was the tmux auto-sync regression described earlier. Since the install, `ops.log` shows the plugin publishing under a new generation (`1403614970817234`). Every tab switch is `accepted=true`, and at 04:49:28Z a `caller_kind=automatic` layout published and converged with `effect=applied focus=focus_applied`.
@@ -179,7 +184,22 @@ If you'd rather ship now, I can release the integrated batch without the formal 
 8. Optional `{{arg}}` / `{{step.<name>.tail}}` placeholders.
 
 The full proposal, with precedent tables and an inventory of the existing deterministic mechanisms, is at `specs/proposals/deterministic-escape.md` on branch `design/deterministic-escape` (`798a46bb91`). It is merged into this release batch. Its `make check-fast` passed (10,563 tests).
-<!-- agent:boundary:6b4ac306 -->
+> **Chat prompt (#chatprompt):** does agent-doc have agent:todo implemented?
+
+### Re: agent:todo is implemented in the installed 0.35.504 — opus-5.5 · 2026-10-15T01:15-04:00
+
+**Yes, in the build installed locally now (0.35.504). It isn't in a published release yet: the v0.35.504 release is still running.**
+
+Before this batch (0.35.503 and earlier), `agent:todo` was only half-built. It was a registered component, and a guard stopped a `patch:todo` from removing items. But nothing added the component to an existing document, and there was no write flag. A `patch:todo` sent to a document without the component was quietly dumped into `agent:exchange`. That is why you never saw todos.
+
+What 0.35.504 adds:
+- **`--todo-add "<action>"`** works on `write`, `finalize`/`respond` and the MCP finalize tool, and can be repeated. It appends `- [ ] <action>` and never rewrites, reorders or removes your items. Adding an action that is already listed (open, checked or gated) does nothing, so a replayed closeout never duplicates a todo or reopens one you checked off.
+- **The section is created when missing:** `## Todo` + `<!-- agent:todo -->` goes after `agent:review`. If there's no review, it goes after backlog, then queue, then exchange, then at the end of the document. `patch:todo` creates it the same way instead of spilling into the exchange.
+- **Reminder:** when a closeout gates an item for review and no todo mentions that `#id`, the write prints a `[todo] advisory (#operatortodo)` line with the exact `--todo-add` command. It doesn't add the todo itself, because a gate can be waiting on CI or a third party rather than you.
+- **Agent instructions:** the skill and runbooks now tell agents to use `--todo-add`, and every harness copy was regenerated.
+
+This response uses it. It adds one real operator action, a live Remote Dev check for the GH #262 fix, so agent-doc should create the `## Todo` section in this document now.
+<!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -187,7 +207,6 @@ The full proposal, with precedent tables and an inventory of the existing determ
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#sensemixdeterministic]: Is there any precedence of agentic programming languages? How about an embedded programming language for markdown? How about a template-driven approach? Perhaps we can support functions + a built in `prompt("...")` function, support conditional logic? Could we use fenced python or js? If we support functions, could we setup events or hooks? Would Jupyter be a good inspiration or since agent-doc is more of a graph, some sort of event-driven graph programming language?~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/261
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/262
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/263
@@ -212,6 +231,12 @@ The full proposal, with precedent tables and an inventory of the existing determ
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 <!-- /agent:review -->
+
+## Todo
+
+<!-- agent:todo -->
+- [ ] Next Remote Dev session: confirm tab switches move tmux (GH #262 fix, plugin 263 0.2.617 after v0.35.504 is installed on the backend)
+<!-- /agent:todo -->
 
 <!-- agent:icebox -->
 - [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.

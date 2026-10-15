@@ -2959,6 +2959,7 @@ version = "0.35.503"
 dependencies = [
  "agent-doc-frontmatter",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

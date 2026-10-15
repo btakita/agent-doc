@@ -42,6 +42,9 @@ pub struct CapturedCloseoutMutationPlan {
     pub review_edit: Vec<String>,
     pub review_remove: Vec<String>,
     pub review_resolve: Vec<String>,
+    /// `#operatortodo`: operator actions appended to `agent:todo`.
+    #[serde(default)]
+    pub todo_add: Vec<String>,
     pub queue_completion_ids: Vec<String>,
     pub allow_replace_pending: bool,
     pub status: Option<String>,
@@ -103,6 +106,10 @@ pub struct CommandOptions {
     pub review_remove: Vec<String>,
     /// `#reviewrm`: ids to resolve out of `agent:review` into `agent:done`.
     pub review_resolve: Vec<String>,
+    /// `#operatortodo`: operator actions to append to `agent:todo` as
+    /// `- [ ] <action>` (repeatable). The component is created when absent;
+    /// existing items are never rewritten, and an identical action is a no-op.
+    pub todo_add: Vec<String>,
     /// Queue-head completion ids proven by the response/route but not backed by
     /// a `pending` mutation such as `--done`.
     pub queue_completion_ids: Vec<String>,
@@ -154,6 +161,7 @@ impl CommandOptions {
             review_edit: self.review_edit.clone(),
             review_remove: self.review_remove.clone(),
             review_resolve: self.review_resolve.clone(),
+            todo_add: self.todo_add.clone(),
             queue_completion_ids: self.queue_completion_ids.clone(),
             allow_replace_pending: self.allow_replace_pending,
             status: self.status.clone(),
@@ -200,6 +208,7 @@ impl CommandOptions {
             review_edit: plan.review_edit,
             review_remove: plan.review_remove,
             review_resolve: plan.review_resolve,
+            todo_add: plan.todo_add,
             queue_completion_ids: plan.queue_completion_ids,
             allow_replace_pending: plan.allow_replace_pending,
             pending_only: false,
@@ -253,6 +262,7 @@ impl CommandOptions {
             review_edit: Vec::new(),
             review_remove: Vec::new(),
             review_resolve: Vec::new(),
+            todo_add: Vec::new(),
             queue_completion_ids: queue_completion_ids.to_vec(),
             allow_replace_pending: false,
             pending_only: false,
@@ -291,6 +301,7 @@ impl CommandOptions {
             || !self.review_edit.is_empty()
             || !self.review_remove.is_empty()
             || !self.review_resolve.is_empty()
+            || !self.todo_add.is_empty()
     }
 
     /// `#queuemirrororder`: the write carries a tracked-work mutation whose only
@@ -352,5 +363,26 @@ mod tests {
         assert!(recovered.lint_override.is_none());
         assert!(recovered.commit_sibling.is_empty());
         assert!(recovered.commit_sibling_message.is_empty());
+    }
+
+    #[test]
+    fn todo_add_is_a_replayable_closeout_mutation() {
+        let file = Path::new("/tmp/session.md");
+        let mut options = CommandOptions::repair_replay(file, false, false, false, &[]);
+        assert!(!options.has_pending_mutation());
+        options.todo_add = vec!["Publish draft docs/note.md".to_string()];
+        assert!(options.has_pending_mutation());
+        assert!(!options.has_metadata_only_mutation());
+
+        let plan = options.captured_closeout_mutation_plan();
+        let recovered =
+            CommandOptions::recovery_from_captured_closeout_mutation_plan(file, plan.clone());
+        assert_eq!(recovered.todo_add, options.todo_add);
+
+        // Plans captured before `--todo-add` existed still deserialize.
+        let mut legacy = serde_json::to_value(&plan).unwrap();
+        legacy.as_object_mut().unwrap().remove("todo_add");
+        let legacy: CapturedCloseoutMutationPlan = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.todo_add.is_empty());
     }
 }

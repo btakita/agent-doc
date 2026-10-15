@@ -7,28 +7,7 @@ use agent_doc_element::element;
 use crate::PatchBlock;
 
 fn count_markdown_checklist_items(body: &str) -> usize {
-    body.lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            let Some(rest) = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "))
-                .or_else(|| trimmed.strip_prefix("+ "))
-                .or_else(|| {
-                    let digit_run = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
-                    if digit_run > 0 {
-                        trimmed[digit_run..].strip_prefix(". ")
-                    } else {
-                        None
-                    }
-                })
-            else {
-                return false;
-            };
-
-            rest.starts_with("[ ] ") || rest.starts_with("[x] ") || rest.starts_with("[/] ")
-        })
-        .count()
+    agent_doc_element::todo::count_checklist_items(body)
 }
 
 fn todo_component_checklist_count(current_content: &str) -> Result<Option<usize>> {

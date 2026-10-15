@@ -1264,6 +1264,132 @@ fn write_review_add_and_edit_mutate_review_component() {
     assert!(review.contains("- [/] [#rvw1] review text updated"));
 }
 
+/// `#operatortodo`: `--todo-add` creates `agent:todo` (after `agent:review`)
+/// when the document has none, appends `- [ ] <action>`, keeps every existing
+/// item, and treats an identical action as a no-op.
+#[test]
+fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    assert!(!fs::read_to_string(&doc).unwrap().contains("agent:todo"));
+    let first = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--review-add",
+            "id=rvw1 needs live verification",
+            "--todo-add",
+            "Verify [#rvw1] in a live pane",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&first.get_output().stderr);
+    assert!(
+        !stderr.contains("[todo] advisory"),
+        "a referenced gate needs no advisory: {stderr}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        content.matches("<!-- agent:todo -->").count(),
+        1,
+        "{content}"
+    );
+    assert_eq!(
+        component_body(&content, "todo"),
+        "- [ ] Verify [#rvw1] in a live pane"
+    );
+    let review_close = content.find("<!-- /agent:review -->").unwrap();
+    let todo_open = content.find("## Todo\n\n<!-- agent:todo -->").unwrap();
+    assert!(review_close < todo_open, "{content}");
+
+    // The operator checks the item off and adds their own note.
+    let edited = content.replace(
+        "- [ ] Verify [#rvw1] in a live pane\n",
+        "- [x] Verify [#rvw1] in a live pane\noperator note\n",
+    );
+    fs::write(&doc, &edited).unwrap();
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--todo-add",
+            "Verify [#rvw1] in a live pane",
+            "--todo-add",
+            "Publish draft docs/launch-note.md",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok again\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        content.matches("<!-- agent:todo -->").count(),
+        1,
+        "{content}"
+    );
+    assert_eq!(
+        component_body(&content, "todo"),
+        "- [x] Verify [#rvw1] in a live pane\noperator note\n- [ ] Publish draft docs/launch-note.md"
+    );
+}
+
+/// `#operatortodo`: a closeout that opens a human gate without any todo naming
+/// it gets a deterministic, non-blocking advisory naming the id and the
+/// `--todo-add` command; the write itself still succeeds.
+#[test]
+fn write_review_add_without_operator_todo_emits_advisory() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let assert_result = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--review-add",
+            "id=rvw2 waiting on operator",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(
+        stderr.contains("[todo] advisory (#operatortodo): this closeout gated #rvw2"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("--todo-add"), "stderr: {stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("agent:todo"),
+        "the advisory never writes a todo by itself:\n{content}"
+    );
+}
+
+/// `#operatortodo`: a `patch:todo` against a document without `agent:todo`
+/// creates the component instead of spilling the checklist into the exchange.
+#[test]
+fn write_patch_todo_creates_missing_todo_component() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(
+            "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] Publish draft docs/launch-note.md\n<!-- /patch:todo -->\n",
+        )
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        component_body(&content, "todo"),
+        "- [ ] Publish draft docs/launch-note.md"
+    );
+    assert!(
+        !component_body(&content, "exchange").contains("Publish draft"),
+        "todo checklist must not spill into exchange:\n{content}"
+    );
+    let pending_close = content.find("<!-- /agent:pending -->").unwrap();
+    let todo_open = content.find("<!-- agent:todo -->").unwrap();
+    assert!(pending_close < todo_open, "{content}");
+}
+
 /// `#closeouttrackedtxn`: one finalize/write envelope may close some review
 /// gates, move another review item to icebox, reactivate and edit a third item,
 /// and add fresh backlog work. Review exits must release their ids before adds,

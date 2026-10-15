@@ -54,6 +54,7 @@ pub struct FinalizeRerunCommand<'a> {
     pub pending_upsert: &'a [String],
     pub review_add: &'a [String],
     pub review_edit: &'a [String],
+    pub todo_add: &'a [String],
     pub allow_replace_pending: bool,
     pub pending_only: bool,
     pub status: Option<&'a str>,
@@ -408,6 +409,7 @@ pub fn finalize_rerun_command_base(command: FinalizeRerunCommand<'_>) -> Option<
     );
     push_repeated_args(&mut args, "--review-add", command.review_add);
     push_repeated_args(&mut args, "--review-edit", command.review_edit);
+    push_repeated_args(&mut args, "--todo-add", command.todo_add);
     if command.allow_replace_pending {
         args.push("--allow-replace-pending".to_string());
     }
@@ -1126,6 +1128,7 @@ mod tests {
             pending_upsert: &empty,
             review_add: &empty,
             review_edit: &empty,
+            todo_add: &empty,
             allow_replace_pending: false,
             pending_only: false,
             status: None,
@@ -1155,6 +1158,7 @@ mod tests {
         let pending_set_verify = vec!["gate1=test".to_string()];
         let review_add = vec!["review me".to_string()];
         let review_edit = vec!["review1=fix it".to_string()];
+        let todo_add = vec!["Publish draft docs/note.md".to_string()];
         let command = FinalizeRerunCommand {
             required_commit: true,
             file: Path::new("tasks/doc.md"),
@@ -1186,6 +1190,7 @@ mod tests {
             pending_upsert: &[],
             review_add: &review_add,
             review_edit: &review_edit,
+            todo_add: &todo_add,
             allow_replace_pending: true,
             pending_only: true,
             status: Some("working hard"),
@@ -1219,6 +1224,7 @@ mod tests {
         assert!(rendered.contains("--backlog-set-verify gate1=test"));
         assert!(rendered.contains("--review-add 'review me'"));
         assert!(rendered.contains("--review-edit 'review1=fix it'"));
+        assert!(rendered.contains("--todo-add 'Publish draft docs/note.md'"));
         assert!(rendered.contains("--allow-replace-pending"));
         assert!(rendered.contains("--backlog-only"));
         assert!(rendered.contains("--status 'working hard'"));

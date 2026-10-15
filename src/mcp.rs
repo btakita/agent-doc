@@ -316,6 +316,7 @@ fn finalize_input_schema() -> Value {
         "review_edit",
         "review_remove",
         "review_resolve",
+        "todo_add",
         "commit_sibling",
         "commit_sibling_message",
     ] {
@@ -693,6 +694,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         review_edit: string_vec_arg(args, "review_edit")?,
         review_remove: string_vec_arg(args, "review_remove")?,
         review_resolve: string_vec_arg(args, "review_resolve")?,
+        todo_add: string_vec_arg(args, "todo_add")?,
         queue_completion_ids: Vec::new(),
         allow_replace_pending: bool_arg(args, "allow_replace_pending", false)?,
         pending_only: false,
@@ -1249,6 +1251,7 @@ mod tests {
             "review_edit",
             "review_remove",
             "review_resolve",
+            "todo_add",
             "commit_sibling",
             "commit_sibling_message",
             "force_disk_operator_override",

@@ -2126,6 +2126,12 @@ struct WriteArgs {
     /// `agent:done` (the completion path; repeatable).
     #[arg(long = "review-resolve")]
     review_resolve: Vec<String>,
+    /// Append an operator action to `agent:todo` as `- [ ] <action>`
+    /// (`#operatortodo`, repeatable). Creates the `agent:todo` component when the
+    /// document has none; existing items are preserved and an identical action
+    /// is a no-op.
+    #[arg(long = "todo-add")]
+    todo_add: Vec<String>,
     /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
     #[arg(long = "allow-replace-pending", hide = true)]
     allow_replace_pending: bool,
@@ -5789,6 +5795,7 @@ fn try_main() -> anyhow::Result<()> {
                     review_edit: args.review_edit,
                     review_remove: args.review_remove,
                     review_resolve: args.review_resolve,
+                    todo_add: args.todo_add,
                     queue_completion_ids: Vec::new(),
                     allow_replace_pending: args.allow_replace_pending,
                     pending_only: args.pending_only,
@@ -5859,6 +5866,7 @@ fn try_main() -> anyhow::Result<()> {
                     review_edit: args.review_edit,
                     review_remove: args.review_remove,
                     review_resolve: args.review_resolve,
+                    todo_add: args.todo_add,
                     queue_completion_ids: Vec::new(),
                     allow_replace_pending: args.allow_replace_pending,
                     pending_only: args.pending_only,

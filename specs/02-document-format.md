@@ -145,9 +145,35 @@ Markdown checklist item to `todo` in the same cycle (`#operatortodo`). The item
 MAY refer to an existing `agent:review` or `agent:backlog` item by `#id`, or to a
 draft file path, instead of duplicating its details; publishing an unpublished
 draft is the canonical example. Such a reference does not transfer ownership or
-scheduling out of the referenced component. Template patches may update `todo`,
-but the write path rejects replacements that reduce its checklist-item count, so
-an agent MUST preserve every existing item when emitting `patch:todo`.
+scheduling out of the referenced component. The preferred write path is the
+granular `--todo-add "<action>"` closeout flag, which appends one
+`- [ ] <action>` line and never touches existing lines (an action already
+present in any checkbox state is a no-op). Template patches may also update
+`todo`, but the write path rejects replacements that reduce its checklist-item
+count, so an agent MUST preserve every existing item when emitting `patch:todo`.
+
+**Auto-created `todo` component.** Most session documents predate `agent:todo`.
+Every agent-side todo write (`--todo-add` or `patch:todo`) therefore creates the
+component when the document has none, instead of dropping the action or routing
+a `patch:todo` body into `exchange` as missing-component overflow. The binary
+inserts an empty `## Todo` section with `<!-- agent:todo -->` /
+`<!-- /agent:todo -->` markers at one deterministic, operator-facing location:
+directly after the last `agent:review` component; else after the last
+`agent:backlog` / legacy `agent:pending`; else after the last `agent:queue`;
+else after the last `agent:exchange`; else at the end of the document. Nothing
+outside the inserted section changes. A document that already has `agent:todo`
+is left structurally unchanged. The default template scaffold still places
+`## Todo` after `## Done`; only the auto-created section uses the review-adjacent
+slot.
+
+**Operator-todo advisory.** When a closeout opens a human gate in
+`agent:review` (`--review-add`, `--backlog-add-gated`, or `--backlog-gate`) and
+the resulting `agent:todo` does not reference that id as `#id`, the write prints
+a non-blocking `[todo] advisory (#operatortodo)` line naming the ids and the
+`--todo-add` command, and logs `operator_todo_advisory` to `ops.log`. The check
+is id-based only (no prose heuristics), never writes a todo by itself, and never
+fails the closeout: a gate blocked on CI or an external party rather than the
+operator simply needs no todo.
 
 **Exchange prompt defaults.** `<!-- agent:exchange preset="#review" -->` applies
 the named frontmatter prompt preset to each new exchange prompt, including the

@@ -1462,6 +1462,45 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     Ok(outcome.inserted.then_some(outcome.id))
 }
 
+/// `#operatortodo`: append one operator action to `agent:todo` as
+/// `- [ ] <action>`, creating the component when the document has none.
+///
+/// Every existing todo line is preserved byte-for-byte, and an action already
+/// present (in any checkbox state) is a no-op, so a replayed closeout never
+/// duplicates or resurrects a todo. Returns whether a line was appended.
+pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
+    let full_content = read_command_document(file, "todo_add")?;
+    let outcome = agent_doc_element::todo::add_todo_item_to_document(&full_content, text)?;
+    if outcome.inserted {
+        persist_pending_write(file, &full_content, &outcome.content)?;
+        pending_receipt!(
+            "[todo] todo-add: {}appended operator action to agent:todo",
+            if outcome.created_component {
+                "created agent:todo and "
+            } else {
+                ""
+            }
+        );
+    } else {
+        pending_receipt!("[todo] todo-add: operator action already present in agent:todo");
+    }
+    Ok(outcome.inserted)
+}
+
+/// `#operatortodo`: ids from `ids` that the current document's `agent:todo`
+/// does not reference as `#id`. Reads the same (possibly virtual) document as
+/// the surrounding tracked-work transaction.
+pub fn todo_unreferenced_ids(file: &Path, ids: &[String]) -> Result<Vec<String>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let full_content = read_command_document(file, "todo_unreferenced_ids")?;
+    Ok(agent_doc_element::todo::todo_unreferenced_ids(
+        &full_content,
+        ids,
+    ))
+}
+
 /// Edit a review item's text, preserving its hash id.
 pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
     let full_content = read_command_document(file, "review_edit")?;
@@ -3220,5 +3259,60 @@ mod tests {
             .unwrap_or_default();
         assert!(done_body.contains("[#aa11]"), "{after}");
         assert!(done_body.contains("finished work"), "{after}");
+    }
+
+    #[test]
+    fn todo_add_creates_missing_todo_after_review_and_is_idempotent() {
+        let (_tmp, doc) = doc_with_review("- [/] [#aa11] gated work\n");
+        let before = fs::read_to_string(&doc).unwrap();
+        assert!(!before.contains("agent:todo"));
+
+        assert!(force_pending(|| todo_add(
+            &doc,
+            "Verify [#aa11] in a live pane"
+        )));
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains(
+                "<!-- /agent:review -->\n\n## Todo\n\n<!-- agent:todo -->\n- [ ] Verify [#aa11] in a live pane\n<!-- /agent:todo -->\n"
+            ),
+            "{after}"
+        );
+        // Only the todo section was added; review/backlog are untouched.
+        assert!(after.contains("- [/] [#aa11] gated work"), "{after}");
+        assert!(after.contains("[#keep1] unrelated open item"), "{after}");
+
+        // Replaying the same action is a no-op.
+        assert!(!force_pending(|| todo_add(
+            &doc,
+            "Verify [#aa11] in a live pane"
+        )));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), after);
+        assert!(
+            force_pending(|| todo_unreferenced_ids(
+                &doc,
+                &["aa11".to_string(), "bb22".to_string()]
+            )) == vec!["bb22".to_string()]
+        );
+    }
+
+    #[test]
+    fn todo_add_preserves_existing_operator_items() {
+        let (tmp, doc) = setup_test_dir();
+        fs::write(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:todo -->\n- [x] Done by operator\nnote line\n- [ ] Open one\n<!-- /agent:todo -->\n",
+        )
+        .unwrap();
+        assert!(force_pending(|| todo_add(
+            &doc,
+            "Publish draft docs/note.md"
+        )));
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains("<!-- agent:todo -->\n- [x] Done by operator\nnote line\n- [ ] Open one\n- [ ] Publish draft docs/note.md\n<!-- /agent:todo -->"),
+            "{after}"
+        );
+        drop(tmp);
     }
 }

@@ -528,7 +528,19 @@ in the same cycle. Start with the action and keep only the context needed to act
   in `agent:backlog`; a human gate stays in `agent:review`; `agent:todo` only
   records the operator action.
 
-Emit the updated component through `<!-- patch:todo -->` in the response. The
-patch is a guarded replacement, so reproduce every existing checklist item plus
-the brief new or updated item. Never use it to prune operator TODOs; the write
-path rejects any replacement that lowers the checklist-item count.
+Record it with the closeout flag `--todo-add "<action>"` (repeatable), for
+example `agent-doc write --commit <FILE> --todo-add "Verify [#gate1] in a live pane"`.
+The binary appends `- [ ] <action>`, creates `agent:todo` when the document has
+none (right after `agent:review`), keeps every existing checklist item, and
+skips an action that is already listed. A missing `agent:todo` component is
+never a reason to skip the TODO.
+
+`<!-- patch:todo -->` also works and also creates a missing component, but it is
+a guarded replacement: reproduce every existing checklist item plus the brief
+new or updated item. Never use it to prune operator TODOs; the write path
+rejects any replacement that lowers the checklist-item count.
+
+When a closeout opens an `agent:review` gate that `agent:todo` does not mention,
+the write prints `[todo] advisory (#operatortodo)`. If that gate waits on the
+operator, add the TODO next cycle (`--backlog-only --todo-add ...` for a
+tracked-work-only closeout); a gate waiting on CI or a third party needs none.

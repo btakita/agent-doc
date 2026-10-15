@@ -980,6 +980,7 @@ mod th {
                     review_edit: Vec::new(),
                     review_remove: Vec::new(),
                     review_resolve: Vec::new(),
+                    todo_add: Vec::new(),
                     queue_completion_ids: Vec::new(),
                     allow_replace_pending: false,
                     pending_only: false,

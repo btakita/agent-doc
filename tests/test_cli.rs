@@ -30310,6 +30310,8 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
             "`agent:review` or `agent:backlog`",
             "draft file path",
             "every existing checklist item",
+            "--todo-add",
+            "creates `agent:todo`",
         ] {
             assert!(
                 surface.contains(required),
@@ -30326,6 +30328,10 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
         "`agent:review` or `agent:backlog`",
         "draft file path",
         "MUST preserve every existing item",
+        "--todo-add",
+        "**Auto-created `todo` component.**",
+        "directly after the last `agent:review` component",
+        "**Operator-todo advisory.**",
     ] {
         assert!(
             document_spec.contains(required),

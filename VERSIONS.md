@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.502
+
+- **Nested projects inherit workspace prompt presets.** Every ancestor
+  `.agent-doc/project.md` within the configured root ceiling contributes
+  defaults; nearer project values overlay parents, and document declarations
+  remain the final override, including unset-value masking. Malformed or
+  unreadable ancestor configuration fails closed with the responsible path.
+- **JetBrains 263 modular packages get truthful restart-required guidance
+  (GH #259).** The current 263 package line is classified as modular rather
+  than legacy, records `declined_by=modular_package`, and reports that the
+  installed files only need an IDE restart without claiming that replacement
+  was refused or prescribing an ineffective local reinstall.
+- **Remote Dev tab selection remains live without a frontend module
+  (GH #260).** The 263 backend observes guest selection while frontend snapshot
+  authority is absent, retires that fallback once frontend authority arrives,
+  treats an empty backend window list as unknown rather than closure evidence,
+  and records accepted and rejected snapshot ingress diagnostics.
+
 ## 0.35.501
 
 - **JetBrains 262/263 modular packages load their private runtime correctly
@@ -29,10 +47,6 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **Project-wide prompt preset setup is documented and contract-tested.** A
   copy-paste `.agent-doc/project.md` example explains quoted `#name` keys,
   structured runbooks, live inheritance, and session-local overrides.
-- **Nested projects inherit workspace prompt presets.** Every ancestor
-  `.agent-doc/project.md` within the configured root ceiling contributes
-  defaults; nearer project values overlay parents, and document declarations
-  remain the final override, including unset-value masking.
 - **The tag release helper accepts dedicated Lazily dependency
   configurations.** Its pin resolver now reads the exact coordinate across
   `compileOnly`, test, and embedded configurations, requires one unique

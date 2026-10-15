@@ -378,7 +378,8 @@ mod tests {
     /// operator edited the claimed `#subagents: <url>` into
     /// `#subagents: #gh-fix <url>` while its subagent worked, and the line
     /// re-appeared in `queue_subagent_dispatch` as new and unclaimed. The
-    /// claim must follow the edit; a retarget to another issue must not.
+    /// claim must follow the edit, including an in-place URL edit
+    /// (`#claimfollowedit`); a line added elsewhere must not inherit it.
     #[test]
     fn edited_claimed_line_keeps_its_claim_and_is_not_redispatched() {
         let dir = tempfile::tempdir().unwrap();
@@ -434,16 +435,41 @@ mod tests {
         // The subagent can still refresh/release by the text it was handed.
         crate::queue_claim::refresh(&file, &handle, "subagent:gh120", 600).unwrap();
 
-        let retarget = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/121";
-        let retargeted = doc(&["current task", retarget]);
-        std::fs::write(&file, &retargeted).unwrap();
-        assert_eq!(
-            pending_subagent_dispatch_for_content(&file, &retargeted).unwrap(),
-            vec![retarget.to_string()],
-            "a different issue is a different task: unclaimed, offered"
+        // `#claimfollowedit`: an in-place edit of the claimed line's URL is
+        // still the claimed line. The claim follows it, and steering forwards
+        // the edit to the owner instead of offering a second worker.
+        let in_place = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/121";
+        let edited_in_place = doc(&["current task", in_place]);
+        std::fs::write(&file, &edited_in_place).unwrap();
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &edited_in_place)
+                .unwrap()
+                .is_empty(),
+            "an in-place edit of a claimed line is never new dispatch work"
         );
         assert!(
-            !crate::queue_claim::claimed_items_for_content(&file, &retargeted).claims(retarget)
+            crate::queue_claim::claimed_items_for_content(&file, &edited_in_place).claims(in_place)
+        );
+        assert_eq!(
+            crate::queue_claim::prune_closed_claims(&file, &edited_in_place).unwrap(),
+            0
+        );
+
+        // Deleting the claimed line and adding another issue elsewhere is a
+        // closed line plus new work: the claim is released, the new line is
+        // offered.
+        let other = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122";
+        let replaced = doc(&[other, "current task"]);
+        std::fs::write(&file, &replaced).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &replaced).unwrap(),
+            vec![other.to_string()],
+            "a line added elsewhere is a different task: unclaimed, offered"
+        );
+        assert!(!crate::queue_claim::claimed_items_for_content(&file, &replaced).claims(other));
+        assert_eq!(
+            crate::queue_claim::prune_closed_claims(&file, &replaced).unwrap(),
+            1
         );
     }
 

@@ -20,16 +20,30 @@
 //! `#gh-fix`) are stripped. So `🚧 do [#a]`, `#subagents do [#a]` and `[#a]`
 //! are one claim, and an operator edit of a claimed
 //! `#subagents: <url>` into `#subagents: #gh-fix <url>` keeps its claim
-//! instead of re-appearing as new, unclaimed dispatch work. Changing the
-//! substance — a different `#id`, URL or prose — is a retarget and does not
-//! inherit the claim.
+//! instead of re-appearing as new, unclaimed dispatch work.
+//!
+//! # Line binding (`#claimfollowedit`)
+//!
+//! The identity names the work, but a claim is bound to the queue LINE that
+//! carries it. Each claim stores a [`ClaimAnchor`] (the queue's heads and the
+//! claimed line indexes), and [`QueueClaimLedger::follow_edits`] aligns it
+//! with the live heads by the edit rule mid-turn steering reports
+//! ([`crate::queue_head_alignment`]). An in-place edit of a claimed free-text
+//! line, such as a corrected URL, carries the claim to the edited line, and
+//! steering forwards that edit to the claim's owner. Observed 2026-10-15 on
+//! agent-doc-bugs.md: the operator corrected `…/agent-foc/issues/272` to
+//! `…/agent-doc/issues/272`; the text-keyed claim matched nothing, was pruned
+//! at closeout, and the edited line was offered to a second worker. A line
+//! with a different `#id`, or a claimed line deleted while a similar one is
+//! added elsewhere, is a different task and does not inherit the claim.
 //!
 //! # Lifetime
 //!
 //! A claim ends on whichever comes first:
 //!
-//! * **closure** — the item is no longer a live head in the queue (it was
-//!   answered and struck, reaped, or deleted by the operator). A claim on an
+//! * **closure** — the item is no longer a live head in the queue, even after
+//!   following edits of its line (it was answered and struck, reaped, or
+//!   deleted by the operator). A claim on an
 //!   item that no longer exists is meaningless, so it is ignored on read and
 //!   pruned at closeout reconciliation;
 //! * **explicit release** — `agent-doc queue release` when the worker reports
@@ -104,7 +118,36 @@ pub struct QueueClaim {
     /// written before the field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_session: Option<ClaimOwnerSession>,
+    /// Where the claimed line sits in the queue (`#claimfollowedit`): the
+    /// queue's heads when the claim was made or last followed, and which of
+    /// them the claim holds. An operator edit of a claimed line carries the
+    /// claim to the edited line by aligning this snapshot with the live heads
+    /// (the same edit rule mid-turn steering reports). `None` for a claim
+    /// stored before the field existed; it is anchored on the next read that
+    /// sees its line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<ClaimAnchor>,
+    /// Earlier `item_text`s this claim followed from, oldest first
+    /// (`#claimfollowedit`), so `release` and `--refresh` by the text the
+    /// worker was handed still find the claim after an operator edit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub followed_from: Vec<String>,
 }
+
+/// A claim's position in its queue (`#claimfollowedit`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimAnchor {
+    /// The queue's live heads, normalized
+    /// ([`crate::queue_head_alignment::normalize_queue_head_text`]), in order.
+    pub heads: Vec<String>,
+    /// Indexes into `heads` of the lines the claim holds: every line with the
+    /// claim's identity (two identical lines are one claim) plus every line
+    /// edited from one of them since the claim was made.
+    pub slots: Vec<usize>,
+}
+
+/// How many earlier texts a claim remembers in `followed_from`.
+const FOLLOWED_FROM_LIMIT: usize = 8;
 
 impl QueueClaim {
     pub fn is_expired(&self, now_secs: u64) -> bool {
@@ -245,6 +288,25 @@ pub struct QueueClaimLedger {
     pub claims: Vec<QueueClaim>,
 }
 
+/// Why [`QueueClaimLedger::prune_detailed`] dropped a claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimPruneCause {
+    /// Its TTL ran out.
+    Expired,
+    /// No live head carries its line any more (answered, reaped, or deleted),
+    /// after following any operator edit of the line.
+    Closed,
+}
+
+impl ClaimPruneCause {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Expired => "expired",
+            Self::Closed => "closed",
+        }
+    }
+}
+
 /// Outcome of [`QueueClaimLedger::claim`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaimOutcome {
@@ -340,13 +402,15 @@ impl QueueClaimLedger {
     ) -> ClaimOutcome {
         let identity = claim_identity(item);
         let expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
-        let fresh = QueueClaim {
+        let mut fresh = QueueClaim {
             identity: identity.clone(),
             item_text: item.trim().to_string(),
             owner: owner.trim().to_string(),
             claimed_at_secs: now_secs,
             expires_at_secs,
             owner_session,
+            anchor: None,
+            followed_from: Vec::new(),
         };
         match self
             .claims
@@ -359,6 +423,10 @@ impl QueueClaimLedger {
                 } else {
                     ClaimOutcome::Reassigned
                 };
+                // The same line, re-claimed: it keeps its place in the queue
+                // and the texts it followed from.
+                fresh.anchor = existing.anchor.take();
+                fresh.followed_from = std::mem::take(&mut existing.followed_from);
                 *existing = fresh;
                 outcome
             }
@@ -439,23 +507,59 @@ impl QueueClaimLedger {
             .position(|claim| claim.identity == identity)
         {
             Some(index) => index,
-            // `#claimfollowsedit`: released by the text the worker was given,
-            // after the claim followed an operator annotation.
-            None => {
-                let continuing: Vec<usize> = self
-                    .claims
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, claim)| is_edit_continuation(&identity, &claim.identity))
-                    .map(|(index, _)| index)
-                    .collect();
-                match continuing.as_slice() {
-                    [only] => *only,
-                    _ => return None,
+            // `#claimfollowedit`: released by the text the worker was given,
+            // after the claim followed an operator edit of its line.
+            None => match self.followed_claim_index(item) {
+                Some(index) => index,
+                // `#claimfollowsedit`: an annotation followed by a claim
+                // stored before `followed_from` existed.
+                None => {
+                    let continuing: Vec<usize> = self
+                        .claims
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, claim)| is_edit_continuation(&identity, &claim.identity))
+                        .map(|(index, _)| index)
+                        .collect();
+                    match continuing.as_slice() {
+                        [only] => *only,
+                        _ => return None,
+                    }
                 }
-            }
+            },
         };
         Some(self.claims.remove(index))
+    }
+
+    /// The one claim that followed an operator edit away from `item`
+    /// (`#claimfollowedit`): its `followed_from` holds a text with `item`'s
+    /// identity. `None` when no claim, or more than one, did.
+    fn followed_claim_index(&self, item: &str) -> Option<usize> {
+        let identity = claim_identity(item);
+        let followed: Vec<usize> = self
+            .claims
+            .iter()
+            .enumerate()
+            .filter(|(_, claim)| {
+                claim
+                    .followed_from
+                    .iter()
+                    .any(|text| claim_identity(text) == identity)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        match followed.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        }
+    }
+
+    /// The current text of the one claim that followed an operator edit away
+    /// from `item` (`#claimfollowedit`), so `claim`, `--refresh` and `release`
+    /// by the text a worker was handed resolve to the line it became.
+    pub fn followed_item_text(&self, item: &str) -> Option<&str> {
+        self.followed_claim_index(item)
+            .map(|index| self.claims[index].item_text.as_str())
     }
 
     /// Claims that are neither expired nor closed. `live_heads` is the set of
@@ -474,37 +578,107 @@ impl QueueClaimLedger {
             .collect()
     }
 
-    /// Carry claims across operator annotations of their head
-    /// (`#claimfollowsedit`). A live (unexpired) claim whose identity is no
-    /// longer a live head follows the ONE live head that is an
-    /// [`is_edit_continuation`] of it and that no other claim holds: the
-    /// operator appended a note (`<url>` -> `<url>: note this is in a Coder
-    /// environment`), added or dropped a trailing period, or trimmed such a
-    /// note. The claim is re-keyed to that head and its `item_text` becomes the
-    /// head's text (so the on-load [`Self::rekey`] keeps it). Ambiguous matches
-    /// (two candidate heads, or two orphaned claims for one head) never follow.
-    /// Returns `(previous item_text, new item_text)` per followed claim.
+    /// Carry claims across operator edits of their lines (`#claimfollowedit`,
+    /// `#claimfollowsedit`) and re-anchor every live claim on `live_heads`.
+    ///
+    /// A claim is bound to its LINE, not to the line's text. Each claim's
+    /// [`ClaimAnchor`] is aligned with `live_heads` by the rule mid-turn
+    /// steering uses to report `previous` -> `verbatim` edits
+    /// ([`crate::queue_head_alignment::pair_queue_heads`]): an unchanged or
+    /// moved line pairs by identity, an in-place edit of free text pairs by
+    /// similarity, and a line with a different `#id`, or a line deleted in one
+    /// place and added in another, does not pair. A live (unexpired) claim
+    /// whose identity is no longer a live head follows the line its anchored
+    /// line(s) became, so `#gh-fix …/agent-foc/issues/272` edited into
+    /// `#gh-fix …/agent-doc/issues/272` stays claimed by the same owner and is
+    /// never re-offered as new dispatch work. Two identical claimed lines are
+    /// one claim: it holds while either line (or a line edited from either)
+    /// is live, and when several descendants differ it follows the first in
+    /// queue order rather than being dropped. A descendant whose identity
+    /// another live claim holds is never taken over. A claim with no anchor
+    /// (stored before anchors existed) falls back to the word-boundary
+    /// annotation rule ([`is_edit_continuation`]).
+    ///
+    /// The followed claim's `item_text` becomes the line's text (so the
+    /// on-load [`Self::rekey`] keeps it) and its previous text is remembered
+    /// in `followed_from`. Returns `(previous item_text, new item_text)` per
+    /// followed claim.
     pub fn follow_edits(&mut self, now_secs: u64, live_heads: &[String]) -> Vec<(String, String)> {
-        let live: Vec<(QueueItemIdentity, &String)> = live_heads
+        use crate::queue_head_alignment::{
+            QueueHeadPairing, normalize_queue_head_text, pair_queue_heads,
+        };
+        let norms: Vec<String> = live_heads
             .iter()
-            .map(|head| (claim_identity(head), head))
+            .map(|head| normalize_queue_head_text(head))
             .collect();
+        let live: Vec<QueueItemIdentity> =
+            live_heads.iter().map(|head| claim_identity(head)).collect();
         let held: HashSet<QueueItemIdentity> = self
             .claims
             .iter()
             .filter(|claim| !claim.is_expired(now_secs))
             .map(|claim| claim.identity.clone())
             .collect();
+
+        // Per claim: the live lines descending from its anchored lines.
+        let mut pairings: Vec<(&Vec<String>, QueueHeadPairing)> = Vec::new();
+        let mut descendants: Vec<Vec<usize>> = Vec::with_capacity(self.claims.len());
+        for claim in &self.claims {
+            let mut lines: Vec<usize> = Vec::new();
+            if claim.is_expired(now_secs) {
+                descendants.push(lines);
+                continue;
+            }
+            if let Some(anchor) = &claim.anchor {
+                let pairing = match pairings
+                    .iter()
+                    .position(|(heads, _)| **heads == anchor.heads)
+                {
+                    Some(index) => &pairings[index].1,
+                    None => {
+                        pairings.push((&anchor.heads, pair_queue_heads(&anchor.heads, &norms)));
+                        &pairings[pairings.len() - 1].1
+                    }
+                };
+                lines.extend(
+                    anchor
+                        .slots
+                        .iter()
+                        .filter_map(|&slot| pairing.new_index_of(slot)),
+                );
+            }
+            lines.extend(
+                live.iter()
+                    .enumerate()
+                    .filter(|(_, id)| **id == claim.identity)
+                    .map(|(index, _)| index),
+            );
+            // Never a line another live claim holds.
+            lines.retain(|&n| live[n] == claim.identity || !held.contains(&live[n]));
+            lines.sort_unstable();
+            lines.dedup();
+            descendants.push(lines);
+        }
+        drop(pairings);
+
         let mut proposals: Vec<(usize, usize)> = Vec::new();
         for (claim_idx, claim) in self.claims.iter().enumerate() {
-            if claim.is_expired(now_secs) || live.iter().any(|(id, _)| *id == claim.identity) {
+            if claim.is_expired(now_secs) || live.contains(&claim.identity) {
+                continue;
+            }
+            if let Some(&first) = descendants[claim_idx].first() {
+                proposals.push((claim_idx, first));
+                continue;
+            }
+            if claim.anchor.is_some() {
+                // Anchored, and no line descends from it: the line closed.
                 continue;
             }
             let candidates: Vec<usize> = live
                 .iter()
                 .enumerate()
-                .filter(|(_, (id, _))| !held.contains(id))
-                .filter(|(_, (id, _))| is_edit_continuation(&claim.identity, id))
+                .filter(|(_, id)| !held.contains(id))
+                .filter(|(_, id)| is_edit_continuation(&claim.identity, id))
                 .map(|(idx, _)| idx)
                 .collect();
             if let [only] = candidates.as_slice() {
@@ -513,14 +687,50 @@ impl QueueClaimLedger {
         }
         let mut followed = Vec::new();
         for (claim_idx, head_idx) in &proposals {
-            if proposals.iter().filter(|(_, h)| h == head_idx).count() != 1 {
+            // Two orphaned claims landing on one line: never guess.
+            if proposals
+                .iter()
+                .filter(|(_, h)| live[*h] == live[*head_idx])
+                .count()
+                != 1
+            {
                 continue;
             }
-            let (identity, text) = &live[*head_idx];
+            let text = live_heads[*head_idx].trim().to_string();
             let claim = &mut self.claims[*claim_idx];
-            let previous = std::mem::replace(&mut claim.item_text, (*text).clone());
-            claim.identity = identity.clone();
-            followed.push((previous, (*text).clone()));
+            let previous = std::mem::replace(&mut claim.item_text, text.clone());
+            claim.identity = live[*head_idx].clone();
+            if !claim.followed_from.contains(&previous) {
+                claim.followed_from.push(previous.clone());
+                let excess = claim
+                    .followed_from
+                    .len()
+                    .saturating_sub(FOLLOWED_FROM_LIMIT);
+                claim.followed_from.drain(..excess);
+            }
+            followed.push((previous, text));
+        }
+
+        // Re-anchor every live claim whose line is in view, so the next
+        // alignment starts from this snapshot. A claim whose line is not in
+        // view (a lagging disk read, or a closed line) keeps its anchor.
+        for (claim_idx, claim) in self.claims.iter_mut().enumerate() {
+            if claim.is_expired(now_secs) || !live.contains(&claim.identity) {
+                continue;
+            }
+            let mut slots = descendants[claim_idx].clone();
+            slots.extend(
+                live.iter()
+                    .enumerate()
+                    .filter(|(_, id)| **id == claim.identity)
+                    .map(|(index, _)| index),
+            );
+            slots.sort_unstable();
+            slots.dedup();
+            claim.anchor = Some(ClaimAnchor {
+                heads: norms.clone(),
+                slots,
+            });
         }
         followed
     }
@@ -585,6 +795,8 @@ impl QueueClaimLedger {
                     claimed_at_secs: source_claim.claimed_at_secs,
                     expires_at_secs: source_claim.expires_at_secs,
                     owner_session: source_claim.owner_session.clone(),
+                    anchor: None,
+                    followed_from: Vec::new(),
                 }),
             }
             transferred.push((source.clone(), id, source_claim.owner));
@@ -611,12 +823,28 @@ impl QueueClaimLedger {
         now_secs: u64,
         live_heads: Option<&HashSet<QueueItemIdentity>>,
     ) -> usize {
-        let before = self.claims.len();
-        self.claims.retain(|claim| {
-            !claim.is_expired(now_secs)
-                && live_heads.is_none_or(|live| live.contains(&claim.identity))
-        });
-        before - self.claims.len()
+        self.prune_detailed(now_secs, live_heads).len()
+    }
+
+    /// [`Self::prune`], returning each dropped claim and why.
+    pub fn prune_detailed(
+        &mut self,
+        now_secs: u64,
+        live_heads: Option<&HashSet<QueueItemIdentity>>,
+    ) -> Vec<(QueueClaim, ClaimPruneCause)> {
+        let mut pruned = Vec::new();
+        let mut kept = Vec::with_capacity(self.claims.len());
+        for claim in std::mem::take(&mut self.claims) {
+            if claim.is_expired(now_secs) {
+                pruned.push((claim, ClaimPruneCause::Expired));
+            } else if live_heads.is_some_and(|live| !live.contains(&claim.identity)) {
+                pruned.push((claim, ClaimPruneCause::Closed));
+            } else {
+                kept.push(claim);
+            }
+        }
+        self.claims = kept;
+        pruned
     }
 
     /// The claimed identities a drainability computation must skip.
@@ -658,9 +886,11 @@ pub fn claim_item_handle(item: &str) -> String {
 /// inside a word, so `.../issues/126` -> `.../issues/126: note …` and
 /// `… works` -> `… works.` continue the work while `.../issues/126` ->
 /// `.../issues/1260` does not. Id-backed identities never need this (an edit
-/// that keeps the id keeps the identity), and a mid-text rewrite (typo fix,
-/// different URL) is still a retarget. The shorter side must carry at least
-/// eight alphanumerics so a stub cannot capture an unrelated line.
+/// that keeps the id keeps the identity). This is the fallback for a claim
+/// with no [`ClaimAnchor`] (stored before anchors existed); an anchored claim
+/// follows any in-place edit of its line (`#claimfollowedit`). The shorter
+/// side must carry at least eight alphanumerics so a stub cannot capture an
+/// unrelated line.
 pub fn is_edit_continuation(old: &QueueItemIdentity, new: &QueueItemIdentity) -> bool {
     let (QueueItemIdentity::FreeText(old), QueueItemIdentity::FreeText(new)) = (old, new) else {
         return false;
@@ -1454,6 +1684,8 @@ mod tests {
                     claimed_at_secs: 1,
                     expires_at_secs: 50,
                     owner_session: None,
+                    anchor: None,
+                    followed_from: Vec::new(),
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -1462,6 +1694,8 @@ mod tests {
                     claimed_at_secs: 2,
                     expires_at_secs: 90,
                     owner_session: None,
+                    anchor: None,
+                    followed_from: Vec::new(),
                 },
             ],
         };
@@ -1612,6 +1846,161 @@ mod tests {
                     10_000,
                     &["#gh-fix https://x.test/issues/126: note".to_string()]
                 )
+                .is_empty()
+        );
+    }
+
+    fn strings(lines: &[&str]) -> Vec<String> {
+        lines.iter().map(|line| line.to_string()).collect()
+    }
+
+    /// `#claimfollowedit` (agent-doc-bugs.md, 2026-10-15): the queue held two
+    /// copies of `#gh-fix …/agent-foc/issues/272` (a duplication bug) when the
+    /// coordinator claimed it. The operator removed the duplicate block, then
+    /// corrected the line to `…/agent-doc/issues/272`. Keyed by text, the claim
+    /// matched no live head, steering offered the edited line as new subagent
+    /// work, and closeout logged `queue_claim_prune pruned=1`. The `#270` line
+    /// "kept" its claim only because that claim had been made on the other
+    /// copy, whose text already read `agent-doc`. A claim binds to its line:
+    /// the in-place edit carries it.
+    #[test]
+    fn a_claim_follows_an_in_place_edit_of_its_line_through_a_duplicate_cleanup() {
+        let foc = "#gh-fix https://github.com/btakita/agent-foc/issues/272";
+        let fixed = "#gh-fix https://github.com/btakita/agent-doc/issues/272";
+        let doubled = strings(&[
+            "#gh-fix https://github.com/btakita/agent-doc/issues/271",
+            foc,
+            "release + publish",
+            "#gh-fix https://github.com/btakita/agent-doc/issues/271",
+            foc,
+            "release + publish",
+        ]);
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(foc, "subagent:gh272", 100, 3600);
+        assert!(ledger.follow_edits(100, &doubled).is_empty());
+        let anchor = ledger.claims[0]
+            .anchor
+            .clone()
+            .expect("anchored on its lines");
+        assert_eq!(anchor.slots, vec![1, 4], "both identical lines are held");
+
+        // The operator deletes the duplicate block: the claim still holds.
+        let single = strings(&[
+            "#gh-fix https://github.com/btakita/agent-doc/issues/271",
+            foc,
+            "release + publish",
+        ]);
+        assert!(ledger.follow_edits(110, &single).is_empty());
+        assert_eq!(ledger.claims[0].anchor.as_ref().unwrap().slots, vec![1]);
+
+        // ...then corrects the URL in place.
+        let corrected = strings(&[
+            "#gh-fix https://github.com/btakita/agent-doc/issues/271",
+            fixed,
+            "release + publish",
+        ]);
+        let followed = ledger.follow_edits(120, &corrected);
+        assert_eq!(followed, vec![(foc.to_string(), fixed.to_string())]);
+        assert_eq!(ledger.claims[0].identity, claim_identity(fixed));
+        assert_eq!(ledger.claims[0].owner, "subagent:gh272");
+        assert_eq!(ledger.claims[0].followed_from, vec![foc.to_string()]);
+        let live: HashSet<_> = corrected.iter().map(|head| claim_identity(head)).collect();
+        assert!(ledger.claimed_items(120, Some(&live)).claims(fixed));
+        assert_eq!(ledger.prune(120, Some(&live)), 0, "never pruned as closed");
+
+        // The worker still names it by the text it was handed.
+        assert_eq!(ledger.followed_item_text(foc), Some(fixed));
+        assert!(
+            ledger.release(foc).is_some(),
+            "released by the original text"
+        );
+        assert!(ledger.claims.is_empty());
+    }
+
+    /// Two identical claimed lines are one claim. Editing one copy leaves the
+    /// claim on the other; once that copy goes too, the claim follows the
+    /// edited copy instead of closing.
+    #[test]
+    fn a_duplicate_claimed_line_keeps_the_claim_until_every_copy_is_gone() {
+        let foc = "#gh-fix https://x.test/agent-foc/issues/272";
+        let fixed = "#gh-fix https://x.test/agent-doc/issues/272";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(foc, "subagent:gh272", 100, 3600);
+        ledger.follow_edits(100, &strings(&[foc, "inline", foc]));
+
+        let one_edited = strings(&[fixed, "inline", foc]);
+        assert!(ledger.follow_edits(110, &one_edited).is_empty());
+        assert_eq!(ledger.claims[0].identity, claim_identity(foc));
+        assert_eq!(
+            ledger.claims[0].anchor.as_ref().unwrap().slots,
+            vec![0, 2],
+            "the edited copy stays one of the claim's lines"
+        );
+
+        let other_deleted = strings(&[fixed, "inline"]);
+        assert_eq!(
+            ledger.follow_edits(120, &other_deleted),
+            vec![(foc.to_string(), fixed.to_string())]
+        );
+        assert_eq!(ledger.claims[0].identity, claim_identity(fixed));
+    }
+
+    /// A deleted claimed line closes its claim, and a line with a different
+    /// `#id`, or a similar line added in another place, never inherits it.
+    #[test]
+    fn a_claim_does_not_follow_a_deleted_line_or_a_different_id() {
+        let line = "#gh-fix https://x.test/issues/7";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(line, "subagent:gh7", 100, 3600);
+        ledger.follow_edits(100, &strings(&["inline", line, "release"]));
+
+        let deleted = strings(&["inline", "release"]);
+        assert!(ledger.follow_edits(110, &deleted).is_empty());
+        let live: HashSet<_> = deleted.iter().map(|head| claim_identity(head)).collect();
+        let pruned = ledger.clone().prune_detailed(110, Some(&live));
+        assert_eq!(pruned.len(), 1);
+        assert_eq!(pruned[0].1, ClaimPruneCause::Closed);
+
+        let elsewhere = strings(&["#gh-fix https://x.test/issues/8", "inline", "release"]);
+        assert!(ledger.follow_edits(110, &elsewhere).is_empty());
+
+        let mut ids = QueueClaimLedger::default();
+        ids.claim("do [#a]", "subagent:a", 100, 3600);
+        ids.follow_edits(100, &strings(&["inline", "do [#a]"]));
+        assert!(
+            ids.follow_edits(110, &strings(&["inline", "do [#b]"]))
+                .is_empty(),
+            "a different id is a different item"
+        );
+    }
+
+    /// An edited line another live claim already holds is never taken over,
+    /// and an expired claim never follows.
+    #[test]
+    fn a_claim_never_follows_onto_another_claims_line_or_after_expiry() {
+        let a = "#gh-fix https://x.test/issues/10";
+        let b = "#gh-fix https://x.test/issues/11";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(a, "subagent:a", 100, 3600);
+        ledger.claim(b, "subagent:b", 100, 3600);
+        ledger.follow_edits(100, &strings(&[a, b]));
+        // `a` edited into `b`'s text: that line is `b`'s claim, not `a`'s.
+        assert!(
+            ledger
+                .clone()
+                .follow_edits(110, &strings(&[b, b]))
+                .is_empty()
+        );
+        // The operator deletes `a` and the similar `b` stays: `a` closes.
+        assert!(ledger.follow_edits(110, &strings(&[b])).is_empty());
+        assert_eq!(ledger.claims[0].identity, claim_identity(a));
+
+        let mut expired = QueueClaimLedger::default();
+        expired.claim(a, "subagent:a", 100, 10);
+        expired.follow_edits(100, &strings(&[a]));
+        assert!(
+            expired
+                .follow_edits(500, &strings(&["#gh-fix https://x.test/issues/12"]))
                 .is_empty()
         );
     }

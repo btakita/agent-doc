@@ -121,7 +121,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     claimed; `owner=subagent:<label>` names it. For an edit, FORWARD
     `previous` -> `verbatim` to that running subagent (for example with
     SendMessage). Never dispatch a new subagent for it and never re-claim it:
-    the claim follows an appended note (`#claimfollowsedit`). An edit of a
+    the claim follows its line through an in-place edit, whether an appended
+    note or a corrected URL or wording (`#claimfollowedit`), and the worker
+    can still `--refresh` / `release` by the text it was handed. An edit of a
     claimed head also wakes an idle coordinator.
   - `sent=explicit` (`#claimedsteerwake`): the operator pressed Run Agent Doc
     (`agent-doc route`), which flushes all pending steering at once past the

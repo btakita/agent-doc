@@ -166,7 +166,12 @@ derives it like a backlog id (collision-free against every id the todo body
 cites and the document's tracked-work ids) unless the action starts with
 `id=<custom> ` or `[#<custom>] `. An id cited later in the action
 (`[#gate1]`, `(#gate1)`) is a reference to tracked work, not the item's
-identity. Operator-written and legacy items may have no own id. The keyed
+identity. Operator-written and legacy items may have no own id. A todo own id
+is a tracked id everywhere a backlog id is: the shadow-backlog guard never
+reports it as an open backlog item outside `agent:backlog`, the coined-id
+guards (`session-check` warn and the `PreToolUse` source/commit hook) resolve
+it, and a queue line citing it (`- [#<id>]: note`) is a reference, not stray
+work. The keyed
 document merge splits `agent:todo` per item like the list components, so a
 concurrent operator edit and agent write to the checklist merge item by item
 instead of character by character (which could duplicate an edit both sides
@@ -252,6 +257,8 @@ render a queue claim or release instruction for an exchange prompt.
 Tracked backlog/review items may carry a machine-readable symptom de-duplication marker in their text: `[symptom-key invariant=<id> document=<doc-id> component=<component> content_hash=<hash>]`. `--backlog-add` (legacy `--pending-add`) and `--review-add` use this key to attach a repeated symptom as an indented `evidence:` continuation on the existing open/gated backlog or review item instead of inserting another tracked item. The key fields are field-safe tokens and intentionally match the binary outcome vocabulary: invariant id, document id, component, and content hash.
 
 Tracked-work extraction is Markdown-structural. Checklist-shaped text inside fenced or indented code, inline code, HTML comments, or raw HTML blocks is literal evidence and never a live backlog/review/icebox item, even when the literal block is indented beneath a real item. The parser uses Markdown AST byte ranges for this classification; line-pattern matching must not independently promote literal examples into tracked work.
+
+**Shadow-backlog guard (orphaned open items).** Preflight (`enforce_no_shadow_open_backlog`) refuses, and `session-check` interrupts on (`shadow_backlog_guard`), an open id-bearing checklist row (`- [ ] [#id] …` / `- [/] [#id] …`) that sits outside every live component and whose id is not open in `agent:backlog`: the "open backlog item(s) exist only outside live agent:backlog" refusal. The scan (`detect_shadow_open_items`) targets stray prose — HTML comments and non-component sections. It skips code ranges and every live component that legitimately holds `[#id]` rows: `agent:backlog`, `agent:review`, `agent:icebox`, `agent:exchange`, `agent:queue` (id heads such as `[#id]: note` / `do [#id]`), and `agent:todo` (the operator checklist, whose leading `[#id]` is the todo item's own id). A row outside those components whose id is open in `agent:backlog` is only a duplicate warning; a genuinely orphaned open row is still refused.
 
 ### §2.5 Queue Component
 

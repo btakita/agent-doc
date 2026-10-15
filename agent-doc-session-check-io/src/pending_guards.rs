@@ -353,6 +353,38 @@ mod tests {
             "an unregistered id must still coin"
         );
     }
+
+    /// An `agent:todo` item's own `[#id]` (the `--todo-add` form) is a tracked
+    /// id: citing it in a response or queue line is a reference, not a coinage.
+    #[test]
+    fn agent_todo_own_ids_are_known_ids() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: something\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- [#tdue427go]: go ahead\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#tdsdkdevrename] Rename the repo\n",
+            "- [ ] [#tdue427go] Approve the go-ahead\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let known = known_ids_for_coined_guard(&file, content).unwrap();
+        assert_eq!(
+            agent_doc_turn::coined_ids::coined_ids(
+                "renamed per #tdsdkdevrename; #tdue427go approved; #inventedhere",
+                &known
+            ),
+            vec!["inventedhere".to_string()],
+            "todo ids resolve; an untracked id still coins"
+        );
+    }
 }
 
 #[cfg(test)]

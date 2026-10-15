@@ -158,6 +158,39 @@ mod tests {
     }
 
     #[test]
+    fn shadow_guard_passes_open_agent_todo_items_with_own_ids() {
+        // session-check reads this guard: open `agent:todo` items carrying the
+        // `--todo-add` `[#id]` form, cited from queue lines, are tracked work.
+        let mut doc = String::from(concat!(
+            "<!-- agent:queue go -->\n",
+            "- [#tda]: rename to sdk-dev\n",
+            "- [#tdb]: go ahead\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#tda] Rename\n",
+            "- [ ] [#tdb] Approve\n",
+        ));
+        for n in 0..19 {
+            doc.push_str(&format!("- [ ] [#td{n}] Action {n}\n"));
+        }
+        doc.push_str(concat!(
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Keep in backlog\n",
+            "<!-- /agent:backlog -->\n",
+        ));
+
+        assert_eq!(
+            shadow_backlog_guard(&doc).unwrap(),
+            BacklogGuardOutcome::Pass
+        );
+
+        doc.push_str("\n<!-- parked copy\n- [ ] [#lost1] Drifted out of backlog\n-->\n");
+        assert!(matches!(shadow_backlog_guard(&doc).unwrap(), BacklogGuardOutcome::Interrupt(message)
+            if message.contains("#lost1") && !message.contains("#td")));
+    }
+
+    #[test]
     fn shadow_guard_warns_duplicate_shadow_items() {
         let doc = concat!(
             "<!-- agent:backlog -->\n",

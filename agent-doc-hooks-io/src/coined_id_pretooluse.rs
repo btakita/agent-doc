@@ -254,7 +254,7 @@ pub fn pretooluse_decision_in(
     PreToolUseDecision::Deny {
         reason: format!(
             "[agent-doc] blocked: this {tool_name} would write coined id(s) {names} into {target}, \
-             but they are not tracked in agent:backlog, agent:queue, agent:done, or agent:review \
+             but they are not tracked in agent:backlog, agent:queue, agent:todo, agent:done, or agent:review \
              of this document or any other session document in the project, and no instruction \
              or source anchor defines them. An id in source or a commit message with no tracked \
              item resolves to nothing later. File one first (`agent-doc write --commit <FILE> --backlog-add \"#<id> ...\"`), reuse \
@@ -791,6 +791,31 @@ mod tests {
             pretooluse_decision("Edit", &input, &DocumentIds::Known(ids), None),
             PreToolUseDecision::Allow
         );
+    }
+
+    /// An `agent:todo` item's own `[#id]` is tracked: the commit/source
+    /// coined-id hook must resolve it exactly like a backlog id.
+    #[test]
+    fn known_ids_for_document_counts_agent_todo_own_ids() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(
+            &file,
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#tdsdkdevrename] Rename the repo\n",
+                "<!-- /agent:todo -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+        )
+        .unwrap();
+
+        let ids = known_ids_for_document(&file).unwrap();
+        assert!(ids.contains("tdsdkdevrename"), "got {ids:?}");
     }
 
     #[test]

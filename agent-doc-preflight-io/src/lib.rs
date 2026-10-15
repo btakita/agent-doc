@@ -7401,6 +7401,42 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    /// Preflight admits a document whose open `agent:todo` items carry their
+    /// own `[#id]` (the `--todo-add` form) and whose queue cites two of them,
+    /// and still refuses a genuinely orphaned backlog row.
+    #[test]
+    fn enforce_no_shadow_open_backlog_admits_agent_todo_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("sdk.md");
+        let mut content = String::from(concat!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents priority go -->\n",
+            "- [#tdsdkdevrename]: rename to sdk-dev\n",
+            "- [#tdue427go]: go ahead\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#tdsdkdevrename] Rename the repo\n",
+            "- [ ] [#tdue427go] Approve the go-ahead\n",
+        ));
+        for n in 0..19 {
+            content.push_str(&format!("- [ ] [#tditem{n}] Operator action {n}\n"));
+        }
+        content.push_str(concat!(
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#live1] Real backlog work\n",
+            "<!-- /agent:backlog -->\n",
+        ));
+        std::fs::write(&doc, &content).unwrap();
+        enforce_no_shadow_open_backlog(&doc).expect("todo ids must be admitted");
+
+        content.push_str("\n<!-- parked copy\n- [ ] [#lost1] Drifted out of backlog\n-->\n");
+        std::fs::write(&doc, &content).unwrap();
+        let err = enforce_no_shadow_open_backlog(&doc).unwrap_err().to_string();
+        assert!(err.contains("#lost1"), "{err}");
+        assert!(!err.contains("#td"), "todo ids must never be reported: {err}");
+    }
+
     /// `#qheadannotation`: the cycle contract carries operator annotations on
     /// selected id heads as a typed field (with guidance), and omits both when
     /// the selected heads are canonical.

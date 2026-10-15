@@ -153,7 +153,7 @@ pub fn coined_ids_guard_result(coined: &[String]) -> GuardResult {
     }
     GuardResult::Warn(vec![
         format!(
-            "[session-check] warn: response coins new id(s) {} that are not in agent:backlog, agent:queue, agent:done, or agent:review",
+            "[session-check] warn: response coins new id(s) {} that are not in agent:backlog, agent:queue, agent:todo, agent:done, or agent:review",
             coined
                 .iter()
                 .map(|id| format!("#{id}"))

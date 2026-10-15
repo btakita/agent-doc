@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -37,6 +38,26 @@ Review pass done. frontendlivedispatch closed on live evidence. Two review items
 Compacted content:
 - Archived 9 response topic(s): queue; v0.35.506 released; #266 closed; fork-dup + compact false positive on main; todo completion API, todo duplicate-on-done, salient-response lint; 6 more
 - Prior summary/context: prior compacted content: Archived 16 response topic(s): dispatched #gh-fix 261–264 + release batch; Subagent complete...
+
+### Re: GH #268–#273 + queue duplication — dispatched to 7 subagents — opus-5-5 · 2026-10-15T12:45-04:00
+
+Every queued fix is claimed and running in its own background subagent. Each one has its own worktree under `agent-loop-worktrees/`, based on `origin/main` (`d5f4cf9743`).
+
+| Claim owner | Item | Branch |
+|---|---|---|
+| `subagent:gh268` | #268 layout repair never releases `window-size manual` pin | `fix/gh268` |
+| `subagent:gh269` | #269 orphaned-preparing reaper SIGTERMs the draining predecessor | `fix/gh269` |
+| `subagent:gh270` | #270 re-exec'd supervisor leaves the PTY unserviced on `state.db` lock | `fix/gh270` |
+| `subagent:gh271` | #271 /clear "not proven": statusLine row + "Update installed" notice | `fix/gh271` |
+| `subagent:gh272` | #272 Run while typing refused on transient `missing_replica` | `fix/gh272` |
+| `subagent:gh273` | #273 held splice batch forks the buffer; rebuild-on-refusal loop | `fix/gh273` |
+| `subagent:queuedup` | queue content duplicated on Run Agent Doc (formal-logic fix) | `fix/queue-dup-invariant` |
+
+**Queue duplication (what I saw this turn):** the six `#gh-dix…` lines you typed were then corrected to `#gh-fix …`. The preflight for this Run listed **12** queue heads: both the pre-correction and the post-correction text were live at once. Shortly after, the queue block appeared twice in HEAD and on disk. I've passed that timeline to `subagent:queuedup`. It is to find the writer that produced the doubled component from the logs and say why earlier fixes didn't hold. It will also state the invariant formally, model it in TLA+ (counterexample before the fix, pass after), and enforce it at the single write choke point with regression tests for this exact shape.
+
+**Claim anomaly (also sent to that subagent):** editing the #270 line from `agent-foc` to `agent-doc` kept its claim, but the same edit on the #272 line dropped it. I re-claimed #272 for `subagent:gh272`, so no duplicate worker was started. I treated the `agent-foc` lines as the same six issues throughout.
+
+**Next:** `release + publish` stays queued for me rather than a subagent, because subagents may not tag or release. As each subagent reports, I'll integrate its branch serially onto `main`, re-running the plugin-version bump to resolve `gradle.properties` conflicts. Then I'll run one `make install` for the batch and close the six GitHub issues and their queue items. Finally I'll cut and publish the release, which will also carry `d5f4cf9743` (the Clear Session Context notice fix).
 <!-- agent:boundary:06765b07 -->
 <!-- /agent:exchange -->
 
@@ -45,7 +66,15 @@ Compacted content:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-<!-- /agent:queue -->
+- #gh-fix https://github.com/btakita/agent-doc/issues/268
+- #gh-fix https://github.com/btakita/agent-doc/issues/269
+- #gh-fix https://github.com/btakita/agent-doc/issues/270
+- #gh-fix https://github.com/btakita/agent-doc/issues/271
+- #gh-fix https://github.com/btakita/agent-doc/issues/272
+- #gh-fix https://github.com/btakita/agent-doc/issues/273
+- The content of the queue were duplicated by agent-doc on Run Agent Doc. This has been a reoccurring issue with multiple fix attempts. Use formal logic to prevent this from happening again.
+- release + publish
+ <!-- /agent:queue -->
 
 ## Backlog
 

@@ -2559,6 +2559,16 @@ pub fn merge_partial_backlog_prefix(current_body: &str, target_body: &str) -> Op
     Some(PendingLayout { segments }.render())
 }
 
+/// Find open tracked-work rows (`- [ ] [#id] ...`) that live outside the live
+/// `agent:backlog`, for the preflight and session-check shadow-backlog guard.
+///
+/// Invariant (GH #275): the scan reads only bytes where a drifted backlog row
+/// can hide: stray prose, HTML comments, and non-component sections. It skips
+/// every component whose rows are not backlog copies: tracked work
+/// (`backlog`/`review`/`icebox`), the `exchange` transcript, the `queue`
+/// (directive heads cite ids), and the operator-owned `todo` checklist, whose
+/// leading `[#id]` is the todo item's own id. Component exclusion is
+/// structural; it never depends on whether a row also contains inline code.
 pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
     let components = agent_doc_element::element::parse(doc)?;
     let Some(backlog_component) = components
@@ -2590,12 +2600,15 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
                 // (#qheadsync orphan-shadow). The shadow guard targets stray prose
                 // (HTML comments, non-component sections), so exclude the queue too.
                 || component.name == "queue"
-                // `agent:todo` is the operator checklist, a live component in
-                // its own right. `--todo-add` writes `- [ ] [#id] <action>`,
-                // where the leading `[#id]` is the todo item's OWN id, not a
-                // backlog item that drifted out of `agent:backlog`. Scanning
-                // it hard-wedged preflight and session-check on every
-                // document whose open todos carry ids.
+                // GH #275: `agent:todo` is the operator-owned checklist
+                // (`#operatortodo`). `--todo-add` writes `- [ ] [#id] <action>`
+                // rows whose leading `[#id]` is the todo item's OWN id, drawn
+                // from a separate namespace (allocated collision-free against
+                // every tracked-work id). Such a row has the exact shape of an
+                // open backlog item but is never a backlog copy, so reading it
+                // as one made every `--todo-add` closeout INTERRUPT session-check
+                // and refuse every later preflight. Exclusion is by component,
+                // so it holds whether or not the row carries an inline code span.
                 || agent_doc_element::todo::is_todo_component(&component.name)
         })
         .map(|component| (component.open_start, component.close_end))
@@ -8026,6 +8039,140 @@ mod tests {
         let report = detect_shadow_open_items(doc).unwrap();
         assert!(report.duplicated_in_live_backlog.is_empty());
         assert!(report.shadow_only.is_empty());
+    }
+
+    /// GH #275: `agent:todo` rows have the open-backlog-row shape
+    /// `- [ ] [#id] <action>` but their `[#id]` is the todo item's own id. They
+    /// must never count as shadow backlog items, with or without an inline code
+    /// span on the row, while a genuine stray row is still caught.
+    #[test]
+    fn detect_shadow_open_items_ignores_agent_todo_rows() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Keep in backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Todo\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#952f] Approve or decline the draft reply\n",
+            "- [ ] [#s26h] Verify [#live1] in a live pane\n",
+            "- [ ] [#nw30] Approve the `## Needs a rebase` section\n",
+            "- [x] [#k9wf] Already done by the operator\n",
+            "- [ ] Operator-authored item without an own id\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- parked copy\n",
+            "- [ ] [#lost1] Drifted out of backlog\n",
+            "-->\n",
+        );
+
+        // Non-vacuity: each todo row parses as an open tracked-work row, so only
+        // the component exclusion keeps it out of the report.
+        for row in [
+            "- [ ] [#952f] Approve or decline the draft reply",
+            "- [ ] [#s26h] Verify [#live1] in a live pane",
+        ] {
+            let item = parse_item_line(row).expect("todo row has the backlog-row shape");
+            assert!(!item.is_done(), "{row}");
+        }
+
+        let report = detect_shadow_open_items(doc).unwrap();
+        assert!(
+            report.duplicated_in_live_backlog.is_empty(),
+            "{:?}",
+            report.duplicated_in_live_backlog
+        );
+        assert_eq!(
+            report
+                .shadow_only
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["lost1"],
+            "only the genuine stray row is a shadow item"
+        );
+    }
+
+    /// The same backtick-free rows OUTSIDE `agent:todo` are still shadow items:
+    /// the exclusion is the component, not the row text.
+    #[test]
+    fn detect_shadow_open_items_flags_todo_shaped_rows_outside_todo_component() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Todo\n\n",
+            "- [ ] [#952f] Approve or decline the draft reply\n",
+            "- [ ] [#s26h] Verify a live pane\n",
+        );
+
+        let report = detect_shadow_open_items(doc).unwrap();
+        assert_eq!(
+            report
+                .shadow_only
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["952f", "s26h"]
+        );
+    }
+
+    /// GH #275 reproduction: a document with no `agent:todo` gains one through
+    /// `--todo-add` (seven backtick-free actions, as in the report). The shadow
+    /// scan of the result is empty and the session-check guard passes.
+    #[test]
+    fn todo_add_result_passes_shadow_backlog_guard() {
+        let mut doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#open1] Still open\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string();
+        assert!(!doc.contains("agent:todo"));
+
+        let id_for = |action: &str, counter: u64| {
+            let mut hash = counter.wrapping_add(0xcbf2_9ce4_8422_2325);
+            for byte in action.bytes() {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+            format!("{:04x}", hash & 0xffff)
+        };
+        let reserved: HashSet<String> = ["open1".to_string()].into_iter().collect();
+        let actions = [
+            "Approve or decline the draft reply",
+            "Open the preview in MS Edge",
+            "Reply to the reviewer",
+            "Merge the release branch",
+            "Rotate the deploy key",
+            "Confirm the invoice total",
+            "Schedule the follow-up call",
+        ];
+        let mut ids = Vec::new();
+        for action in actions {
+            let outcome = agent_doc_element::todo::add_todo_item_to_document(
+                &doc, action, &id_for, &reserved,
+            )
+            .unwrap();
+            assert!(outcome.inserted, "{action}");
+            ids.push(outcome.id.unwrap());
+            doc = outcome.content;
+        }
+        assert_eq!(doc.matches("<!-- agent:todo -->").count(), 1, "{doc}");
+        for (id, action) in ids.iter().zip(actions) {
+            assert!(doc.contains(&format!("- [ ] [#{id}] {action}\n")), "{doc}");
+        }
+
+        let report = detect_shadow_open_items(&doc).unwrap();
+        assert!(report.shadow_only.is_empty(), "{:?}", report.shadow_only);
+        assert!(
+            report.duplicated_in_live_backlog.is_empty(),
+            "{:?}",
+            report.duplicated_in_live_backlog
+        );
+        assert_eq!(
+            crate::guard_policy::shadow_backlog_guard(&doc).unwrap(),
+            crate::guard_policy::BacklogGuardOutcome::Pass
+        );
     }
 
     #[test]

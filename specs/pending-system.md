@@ -265,6 +265,17 @@ On every preflight run:
 in the `agent:done archive=...done.md` target as completed-history proof for
 backlog replay and as known identifiers for the coined-ID guard after inline
 history is reaped. Invalid archive targets fail closed instead of being ignored.
+- Shadow-scan scope invariant (GH #275): the shadow-backlog guard (preflight
+  refusal, session-check INTERRUPTED) flags an open `- [ ] [#id]` row outside
+  the live `agent:backlog` only where a drifted backlog row can hide: stray
+  prose, HTML comments, and non-component sections. It skips by component every
+  surface whose rows are not backlog copies: tracked work (`backlog`, `review`,
+  `icebox`), the `exchange` transcript, the `queue` (directive heads cite ids),
+  and the operator-owned `agent:todo` checklist, whose leading `[#id]` is the
+  todo item's own id (`#operatortodo`). The skip is structural and must not
+  depend on whether a row also carries an inline code span; the same row shape
+  outside those components is still flagged. Otherwise every `--todo-add`
+  closeout interrupts its own session check and refuses every later preflight.
 - Registered-preset invariant (`#coinedpresetid`): a name registered in
   `prompt_presets:` frontmatter is a known identifier for the coined-ID guard.
   It resolves to its preset body, so naming it in prose is a reference, never an
@@ -352,7 +363,7 @@ The backlog is a **priority-ordered pool with id-based consumption** (`--done` /
 | `--review-add "text"` | none | Add a new `[/]` item directly to `agent:review`. Rare; normal code-complete flow should use `--backlog-gate`. |
 | `--review-edit <id> "new text"` | none | Rewrite text in `agent:review`, preserving hash and state. |
 | `--review-resolve <id>` | none | Resolve an `agent:review` item: remove it and archive to `agent:done`. The completion path for finished gated work. Errors if no review component or no matching id. |
-| `--todo-add "action"` | none | `#operatortodo`: append `- [ ] [#<id>] <action>` (fresh own id; `id=<custom> ` chooses it) to the operator-owned `agent:todo` checklist (repeatable). Creates the component when the document has none (an empty `## Todo` section below the backlog: directly after the last `agent:backlog`/`agent:pending`, so above `## Review`; else after `agent:queue`, `agent:exchange`, or at the end of the document; `agent:review` is never an anchor). Never rewrites, reorders, or removes an existing line; an action already present in any checkbox state is a no-op, so replays never duplicate or resurrect a todo. Rejects empty or multi-line text. Counts as a closeout mutation (captured in the replayable mutation plan) but adds no tracked-work id. |
+| `--todo-add "action"` | none | `#operatortodo`: append `- [ ] [#<id>] <action>` (fresh own id; `id=<custom> ` chooses it) to the operator-owned `agent:todo` checklist (repeatable). Creates the component when the document has none (an empty `## Todo` section below the backlog: directly after the last `agent:backlog`/`agent:pending`, so above `## Review`; else after `agent:queue`, `agent:exchange`, or at the end of the document; `agent:review` is never an anchor). Never rewrites, reorders, or removes an existing line; an action already present in any checkbox state is a no-op, so replays never duplicate or resurrect a todo. Rejects empty or multi-line text. Counts as a closeout mutation (captured in the replayable mutation plan) but adds no tracked-work id, so its rows are outside the shadow-backlog scan (GH #275). |
 | `--todo-done <selector>` | none | `#tododone`: check an `agent:todo` item off (`[ ]`/`[/]` → `[x]`) in place, in the same closeout that the operator action was finished (repeatable). Selector: the item's own `[#id]`; else the single item citing `#id` (open items preferred); else exact action text. Idempotent; folds duplicate copies of the item (`#tododupdone`). Errors on no match or an ambiguous selector. |
 | `--todo-edit "<selector>=<text>"` | none | Rewrite an `agent:todo` item's action, keeping its id, checkbox state, and position (repeatable). Re-applying the same text is a no-op. |
 | `--todo-reopen <selector>` | none | Uncheck an `agent:todo` item (`[x]`/`[/]` → `[ ]`) in place (repeatable, idempotent). |

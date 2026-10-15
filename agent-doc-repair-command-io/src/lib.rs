@@ -89,8 +89,12 @@ pub fn run_write_command_with_empty_response_recovery(
 /// phase, bounded by the same settle window `session-check` uses, and report
 /// success only when it reaches `committed`. A failure before capture
 /// (pre-write gate, malformed patchback) leaves the phase at
-/// `preflight_started` and returns its error at once. This reads cycle state
-/// only: it performs no session-check repair and prints nothing to stdout.
+/// `preflight_started` and returns its error at once. A committed cycle then
+/// supersedes the error only if a fresh status-only session check no longer
+/// interrupts (GH #275): the closeout commits before its terminal session
+/// check, so `committed` alone never proves the error was transient. This
+/// reads cycle state and runs a status-only check: it performs no
+/// session-check repair and prints nothing to stdout.
 fn settle_failed_strict_closeout(
     file: &Path,
     closing: &agent_doc_cycle_state_io::CycleState,
@@ -104,6 +108,53 @@ fn settle_failed_strict_closeout(
     );
     if !failed_closeout_settled(closing, settled.as_ref()) {
         return Err(error);
+    }
+    // GH #275: a committed cycle proves the RESPONSE landed, not that the
+    // closeout error was transient. The strict closeout commits BEFORE its
+    // terminal session check, so a deterministic session-check refusal (the
+    // shadow-backlog guard over `--todo-add` rows) left the cycle `committed`
+    // and this path reported "superseded, needs no action" while every later
+    // `session-check` failed on the same committed bytes. Only a fresh
+    // status-only session check that no longer interrupts supersedes the error.
+    match recheck_committed_closeout(
+        agent_doc_session_check_io::session_check_settle_window(),
+        RESPOND_SETTLE_POLL,
+        || {
+            agent_doc_session_check_io::inspect_read_only(
+                file,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
+        },
+    ) {
+        CommittedCloseoutRecheck::Clean => {}
+        CommittedCloseoutRecheck::StillInterrupted(message) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "strict_closeout_error_not_superseded file={} cycle={} reason=session_check_interrupted error={} session_check={}",
+                    file.display(),
+                    closing.cycle_id,
+                    format!("{error:#}").replace('\n', " "),
+                    message.replace('\n', " ")
+                ),
+            );
+            return Err(anyhow::anyhow!(
+                "{}",
+                still_interrupted_closeout_report(&closing.cycle_id, &message)
+            ));
+        }
+        CommittedCloseoutRecheck::Unverified(reason) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "strict_closeout_error_not_superseded file={} cycle={} reason=session_check_unverified detail={}",
+                    file.display(),
+                    closing.cycle_id,
+                    reason.replace('\n', " ")
+                ),
+            );
+            return Err(error);
+        }
     }
     // `#closeoutstrandedmsg`: report the terminal outcome only. The superseded
     // error carries its own remedy ("STRANDED ... Run agent-doc commit"), and
@@ -128,6 +179,60 @@ fn recovered_closeout_report(cycle_id: &str) -> String {
          an earlier transient closeout error was superseded and needs no action \
          (detail: strict_closeout_error_settled_committed in ops.log)"
     )
+}
+
+/// GH #275: the closeout's own cycle committed but the committed document still
+/// fails its session check. Name the commit (so nobody re-commits) and the
+/// live refusal (so the agent fixes the document), never the word "superseded".
+fn still_interrupted_closeout_report(cycle_id: &str, session_check: &str) -> String {
+    format!(
+        "[respond] closeout committed cycle `{cycle_id}`, but the committed document still \
+         fails its session check, so the closeout error was not superseded: {session_check}"
+    )
+}
+
+/// What a fresh status-only session check says about a committed closeout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CommittedCloseoutRecheck {
+    /// `ok` or `steering pending`: the earlier error really was superseded.
+    Clean,
+    /// The committed bytes still interrupt: the error stands.
+    StillInterrupted(String),
+    /// The check itself failed, so nothing proves the error was superseded.
+    Unverified(String),
+}
+
+/// Re-run the status-only session check for a committed closeout. A
+/// self-converging interruption (`#scsettlewindow`) is re-sampled until it
+/// resolves or `window` elapses, the same way operator `session-check` settles;
+/// every other outcome is final at once.
+fn recheck_committed_closeout(
+    window: std::time::Duration,
+    poll: std::time::Duration,
+    mut inspect: impl FnMut() -> Result<agent_doc_session_check_io::SessionCheckStatus>,
+) -> CommittedCloseoutRecheck {
+    use agent_doc_session_check_io::SessionCheckStatus;
+    let deadline = std::time::Instant::now() + window;
+    loop {
+        let verdict = match inspect() {
+            Ok(SessionCheckStatus::Ok(_) | SessionCheckStatus::SteeringPending(_)) => {
+                CommittedCloseoutRecheck::Clean
+            }
+            Ok(SessionCheckStatus::Interrupted(message)) => {
+                CommittedCloseoutRecheck::StillInterrupted(message)
+            }
+            Err(error) => CommittedCloseoutRecheck::Unverified(format!("{error:#}")),
+        };
+        let converging = matches!(
+            &verdict,
+            CommittedCloseoutRecheck::StillInterrupted(message)
+                if agent_doc_session_check_io::is_self_converging_interruption(message)
+        );
+        if !converging || std::time::Instant::now() + poll > deadline {
+            return verdict;
+        }
+        std::thread::sleep(poll);
+    }
 }
 
 const RESPOND_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(500);
@@ -1556,6 +1661,85 @@ mod respond_settle_tests {
             &cycle("c1", "write_applied"),
             settled.as_ref()
         ));
+    }
+
+    /// GH #275: the strict closeout commits, then its terminal session check
+    /// interrupts on the committed bytes (shadow-backlog guard). The cycle is
+    /// `committed`, but a deterministic refusal is never "superseded".
+    #[test]
+    fn a_committed_closeout_whose_session_check_still_interrupts_is_not_superseded() {
+        use agent_doc_session_check_io::SessionCheckStatus;
+        let refusal = "[session-check] INTERRUPTED: open backlog item(s) exist only outside live agent:backlog: #952f (line 138)";
+        let calls = std::cell::Cell::new(0);
+        let verdict = recheck_committed_closeout(
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(1),
+            || {
+                calls.set(calls.get() + 1);
+                Ok(SessionCheckStatus::Interrupted(refusal.to_string()))
+            },
+        );
+        assert_eq!(
+            verdict,
+            CommittedCloseoutRecheck::StillInterrupted(refusal.to_string())
+        );
+        assert_eq!(calls.get(), 1, "a deterministic refusal is not waited on");
+
+        let report = still_interrupted_closeout_report("c1", refusal);
+        assert!(report.contains("committed cycle `c1`"), "{report}");
+        assert!(report.contains(refusal), "{report}");
+        assert!(report.contains("not superseded"), "{report}");
+        assert!(!report.contains("needs no action"), "{report}");
+    }
+
+    #[test]
+    fn a_committed_closeout_with_a_clean_session_check_is_superseded() {
+        use agent_doc_session_check_io::SessionCheckStatus;
+        for status in [
+            SessionCheckStatus::Ok("committed".to_string()),
+            SessionCheckStatus::SteeringPending("steering".to_string()),
+        ] {
+            let verdict = recheck_committed_closeout(
+                std::time::Duration::from_secs(5),
+                std::time::Duration::from_millis(1),
+                || Ok(status.clone()),
+            );
+            assert_eq!(verdict, CommittedCloseoutRecheck::Clean, "{status:?}");
+        }
+    }
+
+    #[test]
+    fn a_self_converging_recheck_is_resampled_until_clean() {
+        use agent_doc_session_check_io::SessionCheckStatus;
+        let converging = "[session-check] INTERRUPTED: cycle `c1` is `write_applied`; the retained closeout will resume automatically".to_string();
+        assert!(agent_doc_session_check_io::is_self_converging_interruption(
+            &converging
+        ));
+        let calls = std::cell::Cell::new(0);
+        let verdict = recheck_committed_closeout(
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(1),
+            || {
+                calls.set(calls.get() + 1);
+                Ok(if calls.get() < 3 {
+                    SessionCheckStatus::Interrupted(converging.clone())
+                } else {
+                    SessionCheckStatus::Ok("committed".to_string())
+                })
+            },
+        );
+        assert_eq!(verdict, CommittedCloseoutRecheck::Clean);
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn an_unverifiable_recheck_does_not_supersede() {
+        let verdict = recheck_committed_closeout(
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(1),
+            || Err(anyhow::anyhow!("authority unavailable")),
+        );
+        assert!(matches!(verdict, CommittedCloseoutRecheck::Unverified(_)));
     }
 
     #[test]

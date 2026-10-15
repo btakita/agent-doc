@@ -5004,6 +5004,12 @@ fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
             doc.to_str().unwrap(),
             "--backlog-edit",
             "quirkbigint=[blocked: #other] decoder half; kept open 2026-10-11",
+            // The cycle's own directive is the live `do [#other]` head. Keep it
+            // open explicitly: before GH #275 the strict closeout reported this
+            // test's expect-done refusal as "superseded" and exited 0 while the
+            // committed document failed every later session-check.
+            "--backlog-edit",
+            "other=other work; kept open 2026-10-11",
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: kept\n\nKept open.\n<!-- /patch:exchange -->\n",
@@ -5024,4 +5030,75 @@ fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
         .assert()
         .success();
     assert_not_requeued("next preflight");
+}
+
+/// GH #275: the strict closeout commits BEFORE its terminal session check. When
+/// that check interrupts deterministically on the committed bytes (here a
+/// drifted open backlog row parked in an HTML comment, the shadow-backlog guard
+/// `--todo-add` rows used to trip), the cycle reads `committed`, and `respond`
+/// used to report "an earlier transient closeout error was superseded and needs
+/// no action" and exit 0 while every later `session-check` failed. A committed
+/// cycle supersedes the error only if a fresh session check is clean.
+#[test]
+fn respond_does_not_supersede_a_session_check_refusal_that_survives_its_commit() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let committed = session_stream_doc_content().replace("❯ Please reply\n", "");
+    fs::write(&doc, &committed).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    fs::write(snapshot_path(tmp.path(), &doc), &committed).unwrap();
+    fs::write(&doc, session_stream_doc_content()).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    assert_eq!(
+        read_cycle_phase(tmp.path(), &doc).as_deref(),
+        Some("preflight_started")
+    );
+
+    // A drifted backlog row lands outside every component after preflight
+    // admitted the turn, so only the closeout's terminal session check sees it.
+    let mut drifted = fs::read_to_string(&doc).unwrap();
+    drifted.push_str("\n<!-- parked copy\n- [ ] [#lost1] Drifted out of backlog\n-->\n");
+    fs::write(&doc, &drifted).unwrap();
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "1")
+        .args(["respond", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin("<!-- patch:exchange -->\n### Re: reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+
+    assert!(
+        head_blob(tmp.path()).contains("Replied."),
+        "precondition: the closeout committed the response before its session check:\n{stderr}"
+    );
+    assert!(
+        !output.status.success(),
+        "a session-check refusal that survives the commit must fail respond:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("needs no action")
+            && !ops.contains("strict_closeout_error_settled_committed"),
+        "the refusal must not be reported as superseded:\n{stderr}\n{ops}"
+    );
+    assert!(
+        stderr.contains("outside live agent:backlog") && stderr.contains("#lost1"),
+        "respond must name the live refusal:\n{stderr}"
+    );
+
+    let check = agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        !check.status.success(),
+        "the refusal respond reported is the one session-check still reports"
+    );
 }

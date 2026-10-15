@@ -450,6 +450,38 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `published endpoint cannot retire itself when IDE window enumeration lags`() {
+        val ownership = EditorTabSyncListener.SurfaceEndpointOwnership()
+        val detached = EditorTabSyncListener.SurfaceEndpoint("/repo", "frame-detached")
+
+        assertTrue(ownership.markPublished(detached, setOf("main-frame")).isEmpty())
+        assertEquals(listOf(detached), ownership.drain())
+    }
+
+    @Test
+    fun `surface capture delegates authoritative liveness to the shared adapter`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val capture =
+            source
+                .substringAfter("private fun captureSurface(")
+                .substringBefore("private fun resolveSurface(")
+
+        assertTrue(
+            capture.contains(
+                "JetBrainsEditorSurfaces.liveSurfaceIds(project, editorSurface.surfaceId)",
+            ),
+        )
+        assertFalse(capture.contains("?.map { JetBrainsEditorSurfaces.forEditorWindow"))
+    }
+
+    @Test
     fun `surface projection waits while the selected document is absent`() {
         assertEquals(
             EditorTabSyncListener.SurfaceReport.ProjectionReadiness.AwaitingSelectedDocument,

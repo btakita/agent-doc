@@ -369,7 +369,9 @@ companion object {
 
         fun markPublished(endpoint: SurfaceEndpoint, liveSurfaceIds: Set<String>?): List<SurfaceEndpoint> {
             record(endpoint)
-            return liveSurfaceIds?.let(::missing).orEmpty()
+            // The observation itself is positive liveness evidence. Never let a lagging IDE window
+            // enumeration retire the endpoint that just published this exact observation.
+            return liveSurfaceIds?.let { missing(it + endpoint.surfaceId) }.orEmpty()
         }
 
         fun markForgotten(endpoint: SurfaceEndpoint): Boolean = observed.remove(endpoint)
@@ -1043,10 +1045,7 @@ private data class CapturedSurface(
                 ?: editorWindows.firstOrNull()
         val editorSurface = JetBrainsEditorSurfaces.forEditorWindow(project, anchorWindow)
         val liveSurfaceIds =
-            editorWindows
-                .takeIf { it.isNotEmpty() }
-                ?.map { JetBrainsEditorSurfaces.forEditorWindow(project, it).surfaceId }
-                ?.toSet()
+            JetBrainsEditorSurfaces.liveSurfaceIds(project, editorSurface.surfaceId)
         val surfaceWindows =
             anchorWindow?.owner?.let { owner ->
                 editorWindows.filter { it.owner === owner }

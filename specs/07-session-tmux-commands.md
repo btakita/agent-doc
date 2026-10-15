@@ -280,6 +280,12 @@ The spanning editor surface graph owns that structural work.
   JetBrains effect moves only the dedicated agent-doc terminal tool window; it
   never relocates unrelated tabs from the stock Terminal tool window. Missing
   pane-placement capability fails closed without changing tmux ownership.
+  Each accepted publication is positive liveness evidence for its own endpoint:
+  JetBrains unions the current/published surface with an available backend
+  window snapshot before retiring previously retained endpoints, so a lagging
+  detached-frame enumeration cannot retire the surface that just published and
+  fence every later observation in that generation. An empty backend window
+  snapshot remains unknown liveness for Remote Dev and retires no endpoint.
 Its `active_window_guard` registers a project-scoped fence at async admission;
 supersession and the command deadline are checked again while holding that
 fence across the final `select-pane` effect. A worker that was accepted earlier

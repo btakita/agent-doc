@@ -950,8 +950,23 @@ pub fn busy_clear_deferred_message(file: &Path, pane_id: Option<&str>) -> String
     )
 }
 
-pub fn busy_clear_already_deferred_message(file: &Path, pane_id: Option<&str>) -> String {
+pub fn busy_clear_already_deferred_message(
+    file: &Path,
+    pane_id: Option<&str>,
+    live_evidence: Option<&str>,
+) -> String {
     let pane = pane_id.unwrap_or("unknown");
+    if live_evidence == Some(DISPATCH_TURN_PENDING_EVIDENCE) {
+        // The only evidence is an accepted Run Agent Doc whose turn has not
+        // started: there is no active turn to protect or interrupt, so do not
+        // describe one or offer interrupt-clear (it would only queue again).
+        return format!(
+            "session_clear already deferred for {} — pane {} still has a queued clear waiting behind a Run Agent Doc that was accepted and has not started its turn yet (harness_turn_live=pending evidence={}); no turn is running. Not queueing a second clear: the queued one runs after that run, and pressing Clear Session Context again or Interrupt and clear does not make it sooner. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none.",
+            file.display(),
+            pane,
+            DISPATCH_TURN_PENDING_EVIDENCE,
+        );
+    }
     format!(
         "session_clear already deferred for {} — pane {} still has a queued clear waiting for the next idle prompt. Not sending another clear into the active turn. Run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
         file.display(),
@@ -1161,8 +1176,9 @@ pub fn pending_dispatch_clear_queued_message(
         || "was accepted".to_string(),
         |secs| format!("was accepted {secs}s ago"),
     );
-    let fallback_secs = evidence_age_secs
-        .map_or(pre_turn_grace_secs, |secs| pre_turn_grace_secs.saturating_sub(secs));
+    let fallback_secs = evidence_age_secs.map_or(pre_turn_grace_secs, |secs| {
+        pre_turn_grace_secs.saturating_sub(secs)
+    });
     let queued = if rearmed {
         "The clear that was already queued stays queued (still one clear)"
     } else {
@@ -2724,11 +2740,35 @@ Welcome to Claude Code
 
     #[test]
     fn busy_clear_already_deferred_message_refuses_duplicate_clear() {
-        let message = busy_clear_already_deferred_message(Path::new("/tmp/doc.md"), Some("%7"));
+        let message =
+            busy_clear_already_deferred_message(Path::new("/tmp/doc.md"), Some("%7"), None);
 
         assert!(message.contains("session_clear already deferred"));
         assert!(message.contains("Not sending another clear into the active turn"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn busy_clear_already_deferred_message_behind_unstarted_run_names_no_live_turn() {
+        // sdk.md 2026-10-15: a second Clear press while the only evidence was
+        // an accepted, not-yet-started Run Agent Doc described an "active
+        // turn" and offered interrupt-clear, which on an idle pane only queues
+        // again.
+        let message = busy_clear_already_deferred_message(
+            Path::new("/tmp/doc.md"),
+            Some("%180"),
+            Some(DISPATCH_TURN_PENDING_EVIDENCE),
+        );
+
+        assert!(message.contains("session_clear already deferred"));
+        assert!(message.contains("has not started its turn yet"));
+        assert!(message.contains("no turn is running"));
+        assert!(message.contains("ui_outcome=queued"));
+        assert!(!message.contains("active turn"), "{message}");
+        assert!(
+            !message.contains("agent-doc session interrupt-clear"),
+            "{message}"
+        );
     }
 
     #[test]

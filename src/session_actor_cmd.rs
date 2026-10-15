@@ -1384,7 +1384,8 @@ fn reconcile_idle_projection_before_clear(
                         "{}",
                         busy_clear_already_deferred_message(
                             &ctx.canonical_file,
-                            evidence.pane_id.as_deref()
+                            evidence.pane_id.as_deref(),
+                            live_turn_evidence,
                         )
                     );
                     return Ok(ClearPreflightOutcome::DeferredPreempt);

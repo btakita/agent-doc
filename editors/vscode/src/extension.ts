@@ -95,7 +95,6 @@ import { DebounceCore } from '@lazily-hub/lazily-js/rateshape';
 
 let resolvedAgentDoc: string | null = null;
 const AUTOMATIC_SYNC_CLI_TIMEOUT_MS = 5_000;
-const ROUTE_CANCEL_WAIT_MS = 5_000;
 const ROUTE_WAIT_FOR_READY_SECONDS = '120';
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
 const EDITOR_SURFACE_CLIENT_ID = `vscode-pid:${process.pid}`;
@@ -1372,7 +1371,7 @@ routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
         showHint(buildEditorRouteSuccessHint(rel, output));
     } catch (err: any) {
         if (isCliCancelled(err)) {
-            showHint(`Run cancelled before Clear Session Context for ${rel}`);
+            showHint(`Run cancelled for ${rel}`);
             return;
         }
         if (routeGeneration !== null && isEditorRouteSteeringDelivered(err.message)) {
@@ -1391,16 +1390,6 @@ routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
         editorCommandRegistry.complete(routeKey, EditorCommandKind.RunAgentDoc);
         resolveSettled();
     }
-}
-
-async function cancelActiveRoute(routeKey: string): Promise<void> {
-    const route = activeRoutes.get(routeKey);
-    if (!route) return;
-    route.controller.abort();
-    await Promise.race([
-        route.settled,
-        new Promise<void>((resolve) => setTimeout(resolve, ROUTE_CANCEL_WAIT_MS)),
-    ]);
 }
 
 async function runSessionCommandForActiveFile(
@@ -1789,8 +1778,16 @@ async function clearSessionContextAction(): Promise<void> {
         case EditorCommandDecision.StartNow:
             break;
         case EditorCommandDecision.PreemptRunWithClear:
-            showHint(`Cancelling Run before Clear Session Context for ${rel}`);
-            await cancelActiveRoute(routeKey);
+            // #clearaftrun: the Run is a controller-side editor_route command that
+            // the editor cannot cancel; aborting only abandoned the wait for its
+            // outcome (the trigger was still typed) and freed the Run slot, so a
+            // Run re-press typed a second trigger. Keep the Run's wait alive so its
+            // outcome is still shown; the binary queues this clear behind that run
+            // (`dispatch_turn_pending`) and says so.
+            console.log(
+                `[agent-doc] Clear Session Context requested while Run Agent Doc is dispatching for ${rel}; `
+                + 'the run continues and the clear is ordered after it',
+            );
             break;
         case EditorCommandDecision.DedupeActiveClear:
             showHint(`Clear Session Context already running for ${rel}`);

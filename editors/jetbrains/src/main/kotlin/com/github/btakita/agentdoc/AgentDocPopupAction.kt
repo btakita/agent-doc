@@ -10,7 +10,9 @@ import com.intellij.openapi.ui.popup.JBPopupFactory
  * the PSI indexes, so "Analyzing project..." must not disable or hide the menu.
  */
 internal class DumbAwareGroup(name: String? = null, popup: Boolean = false) :
-    DefaultActionGroup(name, popup), DumbAware
+    DefaultActionGroup(name, popup), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+}
 
 /**
  * Shows a popup menu with Agent Doc commands when Ctrl+Shift+Alt+D (rebindable) is pressed in a .md file;

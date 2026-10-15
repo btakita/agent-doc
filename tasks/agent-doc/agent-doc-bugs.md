@@ -247,6 +247,33 @@ There is no queue marker for `[/]` meaning *gated, waiting on something external
 - **staleplugwarnflake:** the test now uses the in-process relay route instead of cold-launching a controller (6/128 failures under load → 0/128).
 
 **Found along the way, dispatched:** that flake belongs to a class. Many lib tests cold-launch a separate `controller serve` and wait a fixed ~2 s for its socket, which gave ~500 panics in `agent-doc-preflight-io` under load. The same cause, plus a 5 s wall-clock assertion, explains the `queue-io` failures seen in two subagents' `make check` runs. `fix/cold-launch-test-flakes` makes these tests in-process or condition-based and adds a guard against new cold-launching lib tests, so the next release's single `make check` is reliable.
+
+### Re: release status, and resuming the subagents a dead session left behind — opus-5-5 · 2026-10-15T17:51-04:00
+
+> **Chat prompt (#chatprompt):** release published?
+
+**v0.35.509 is the latest published release.** The GitHub Release is marked Latest (19:20Z), PyPI is 0.35.509, and the Release run succeeded. Nothing newer has shipped. `batch-0.35.510` is built up but not released yet (state below).
+
+**What happened to the in-flight work:** the previous coordinator session exited, and its background subagents died with it. Their claims stayed held by a dead owner, and 8 worktrees were left with uncommitted, half-finished changes. No work was lost: every worktree still holds its diff.
+
+**Resumed: 9 fresh subagents, one per existing worktree.** Each continues from the previous worker's diff, with the operator authorization pasted verbatim. Builds run under `nice -n 19 ionice -c3` with `CARGO_BUILD_JOBS=6` so IDEA stays responsive (load is ~3 now). Version bumps are left to integration.
+- `subagent:gh274` → `fix/gh274` (GH #274, the duplicated response with `?` characters)
+- `subagent:todoids` → `feat/todo-ids` (todo id reuse/mint plus a done flow; builds on `fix/todo-id-guard`)
+- `subagent:keylogrebase` → `fix/keylogrebase`
+- `subagent:gh275` → `fix/gh275` (GH #275 plus the new comment; builds on `fix/todo-id-guard`)
+- `subagent:queueschedule` → `feat/queue-schedule` (`interval` / `time` / `loop`)
+- `subagent:clearctxerr` → `fix/clear-first-attempt-error`
+- `subagent:ideacpu` → `fix/keep-ide-snappy`
+- `subagent:stalecontroller` → `fix/stale-controller-hot-update` (also covers the tmux 2→1→2 pane auto-sync item)
+- `fix/cold-launch-test-flakes`: the test-flake follow-up found while fixing `#staleplugwarnflake`. Not a queue item.
+
+**Integrated into `batch-0.35.510` (pushed):** `fix/todo-id-guard` (the fix for `#todobracketguard`, which unblocks sdk.md) and `fix/splicesessionack` (GH #273 remainder) merged cleanly. The batch already held `#claimfollowedit` (its completion note above), `#execfailpipe`, `#rearmreadfailclosed2` and `#staleplugwarnflake`. `make check-fast` is running on the batch now. These items stay claimed until the batch passes its single `make check` and is installed. The full check waits for `fix/cold-launch-test-flakes`, so the known flake class doesn't turn that run red. Then one `make install`, the closeouts, and the sdk.md re-check.
+
+> **Queue prompt:** Run Agent Doc on docs.md: agent-doc should interrupt the turn until the writing has settled. The
+
+**Deferred:** you're still typing this one (the typing gate holds it as unsettled). It is parked under a 30-minute coordinator claim, and editing the line releases it. I'll dispatch it once the sentence is complete.
+
+The exchange is large (221 lines, 13 sections). I'm noting that here, not stopping for it.
 <!-- agent:boundary:2e8e3946 -->
 <!-- /agent:exchange -->
 
@@ -255,20 +282,21 @@ There is no queue marker for `[/]` meaning *gated, waiting on something external
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/274
-- 🚧 `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
-- 🚧 do [#keylogrebase]
-- 🚧 do [#claimfollowedit]
-- 🚧 do [#splicesessionack]
-- 🚧 do [#rearmreadfailclosed2]
-- 🚧 do [#execfailpipe]
-- 🚧 do [#staleplugwarnflake]
-- #gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.
-- Add `agent:queue` `interval` which sets the poll interval. Add a `time` attribute to set time of day. Allow multiple times of day. Make the loop efficiently run in the Controller. Ideally a single loop. Make sure the loop does not "go rogue" and thrash the CPU. Jobs use background workers. Add a `loop` attribute which loops through the items per interval/schedule and keeps the items in the queue. `loop` without a value will loop indefinately. `loop=3` will loop 3 times. Make sure realtime updates are supported. Use lazily for state management.  
-- Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked
-- idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?
+- do [#todobracketguard]
+- #gh-fix https://github.com/btakita/agent-doc/issues/274
+- `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
+- do [#keylogrebase]
+- do [#claimfollowedit]
+- do [#splicesessionack]
+- do [#rearmreadfailclosed2]
+- do [#execfailpipe]
+- do [#staleplugwarnflake]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.
+- 🚧 Add `agent:queue` `interval` which sets the poll interval. Add a `time` attribute to set time of day. Allow multiple times of day. Make the loop efficiently run in the Controller. Ideally a single loop. Make sure the loop does not "go rogue" and thrash the CPU. Jobs use background workers. Add a `loop` attribute which loops through the items per interval/schedule and keeps the items in the queue. `loop` without a value will loop indefinately. `loop=3` will loop 3 times. Make sure realtime updates are supported. Use lazily for state management.  
+- 🚧 Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked
+- 🚧 idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?
 ---
-sdk.md issue: I asked the agent to add ids on the todo items:
+🚧 sdk.md issue: I asked the agent to add ids on the todo items:
 ```
 ❯ /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
 
@@ -300,8 +328,9 @@ sdk.md issue: I asked the agent to add ids on the todo items:
   5. Chat about this
 ```
 ---
-- tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.
+- ~~release + publish~~
+- Run Agent Doc on docs.md: agent-doc should interrupt the turn until the writing has settled. The 
 <!-- /agent:queue -->
 
 ## Todo
@@ -316,12 +345,12 @@ sdk.md issue: I asked the agent to add ids on the todo items:
 
 <!-- agent:backlog priority queue -->
 - [ ] [#todobracketguard] Preflight shadow-backlog guard (`detect_shadow_open_items`, agent-doc-element-backlog/src/backlog.rs:2391, raised from agent-doc-preflight-io `enforce_no_shadow_open_backlog`) refuses `- [ ] [#id]` items in `agent:todo` as "open backlog item(s) exist only outside live agent:backlog" because `todo` is not in its excluded-component list (backlog/review/icebox/exchange/queue). It hard-wedged haiven-dev tasks/sdk.md on agent-doc 0.35.509 (21 todo ids); the same `[ ] [#id]` format works on the operator coder instance, so compare versions/guard paths. Fix: exclude `agent:todo` (or parse its own `[#id]` as todo ids, not backlog ids) in the guard, add a regression test with bracketed todo ids, and reconcile with the #todo id/done-flow work (feat/todo-ids). Workaround in place: sdk.md todos use a bare `#id`.
-- [ ] 🚧 [#keylogrebase] Keystroke log reopened after a compaction keeps the pre-compaction base hash (`merge_base=97b41a5fa5b6` after the 2026-10-15 16:29:43Z compaction), so admission has no op-lineage proof. Fixing it also closes the documented gap where a disk-only component can still arrive twice (see specs/14-realtime-workflow.md "Cut exclusivity" and the TLA+ `AdmissionCutExclusivityResidual` config).
-- [ ] 🚧 [#claimfollowedit] Queue claims are keyed by exact line text, so editing a claimed line drops the claim (`queue_claim_prune pruned=1`; GH #272 line 2026-10-15). Claims should follow the edited item (node identity) the way steering forward_to_owner already does.
-- [ ] 🚧 [#splicesessionack] GH #273 remainder: session-check still reports "acknowledgement pending" after the controller logs `retained_persistence_replica_rebuild_exhausted ... editor_holds_unmerged_visible_text`; give session-check a durable read of that state and name the operator action.
-- [ ] 🚧 [#rearmreadfailclosed2] Two remaining rearm-evidence reads in agent-doc-document-realtime-io/src/lib.rs (around lines 4167 and 5334) still use `.ok().flatten()`, treating a failed read as "no evidence"; apply the fail-closed rule from fix/preflight-io-load-flakes (6f54959182).
-- [ ] 🚧 [#execfailpipe] Verify and fix: `close_inherited_fds_on_exec` closes fds >= 3 in the child before exec, likely including Rust spawn's CLOEXEC exec-failure pipe, so an exec ENOENT may report as a successful spawn and defeat the launch-ENOENT retry.
-- [ ] 🚧 [#staleplugwarnflake] `warnings::tests::stale_plugin_warning_end_to_end_from_reliable_registration` failed 1/96 whole-crate runs under load (2026-10-15); find and fix the nondeterminism, never rerun to green.
+- [ ] [#keylogrebase] Keystroke log reopened after a compaction keeps the pre-compaction base hash (`merge_base=97b41a5fa5b6` after the 2026-10-15 16:29:43Z compaction), so admission has no op-lineage proof. Fixing it also closes the documented gap where a disk-only component can still arrive twice (see specs/14-realtime-workflow.md "Cut exclusivity" and the TLA+ `AdmissionCutExclusivityResidual` config).
+- [ ] [#claimfollowedit] Queue claims are keyed by exact line text, so editing a claimed line drops the claim (`queue_claim_prune pruned=1`; GH #272 line 2026-10-15). Claims should follow the edited item (node identity) the way steering forward_to_owner already does.
+- [ ] [#splicesessionack] GH #273 remainder: session-check still reports "acknowledgement pending" after the controller logs `retained_persistence_replica_rebuild_exhausted ... editor_holds_unmerged_visible_text`; give session-check a durable read of that state and name the operator action.
+- [ ] [#rearmreadfailclosed2] Two remaining rearm-evidence reads in agent-doc-document-realtime-io/src/lib.rs (around lines 4167 and 5334) still use `.ok().flatten()`, treating a failed read as "no evidence"; apply the fail-closed rule from fix/preflight-io-load-flakes (6f54959182).
+- [ ] [#execfailpipe] Verify and fix: `close_inherited_fds_on_exec` closes fds >= 3 in the child before exec, likely including Rust spawn's CLOEXEC exec-failure pipe, so an exec ENOENT may report as a successful spawn and defeat the launch-ENOENT retry.
+- [ ] [#staleplugwarnflake] `warnings::tests::stale_plugin_warning_end_to_end_from_reliable_registration` failed 1/96 whole-crate runs under load (2026-10-15); find and fix the nondeterminism, never rerun to green.
 <!-- /agent:backlog -->
 
 ## Review

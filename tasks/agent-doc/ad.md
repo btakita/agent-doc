@@ -42,6 +42,17 @@ The only change this cycle was frontmatter: the agent declaration (`agent: codex
 **What I did not do.** I made no code change. That session owns this fix in that worktree right now, and a second session editing the same gate would collide with it.
 
 **To see it now:** the pane is at tmux `0:1.2` in the `stash` window. Or wait: once the bugs.md turn closes, the deferred recycle fires and the next focus should swap it in. If it stays stuck after that turn closes, that is a real bug in the new gate logic.
+
+### Re: published? — opus-5.5 · 2026-10-15T14:42-04:00
+
+> **Chat prompt (#chatprompt):** published?
+
+**Yes.** The fixes from the bugs.md session first shipped in **v0.35.499**. The current release is **v0.35.508** on PyPI; its Release workflow was green at 14:34Z today, and it is also the locally installed version. The three commits are on `origin/main`:
+- `08dba1fcc6` fix(sync): restore focused active pane across live peers
+- `c1d74b9873` fix(route): warn when live owner pane is off-screen
+- `e49470008d` feat(queue): surface subagent completion feedback
+
+The current ops log has no `layout_column_pane_excluded` entries for agent-doc-bugs.md. Pane `%192` is still in the `stash` window, but that is only a problem if it is still the doc's owner. If focusing agent-doc-bugs.md in IDEA still doesn't bring its pane forward on 0.35.508, report it as a new bug against the shipped gate.
 <!-- agent:boundary:53d7834e -->
 <!-- /agent:exchange -->
 

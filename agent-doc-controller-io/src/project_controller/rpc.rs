@@ -1488,6 +1488,43 @@ mod warm_test_actor_sockets {
     }
 }
 
+/// Opt in to cold-launching a real detached `agent-doc controller serve`
+/// process for `project_root` from a workspace lib test (`#coldlaunchflakes`).
+///
+/// Without this marker a lib test never starts a controller process:
+/// [`connect_or_launch`] serves the root from this process's warm state actor
+/// ([`ensure_state_actor_for_tests`]) instead, and any other launch path
+/// panics. Only a test whose subject IS the process launch (spawn, socket
+/// publication, handoff to a replacement process) should call this.
+#[cfg(feature = "test-support")]
+pub fn allow_cold_controller_launch_for_tests(project_root: &Path) {
+    cold_launch_test_policy::allow(project_root);
+}
+
+/// `#coldlaunchflakes`: which lib-test launches may start a real controller
+/// process (see the module docs).
+#[cfg(feature = "test-support")]
+#[path = "cold_launch_test_policy.rs"]
+mod cold_launch_test_policy;
+
+/// `#coldlaunchflakes` guard: a lib test may only spawn a controller process
+/// after [`allow_cold_controller_launch_for_tests`]. [`connect_or_launch`]
+/// already serves unopted lib tests in-process, so reaching a spawn here means
+/// a new launch path (handoff, recycle, helper) would reintroduce the
+/// process-startup race; fail the test that took it instead.
+fn refuse_unopted_lib_test_controller_launch(project_root: &Path) {
+    #[cfg(feature = "test-support")]
+    if cold_launch_test_policy::unopted_lib_test_launch(project_root) {
+        panic!(
+            "lib test tried to launch a detached `agent-doc controller serve` for {} without opting in (#coldlaunchflakes). \
+             Serve the root in-process with ensure_state_actor_for_tests, or call \
+             allow_cold_controller_launch_for_tests if the process launch is what the test exercises.",
+            project_root.display()
+        );
+    }
+    let _ = project_root;
+}
+
 fn read_controller_response_line_with_timeout<R: BufRead>(
     reader: &mut R,
     response: &mut String,
@@ -16056,6 +16093,15 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
     // socket; polling the bare path then spent the whole launch budget and
     // reported "timed out waiting for project controller", hiding the real
     // cause the child wrote to its stderr log.
+    //
+    // `#coldlaunchflakes`: a lib test that did not opt in to a real process
+    // launch is served by this process's state actor, bound before it returns,
+    // so the connect below has no startup race and no launch deadline.
+    #[cfg(feature = "test-support")]
+    if cold_launch_test_policy::unopted_lib_test_launch(project_root) {
+        ensure_state_actor_for_tests(project_root)?;
+        return connect(project_root);
+    }
     let launch = launch_detached(project_root, launch_mode)?;
     wait_for_controller_path_with_launch(
         &socket_path(project_root),
@@ -16263,6 +16309,7 @@ pub(crate) fn launch_detached_at(
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
 ) -> Result<DetachedControllerLaunch> {
+    refuse_unopted_lib_test_controller_launch(project_root);
     if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
         return launch_detached_via_helper(
             project_root,
@@ -16717,7 +16764,7 @@ fn wait_for_controller_path_with_launch(
     }
     let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
         "project_controller_connect",
-        timeout,
+        launched_child_wait_budget(timeout),
     )?;
     let stderr_log = path
         .parent()
@@ -16768,6 +16815,25 @@ fn wait_for_controller_path_with_launch(
         }
         std::thread::sleep(CONNECT_POLL);
     }
+}
+
+/// `#coldlaunchflakes`: in a lib test that opted in to a real controller launch,
+/// the wait for the child is condition-based. It ends when the child publishes
+/// its socket or exits (both observed by the loop above), and the budget is only
+/// a hang ceiling: the test-mode `LAUNCH_CONNECT_WAIT` (2s) turned "this child
+/// is alive but descheduled under load" into a test failure. The ceiling stays
+/// below nextest's 180s per-test kill so a genuine hang still names the
+/// controller, and bounds the batched `cargo test` packages, which have no
+/// per-test timeout. Every other process keeps `timeout` unchanged.
+#[cfg(feature = "test-support")]
+const LAUNCHED_CHILD_HANG_CEILING: Duration = Duration::from_secs(150);
+
+fn launched_child_wait_budget(timeout: Duration) -> Duration {
+    #[cfg(feature = "test-support")]
+    if cold_launch_test_policy::running_in_workspace_lib_test() {
+        return timeout.max(LAUNCHED_CHILD_HANG_CEILING);
+    }
+    timeout
 }
 
 /// The last few lines of a controller stderr log, formatted for an error
@@ -21185,6 +21251,22 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     // The controller owns the authoritative projection. Never ask its socket
     // from the controller process itself.
     if agent_doc_crdt_relay_io::process_serves_relay_hub() {
+        return false;
+    }
+    // `#coldlaunchflakes`: a lib test that routes this document's relay
+    // in-process (`seed_embedded_relay_for_file` / a replica registration) is
+    // modelling the controller-hosted topology, in which this process owns the
+    // document's relay and, like the controller above, answers from its own
+    // plane. Before lib tests were served by an in-process state actor, the
+    // socket here belonged to a separately launched controller that hosted no
+    // model for the document, so the answer was the same "not live" -- unless
+    // that launch lost its startup race under load. The in-process actor shares
+    // this process's relay registry and would report the test's own hub as a
+    // second, controller-side allocation, which no production topology has.
+    #[cfg(feature = "test-support")]
+    if cold_launch_test_policy::running_in_workspace_lib_test()
+        && agent_doc_crdt_relay_io::embedded_relay_route_is_registered_for_file(file)
+    {
         return false;
     }
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {

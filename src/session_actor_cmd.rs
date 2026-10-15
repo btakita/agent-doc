@@ -6110,12 +6110,22 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         // prompt and the seconds left (snapshot 2s old), instead of a live turn.
         let settling = settling_abandoned_prompt_for_clear(&ctx, "%180", "turn_active_lease")
             .expect("an unsettled abandoned prompt behind the lease");
+        let checked_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         assert_eq!(settling.snapshot_at, lease_at + 2);
+        // The guard reads the wall clock somewhere in [now, checked_at], so the
+        // seconds left are SETTLE minus the snapshot's age at that read. Bound
+        // the read by what this test observed instead of assuming the setup
+        // above took under a second: under load it took longer, the age reached
+        // 4s, and a fixed `SETTLE-3..=SETTLE-2` window failed with
+        // `settles_in_secs: 16` while the guard was correct.
+        let settle = agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS;
         assert!(
-            (agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 3
-                ..=agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 2)
+            (settle - (checked_at - settling.snapshot_at)..=settle - (now - settling.snapshot_at))
                 .contains(&settling.settles_in_secs),
-            "{settling:?}"
+            "{settling:?} checked_at={checked_at} now={now}"
         );
         assert_eq!(
             settling_abandoned_prompt_for_clear(&ctx, "%180", "dispatch_turn_running"),

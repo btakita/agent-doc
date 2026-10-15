@@ -94,6 +94,23 @@ Yes. The repo already has the model this needs. What missed the bug is the link 
 **Limits.** TLC checks a bounded model, so it proves the protocol, not the Kotlin or Rust. The guarantee is only as strong as the conformance step in (3). A model is not proof of the code until something mechanically ties the code's transitions to it. Lean already holds the wait-machine and authority-ladder proofs. It could also prove the pure `ControllerEditorSurfaceGraph::observe` fence function, but the cross-process wedge belongs in TLA+.
 
 If you want this, I'd queue it as one item after the v0.35.504 release: (1) the TLA+ extension with wedge and reach configs, (2) re-registration on `retired_endpoint`, (3) the action-set conformance test, trace fixtures for the two wedge windows, and the runtime monitor.
+
+### Re: dispatched the formal-logic work for the tmux auto-sync class — opus-5.5 · 2026-10-14T23:43-04:00
+
+I handed the new queue item ("do your formal logic suggestions") to its own subagent (`subagent:surfaceformal`). It works in the worktree `~/work/btakita/agent-doc-wt/surfaceformal` on branch `feat/surface-retire-formal`. The branch starts from the integration branch `batch-gh261-264`, so the tmux auto-sync fix is already in it. It covers all three parts of the proposal:
+
+1. **TLA+:** `PassiveTmuxSyncNet` gets a retire/forget step, the per-process generation, the controller's retired-endpoint check, and frontend handoff. It also gets the property "a live editor window is never permanently ignored".
+   - A **wedge** config with the shipped behaviour (`RetireOnNewerReply = TRUE`) must make TLC find the 02:54Z stall.
+   - A **reach** config shows the fixed model actually exercises retirement and re-registration.
+2. **Recovery built into the design:** when the controller rejects a still-connected window as retired, the plugin re-registers under a fresh generation, so no forget bug can keep a live window ignored for more than one round trip. This covers the classic plugin and the Remote Dev handoff case that is still open.
+3. **Tying the model to the code:**
+   - A test maps every call that changes the controller's editor-window state to a step in the model, so a step the model lacks fails `make check`. The subagent must show the test fails when it adds a fake unmodeled call.
+   - The 00:45Z and 02:54Z stall traces, anonymized, become replay fixtures.
+   - A runtime warning, plus automatic recovery, fires when a connected window is rejected as retired K times in a row.
+
+**`release + publish`** comes after this item in the queue, so v0.35.504 waits for this branch and for the duplicate-title fix. I'll then merge both and run one full `make check`, which includes `make tla`, followed by `make install`. Last, I'll push `main`, close #261–#264, and release.
+
+The three `semantic_completion_match` warnings from preflight are false matches with old done items, so I ignored them.
 <!-- agent:boundary:72605a80 -->
 <!-- /agent:exchange -->
 
@@ -102,15 +119,15 @@ If you want this, I'd queue it as one item after the v0.35.504 release: (1) the 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/261
-- #gh-fix https://github.com/btakita/agent-doc/issues/262
-- #gh-fix https://github.com/btakita/agent-doc/issues/263
-- #gh-fix https://github.com/btakita/agent-doc/issues/264
-- tmux pane auto-sync not working
-- Add a `priority` attribute to `agent:review`.
-- Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/261
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/262
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/263
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/264
+- 🚧 tmux pane auto-sync not working
+- 🚧 Add a `priority` attribute to `agent:review`.
+- 🚧 Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.
 - do your formal logic suggestions
-- release + publish
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog

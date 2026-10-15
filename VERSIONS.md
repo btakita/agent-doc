@@ -2,6 +2,32 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.505
+
+- **tmux auto-sync recovers from a retired endpoint by construction.** A
+  rejected surface observation now returns a typed `retired_endpoint` receipt
+  naming the generation to re-register above; the JetBrains plugin (classic and
+  the Remote Dev backend fallback) re-registers there and re-sends once. A
+  forget at generation g retires every endpoint registered at or below g and
+  raises its fence, so a retired frame can never resurrect. Three consecutive
+  retired rejections of one endpoint log
+  `controller_editor_surface_muted_live_endpoint`.
+- **Formal model of surface retirement.** `PassiveTmuxSyncRetireNet.tla` models
+  retire/forget, per-process generations, the controller fence and Remote Dev
+  handoff, proving `LiveEndpointNeverMuted` and `NoRetiredResurrection`; wedge
+  configs reproduce the shipped 0.35.502/503 stall, the Remote Dev fallback
+  mute and an exact-forget resurrection. A `syn`-derived conformance test fails
+  the build when code adds a surface-state transition the model lacks, and the
+  two real wedge traces replay as anonymized fixtures.
+- **JetBrains actions declare their update thread (GH #265).** Every action,
+  including the runtime popup group, overrides `getActionUpdateThread()` with
+  `BGT`, so build 263 no longer logs SEVERE `requested on EDT` reports blamed
+  on Agent Doc; a class-scanning test fails if any action inherits it.
+- **Controller tests no longer depend on timing.** The actor-binding "no
+  retry" proof counts connections instead of wall-clock time, and process-wide
+  state readers are bound to their project root so concurrent in-process
+  controllers never answer for one another.
+
 ## 0.35.504
 
 - **A promoted predecessor controller retires instead of lingering (GH #261).**

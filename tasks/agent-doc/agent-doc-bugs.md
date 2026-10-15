@@ -111,7 +111,24 @@ I handed the new queue item ("do your formal logic suggestions") to its own suba
 **`release + publish`** comes after this item in the queue, so v0.35.504 waits for this branch and for the duplicate-title fix. I'll then merge both and run one full `make check`, which includes `make tla`, followed by `make install`. Last, I'll push `main`, close #261–#264, and release.
 
 The three `semantic_completion_match` warnings from preflight are false matches with old done items, so I ignored them.
-<!-- agent:boundary:72605a80 -->
+> **Chat prompt (#chatprompt):** is the release published?
+
+### Re: release status (v0.35.504 not yet published) — opus-5.5 · 2026-10-15T00:17-04:00
+
+No. The latest published release is still **v0.35.503** (GitHub release at 2026-10-15T02:20:56Z), and `origin/main` is still at `748c9381a7 chore: release v0.35.503`. No v0.35.504 tag exists.
+
+The release is held on purpose. "release + publish" comes last in the queue, after "do your formal logic suggestions", and that subagent is still running. Everything else is merged into the local integration branch `batch-gh261-264`, which is not pushed yet:
+
+- GH #261, #262, #263, #264
+- `priority` on `agent:review`
+- `agent:todo` auto-creation and `--todo-add`
+- the tmux auto-sync regression fix
+- the duplicate-heading `report-complete` fix
+
+Once the formal branch lands, I'll merge it and run one full `make check`, which includes `make tla`, then `make install`. Then I'll push `main`, close #261–#264, and release v0.35.504.
+
+If you'd rather ship now, I can release the integrated batch without the formal work and put the formal work in v0.35.505.
+<!-- agent:boundary:29f7c195 -->
 <!-- /agent:exchange -->
 
 <!--

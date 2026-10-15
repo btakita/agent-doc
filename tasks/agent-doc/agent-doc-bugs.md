@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -152,6 +153,26 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 - Full `make check`: exit 0, 10609 passed, 167 skipped, no `result: FAILED`.
 - Pushed to `main` as a fast-forward (`86e24508ce..929af28503`), and `make install` exited 0.
 - These fixes are on main but **unreleased**; they are not in v0.35.506.
+
+### Re: v0.35.507 released; GH #267 dispatched — opus-5-5 · 2026-10-15T10:05-04:00
+
+> **Queue prompt:** release + publish
+
+**Released v0.35.507** (`bfe24ce941`, fast-forward on `main`, tag `v0.35.507` pushed).
+- **Contents:** the five fixes that landed on `main` after v0.35.506:
+  - `agent:todo` completion flags (`--todo-done` / `--todo-edit` / `--todo-reopen` / `--todo-remove`), plus per-item todo merge with duplicate folding (`72a8f99d2a`);
+  - the fix for half-typed queue lines forking into duplicates, via the op-epoch-ahead lineage proof (`9fa07acab1`);
+  - the compact-exchange directive now ignores managed list components and report nouns (`86e24508ce`);
+  - the lint gate registers the `salient-response` / `referral` markers (`7fee5a2623`).
+- **Release notes:** VERSIONS.md and the release-parity row were written before the check, so `editor-parity` covered 0.35.507 on the first run.
+- **Checks:** the full `make check` on the version-projected tree passed: exit 0, 10609 passed, 167 skipped, no `result: FAILED`.
+- **Installed:** `make install-full` exited 0, and `agent-doc --version` reports `agent-doc 0.35.507`.
+- **CI:** the tag-push workflows are running; CI on `main` is still in progress. The Book and Pages deploys already succeeded.
+
+**Dispatched:** `#gh-fix https://github.com/btakita/agent-doc/issues/267` is claimed for `subagent:gh267`, on branch `fix/gh267-superseded-plugin-gate` from v0.35.507.
+- **The issue:** after `agent-doc upgrade` swaps the exact-263 plugin under a live IDE, every Run Agent Doc is refused with `plugin_bytes_superseded` until restart. That same IDE pid had hot-reloaded the new native library and was still replicating edits.
+- **The fix:** the subagent will make the gate decide from the editor's live capability evidence instead of "the jar on disk changed". It keeps fail-closed behavior when the process genuinely cannot publish the route's observations, and it covers both cases with regression tests.
+- **Coordinator steps:** integration, `make install`, and closing #267 come back to the coordinator.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -160,6 +181,7 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+- #gh-fix https://github.com/btakita/agent-doc/issues/267
 - release + publish
 <!-- /agent:queue -->
 

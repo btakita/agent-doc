@@ -1947,13 +1947,24 @@ mod tests {
         let after_edit = observe_for_wake(&file).unwrap();
         assert!(after_edit.items.is_empty(), "{after_edit:?}");
 
-        // Retargeting it to a different issue is new work: it wakes.
+        // Changing the claimed line's issue in place wakes the coordinator,
+        // routed to the claim's owner (`#claimfollowedit`): the claim follows
+        // its line, so the owner decides, and no second worker is offered.
         let retargeted = retagged.replace("issues/116", "issues/118");
         std::fs::write(&file, &retargeted).unwrap();
         backdate(&file);
         let after_retarget = observe_for_wake(&file).unwrap();
         assert_eq!(after_retarget.items.len(), 1, "{after_retarget:?}");
         assert!(after_retarget.items[0].verbatim.ends_with("/118"));
+        assert_eq!(
+            after_retarget.items[0].dispatch,
+            core::SteeringDispatch::ForwardToOwner,
+            "{after_retarget:?}"
+        );
+        assert_eq!(
+            after_retarget.items[0].owner.as_deref(),
+            Some("subagent:gh-116")
+        );
     }
 
     /// Pin a document's mtime in the future: the settle gate then has no
@@ -2315,6 +2326,107 @@ mod tests {
         let passive = observe(&file, CONSUMER_HOOK, false).unwrap().unwrap();
         assert!(passive.items.is_empty(), "{passive:?}");
         assert_eq!(passive.pending, 1);
+    }
+
+    /// `#claimfollowedit` (agent-doc-bugs.md, 2026-10-15): a claimed queue line
+    /// whose URL the operator corrects in place stays claimed by its owner, and
+    /// steering forwards the edit to that owner instead of offering a second
+    /// subagent. The claimed text was on two identical lines: editing one copy
+    /// forwards to the owner, deleting the other copy keeps the claim on the
+    /// edited line, and only deleting the line itself releases the claim.
+    #[test]
+    fn in_place_edit_of_a_claimed_duplicate_line_keeps_its_claim_and_forwards_to_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let foc = "#subagents: #gh-fix https://github.com/btakita/agent-foc/issues/272";
+        let fixed = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/272";
+        let doc = |lines: &[&str]| {
+            let queue: String = lines.iter().map(|line| format!("- {line}\n")).collect();
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 2500\nprompt_presets:\n  '#subagents': 'run the remaining items in subagents'\n---\n# S\n\n<!-- agent:queue go -->\n{queue}<!-- /agent:queue -->\n"
+            )
+        };
+        let baseline = doc(&["current task", foc, "release + publish", foc]);
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, foc, "subagent:gh272", 3600).unwrap();
+        assert_eq!(
+            claim.anchor.as_ref().map(|anchor| anchor.slots.len()),
+            Some(2),
+            "one claim binds both identical lines"
+        );
+
+        // The operator corrects the first copy in place.
+        let one_fixed = doc(&["current task", fixed, "release + publish", foc]);
+        std::fs::write(&file, &one_fixed).unwrap();
+        backdate(&file);
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(hook.items.len(), 1, "{hook:?}");
+        assert_eq!(
+            hook.items[0].dispatch,
+            core::SteeringDispatch::ForwardToOwner,
+            "{hook:?}"
+        );
+        assert_eq!(hook.items[0].owner.as_deref(), Some("subagent:gh272"));
+        assert_eq!(hook.items[0].previous.as_deref(), Some(foc));
+
+        // ...and deletes the stale copy: the claim moves to the edited line.
+        let cleaned = doc(&["current task", fixed, "release + publish"]);
+        std::fs::write(&file, &cleaned).unwrap();
+        backdate(&file);
+        let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(&file, &cleaned);
+        assert!(claimed.claims(fixed), "the claim followed the edited line");
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::prune_closed_claims(&file, &cleaned).unwrap(),
+            0,
+            "closeout must not prune the edited line's claim"
+        );
+        let stored = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        assert_eq!(stored.claims.len(), 1, "{stored:?}");
+        assert_eq!(stored.claims[0].owner, "subagent:gh272");
+        assert_eq!(stored.claims[0].item_text, fixed);
+
+        // A further in-place edit still routes to the owner, with no re-claim.
+        let annotated_line = format!("{fixed} (Coder env)");
+        let annotated = doc(&["current task", &annotated_line, "release + publish"]);
+        std::fs::write(&file, &annotated).unwrap();
+        backdate(&file);
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert!(
+            hook.items
+                .iter()
+                .all(|item| item.dispatch == core::SteeringDispatch::ForwardToOwner),
+            "{hook:?}"
+        );
+
+        // The worker refreshes by the text it was handed.
+        agent_doc_queue_io::queue_claim::refresh(&file, foc, "subagent:gh272", 3600).unwrap();
+
+        // Deleting the line releases the claim.
+        let deleted = doc(&["current task", "release + publish"]);
+        std::fs::write(&file, &deleted).unwrap();
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::prune_closed_claims(&file, &deleted).unwrap(),
+            1
+        );
+        assert!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
     }
 
     /// `#steerworks` items 1 + 3 (agent-doc-bugs.md, 2026-10-04): the operator

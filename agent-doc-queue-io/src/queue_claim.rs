@@ -290,29 +290,92 @@ pub(crate) fn editor_authority_text(file: &Path, source: &str) -> Option<String>
 /// Resolve a claim `--item` against the on-disk document, falling back to
 /// the editor authority's current text on a miss (GH #124 ask 5): dispatch
 /// and claim must agree on what a live head is even while an editor save to
-/// disk is deferred.
-fn resolve_live_claim_target(file: &Path, item: &str, source: &str) -> Result<String> {
+/// disk is deferred. Returns the resolved head and the live heads of the view
+/// it resolved in (a new claim's anchor, `#claimfollowedit`).
+///
+/// An item that names no live head but names a claim that has since followed
+/// an operator edit of its line resolves to the line it became
+/// (`#claimfollowedit`), so a worker's `--refresh` / `release` by the text it
+/// was handed still reaches its claim.
+fn resolve_live_claim_target(
+    file: &Path,
+    item: &str,
+    source: &str,
+) -> Result<(String, Vec<String>)> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("read {} to resolve queue item {item:?}", file.display()))?;
     let disk_heads = live_queue_head_texts(&content).unwrap_or_default();
+    let mut authority: Option<Vec<String>> = None;
     let resolved = match resolve_claim_target_in_views(item, &disk_heads, None) {
-        Ok(resolved) => resolved,
+        Ok(resolved) => Ok(resolved),
         Err(_) => {
-            let authority = editor_authority_queue_heads(file, source);
-            resolve_claim_target_in_views(item, &disk_heads, authority.as_deref())?
+            authority = editor_authority_queue_heads(file, source);
+            resolve_claim_target_in_views(item, &disk_heads, authority.as_deref())
         }
     };
-    if resolved.1 == ClaimHeadSource::EditorAuthority {
+    let (target, view) = match resolved {
+        Ok(resolved) => resolved,
+        Err(miss) if miss.ambiguous.is_empty() => {
+            match followed_claim_target(file, item, &disk_heads, authority.as_deref()) {
+                Some(resolved) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "{source}_resolved_followed_edit source={} item_bytes={} target_bytes={} (#claimfollowedit)",
+                            resolved.1.as_str(),
+                            item.trim().len(),
+                            resolved.0.trim().len()
+                        ),
+                    );
+                    resolved
+                }
+                None => return Err(miss.into()),
+            }
+        }
+        Err(miss) => return Err(miss.into()),
+    };
+    if view == ClaimHeadSource::EditorAuthority {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{source}_resolved source={} reason=head_not_yet_saved_to_disk item_bytes={}",
-                resolved.1.as_str(),
+                view.as_str(),
                 item.trim().len()
             ),
         );
     }
-    Ok(resolved.0)
+    let heads = match view {
+        ClaimHeadSource::Disk => disk_heads,
+        ClaimHeadSource::EditorAuthority => authority.unwrap_or_default(),
+    };
+    Ok((target, heads))
+}
+
+/// The live head a claim that followed an operator edit away from `item`
+/// now holds (`#claimfollowedit`), in the first view where that claim's line
+/// is live. `None` when no single claim followed away from `item`.
+fn followed_claim_target(
+    file: &Path,
+    item: &str,
+    disk_heads: &[String],
+    authority_heads: Option<&[String]>,
+) -> Option<(String, ClaimHeadSource)> {
+    let stored = load_ledger(file).ok()?;
+    if stored.claims.is_empty() {
+        return None;
+    }
+    let views = std::iter::once((disk_heads, ClaimHeadSource::Disk))
+        .chain(authority_heads.map(|heads| (heads, ClaimHeadSource::EditorAuthority)));
+    for (heads, view) in views {
+        let mut ledger = stored.clone();
+        ledger.follow_edits(now_secs(), heads);
+        if let Some(text) = ledger.followed_item_text(item)
+            && let Ok(target) = agent_doc_queue::queue_claim::resolve_claim_target(text, heads)
+        {
+            return Some((target, view));
+        }
+    }
+    None
 }
 
 /// Claim the live queue head `item` for `owner` for `ttl_secs`.
@@ -347,11 +410,19 @@ pub fn claim_with_session(
     // A miss is a typed usage error (`QueueClaimMiss`) naming the live heads,
     // never a bare string: the CLI reports it as-is instead of wrapping it in
     // the generic turn-failure notice.
-    let target = resolve_live_claim_target(file, item, "queue_claim")?;
+    let (target, heads) = resolve_live_claim_target(file, item, "queue_claim")?;
     let identity = claim_identity(&target);
+    // `#claimfollowedit`: identical lines are one work identity, so one claim
+    // holds every copy; the log names how many it bound.
+    let occurrences = heads
+        .iter()
+        .filter(|head| claim_identity(head) == identity)
+        .count();
     let now = now_secs();
     let result = mutate_ledger(file, |ledger| {
         let outcome = ledger.claim_in_session(&target, owner, now, ttl_secs, owner_session);
+        // Anchor the claim to its line(s) in the view it resolved in.
+        log_followed(file, &ledger.follow_edits(now, &heads));
         let stored = ledger
             .claims
             .iter()
@@ -363,7 +434,7 @@ pub fn claim_with_session(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_claim outcome={:?} owner={} expires_at={} item_bytes={} owner_session={}",
+            "queue_claim outcome={:?} owner={} expires_at={} item_bytes={} occurrences={occurrences} owner_session={}",
             result.0,
             result.1.owner,
             result.1.expires_at_secs,
@@ -391,7 +462,7 @@ fn refresh_at(file: &Path, item: &str, owner: &str, ttl_secs: u64, now: u64) -> 
     }
     // Same resolution as `claim`, so `--item #id` refreshes a
     // `#subagents do [#id]` head and a closed head is a typed miss.
-    let target = resolve_live_claim_target(file, item, "queue_claim_refresh")?;
+    let (target, _) = resolve_live_claim_target(file, item, "queue_claim_refresh")?;
     // `#claimownerliveness`: a refresh also adopts the claim into the
     // caller's session, so a post-`/clear` coordinator that still hears from
     // the subagent makes the claim live again.
@@ -446,7 +517,7 @@ pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
     // `#subagents do [#id]` head; fall back to the literal item (a closed head
     // can still hold a stale claim worth releasing).
     let target = match resolve_live_claim_target(file, item, "queue_claim_release") {
-        Ok(target) => target,
+        Ok((target, _)) => target,
         Err(err) => {
             if err.downcast_ref::<QueueClaimMiss>().is_none() {
                 eprintln!(
@@ -630,12 +701,25 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
         if let Some(heads) = &heads {
             log_followed(file, &ledger.follow_edits(now, heads));
         }
-        Ok(ledger.prune(now, live.as_ref()))
+        Ok(ledger.prune_detailed(now, live.as_ref()))
     })?;
-    if pruned > 0 {
-        agent_doc_ops_log_io::log_op(file, &format!("queue_claim_prune pruned={pruned}"));
+    // `#claimfollowedit`: name every dropped claim, so a prune is never silent.
+    for (claim, cause) in &pruned {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_pruned owner={} cause={} item_bytes={} followed_edits={}",
+                claim.owner,
+                cause.as_str(),
+                claim.item_text.trim().len(),
+                claim.followed_from.len()
+            ),
+        );
     }
-    Ok(pruned)
+    if !pruned.is_empty() {
+        agent_doc_ops_log_io::log_op(file, &format!("queue_claim_prune pruned={}", pruned.len()));
+    }
+    Ok(pruned.len())
 }
 
 #[cfg(test)]
@@ -793,7 +877,6 @@ mod tests {
         assert!(release(&doc, "fix issue 110 now").unwrap().is_some());
         assert!(!claimed_items_for_content(&doc, &content).claims("fix issue 110 now"));
         assert!(release(&doc, "fix issue 110 now").unwrap().is_none());
-
     }
 
     fn refusal(err: &anyhow::Error) -> &agent_doc_queue::queue_claim::RefreshRefusal {

@@ -772,12 +772,7 @@ struct QueueAlignment {
 /// Normalize a queue prompt for comparison: progress/pin/priority markers are
 /// cosmetic and never read as an operator edit.
 pub fn normalize_queue_text(text: &str) -> String {
-    agent_doc_document::queue_projection::strip_priority_markers(
-        &agent_doc_document::queue_projection::strip_in_progress_marker(text),
-    )
-    .replace("\r\n", "\n")
-    .trim()
-    .to_string()
+    agent_doc_queue::queue_head_alignment::normalize_queue_head_text(text)
 }
 
 fn queue_items(content: &str) -> Vec<QueueItem> {
@@ -858,7 +853,6 @@ fn queue_alignment(
     let old = &watermark.acknowledged_queue;
     let new = queue_items(current);
     let old_keys: Vec<String> = old.iter().map(|norm| queue_identity(norm)).collect();
-    let new_keys: Vec<String> = new.iter().map(|item| queue_identity(&item.norm)).collect();
     // At the boundary the current item is finished: its consumption is not
     // an operator deletion and an edit to it is ordinary queue work.
     let current_item = if boundary {
@@ -986,58 +980,15 @@ fn queue_alignment(
     // outside that run (a moved line) still pairs with itself. Only lines
     // with no identity partner left are offered to the similarity pairing,
     // so deleting struck lines above claimed items can never turn a removed
-    // `do [#a]` into the "previous" text of an untouched `do [#b]`.
-    let ops = similar::capture_diff_slices(similar::Algorithm::Myers, &old_keys, &new_keys);
-    let mut pair_of_new: Vec<Option<(usize, bool)>> = vec![None; new.len()];
-    let mut old_paired = vec![false; old.len()];
-    for op in &ops {
-        if let similar::DiffOp::Equal {
-            old_index,
-            new_index,
-            len,
-        } = *op
-        {
-            for offset in 0..len {
-                pair_of_new[new_index + offset] = Some((old_index + offset, false));
-                old_paired[old_index + offset] = true;
-            }
-        }
-    }
-    for n in 0..new.len() {
-        if pair_of_new[n].is_some() {
-            continue;
-        }
-        if let Some(o) = (0..old.len()).find(|&o| !old_paired[o] && old_keys[o] == new_keys[n]) {
-            pair_of_new[n] = Some((o, false));
-            old_paired[o] = true;
-        }
-    }
-    for op in &ops {
-        let similar::DiffOp::Replace {
-            old_index,
-            old_len,
-            new_index,
-            new_len,
-        } = *op
-        else {
-            continue;
-        };
-        // Pair a replaced line with its edit only when the texts are
-        // plausibly the same item; positional pairing misread a consumed head
-        // followed by an operator addition as two edits.
-        let olds: Vec<usize> = (old_index..old_index + old_len)
-            .filter(|&o| !old_paired[o])
-            .collect();
-        let news: Vec<usize> = (new_index..new_index + new_len)
-            .filter(|&n| pair_of_new[n].is_none())
-            .collect();
-        let old_texts: Vec<String> = olds.iter().map(|&o| old[o].clone()).collect();
-        let new_items: Vec<QueueItem> = news.iter().map(|&n| new[n].clone()).collect();
-        for (po, pn) in pair_replaced_lines(&old_texts, &new_items) {
-            pair_of_new[news[pn]] = Some((olds[po], true));
-            old_paired[olds[po]] = true;
-        }
-    }
+    // `do [#a]` into the "previous" text of an untouched `do [#b]`. The rule
+    // is shared with the queue-claim ledger (`#claimfollowedit`), so a claim
+    // follows exactly the edits steering reports.
+    let new_norms: Vec<String> = new.iter().map(|item| item.norm.clone()).collect();
+    let agent_doc_queue::queue_head_alignment::QueueHeadPairing {
+        pair_of_new,
+        old_paired,
+        ops,
+    } = agent_doc_queue::queue_head_alignment::pair_queue_heads(old, &new_norms);
 
     let emit_new = |alignment: &mut QueueAlignment, n: usize| match pair_of_new[n] {
         Some((o, true)) if binary_owned_line(&new[n].norm, binary_owned_ids) => {
@@ -1084,50 +1035,6 @@ fn queue_alignment(
         }
     }
     alignment
-}
-
-/// Greedy best-match pairing of a replaced block: `(old_offset, new_offset)`
-/// for every pair whose texts are similar enough to be one edited item
-/// (containment, or a character similarity ratio of at least 0.5).
-fn pair_replaced_lines(old: &[String], new: &[QueueItem]) -> Vec<(usize, usize)> {
-    let mut scored: Vec<(f32, usize, usize)> = Vec::new();
-    for (o, old_text) in old.iter().enumerate() {
-        let old_identity = agent_doc_element_queue::queue_head_identity(old_text);
-        for (n, new_item) in new.iter().enumerate() {
-            let new_text = new_item.norm.as_str();
-            // A tracked id IS the item's identity: two different ids are two
-            // different items however alike their text (`do [#ridernavp4]`
-            // vs `do [#ridernavp6route]`), and neither is the same item as a
-            // free-text line. Only free text, whose identity is its text, can
-            // be edited into a different key.
-            if old_identity.is_id_backed()
-                || agent_doc_element_queue::queue_head_identity(new_text).is_id_backed()
-            {
-                continue;
-            }
-            let score = if new_text.contains(old_text.as_str()) || old_text.contains(new_text) {
-                1.0
-            } else {
-                similar::TextDiff::from_chars(old_text.as_str(), new_text).ratio()
-            };
-            if score >= 0.5 {
-                scored.push((score, o, n));
-            }
-        }
-    }
-    scored.sort_by(|a, b| {
-        b.0.partial_cmp(&a.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.1.cmp(&b.1))
-            .then(a.2.cmp(&b.2))
-    });
-    let mut pairs: Vec<(usize, usize)> = Vec::new();
-    for (_, o, n) in scored {
-        if !pairs.iter().any(|(po, pn)| *po == o || *pn == n) {
-            pairs.push((o, n));
-        }
-    }
-    pairs
 }
 
 /// A queue line whose only directive targets are ids the binary itself added

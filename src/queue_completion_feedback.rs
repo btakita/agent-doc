@@ -280,6 +280,8 @@ mod tests {
             claimed_at_secs: 10,
             expires_at_secs: 20,
             owner_session: None,
+            anchor: None,
+            followed_from: Vec::new(),
         }
     }
 

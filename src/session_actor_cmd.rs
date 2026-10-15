@@ -6111,11 +6111,19 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let settling = settling_abandoned_prompt_for_clear(&ctx, "%180", "turn_active_lease")
             .expect("an unsettled abandoned prompt behind the lease");
         assert_eq!(settling.snapshot_at, lease_at + 2);
+        // The settle countdown reads the wall clock, so bound it by the
+        // seconds that actually elapsed since `now` instead of assuming at most
+        // one: a loaded machine routinely takes 2s+ to get here.
+        let elapsed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - now;
+        let settle_at_now = agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 2;
         assert!(
-            (agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 3
-                ..=agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 2)
+            (settle_at_now.saturating_sub(elapsed)..=settle_at_now)
                 .contains(&settling.settles_in_secs),
-            "{settling:?}"
+            "{settling:?} elapsed={elapsed}"
         );
         assert_eq!(
             settling_abandoned_prompt_for_clear(&ctx, "%180", "dispatch_turn_running"),

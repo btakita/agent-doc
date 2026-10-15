@@ -3094,6 +3094,18 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     fn refresh_dashboard_projection(&self, _project_root: &Path) -> Result<bool> {
         Ok(false)
     }
+
+    /// `#queueschedule`: put a completed `loop` pass's items back into the
+    /// document's `agent:queue` through the binary-owned queue write path
+    /// (live CRDT replica while an editor holds the document). The writer lives
+    /// in `agent-doc-queue-io`, which depends on this crate, hence the port.
+    /// Returns how many items were restored.
+    fn restore_queue_loop_items(&self, file: &Path, _roster: &[String]) -> Result<usize> {
+        anyhow::bail!(
+            "queue loop restore is not wired in this binary ({})",
+            file.display()
+        )
+    }
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
@@ -6584,6 +6596,9 @@ impl ControllerDocumentGraphs {
         };
         self.queue_authority
             .set(&self.ctx, document_hash.to_string(), Some(observation));
+        // `#queueschedule`: a commit frontier may have drained (or edited) a
+        // scheduled queue; detached documents have no relay region Source.
+        crate::queue_scheduler::note_document_changed(file);
         let strike = self.current_answered_free_text_strike(document_hash);
         if let Some(error) = strike.error {
             anyhow::bail!("{error}");

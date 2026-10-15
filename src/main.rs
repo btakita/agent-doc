@@ -586,6 +586,14 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
     fn refresh_dashboard_projection(&self, project_root: &Path) -> anyhow::Result<bool> {
         agent_dashboard::refresh_if_armed(project_root)
     }
+
+    fn restore_queue_loop_items(&self, file: &Path, roster: &[String]) -> anyhow::Result<usize> {
+        agent_doc_queue_io::queue_schedule::restore_loop_items_with_effects(
+            &CliQueueCommandEffects,
+            file,
+            roster,
+        )
+    }
 }
 
 static PROJECT_CONTROLLER_RUNTIME_EFFECTS: CliProjectControllerRuntimeEffects =
@@ -4306,6 +4314,17 @@ enum QueueAction {
         /// stdin when omitted.
         text: Vec<String>,
     },
+    /// Show a scheduled queue's schedule (`interval=`, `time=`, `loop`,
+    /// `#queueschedule`): cadence, whether a pass is running, passes run
+    /// against the `loop` limit, the next run, and backoff. The project
+    /// controller's single scheduler loop owns the ticks; this only reads.
+    Schedule {
+        /// Path to the session document
+        file: PathBuf,
+        /// Print the status as one JSON object
+        #[arg(long)]
+        json: bool,
+    },
     /// Claim a live queue head for a worker outside the in-session loop
     /// (`#queueclaim`), e.g. a dispatched subagent. A claimed head is in flight:
     /// the in-session loop, preflight selection, and the Stop-hook continuation
@@ -7482,6 +7501,22 @@ fn try_main() -> anyhow::Result<()> {
                         )
                     }
                     None => eprintln!("[queue] no claim on {item:?}; nothing to release"),
+                }
+                Ok(())
+            }
+            QueueAction::Schedule { file, json } => {
+                let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    &file,
+                    "queue_schedule_status",
+                )?;
+                let report = agent_doc_queue_io::queue_schedule::schedule_status(&file, &content)?;
+                if json {
+                    println!("{}", serde_json::to_string(&report)?);
+                } else {
+                    println!(
+                        "{}",
+                        agent_doc_queue_io::queue_schedule::render_schedule_report(&file, &report)
+                    );
                 }
                 Ok(())
             }

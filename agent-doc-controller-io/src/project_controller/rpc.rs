@@ -9999,6 +9999,8 @@ fn handle_crdt_route_disk_change_signal_rpc(
         .context("failed to parse disk-change signal payload")?;
     let delivery = signal.into_delivery();
     let action = agent_doc_crdt_relay_io::route_disk_change_signal(&canonical, &delivery)?;
+    // `#queueschedule`: a detached document's disk edit may reschedule its queue.
+    crate::queue_scheduler::note_document_changed(&canonical);
     Ok(ControllerWatchSignalResult {
         action: watch_action_payload(action).to_string(),
     })
@@ -17307,7 +17309,7 @@ pub(crate) fn serve_with_options(
     // #s4b: install the OS process-exit watcher on the process-global
     // editor-attachment registry so `authority_for_file` reads reactive state
     // and editor crashes publish a bounded-latency liveness transition.
-    crate::process_exit_watcher::install_process_exit_watcher(durable_project_root);
+    crate::process_exit_watcher::install_process_exit_watcher(durable_project_root.clone());
 
     // `#ctrlbindbeforeserve`: name the window a client can connect into without
     // being served. It should be sub-millisecond; if a stall ever reappears, this
@@ -17329,6 +17331,11 @@ pub(crate) fn serve_with_options(
     if let Some(ready) = serve_ready {
         let _ = ready.send(sock.clone());
     }
+    // `#queueschedule`: the one queue-schedule loop of this controller process.
+    // Ticks are exactly-once through the durable `queue_schedule` row, so a
+    // handoff predecessor and successor running it side by side cannot double
+    // fire; the loop only opens pass windows and never drains on its thread.
+    crate::queue_scheduler::start_queue_scheduler(&durable_project_root);
 
     let should_stop = Arc::new(AtomicBool::new(false));
     let active_clients = Arc::new(AtomicUsize::new(0));

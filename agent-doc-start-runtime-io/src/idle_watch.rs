@@ -1318,6 +1318,10 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         },
         transition,
     };
+    // `#queueschedule`: a scheduled queue's drainability also depends on its
+    // pass window, which lives in `state.db` and opens without any document
+    // revision change. Never memoize it by revision.
+    let revision = revision.filter(|_| !agent_doc_queue::queue_schedule::content_is_scheduled(&content));
     memoize_queue_head(&canonical, revision, &observation);
     observation
 }

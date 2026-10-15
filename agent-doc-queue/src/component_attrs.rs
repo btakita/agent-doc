@@ -18,6 +18,9 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
     "id",
     "after",
     crate::queue_auto_clear::QUEUE_DISABLE_AUTO_CLEAR_ATTR,
+    crate::queue_schedule::QUEUE_INTERVAL_ATTR,
+    crate::queue_schedule::QUEUE_TIME_ATTR,
+    crate::queue_schedule::QUEUE_LOOP_ATTR,
 ];
 
 /// Prompt defaults shared by `agent:queue` and `agent:exchange`.
@@ -42,7 +45,14 @@ pub fn is_prompt_component_attr(key: &str) -> bool {
 pub fn is_queue_bare_flag_attr(key: &str) -> bool {
     matches!(
         key,
-        "auto" | "start" | "go" | "stop" | "subagents" | "fan-out" | "disable-auto-clear"
+        "auto"
+            | "start"
+            | "go"
+            | "stop"
+            | "subagents"
+            | "fan-out"
+            | "disable-auto-clear"
+            | "loop"
     )
 }
 
@@ -111,6 +121,17 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
     let components = element::parse(content).ok()?;
     let mut issues: Vec<String> = Vec::new();
     for component in &components {
+        if component.name == "queue" {
+            // `#queueschedule`: invalid `interval`/`time`/`loop` values are
+            // dropped (never hold the queue) and reported here.
+            let (_, schedule_issues) =
+                crate::queue_schedule::queue_schedule_spec_for_attrs(&component.attrs);
+            issues.extend(
+                schedule_issues
+                    .into_iter()
+                    .map(|issue| format!("`{}` on `agent:queue`: {}", issue.attr, issue.message)),
+            );
+        }
         for (key, value) in &component.attrs {
             if is_queue_only_component_attr(key) {
                 if component.name != "queue" {
@@ -189,6 +210,24 @@ mod tests {
         assert!(body.contains("agent:backlog"));
         assert!(body.contains("agent:queue auto"));
         assert!(body.contains("no mutation"));
+    }
+
+    #[test]
+    fn component_attr_warning_accepts_valid_schedule_and_flags_bad_values() {
+        let valid = "<!-- agent:queue interval=30m time=09:00,17:30 loop=3 -->\n- a\n<!-- /agent:queue -->\n";
+        assert!(component_attr_warning(valid).is_none(), "{:?}", component_attr_warning(valid));
+        let bare_loop = "<!-- agent:queue loop -->\n- a\n<!-- /agent:queue -->\n";
+        assert!(component_attr_warning(bare_loop).is_none());
+        let bad = "<!-- agent:queue interval=soon time=25:00 -->\n- a\n<!-- /agent:queue -->\n";
+        let warning = component_attr_warning(bad).expect("bad schedule values warn");
+        assert_eq!(warning.issues.len(), 2, "{:?}", warning.issues);
+        let misplaced = "<!-- agent:backlog interval=5m -->\n- [ ] [#x1] a\n<!-- /agent:backlog -->\n";
+        assert!(
+            component_attr_warning(misplaced)
+                .unwrap()
+                .message_body()
+                .contains("queue-only attribute")
+        );
     }
 
     #[test]

@@ -1195,7 +1195,7 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
     };
     let mut hub = handle.lock();
     let result = f(&mut hub);
-    retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+    retain_and_publish_queue_region(&hash, file, hub.retained_canonical_projection());
     Ok(result)
 }
 
@@ -1210,8 +1210,99 @@ fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Resu
     };
     let mut hub = handle.lock();
     let result = f(&mut hub);
-    retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+    retain_and_publish_queue_region(&hash, file, hub.retained_canonical_projection());
     Ok(Some(result))
+}
+
+/// Retain the hub's canonical projection and publish its queue-region change
+/// key (`queue_regions`) from the SAME materialized text, so watching the
+/// queue costs no second materialization of the document.
+fn retain_and_publish_queue_region(
+    hash: &str,
+    file: &Path,
+    projection: RetainedCanonicalProjection,
+) {
+    publish_queue_region(hash, file, &projection.current_text);
+    retained_canonical_projections().retain(hash, projection);
+}
+
+/// Change key of one document's `agent:queue` region, published from every
+/// relay-hub operation (`#queueschedule` realtime ingress).
+///
+/// The controller's queue scheduler subscribes to this Lazily Source with an
+/// Effect, so an operator edit of the queue marker (`interval=`, `time=`,
+/// `loop`) or a drained head reschedules immediately without anyone polling
+/// the document. The value is a hash, not the text: equal regions compare in
+/// O(1) and Lazily suppresses the downstream rerun, so typing outside the
+/// queue never reaches the scheduler.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueRegionObservation {
+    pub file: std::path::PathBuf,
+    /// Hash of the text from the first `<!-- agent:queue` to the end of the
+    /// last `<!-- /agent:queue -->` (a superset of every queue block).
+    pub region_hash: u64,
+    /// The region mentions a schedule attribute (`interval`, `time=`,
+    /// `loop`). An over-approximation the scheduler uses to skip documents
+    /// that cannot be scheduled.
+    pub schedule_hint: bool,
+}
+
+struct QueueRegions {
+    ctx: ThreadSafeContext,
+    values: ThreadSafeSourceMap<String, Option<QueueRegionObservation>>,
+}
+
+fn queue_regions() -> &'static QueueRegions {
+    static REGIONS: OnceLock<QueueRegions> = OnceLock::new();
+    REGIONS.get_or_init(|| {
+        // `#stategraphjoin`: a process fact, so it joins the shared editor
+        // process scope (the same graph as editor open/attach state) instead of
+        // minting an island.
+        let ctx = agent_doc_document_realtime::editor_process_scope()
+            .ctx()
+            .clone();
+        let values = ThreadSafeSourceMap::new(&ctx);
+        QueueRegions { ctx, values }
+    })
+}
+
+/// The process-wide queue-region Source and the context it lives in. The
+/// scheduler attaches its Effect here; everything else only publishes.
+pub fn queue_region_graph() -> (
+    ThreadSafeContext,
+    ThreadSafeSourceMap<String, Option<QueueRegionObservation>>,
+) {
+    let regions = queue_regions();
+    (regions.ctx.clone(), regions.values.clone())
+}
+
+/// The queue-region change key of `text`, or `None` when it has no queue.
+pub fn queue_region_observation(file: &Path, text: &str) -> Option<QueueRegionObservation> {
+    use std::hash::{Hash, Hasher};
+    let start = text.find("<!-- agent:queue")?;
+    let end = text
+        .rfind("<!-- /agent:queue")
+        .and_then(|close| text[close..].find("-->").map(|offset| close + offset + 3))
+        .filter(|end| *end > start)
+        .unwrap_or(text.len());
+    let region = &text[start..end];
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    region.hash(&mut hasher);
+    Some(QueueRegionObservation {
+        file: file.to_path_buf(),
+        region_hash: hasher.finish(),
+        schedule_hint: region.contains("interval") || region.contains("time=") || region.contains("loop"),
+    })
+}
+
+fn publish_queue_region(hash: &str, file: &Path, text: &str) {
+    let regions = queue_regions();
+    let key = hash.to_string();
+    let observation = queue_region_observation(file, text);
+    if observation.is_none() && !regions.values.contains_key(&regions.ctx, &key) {
+        return;
+    }
+    regions.values.set(&regions.ctx, key, observation);
 }
 
 /// Drop an inactive hub only after its canonical text is known to be durable.

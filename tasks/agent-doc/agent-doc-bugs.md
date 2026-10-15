@@ -204,7 +204,18 @@ The new queue item (Clear Session Context on `sdk.md` is slow and shows an error
 - The subagent works in its own worktree outside agent-loop, on branch `fix/clear-ctx-slow` in `btakita/agent-doc`.
 - It will find the JetBrains action and the binary command/IPC behind it. It will pull the actual error text from the IDEA/ops logs. Then it fixes the root cause (likely blocking work on the EDT and/or a benign condition shown as an error dialog), updates the spec and tests, then commits and pushes its branch.
 - When it reports back I integrate the branch, run one `make install`, release the claim, and close the item next cycle.
-<!-- agent:boundary:77c3a41f -->
+> **Chat prompt (#chatprompt):** is the new version published?
+
+### Re: is v0.35.508 published? — opus-5-5 · 2026-10-15T10:55-04:00
+
+Not yet. **v0.35.508** is tagged and installed locally (`agent-doc --version` → 0.35.508), but its Release run (`38752593519`, started 14:34Z) is still in progress:
+
+- 5 of 6 platform builds and the `plugins` job are green.
+- The `x86_64-apple-darwin` (macos-15-intel) build is still running, and the publish steps come after it.
+- The latest GitHub Release and PyPI are both still **0.35.507** (published 14:25Z).
+
+The Clear Session Context fix is not in any version yet. Its subagent is still working on it, and it would go in a later release.
+<!-- agent:boundary:f8ebbf0a -->
 <!-- /agent:exchange -->
 
 <!--

@@ -1306,12 +1306,23 @@ tail passes only when it is short, carries the command echo, holds no
 submitted prompt, operator draft, assistant/tool bullet, tool result,
 spinner, or any other row that is not composer chrome after the echo, and
 ends at a dispatch-ready composer; a command still sitting in the composer
-fails closed first. A clear that did not run cannot pass, because a lost
+fails closed first. Rows below a CLOSED composer frame (a rule, one `❯`
+composer row, a rule) are the harness footer and are classified by position,
+not by string (`#claudeclearfooter`, gh-271): Claude Code draws the
+permission-mode row, the built-in or an operator-configured `statusLine`, and
+transient notices such as `✔ Update installed · Restart to update` there,
+while the conversation always renders above the frame, so no per-string
+chrome rule is needed for them. The footer still never excuses a submitted
+prompt or composer row, an assistant/tool bullet, a tool result, or a
+spinner; the same text above or inside the frame, directly under the echo, or
+below a frame whose composer holds a draft stays unknown output and fails
+closed. A clear that did not run cannot pass, because a lost
 clear paints no new banner and the tail after the last one holds the
 retained conversation. The same proofs resolve a blank-viewport
 (`pane_not_rendered`) window from scrollback for both harnesses. The
 `harness_queued_input` label (`#clearqueuedcomposer`) is read from the ACTIVE
-composer only — the bottom-most row that is not harness chrome — because
+composer only — the bottom-most row that is neither harness chrome nor
+composer-frame footer (`#claudeclearfooter`) — because
 Claude Code repaints its composer frame into scrollback and stale
 `❯ Press up to edit queued messages` rows from ended turns are not the pane's
 state. The probe dispatches on the resolved `HarnessConfig` binary, not on

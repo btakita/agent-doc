@@ -120,17 +120,27 @@ impl ContextClearSubmitStatus {
 /// Scanning the whole capture read those as the current state and reported
 /// `harness_queued_input` for clears that Claude Code ran within a second
 /// (gh-266, 2026-10-14 18:43Z and 2026-10-15 01:27Z).
+///
+/// Rows Claude Code draws BELOW a closed composer frame (a custom `statusLine`,
+/// the `✔ Update installed` notice) are footer, never the active composer
+/// ([`claude_composer_footer_rows`], gh-271).
 pub fn context_clear_capture_shows_queued_input(
     capture: &str,
     is_ignorable_chrome_line: impl Fn(&str) -> bool,
     is_queued_input_placeholder_line: impl Fn(&str) -> bool,
 ) -> bool {
-    capture
+    let lines: Vec<String> = capture
         .lines()
-        .rev()
         .map(|line| crate::prompt::strip_ansi(line).trim().to_string())
-        .find(|line| !line.is_empty() && !is_ignorable_chrome_line(line))
-        .is_some_and(|line| is_queued_input_placeholder_line(&line))
+        .filter(|line| !line.is_empty())
+        .collect();
+    let footer = claude_composer_footer_rows(&lines);
+    lines
+        .iter()
+        .zip(footer)
+        .rev()
+        .find(|(line, below_frame)| !below_frame && !is_ignorable_chrome_line(line))
+        .is_some_and(|(line, _)| is_queued_input_placeholder_line(line))
 }
 
 /// (`#clearsubmitpanesettle`) Distinguish a pane that is visibly booting its
@@ -346,6 +356,54 @@ fn claude_prompt_glyph_body(line: &str) -> Option<&str> {
         .map(str::trim)
 }
 
+/// One of the box-drawing rules Claude Code draws above and below its composer.
+fn is_claude_composer_rule_row(line: &str) -> bool {
+    !line.is_empty() && line.chars().all(|c| c == '─')
+}
+
+/// (`#claudeclearfooter`, gh-271) Which rows of a (stripped, trimmed,
+/// non-empty) capture sit in the FOOTER of a closed Claude Code composer frame.
+///
+/// Claude Code lays its input area out as a frame — a rule, the `❯` composer
+/// row, a rule — and draws everything else that belongs to the harness rather
+/// than to the conversation BELOW the closing rule: the permission-mode row
+/// (`⏵⏵ auto mode on …`), the built-in or an operator-configured `statusLine`
+/// (`<(^*)__ repo (main) · ctx sem dados · …`), and transient notices such as
+/// the auto-updater's `✔ Update installed · Restart to update`. The
+/// conversation itself always renders ABOVE the frame. So a row's position
+/// classifies it: no per-string chrome rule can enumerate every operator
+/// statusLine script or harness notice, but every one of them lands in the
+/// footer.
+///
+/// The footer opens at the rule that closes a frame (rule, one `❯` row, rule),
+/// and closes at the next rule (a repainted frame opening), the next prompt-glyph
+/// row, or the next row only a conversation renders (assistant/tool bullet,
+/// tool result, spinner) — such a row is never footer, so it keeps failing
+/// every proof closed wherever it appears.
+fn claude_composer_footer_rows(lines: &[String]) -> Vec<bool> {
+    let mut footer = Vec::with_capacity(lines.len());
+    let mut in_footer = false;
+    for (index, line) in lines.iter().enumerate() {
+        let line = line.as_str();
+        if is_claude_composer_rule_row(line) {
+            // Only the rule that CLOSES a frame (rule, one `❯` row, rule)
+            // opens the footer. The rule under a submitted prompt's echo
+            // (`❯ /clear` then the frame's opening rule) does not, and a
+            // multi-row draft never closes a frame here, so it fails closed.
+            in_footer = index >= 2
+                && lines[index - 1].starts_with('❯')
+                && is_claude_composer_rule_row(&lines[index - 2]);
+            footer.push(false);
+        } else if claude_prompt_glyph_body(line).is_some() || is_claude_conversation_line(line) {
+            in_footer = false;
+            footer.push(false);
+        } else {
+            footer.push(in_footer);
+        }
+    }
+    footer
+}
+
 /// (`#claudeclearfreshchat`) Does the pane's scrollback prove the CURRENT
 /// Claude Code conversation is the fresh one `/clear` starts?
 ///
@@ -376,7 +434,10 @@ fn claude_prompt_glyph_body(line: &str) -> Option<&str> {
 /// the whole capture. It passes only when that tail is short, carries the
 /// command echo, holds nothing a conversation renders after the echo (no
 /// submitted prompt, assistant/tool bullet, tool result, spinner, or any line
-/// that is not composer chrome), and ends at a dispatch-ready composer.
+/// that is not composer chrome), and ends at a dispatch-ready composer. Rows
+/// below the closed composer frame are the harness footer, whatever they say
+/// (`#claudeclearfooter`, gh-271: a custom `statusLine` and the
+/// `✔ Update installed` notice failed every proof on a pane that had cleared).
 ///
 /// It cannot pass a clear that was lost: then the last banner is the one that
 /// began the retained conversation (a cold start, or an earlier `/clear`), and
@@ -415,9 +476,10 @@ pub fn context_clear_claude_history_shows_fresh_chat(
         return false;
     }
     let command = command.trim();
+    let footer = claude_composer_footer_rows(tail);
     let mut saw_echo = false;
     let mut saw_ready_prompt = false;
-    for line in tail {
+    for (line, below_frame) in tail.iter().zip(footer) {
         if is_claude_conversation_line(line) {
             return false;
         }
@@ -439,9 +501,11 @@ pub fn context_clear_claude_history_shows_fresh_chat(
         }
         if is_dispatch_ready_prompt_line(line) {
             saw_ready_prompt = true;
-        } else if !(is_ignorable_chrome_line(line) || line == "? for shortcuts") {
-            // Anything else after the echo is output the fresh chat should not
-            // hold yet; fail closed rather than guess it is chrome.
+        } else if !(below_frame || is_ignorable_chrome_line(line) || line == "? for shortcuts") {
+            // Anything else after the echo — above or inside the composer
+            // frame — is output the fresh chat should not hold yet; fail
+            // closed rather than guess it is chrome. Rows below a closed
+            // composer frame are harness footer (`#claudeclearfooter`).
             return false;
         }
     }
@@ -1495,6 +1559,141 @@ mod tests {
         ));
         // Stale residue above an idle composer is not a queue.
         let idle = format!("{}{}", claude_long_conversation(40), idle_claude_composer());
+        assert!(!context_clear_capture_shows_queued_input(
+            &idle,
+            claude_chrome,
+            claude_queued,
+        ));
+    }
+
+    /// gh-271's pane, captured after Claude Code ran `/clear`: the post-clear
+    /// shape `#claudeclearfreshchat` looks for, plus an operator-configured
+    /// `statusLine` and the auto-updater notice below the composer frame.
+    const CLAUDE_CUSTOM_STATUSLINE_TAIL: &str =
+        include_str!("fixtures/claude_clear_custom_statusline_tail.txt");
+    const CUSTOM_STATUSLINE_ROW: &str = "  <(^*)__ example (main) \u{b7} ctx sem dados \u{b7} \u{c9}pico III \u{b7} XP 4513 \u{b7} Opus 5.5";
+    const UPDATE_NOTICE_ROW: &str = "         \u{2714} Update installed \u{b7} Restart to update";
+
+    /// `#claudeclearfooter` (gh-271): rows Claude Code draws below the closed
+    /// composer frame — a custom `statusLine`, the `✔ Update installed`
+    /// notice, any future footer row — are harness footer, not chat content,
+    /// so they no longer defeat the fresh-chat proof of a clear that ran.
+    #[test]
+    fn claude_clear_is_proven_with_a_custom_statusline_and_update_notice_below_the_composer() {
+        let proves = |history: &str| {
+            context_clear_claude_history_shows_fresh_chat(
+                history,
+                "/clear",
+                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+                claude_ready,
+                claude_chrome,
+            )
+        };
+        // The fixture's footer rows match no per-string chrome rule.
+        assert!(!claude_chrome(CUSTOM_STATUSLINE_ROW));
+        assert!(!claude_chrome(UPDATE_NOTICE_ROW));
+        assert!(CLAUDE_CUSTOM_STATUSLINE_TAIL.contains(CUSTOM_STATUSLINE_ROW.trim()));
+        assert!(CLAUDE_CUSTOM_STATUSLINE_TAIL.contains(UPDATE_NOTICE_ROW.trim()));
+
+        let history = format!(
+            "{}{CLAUDE_CUSTOM_STATUSLINE_TAIL}",
+            claude_long_conversation(700)
+        );
+        assert!(proves(&history));
+        assert_eq!(
+            context_clear_unrendered_window_status(
+                "claude",
+                Some(&history),
+                "/clear",
+                claude_ready,
+                claude_chrome,
+            ),
+            ContextClearSubmitStatus::AcceptedClearedState
+        );
+        // Each footer row on its own, and a footer repainted into scrollback
+        // under a second copy of the frame.
+        let footer_rule = "\u{2500}\u{2500}\u{2500}\u{2500}\n";
+        for footer in [
+            format!("{CUSTOM_STATUSLINE_ROW}\n"),
+            format!("{UPDATE_NOTICE_ROW}\n"),
+            format!(
+                "{CUSTOM_STATUSLINE_ROW}\n{footer_rule}\u{276f} \n{footer_rule}{CUSTOM_STATUSLINE_ROW}\n{UPDATE_NOTICE_ROW}\n"
+            ),
+        ] {
+            let tail = format!(
+                " \u{2590}\u{259b}\u{2588}   Claude Code v2.1.299\n\u{276f} /clear\n{footer_rule}\u{276f} \n{footer_rule}{footer}"
+            );
+            assert!(proves(&tail), "footer {footer:?} must not defeat the proof");
+        }
+    }
+
+    /// The fail-closed half of `#claudeclearfooter`: only rows BELOW a closed
+    /// composer frame are footer. The same rows above the frame, inside it,
+    /// under the echo, or below a frame whose composer holds a draft still
+    /// fail; and conversation rows or prompts in the footer still fail.
+    #[test]
+    fn claude_clear_footer_rows_are_only_excused_below_a_closed_ready_composer() {
+        let proves = |history: &str| {
+            context_clear_claude_history_shows_fresh_chat(
+                history,
+                "/clear",
+                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+                claude_ready,
+                claude_chrome,
+            )
+        };
+        let rule = "\u{2500}\u{2500}\u{2500}\u{2500}";
+        // Lost clear: the old conversation ends at an idle composer whose
+        // footer carries the custom status line and update notice.
+        let lost = format!(
+            "{}{rule}\n\u{276f} \n{rule}\n{CUSTOM_STATUSLINE_ROW}\n{UPDATE_NOTICE_ROW}\n",
+            claude_long_conversation(700)
+        );
+        assert!(!proves(&lost));
+        // Unknown text between the echo and the frame, directly under the
+        // echo's rule, or inside the frame stays unknown output.
+        for bad in [
+            format!("\u{276f} /clear\nstray output\n{rule}\n\u{276f} \n{rule}\n"),
+            format!("\u{276f} /clear\n{rule}\nstray output\n{rule}\n\u{276f} \n{rule}\n"),
+            format!("\u{276f} /clear\n{rule}\n\u{276f} \nstray output\n{rule}\n"),
+        ] {
+            let tail = format!(" \u{2590}\u{259b}\u{2588}   Claude Code v2.1.299\n{bad}");
+            assert!(!proves(&tail), "{bad:?}");
+        }
+        // Footer rows below a frame whose composer holds an operator draft.
+        let drafted = CLAUDE_CUSTOM_STATUSLINE_TAIL.replace("\u{276f} \n", "\u{276f} half-typed\n");
+        assert!(!proves(&drafted));
+        // A conversation row or a submitted prompt below the frame is never
+        // footer: the fresh chat already moved on.
+        for moved_on in [
+            "\u{25cf} Leftover answer text.\n",
+            "\u{276f} /agent-doc tasks/plan.md\n",
+            "\u{2722} Hatching\u{2026} (3s \u{b7} esc to interrupt)\n",
+        ] {
+            let tail = format!("{CLAUDE_CUSTOM_STATUSLINE_TAIL}{moved_on}");
+            assert!(!proves(&tail), "{moved_on:?}");
+        }
+    }
+
+    /// `#clearqueuedcomposer` with a custom `statusLine` (gh-271): the footer
+    /// row below the frame is not the active composer, so a queued clear is
+    /// still labelled queued.
+    #[test]
+    fn claude_queued_clear_is_recognized_above_a_custom_statusline_footer() {
+        let rule = "\u{2500}\u{2500}\u{2500}\u{2500}";
+        let queued = format!(
+            "{}{rule}\n\u{276f} Press up to edit queued messages\n{rule}\n{CUSTOM_STATUSLINE_ROW}\n  \u{23f5}\u{23f5} auto mode on (shift+tab to cycle)\n{UPDATE_NOTICE_ROW}\n",
+            claude_long_conversation(40)
+        );
+        assert!(context_clear_capture_shows_queued_input(
+            &queued,
+            claude_chrome,
+            claude_queued,
+        ));
+        let idle = format!(
+            "{}{rule}\n\u{276f} \n{rule}\n{CUSTOM_STATUSLINE_ROW}\n",
+            claude_long_conversation(40)
+        );
         assert!(!context_clear_capture_shows_queued_input(
             &idle,
             claude_chrome,

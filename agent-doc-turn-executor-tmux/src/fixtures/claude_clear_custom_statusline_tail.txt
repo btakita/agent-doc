@@ -1,0 +1,12 @@
+ ▐▛███▛█   Claude Code v2.1.299
+▝▜██████▀  Opus 5.5 with high effort · Claude Max
+ ▝▝   ▝▝   ~/work/example
+
+❯ /clear
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  <(^*)__ example (main) · ctx sem dados · Épico III · XP 4513 · Opus 5.5
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents
+                                                            ✔ Update installed · Restart to update

@@ -134,6 +134,41 @@ Dispatched to background subagents, all claimed. Each resumes its earlier worktr
 - agent-doc issue 249 (`#gh-fix`) → `subagent:issue249`, resuming `~/worktrees/agent-doc-gh249-20261013` (branch `fix/gh249-jetbrains-263-frame-isolation`, uncommitted changes in `src/plugin.rs`, `editors/jetbrains/SPEC.md`, and `scripts/jetbrains-custom-repository.py`). It first checks whether another live session owns that worktree.
 
 `#spec-test-commit-push` is still undefined (`#lzcommitpresetresolve`). Every worker got the unresolved-authorization preamble, so none of them will commit, push, install, or release. Results land as uncommitted worktree diffs plus reports. Integrating and releasing needs that preset defined, or an explicit commit/push authorization.
+
+### Re: release + publish — opus-5-5 · 2026-10-14T21:00-04:00
+
+> **Queue prompt:** release + publish
+
+`subagent:releasepublish` reported back with a read-only readiness audit. I'm closing this head and tracking the actual release as gated `#lzcohortrelease`. Report: `~/worktrees/agent-loop-lzreleasepublish-readiness-20261014/.audit-work/lazily-release-readiness-20261014.md`. It is uncommitted and nothing was released.
+
+**No public `main` warrants a release today.** Every repo has zero commits since its last tag, apart from two:
+- rs: one commit since v0.59.0, the `lazily-macros` 0.23.1 bump, which is already published.
+- go: one test/CI-only commit, and go `main` CI is red on the CI-reachability guard (`#lzgocireachability` fixes it).
+
+The real release content is all uncommitted, in about 60 review worktrees: Core Phases 1–6, CI activation, interop cold-start, and the 13 release pins.
+
+Integration hazards it found:
+- Six Zig worktrees are based two releases behind `main` and need a rebase.
+- The Go consumer worktree adds new copies of files that `main` already has, so it will conflict.
+- The cpp and zig interop peers hardcode stale version strings.
+
+Rust: the tag-triggered `Release` job has failed at the crates.io login step on v0.57.1, v0.58.0 and v0.59.0. Every live version was a manual publish. Add Trusted Publishing (`#lzrustpublish`), then stop publishing by hand.
+
+Order once unblocked:
+1. Go CI fix.
+2. `#lzcoreevidencedarttimeout`.
+3. Core Phases 1→5, with the Zig/Go rebases first.
+4. Phase 6.
+5. Interop cold-start.
+6. Minor releases: rs 0.60.0, py 0.44.0, js 0.36.0, kt 0.45.0, cs 0.8.0, go v0.30.0, cpp v0.32.0, zig v0.38.0, dart 0.34.0, spec v0.42.0.
+7. Refresh the release pins.
+
+Needed from you:
+- Define `#spec-test-commit-push`. The frontmatter `release` preset is not the queue's declared preset.
+- Explicit commit/push/tag/publish authorization.
+- Decide between a pre-1.0 cohort and Core Beta (`#lzbetascope`).
+- Decide on Rust Trusted Publishing, or authorize one more manual `cargo publish`.
+- Run the pub.dev publish under your own login.
 <!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  
@@ -142,13 +177,14 @@ Dispatched to background subagents, all claimed. Each resumes its earlier worktr
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - 🚧 do [#lzcoreevidencedarttimeout]
 - 🚧 do [#lzcoreciactivationfixes]
-- 🚧 release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#lzcohortrelease] [operator-decision] Lazily cohort release: no public main warrants a release today (readiness report /home/brian/worktrees/agent-loop-lzreleasepublish-readiness-20261014/.audit-work/lazily-release-readiness-20261014.md, 2026-10-14). Blocked on #lzcommitpresetresolve plus explicit commit/push/version-bump/tag/publish authorization, a pre-1.0-cohort vs Core Beta decision (#lzbetascope), and #lzrustpublish. Once unblocked: Go CI fix, #lzcoreevidencedarttimeout, Core Phases 1-5 (rebase the Zig/Go worktrees first), Phase 6, interop cold-start, then minor-version releases rs 0.60.0, py 0.44.0, js 0.36.0, kt 0.45.0, cs 0.8.0, go v0.30.0, cpp v0.32.0, zig v0.38.0, dart 0.34.0 (operator pub.dev login), spec v0.42.0 last, then refresh release pins.
 - [ ] 🚧 [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
 - [ ] 🚧 [#lzcoreciactivationfixes] Make every new Core Phase 1-5 gate CI-active and reach-pinned: add named workflow steps and exact reach mappings for profile/evidence/facade/compatibility/consumer targets, name the currently anonymous binding consumer steps, pin job activation and matrices, rerun aggregate gates in the Phase 6 reusable workflow, and add exact Phase 6 callers from all nine candidate binding release workflows.
 <!-- /agent:backlog -->

@@ -128,7 +128,58 @@ The release is held on purpose. "release + publish" comes last in the queue, aft
 Once the formal branch lands, I'll merge it and run one full `make check`, which includes `make tla`, then `make install`. Then I'll push `main`, close #261–#264, and release v0.35.504.
 
 If you'd rather ship now, I can release the integrated batch without the formal work and put the formal work in v0.35.505.
-<!-- agent:boundary:29f7c195 -->
+> **Chat prompt (#chatprompt):** ship now
+
+> **Chat prompt (#chatprompt):** Is the next version of agent-doc installed? tmux sync not working
+
+> **Chat prompt (#chatprompt):** is the release locally installed?
+
+> **Chat prompt (#chatprompt):** b/c I want tmux auto sync to work
+
+### Re: v0.35.504 installed locally, tmux auto-sync restored, release re-running — opus-5.5 · 2026-10-15T01:00-04:00
+
+**Local install: yes.** I ran `make install` from the integrated tree, so `agent-doc --version` now reports **0.35.504**. The JetBrains plugin hot-upgraded in your running IDE (classic 0.2.615). 27 supervisors and 4 controllers are marked to recycle at their next idle boundary. The 262 package (0.2.616) went to the Rider install, which loads it on next start.
+
+**tmux auto-sync works again.** The cause was the tmux auto-sync regression described earlier. Since the install, `ops.log` shows the plugin publishing under a new generation (`1403614970817234`). Every tab switch is `accepted=true`, and at 04:49:28Z a `caller_kind=automatic` layout published and converged with `effect=applied focus=focus_applied`.
+
+**Published release: not yet.** "ship now" means v0.35.504 goes out without the formal-logic branch (that work moves to v0.35.505). The first `make release` passed preflight and the nextest suite (10,563 passed). It then failed in the batched controller tests on the new #261 test `a_promoted_predecessor_releases_the_editors_authority_streams`, before any tag or push.
+- **Cause:** the code is correct, but the test was timing-dependent. The stream's own subscription publishes its initial projection asynchronously, so the stream can write a real projection frame before the retirement wake, and the late-subscriber probe passes or fails depending on that timing.
+- **Fix:** the test now asserts the real invariant: at most one genuine projection frame, then at most one wake, and nothing after the wake. The late subscriber now uses a cursor ahead of every frame, so only retirement can return it early. It passed all 40 concurrent stress runs.
+- **Now:** `make release` is running again on the fixed tree: full `make check`, then `tmux-ci`, then tag and push `v0.35.504`, then `install-full`.
+
+**Pre-existing timing flakes:** the same stress run also showed two older controller tests failing under heavy concurrency. Both are on `main` already and passed both full `make check` runs. I filed `#ctrltimingflakes` to replace their wall-clock assertions with structural ones. I did not rerun them to green.
+
+> **Operator note:** do [#sensemixdeterministic]: Is there any precedence of agentic programming languages? How about an embedded programming language for markdown? How about a template-driven approach? Perhaps we can support functions + a built in `prompt("...")` function, support conditional logic? Could we use fenced python or js? If we support functions, could we setup events or hooks? Would Jupyter be a good inspiration or since agent-doc is more of a graph, some sort of event-driven graph programming language?
+
+**Verdict:** yes, and agent-doc already does it with a fixed set of built-in deterministic directives: presets, queue grammar, ids, slash commands, orchestrate DAGs and closeout guards. What's missing is a way for a project to add its own. Don't build a language. Add **named steps**: commands registered in a committed file, run by the binary, and recorded as receipts tied to the exact repository contents. Documents refer to steps by name only.
+
+- **Precedent:** yes, plenty, in two families.
+  - LLM calls as steps inside ordinary code: LMQL, Guidance, SGLang, APPL, IBM PDL, BAML, Jac `by llm()`, DSPy, Semantic Kernel.
+  - The model interprets the language itself: SudoLang, OpenProse.
+  - Older relatives: org-babel (its `:cache` hash is the receipt idea), Jupyter/marimo, Markdoc.
+  - None of them has agent-doc's shape: a co-edited, committed document whose deterministic parts a separate binary enforces.
+- **Embedded markdown language:** no. Text that two authors edit concurrently through the CRDT, including half-typed edits, must not change what a program does. Keep the small declarative vocabulary and add named directives one at a time, as Markdoc does.
+- **Template-driven:** only as plain substitution into preset bodies, such as the preset argument and fields from a step's receipt. No `if`/`each` inside templates.
+- **Functions + `prompt("...")`:** functions yes, as named things. Presets already are the agentic functions (a preset is a named `prompt()`), and steps would be the deterministic ones. A script calling `prompt()` is the wrong way round, because the turn lifecycle belongs to the binary.
+- **Conditionals:** only over a fixed set of typed facts: step passed or failed, a receipt exists for this tree, queue drained, time reached. No general `if <expr>`; branches that need judgement stay with the agent.
+- **Fenced python/js:** no. A sandbox takes away the git, filesystem and network access that useful steps need. A fence is CRDT-edited text, so replay would need pinned revisions and would repeat side effects. Making fences executable also turns every pasted log into an injection risk. Put the code in `scripts/x.py` and register it as a step.
+- **Events/hooks:** yes, and this is the strongest idea in the list. Hooks should subscribe to the typed lifecycle events agent-doc already records (`CommitObserved`, `QueueHeadCompleted`, …). Each hook runs once per event, never inside a critical section, and never for install/push-type steps.
+- **Jupyter vs an event-driven graph:** the graph, which already exists (the controller event log, idempotent reducers, and lazily `Source`/`Computed`/`Effect`). Jupyter's linear cells and hidden kernel state are the wrong model; its one lesson is to show results next to what produced them.
+
+**Smallest first step:** an `agent-doc-steps.toml` registry, for example `[steps.check-fast] argv=["make","check-fast"] effect="check" inputs="worktree" timeout_secs=1800`, plus `agent-doc step run <FILE> <name>`. The command runs directly, with no shell and no document text in it. Each run stores a receipt keyed by the step, the registry entry's hash and the working tree's content hash; the same key returns the stored receipt, and a failure is never auto-retried.
+
+**Phases**, each one queue item:
+1. Registry, `step run`, receipts.
+2. Presets declare `requires: [check-fast]`, and closeout refuses to commit without a passing receipt for the exact tree.
+3. `/step <name>` runs as a queue item with no agent turn.
+4. `/step x else '#preset'` queues the preset on failure.
+5. `on=` hooks for read/check steps.
+6. Step results shown in `agent:signals`.
+7. Optional read-only steps at preflight.
+8. Optional `{{arg}}` / `{{step.<name>.tail}}` placeholders.
+
+The full proposal, with precedent tables and an inventory of the existing deterministic mechanisms, is at `specs/proposals/deterministic-escape.md` on branch `design/deterministic-escape` (`798a46bb91`). It is merged into this release batch. Its `make check-fast` passed (10,563 tests).
+<!-- agent:boundary:6b4ac306 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -136,6 +187,7 @@ If you'd rather ship now, I can release the integrated batch without the formal 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#sensemixdeterministic]: Is there any precedence of agentic programming languages? How about an embedded programming language for markdown? How about a template-driven approach? Perhaps we can support functions + a built in `prompt("...")` function, support conditional logic? Could we use fenced python or js? If we support functions, could we setup events or hooks? Would Jupyter be a good inspiration or since agent-doc is more of a graph, some sort of event-driven graph programming language?~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/261
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/262
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/263
@@ -145,11 +197,13 @@ If you'd rather ship now, I can release the integrated batch without the formal 
 - 🚧 Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.
 - 🚧 do your formal logic suggestions
 - 🚧 release + publish
+- do [#ctrltimingflakes]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ctrltimingflakes] Two existing controller-io tests fail under concurrent libtest load (16 threads, 40 runs: 5x actor_binding_observation_uses_one_caller_deadline_without_retry, 3x mark_write_applied_routes_through_command_plane_when_controller_live). Both predate the 0.35.504 batch and passed both full make check runs. The first asserts a wall-clock bound (elapsed < 2x deadline); count connection attempts instead. Diagnose the second the same way: replace timing assumptions with structural signals, never longer timeouts.
 <!-- /agent:backlog -->
 
 ## Review

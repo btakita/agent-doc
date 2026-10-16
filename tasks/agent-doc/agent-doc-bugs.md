@@ -500,6 +500,34 @@ I re-ran only the failed CI job as a diagnostic, to learn whether it fails every
 - Add deterministic regression coverage, proven to fail before the fix, then run `make check` and push the branch.
 
 The CI re-run of the failed job is still in progress. The subagent will use its result to tell whether the failure happens every time or intermittently. I'll integrate the branch and run the single `make install` when it reports.
+
+### Re: `#detachedexitci` fixed, pushed, installed — opus-5-5 · 2026-10-15T23:54-04:00
+
+> **Queue prompt:** do [#detachedexitci]
+
+`subagent:detachedexitci` found the cause and fixed it. Its commit `e010dd62fd` fast-forwarded `main` and is installed locally.
+
+**Root cause:** a race, not a blocked loop.
+- The test's `TempDir` removal ran while a controller thread was writing into the same root. `remove_dir_all` deleted `controller.sock` and `state.db`, then a writer recreated `.agent-doc/state.db`, so the final `rmdir` failed with "directory not empty". `TempDir` ignores that error.
+- The root therefore survived with its original inode. The root-identity check kept passing, and the controller kept serving a gutted root with no socket. Its only exit left was the 60s idle exit for temp roots, which ties the test's 60s ceiling.
+- The writer was a real cross-test leak. Every in-process controller started an exit-watcher poller that ran until the whole process exited and wrote other tests' dead editor pids into its own root. That is why another test's `runfrontendissue-epoch-reuse` document showed up in this test's log.
+- Reproduced locally with a writer hammering the root: 12 of 120 runs left the root behind, and the controller then stayed up exactly 60.0s with CI's errors.
+
+**Fix:**
+- A stable controller now exits at the top of each idle tick, before any maintenance, if its bound `controller.sock` is gone or now belongs to another listener. Handoffs are exempt.
+- A controller exiting for that reason leaves the socket path alone, since it may be someone else's now.
+- The exit-watcher poller stops when its controller does.
+- The test now confirms its root was actually removed.
+- Five new deterministic tests, each proven to fail before the fix. `SPEC.md` and `VERSIONS.md` are updated.
+
+**Verification:**
+- `make check` in the fix worktree passed (exit 0): nextest ran 10,821 tests, all passed. In the batched pass that failed on CI, controller-io passed 758.
+- The full-check receipt matches the pushed bytes.
+- The CI re-run (attempt 2) of the v0.35.510 commit went **green**, so the original failure is intermittent, consistent with the race.
+- CI on `e010dd62fd` is still running.
+- `make install` succeeded.
+
+**Also in flight:** `subagent:sdktododone` is working the new queue item about sdk.md todos not being checked off when their work finishes. It is fixing the auto-check in agent-doc and will hand back a list of sdk.md rows to check. It will not edit sdk.md itself.
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
@@ -508,7 +536,8 @@ The CI re-run of the failed job is still in progress. The subagent will use its 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- do [#detachedexitci]
+- ~~do [#detachedexitci]~~
+- todo items in sdk.md did not get marked as completed when done?
 <!-- /agent:queue -->
 
 ## Todo
@@ -524,7 +553,6 @@ The CI re-run of the failed job is still in progress. The subagent will use its 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#detachedexitci] CI red on v0.35.510 (run 38837770714, batched libtest pass): `detached_controller_exits_when_temp_project_root_is_removed` timed out at its 60s ceiling. The controller kept running its supervisor watchdog / orphan drain against the recreated root instead of exiting. It passed in all 8 previous CI runs and does not reproduce locally (crate suite 3x, 6x concurrent, 8x concurrent workspace-built with --test-threads=2). The retained directory handle rules out inode reuse, so suspect the serve loop stuck inside an idle tick (recycle/handoff path, liveness-plane lock, or the new 150s launch-wait ceiling from #integrationtesttargets). Next: make the incarnation exit independent of idle-tick maintenance, or add tick-phase diagnostics to the timeout message.
 <!-- /agent:backlog -->
 
 ## Review

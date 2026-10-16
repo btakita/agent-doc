@@ -3,8 +3,15 @@
 //! ## Invariant
 //!
 //! Recovery never commits a candidate that **adds** a copy of already-committed
-//! text: neither a second exact copy of a committed response block, nor a line
-//! that differs from a committed line only by encoder replacement characters.
+//! text: neither a second copy of a committed response block, nor a line that
+//! differs from a committed line only by encoder replacement characters.
+//!
+//! A "copy" of a response block is judged modulo binary-owned decoration
+//! (`#dupemoduloecho`, [`crate::response_replay::response_block_signature`]):
+//! `#closeoutduplicatedcommit` committed a second copy that differed from the
+//! first only by a binary done-id `> **Queue prompt:**` echo on one side and
+//! repair's `❯ ` prompt prefixes on the other, and a byte-exact comparison let
+//! it through.
 //!
 //! GH #274: an IDE whose JVM ran under an ASCII locale marshalled document text
 //! across JNA with US-ASCII, so every non-ASCII character of a committed response
@@ -180,6 +187,19 @@ fn lossy_committed_line(candidate: &str, committed: &str) -> Option<CommittedTex
         })
 }
 
+/// Return the first response block the candidate carries more copies of than
+/// `base` does, or `None` (`#closeoutduplicatedcommit`).
+///
+/// Blocks are compared by [`crate::response_replay::response_block_signature`],
+/// so a copy that differs only by binary-owned decoration — a done-id
+/// `> **Queue prompt:**` echo, `❯ ` prompt prefixes, boundary markers, the
+/// `(HEAD)` suffix, blank lines — is still a copy. Materialization sites call
+/// this with their own pre-image as `base`: a recovery target that re-appends a
+/// response the document already holds is refused before it reaches an editor.
+pub fn added_response_copy(candidate: &str, base: &str) -> Option<CommittedTextViolation> {
+    duplicate_committed_response_block(candidate, base)
+}
+
 fn duplicate_committed_response_block(
     candidate: &str,
     committed: &str,
@@ -294,6 +314,33 @@ mod tests {
             CommittedTextViolationKind::DuplicateCommittedResponse
         );
         assert!(violation.committed_line.starts_with("### Re: upgrade"));
+    }
+
+    /// `#closeoutduplicatedcommit`: HEAD carries the response once; the
+    /// candidate carries it twice, one copy under a binary done-id echo and the
+    /// other with `❯`-prefixed body lines. Neither copy is byte-equal to HEAD's,
+    /// and the guard still refuses.
+    #[test]
+    fn copy_modulo_binary_echo_and_prompt_prefixes_is_refused() {
+        let committed = committed_doc();
+        let echoed = COMMITTED_RESPONSE.replacen(
+            "\n",
+            "\n\n> **Queue prompt:**\n>\n> do [#upgrade]\n>\n> do [#viewpane]\n\n",
+            1,
+        );
+        let prefixed = COMMITTED_RESPONSE.replace("- **Upgraded", "\u{276f} - **Upgraded");
+        let candidate = committed.replace(COMMITTED_RESPONSE, &format!("{echoed}{prefixed}"));
+        let violation = committed_text_violation(&candidate, &committed).expect("refused");
+        assert_eq!(
+            violation.kind,
+            CommittedTextViolationKind::DuplicateCommittedResponse
+        );
+        assert!(violation.committed_line.starts_with("### Re: upgrade"));
+        // A single decorated copy replacing the committed one adds nothing.
+        let single = committed.replace(COMMITTED_RESPONSE, &echoed);
+        assert_eq!(committed_text_violation(&single, &committed), None);
+        assert_eq!(added_response_copy(&single, &committed), None);
+        assert!(added_response_copy(&candidate, &single).is_some());
     }
 
     #[test]

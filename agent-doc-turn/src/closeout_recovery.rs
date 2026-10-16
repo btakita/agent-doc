@@ -256,6 +256,11 @@ pub enum CloseoutRecoveryState {
     /// A visible `### Re:` response was patched directly into the document
     /// outside the binary write path.
     DirectResponsePatchback,
+    /// The visible document carries an extra copy of a response `HEAD` already
+    /// holds (modulo binary-owned echo lines and prompt prefixes). It is not a
+    /// patchback: `write --commit` refuses to replay a committed response, so
+    /// the recovery is `dedupe` and then `commit` (`#closeoutduplicatedcommit`).
+    DuplicateCommittedResponse,
     /// Raw `<!-- agent:NAME -->` component markers were escaped into the
     /// committed exchange instead of applied as `<!-- patch:* -->` blocks.
     EscapedTemplatePatch,
@@ -329,6 +334,14 @@ pub struct CloseoutRecoveryStateInput {
     pub head_has_escaped_template_patch: bool,
     pub missing_captured_response_body: bool,
     pub direct_response_patchback: bool,
+    /// The current document authority carries more copies of a response block
+    /// than `HEAD` does, compared modulo binary-owned decoration
+    /// (`committed_text_integrity::added_response_copy`). Wins over
+    /// `direct_response_patchback` / `uncommitted_response_vs_head`: the extra
+    /// `### Re:` heading those facts see is a copy, and the patchback recovery
+    /// (`write --commit`) refuses a response already in HEAD
+    /// (`#closeoutduplicatedcommit`).
+    pub uncommitted_response_duplicates_head: bool,
     pub snapshot_head_drift: Option<CloseoutRecoveryDrift>,
     pub snapshot_visible_drift: Option<CloseoutRecoveryDrift>,
     pub nested_parent_pointer_stale: bool,
@@ -361,12 +374,13 @@ pub struct CloseoutRecoveryCommandInput {
 }
 
 impl CloseoutRecoveryState {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Clean,
         Self::OpenCycle,
         Self::BlockedCapture,
         Self::MissingResponseBody,
         Self::DirectResponsePatchback,
+        Self::DuplicateCommittedResponse,
         Self::EscapedTemplatePatch,
         Self::BoundaryOnlyDrift,
         Self::NestedParentPointerStale,
@@ -383,6 +397,7 @@ impl CloseoutRecoveryState {
             Self::BlockedCapture => "blocked_capture",
             Self::MissingResponseBody => "missing_response_body",
             Self::DirectResponsePatchback => "direct_response_patchback",
+            Self::DuplicateCommittedResponse => "duplicate_committed_response",
             Self::EscapedTemplatePatch => "escaped_template_patch",
             Self::BoundaryOnlyDrift => "boundary_only_drift",
             Self::NestedParentPointerStale => "nested_parent_pointer_stale",
@@ -409,6 +424,9 @@ pub fn closeout_recovery_command(input: CloseoutRecoveryCommandInput) -> Option<
         ),
         CloseoutRecoveryState::DirectResponsePatchback => format!(
             "`agent-doc write --commit {f}` to absorb the visible `### Re:` response through the snapshot/commit boundary"
+        ),
+        CloseoutRecoveryState::DuplicateCommittedResponse => format!(
+            "`agent-doc dedupe {f}` (removes the extra copy of the already-committed `### Re:` response through the editor-aware write path), then `agent-doc commit {f}` — do NOT `write --commit` it: the response is already in HEAD and the pre-write gate refuses to replay it"
         ),
         CloseoutRecoveryState::EscapedTemplatePatch => format!(
             "rewrite the response with real `<!-- patch:exchange -->` blocks and rerun `agent-doc finalize {f}` — escaped component markers must not reach `agent:exchange`"
@@ -554,6 +572,9 @@ pub fn classify_closeout_recovery_state_from_input(
         // uncommitted relative to HEAD is recovered by `write --commit`
         // exactly as `commit` itself demands; calling it clean is what left
         // every recovery surface disagreeing with every other.
+        CyclePhase::Abandoned if input.uncommitted_response_duplicates_head => {
+            return CloseoutRecoveryState::DuplicateCommittedResponse;
+        }
         CyclePhase::Abandoned if input.uncommitted_response_vs_head => {
             return CloseoutRecoveryState::DirectResponsePatchback;
         }
@@ -568,6 +589,9 @@ pub fn classify_closeout_recovery_state_from_input(
         || cycle.is_committed_pending_mutation_without_response()
     {
         return CloseoutRecoveryState::MissingResponseBody;
+    }
+    if input.uncommitted_response_duplicates_head {
+        return CloseoutRecoveryState::DuplicateCommittedResponse;
     }
     if input.direct_response_patchback || input.uncommitted_response_vs_head {
         return CloseoutRecoveryState::DirectResponsePatchback;
@@ -877,6 +901,7 @@ pub fn closeout_recovery_decision_from_state(
         CloseoutRecoveryState::Clean => CloseoutRecoveryDecision::AlreadyCommitted,
         CloseoutRecoveryState::BlockedCapture
         | CloseoutRecoveryState::DirectResponsePatchback
+        | CloseoutRecoveryState::DuplicateCommittedResponse
         | CloseoutRecoveryState::BoundaryOnlyDrift
         | CloseoutRecoveryState::NestedParentPointerStale
         | CloseoutRecoveryState::OpenEmptyPreflight
@@ -1198,6 +1223,7 @@ mod tests {
             (BlockedCapture, "blocked_capture"),
             (MissingResponseBody, "missing_response_body"),
             (DirectResponsePatchback, "direct_response_patchback"),
+            (DuplicateCommittedResponse, "duplicate_committed_response"),
             (EscapedTemplatePatch, "escaped_template_patch"),
             (BoundaryOnlyDrift, "boundary_only_drift"),
             (NestedParentPointerStale, "nested_parent_pointer_stale"),
@@ -1239,6 +1265,11 @@ mod tests {
                 DirectResponsePatchback,
                 "direct_response_patchback",
                 "absorb the visible",
+            ),
+            (
+                DuplicateCommittedResponse,
+                "duplicate_committed_response",
+                "agent-doc dedupe",
             ),
             (
                 EscapedTemplatePatch,
@@ -1526,6 +1557,49 @@ mod tests {
         );
     }
 
+    /// `#closeoutduplicatedcommit` (agent-doc-bugs.md 2026-10-15 19:51-19:56):
+    /// the visible document carried a second copy of the committed response.
+    /// The extra heading read as a direct patchback, session-check named
+    /// `write --commit`, and `write --commit` refused because the response was
+    /// already in HEAD. The duplicate fact wins, and its remedy is one that is
+    /// executable in that state.
+    #[test]
+    fn duplicate_of_a_committed_response_names_dedupe_not_write_commit() {
+        for phase in [CyclePhase::Committed, CyclePhase::Abandoned] {
+            let state = classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(CloseoutRecoveryCycleInput {
+                    phase,
+                    ..committed_cycle()
+                }),
+                direct_response_patchback: true,
+                uncommitted_response_vs_head: true,
+                uncommitted_response_duplicates_head: true,
+                ..CloseoutRecoveryStateInput::default()
+            });
+            assert_eq!(
+                state,
+                CloseoutRecoveryState::DuplicateCommittedResponse,
+                "{phase:?}"
+            );
+        }
+        let command = closeout_recovery_command(CloseoutRecoveryCommandInput {
+            document: "doc.md".to_string(),
+            state: CloseoutRecoveryState::DuplicateCommittedResponse,
+            open_cycle: None,
+        })
+        .expect("a duplicate names a recovery");
+        assert_eq!(
+            short_recovery_command_from_recommendation(&command).as_deref(),
+            Some("agent-doc dedupe doc.md")
+        );
+        let dedupe = command.find("agent-doc dedupe doc.md").unwrap();
+        let commit = command
+            .find("agent-doc commit doc.md")
+            .expect("commit follows dedupe");
+        assert!(dedupe < commit);
+        assert!(!command.contains("agent-doc write --commit"), "{command}");
+    }
+
     /// `#retaineddeferwedge`: observed 2026-09-29 on `cycle-1790658555784`.
     /// The cycle was abandoned, the snapshot had been checkpointed after the
     /// response materialized, and the authority held that response
@@ -1750,6 +1824,7 @@ mod tests {
             (BlockedCapture, "replay_safe"),
             (MissingResponseBody, "blocked"),
             (DirectResponsePatchback, "replay_safe"),
+            (DuplicateCommittedResponse, "replay_safe"),
             (EscapedTemplatePatch, "blocked"),
             (BoundaryOnlyDrift, "replay_safe"),
             (NestedParentPointerStale, "replay_safe"),

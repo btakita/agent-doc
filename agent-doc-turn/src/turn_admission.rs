@@ -148,7 +148,8 @@ pub const PENDING_OPERATOR_STEERING_RECOVERY: &str = "pending_operator_steering"
 ///
 /// `RecoveryProjectionVisibleDrift` names `reset --from-current` (baseline :=
 /// visible). `BoundaryOnlyDrift` / `QueueMetadataDrift` /
-/// `NestedParentPointerStale` / `Clean` name `agent-doc commit`, whose
+/// `NestedParentPointerStale` / `Clean` name `agent-doc commit` (and
+/// `DuplicateCommittedResponse` names it after `dedupe`), whose
 /// document-only path may adopt the visible document as the new baseline, and
 /// `repair --apply-recovery` for the metadata states may restore the visible file
 /// from HEAD. Each one, run while an operator prompt is unanswered, makes that
@@ -160,6 +161,7 @@ pub const fn recovery_absorbs_visible_document(state: CloseoutRecoveryState) -> 
         state,
         CloseoutRecoveryState::Clean
             | CloseoutRecoveryState::BoundaryOnlyDrift
+            | CloseoutRecoveryState::DuplicateCommittedResponse
             | CloseoutRecoveryState::NestedParentPointerStale
             | CloseoutRecoveryState::QueueMetadataDrift
             | CloseoutRecoveryState::RecoveryProjectionVisibleDrift

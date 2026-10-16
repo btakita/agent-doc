@@ -410,8 +410,12 @@ fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
         ops.contains("codex_stop_repeated_queue_recovery_success source=strict_replay_receipt"),
         "repeated-stop recovery must reuse the strict replay receipt instead of re-running closeout:\n{ops}"
     );
+    // `terminal_closeout_proof_recorded` is written once per terminal closeout.
+    // `closeout_latency` is not an oracle: it is logged only when a closeout
+    // takes at least `CloseoutTimer::REPORT_THRESHOLD_MS`, so a fast host logs
+    // zero lines and an honest single closeout failed this assertion.
     assert_eq!(
-        ops.matches("closeout_latency ").count(),
+        ops.matches("terminal_closeout_proof_recorded ").count(),
         1,
         "exactly one closeout must run for one recovered response:\n{ops}"
     );

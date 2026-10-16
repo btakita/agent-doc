@@ -808,6 +808,7 @@ guidance.
 `agent-doc dedupe <FILE>`
 
 - Removes consecutive duplicate `### Re:` response blocks and updates the snapshot.
+- Two blocks are duplicates when their `response_block_signature` matches (`#dupemoduloecho`): copies that differ only by a binary-owned `> **Queue prompt:**` echo block, `❯ ` prompt prefixes, boundary / `(HEAD)` markers or blank lines are one response. When one copy has `❯`-prefixed body lines, that copy is the one removed; otherwise the later copy is. When the removed copy holds the document's only boundary markers, its last marker (the exchange's trailing boundary) survives; at most one is carried over. This is the editor-aware removal path the committed-text integrity refusal and the `duplicate_committed_response` recovery name (`#closeoutduplicatedcommit`).
 - Also deletes the stale queued patch file so a plugin restart cannot replay the removed duplicate.
 - The normal template write/finalize path runs the same consecutive-response dedupe before saving snapshots, CRDT state, or disk content. Sidecar-normalization and IPC dedupe repair must prove editor delivery before saving; otherwise the write fails closed with retry state intact. `session-check` fails closed if a duplicate survives closeout instead of reporting success.
 - Active stream IPC timeout leaves the queued patch/pending response for retry and does not perform a local write or commit, so `dedupe` is not a cleanup mechanism for that timeout shape.

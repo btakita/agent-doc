@@ -405,6 +405,18 @@ impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for RuntimeRepairRepla
             Err(err) => Err(err),
         }
     }
+
+    fn strike_free_text_heads_answered_by_committed_heading_replay(
+        &self,
+        file: &Path,
+        replay_body: &str,
+    ) -> Result<usize> {
+        agent_doc_queue_io::queue_consume::strike_free_text_heads_answered_by_committed_heading_replay(
+            file,
+            replay_body,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        )
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -5576,6 +5588,14 @@ mod tests {
             _expected_head: &str,
         ) -> Result<()> {
             Ok(())
+        }
+
+        fn strike_free_text_heads_answered_by_committed_heading_replay(
+            &self,
+            _file: &Path,
+            _replay_body: &str,
+        ) -> Result<usize> {
+            Ok(0)
         }
     }
 

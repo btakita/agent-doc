@@ -1646,6 +1646,14 @@ mod late_fallback_patch_guard_tests {
         ) -> anyhow::Result<()> {
             Ok(())
         }
+
+        fn strike_free_text_heads_answered_by_committed_heading_replay(
+            &self,
+            _file: &Path,
+            _replay_body: &str,
+        ) -> anyhow::Result<usize> {
+            Ok(0)
+        }
     }
 
     fn try_ipc_full_content(file: &Path, content: &str) -> anyhow::Result<bool> {

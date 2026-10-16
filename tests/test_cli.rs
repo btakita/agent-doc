@@ -961,6 +961,123 @@ fn mcp_finalize_close_after_capture_recovers_on_next_preflight_once() {
     assert_terminal_closeout_proof(root, &doc);
 }
 
+/// `#qresiduewedge` (haiven-dev docs.md, 2026-10-16): a cycle committed an
+/// answer titled with a free-text queue head but without a `> **Queue prompt:**`
+/// echo, so the head stayed live. The Codex Stop hook then saved the closing
+/// chat summary as a second answer to that head. Its `### Re:` heading was
+/// already committed, so every preflight's repair refused to replay it and
+/// failed closed, and every `Run Agent Doc` was refused. The next admission
+/// must park that replay, strike the head the committed answer is titled with,
+/// keep the operator's new queue edit, and admit.
+#[test]
+fn preflight_parks_committed_heading_replay_and_strikes_its_answered_head() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let head = "See https://example.com/pull/48/changes#r1 https://example.com/pull/48/changes#r2";
+    let unrelated = "Does the page status enum have an archived value?";
+    let committed = format!(
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\n---\n\n\
+         ## Exchange\n\n<!-- agent:exchange patch=append -->\n\
+         ### Re: {head}\nReviewed against the full PR. Verdict: request changes.\n\
+         <!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n\
+         ## Queue\n\n<!-- agent:queue -->\n- {head}\n- {unrelated}\n<!-- /agent:queue -->\n"
+    );
+    fs::write(&doc, &committed).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, &committed);
+    // The answering cycle: captured without an echo, committed.
+    agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed)).unwrap();
+    agent_doc_capture_io::capture_response(
+        &doc,
+        &format!(
+            "<!-- patch:exchange -->\n### Re: {head}\nReviewed against the full PR. Verdict: request changes.\n<!-- /patch:exchange -->\n"
+        ),
+    )
+    .unwrap();
+    agent_doc_capture_io::mark_committed(&doc).unwrap();
+    agent_doc_cycle_state_io::mark_committed(
+        &doc,
+        "commit_success",
+        Some(&committed),
+        Some(&committed),
+    )
+    .unwrap();
+    // The Codex Stop hook's repeated-head recovery saves the closing summary
+    // as a second answer to the same head (`wrap_repeated_queue_response_patch`).
+    let stop_payload = format!(
+        "<!-- patch:exchange -->\n### Re: {head} — gpt-5\n\n\
+         > **Queue prompt:**\n>\n> {head}\n\n\
+         The assessment was refreshed; the PR is unchanged.\n<!-- /patch:exchange -->\n"
+    );
+    agent_doc_repair_io::pending::save_pending(&doc, &stop_payload).unwrap();
+    // The operator queues new work and presses Run Agent Doc.
+    let operator_edit = committed.replace(
+        "<!-- /agent:queue -->",
+        "- audit https://example.com/pull/48/\n<!-- /agent:queue -->",
+    );
+    fs::write(&doc, &operator_edit).unwrap();
+
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.args(["preflight", doc.to_str().unwrap()]);
+    let output = preflight.output().unwrap();
+    assert!(
+        output.status.success(),
+        "admission must not fail closed on a committed-heading replay:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        after.contains(&format!("~~{head}")),
+        "the head the committed answer is titled with must be struck:\n{after}"
+    );
+    assert!(
+        after.contains(&format!("{unrelated}\n"))
+            && !after.contains(&format!("~~{unrelated}"))
+            && after.contains("- audit https://example.com/pull/48/\n"),
+        "unanswered heads and the operator's new edit must stay live:\n{after}"
+    );
+    assert_eq!(
+        after.matches("### Re: ").count(),
+        1,
+        "the parked replay must never be written:\n{after}"
+    );
+    assert!(
+        agent_doc_repair_io::pending::load_active_pending_response(&doc)
+            .unwrap()
+            .is_none(),
+        "the parked replay must not be retried by the next admission"
+    );
+    let parked = fs::read_dir(root.join(".agent-doc/repair-blocked"))
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| fs::read_to_string(entry.path()).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parked.len(),
+        1,
+        "the replay payload is preserved for forensics"
+    );
+    assert!(parked[0].contains("The assessment was refreshed"));
+
+    let mut check = agent_doc_cmd();
+    check.current_dir(root);
+    check.args(["session-check", doc.to_str().unwrap()]);
+    let check_output = check.output().unwrap();
+    let check_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check_output.stdout),
+        String::from_utf8_lossy(&check_output.stderr)
+    );
+    assert!(
+        !check_text.contains("completed free-text agent:queue head"),
+        "the struck head must not be reported as completed residue:\n{check_text}"
+    );
+}
+
 #[test]
 fn test_codex_shared_closeout_spec_invariants() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

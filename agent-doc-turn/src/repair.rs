@@ -6,6 +6,11 @@ pub const RESPONSE_PATCHBACK_UNCOMMITTED_ERROR: &str = "response_patchback_uncom
 pub const EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR: &str =
     "empty preflight_started cycle has no response capture";
 pub const STALE_EMPTY_PREFLIGHT_TTL_SECS: u64 = 60;
+/// `#qresiduewedge`: retirement reason for a captured response that repair
+/// parked because the document already holds an answer under its `### Re:`
+/// heading. A parked capture was never written, so it is no longer the
+/// cycle's answer and never proves a free-text queue head answered.
+pub const COMMITTED_HEADING_REPLAY_PARKED_REASON: &str = "committed_heading_replay_parked";
 
 /// The proof a caller carries when it asks to reclaim an empty
 /// `preflight_started` cycle.

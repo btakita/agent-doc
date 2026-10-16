@@ -199,6 +199,16 @@ pub fn check_free_text_queue_head_provenance(
     }
     let content = rc.doc_content();
     let closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    // `#qresiduewedge`: repair parks (never writes) a capture whose heading the
+    // document already answers, striking only the heads that committed answer
+    // is titled with. Its echo of any other head is not a committed answer, so
+    // it never makes that head completed residue — that INTERRUPT would name a
+    // strike no actor can run. It still explains a head the operator removed.
+    let capture_parked = closeout.as_ref().is_some_and(|projection| {
+        projection.matches_cycle(&state.cycle_id)
+            && projection.captured_response_retired_reason.as_deref()
+                == Some(agent_doc_turn::repair::COMMITTED_HEADING_REPLAY_PARKED_REASON)
+    });
     let current_cycle_response = closeout
         .as_ref()
         .filter(|projection| projection.matches_cycle(&state.cycle_id))
@@ -237,7 +247,7 @@ pub fn check_free_text_queue_head_provenance(
         }
         return Ok(GuardResult::None);
     }
-    if !decision.completed_residue.is_empty() {
+    if !decision.completed_residue.is_empty() && !capture_parked {
         let heads_text = decision
             .completed_residue
             .iter()

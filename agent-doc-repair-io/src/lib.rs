@@ -394,6 +394,15 @@ pub trait RepairFallbackWriteEffects {
 pub trait RepairRecoveredQueueHeadEffects {
     fn strike_recovered_free_text_queue_head(&self, file: &Path, expected_head: &str)
     -> Result<()>;
+
+    /// `#qresiduewedge`: strike the free-text heads a parked committed-heading
+    /// replay answers, where the document already holds an answer titled with
+    /// each head. Returns the number of heads struck.
+    fn strike_free_text_heads_answered_by_committed_heading_replay(
+        &self,
+        file: &Path,
+        replay_body: &str,
+    ) -> Result<usize>;
 }
 
 pub trait RepairReplayWriteEffects:
@@ -1543,6 +1552,73 @@ fn quarantine_blocked_pending_capture(
     Ok(agent_doc_turn::repair::RepairOutcome::BlockedCaptureQuarantined)
 }
 
+/// `#qresiduewedge`: a retained response whose `### Re:` heading the document
+/// already holds is a replay by construction, so the replay guard refuses it
+/// on every attempt. Failing closed on it wedged the document: every later
+/// preflight replayed the same response, refused admission, and never reached
+/// the queue maintenance that could strike the head it answers (haiven-dev
+/// docs.md, 2026-10-16: a Codex Stop hook captured a second answer to a
+/// free-text head whose first answer was committed without an echo).
+///
+/// Park it instead, like any other unreplayable capture: strike the free-text
+/// heads it answers whose answer the document already holds under the head's
+/// own title (the never-written replay alone never strikes a head), preserve
+/// the payload under `.agent-doc/repair-blocked/`, retire the capture and its
+/// pending response, and let the next admission run.
+fn park_committed_heading_replay(
+    effects: &impl RepairReplayWriteEffects,
+    canonical: &Path,
+    file: &Path,
+    doc_content: &str,
+    response: &str,
+    reason: &str,
+) -> Result<agent_doc_turn::repair::RepairOutcome> {
+    let struck = match effects
+        .strike_free_text_heads_answered_by_committed_heading_replay(file, response)
+    {
+        Ok(struck) => struck,
+        Err(err) => {
+            eprintln!(
+                "[repair] answered free-text strike for a parked committed-heading replay deferred: {err:#} (non-fatal)"
+            );
+            0
+        }
+    };
+    let current_content = if struck > 0 {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "repair_committed_heading_replay_parked",
+        )?
+    } else {
+        doc_content.to_string()
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "repair_committed_heading_replay_parked file={} struck={struck} response_hash={} #qresiduewedge",
+            file.display(),
+            agent_doc_hash::content_hash(response),
+        ),
+    );
+    let outcome =
+        quarantine_blocked_pending_capture(canonical, &current_content, response, reason)?;
+    // The quarantine cannot abandon a cycle that already committed, and that
+    // abandonment is what clears its pending response. Retire the parked
+    // capture explicitly so no later admission replays it, and so the
+    // session-check residue guard stops reading it as this cycle's answer.
+    if let Some(captured) = agent_doc_cycle_state_io::load_closeout_projection(canonical)?
+        .and_then(|projection| projection.captured_response)
+    {
+        agent_doc_cycle_state_io::retire_projected_captured_response(
+            canonical,
+            &captured.cycle_id,
+            &captured.capture_id,
+            agent_doc_turn::repair::COMMITTED_HEADING_REPLAY_PARKED_REASON,
+        )?;
+    }
+    Ok(outcome)
+}
+
 fn is_legacy_structured_exchange_patch(response: &str) -> bool {
     agent_doc_template::parse_patches(response)
         .is_ok_and(|(patches, _)| patches.iter().any(|patch| patch.name == "exchange"))
@@ -1686,6 +1762,21 @@ pub fn replay_orphaned_response(
             Some(doc_content),
         ) {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+                if agent_doc_template::replay_guard::committed_heading_replay_topic(
+                    response,
+                    doc_content,
+                )
+                .is_some()
+                {
+                    return park_committed_heading_replay(
+                        effects,
+                        canonical,
+                        file,
+                        doc_content,
+                        response,
+                        &reason,
+                    );
+                }
                 fail_closed_on_blocked_template_replay(file, response, &reason)?;
                 response.to_string()
             }

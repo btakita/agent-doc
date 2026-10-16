@@ -207,10 +207,7 @@ Your text is the base, and the saved response is applied once on top of it; an e
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#jetbrainsreplicaloops]~~
-- ~~do [#clearsessioncontext]~~
-- ~~do [#mergecapturedsplice]~~
-- do [#jetbrainscleanregistrati]
+- 🚧 do [#jetbrainscleanregistrati]
 <!-- /agent:queue -->
 
 ## Todo
@@ -229,7 +226,7 @@ Your text is the base, and the saved response is applied once on top of it; an e
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jetbrainscleanregistrati] [agent-doc] JetBrains cleanRegistrationMerge still calls NativePatching.reconcileText (char-level conflict_reconcile::reconcile) before the captured-splice rebase, so a registration merge can re-anchor a controller edit onto operator text with zero conflicts: operator deletes the struck line '- ~~do [tdc]~~' and types new items while canonical closes the kept '- do [sdkdocs]', and it returns '- do [sdkexamples] (closed)'. Route registration merges through the whole-line merge and deleted-anchor refusal that mergecapturedsplice (f108cd7d51) added to merge_forward, with this case as a regression test.
+- [ ] 🚧 [#jetbrainscleanregistrati] [agent-doc] JetBrains cleanRegistrationMerge still calls NativePatching.reconcileText (char-level conflict_reconcile::reconcile) before the captured-splice rebase, so a registration merge can re-anchor a controller edit onto operator text with zero conflicts: operator deletes the struck line '- ~~do [tdc]~~' and types new items while canonical closes the kept '- do [sdkdocs]', and it returns '- do [sdkexamples] (closed)'. Route registration merges through the whole-line merge and deleted-anchor refusal that mergecapturedsplice (f108cd7d51) added to merge_forward, with this case as a regression test.
 <!-- /agent:backlog -->
 
 ## Review

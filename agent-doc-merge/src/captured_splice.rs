@@ -25,8 +25,10 @@ pub struct CapturedSpliceBatch {
 /// Translate each range through equal spans only. The complete resulting cut
 /// verifies that the caller supplied the actual captured stream, not a guessed
 /// edit. A batch the exact translation refuses falls back to a conflict-free
-/// three-way merge ([`merge_forward`], `#heldbatchmerge`); any true overlap
-/// still fails before a replacement replica is registered.
+/// line-granular three-way merge ([`merge_forward`], `#heldbatchmerge`); any
+/// true overlap still fails before a replacement replica is registered, and no
+/// answer anchors canonical text on a line the operator deleted or rewrote
+/// (`#mergecapturedsplice`).
 pub fn rebase(
     base: &str,
     canonical: &str,
@@ -82,10 +84,31 @@ pub fn rebase(
         translate_edits(&old, &current, batch)
             .or_else(|_| merge_windows(&captured_result, &current, &canonical_changes, &windows))
     };
-    exact.or_else(|refusal| {
+    let answer = exact.or_else(|refusal| {
         merge_forward(&old, &current, &captured_result, &windows)
             .map_err(|merge| anyhow::anyhow!("{refusal}; merge-forward refused: {merge}"))
-    })
+    })?;
+    // `#mergecapturedsplice`: the planners above work by code point, and a
+    // line the operator deleted or rewrote can keep a few code points by
+    // coincidence; a canonical change anchored between them then lands on the
+    // operator's new text. Every answer is held to whole-line anchoring:
+    // where the line-granular merge exists the answer must be it, and no answer
+    // keeps a canonical change whose anchor line the operator deleted or
+    // rewrote. Refusing is the existing overlap outcome: the plugin keeps the
+    // captured batch and the operator's visible text, and the
+    // controller-licensed roll-forward settles it.
+    if let Some(line_merged) = line_merge(base, &batch.resulting_text, canonical) {
+        ensure!(
+            answer.resulting_text == line_merged,
+            "the code-point plan anchors canonical text at a different line than the \
+             line-granular merge"
+        );
+    }
+    ensure!(
+        !canonical_change_lost_its_anchor(base, canonical, &batch.resulting_text),
+        "canonical changed a line the operator deleted or rewrote; its anchor is gone"
+    );
+    Ok(answer)
 }
 
 /// `#heldbatchmerge` (GH #273): the exit for a captured batch the exact planner
@@ -99,17 +122,20 @@ pub fn rebase(
 /// re-registration deferred canonical behind it, and the visible buffer stayed
 /// forked from the replica for good while every native save was refused.
 ///
-/// The fallback is the formally checked three-way reconcile
-/// ([`crate::conflict_reconcile::reconcile`], base = the captured base, yours =
-/// the captured cut, agent = canonical): the editor text is the base and the
-/// unapplied canonical changes roll forward onto it. It is accepted only when
-/// (1) no edit of either side overlaps the other (`conflicts == 0`), so no
-/// winner is chosen; (2) canonical has not already ingested the operator's
-/// text, so a lost receipt cannot insert a burst twice; and (3) no canonical
-/// insertion sits at the operator's own anchor, where foreign controller text
-/// may be the transformation of a burst it already consumed. Otherwise the
-/// refusal stands. The answer is the canonical-relative splices that produce the merge,
-/// forwarded on a replica registered at exactly `canonical`.
+/// The fallback is a line-granular three-way merge ([`line_merge`], base = the
+/// captured base, yours = the captured cut, agent = canonical): the editor
+/// text is the base and the unapplied canonical changes roll forward onto it.
+/// It applies the rules of the formally checked reconcile
+/// ([`crate::conflict_reconcile`]) with a whole base line as the unit of
+/// anchoring (`#mergecapturedsplice`). It is accepted only when (1) no edit of
+/// either side overlaps the other: no base line changed by both, so no winner
+/// is chosen and no canonical change lands on a line the operator deleted or
+/// rewrote; (2) canonical has not already ingested the operator's text, so a
+/// lost receipt cannot insert a burst twice; and (3) the two sides did not
+/// insert lines at one boundary, where foreign controller text may be the
+/// transformation of a burst it already consumed. Otherwise the refusal
+/// stands. The answer is the canonical-relative splices that produce the
+/// merge, forwarded on a replica registered at exactly `canonical`.
 fn merge_forward(
     base: &[char],
     canonical: &[char],
@@ -123,19 +149,20 @@ fn merge_forward(
     let base_text: String = base.iter().collect();
     let captured_text: String = captured_result.iter().collect();
     let canonical_text: String = canonical.iter().collect();
-    let merged = crate::conflict_reconcile::reconcile_without_same_point_insertions(
-        &base_text,
-        &captured_text,
-        &canonical_text,
-    )
-    .map_err(|error| anyhow::anyhow!("three-way reconcile unavailable: {error:?}"))?
-    .ok_or_else(|| anyhow::anyhow!("canonical inserted text at the operator's own anchor"))?;
-    ensure!(
-        merged.conflicts == 0,
-        "operator and canonical edits overlap ({} conflict region(s))",
-        merged.conflicts
-    );
-    let target: Vec<char> = merged.text.chars().collect();
+    // `#mergecapturedsplice`: the merge is line-granular. The char-level
+    // reconcile this used before diffs each side with no line anchoring, so an
+    // operator who deleted a line and typed others came back as a coincidental
+    // alignment of the two (`- ~~do [#tdc]~~\n` against `- do [#sdkexamples]\n`
+    // shares `- do [#` and the newline), and a canonical insertion anchored in
+    // the deleted line landed on the operator's text with zero conflicts
+    // reported (`- do [#sdkexamples] (closed)`).
+    let merged = line_merge(&base_text, &captured_text, &canonical_text).ok_or_else(|| {
+        anyhow::anyhow!(
+            "operator and canonical edits overlap: both changed one line, an insertion falls \
+             inside a run the other side replaced, or both inserted at one line boundary"
+        )
+    })?;
+    let target: Vec<char> = merged.chars().collect();
     let edits = splices_between(canonical, &target);
     let mut replayed = canonical.to_vec();
     for edit in &edits {
@@ -147,7 +174,215 @@ fn merge_forward(
     );
     Ok(CapturedSpliceBatch {
         edits,
-        resulting_text: merged.text,
+        resulting_text: merged,
+    })
+}
+
+/// `#mergecapturedsplice`: the line-granular three-way merge [`merge_forward`]
+/// answers with and every [`rebase`] answer is checked against. Each side
+/// is diffed against `base` by whole lines (`\n`-terminated). A base line is
+/// an indivisible anchor: answers `None` (an overlap) when both sides changed
+/// or deleted the same base line, when one side inserts lines strictly inside
+/// a run of base lines the other changed, or when both insert lines at the
+/// same boundary. Otherwise both apply; at one boundary an insertion goes
+/// before a change that starts there (the reconcile's rule 2). An identical
+/// change made by both sides applies once, as in the reconcile. The result
+/// never holds a line that is neither the operator's nor canonical's.
+fn line_merge(base: &str, yours: &str, agent: &str) -> Option<String> {
+    let base_lines: Vec<&str> = base.split_inclusive('\n').collect();
+    let hunks =
+        |side: &str| line_hunks(&base_lines, &side.split_inclusive('\n').collect::<Vec<_>>());
+    let ours = hunks(yours);
+    let theirs: Vec<_> = hunks(agent)
+        .into_iter()
+        .filter(|hunk| !ours.contains(hunk))
+        .collect();
+    for LineHunk { old: a, .. } in &ours {
+        for LineHunk { old: b, .. } in &theirs {
+            let overlap = if a.is_empty() && b.is_empty() {
+                a.start == b.start
+            } else if a.is_empty() {
+                b.start < a.start && a.start < b.end
+            } else if b.is_empty() {
+                a.start < b.start && b.start < a.end
+            } else {
+                a.start < b.end && b.start < a.end
+            };
+            if overlap {
+                return None;
+            }
+        }
+    }
+    let mut events: Vec<&LineHunk> = ours.iter().chain(&theirs).collect();
+    events.sort_by_key(|hunk| (hunk.old.start, !hunk.old.is_empty()));
+    let mut out = String::with_capacity(base.len().max(yours.len()));
+    let mut at = 0;
+    for hunk in events {
+        out.extend(base_lines[at..hunk.old.start].iter().copied());
+        out.extend(hunk.lines.iter().map(String::as_str));
+        at = hunk.old.end;
+    }
+    out.extend(base_lines[at..].iter().copied());
+    Some(out)
+}
+
+/// One whole-line edit: replace `base_lines[old]` with `lines`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LineHunk {
+    old: Range<usize>,
+    lines: Vec<String>,
+    /// A one-line change to a line still recognisably the same line (at least
+    /// half of the longer line's words in common). Anything else replaced or
+    /// deleted its base lines: a change anchored inside them lost its anchor.
+    edits_line: bool,
+}
+
+/// Hunks above this many old × new lines are not paired line by line.
+const LINE_PAIRING_LIMIT: usize = 1_024;
+
+/// The whole-line edits turning `base` into `side`, each as small as an exact
+/// script allows. Myers groups adjacent changed lines into one hunk, and a
+/// grouped hunk reads an insertion between two of its lines as an overlap
+/// (`- a (HEAD)`, a boundary marker line, `- ~~b~~` is three edits, not one).
+/// A replaced run is split by pairing old lines with similar new lines in
+/// order: a pair is a one-line change ([`LineHunk::edits_line`]); each run of
+/// unpaired lines between pairs is one hunk that deletes or replaces its base
+/// lines. Every split is still an exact script.
+fn line_hunks(base_lines: &[&str], lines: &[&str]) -> Vec<LineHunk> {
+    let owned = |lines: &[&str]| lines.iter().map(|line| (*line).to_owned()).collect();
+    let mut out = Vec::new();
+    for op in capture_diff_slices(Algorithm::Myers, base_lines, lines) {
+        let (old, new) = (op.old_range(), op.new_range());
+        match op.tag() {
+            DiffTag::Equal => {}
+            DiffTag::Replace => out.extend(split_replaced_lines(
+                &base_lines[old.clone()],
+                &lines[new],
+                old.start,
+            )),
+            _ => out.push(LineHunk {
+                old,
+                lines: owned(&lines[new]),
+                edits_line: false,
+            }),
+        }
+    }
+    out
+}
+
+/// Whether `b` is still recognisably the line `a`: at least half of the longer
+/// line's whitespace-separated words survive in order.
+fn same_line(a: &str, b: &str) -> bool {
+    let (a, b): (Vec<&str>, Vec<&str>) = (
+        a.split_whitespace().collect(),
+        b.split_whitespace().collect(),
+    );
+    let common: usize = capture_diff_slices(Algorithm::Myers, &a, &b)
+        .iter()
+        .filter(|op| op.tag() == DiffTag::Equal)
+        .map(|op| op.old_range().len())
+        .sum();
+    2 * common >= a.len().max(b.len())
+}
+
+fn split_replaced_lines(old: &[&str], new: &[&str], at: usize) -> Vec<LineHunk> {
+    let owned = |lines: &[&str]| lines.iter().map(|line| (*line).to_owned()).collect();
+    let (n, m) = (old.len(), new.len());
+    if n * m > LINE_PAIRING_LIMIT {
+        return vec![LineHunk {
+            old: at..at + n,
+            lines: owned(new),
+            edits_line: false,
+        }];
+    }
+    // Longest in-order pairing of similar lines (LCS over `same_line`).
+    let pairs: Vec<Vec<bool>> = old
+        .iter()
+        .map(|a| new.iter().map(|b| same_line(a, b)).collect())
+        .collect();
+    let mut best = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            best[i][j] = best[i + 1][j].max(best[i][j + 1]);
+            if pairs[i][j] {
+                best[i][j] = best[i][j].max(1 + best[i + 1][j + 1]);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let (mut i, mut j, mut gap_i, mut gap_j) = (0, 0, 0, 0);
+    let flush = |out: &mut Vec<LineHunk>, gap_i: usize, i: usize, gap_j: usize, j: usize| {
+        if gap_i < i || gap_j < j {
+            out.push(LineHunk {
+                old: at + gap_i..at + i,
+                lines: owned(&new[gap_j..j]),
+                edits_line: false,
+            });
+        }
+    };
+    while i < n || j < m {
+        if i < n && j < m && pairs[i][j] && best[i][j] == 1 + best[i + 1][j + 1] {
+            flush(&mut out, gap_i, i, gap_j, j);
+            if old[i] != new[j] {
+                out.push(LineHunk {
+                    old: at + i..at + i + 1,
+                    lines: vec![new[j].to_owned()],
+                    edits_line: true,
+                });
+            }
+            i += 1;
+            j += 1;
+            (gap_i, gap_j) = (i, j);
+        } else if i < n && (j == m || best[i][j] == best[i + 1][j]) {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    flush(&mut out, gap_i, i, gap_j, j);
+    out
+}
+
+/// `#mergecapturedsplice`: whether an answer would keep a canonical change
+/// whose anchor line the operator deleted or rewrote into a different line.
+///
+/// The planners diff by code point, so a line the operator replaced can keep a
+/// few code points by coincidence (`- do [#item4]` and `- review [#op7x4]`
+/// share `- `, `[#`, `4]` and the newline). A canonical insertion between two
+/// such survivors then translates onto the operator's new line
+/// (`- review [#op7x4] (closed)`), the corruption the exact planner produced
+/// as readily as the merge-forward fallback. Per base line: a canonical change
+/// to a line the operator removed or replaced by a different line (not a
+/// [`LineHunk::edits_line`] pair) has no anchor in the operator's text, and a
+/// canonical line insertion is anchored only while a neighbouring base line
+/// (or the document edge) survives. A change both sides made identically is not a conflict.
+fn canonical_change_lost_its_anchor(base: &str, canonical: &str, captured: &str) -> bool {
+    let base_lines: Vec<&str> = base.split_inclusive('\n').collect();
+    let ours = line_hunks(
+        &base_lines,
+        &captured.split_inclusive('\n').collect::<Vec<_>>(),
+    );
+    let mut anchor_lost = vec![false; base_lines.len()];
+    for hunk in ours.iter().filter(|hunk| !hunk.edits_line) {
+        anchor_lost[hunk.old.clone()]
+            .iter_mut()
+            .for_each(|lost| *lost = true);
+    }
+    line_hunks(
+        &base_lines,
+        &canonical.split_inclusive('\n').collect::<Vec<_>>(),
+    )
+    .iter()
+    .filter(|hunk| !ours.contains(hunk))
+    .any(|hunk| {
+        if hunk.old.is_empty() {
+            let before = hunk.old.start.checked_sub(1).map(|line| anchor_lost[line]);
+            let after = anchor_lost.get(hunk.old.start).copied();
+            // A document edge is an anchor no edit removes.
+            before.unwrap_or(false) && after.unwrap_or(false)
+        } else {
+            anchor_lost[hunk.old.clone()].iter().any(|lost| *lost)
+        }
     })
 }
 
@@ -1589,5 +1824,231 @@ mod tests {
             apply(&mut replay, edit).unwrap();
         }
         assert_eq!(replay.iter().collect::<String>(), expected);
+    }
+
+    /// The operator's whole change as one splice per deleted run and one per
+    /// typed code point, the shape the JetBrains plugin captures.
+    fn captured_typing(base: &str, typed_text: &str) -> CapturedSpliceBatch {
+        let ops = splices_between(
+            &base.chars().collect::<Vec<_>>(),
+            &typed_text.chars().collect::<Vec<_>>(),
+        );
+        let mut edits = Vec::new();
+        for op in ops {
+            edits.push(edit(op.offset_code_points, op.delete_code_points, ""));
+            edits.extend(typed(op.offset_code_points, &op.insert));
+        }
+        let captured = batch(base, edits);
+        assert_eq!(captured.resulting_text, typed_text);
+        captured
+    }
+
+    /// `#mergecapturedsplice` (found by the `#jetbrainsreplicaloops` subagent,
+    /// sdk.md 2026-10-16). The operator deleted a struck queue line and typed
+    /// new items while a closeout appended ` (closed)` inside that same line.
+    /// The merge-forward reconcile diffs char by char, aligned the deleted line
+    /// with the operator's new one (both start `- ` and end in a newline), and
+    /// re-attached the close marker to the operator's text:
+    /// `- review [#retryloop] (closed)`. An insertion whose anchor the operator
+    /// deleted is an overlap: the planner refuses, the plugin keeps the batch,
+    /// and the controller-licensed roll-forward settles the visible text.
+    #[test]
+    fn canonical_insert_inside_a_line_the_operator_deleted_refuses_instead_of_reanchoring() {
+        let base = concat!(
+            "## Exchange\n",
+            "<!-- agent:exchange -->\n",
+            "What is the full todo text for #tdc?\n",
+            "<!-- agent:boundary:5d1f0a2c -->\n",
+            "<!-- /agent:exchange -->\n",
+            "## Queue\n",
+            "<!-- agent:queue -->\n",
+            "- ~~do [#tdc]~~\n",
+            "- do [#sdkdocs]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let canonical = base.replace("- ~~do [#tdc]~~\n", "- ~~do [#tdc]~~ (closed)\n");
+        let queue = "- ~~do [#tdc]~~\n- do [#sdkdocs]\n";
+        for operator_queue in [
+            // The reported fixture: struck line removed, two items typed.
+            "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
+            "- do [#sdkdocs]\n- review [#retryloop]\n",
+            // The struck line replaced in place by a new item.
+            "- review [#retryloop]\n- do [#sdkdocs]\n",
+            // Removed only.
+            "- do [#sdkdocs]\n",
+        ] {
+            let visible = base.replace(queue, operator_queue);
+            let out = rebase(base, &canonical, &captured_typing(base, &visible));
+            let refusal = match out {
+                Err(refusal) => format!("{refusal:#}"),
+                Ok(out) => panic!(
+                    "a canonical insert whose anchor the operator deleted must refuse, \
+                     never land on operator text:\n{}",
+                    out.resulting_text
+                ),
+            };
+            assert!(refusal.contains("merge-forward refused"), "{refusal}");
+        }
+
+        // Control: the same burst beside a close of a line the operator kept
+        // still merges forward, and every line is one side's line verbatim.
+        let visible = base.replace(
+            queue,
+            "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
+        );
+        let closed_kept_line = base.replace("- do [#sdkdocs]\n", "- do [#sdkdocs] (closed)\n");
+        let out = rebase(base, &closed_kept_line, &captured_typing(base, &visible))
+            .expect("a close of a line the operator kept is independent");
+        assert_eq!(
+            out.resulting_text,
+            visible.replace("- do [#sdkdocs]\n", "- do [#sdkdocs] (closed)\n")
+        );
+        let mut replay: Vec<char> = closed_kept_line.chars().collect();
+        for edit in &out.edits {
+            apply(&mut replay, edit).unwrap();
+        }
+        assert_eq!(replay.iter().collect::<String>(), out.resulting_text);
+
+        // Control: an anchor that survives. The operator edited the item's
+        // verb, keeping the line recognisably the same, and canonical closed
+        // it at the other end; the exact translation keeps both.
+        let edited = base.replace("- do [#sdkdocs]\n", "- review [#sdkdocs]\n");
+        let out = rebase(base, &closed_kept_line, &captured_typing(base, &edited))
+            .expect("a canonical change on a line the operator edited in place keeps its anchor");
+        assert_eq!(
+            out.resulting_text,
+            base.replace("- do [#sdkdocs]\n", "- review [#sdkdocs] (closed)\n")
+        );
+
+        // The document edge is an anchor no edit removes: a canonical line
+        // inserted at the top survives the operator deleting the first line.
+        let top = "- ~~do [#tdc]~~\n- do [#sdkdocs]\n";
+        assert!(!canonical_change_lost_its_anchor(
+            top,
+            &format!("## Queue\n{top}"),
+            "- do [#sdkdocs]\n"
+        ));
+        assert!(canonical_change_lost_its_anchor(
+            top,
+            &top.replace("~~\n", "~~\n## Moved\n"),
+            "- review [#retryloop]\n"
+        ));
+    }
+
+    /// `#mergecapturedsplice` property: no canonical change ever lands inside
+    /// or on text the operator inserted unless its anchor line survived. The
+    /// operator keeps, deletes, rewrites (similar or unrelated text), or types
+    /// a line after each base line; canonical keeps, closes, strikes, or
+    /// inserts a response block after it. Whenever both sides changed one base
+    /// line the planner must refuse. Any answer it gives must be exactly the
+    /// line-wise union (so no line is a hybrid of the two sides, and every
+    /// operator line survives verbatim, once) and must replay on canonical.
+    /// Deterministic xorshift, no new deps.
+    #[test]
+    fn a_canonical_change_never_lands_on_operator_text_once_its_anchor_line_is_gone() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % bound as u64) as usize
+        };
+        let (mut answered, mut refused, mut same_line) = (0, 0, 0);
+        for case in 0..400 {
+            let lines = 3 + next(8);
+            let base_lines: Vec<String> = (0..lines).map(|n| format!("- do [#item{n}]")).collect();
+            let (mut canonical_lines, mut operator_lines, mut merged_lines) =
+                (Vec::new(), Vec::new(), Vec::new());
+            let mut both_changed_a_line = false;
+            for (n, line) in base_lines.iter().enumerate() {
+                let canonical_op = next(4);
+                let mut operator_op = next(4);
+                if canonical_op == 3 && operator_op == 3 {
+                    // Both inserting after one line: the same anchor, which
+                    // the planner already refuses; outside this property.
+                    operator_op = 0;
+                }
+                both_changed_a_line |=
+                    matches!(canonical_op, 1 | 2) && matches!(operator_op, 1 | 2);
+                let canonical_line = match canonical_op {
+                    1 => Some(format!("{line} (closed)")),
+                    2 => Some(line.replace("- do", "- ~~do") + "~~"),
+                    _ => None,
+                };
+                let operator_line = match operator_op {
+                    1 => Some(None),
+                    2 if next(2) == 0 => Some(Some(format!("{line} operator {case} edit"))),
+                    2 => Some(Some(format!("- review [#op{case}x{n}]"))),
+                    _ => None,
+                };
+                canonical_lines.push(canonical_line.clone().unwrap_or_else(|| line.clone()));
+                match &operator_line {
+                    Some(None) => {}
+                    Some(Some(rewritten)) => operator_lines.push(rewritten.clone()),
+                    None => operator_lines.push(line.clone()),
+                }
+                match (operator_line, canonical_line) {
+                    (Some(None), _) => {}
+                    (Some(Some(rewritten)), _) => merged_lines.push(rewritten),
+                    (None, Some(changed)) => merged_lines.push(changed),
+                    (None, None) => merged_lines.push(line.clone()),
+                }
+                if canonical_op == 3 {
+                    let block = [
+                        format!("### Re: item{n}"),
+                        String::new(),
+                        format!("answer {case} {n}"),
+                    ];
+                    canonical_lines.extend(block.iter().cloned());
+                    merged_lines.extend(block);
+                }
+                if operator_op == 3 {
+                    let typed_line = format!("- review [#typed{case}x{n}]");
+                    operator_lines.push(typed_line.clone());
+                    merged_lines.push(typed_line);
+                }
+            }
+            let join = |lines: &[String]| {
+                lines
+                    .iter()
+                    .map(|line| format!("{line}\n"))
+                    .collect::<String>()
+            };
+            let base = join(&base_lines);
+            let canonical = join(&canonical_lines);
+            let yours = join(&operator_lines);
+            let captured = captured_typing(&base, &yours);
+            same_line += usize::from(both_changed_a_line);
+            match rebase(&base, &canonical, &captured) {
+                Err(_) => refused += 1,
+                Ok(out) => {
+                    answered += 1;
+                    assert!(
+                        !both_changed_a_line,
+                        "case {case}: both sides changed one line, yet the planner answered\n\
+                         base:\n{base}\ncanonical:\n{canonical}\nyours:\n{yours}\nmerged:\n{}",
+                        out.resulting_text
+                    );
+                    assert_eq!(
+                        out.resulting_text,
+                        join(&merged_lines),
+                        "case {case}\nbase:\n{base}\ncanonical:\n{canonical}\nyours:\n{yours}"
+                    );
+                    let mut replay: Vec<char> = canonical.chars().collect();
+                    for edit in &out.edits {
+                        apply(&mut replay, edit).unwrap();
+                    }
+                    assert_eq!(
+                        replay.iter().collect::<String>(),
+                        out.resulting_text,
+                        "case {case}"
+                    );
+                }
+            }
+        }
+        // Non-vacuity: the generator reaches both outcomes and the bug class.
+        assert!(answered >= 40, "answered {answered}, refused {refused}");
+        assert!(same_line >= 100, "same-line cases {same_line}");
+        eprintln!("answered {answered} refused {refused} same-line {same_line}");
     }
 }

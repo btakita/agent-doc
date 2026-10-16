@@ -1163,6 +1163,21 @@ fn held_captured_batch_beside_head_marker_and_closeout_merges_forward_across_pee
 /// text byte for byte, and every peer converges on it without a recycle.
 #[test]
 fn stale_baseline_loop_converges_by_rolling_the_visible_buffer_forward_in_place() {
+    stale_baseline_roll_forward_case(true);
+}
+
+/// `#mergecapturedsplice` end to end: the same loop without the retarget, so
+/// the only overlap is canonical's ` (closed)` inside the struck line the
+/// operator deleted. The rebase used to answer that with the close marker
+/// re-attached to the operator's typed item (`- review [#retryloop] (closed)`);
+/// it must refuse like any overlap, every retry, and the roll-forward must then
+/// settle on the operator's text without the marker.
+#[test]
+fn deleted_anchor_close_refuses_and_rolls_the_visible_buffer_forward() {
+    stale_baseline_roll_forward_case(false);
+}
+
+fn stale_baseline_roll_forward_case(retarget: bool) {
     let _env_guard = agent_doc_test_support::env_lock();
     let temp = tempfile::TempDir::new().unwrap();
     let project_root = temp.path();
@@ -1214,26 +1229,30 @@ fn stale_baseline_loop_converges_by_rolling_the_visible_buffer_forward_in_place(
     // ...and retargets the remaining item, at the exact point canonical edits.
     let retarget_at = code_point_offset(&captured_base, "sdkdocs]") + "sdkdocs".chars().count()
         - struck.chars().count();
-    let captured = captured_splice_batch(
-        &captured_base,
-        vec![
-            splice(struck_at, struck.chars().count(), ""),
-            splice(retarget_at, 0, "-api"),
-            splice(typed_at + "-api".chars().count(), 0, typed),
-        ],
-    );
+    let api = if retarget { "-api" } else { "" };
+    let mut splices = vec![splice(struck_at, struck.chars().count(), "")];
+    if retarget {
+        splices.push(splice(retarget_at, 0, api));
+    }
+    splices.push(splice(typed_at + api.chars().count(), 0, typed));
+    let captured = captured_splice_batch(&captured_base, splices);
     let visible = captured.resulting_text.clone();
+    let operator_item = format!("- do [#sdkdocs{api}]\n");
     assert_eq!(
         visible,
-        concat!(
-            "<!-- agent:exchange -->\n",
-            "What is the full todo text? 🌍\n",
-            "<!-- /agent:exchange -->\n",
-            "<!-- agent:queue -->\n",
-            "- do [#sdkdocs-api]\n",
-            "- review [#retryloop]\n",
-            "- do [#sdkexamples]\n",
-            "<!-- /agent:queue -->\n",
+        format!(
+            "{}{operator_item}{}",
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "What is the full todo text? 🌍\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:queue -->\n",
+            ),
+            concat!(
+                "- review [#retryloop]\n",
+                "- do [#sdkexamples]\n",
+                "<!-- /agent:queue -->\n",
+            ),
         )
     );
 
@@ -1246,7 +1265,9 @@ fn stale_baseline_loop_converges_by_rolling_the_visible_buffer_forward_in_place(
         vscode.pull_and_project().unwrap();
     };
     canonical_edit("~~do [#tdc]~~", " (closed)");
-    canonical_edit("do [#sdkdocs", "-guide");
+    if retarget {
+        canonical_edit("do [#sdkdocs", "-guide");
+    }
     canonical_edit(
         "full todo text? 🌍\n",
         "### Re: full todo text\n\nHere it is.\n",
@@ -1256,10 +1277,12 @@ fn stale_baseline_loop_converges_by_rolling_the_visible_buffer_forward_in_place(
         canonical.contains("- ~~do [#tdc]~~ (closed)\n"),
         "{canonical:?}"
     );
-    assert!(
-        canonical.contains("- do [#sdkdocs-guide]\n"),
-        "{canonical:?}"
-    );
+    let canonical_item = if retarget {
+        "- do [#sdkdocs-guide]\n"
+    } else {
+        "- do [#sdkdocs]\n"
+    };
+    assert!(canonical.contains(canonical_item), "{canonical:?}");
     assert!(canonical.contains("Here it is."), "{canonical:?}");
 
     // The loop: the stuck JetBrains replica holds canonical, its visible
@@ -1317,7 +1340,7 @@ fn stale_baseline_loop_converges_by_rolling_the_visible_buffer_forward_in_place(
     assert_eq!(vscode.text(), expected, "every peer converges on one text");
     assert_eq!(expected.matches(response).count(), 1);
     for line in [
-        "- do [#sdkdocs-api]\n",
+        operator_item.as_str(),
         "- review [#retryloop]\n",
         "- do [#sdkexamples]\n",
     ] {

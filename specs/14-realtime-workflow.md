@@ -1505,28 +1505,66 @@ merely share a line boundary refuse too: typing under a heading whose
 closeout struck. Such a batch was held as `await-missing-base` forever; every
 re-registration then deferred canonical behind it ("a captured local delta owns
 the visible buffer") and the visible buffer stayed forked from the replica while
-every native save was refused. A refused batch therefore falls back to the
-formally checked three-way reconcile (`conflict_reconcile`, base = captured
+every native save was refused. A refused batch therefore falls back to a
+line-granular three-way merge (`captured_splice::line_merge`, base = captured
 base, yours = captured cut, agent = canonical) — the editor text is the base and
-canonical's unapplied changes roll forward onto it — accepted only when all of
-these hold:
+canonical's unapplied changes roll forward onto it — with the rules of the
+formally checked reconcile (`conflict_reconcile`) and a whole base line as the
+unit of anchoring. It is accepted only when all of these hold:
 
-1. no edit of either side overlaps the other (zero conflict regions), so no
-   winner is chosen;
+1. no edit of either side overlaps the other: no base line is changed or
+   deleted by both sides, and no line insertion falls strictly inside a run of
+   base lines the other side replaced, so no winner is chosen;
 2. canonical gained no occurrence of a window's operator text, and no canonical
    change in that window begins or ends with the operator text's start, so a
    wholly or partly ingested burst (a lost receipt) is not inserted twice;
-3. no canonical insertion sits at the operator's own insertion point, where
-   controller text may be the transformation of a burst it already consumed.
+3. the two sides did not insert lines at one line boundary, where controller
+   text may be the transformation of a burst it already consumed.
+
+Each side's line diff is split as finely as an exact script allows: a run of
+replaced lines is paired old line to new line where the two still share at
+least half of the longer line's words, in order. A pair is an in-place edit of
+that line; an unpaired base line was deleted or rewritten into a different line.
+
+**Whole-line anchoring (`#mergecapturedsplice`).** The planner never anchors
+canonical text on a line the operator deleted or rewrote. The code-point
+planners (translation, window merge) and the earlier char-level reconcile
+fallback could keep a few code points of a replaced line by coincidence: when
+the operator deleted the struck line `- ~~do [#tdc]~~` and typed new items while
+a closeout appended ` (closed)` inside that line, the char diff aligned the
+deleted line with a typed one (`- `, `[#`, the newline) and the close marker
+landed on operator text — `- review [#retryloop] (closed)` or
+`- do [#sdkexamples] (closed)` — with zero conflicts reported. Every answer is
+therefore held to two checks before it is returned:
+
+- where the line-granular merge exists, the answer must be exactly it (no line
+  of the result is a hybrid of the two sides, and canonical's line insertions
+  sit at the boundary they were made at);
+- no canonical change touches a base line the operator deleted or rewrote into
+  a different line (an unpaired line above), and a canonical line insertion is
+  kept only while one of its neighbouring base lines (or the document edge)
+  survives.
+
+An insertion whose anchor the operator deleted is never dropped or re-anchored
+by the planner: the rebase refuses it as an overlap. A canonical change on a
+line the operator edited in place (the pair still shares half its words) keeps
+its anchor and translates exactly, e.g. `- do [#sdkdocs]` edited to
+`- review [#sdkdocs]` while canonical closes it yields
+`- review [#sdkdocs] (closed)`.
 
 The answer is the canonical-relative splices that produce the merge, so the
 plugin forwards them exactly like a translated batch: on the attached endpoint
 when it already holds that canonical, otherwise on a replacement registered at
 that canonical cut. Invariant: a captured batch is held only by a true overlap
-or by evidence that canonical may already hold its text; changes beside it never
-hold it. Any batch that still refuses keeps the retained delta, and the
+(including a canonical change whose anchor line the operator deleted or
+rewrote) or by evidence that canonical may already hold its text; changes
+beside it never hold it. Any batch that still refuses keeps the retained delta
+and the operator's visible text untouched (the JetBrains plugin's
+`rebaseCapturedSplices` returns null and the forward is not attempted), and the
 controller's bounded rebuild budget above turns it into an operator-visible
-state instead of a loop.
+state instead of a loop; the controller-licensed in-place roll-forward then
+makes the visible text canonical and the retained response is re-applied onto
+it once (`#jetbrainsreplicaloops`).
 
 An unacknowledged local delta is settled before it is rebased
 (`#captureddeltalivelock`). When the plugin replica applies a captured burst but

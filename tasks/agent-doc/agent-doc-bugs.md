@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -37,14 +38,34 @@ Review pass done. frontendlivedispatch closed on live evidence. Two review items
 Compacted content:
 - Archived 33 response topic(s): GH #268–#273 + queue duplication; GH #268–#273 + queue duplication; is v0.35.509 published?; 30 more
 - Prior summary/context: prior compacted content: Archived 9 response topic(s): queue; v0.35.506 released; #266 closed; fork-dup + compact fal...
-<!-- agent:boundary:0710c595 -->
+> **Chat prompt (#chatprompt):** Can we unwedge docs.md or do need it as is for diagnostics?
+
+### Re: unwedging docs.md — opus-5.5 · 2026-10-16T01:21-04:00
+
+**Diagnostics: we don't need docs.md kept stuck.** Everything is saved in the scratchpad `docsmd-wedge/`: a copy of the stuck doc, the 8 `ops.log` guard/admission lines, and the failed repair output. The subagent on #rundocsissue also has the session-check text and is told to reproduce from test fixtures. The only thing we'd lose is checking the fix live against this exact doc after install, and the regression test covers that.
+
+**From here I can't unwedge it: the binary refuses.** I ran the hint's repair (`agent-doc preflight tasks/docs.md` then commit). It was refused before changing anything: `pane execution authority rejected before mutation: live owner pane %197, invocation pane %205`. The authority check is correct. But it shows the hint can't be followed by anyone: other panes are refused by the binary, and in pane %197 the agent is forbidden by the skill. I've passed this to the #rundocsissue subagent as more evidence. The fix should be that admission clears the answered line itself, and the hint never names preflight.
+
+**What the stuck queue looks like:** the answered line is `- See https://github.com/haiven-dev/haiven-docs/pull/48/changes#r4289086126 https://github.com/haiven-dev/haiven-docs/pull/48/changes#r4289122564`, 6th in docs.md's queue. Its answer is already committed (`### Re: See https://…pull/48…`, verdict: request changes). No queue claims are active, and the editor text matches disk.
+
+**Ways to unwedge it now (pick one):**
+1. **In the editor, delete that one queue line, then Run Agent Doc in pane %197.** This is what I'd try first. The answer is already in the exchange, so no work is lost. Caveat from the source: the guard reads its list of lines from the stored cycle state, not from the current queue (`queue_head_provenance_guards.rs:183`). So it may still fire after the deletion. I've asked the subagent to test that case and fix it if so.
+2. **In pane %197, run the hint's repair as an operator shell command**, which the pane ownership check allows: `agent-doc preflight /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md`, then `agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md`. The uncommitted docs.md edits are all queue lines, so the repair commit won't absorb any exchange prompt.
+3. **Wait for the #rundocsissue fix and `make install`**, then Run Agent Doc should clear it by itself.
+
+**Batch status:** #rundocsissue, GH #276 and the todo-id-layering line are still with their subagents. "release + publish" is held by me until the batch is merged.
+<!-- agent:boundary:acf450de -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#rundocsissue]
+- 🚧 todo ids opportunistically layer on existing `agent:review` ids if an operator decision needs to be made on the backlog/review/icebox item. The todo is for visibility. A surrogate todo id would be created only if there are multiple backlog/review/icebox ids or if it is not associated with a backlog/review/icebox item.
+- #gh-fix https://github.com/btakita/agent-doc/issues/276
+- release + publish
 <!-- /agent:queue -->
 
 ## Todo
@@ -62,6 +83,30 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rundocsissue] Run Agent Doc on docs.md issue
+  ```
+  › agent-doc tasks/docs.md
+
+
+  • The agent-doc turn was not admitted, so I won’t modify the document or start a response. I’m running the permitted
+  session check to recover any pending operator prompt.
+
+
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
+
+
+  • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
+  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md total_ms=299…
+    [session-check] INTERRUPTED: completed free-text agent:queue head(s) "See https://github.com/haiven-dev/haiven-doc…
+    [session-check] hint: this cycle is already committed, so run `agent-doc preflight /home/brian/work/btakita/agent-…
+    + 6 lines (^t to expand)
+
+  • The repeated invocation hit the same failed-closed recovery state. I’m completing the already-started permitted
+  session check; I will only relay its result and stop.
+
+  • Agent-doc admission failed because the response heading is already committed, leaving stale completed queue residue.
+  No document changes were made, and I did not rerun preflight.
+  ```
 <!-- /agent:backlog -->
 
 ## Review

@@ -96,10 +96,10 @@ There were no actionable follow-up items to capture. Everything left is already 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#rundocsissue]
-- #gh-fix https://github.com/btakita/agent-doc/issues/277
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/277
 - 🚧 todo ids opportunistically layer on existing `agent:review` ids if an operator decision needs to be made on the backlog/review/icebox item. The todo is for visibility. A surrogate todo id would be created only if there are multiple backlog/review/icebox ids or if it is not associated with a backlog/review/icebox item.
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/276
-- Clear Session Context on sdk.md wedged: • The response is committed, but the IDE editor buffer for tasks/sdk.md contains unmerged typing. Please reconcile/save that buffer while preserving your text. The retained agent-doc write is durable and 04will apply automatically once they agree.
+- 🚧 Clear Session Context on sdk.md wedged: • The response is committed, but the IDE editor buffer for tasks/sdk.md contains unmerged typing. Please reconcile/save that buffer while preserving your text. The retained agent-doc write is durable and 04will apply automatically once they agree.
 - 🚧 release + publish
 <!-- /agent:queue -->
 

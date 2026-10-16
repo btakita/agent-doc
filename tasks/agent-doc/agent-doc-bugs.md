@@ -199,6 +199,29 @@ Your text is the base, and the saved response is applied once on top of it; an e
 **Same bug, second place (queued at the end):** the JetBrains plugin's registration merge (`cleanRegistrationMerge`) still runs the old character-level merge before the rebase. In one case it returns `- do [#sdkexamples] (closed)` with zero conflicts. It needs the same whole-line merge and refusal.
 
 0.35.512 on main so far: the sdk.md Clear fix, `clearsessioncontext`, `jetbrainsreplicaloops` and `mergecapturedsplice`. It is not released yet.
+
+### Re: `#jetbrainscleanregistrati` merged; `#tmuxpanesreversed` handed to a subagent — opus-5.5 · 2026-10-16T11:52-04:00
+
+**`#jetbrainscleanregistrati` is done.** The subagent's fix (`2118874611`) is now on agent-doc `main` (fast-forward from `863fce679c`). The JetBrains plugin's registration merge no longer runs the character-level merge. It now runs only the line-by-line rebase from `mergecapturedsplice`. If that rebase refuses, the plugin keeps the operator's buffer and merges nothing.
+
+The FFI `agent_doc_reconcile_text` also checks its own answer now. It returns `line_anchor_lost` for any conflict-free answer that is not a whole-line merge. That protects an older plugin that still calls it before the IDE restarts. The `- do [#sdkexamples] (closed)` case is pinned by a Rust regression test, an FFI refusal test, an extended property test, and a Kotlin decision test. The subagent mutation-checked them. JetBrains plugins are now 0.2.657 (262: 0.2.658, 263: 0.2.659).
+
+**Verification:**
+- `make check` in the merge worktree: `EXIT=0`, nextest `10865 tests run: 10865 passed, 169 skipped`. That worktree was exactly main plus this one commit.
+- Gradle targeted run: `BUILD SUCCESSFUL`.
+- `make install` exited 0. It installed the binary, the cdylib, and the editor plugins, and it marked 27 supervisors and 3 controllers to restart at their next idle point.
+- No live IDE runs the new JetBrains plugin yet, so it loads on the next IDE start.
+- CI run 38926954915 on this commit is still in progress. I did not wait for it.
+
+**`#tmuxpanesreversed` was handed to a background subagent** (`subagent:tmuxpaneorder`, claimed). It works in its own worktree `agent-doc-wt/tmuxpaneorder` on branch `fix/tmux-pane-order-invariant`. You asked for formal logic, so I gave it four tasks:
+1. Find every place that decides or changes pane order, and the real reason it reversed on Coder. Suspects include using pane index instead of `pane_left` position, the `split-window -b` / `join-pane` direction, the fallback when the editor's split order is unknown, and `base-index` / `pane-base-index` differences.
+2. Write the rule in SPEC.md: after every layout operation, the left-to-right order of panes by `pane_left` equals the wanted column order.
+3. Enforce that rule with one pure planner, plus a check afterwards that re-reads the pane positions and corrects them or fails loudly.
+4. Prove it by testing every permutation of up to 4–5 columns, from every starting arrangement, with the editor order both known and unknown, using SimWorld and real tmux where the harness allows.
+
+I will merge and install its branch when it reports back.
+
+Exchange size is 173 lines. The queue is active, so I am not compacting.
 <!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 
@@ -207,7 +230,8 @@ Your text is the base, and the saved response is applied once on top of it; an e
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#jetbrainscleanregistrati]
+- do [#tmuxpanesreversed]
+- ~~do [#jetbrainscleanregistrati]~~
 <!-- /agent:queue -->
 
 ## Todo
@@ -226,7 +250,7 @@ Your text is the base, and the saved response is applied once on top of it; an e
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#jetbrainscleanregistrati] [agent-doc] JetBrains cleanRegistrationMerge still calls NativePatching.reconcileText (char-level conflict_reconcile::reconcile) before the captured-splice rebase, so a registration merge can re-anchor a controller edit onto operator text with zero conflicts: operator deletes the struck line '- ~~do [tdc]~~' and types new items while canonical closes the kept '- do [sdkdocs]', and it returns '- do [sdkexamples] (closed)'. Route registration merges through the whole-line merge and deleted-anchor refusal that mergecapturedsplice (f108cd7d51) added to merge_forward, with this case as a regression test.
+- [ ] [#tmuxpanesreversed] The tmux panes are reversed again on my Coder instance. We have made several releases attempting to fix this issue but it persists. A gh issue is coming soon. But I wanted to get a head start. Can we use formal logic to ensure this behavior is correct and this class of error is fixed?
 <!-- /agent:backlog -->
 
 ## Review

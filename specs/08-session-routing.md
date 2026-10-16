@@ -47,6 +47,16 @@ transaction; no registry JSON is emitted or read. Multiple documents can still
 map to the same pane, and the optional window binding supports window-scoped
 `claim` and `layout` routing.
 
+A live supervisor must eventually publish its current process ID, pane/window,
+session, and supervisor-instance identity even when its startup publication
+collides with a busy state database during a batch recycle. The failed target is
+retained in the supervisor's process-scoped reactive graph. Idle-watch ticks
+drive an idempotent durable-sink effect with bounded exponential backoff; each
+attempt publishes a success/failure receipt back into the graph, and a successful
+receipt retires all later attempts. Registry contention therefore cannot leave a
+re-exec'd supervisor permanently represented by a dead predecessor or pane shell,
+and retry work never blocks the PTY bridge or the startup path (GH #280).
+
 Document-path transitions rekey the same session and pane rather than closing
 the actor. If an editor transition event is missed, sync may use the legacy
 registry projection only when exactly one same-session entry exists, its old

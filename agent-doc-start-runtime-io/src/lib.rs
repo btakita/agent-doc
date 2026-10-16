@@ -2513,6 +2513,12 @@ pub(crate) struct SupervisorShared {
     _process_scope: agent_doc_state_scope::ProcessScope,
     /// `#supkill-bg` — source observations and the derived freshness projection.
     binary_freshness: agent_doc_supervisor::binary_freshness::BinaryFreshnessState,
+    /// Failed startup registry publication, retained until the process-scoped
+    /// idle-tick effect records a successful durable sink receipt (GH #280).
+    registry_publication_retry:
+        agent_doc_supervisor::registry_publication::RegistryPublicationRetryState,
+    registry_publication_target:
+        Mutex<Option<agent_doc_start_io::StartSupervisorRegistryTarget>>,
     /// Lease for this process's authoritative actor generation. A controller CAS
     /// conflict retires it and suppresses every later lifecycle write.
     actor_generation_lease: agent_doc_supervisor::actor_generation::ActorGenerationLease,
@@ -2578,6 +2584,10 @@ impl SupervisorShared {
             agent_doc_supervisor::binary_freshness::BinaryFreshnessState::new_in(&process_scope);
         let actor_generation_lease =
             agent_doc_supervisor::actor_generation::ActorGenerationLease::new_in(&process_scope);
+        let registry_publication_retry =
+            agent_doc_supervisor::registry_publication::RegistryPublicationRetryState::new_in(
+                &process_scope,
+            );
         let harness_authority =
             agent_doc_supervisor::harness_authority::HarnessAuthorityState::new_in(
                 &process_scope,
@@ -2613,6 +2623,8 @@ impl SupervisorShared {
             restart_reexec: AtomicBool::new(false),
             _process_scope: process_scope,
             binary_freshness,
+            registry_publication_retry,
+            registry_publication_target: Mutex::new(None),
             actor_generation_lease,
             stop_requested: AtomicBool::new(false),
             stop_agent_requested: AtomicBool::new(false),
@@ -2628,6 +2640,20 @@ impl SupervisorShared {
             capability_proof_contract: Mutex::new(None),
             route_owned_dispatch_promoted: AtomicBool::new(false),
         }
+    }
+
+    fn arm_registry_publication_retry(
+        &self,
+        target: agent_doc_start_io::StartSupervisorRegistryTarget,
+    ) {
+        *self.registry_publication_target.lock() = Some(target);
+        self.registry_publication_retry.request_retry();
+    }
+
+    fn registry_publication_retry_target(
+        &self,
+    ) -> Option<agent_doc_start_io::StartSupervisorRegistryTarget> {
+        self.registry_publication_target.lock().clone()
     }
 
     /// `#gh133sigterm`: the identity a deliberate exit of this supervisor is

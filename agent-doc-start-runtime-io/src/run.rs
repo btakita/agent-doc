@@ -1034,6 +1034,7 @@ pub fn run_with_reap_policy_resume_and_harness(
         harness,
         pane_id,
         supervisor_instance_id,
+        registry_publication_retry,
         actor_record,
         post_start_document_model_ensure,
     } = if reexec_reentry {
@@ -1302,6 +1303,9 @@ pub fn run_with_reap_policy_resume_and_harness(
         Some(actor_record.state),
         Some(pane_id.clone()),
     ));
+    if let Some(target) = registry_publication_retry {
+        shared.arm_registry_publication_retry(target);
+    }
     if route_owned_start_purpose != declared_route_owned_start_purpose {
         shared.mark_route_owned_dispatch_promoted();
         log_event(

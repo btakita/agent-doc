@@ -29,6 +29,7 @@ pub mod recycle_inflight;
 pub mod recycle_request;
 pub mod recycle_yield;
 pub mod reexec;
+pub mod registry_publication;
 pub mod route_owned;
 pub mod route_runtime;
 pub mod run_loop;

@@ -2569,6 +2569,10 @@ pub fn merge_partial_backlog_prefix(current_body: &str, target_body: &str) -> Op
 /// (directive heads cite ids), and the operator-owned `todo` checklist, whose
 /// leading `[#id]` is the todo item's own id. Component exclusion is
 /// structural; it never depends on whether a row also contains inline code.
+///
+/// Code exclusion (`#shadowbacklogscan`) is decided by the row head only: a
+/// code block or backtick span covering the list marker, checkbox or `[#id]`
+/// skips the row, while inline code later in the row text does not hide it.
 pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
     let components = agent_doc_element::element::parse(doc)?;
     let Some(backlog_component) = components
@@ -2631,17 +2635,26 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
         {
             continue;
         }
-        if code_ranges
-            .iter()
-            .any(|(start, end)| line_start < *end && line_end > *start)
-        {
-            continue;
-        }
-
         let Some(item) = parse_item_line(line) else {
             continue;
         };
-        if item.id.is_empty() || item.is_done() || !seen_ids.insert(item.id.clone()) {
+        if item.id.is_empty() || item.is_done() {
+            continue;
+        }
+        // `#shadowbacklogscan`: only the row's head (list marker, checkbox and
+        // `[#id]` token) decides whether it is quoted. A fenced/indented code
+        // block covers the whole head, and a backtick span over the marker or
+        // the `[#id]` quotes the row, so either skips it. Inline code AFTER the
+        // id is ordinary row text: skipping the whole line on it hid every
+        // drifted open row whose description mentioned `code`.
+        let head_end = line_start + shadow_row_head_len(line, &item.id);
+        if code_ranges
+            .iter()
+            .any(|(start, end)| line_start < *end && head_end > *start)
+        {
+            continue;
+        }
+        if !seen_ids.insert(item.id.clone()) {
             continue;
         }
 
@@ -2658,6 +2671,23 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
     }
 
     Ok(report)
+}
+
+/// Byte length of an id-bearing row's head: everything up to and including its
+/// leading `[#id]` token. `parse_item_line` reads the id from the first `[#`
+/// after the list marker, checkbox and in-progress marker, none of which can
+/// contain `[#`, so the first `[#` on the line is the id token. Falls back to
+/// the whole line (the conservative pre-`#shadowbacklogscan` skip) if the
+/// token cannot be located.
+fn shadow_row_head_len(line: &str, id: &str) -> usize {
+    let Some(open) = line.find("[#") else {
+        return line.len();
+    };
+    let after = open + 2;
+    match line[after..].find(']') {
+        Some(close) if line[after..after + close].eq_ignore_ascii_case(id) => after + close + 1,
+        _ => line.len(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8177,6 +8207,149 @@ mod tests {
             crate::guard_policy::shadow_backlog_guard(&doc).unwrap(),
             crate::guard_policy::BacklogGuardOutcome::Pass
         );
+    }
+
+    fn shadow_only_ids(doc: &str) -> Vec<String> {
+        detect_shadow_open_items(doc)
+            .unwrap()
+            .shadow_only
+            .into_iter()
+            .map(|item| item.id)
+            .collect()
+    }
+
+    /// `#shadowbacklogscan`: a drifted open row whose description carries an
+    /// inline code span is still a drifted open row. The scan used to skip any
+    /// line overlapping inline code, so this exact shape (found during the GH
+    /// 275 fix) was never caught, in a parked HTML comment or in a bare
+    /// non-component section.
+    #[test]
+    fn detect_shadow_open_items_flags_drifted_row_with_inline_code_after_id() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Keep `live` in backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- parked copy\n",
+            "- [ ] [#lost1] Fix `detect_shadow_open_items` skipping code\n",
+            "- [ ] [#live1] Keep `live` in backlog\n",
+            "-->\n\n",
+            "## Notes\n\n",
+            "- [ ] [#lost2] Handle ``a ` b`` spans and `<!-- /agent:backlog -->` prose\n",
+            "- [/] [#lost3] Gated `release` follow-up\n",
+        );
+        let report = detect_shadow_open_items(doc).unwrap();
+        assert_eq!(
+            report
+                .shadow_only
+                .iter()
+                .map(|item| (item.id.as_str(), item.line))
+                .collect::<Vec<_>>(),
+            vec![("lost1", 6), ("lost2", 12), ("lost3", 13)]
+        );
+        assert_eq!(
+            report
+                .duplicated_in_live_backlog
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["live1"]
+        );
+        assert!(matches!(
+            crate::guard_policy::shadow_backlog_guard(doc).unwrap(),
+            crate::guard_policy::BacklogGuardOutcome::Interrupt(message)
+                if message.contains("#lost1 (line 6)")
+        ));
+    }
+
+    /// An id quoted inside a backtick span, or a whole row shown inside one,
+    /// is prose citing the id, not a tracked row, and stays unflagged.
+    #[test]
+    fn detect_shadow_open_items_ignores_ids_and_rows_inside_backtick_spans() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Notes\n\n",
+            "The drifted shape is `- [ ] [#quoted1] Fix the scan`, see `[#quoted2]`.\n",
+            "- [ ] `[#quoted3]` cited in code, not a row id\n",
+            "- see `[#quoted4]` for details\n",
+            "- `- [ ] [#quoted5] row shown as code`\n",
+            "<!-- parked\n",
+            "Example: `- [ ] [#quoted6] Example row`\n",
+            "-->\n",
+        );
+        assert!(
+            shadow_only_ids(doc).is_empty(),
+            "{:?}",
+            shadow_only_ids(doc)
+        );
+    }
+
+    /// Rows inside fenced or indented code blocks are examples even when the
+    /// row also carries inline code: the block covers the row head.
+    #[test]
+    fn detect_shadow_open_items_ignores_code_block_rows_with_inline_code() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "```md\n",
+            "- [ ] [#fence1] Example with `code`\n",
+            "- [ ] [#fence2] Plain example\n",
+            "```\n\n",
+            "~~~\n",
+            "- [ ] [#tilde1] Tilde fence with `code`\n",
+            "~~~\n\n",
+            "Paragraph.\n\n",
+            "    - [ ] [#indent1] Indented code block with `code`\n",
+        );
+        // Non-vacuity: the fenced rows parse as open id rows, so only the
+        // code-block skip keeps them out.
+        let item = parse_item_line("- [ ] [#fence1] Example with `code`").unwrap();
+        assert_eq!(item.id, "fence1");
+        assert!(
+            shadow_only_ids(doc).is_empty(),
+            "{:?}",
+            shadow_only_ids(doc)
+        );
+    }
+
+    /// GH #275 shapes with inline code: `agent:todo` and `agent:queue` rows
+    /// stay excluded by component, while a drifted backtick row beside them is
+    /// caught.
+    #[test]
+    fn detect_shadow_open_items_gh275_shapes_with_inline_code() {
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#live1] with `--force`\n",
+            "- [#reaped1]: fixed in `0.35.1`\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Keep in backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#nw30] Approve the `## Needs a rebase` section\n",
+            "- [ ] [#s26h] Run `make install` then verify [#live1]\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "- [ ] [#xchg1] Transcript row with `code`\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- parked copy\n",
+            "- [ ] [#lost1] Restore `agent:todo` exclusion\n",
+            "-->\n",
+        );
+        assert_eq!(shadow_only_ids(doc), vec!["lost1".to_string()]);
+    }
+
+    #[test]
+    fn shadow_row_head_len_ends_after_the_id_token() {
+        let row = "- [ ] [#abc] Fix `code`";
+        assert_eq!(&row[..shadow_row_head_len(row, "abc")], "- [ ] [#abc]");
+        let gated = "- [/release] 🚧 [#AbC] text";
+        assert_eq!(
+            &gated[..shadow_row_head_len(gated, "abc")],
+            "- [/release] 🚧 [#AbC]"
+        );
+        // An unlocatable token falls back to the whole line.
+        assert_eq!(shadow_row_head_len("- [ ] text", "abc"), "- [ ] text".len());
     }
 
     #[test]

@@ -471,7 +471,7 @@ PyPI: https://pypi.org/project/agent-doc/0.35.513/
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#syncioredlivetmux] [agent-doc-bug] 14 live-tmux tests in `agent-doc-sync-io` fail on current main and are not run by CI. The tmuxpanesreversed subagent found them while running the suite (2026-10-16); they fail the same way with the original `sync.rs`, so they predate the pane-order change. Fix each failure, then add the tests to `make tmux-ci` so they cannot rot again. Do not delete or ignore tests to make the suite pass.
+- [ ] [#syncioredlivetmux] [agent-doc-bug] 14 live-tmux tests in `agent-doc-sync-io` fail on current main and are not run by CI. The tmuxpanesreversed subagent found them while running the suite (2026-10-16); they fail the same way with the original `sync.rs`, so they predate the pane-order change. Fix each failure, then add the tests to `make tmux-ci` so they cannot rot again. Do not delete or ignore tests to make the suite pass.
 <!-- /agent:backlog -->
 
 ## Review

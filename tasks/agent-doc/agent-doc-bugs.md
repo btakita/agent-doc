@@ -178,6 +178,27 @@ Your text is the base, and the saved response is applied once on top of it; an e
 **New backlog item (queued at the end):** the subagent found a separate bug in `captured_splice::rebase`. You delete a struck queue line while the controller inserts " (closed)" inside that same line. The " (closed)" ends up attached to your next new line instead of the edit being refused. That silently corrupts operator text, so it is queued as its own fix.
 
 0.35.512 is not released yet. On main for it: the sdk.md Clear fix, these two follow-ups, and the release notes for all three.
+
+### Re: mergecapturedsplice integrated and installed — opus-5.5 · 2026-10-16T11:15-04:00
+
+**`mergecapturedsplice`: done.** Commit `f108cd7d51` is merged to main (`863fce679c`) and installed locally; it ships in 0.35.512.
+
+**Cause:** when the normal merge refused, `merge_forward` fell back to a merge that compares the two texts one character at a time, with no line boundaries. The deleted line `- ~~do [#tdc]~~` shares `- `, `[#` and the newline with the newly typed `- review [#retryloop]`. So the controller's ` (closed)` landed on the new line, and the merge reported no conflict. The normal merge had the same hole: a rewritten line can keep a few matching characters by chance.
+
+**Fix:** the fallback now merges whole lines. Any rebase result that would keep a controller change on a line the operator deleted or rewrote is refused as an overlap, never moved or dropped. The JetBrains caller keeps the visible buffer on a refusal, and the new in-place roll-forward (`jetbrainsreplicaloops`) settles it. A full simulation shows the refusal repeating on every retry while every editor ends up on the operator's text, with the response once and no stray ` (closed)`.
+
+**Trade-off:** a fallback merge where both sides edited the same line now refuses where it used to answer. Edits that don't touch on the same line still go through the normal merge.
+
+**Tests:**
+- the exact case with four variants and three controls;
+- a 400-case property test;
+- nine deliberately broken versions of the fix, all caught by the tests.
+
+**Verification:** the merged copy passed `make check`: exit 0, 0 `result: FAILED`, nextest `10863 tests run: 10863 passed, 169 skipped`. `make install` exited 0, and main was pushed as a fast-forward.
+
+**Same bug, second place (queued at the end):** the JetBrains plugin's registration merge (`cleanRegistrationMerge`) still runs the old character-level merge before the rebase. In one case it returns `- do [#sdkexamples] (closed)` with zero conflicts. It needs the same whole-line merge and refusal.
+
+0.35.512 on main so far: the sdk.md Clear fix, `clearsessioncontext`, `jetbrainsreplicaloops` and `mergecapturedsplice`. It is not released yet.
 <!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 
@@ -185,10 +206,11 @@ Your text is the base, and the saved response is applied once on top of it; an e
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#jetbrainsreplicaloops]~~
 - ~~do [#clearsessioncontext]~~
-- do [#mergecapturedsplice]
+- ~~do [#mergecapturedsplice]~~
+- do [#jetbrainscleanregistrati]
 <!-- /agent:queue -->
 
 ## Todo
@@ -207,7 +229,7 @@ Your text is the base, and the saved response is applied once on top of it; an e
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#mergecapturedsplice] [agent-doc] agent_doc_merge::captured_splice::rebase silently corrupts operator text: when the operator deletes a struck queue line while canonical inserts " (closed)" inside that same line, the rebase attaches " (closed)" to the operator's next new line (fixture result: "- review [retryloop] (closed)") instead of refusing the overlapping edit. Found by the jetbrainsreplicaloops subagent (branch fix/jb-stale-baseline-rollforward). The rebase must refuse or drop an insert whose anchor the operator deleted, never re-anchor it onto unrelated operator text; add the fixture as a regression test.
+- [ ] [#jetbrainscleanregistrati] [agent-doc] JetBrains cleanRegistrationMerge still calls NativePatching.reconcileText (char-level conflict_reconcile::reconcile) before the captured-splice rebase, so a registration merge can re-anchor a controller edit onto operator text with zero conflicts: operator deletes the struck line '- ~~do [tdc]~~' and types new items while canonical closes the kept '- do [sdkdocs]', and it returns '- do [sdkexamples] (closed)'. Route registration merges through the whole-line merge and deleted-anchor refusal that mergecapturedsplice (f108cd7d51) added to merge_forward, with this case as a regression test.
 <!-- /agent:backlog -->
 
 ## Review

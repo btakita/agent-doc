@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -579,6 +578,15 @@ When it reports, I'll integrate the branch, run one `make install`, and close bo
 **Known gap:** `--done <id>` for a queue head that is neither tracked work nor a todo still fails.
 
 **CI:** runs for `e010dd62fd` and `082fd538a0` are still in progress.
+
+### Re: committing the previous closeout's queue and todo edits — opus-5-5 · 2026-10-16T00:45-04:00
+
+This cycle commits edits the previous closeout made but did not include in its commit:
+- both finished queue items are struck (the sdk.md todo bug and the docs.md todo-ids request)
+- the queue is drained, so `queue: go` is off
+- two operator todos are added: `#n7kq` (restore the 7 sdk.md ids) and `#8ph6` (check off the docs.md Google Drive row)
+
+Those edits were in the live buffer, but the closeout's commit left them out. It then refused to commit them, because it read them as an unanswered operator edit. That is an agent-doc defect in its own right: a closeout cannot recognise its own queue and todo edits as its own. The binary flagged it as `projection_failure`, and the dogfood watcher files such issues into `agent-doc-bugs2.md`.
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
@@ -586,13 +594,7 @@ When it reports, I'll integrate the branch, run one `make install`, and close bo
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~todo items in sdk.md did not get marked as completed when done?~~
----
-In docs.md, I did re-authenticate the google drive connector, but the todo item remained. We should auto-assign ids to todo items, like we do with free text queue items + backend items.
-```
-- [ ] Re-authenticate the Google Drive connector (/mcp, sign in) or paste the Google Doc text into tasks/docs.md so #httpsdocsgoogle can proceed; or say skip
-```
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Todo
@@ -603,6 +605,8 @@ In docs.md, I did re-authenticate the google drive connector, but the todo item 
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#gq2c] After the haiven-dev supervisor recycles onto the new build, re-run Agent Doc on tasks/sdk.md: bracketed todo ids are admitted again (it currently uses bare ids as a workaround).
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
+- [ ] [#n7kq] In the sdk.md session: restore the 7 todo ids the 23:30 --todo-edit dropped (#tdclireview, #tdcontracts162, #tdpromotioncallers, #tdinspectclones, #tdfpe202, #tdadr0033, #tdadr0030) with --todo-edit "<exact text>=#tdX <same text>", or accept the ids the preflight backfill assigns
+- [ ] [#8ph6] In the docs.md session: check off the Google Drive re-auth todo (--todo-done httpsdocsgoogle once backfilled, or --todo-done with its exact text)
 <!-- /agent:todo -->
 
 ## Backlog

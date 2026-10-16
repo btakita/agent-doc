@@ -2059,4 +2059,25 @@ mod tests {
         let miss = resolve_claim_target("bug", &twin).unwrap_err();
         assert_eq!(miss.ambiguous, twin);
     }
+
+    #[test]
+    fn bare_paragraph_after_list_item_resolves_as_its_own_claim_target() {
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "- Does the queue split free text after a list item?\n",
+            "The terminal windows closed because a scope was left behind.\n",
+            "> diagnostic detail\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let heads = crate::queue_heads::active_queue_heads(doc);
+        assert_eq!(heads.len(), 2, "{heads:?}");
+        assert_eq!(
+            resolve_claim_target(
+                "The terminal windows closed because a scope was left behind.",
+                &heads,
+            )
+            .unwrap(),
+            "The terminal windows closed because a scope was left behind.\n> diagnostic detail"
+        );
+    }
 }

@@ -4,9 +4,11 @@
 //!
 //! Hybrid syntax:
 //! - `- text` / `1. text` → list-item prompt; a free-text item also owns its
-//!   lazy / indented continuation lines up to the next blank line, list
-//!   marker, or queue-native line (`#queuecruft`,
+//!   indented continuation lines up to the next blank line, list marker, or
+//!   queue-native line (`#queuecruft`,
 //!   `agent_doc_markdown_ast::overlay::queue_continuation_line`)
+//! - column-zero prose → a distinct bare free-text prompt; consecutive prose
+//!   and a directly following blockquote stay together (`#queuefreetextsplit`)
 //! - `~~~prompt` / `---` → multi-line prompt fence
 //! - unwrapped prose + a closed Markdown code fence + a trailing explicit
 //!   request → recovered multi-line prompt (`#queue-unwrapped-fenced-task`)
@@ -298,6 +300,10 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
 
     let mut entries: Vec<(QueueEntry, std::ops::Range<usize>)> = Vec::new();
     let mut i = 0;
+    // A bare prose head is intentional only at a queue-item boundary: after a
+    // list item or thematic separator. Other unexpected prose remains inert
+    // `Freeform`, preserving the polluted-queue recovery contract.
+    let mut bare_prompt_allowed = false;
 
     while i < lines.len() {
         let start_i = i;
@@ -342,6 +348,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 span(start_i, block.last_line + 1),
             ));
             i = block.last_line + 1;
+            bare_prompt_allowed = true;
             continue;
         }
 
@@ -363,6 +370,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 span(i, end_i + 1),
             ));
             i = end_i + 1;
+            bare_prompt_allowed = true;
             continue;
         }
 
@@ -376,6 +384,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 QueueEntry::Freeform(lines[i..=close_idx].join("\n")),
                 span(start_i, close_idx + 1),
             ));
+            bare_prompt_allowed = false;
             i = close_idx + 1;
             continue;
         }
@@ -390,6 +399,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 }),
                 span(start_i, start_i + 1),
             ));
+            bare_prompt_allowed = false;
             i += 1;
             continue;
         }
@@ -427,9 +437,10 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 // verbatim as `Freeform` so it is never run, synced, or reaped.
                 QueueEntry::Freeform(line.to_string())
             } else {
-                // `#queuecruft`: a free-text item owns the lazy / indented
-                // continuation lines beneath it (Markdown paragraph
-                // continuation). They are part of the item's text, so admission,
+                // `#queuecruft`: a free-text item owns indented continuation
+                // lines beneath it. Column-zero prose starts another queue
+                // head (`#queuefreetextsplit`). Continuations are part of the
+                // item's text, so admission,
                 // consume, removal and every entry-level reorder move or drop the
                 // whole item; none can strand a continuation line as orphaned
                 // `Freeform` residue. The raw lines are kept verbatim after a
@@ -464,6 +475,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                         }),
                     };
                     entries.push((entry, span(start_i, end_i)));
+                    bare_prompt_allowed = true;
                     i = end_i;
                     continue;
                 }
@@ -475,6 +487,8 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 })
             };
             entries.push((entry, span(start_i, start_i + 1)));
+            bare_prompt_allowed =
+                agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(rest);
             i += 1;
             continue;
         }
@@ -486,6 +500,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     QueueEntry::Preset(preset.to_string()),
                     span(start_i, start_i + 1),
                 ));
+                bare_prompt_allowed = false;
                 i += 1;
                 continue;
             }
@@ -498,6 +513,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     QueueEntry::Dispatch(preset.to_string()),
                     span(start_i, start_i + 1),
                 ));
+                bare_prompt_allowed = false;
                 i += 1;
                 continue;
             }
@@ -506,12 +522,14 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         if is_start_fence(trimmed) {
             let datetime = parse_start_datetime(trimmed);
             entries.push((QueueEntry::StartFence(datetime), span(start_i, start_i + 1)));
+            bare_prompt_allowed = false;
             i += 1;
             continue;
         }
 
         if is_stop_fence(trimmed) {
             entries.push((QueueEntry::StopFence, span(start_i, start_i + 1)));
+            bare_prompt_allowed = false;
             i += 1;
             continue;
         }
@@ -541,12 +559,14 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     entries.push((entry, span(start_i, close_idx + 1)));
                 }
                 i = close_idx + 1;
+                bare_prompt_allowed = true;
                 continue;
             }
             entries.push((
                 QueueEntry::Freeform(line.to_string()),
                 span(start_i, start_i + 1),
             ));
+            bare_prompt_allowed = false;
             i += 1;
             continue;
         }
@@ -571,6 +591,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     ));
                 }
                 i = close_idx + 1;
+                bare_prompt_allowed = true;
                 continue;
             }
             // `#multilinequeuehead`: an unclosed `---` directly above a
@@ -587,8 +608,18 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     span(start_i, block.last_line + 1),
                 ));
                 i = block.last_line + 1;
+                bare_prompt_allowed = true;
                 continue;
             }
+            entries.push((
+                QueueEntry::Freeform(line.to_string()),
+                span(start_i, start_i + 1),
+            ));
+            i += 1;
+            continue;
+        }
+
+        if matches!(trimmed, "***" | "___") {
             entries.push((
                 QueueEntry::Freeform(line.to_string()),
                 span(start_i, start_i + 1),
@@ -617,8 +648,41 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     span(start_i, close_idx + 1),
                 ));
                 i = close_idx + 1;
+                bare_prompt_allowed = true;
                 continue;
             }
+        }
+
+        // `#queuefreetextsplit`: a column-zero prose paragraph is actionable
+        // queue work, not inert residue and not lazy continuation of the list
+        // item above. Represent it as the established multiline prompt surface
+        // so claim, exact-span consumption, and answered-head strike all share
+        // the same node model. Rewrites normalize the bare source to `---`
+        // prompt fences, just like recovered title-plus-evidence heads.
+        if (bare_prompt_allowed
+            || agent_doc_markdown_ast::overlay::queue_bare_prompt_block_has_quote(&lines, i))
+            && agent_doc_markdown_ast::overlay::queue_bare_prompt_start_line(line)
+        {
+            let mut end_i = i + 1;
+            while end_i < lines.len()
+                && agent_doc_markdown_ast::overlay::queue_bare_prompt_continuation_line(
+                    lines[end_i],
+                )
+            {
+                end_i += 1;
+            }
+            entries.push((
+                QueueEntry::Prompt(QueuePrompt {
+                    text: lines[i..end_i].join("\n"),
+                    multiline: true,
+                    indent: 0,
+                    ordered_marker: None,
+                }),
+                span(start_i, end_i),
+            ));
+            bare_prompt_allowed = false;
+            i = end_i;
+            continue;
         }
 
         // Unrecognized line: preserve verbatim instead of failing the parse so
@@ -629,6 +693,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             QueueEntry::Freeform(line.to_string()),
             span(start_i, start_i + 1),
         ));
+        bare_prompt_allowed = false;
         i += 1;
     }
 
@@ -7902,38 +7967,37 @@ mod tests {
 
     // ── #queuecruft: multi-line queue item boundaries ─────────────────────
 
-    /// A free-text item's lazy (unindented) continuation line is part of the
-    /// item, not separate `Freeform` residue, and round-trips byte for byte.
+    /// A column-zero paragraph after a list item starts a second queue head.
+    /// Its immediately following blockquote stays with that bare head.
     #[test]
-    fn lazy_continuation_line_belongs_to_its_free_text_item() {
+    fn column_zero_paragraph_after_list_item_is_a_distinct_head() {
         let body = concat!(
-            "- do [#runctrlclaude]\n",
-            "- Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n",
-            "the route-owned host supervisor (pid 1989646) is mapping a STALE binary.\n",
-            "- do [#explicitrunqueue]\n",
+            "- Does the queue split free text after a list item?\n",
+            "The terminal windows closed because a scope was left behind.\n",
+            "> diagnostic detail\n",
         );
         let spans = parse_spans(body).unwrap();
-        assert_eq!(spans.len(), 3, "{spans:?}");
+        assert_eq!(spans.len(), 2, "{spans:?}");
+        assert_eq!(
+            spans[0].0,
+            QueueEntry::Prompt(QueuePrompt::new(
+                "Does the queue split free text after a list item?"
+            ))
+        );
         let QueueEntry::Prompt(prompt) = &spans[1].0 else {
-            panic!("expected the wrapped item as one prompt: {spans:?}");
+            panic!("expected the bare paragraph as one prompt: {spans:?}");
         };
         assert_eq!(
             prompt.text,
-            "Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n\
-             the route-owned host supervisor (pid 1989646) is mapping a STALE binary."
+            "The terminal windows closed because a scope was left behind.\n\
+             > diagnostic detail"
         );
-        assert!(!prompt.multiline);
+        assert!(prompt.multiline);
         assert_eq!(
             &body[spans[1].1.clone()],
-            "- Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n\
-             the route-owned host supervisor (pid 1989646) is mapping a STALE binary.\n"
+            "The terminal windows closed because a scope was left behind.\n\
+             > diagnostic detail\n"
         );
-        assert!(
-            !spans
-                .iter()
-                .any(|(entry, _)| matches!(entry, QueueEntry::Freeform(_)))
-        );
-        assert_eq!(render(&parse(body).unwrap()), body);
     }
 
     /// Indented continuation (one or more lines, up to the next list marker or
@@ -7945,7 +8009,7 @@ mod tests {
             "  it fails only under nextest\n",
             "    and only on the second run\n",
             "\n",
-            "stray note after a blank line\n",
+            "separate work after a blank line\n",
             "- next item\n",
         );
         let entries = parse(body).unwrap();
@@ -7958,7 +8022,12 @@ mod tests {
         );
         assert_eq!(
             entries[1],
-            QueueEntry::Freeform("stray note after a blank line".to_string())
+            QueueEntry::Prompt(QueuePrompt {
+                text: "separate work after a blank line".to_string(),
+                multiline: true,
+                indent: 0,
+                ordered_marker: None,
+            })
         );
         assert_eq!(
             entries[2],
@@ -7985,12 +8054,12 @@ mod tests {
             ]
         );
 
-        let body = "- ~~wrapped item\nsecond line~~\n";
+        let body = "- ~~wrapped item\n  second line~~\n";
         let wrapped = parse(body).unwrap();
         assert_eq!(
             wrapped,
             vec![QueueEntry::Completed(QueuePrompt::new(
-                "wrapped item\nsecond line"
+                "wrapped item\n  second line"
             ))]
         );
         assert_eq!(render(&wrapped), body);
@@ -8004,7 +8073,7 @@ mod tests {
         let body = concat!(
             "- do [#bbb]\n",
             "- Wrapped free-text item\n",
-            "second line of the same item\n",
+            "  second line of the same item\n",
             "- do [#ccc]\n",
         );
         let entries = parse(body).unwrap();
@@ -8021,7 +8090,7 @@ mod tests {
             .unwrap_or_else(|| entries.clone());
             let rendered = render(&synced);
             assert!(
-                rendered.contains("- Wrapped free-text item\nsecond line of the same item\n"),
+                rendered.contains("- Wrapped free-text item\n  second line of the same item\n"),
                 "{mode:?} separated the continuation: {rendered}"
             );
             assert_eq!(
@@ -8038,7 +8107,7 @@ mod tests {
     fn continuation_item_spans_match_markdown_ast_item_nodes() {
         let body = concat!(
             "- first free text\n",
-            "lazy continuation\n",
+            "bare second head\n",
             "- second item\n",
             "  indented continuation\n",
             "- do [#aaa]\n",
@@ -8051,6 +8120,24 @@ mod tests {
         for (node, (_, range)) in nodes.iter().zip(spans.iter()) {
             assert_eq!(node.item.start_byte - body_start, range.start);
             assert_eq!(node.item.end_byte - body_start, range.end);
+        }
+    }
+
+    #[test]
+    fn thematic_separator_does_not_hide_the_following_bare_head() {
+        for separator in ["***", "___", "---"] {
+            let body =
+                format!("- first item\n{separator}\nsecond paragraph\n> detail\n- third item\n");
+            let prompts = prompt_texts(&body);
+            assert_eq!(
+                prompts,
+                vec![
+                    "first item".to_string(),
+                    "second paragraph\n> detail".to_string(),
+                    "third item".to_string(),
+                ],
+                "separator {separator}: {body}"
+            );
         }
     }
 

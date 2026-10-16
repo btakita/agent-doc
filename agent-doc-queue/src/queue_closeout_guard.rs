@@ -1041,6 +1041,33 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn claimed_list_head_does_not_absorb_or_lose_the_following_bare_head() {
+        let first = "Does the queue split free text after a list item?";
+        let second =
+            "The terminal windows closed because a scope was left behind.\n> diagnostic detail";
+        let before = format!("<!-- agent:queue -->\n- {first}\n{second}\n<!-- /agent:queue -->\n");
+        let recorded = crate::queue_heads::active_free_text_queue_heads(&before);
+        assert_eq!(recorded, vec![first.to_string(), second.to_string()]);
+
+        let response = format!(
+            "### Re: queue split\n\n> **Queue prompt:** {first}\n\nThe parser now keeps the next paragraph separate.\n"
+        );
+        let current = format!(
+            "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{second}\n<!-- /agent:queue -->\n"
+        );
+        let decision = free_text_queue_head_provenance_decision_with_claims(
+            &recorded,
+            &current,
+            Some(&response),
+            &[first.to_string()],
+        )
+        .unwrap();
+        assert_eq!(decision.response_proven_removed, vec![first.to_string()]);
+        assert!(decision.unresolved.is_empty(), "{decision:?}");
+        assert!(decision.completed_residue.is_empty(), "{decision:?}");
+    }
+
     /// `#qheadresiduescope`: a closeout that does not quote a re-typed repeated
     /// report never calls it completed residue, even though the committed
     /// exchange still holds the echo that answered its earlier copy. The

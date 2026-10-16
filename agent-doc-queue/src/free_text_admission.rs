@@ -1743,7 +1743,7 @@ mod tests {
     }
 
     /// `#queuecruft`: the live `agent-doc-bugs.md` shape. A free-text queue item
-    /// pasted across two lines (the second a lazy, unindented continuation) is
+    /// pasted across two lines (the second an indented continuation) is
     /// ONE item: the promoted backlog text carries both lines joined, and the
     /// queue replacement removes every line of it. Before the fix the second
     /// line stayed behind as orphaned `Freeform` residue, and the prepended
@@ -1754,7 +1754,7 @@ mod tests {
             "Run Agent Doc on frontend.md error: dispatch-only claude reopen refused to inject";
         let second = "the route-owned host supervisor (pid 1989646) serving this document is mapping a STALE agent-doc binary.";
         let content = format!(
-            "<!-- agent:queue -->\n- do [#runctrlclaude]\n- {first}\n{second}\n- do [#explicitrunqueue]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#runctrlclaude] Ctrl-C wedge\n- [ ] [#explicitrunqueue] Explicit run on claimed head\n<!-- /agent:backlog -->\n"
+            "<!-- agent:queue -->\n- do [#runctrlclaude]\n- {first}\n  {second}\n- do [#explicitrunqueue]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#runctrlclaude] Ctrl-C wedge\n- [ ] [#explicitrunqueue] Explicit run on claimed head\n<!-- /agent:backlog -->\n"
         );
         let entries = queue_entries_from_content(&content);
 

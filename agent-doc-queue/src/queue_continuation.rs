@@ -3050,7 +3050,7 @@ mod tests {
             "- do [#real]\n",
             "<!-- /agent:queue -->\n"
         );
-        assert_eq!(queue_stale_noise_lines(content), 2);
+        assert_eq!(queue_stale_noise_lines(content), 1);
     }
 
     #[test]

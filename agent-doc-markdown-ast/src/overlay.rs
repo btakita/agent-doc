@@ -208,13 +208,11 @@ pub(crate) fn strip_bullet(line: &str) -> Option<&str> {
 /// True when `line` may continue the queue list item directly above it
 /// (`#queuecruft`).
 ///
-/// Markdown folds a non-blank line that follows a list item, with or without
-/// indentation (a "lazy continuation"), into that item's paragraph. A pasted
-/// free-text queue item that wraps onto a second line is therefore ONE item.
-/// Before this predicate the queue parser kept only the bulleted first line and
-/// demoted the rest to inert `Freeform` residue, so promoting the item to the
-/// backlog removed the first line and left the continuation orphaned in the
-/// queue, where later reorders detached it from its parent entirely.
+/// Queue syntax deliberately requires indentation for list-item continuation.
+/// CommonMark's unindented "lazy continuation" is ambiguous in an operational
+/// queue: operators also use a column-zero paragraph to start the next
+/// free-text item. Treating that paragraph as continuation merged two jobs and
+/// made the second one impossible to claim (`#queuefreetextsplit`).
 ///
 /// The line-local rule here is the single source of truth shared by this
 /// overlay and `document_queue::parse_spans`. A line is NOT a continuation when
@@ -226,6 +224,40 @@ pub(crate) fn strip_bullet(line: &str) -> Option<&str> {
 /// Whether the item above accepts continuation is decided separately by
 /// [`queue_item_accepts_continuation`].
 pub fn queue_continuation_line(line: &str) -> bool {
+    if !line.starts_with([' ', '\t']) {
+        return false;
+    }
+    queue_prompt_content_line(line)
+}
+
+/// True when a column-zero line can start a bare free-text queue paragraph.
+/// The paragraph is represented by the same multiline item surface as legacy
+/// prompt fences, so node-keyed claim/strike/remove operations have one model.
+pub fn queue_bare_prompt_start_line(line: &str) -> bool {
+    !line.starts_with([' ', '\t'])
+        && !line.trim_start().starts_with('>')
+        && queue_prompt_content_line(line)
+}
+
+/// True when a line can continue a bare free-text queue paragraph. Unlike a
+/// list item, a bare paragraph may own subsequent prose and blockquote lines;
+/// blank lines, list markers, thematic breaks, and queue-native syntax stop it.
+pub fn queue_bare_prompt_continuation_line(line: &str) -> bool {
+    queue_prompt_content_line(line)
+}
+
+/// A standalone bare paragraph with an attached blockquote carries enough
+/// structure to remain a prompt after the item above it is consumed or reaped.
+pub fn queue_bare_prompt_block_has_quote(lines: &[&str], start: usize) -> bool {
+    queue_bare_prompt_start_line(lines.get(start).copied().unwrap_or_default())
+        && lines
+            .iter()
+            .skip(start + 1)
+            .take_while(|line| queue_bare_prompt_continuation_line(line))
+            .any(|line| line.trim_start().starts_with('>'))
+}
+
+fn queue_prompt_content_line(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return false;
@@ -246,6 +278,8 @@ pub fn queue_continuation_line(line: &str) -> bool {
         || trimmed.starts_with("```")
         || trimmed.starts_with("~~~")
         || trimmed.starts_with("---")
+        || trimmed == "***"
+        || trimmed == "___"
         || trimmed.starts_with("preset ")
         || trimmed.starts_with("dispatch ")
     {
@@ -392,9 +426,7 @@ pub fn queue_fenced_title_block(
     after_multiline_item: bool,
 ) -> Option<QueueFencedTitleBlock> {
     let is_title_line = |line: &str| {
-        !line.starts_with([' ', '\t'])
-            && queue_continuation_line(line)
-            && queue_code_fence_run(line.trim()).is_none()
+        queue_bare_prompt_start_line(line) && queue_code_fence_run(line.trim()).is_none()
     };
     if !is_title_line(lines.get(start)?) {
         return None;
@@ -427,7 +459,8 @@ pub fn queue_fenced_title_block(
     let is_boundary = |index: Option<usize>| match index {
         None => true,
         Some(j) => {
-            !queue_continuation_line(lines[j]) || queue_fenced_title_block(lines, j, true).is_some()
+            !queue_bare_prompt_continuation_line(lines[j])
+                || queue_fenced_title_block(lines, j, true).is_some()
         }
     };
     let after = next_nonblank(last + 1);
@@ -631,6 +664,9 @@ fn queue_multiline_items(
     let contents: Vec<&str> = lines.iter().map(|line| line.content).collect();
     let mut items = Vec::new();
     let mut index = 0usize;
+    // Bare prose is actionable only at an item boundary. Arbitrary pollution
+    // elsewhere in a queue remains inert and recoverable as before.
+    let mut bare_prompt_allowed = false;
     // Line index just past the last multi-line item, so a title block pasted
     // directly beneath it (blank lines only between) is introduced by it.
     let mut multiline_end: Option<usize> = None;
@@ -651,6 +687,19 @@ fn queue_multiline_items(
     while index < lines.len() {
         let line = lines[index];
         let trimmed = line.content.trim();
+        if let Some(item) = list_items
+            .iter()
+            .find(|item| item.start_byte <= line.start_byte && line.start_byte < item.end_byte)
+        {
+            if line.end_byte >= item.end_byte {
+                bare_prompt_allowed = !item.struck
+                    && item.kind == ItemKind::FreeText
+                    && !item.text.is_empty()
+                    && !item.text.starts_with("[#");
+            }
+            index += 1;
+            continue;
+        }
         // `#multilinequeuehead`: a bullet-less title line plus fenced block.
         // Lines a list item already owns (`#queuecruft` continuation) and
         // lines inside code are never a new head.
@@ -664,6 +713,7 @@ fn queue_multiline_items(
             items.push(title_block_item(index, index, block));
             index = block.last_line + 1;
             multiline_end = Some(index);
+            bare_prompt_allowed = true;
             continue;
         }
         let fence = match trimmed {
@@ -678,6 +728,44 @@ fn queue_multiline_items(
             _ => None,
         };
         let Some((closer, struck)) = fence else {
+            // `#queuefreetextsplit`: column-zero prose is a distinct queue
+            // head, not CommonMark lazy continuation of the list item above.
+            // Keep consecutive prose and an immediately following blockquote
+            // together as one paragraph-shaped head.
+            if (bare_prompt_allowed || queue_bare_prompt_block_has_quote(&contents, index))
+                && !in_code(code_ranges, line.start_byte)
+                && queue_bare_prompt_start_line(line.content)
+            {
+                let mut end = index + 1;
+                while end < lines.len()
+                    && !in_code(code_ranges, lines[end].start_byte)
+                    && queue_bare_prompt_continuation_line(lines[end].content)
+                {
+                    end += 1;
+                }
+                let text = contents[index..end].join("\n");
+                items.push(parse_multiline_item(
+                    source,
+                    line.start_byte,
+                    lines[end - 1].content_end_byte,
+                    lines[end - 1].end_byte,
+                    text,
+                    false,
+                ));
+                index = end;
+                multiline_end = Some(end);
+                bare_prompt_allowed = false;
+                continue;
+            }
+            if trimmed.is_empty() {
+                index += 1;
+                continue;
+            }
+            if matches!(trimmed, "***" | "___") {
+                index += 1;
+                continue;
+            }
+            bare_prompt_allowed = false;
             index += 1;
             continue;
         };
@@ -695,6 +783,7 @@ fn queue_multiline_items(
                 items.push(title_block_item(index, index + 1, block));
                 index = block.last_line + 1;
                 multiline_end = Some(index);
+                bare_prompt_allowed = true;
                 continue;
             }
             // Match document_queue's fail-closed treatment of unclosed fences:
@@ -717,6 +806,7 @@ fn queue_multiline_items(
                 struck,
             ));
             multiline_end = Some(close_index + 1);
+            bare_prompt_allowed = true;
         }
         index = close_index + 1;
     }
@@ -858,10 +948,9 @@ mod tests {
             .unwrap()
     }
 
-    /// `#queuecruft`: the live shape. A pasted free-text item wrapped onto an
-    /// unindented (lazy) second line, followed by an indented-continuation item.
-    /// Each is ONE node whose span covers every one of its lines, so a node-keyed
-    /// remove/strike/move can never leave a continuation line behind.
+    /// `#queuecruft` / `#queuefreetextsplit`: column-zero prose after a live
+    /// free-text list item is a second head, while indented prose remains part
+    /// of its list item.
     const CONTINUATION_DOC: &str = "\
 <!-- agent:queue -->
 - Run Agent Doc on frontend.md error: dispatch-only claude reopen refused
@@ -876,7 +965,7 @@ trailing residue
 ";
 
     #[test]
-    fn queue_item_spans_lazy_and_indented_continuation_lines() {
+    fn queue_item_spans_bare_heads_and_indented_continuation_lines() {
         let queue = components(CONTINUATION_DOC)
             .into_iter()
             .find(|c| c.name == "queue")
@@ -885,8 +974,8 @@ trailing residue
         assert_eq!(
             texts,
             vec![
-                "Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n\
-                 the route-owned host supervisor (pid 1989646) is mapping a STALE binary.",
+                "Run Agent Doc on frontend.md error: dispatch-only claude reopen refused",
+                "the route-owned host supervisor (pid 1989646) is mapping a STALE binary.",
                 "Indented item first line\n  indented second line",
                 "do [#alpha]",
                 "struck alone",
@@ -895,14 +984,13 @@ trailing residue
         let first = &queue.items[0];
         assert_eq!(
             &CONTINUATION_DOC[first.start_byte..first.end_byte],
-            "- Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n\
-             the route-owned host supervisor (pid 1989646) is mapping a STALE binary.\n"
+            "- Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n"
         );
         // The id directive's folded `do [#beta]` and the residue under a line
         // struck on its own are NOT continuation.
-        assert!(!queue.items[2].text.contains("beta"));
-        assert!(queue.items[3].struck);
-        assert!(!queue.items[3].text.contains("residue"));
+        assert!(!queue.items[3].text.contains("beta"));
+        assert!(queue.items[4].struck);
+        assert!(!queue.items[4].text.contains("residue"));
     }
 
     #[test]
@@ -931,11 +1019,10 @@ trailing residue
             assert!(!queue_continuation_line(line), "{line:?}");
         }
         for line in [
-            "the route-owned host supervisor (pid 1989646)",
             "  indented prose",
-            "/home/brian/work/x is a path, not a command",
-            "#fcc0 is a tag, not a heading",
-            "> quoted log",
+            "  /project/path is a path, not a command",
+            "  #tag is a tag, not a heading",
+            "  > quoted log",
         ] {
             assert!(queue_continuation_line(line), "{line:?}");
         }

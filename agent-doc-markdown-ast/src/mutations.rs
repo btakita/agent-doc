@@ -676,12 +676,12 @@ mod tests {
     }
 
     /// `#queuecruft`: node-keyed remove / strike / reorder treat a free-text item
-    /// and its lazy continuation line as one node.
+    /// and its indented continuation line as one node.
     const CONTINUATION_DOC: &str = "\
 <!-- agent:queue -->
 - do [#alpha]
 - Wrapped free-text item
-second line of the same item
+  second line of the same item
 - do [#beta]
 <!-- /agent:queue -->
 ";
@@ -700,7 +700,7 @@ second line of the same item
 
         let struck = consume_node(CONTINUATION_DOC, "queue", &wrapped.node_key).unwrap();
         assert!(
-            struck.contains("- ~~Wrapped free-text item\nsecond line of the same item~~\n"),
+            struck.contains("- ~~Wrapped free-text item\n  second line of the same item~~\n"),
             "{struck}"
         );
         let struck_nodes = item_nodes(&struck, "queue").unwrap();
@@ -712,7 +712,7 @@ second line of the same item
         let reordered = reorder_nodes(CONTINUATION_DOC, "queue", &order).unwrap();
         assert!(
             reordered.contains(
-                "- Wrapped free-text item\nsecond line of the same item\n- do [#beta]\n- do [#alpha]\n"
+                "- Wrapped free-text item\n  second line of the same item\n- do [#beta]\n- do [#alpha]\n"
             ),
             "{reordered}"
         );

@@ -4022,6 +4022,42 @@ Old.
     }
 
     #[test]
+    fn answered_bare_paragraph_strikes_only_its_own_multiline_node() {
+        let queue = concat!(
+            "- Does the queue split free text after a list item?\n",
+            "The terminal windows closed because a scope was left behind.\n",
+            "> diagnostic detail\n",
+        );
+        let response = concat!(
+            "### Re: terminal scope\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> The terminal windows closed because a scope was left behind.\n",
+            "> > diagnostic detail\n\n",
+            "The scope cleanup now runs at the ownership boundary.\n",
+        );
+        let content = doc_with_queue_and_exchange(queue, response);
+        let projection = project_answered_free_text_strike(&content, response, Some(&content))
+            .unwrap()
+            .expect("the exact bare paragraph echo should strike its node");
+        let heads = crate::queue_heads::active_free_text_queue_heads(&projection.target_content);
+        assert_eq!(
+            heads,
+            vec!["Does the queue split free text after a list item?".to_string()]
+        );
+        assert!(
+            projection.target_content.contains(concat!(
+                "~~~done\n",
+                "The terminal windows closed because a scope was left behind.\n",
+                "> diagnostic detail\n",
+                "~~~\n",
+            )),
+            "{}",
+            projection.target_content
+        );
+    }
+
+    #[test]
     fn multilinequeuehead_annotation_never_touches_a_done_fence() {
         let fence = "~~~done\nalpha.md issue\n```\nlog\n```\n~~~\n";
         assert_eq!(annotate_struck_free_text_line(fence), fence);

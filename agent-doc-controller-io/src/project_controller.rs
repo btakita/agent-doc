@@ -978,6 +978,33 @@ fn invocation_columns_contain_document(
         .any(|candidate| candidate == document)
 }
 
+/// A focus the focus effect applied, stamped with the desired generation that
+/// was current when it applied (GH #278 Ask 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PaneLayoutFocusOutcome {
+    pub(crate) document: String,
+    pub(crate) generation: u64,
+}
+
+/// GH #278 Ask 3: the latest focus over `current`. A focus outcome recorded
+/// while `current` (or a later generation) was the desired layout is newer
+/// than `current.invocation.focus`, which was fixed at publication; one
+/// recorded under an older generation is superseded by `current`'s own focus.
+/// An outcome whose document is not in `current`'s columns has no column to
+/// name, so `current`'s focus stands.
+pub(crate) fn latest_layout_focus(
+    current: &PaneLayoutDesired,
+    outcome: Option<&PaneLayoutFocusOutcome>,
+) -> Option<String> {
+    outcome
+        .filter(|outcome| outcome.generation >= current.generation)
+        .filter(|outcome| {
+            invocation_columns_contain_document(&current.invocation, &outcome.document)
+        })
+        .map(|outcome| outcome.document.clone())
+        .or_else(|| current.invocation.focus.clone())
+}
+
 /// Rebase a focus escalation that was derived from an older desired generation.
 ///
 /// Escalations carry a semantic intent (make `focus` visible), not authority to
@@ -988,6 +1015,7 @@ fn rebase_stale_focus_escalation(
     mut invocation: ControllerTmuxLayoutSyncInvocation,
     claim: PaneLayoutClaim,
     current: Option<&PaneLayoutDesired>,
+    focus_outcome: Option<&PaneLayoutFocusOutcome>,
 ) -> ControllerTmuxLayoutSyncInvocation {
     if claim.publisher != PaneLayoutPublisher::Escalation {
         return invocation;
@@ -1006,9 +1034,9 @@ fn rebase_stale_focus_escalation(
         return invocation;
     }
     if !invocation_columns_contain_document(&current.invocation, &document) {
-        let replace_index = current
-            .invocation
-            .focus
+        // GH #278 Ask 3: the latest applied focus, not only the published one.
+        let latest_focus = latest_layout_focus(current, focus_outcome);
+        let replace_index = latest_focus
             .as_deref()
             .and_then(|focused| {
                 columns.iter().position(|column| {
@@ -1512,6 +1540,11 @@ struct ControllerPaneLayoutGraph {
     /// GH #136 follow-up (a)/(d): the last pass's observed width and gated
     /// documents, retained across generations.
     width_memory: Mutex<PaneLayoutWidthMemory>,
+    /// GH #278 Ask 3: the latest editor focus this lane's focus effect
+    /// applied, `focus_only` ones included. A `focus_only` outcome publishes
+    /// no desired generation, so the retained layout's `focus` goes stale the
+    /// moment the operator moves focus without changing the layout.
+    focus_outcome: Mutex<Option<PaneLayoutFocusOutcome>>,
     /// `#stalecontrollerhotupdate` (b)/(d): per-generation attempt count,
     /// retirement, and window-claim stamp. Held by the graph, not the worker
     /// thread, so a restarted worker cannot re-apply a retired generation or
@@ -1768,6 +1801,7 @@ impl ControllerPaneLayoutGraph {
             plane_seen: AtomicU64::new(0),
             published_generation: Arc::new(AtomicU64::new(0)),
             width_memory: Mutex::new(PaneLayoutWidthMemory::default()),
+            focus_outcome: Mutex::new(None),
             attempt_ledger: Mutex::new(Default::default()),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
@@ -1863,7 +1897,13 @@ impl ControllerPaneLayoutGraph {
         }
         let mut publication_state = self.publication_state.lock();
         let current = self.ctx.get(&self.desired);
-        invocation = rebase_stale_focus_escalation(invocation, claim, current.as_ref());
+        let focus_outcome = self.focus_outcome.lock().clone();
+        invocation = rebase_stale_focus_escalation(
+            invocation,
+            claim,
+            current.as_ref(),
+            focus_outcome.as_ref(),
+        );
         if let Some(version) = source_plane_version {
             // A deferred or refused frame still counts as seen; wake a route
             // awaiting plane catch-up even when no generation is minted. The
@@ -2221,6 +2261,27 @@ impl ControllerPaneLayoutGraph {
 
     fn width_memory(&self) -> PaneLayoutWidthMemory {
         self.width_memory.lock().clone()
+    }
+
+    /// GH #278 Ask 3: record a focus the focus effect applied. Stamped with
+    /// the desired generation current at the time, so a later publication
+    /// (which carries its own `focus`) supersedes it.
+    pub(crate) fn record_focus_outcome(&self, document: &str) {
+        let generation = self
+            .desired()
+            .map(|desired| desired.generation)
+            .unwrap_or(0);
+        *self.focus_outcome.lock() = Some(PaneLayoutFocusOutcome {
+            document: document.to_string(),
+            generation,
+        });
+    }
+
+    /// GH #278 Ask 3: the document a focus escalation must replace the
+    /// column of: the latest applied focus when it is newer than `current`'s
+    /// publication and still in its columns, else `current`'s own focus.
+    pub(crate) fn latest_focus(&self, current: &PaneLayoutDesired) -> Option<String> {
+        latest_layout_focus(current, self.focus_outcome.lock().as_ref())
     }
 
     /// `#stalecontrollerhotupdate` (b): admit the next projection attempt for
@@ -24602,6 +24663,90 @@ mod retained_persistence_retry_tests {
             retained_persistence_retry_step(&mut retries, "doc", 3, CONTENT, false, true),
             None,
             "a newer pending epoch has its own claim edge"
+        );
+    }
+}
+
+#[cfg(test)]
+mod gh278_latest_focus_tests {
+    use super::*;
+
+    fn invocation(columns: &[&str], focus: Option<&str>) -> ControllerTmuxLayoutSyncInvocation {
+        ControllerTmuxLayoutSyncInvocation {
+            columns: columns.iter().map(|column| column.to_string()).collect(),
+            window: None,
+            focus: focus.map(str::to_string),
+            no_autostart: true,
+            exact_visible: false,
+            caller_kind: "automatic".to_string(),
+            column_order: agent_doc_tmux::LayoutColumnOrder::Retained,
+            actor_bindings: Vec::new(),
+            client_id: None,
+        }
+    }
+
+    fn desired(generation: u64, columns: &[&str], focus: &str) -> PaneLayoutDesired {
+        PaneLayoutDesired {
+            generation,
+            source_plane_version: None,
+            invocation: invocation(columns, Some(focus)),
+            provenance: PaneLayoutProvenance::default(),
+        }
+    }
+
+    fn outcome(document: &str, generation: u64) -> PaneLayoutFocusOutcome {
+        PaneLayoutFocusOutcome {
+            document: document.to_string(),
+            generation,
+        }
+    }
+
+    #[test]
+    fn the_latest_focus_is_a_newer_outcome_in_the_columns_else_the_published_focus() {
+        let current = desired(7, &["c.md", "b.md"], "c.md");
+        assert_eq!(latest_layout_focus(&current, None).as_deref(), Some("c.md"));
+        assert_eq!(
+            latest_layout_focus(&current, Some(&outcome("b.md", 7))).as_deref(),
+            Some("b.md")
+        );
+        // Recorded under an older generation: the publication superseded it.
+        assert_eq!(
+            latest_layout_focus(&current, Some(&outcome("b.md", 6))).as_deref(),
+            Some("c.md")
+        );
+        // Not in the columns: it names no column.
+        assert_eq!(
+            latest_layout_focus(&current, Some(&outcome("z.md", 7))).as_deref(),
+            Some("c.md")
+        );
+    }
+
+    /// GH #278 Ask 3, the #224 rebase path: a stale escalation for an
+    /// uncovered `d` rebased onto `[c | b]` (published focus `c`, then `b`
+    /// focused in place) replaces `b`'s column, not `c`'s.
+    #[test]
+    fn a_stale_escalation_rebases_into_the_latest_focus_column() {
+        let current = desired(9, &["c.md", "b.md"], "c.md");
+        let claim = PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).derived_from(Some(8));
+        let rebased = rebase_stale_focus_escalation(
+            invocation(&["d.md", "b.md"], Some("d.md")),
+            claim,
+            Some(&current),
+            Some(&outcome("b.md", 9)),
+        );
+        assert_eq!(
+            rebased.columns,
+            vec!["c.md".to_string(), "d.md".to_string()]
+        );
+        let without_outcome = rebase_stale_focus_escalation(
+            invocation(&["d.md", "b.md"], Some("d.md")),
+            claim,
+            Some(&current),
+            None,
+        );
+        assert_eq!(
+            without_outcome.columns,
+            vec!["d.md".to_string(), "b.md".to_string()]
         );
     }
 }

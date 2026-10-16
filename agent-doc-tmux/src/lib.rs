@@ -4,6 +4,8 @@
 //! projection policy. It does not execute `tmux` commands, dispatch turns,
 //! merge document text, or commit document changes.
 
+pub mod pane_order;
+
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -921,80 +923,141 @@ pub struct OrderedLayoutColumns {
     pub reordered: bool,
 }
 
-/// Resolve the left-to-right order of a desired pane layout (GH #112).
+/// Resolve the left-to-right order of a desired pane layout (GH #112,
+/// `#tmuxpanesreversed`).
 ///
 /// Pure: no IO, no graph access, so it can be the body of a `Computed` over
 /// per-publisher layout Sources unchanged. Membership is always the incoming
-/// publication's; this only decides ORDER.
+/// publication's; this only decides ORDER, and the result is always a
+/// permutation of `incoming`.
 ///
-/// - `Editor` and already-resolved `Retained` orders pass through untouched.
-/// - An `Unknown` order is sorted by the earliest position any of its documents
-///   holds in `retained`. Columns with no retained document
-///   keep their relative incoming order and are appended after the retained
-///   ones, so a newly visible document joins at the end instead of jumping to
-///   the front. Focus never participates: it is a focus effect, not a
-///   structural input.
-/// - With no document in common with `retained` there is no order to keep, and
-///   the incoming order is used as-is, still labelled `Unknown`.
+/// `retained` is the order authority whenever the publisher has no geometry:
+/// it is the layout tmux already shows. With `rank(column)` the earliest
+/// position any of the column's documents holds in `retained` ("survivors"
+/// have a rank, "new" columns do not):
 ///
-/// Documents are compared by trimmed identity; callers pass canonical ids.
-/// Idempotent: resolving an already-resolved vector against the same
-/// `retained` returns it unchanged.
+/// - `Editor` (a positive split-geometry observation) passes through.
+/// - With no survivor there is no order to keep: the incoming order is used
+///   as-is, still labelled `Unknown`.
+/// - `Unknown` (membership without order: a Remote Dev publisher, or the
+///   focus-first `selectedFiles` fallback) is a **slot fold** against
+///   `retained`. Survivors keep the retained relative order; walking the
+///   retained columns left to right, a column whose documents all left is a
+///   vacated slot, and the next new column (in incoming order) takes it. New
+///   columns left over after every vacated slot is filled are appended. So a
+///   one-in/one-out replacement keeps the replaced column's position: the
+///   new document never lands on the far side of a survivor (the GH #185
+///   class, here at the controller).
+/// - `Retained` (an upstream fold already placed new documents in slots) is
+///   trusted for WHERE new columns go, but never for the survivors' relative
+///   order: the positions holding survivors are refilled with the survivors in
+///   retained order (a slot-preserving permutation). Upstream folds anchored
+///   to this layout never invert two of its documents, so an inversion is
+///   divergence (an unanchored or stale upstream memory), never geometry.
+///
+/// Focus never participates. Documents are compared by trimmed identity;
+/// callers pass canonical ids. Idempotent: resolving a resolved vector against
+/// the same `retained` returns it unchanged.
 pub fn order_layout_columns(
     retained: &[String],
     incoming: &[String],
     incoming_order: LayoutColumnOrder,
 ) -> OrderedLayoutColumns {
-    if incoming_order != LayoutColumnOrder::Unknown {
+    if incoming_order == LayoutColumnOrder::Editor {
         return OrderedLayoutColumns {
             columns: incoming.to_vec(),
             order: incoming_order,
             reordered: false,
         };
     }
-    let retained_documents: Vec<&str> = retained
-        .iter()
-        .flat_map(|column| column.split(','))
-        .map(str::trim)
-        .filter(|document| !document.is_empty())
-        .collect();
-    let retained_rank = |column: &str| {
+    let documents = |column: &str| -> Vec<String> {
         column
             .split(',')
             .map(str::trim)
             .filter(|document| !document.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let retained_columns: Vec<Vec<String>> =
+        retained.iter().map(|column| documents(column)).collect();
+    let retained_documents: Vec<&String> = retained_columns.iter().flatten().collect();
+    let rank = |column: &str| {
+        documents(column)
+            .iter()
             .filter_map(|document| {
                 retained_documents
                     .iter()
-                    .position(|retained| *retained == document)
+                    .position(|known| *known == document)
             })
             .min()
     };
-    let ranked: Vec<(Option<usize>, usize, &String)> = incoming
-        .iter()
-        .enumerate()
-        .map(|(index, column)| (retained_rank(column), index, column))
-        .collect();
-    if ranked.iter().all(|(rank, _, _)| rank.is_none()) {
+    let ranks: Vec<Option<usize>> = incoming.iter().map(|column| rank(column)).collect();
+    if ranks.iter().all(Option::is_none) {
         return OrderedLayoutColumns {
             columns: incoming.to_vec(),
-            order: LayoutColumnOrder::Unknown,
+            order: incoming_order,
             reordered: false,
         };
     }
-    let mut sorted = ranked;
-    // `None` sorts after every `Some`, and the incoming index breaks ties, so
-    // new columns append in the order they arrived.
-    sorted.sort_by_key(|(rank, index, _)| (rank.is_none(), rank.unwrap_or(0), *index));
-    let reordered = sorted
+    let mut survivors: Vec<(usize, &String)> = incoming
         .iter()
-        .enumerate()
-        .any(|(position, (_, index, _))| position != *index);
+        .zip(&ranks)
+        .filter_map(|(column, rank)| rank.map(|rank| (rank, column)))
+        .collect();
+    survivors.sort_by_key(|(rank, _)| *rank);
+    let columns: Vec<String> = match incoming_order {
+        LayoutColumnOrder::Retained => {
+            let mut refill = survivors.iter().map(|(_, column)| (*column).clone());
+            incoming
+                .iter()
+                .zip(&ranks)
+                .map(|(column, rank)| match rank {
+                    Some(_) => refill.next().unwrap_or_else(|| column.clone()),
+                    None => column.clone(),
+                })
+                .collect()
+        }
+        _ => {
+            // The retained column each survivor's earliest document lives in.
+            let home = |rank: usize| {
+                let mut seen = 0;
+                retained_columns
+                    .iter()
+                    .position(|column| {
+                        seen += column.len();
+                        rank < seen
+                    })
+                    .unwrap_or(retained_columns.len())
+            };
+            let mut new_columns = incoming
+                .iter()
+                .zip(&ranks)
+                .filter(|(_, rank)| rank.is_none())
+                .map(|(column, _)| column.clone());
+            let mut out = Vec::with_capacity(incoming.len());
+            let mut pending = survivors.iter().peekable();
+            for slot in 0..retained_columns.len() {
+                let mut occupied = false;
+                while let Some((rank, column)) = pending.peek() {
+                    if home(*rank) != slot {
+                        break;
+                    }
+                    out.push((*column).clone());
+                    occupied = true;
+                    pending.next();
+                }
+                if !occupied && let Some(column) = new_columns.next() {
+                    out.push(column);
+                }
+            }
+            out.extend(pending.map(|(_, column)| (*column).clone()));
+            out.extend(new_columns);
+            out
+        }
+    };
+    let reordered = columns != incoming;
     OrderedLayoutColumns {
-        columns: sorted
-            .into_iter()
-            .map(|(_, _, column)| column.clone())
-            .collect(),
+        columns,
         order: LayoutColumnOrder::Retained,
         reordered,
     }
@@ -2764,20 +2827,138 @@ distinct, identical ones still dedupe"
         assert!(!ordered.reordered);
     }
 
+    /// An upstream `Retained` fold decides where NEW documents go; it is
+    /// never trusted to invert two documents the retained layout already
+    /// orders (`#tmuxpanesreversed`: a Remote Dev fold that lost its memory
+    /// on a native reload re-learned the visible list's tab-open order and
+    /// published it as `retained`).
     #[test]
-    fn an_upstream_retained_order_passes_through_without_second_guessing_its_slots() {
+    fn an_upstream_retained_order_keeps_its_new_slots_but_never_inverts_survivors() {
         let retained = cols(&["a.md", "b.md"]);
         let once = order_layout_columns(
             &retained,
             &cols(&["b.md", "a.md"]),
             LayoutColumnOrder::Retained,
         );
+        assert_eq!(once.columns, cols(&["a.md", "b.md"]));
+        assert!(once.reordered);
         let twice = order_layout_columns(&retained, &once.columns, once.order);
-        assert_eq!(once.columns, cols(&["b.md", "a.md"]));
-        assert_eq!(once.order, LayoutColumnOrder::Retained);
-        assert!(!once.reordered);
         assert_eq!(twice.columns, once.columns);
         assert!(!twice.reordered);
+        // A new document keeps the slot the upstream fold gave it.
+        let placed = order_layout_columns(
+            &cols(&["a.md", "b.md"]),
+            &cols(&["c.md", "b.md"]),
+            LayoutColumnOrder::Retained,
+        );
+        assert_eq!(placed.columns, cols(&["c.md", "b.md"]));
+        assert!(!placed.reordered);
+    }
+
+    /// `#tmuxpanesreversed`: an unordered one-in/one-out replacement takes the
+    /// replaced document's slot. Appending put `c` on the far side of `b`:
+    /// `[a | b]` with the left split switched to `c` became `[b | c]`.
+    #[test]
+    fn unknown_order_gives_a_replacement_the_vacated_slot() {
+        let ordered = order_layout_columns(
+            &cols(&["a.md", "b.md"]),
+            &cols(&["b.md", "c.md"]),
+            LayoutColumnOrder::Unknown,
+        );
+        assert_eq!(ordered.columns, cols(&["c.md", "b.md"]));
+        assert_eq!(ordered.order, LayoutColumnOrder::Retained);
+        let ordered = order_layout_columns(
+            &cols(&["a.md", "b.md", "c.md"]),
+            &cols(&["d.md", "a.md", "c.md"]),
+            LayoutColumnOrder::Unknown,
+        );
+        assert_eq!(ordered.columns, cols(&["a.md", "d.md", "c.md"]));
+    }
+
+    /// Every ordered subset (up to four of five documents) as the retained
+    /// layout, against every ordered subset as the incoming publication.
+    fn ordered_subsets(max: usize) -> Vec<Vec<String>> {
+        fn grow(prefix: &mut Vec<String>, max: usize, out: &mut Vec<Vec<String>>) {
+            out.push(prefix.clone());
+            if prefix.len() == max {
+                return;
+            }
+            for document in ["a.md", "b.md", "c.md", "d.md", "e.md"] {
+                if !prefix.iter().any(|known| known == document) {
+                    prefix.push(document.to_string());
+                    grow(prefix, max, out);
+                    prefix.pop();
+                }
+            }
+        }
+        let mut out = Vec::new();
+        grow(&mut Vec::new(), max, &mut out);
+        out
+    }
+
+    /// `#tmuxpanesreversed`: the controller-side order invariants, checked
+    /// exhaustively for both upstream labels without geometry.
+    #[test]
+    fn order_resolution_never_inverts_the_retained_layout() {
+        let layouts = ordered_subsets(4);
+        let mut checked = 0usize;
+        for retained in &layouts {
+            for incoming in layouts.iter().filter(|layout| !layout.is_empty()) {
+                for label in [LayoutColumnOrder::Unknown, LayoutColumnOrder::Retained] {
+                    let ordered = order_layout_columns(retained, incoming, label);
+                    // 1. A permutation of the incoming membership.
+                    let mut sorted_in = incoming.clone();
+                    let mut sorted_out = ordered.columns.clone();
+                    sorted_in.sort();
+                    sorted_out.sort();
+                    assert_eq!(sorted_in, sorted_out, "{retained:?} {incoming:?} {label}");
+                    // 2. Survivors in retained relative order.
+                    let survivors: Vec<&String> = ordered
+                        .columns
+                        .iter()
+                        .filter(|column| retained.contains(column))
+                        .collect();
+                    let expected: Vec<&String> = retained
+                        .iter()
+                        .filter(|column| incoming.contains(column))
+                        .collect();
+                    assert_eq!(survivors, expected, "{retained:?} {incoming:?} {label}");
+                    // 3. An unordered one-in/one-out replacement at the same
+                    //    width takes the vacated slot.
+                    let added: Vec<&String> = incoming
+                        .iter()
+                        .filter(|column| !retained.contains(column))
+                        .collect();
+                    let dropped: Vec<usize> = retained
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, column)| !incoming.contains(column))
+                        .map(|(index, _)| index)
+                        .collect();
+                    if label == LayoutColumnOrder::Unknown
+                        && retained.len() == incoming.len()
+                        && added.len() == 1
+                        && dropped.len() == 1
+                    {
+                        assert_eq!(&ordered.columns[dropped[0]], added[0]);
+                    }
+                    // 4. An upstream fold's new-column slots are kept.
+                    if label == LayoutColumnOrder::Retained {
+                        for (index, column) in incoming.iter().enumerate() {
+                            if !retained.contains(column) {
+                                assert_eq!(&ordered.columns[index], column);
+                            }
+                        }
+                    }
+                    // 5. Idempotent.
+                    let again = order_layout_columns(retained, &ordered.columns, ordered.order);
+                    assert_eq!(again.columns, ordered.columns);
+                    assert!(!again.reordered);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 80_000, "coverage collapsed: {checked}");
     }
 
     #[test]

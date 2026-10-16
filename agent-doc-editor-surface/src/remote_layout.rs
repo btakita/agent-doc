@@ -155,17 +155,51 @@ pub struct RemoteLayoutMemory {
     /// base instead of treating the guess as authoritative geometry (GH #250).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provisional_base_columns: Option<Vec<SurfaceColumn>>,
+    /// The visible set of the immediately preceding selection-only
+    /// observation while a guess is outstanding. The SAME set observed again
+    /// at once has persisted, so it is a real split (GH #253), not a lagging
+    /// tracker; any other visible set is judged against the confirmed layout
+    /// (`#tmuxpanesreversed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provisional_visible: Option<Vec<String>>,
+    /// The left-to-right order of `columns` was never anchored to the order
+    /// authority (`#tmuxpanesreversed`). A cold fold (empty memory after a
+    /// native reload, an IDE restart, or a first start) takes the visible
+    /// list's TAB-OPEN order, which is not geometry. Every later fold keeps
+    /// survivors in that order, so its output inherits the same lack of
+    /// authority: while this is set, every resolution is labelled
+    /// [`RemoteLayoutColumnOrder::Unknown`] (the controller then orders it
+    /// against the layout tmux already shows) instead of upgrading a guessed
+    /// order to `Retained`. [`RemoteLayoutMemory::anchor`] clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unanchored: bool,
 }
 
 impl RemoteLayoutMemory {
     /// Fold one observation, returning the next memory and the resolution.
     pub fn advance(&self, evidence: &RemoteLayoutEvidence) -> (Self, RemoteLayoutResolution) {
         let active = active_document(evidence);
-        let resolution = self.resolve(evidence, active.as_deref());
+        let mut resolution = self.resolve(evidence, active.as_deref());
+        // Order provenance never upgrades (`#tmuxpanesreversed`): a fold over
+        // an unanchored memory, or a cold fold with no survivor, has only
+        // tab-open order to offer.
+        let unanchored = if resolution.columns.is_empty() {
+            self.unanchored
+        } else {
+            self.unanchored
+                || (resolution.column_order == RemoteLayoutColumnOrder::Unknown
+                    && resolution.columns.len() >= 2)
+        };
+        if unanchored && !resolution.columns.is_empty() {
+            resolution.column_order = RemoteLayoutColumnOrder::Unknown;
+        }
         let provisional_base_columns = match (resolution.source, resolution.reason.as_deref()) {
             (
                 RemoteLayoutSource::RetainedRemoteColumns,
-                Some("selected_visible_change_replaced_focus_column"),
+                Some(
+                    "selected_visible_change_replaced_focus_column"
+                    | "tab_switch_replaced_focus_column",
+                ),
             ) => self
                 .provisional_base_columns
                 .clone()
@@ -177,12 +211,97 @@ impl RemoteLayoutMemory {
             ) => None,
             _ => self.provisional_base_columns.clone(),
         };
+        // Only the IMMEDIATELY preceding selection-only observation counts:
+        // GH #253's "the same evidence again" is consecutive persistence.
+        let provisional_visible = match resolution.reason.as_deref() {
+            _ if provisional_base_columns.is_none() => None,
+            Some(
+                "selected_visible_change_replaced_focus_column"
+                | "selected_visible_change_width_held",
+            ) => single_split_candidate(evidence),
+            _ => None,
+        };
         let next = Self {
             columns: resolution.columns.clone(),
             focused: active.or_else(|| self.focused.clone()),
             provisional_base_columns,
+            provisional_visible,
+            unanchored,
         };
         (next, resolution)
+    }
+
+    /// Anchor this memory's order to the order authority (`#tmuxpanesreversed`).
+    ///
+    /// `authority` is the layout the Project Controller retains and tmux
+    /// shows, as column file lists in this memory's path space. Remote Dev
+    /// has no geometry, so that layout is the only order authority; the fold
+    /// keeps membership and its slot logic, but must never hold the shared
+    /// documents in a different relative order than the authority.
+    ///
+    /// - Empty memory: seeded with the authority's columns, so the next
+    ///   observation is a slot fold against what tmux shows instead of a
+    ///   cold tab-open order.
+    /// - Otherwise: the slots that hold authority documents are refilled
+    ///   with those documents in authority order (a slot-preserving
+    ///   permutation; other slots and the membership are unchanged), for the
+    ///   current columns and the provisional base alike.
+    ///
+    /// The result is anchored (`unanchored == false`) when every memory
+    /// document appears in the authority or the memory was seeded. An empty
+    /// authority changes nothing. Pure and idempotent.
+    pub fn anchor(&self, authority: &[SurfaceColumn]) -> Self {
+        let authority_files = distinct(authority.iter().flat_map(|column| column.files.iter()));
+        if authority_files.is_empty() {
+            return self.clone();
+        }
+        if self.columns.is_empty() {
+            return Self {
+                columns: authority
+                    .iter()
+                    .filter(|column| !column.files.is_empty())
+                    .cloned()
+                    .collect(),
+                focused: self.focused.clone(),
+                provisional_base_columns: None,
+                provisional_visible: None,
+                unanchored: false,
+            };
+        }
+        let permute = |columns: &[SurfaceColumn]| -> Vec<SurfaceColumn> {
+            let rank = |column: &SurfaceColumn| {
+                column
+                    .files
+                    .iter()
+                    .filter_map(|file| authority_files.iter().position(|known| known == file))
+                    .min()
+            };
+            let mut anchored: Vec<&SurfaceColumn> = columns
+                .iter()
+                .filter(|column| rank(column).is_some())
+                .collect();
+            anchored.sort_by_key(|column| rank(column));
+            let mut refill = anchored.into_iter();
+            columns
+                .iter()
+                .map(|column| match rank(column) {
+                    Some(_) => refill.next().cloned().unwrap_or_else(|| column.clone()),
+                    None => column.clone(),
+                })
+                .collect()
+        };
+        let covered = self
+            .columns
+            .iter()
+            .flat_map(|column| column.files.iter())
+            .all(|file| authority_files.contains(file));
+        Self {
+            columns: permute(&self.columns),
+            focused: self.focused.clone(),
+            provisional_base_columns: self.provisional_base_columns.as_deref().map(permute),
+            provisional_visible: self.provisional_visible.clone(),
+            unanchored: self.unanchored && !covered,
+        }
     }
 
     fn resolve(
@@ -303,10 +422,7 @@ impl RemoteLayoutMemory {
         // provisional width-preserving guess, not geometry authority. When the
         // structural visible set catches up, recover the slots from before that
         // guess (GH #250).
-        let previous_columns = self
-            .provisional_base_columns
-            .as_ref()
-            .unwrap_or(&self.columns);
+        let previous_columns = self.confirmed_columns();
         let previous = distinct(
             previous_columns
                 .iter()
@@ -367,7 +483,13 @@ impl RemoteLayoutMemory {
     /// change but not a new split. Route it through rule 2 so the focused
     /// column is replaced and width is held.
     fn selection_only_change(&self, files: &[String], evidence: &RemoteLayoutEvidence) -> bool {
-        if self.columns.is_empty() {
+        // `#tmuxpanesreversed`: judge against the last CONFIRMED layout, never
+        // a provisional guess. A guess is a conclusion, not a premise: judging
+        // a lagging observation against it let a stale hidden editor (GH #175)
+        // read as a real extra split, consume the pre-guess base, and leave
+        // the corrected document on the wrong side.
+        let confirmed = self.confirmed_columns();
+        if confirmed.is_empty() {
             return false;
         }
         let selected = distinct(
@@ -384,14 +506,49 @@ impl RemoteLayoutMemory {
         if !files.contains(selected) {
             return true;
         }
-        if files.len() <= self.columns.len() {
+        // GH #253: the visible set that produced the outstanding guess has now
+        // been observed again. Evidence that persists is a real split.
+        if self
+            .provisional_visible
+            .as_ref()
+            .is_some_and(|seen| same_set(seen, files))
+        {
+            return false;
+        }
+        if files.len() <= confirmed.len() {
             return false;
         }
         let added: Vec<&String> = files
             .iter()
-            .filter(|file| !covers(&self.columns, file))
+            .filter(|file| !covers(confirmed, file))
             .collect();
         added.as_slice() == [selected]
+    }
+
+    /// The last layout a structural visible-set observation confirmed: the
+    /// pre-guess base while a provisional guess is outstanding, else the
+    /// current columns. Every inference folds against this, never a guess.
+    fn confirmed_columns(&self) -> &[SurfaceColumn] {
+        self.provisional_base_columns
+            .as_deref()
+            .unwrap_or(&self.columns)
+    }
+}
+
+/// The one distinct client split-evidence set, if exactly one client offers
+/// split evidence (the rule 1 candidate).
+fn single_split_candidate(evidence: &RemoteLayoutEvidence) -> Option<Vec<String>> {
+    let mut candidates: Vec<Vec<String>> = Vec::new();
+    for client in &evidence.clients {
+        if let Some((files, _)) = client.split_evidence()
+            && !candidates.iter().any(|seen| same_set(seen, &files))
+        {
+            candidates.push(files);
+        }
+    }
+    match <[Vec<String>; 1]>::try_from(candidates) {
+        Ok([only]) => Some(only),
+        Err(_) => None,
     }
 }
 
@@ -489,6 +646,39 @@ mod tests {
     const B: &str = "tasks/agent-doc/agent-doc.ad.md";
     const C: &str = "tasks/c.md";
 
+    /// GH #278 Ask 2: a no-survivor guess stays `Unknown`. From empty memory,
+    /// folding `visible={x, y}` twice must not turn the tab-open order into
+    /// `Retained` on the second (identical) fold: the memory carries the label.
+    #[test]
+    fn gh278_an_identical_refold_of_a_no_survivor_guess_stays_unknown() {
+        let observed = evidence(vec![client(&[B, C], &[C], &[A, B, C])], &[C]);
+        let (memory, first) = RemoteLayoutMemory::default().advance(&observed);
+        assert_eq!(first.column_order, RemoteLayoutColumnOrder::Unknown);
+        let (memory, second) = memory.advance(&observed);
+        assert_eq!(second.column_order, RemoteLayoutColumnOrder::Unknown);
+        assert_eq!(columns(&second), columns(&first));
+        // GH #278's own shape: a one-column memory holding neither visible
+        // document (`[<doc-d>]`), then the claim's two identical folds.
+        let held = RemoteLayoutMemory {
+            columns: vec![SurfaceColumn::new(["tasks/d.md"])],
+            focused: Some("tasks/d.md".to_string()),
+            ..RemoteLayoutMemory::default()
+        };
+        let (held, first) = held.advance(&observed);
+        assert_eq!(first.column_order, RemoteLayoutColumnOrder::Unknown);
+        let (_, second) = held.advance(&observed);
+        assert_eq!(second.column_order, RemoteLayoutColumnOrder::Unknown);
+        // Anchored to the controller's retained layout, it is an order again.
+        let (anchored, _) = memory
+            .anchor(&[SurfaceColumn::new([C]), SurfaceColumn::new([B])])
+            .advance(&observed);
+        assert!(!anchored.unanchored);
+        assert_eq!(
+            anchored.columns,
+            vec![SurfaceColumn::new([C]), SurfaceColumn::new([B])]
+        );
+    }
+
     /// GH #134: the live Remote Dev shape — one client, one selected file, no
     /// local windows — with the frontend's two visible splits reported by the
     /// editor tracker yields two columns, not `unknown`.
@@ -517,6 +707,8 @@ mod tests {
             columns: vec![SurfaceColumn::new([C]), SurfaceColumn::new([B])],
             focused: Some(C.to_string()),
             provisional_base_columns: None,
+            provisional_visible: None,
+            unanchored: false,
         };
         let (_, resolution) = memory.advance(&evidence(vec![client(&[A, B], &[A], &[A, B])], &[A]));
 
@@ -629,6 +821,8 @@ mod tests {
             columns: vec![SurfaceColumn::new([A])],
             focused: Some(A.to_string()),
             provisional_base_columns: None,
+            provisional_visible: None,
+            unanchored: false,
         };
         let (_, resolution) = memory.advance(&evidence(vec![client(&[A, B], &[B], &[A, B])], &[B]));
         assert_eq!(resolution.source, RemoteLayoutSource::RetainedRemoteColumns);
@@ -648,6 +842,8 @@ mod tests {
             columns: vec![SurfaceColumn::new([A])],
             focused: Some(A.to_string()),
             provisional_base_columns: None,
+            provisional_visible: None,
+            unanchored: false,
         };
 
         let (memory, provisional) =
@@ -803,6 +999,8 @@ mod tests {
                     .collect(),
                 focused: None,
                 provisional_base_columns: None,
+                provisional_visible: None,
+                unanchored: false,
             };
             let (columns, order) = memory.ordered_columns(visible);
             (

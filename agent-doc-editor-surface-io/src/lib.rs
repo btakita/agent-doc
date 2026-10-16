@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
-#[cfg(test)]
 use agent_doc_editor_surface::SurfaceColumn;
 use agent_doc_editor_surface::{
     CurrentDocumentAuthority, DocumentAuthority, EditorSurface, EditorSurfaceObservation,
@@ -276,11 +275,117 @@ pub fn resolve_remote_layout(
     project_root: &Path,
     evidence: &RemoteLayoutEvidence,
 ) -> RemoteLayoutResolution {
+    resolve_remote_layout_with_authority(project_root, evidence, remote_layout_authority)
+}
+
+/// `#tmuxpanesreversed`: Remote Dev reports no split geometry, so the layout
+/// the Project Controller retains (what tmux shows) is the only order
+/// authority. A memory that is cold (dropped by a native reload, an IDE
+/// restart, or never filled) or unanchored would otherwise adopt the visible
+/// list's tab-open order and later publish it as `retained`; anchor it to the
+/// authority first. At most one controller read per root per
+/// [`REMOTE_LAYOUT_ANCHOR_RETRY`], outside the memory lock.
+fn resolve_remote_layout_with_authority(
+    project_root: &Path,
+    evidence: &RemoteLayoutEvidence,
+    authority: impl FnOnce(&Path) -> Option<Vec<SurfaceColumn>>,
+) -> RemoteLayoutResolution {
+    let needs_anchor = remote_layout_memory()
+        .get(project_root)
+        .is_none_or(|memory| memory.columns.is_empty() || memory.unanchored);
+    let authority = (needs_anchor && remote_layout_anchor_attempt_due(project_root))
+        .then(|| authority(project_root))
+        .flatten();
     let mut memories = remote_layout_memory();
     let memory = memories.entry(project_root.to_path_buf()).or_default();
+    if let Some(authority) = authority {
+        let anchored = memory.anchor(&authority);
+        if anchored != *memory {
+            eprintln!(
+                "[editor-surface] remote_layout_anchored root={} authority={:?} before={:?} after={:?} (#tmuxpanesreversed)",
+                project_root.display(),
+                column_files(&authority),
+                column_files(&memory.columns),
+                column_files(&anchored.columns),
+            );
+        }
+        *memory = anchored;
+    }
     let (next, resolution) = memory.advance(evidence);
     *memory = next;
     resolution
+}
+
+/// Minimum spacing between two authority reads for one project root.
+const REMOTE_LAYOUT_ANCHOR_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+static REMOTE_LAYOUT_ANCHOR_ATTEMPTS: LazyLock<Mutex<HashMap<PathBuf, std::time::Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn remote_layout_anchor_attempt_due(project_root: &Path) -> bool {
+    let mut attempts = REMOTE_LAYOUT_ANCHOR_ATTEMPTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let now = std::time::Instant::now();
+    match attempts.get(project_root) {
+        Some(last) if now.duration_since(*last) < REMOTE_LAYOUT_ANCHOR_RETRY => false,
+        _ => {
+            attempts.insert(project_root.to_path_buf(), now);
+            true
+        }
+    }
+}
+
+/// The controller's retained layout, in the fold's project-relative path
+/// space. `None` when no controller answers or it retains nothing here.
+fn remote_layout_authority(project_root: &Path) -> Option<Vec<SurfaceColumn>> {
+    let columns =
+        agent_doc_controller_io::project_controller::pane_layout_retained_columns_existing(
+            project_root,
+        )
+        .ok()?;
+    let authority = authority_columns_in_root(project_root, &columns);
+    (!authority.is_empty()).then_some(authority)
+}
+
+/// Map the controller's columns (comma-joined canonical document paths) into
+/// the plugin's path space: paths relative to the IDE project root. Documents
+/// outside the root are dropped: this editor can never report them visible,
+/// so they can neither anchor nor be anchored.
+fn authority_columns_in_root(project_root: &Path, columns: &[String]) -> Vec<SurfaceColumn> {
+    let canonical_root = project_root.canonicalize().ok();
+    let relative = |file: &str| -> Option<String> {
+        let path = Path::new(file);
+        if path.is_relative() {
+            return Some(file.to_string());
+        }
+        [Some(project_root), canonical_root.as_deref()]
+            .into_iter()
+            .flatten()
+            .find_map(|root| path.strip_prefix(root).ok())
+            .map(|rest| rest.to_string_lossy().into_owned())
+            .filter(|rest| !rest.is_empty())
+    };
+    columns
+        .iter()
+        .map(|column| {
+            SurfaceColumn::new(
+                column
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|file| !file.is_empty())
+                    .filter_map(relative),
+            )
+        })
+        .filter(|column| !column.files.is_empty())
+        .collect()
+}
+
+fn column_files(columns: &[SurfaceColumn]) -> Vec<String> {
+    columns
+        .iter()
+        .map(|column| column.files.join(","))
+        .collect()
 }
 
 pub fn resolve_remote_layout_from_json(
@@ -464,6 +569,76 @@ mod tests {
         assert_eq!(corrected.columns[0].files, ["a.md"]);
         assert_eq!(corrected.columns[1].files, ["c.md"]);
         remote_layout_memory().remove(root);
+    }
+
+    /// `#tmuxpanesreversed`: a native reload drops the fold memory. The next
+    /// observation lists the visible documents in tab-open order — here the
+    /// reverse of the editor's `[a | b]` split — and the memory used to adopt
+    /// it, so the following tab switch in the LEFT split (a -> c) published
+    /// `[b | c]` labelled `retained`, which the controller applies verbatim:
+    /// reversed panes. Anchoring the cold memory to the controller's retained
+    /// layout first keeps `[c | b]`.
+    #[test]
+    fn a_reloaded_fold_anchors_to_the_retained_layout_before_folding() {
+        let root = Path::new("/tmp/tmuxpanesreversed-reload-root");
+        remote_layout_memory().remove(root);
+        let authority = || {
+            Some(vec![
+                SurfaceColumn::new(["a.md"]),
+                SurfaceColumn::new(["b.md"]),
+            ])
+        };
+        let reversed_tab_order = r#"{"clients":[{"visible":["b.md","a.md"],"selected":["a.md"],"open":["b.md","a.md","c.md"]}],"focused":["a.md"]}"#;
+        let left_split_switch = r#"{"clients":[{"visible":["c.md","b.md"],"selected":["c.md"],"open":["b.md","a.md","c.md"]}],"focused":["c.md"]}"#;
+        let parse = |json: &str| serde_json::from_str::<RemoteLayoutEvidence>(json).unwrap();
+
+        let first =
+            resolve_remote_layout_with_authority(root, &parse(reversed_tab_order), |_| authority());
+        assert_eq!(column_files(&first.columns), ["a.md", "b.md"]);
+        assert_eq!(
+            first.column_order,
+            agent_doc_editor_surface::remote_layout::RemoteLayoutColumnOrder::Retained
+        );
+        let switched =
+            resolve_remote_layout_with_authority(root, &parse(left_split_switch), |_| None);
+        assert_eq!(column_files(&switched.columns), ["c.md", "b.md"]);
+        remote_layout_memory().remove(root);
+    }
+
+    /// Without an authority (no controller yet), a cold fold keeps the
+    /// tab-open order but never labels it `retained`, so the controller orders
+    /// it against the layout tmux shows.
+    #[test]
+    fn an_unanchored_fold_never_claims_retained_order() {
+        let root = Path::new("/tmp/tmuxpanesreversed-unanchored-root");
+        remote_layout_memory().remove(root);
+        let parse = |json: &str| serde_json::from_str::<RemoteLayoutEvidence>(json).unwrap();
+        let cold = parse(
+            r#"{"clients":[{"visible":["b.md","a.md"],"selected":["a.md"],"open":["a.md","b.md","c.md"]}],"focused":["a.md"]}"#,
+        );
+        let switched = parse(
+            r#"{"clients":[{"visible":["c.md","b.md"],"selected":["c.md"],"open":["a.md","b.md","c.md"]}],"focused":["c.md"]}"#,
+        );
+        use agent_doc_editor_surface::remote_layout::RemoteLayoutColumnOrder;
+        let first = resolve_remote_layout_with_authority(root, &cold, |_| None);
+        assert_eq!(first.column_order, RemoteLayoutColumnOrder::Unknown);
+        let second = resolve_remote_layout_with_authority(root, &switched, |_| None);
+        assert_eq!(second.column_order, RemoteLayoutColumnOrder::Unknown);
+        remote_layout_memory().remove(root);
+    }
+
+    #[test]
+    fn authority_columns_map_into_the_project_relative_path_space() {
+        let root = Path::new("/work/project");
+        let columns = vec![
+            "/work/project/tasks/a.md,/work/project/tasks/b.md".to_string(),
+            "/elsewhere/c.md".to_string(),
+            "tasks/d.md".to_string(),
+        ];
+        assert_eq!(
+            column_files(&authority_columns_in_root(root, &columns)),
+            ["tasks/a.md,tasks/b.md", "tasks/d.md"]
+        );
     }
 
     fn mirrored(surface: &EditorSurface) -> TmuxLayout {

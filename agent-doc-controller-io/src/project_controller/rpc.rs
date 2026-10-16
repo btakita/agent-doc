@@ -3353,6 +3353,22 @@ fn tmux_focus_state_with_caller(
     )
 }
 
+/// The shared lane's retained desired layout columns, in order
+/// (`#tmuxpanesreversed`).
+///
+/// This is the left-to-right order tmux shows (or is converging on), and on a
+/// JetBrains Remote Dev backend, which reports no split geometry, it is the
+/// only order authority. The Remote Dev layout fold reads it to anchor a cold
+/// or unanchored memory instead of adopting the visible list's tab-open order.
+/// Existing-controller only and read-only: no autostart, no SQLite, no tmux.
+pub fn pane_layout_retained_columns_existing(project_root: &Path) -> Result<Vec<String>> {
+    request_existing_controller_with_timeout(
+        project_root,
+        empty_controller_request("pane_layout_retained_columns"),
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
 /// Read the controller's process-scoped projection of durable editor-view
 /// bindings. Callers that can mutate tmux must carry this snapshot into their
 /// effect rather than independently re-reading policy state mid-operation.
@@ -20259,6 +20275,10 @@ pub(crate) fn handle_request_locked(
             request.caller.as_deref(),
         )),
         "main_layout_eligibility" => controller_envelope(Ok(runtime.main_layout_eligibility())),
+        "pane_layout_retained_columns" => controller_envelope(Ok(runtime
+            .pane_layout_desired()
+            .map(|desired| desired.invocation.columns)
+            .unwrap_or_default())),
         "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -26627,8 +26647,14 @@ fn focus_escalation_columns(
             .map(|desired| desired.generation)
             .unwrap_or(0),
     );
+    // GH #278 Ask 3: the column to replace is the LATEST focus, including a
+    // `focus_only` outcome that published no generation, not the focus the
+    // retained layout was published with.
     let (mut retained, mut retained_focus) = retained_desired
-        .map(|desired| (desired.invocation.columns, desired.invocation.focus))
+        .map(|desired| {
+            let focus = runtime.pane_layout_graph().latest_focus(&desired);
+            (desired.invocation.columns, focus)
+        })
         .unwrap_or_default();
     retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &retained);
     retained_focus = retained_focus.filter(|focused| {
@@ -27550,6 +27576,16 @@ fn handle_editor_surface_observe(
                                 && focus_refusal_requires_structural_layout(&outcome.reason)
                         })
                         .map(|outcome| outcome.reason.clone());
+                    // GH #278 Ask 3: an applied focus is the latest focus the
+                    // lane's escalations replace, even though it publishes
+                    // no desired generation.
+                    if let Ok(outcome) = focus_result.as_ref()
+                        && outcome.focused
+                    {
+                        runtime
+                            .pane_layout_graph_for_lane(&navigation_lane)
+                            .record_focus_outcome(&document);
+                    }
                     // `#netadv3` F14/F15: an effect that ERRORED was lost, not
                     // refused; keep the intent for the next observation.
                     let mut effect_failed = focus_result.is_err();
@@ -39063,6 +39099,44 @@ mod tests {
         assert_eq!(desired.invocation.focus.as_deref(), Some(infra.as_str()));
     }
 
+    /// GH #278 Ask 1 at the controller: retained `[a | b]`; an unordered
+    /// publication `{b, c}` (the left split switched from `a` to `c`) gives `c`
+    /// the slot `a` vacated: `[c | b]`, never `[b | c]`. A `retained` label
+    /// may place `c` but never inverts the survivor order either.
+    #[test]
+    fn gh278_unknown_order_publication_fills_the_vacated_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let c = session_document(&dir, "c.md");
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&a, &b], &a),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        let (desired, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&b, &c], &c),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(desired.invocation.columns, vec![c.clone(), b.clone()]);
+        assert_eq!(
+            desired.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Retained
+        );
+    }
+
     /// GH #112: a positive editor split order (local multi-window geometry, or
     /// a publisher that predates `column_order`) is still authoritative and
     /// replaces the retained order.
@@ -39229,6 +39303,73 @@ mod tests {
         assert!(
             !ops_log.contains("controller_editor_surface_focus_escalation_skipped"),
             "no uncovered document may be silently skipped (GH #126): {ops_log}"
+        );
+    }
+
+    /// GH #278 Ask 3: an escalation replaces the column of the LATEST focus.
+    /// Published `[c | b]` with focus `c`; `b` then gets focus as `focus_only`
+    /// (no generation published); an uncovered `d` must replace `b`, giving
+    /// `[c | d]`, not `c`'s column (`[d | b]`, the reversal of GH #278).
+    #[test]
+    fn gh278_focus_escalation_replaces_the_latest_focus_only_column() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let path = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let (c, b, d) = (path("c.md"), path("b.md"), path("d.md"));
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &c,
+            &[
+                SurfaceColumn {
+                    files: vec![c.clone()],
+                },
+                SurfaceColumn {
+                    files: vec![b.clone()],
+                },
+            ],
+            "actor_pane_not_visible",
+        );
+        let published = runtime.pane_layout_desired().unwrap();
+        assert_eq!(published.invocation.columns, vec![c.clone(), b.clone()]);
+        assert_eq!(published.invocation.focus.as_deref(), Some(c.as_str()));
+
+        // `b` is focused in place: a focus outcome, no new generation.
+        runtime.pane_layout_graph().record_focus_outcome(&b);
+        assert_eq!(
+            runtime.pane_layout_desired().unwrap().generation,
+            published.generation
+        );
+
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &d,
+            &[],
+            "actor_pane_not_visible",
+        );
+        let desired = runtime.pane_layout_desired().unwrap();
+        assert_eq!(desired.invocation.columns, vec![c.clone(), d.clone()]);
+        assert_eq!(desired.invocation.focus.as_deref(), Some(d.as_str()));
+
+        // The escalation's own publication carries focus `d`, so an outcome
+        // recorded under the older generation no longer names the column.
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &b,
+            &[],
+            "actor_pane_not_visible",
+        );
+        assert_eq!(
+            runtime.pane_layout_desired().unwrap().invocation.columns,
+            vec![c.clone(), b.clone()]
         );
     }
 

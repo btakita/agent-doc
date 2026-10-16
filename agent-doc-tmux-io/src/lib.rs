@@ -7,6 +7,7 @@ pub mod client_visibility;
 pub mod editor_view;
 pub mod isolated_test_server;
 pub mod observation_cache;
+pub mod pane_order;
 
 pub use client_visibility::{
     AmbientSession, AmbientSessionResolution, AttachedTmuxClient, PANE_NOT_VISIBLE_MARKER,

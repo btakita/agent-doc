@@ -2224,6 +2224,54 @@ fn sync_log(msg: &str) {
     crate::append_sync_log(msg);
 }
 
+/// `#tmuxpanesreversed`: the post-operation check of the pane-order
+/// invariant (SPEC: after every layout operation the wanted panes, left to
+/// right by `pane_left`, are the wanted column order). Re-reads geometry,
+/// repairs a complete-but-misordered window with `swap-pane`, and writes one
+/// `tmux_pane_order` line per layout pass to ops.log with the host's tmux
+/// version, base indices, wanted order, and positions before and after. A
+/// violation that survives the repair is logged as an error, never silently
+/// accepted.
+fn enforce_synced_pane_order(
+    tmux: &Tmux,
+    project_root: &Path,
+    col_args: &[String],
+    result: &tmux_router::SyncResult,
+    requested_window: Option<&str>,
+    before: Option<agent_doc_tmux::pane_order::PaneOrderSnapshot>,
+) {
+    use agent_doc_tmux_io::pane_order::PaneOrderOutcome;
+    let wanted = agent_doc_tmux::pane_order::wanted_pane_order(col_args, &result.file_panes);
+    // A `before` read of a different window than the one tmux-router chose
+    // describes nothing about this pass.
+    let before = before.filter(|_| requested_window == Some(result.target_window.as_str()));
+    let pass = agent_doc_tmux_io::pane_order::enforce_pane_order(
+        tmux,
+        &result.target_window,
+        &wanted,
+        before,
+    );
+    let line = pass.log_line();
+    sync_log(&line);
+    let _ = agent_doc_ops_log_io::append_ops_log_at_project(
+        project_root,
+        &line,
+        agent_doc_ops_log_io::OpsLogTracking::default(),
+    );
+    match pass.outcome {
+        PaneOrderOutcome::Violated => {
+            eprintln!(
+                "[sync] ERROR: tmux pane order still violates the wanted column order after repair: {line}"
+            );
+            tracing::error!(line = %line, "tmux pane order invariant violated");
+        }
+        PaneOrderOutcome::Repaired => {
+            eprintln!("[sync] repaired tmux pane order: {line}");
+        }
+        _ => {}
+    }
+}
+
 /// Check the per-server-per-session destructive-repair throttle in the project
 /// state transaction. No filesystem stamp participates in the sync hot path.
 fn throttle_destructive_repair(project_root: &Path, tmux: &Tmux, session_name: &str) -> bool {
@@ -5550,6 +5598,10 @@ fn run_with_options_internal_at_root(
 
     // Open-cycle panes are logged during DETACH, but they are not kept visible.
     // Stashing preserves the process and avoids recurring 3-pane projections.
+    // `#tmuxpanesreversed`: pane geometry before the layout operation, read
+    // past the observation cache, for the post-operation order check's log.
+    let pane_order_before =
+        window.and_then(|window| agent_doc_tmux_io::pane_order::observe_pane_order(tmux, window));
     let router_start = Instant::now();
     let result = tmux_router::sync_with_options(
         col_args,
@@ -5559,7 +5611,21 @@ fn run_with_options_internal_at_root(
         tmux_router_registry_path,
         &resolve_file,
         &tmux_router_options,
-    )?;
+    );
+    // tmux-router mutates tmux through its own command builder, which the
+    // pass-wide observation cache cannot see: without this, every cached
+    // read below (the GH #109 "after" snapshot among them) would replay the
+    // layout from BEFORE the router ran.
+    agent_doc_tmux_io::observation_cache::observe_external_mutation();
+    let result = result?;
+    enforce_synced_pane_order(
+        tmux,
+        &sync_project_root,
+        col_args,
+        &result,
+        window,
+        pane_order_before,
+    );
     LAST_SYNC_RUN_REPORT.with(|report| {
         report.borrow_mut().file_panes = result.file_panes.clone();
     });

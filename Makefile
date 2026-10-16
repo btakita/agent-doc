@@ -1,5 +1,18 @@
 .PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test jetbrains-repository-self-test build-priority-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
 
+# `#tmuxscopesteward`: tmux built with systemd support (e.g. Arch/CachyOS tmux
+# 3.8) asks the systemd user manager for one transient `tmux-spawn-<uuid>.scope`
+# per pane over the session D-Bus. Test runs create and kill thousands of
+# throwaway panes; under load a pane exits before systemd attaches it and the
+# FAILED unit stays loaded until `reset-failed` (3,911 loaded scopes preceded an
+# X11 session crash on 2026-10-16). tmux has no per-server opt-out, but it skips
+# the scope when the user bus is unreachable, so every test target gives its
+# processes (and every tmux server a test spawns) an unreachable bus. Install
+# and release targets keep the real bus. `systemctl --user` is unaffected: it
+# reaches the manager over `$XDG_RUNTIME_DIR/systemd/private`.
+TEST_SESSION_BUS_ADDRESS := unix:path=/nonexistent/agent-doc-test-no-session-bus
+check test tmux-ci sim-medium sim-net cross-editor-simworld: export DBUS_SESSION_BUS_ADDRESS = $(TEST_SESSION_BUS_ADDRESS)
+
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # Build priority (`#keepidesnappy`): agent-doc's own builds and tests run below

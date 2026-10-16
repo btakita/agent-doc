@@ -141,6 +141,7 @@ members = [
     "agent-doc-tmux",
     "agent-doc-tmux-commands",
     "agent-doc-tmux-io",
+    "agent-doc-tmux-scope-io",
     "agent-doc-markdown-ast",
     "agent-doc-markdown-lossless",
     "agent-doc-merge",
@@ -289,6 +290,7 @@ agent-doc-template = { path = "agent-doc-template", version = "0.35.512" }
 agent-doc-template-io = { path = "agent-doc-template-io", version = "0.35.512" }
 agent-doc-tmux-commands = { path = "agent-doc-tmux-commands", version = "0.35.512" }
 agent-doc-tmux-io = { path = "agent-doc-tmux-io", version = "0.35.512" }
+agent-doc-tmux-scope-io = { path = "agent-doc-tmux-scope-io", version = "0.35.512" }
 agent-doc-turn = { path = "agent-doc-turn", version = "0.35.512" }
 agent-doc-turn-executor = { path = "agent-doc-turn-executor", version = "0.35.512" }
 agent-doc-turn-executor-tmux = { path = "agent-doc-turn-executor-tmux", version = "0.35.512" }

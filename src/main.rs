@@ -3727,6 +3727,20 @@ enum AdminAction {
         #[arg(long)]
         json: bool,
     },
+    /// Steward the systemd `tmux-spawn-*.scope` units tmux creates per pane
+    /// (`#tmuxscopesteward`): reset failed scopes, stop orphaned scopes that
+    /// hold only agent-doc test-fixture leaks, and report every other orphaned
+    /// scope without touching it. The project controller runs the same sweep
+    /// automatically (rate-limited host-wide); this runs it now.
+    #[command(name = "tmux-scopes")]
+    TmuxScopes {
+        /// Report what the sweep would do without resetting or stopping anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
     /// Kill the `start --route-owned` supervisor for a document: request a graceful
     /// idle-gated self-kill, then force-kill the verified pid after a grace window
     /// if it stays alive (`#supkill`). Refuses to kill the caller's own ancestor —
@@ -6852,6 +6866,31 @@ fn try_main() -> anyhow::Result<()> {
                                 session_actor_cmd::RestartMode::Continue,
                                 force,
                             )?;
+                        }
+                    }
+                    Ok(())
+                }
+                AdminAction::TmuxScopes { dry_run, json } => {
+                    let report = agent_doc_tmux_scope_io::sweep(dry_run);
+                    if let Ok(cwd) = std::env::current_dir()
+                        && let Some(root) = agent_doc_project_root_io::project_root_containing(&cwd)
+                    {
+                        for line in report.log_lines("admin") {
+                            agent_doc_ops_log_io::log_op(&root, &line);
+                        }
+                    }
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    } else {
+                        for line in report.log_lines("admin") {
+                            println!("[admin] {line}");
+                        }
+                        let omitted = (report.stopped.len() + report.reported.len())
+                            .saturating_sub(agent_doc_tmux_scope_io::MAX_DETAIL_LOG_LINES);
+                        if omitted > 0 {
+                            println!(
+                                "[admin] ... {omitted} more scope(s); use --json for the full list"
+                            );
                         }
                     }
                     Ok(())

@@ -17690,6 +17690,11 @@ pub(crate) fn serve_with_options(
     // live" diagnostic per document+dead pid so a stashed corpse is reported once.
     let mut supervisor_watchdog_binding_skip_notified: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    // `#tmuxscopesteward`: the host-wide tmux-spawn scope sweep. Checked once a
+    // minute on the idle tick; the real cadence is a host-wide stamp shared by
+    // every controller, so N projects still sweep once per interval.
+    let mut tmux_scope_sweep_last_check: Option<Instant> = None;
+    let tmux_scope_sweep_in_flight = Arc::new(AtomicBool::new(false));
     let mut last_client_activity = Instant::now();
     // `#supthrash` L2/L4: throttle for the idle-root evidence probe, and the
     // variant that bounds self-handoff retries.
@@ -18145,6 +18150,19 @@ pub(crate) fn serve_with_options(
                         controller_orphan_drain_tick(runtime);
                     },
                 );
+                // `#tmuxscopesteward`: same `#drainingpredecessor` gate — the
+                // promoted successor owns the host-wide sweep.
+                let tmux_scope_now = Instant::now();
+                if tmux_scope_sweep_check_due(
+                    project_root,
+                    tmux_scope_sweep_last_check,
+                    tmux_scope_now,
+                ) && agent_doc_controller::recycle::controller_background_work_allowed(
+                    runtime.successor_promoted(),
+                ) {
+                    tmux_scope_sweep_last_check = Some(tmux_scope_now);
+                    spawn_tmux_scope_sweep(project_root, &tmux_scope_sweep_in_flight);
+                }
                 wait_for_pending_controller_client(&listener, CONNECT_POLL);
             }
             Err(err) => return Err(err).context("failed to accept project controller client"),
@@ -18837,6 +18855,56 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                 );
             }
         }
+    }
+}
+
+/// How often the idle tick asks whether the host-wide tmux scope sweep is due.
+const TMUX_SCOPE_SWEEP_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+
+/// `#tmuxscopesteward`: should this idle tick consult the host-wide sweep stamp?
+///
+/// A detached temporary (test-fixture) controller never sweeps: the host's
+/// systemd user manager is not a test fixture's to steward. Every other
+/// controller checks once per [`TMUX_SCOPE_SWEEP_CHECK_INTERVAL`].
+fn tmux_scope_sweep_check_due(
+    project_root: &Path,
+    last_check: Option<Instant>,
+    now: Instant,
+) -> bool {
+    !detached_temp_project_root(project_root)
+        && last_check.is_none_or(|last| now.duration_since(last) >= TMUX_SCOPE_SWEEP_CHECK_INTERVAL)
+}
+
+/// `#tmuxscopesteward`: run the rate-limited tmux-spawn scope sweep off the
+/// accept loop.
+///
+/// The sweep observes the systemd user manager, which has no producer edge into
+/// this controller's Lazily graph (a D-Bus subscription to every transient unit
+/// would cost more than the leak), so this is a throttled idle-tick boundary
+/// like the supervisor watchdog: one bounded worker at a time, the cadence
+/// owned by `agent_doc_tmux_scope_io::run_scheduled_sweep`'s host-wide stamp,
+/// and every sweep logged to this project's `ops.log`.
+fn spawn_tmux_scope_sweep(project_root: &Path, in_flight: &Arc<AtomicBool>) {
+    if in_flight.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let root = project_root.to_path_buf();
+    let worker_in_flight = Arc::clone(in_flight);
+    let spawned = std::thread::Builder::new()
+        .name("controller-tmux-scope-sweep".to_string())
+        .spawn(move || {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                agent_doc_tmux_scope_io::run_scheduled_sweep(&mut |line| {
+                    agent_doc_ops_log_io::log_op(&root, line);
+                });
+            }));
+            if outcome.is_err() {
+                agent_doc_ops_log_io::log_op(&root, "tmux_scope_sweep status=panicked");
+            }
+            worker_in_flight.store(false, Ordering::SeqCst);
+        });
+    if spawned.is_err() {
+        in_flight.store(false, Ordering::SeqCst);
     }
 }
 
@@ -38179,6 +38247,31 @@ mod tests {
         assert!(!detached_temp_project_root_under(
             Path::new("/.tmpXYZ/project"),
             Path::new("/"),
+        ));
+    }
+
+    /// `#tmuxscopesteward`: a real project's controller consults the host-wide
+    /// sweep once per check interval; a detached test-fixture controller never
+    /// sweeps the operator's systemd user manager.
+    #[test]
+    fn tmux_scope_sweep_check_runs_for_real_roots_on_the_check_interval_only() {
+        let now = Instant::now();
+        let real = Path::new("/home/user/work/project");
+        assert!(tmux_scope_sweep_check_due(real, None, now));
+        assert!(!tmux_scope_sweep_check_due(
+            real,
+            Some(now),
+            now + TMUX_SCOPE_SWEEP_CHECK_INTERVAL - Duration::from_millis(1),
+        ));
+        assert!(tmux_scope_sweep_check_due(
+            real,
+            Some(now),
+            now + TMUX_SCOPE_SWEEP_CHECK_INTERVAL,
+        ));
+        assert!(!tmux_scope_sweep_check_due(
+            Path::new("/tmp/.tmpABC123/project"),
+            None,
+            now,
         ));
     }
 

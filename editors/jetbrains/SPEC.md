@@ -64,6 +64,13 @@ only when its quiesce actually disposed the replica managers; a checkpoint that
 missed its deadline returns before disposing anything, so the live replicas are
 left attached rather than force-refreshed.
 
+Each checkpoint is queued behind the document's already-accepted work and resolves
+the current attached forwarder when that serialized task runs. If projection
+recovery replaced the snapshotted forwarder with a successfully reattached one in
+front of the checkpoint, the replacement supplies the resume state (GH #281); stale
+object identity alone must not make a fail-closed reload permanent or require a
+later, unrelated IPC write to retry it.
+
 Before native reload reattaches any CRDT replica, JetBrains republishes each
 open session document's reliable-liveness registration with the current plugin
 classloader endpoint identity. Existing local presence tags are retained; if

@@ -131,6 +131,38 @@ class NativeReloadCoordinatorTest {
     }
 
     /**
+     * GH #281: projection recovery can replace an attached forwarder after the
+     * reload snapshots the map but before its serialized checkpoint task runs.
+     * The replacement is the live authority and must be checkpointed instead of
+     * turning a safe reload into a permanent fail-closed state.
+     */
+    @Test
+    fun `native checkpoint follows a live forwarder replacement`() {
+        val manager = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            ).first { Files.exists(it) },
+        )
+        val capture = manager
+            .substringAfter("private fun captureNativeReloadResumeStates(")
+            .substringBefore("companion object")
+
+        assertTrue(
+            "the serialized checkpoint must resolve the current authoritative forwarder",
+            capture.contains("val currentForwarder = forwarders[filePath]"),
+        )
+        assertTrue(
+            "a replacement that is live when the task runs must provide the resume state",
+            capture.contains("currentForwarder?.captureResumeState()"),
+        )
+        assertFalse(
+            "stale snapshot identity must not permanently reject a safe reload",
+            capture.contains("forwarders[filePath] !== forwarder"),
+        )
+    }
+
+    /**
      * GH #276, as measured 2026-10-15: four of 30 awaited attaches outlived the 750 ms
      * wait (`not_attached ... retry=scheduled`) and each attached 0.03-3.2 s later,
      * before the report was logged. The report taken at that moment must count them.

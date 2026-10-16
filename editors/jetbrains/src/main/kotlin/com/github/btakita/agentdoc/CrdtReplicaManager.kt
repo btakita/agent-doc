@@ -4856,11 +4856,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 .filter { (_, forwarder) -> forwarder.attached }
                 .associate { (filePath, forwarder) ->
                     filePath to documentWorkers.forDocument(filePath).submit<ReplicaResumeState?> {
-                        if (forwarders[filePath] !== forwarder) {
-                            null
-                        } else {
-                            forwarder.captureResumeState()
+                        // GH #281: a projection-recovery re-register can finish on this
+                        // document lane before the checkpoint task runs. That replacement
+                        // is now the authoritative live replica, so checkpoint it instead
+                        // of permanently failing the native reload on stale identity.
+                        val currentForwarder = forwarders[filePath]
+                        if (currentForwarder !== forwarder && currentForwarder?.attached == true) {
+                            log.info(
+                                "[crdt-replica] native reload checkpoint following live forwarder " +
+                                    "replacement for ${File(filePath).name}",
+                            )
                         }
+                        currentForwarder?.captureResumeState()
                     }
                 }
         val captured = LinkedHashMap<String, ReplicaResumeState>()

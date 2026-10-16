@@ -3,7 +3,7 @@ agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
   codex: 01a13cac-54da-7403-9456-6fc418818870
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -357,7 +357,40 @@ The agent will:
 **The X11/tmux-spawn half is not repeated:** `#tmuxscopesteward` already covers it, so this agent only handles item parsing. When it lands, your X11 note will parse as its own item, and I'll close it as answered by `#tmuxscopesteward`.
 
 **In flight:** `#tmuxscopesteward` (running its tests), `#syncioredlivetmux` (the 14 failing real-tmux tests), and this one. I merge each one serially and run one `make install` per batch.
-<!-- agent:boundary:510e6fab -->
+
+### Re: Subagent completed: `subagent:handoff_backlog` returned work for queue item “Claude Code ran out of tokens mid-tasks. Please continue: ``` ❯ create a backlog + queue item for codex to pick up the work ● Stopped the three agents so Codex won't collide with them in the same worktrees. Now writing one handoff file per agent, then the backlog and queue items. ● Bash(mkdir -p /home/brian/work/btakita/agent-loop/tasks/agent-doc; cat > /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-tmuxscopesteward.md <<'EOF' # Ha…) ⎿ 8337 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-2026-10-05-codex.md 4868 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-queuefreetextsplit.md 3096 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-syncioredlivetmux.md 5229 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-tmuxscopesteward.md ⎿ You've hit your weekly limit · resets Oct 19, 6am (America/New_York) Use your limit reset to reset it now: clau.de/reset ```” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=d4b5cc4fef44af4fe74f6e192eb5ea8b7f014a8e274a765097ea5cc57cc74f21 -->
+> **Chat prompt (#chatprompt):** queuefreetextsplit was just started. You can look in agent-doc + Claude Code session history or start the analysis again.
+
+> **Queue prompt:** Claude Code ran out of tokens mid-tasks. Please continue:
+> ```
+> ❯ create a backlog + queue item for codex to pick up the work
+>
+> ● Stopped the three agents so Codex won't collide with them in the same worktrees. Now writing one handoff file per
+>   agent, then the backlog and queue items.
+>
+> ● Bash(mkdir -p /home/brian/work/btakita/agent-loop/tasks/agent-doc; cat >
+>       /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-tmuxscopesteward.md <<'EOF'
+>       # Ha…)
+>   ⎿  8337 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-2026-10-05-codex.md
+>      4868 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-queuefreetextsplit.md
+>      3096 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-syncioredlivetmux.md
+>      5229 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-tmuxscopesteward.md
+>   ⎿  You've hit your weekly limit · resets Oct 19, 6am (America/New_York)
+>      Use your limit reset to reset it now: clau.de/reset
+> ```
+
+### Re: interrupted handoff capture — gpt-5 · 2026-10-16T13:44-04:00
+
+Recovered the prior `#queuefreetextsplit` start rather than restarting its analysis. Claude created `/home/brian/work/btakita/agent-doc-wt/queuefreetextsplit` on `fix/queue-free-text-item-boundaries` at `46bc541bd8`, ran a historical queue scan under `.scratch/`, and left the tracked worktree clean with no implementation commit. The handoff remains the continuation point.
+
+Added `#queuefreetextsplit` to the backlog and appended its mirrored `do [#queuefreetextsplit]` queue entry. `#syncioredlivetmux` and `#tmuxscopesteward` were already present in both places. I did not create a separate X11 item: the current parser merges that paragraph into the preceding free-text head, while its operational work is already covered by `#tmuxscopesteward`.
+
+Committed the three completed handoff documents as `241c641c7b` (`docs: add interrupted task handoffs`). No implementation tests, build, or install were run because this cycle only recovered and tracked the handoffs; the implementation handoffs retain their own remaining verification requirements.
+
+The exchange is large (327 lines); queue auto-clear will reset context after this closeout. No compaction was requested.
+<!-- agent:boundary:0ab78b2a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -365,7 +398,7 @@ The agent will:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
----
+~~~done
 Claude Code ran out of tokens mid-tasks. Please continue:
 ```
 ❯ create a backlog + queue item for codex to pick up the work
@@ -383,12 +416,13 @@ Claude Code ran out of tokens mid-tasks. Please continue:
   ⎿  You've hit your weekly limit · resets Oct 19, 6am (America/New_York)
      Use your limit reset to reset it now: clau.de/reset
 ```
----
+~~~
 - 🚧 Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?
 My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
 > I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
 - 🚧 do [#tmuxscopesteward]
 - 🚧 do [#syncioredlivetmux]
+- do [#queuefreetextsplit]
 <!-- /agent:queue -->
 
 ## Todo
@@ -405,6 +439,7 @@ My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#queuefreetextsplit] [agent-doc-bug] `agent:queue` merges an unindented multi-line free-text item after a bullet into that bullet, but drops prose after a thematic break; `session-check` also falsely reports claimed free-text heads as lost. Define compatible item-boundary rules, make preflight/list/claim/#ftstrike/session-check agree, warn rather than silently drop text, update the SPEC, and add mutation-checked regressions. Handoff: `tasks/agent-doc/handoff-queuefreetextsplit.md`.
 - [ ] 🚧 [#syncioredlivetmux] [agent-doc-bug] 14 live-tmux tests in `agent-doc-sync-io` fail on current main and are not run by CI. The tmuxpanesreversed subagent found them while running the suite (2026-10-16); they fail the same way with the original `sync.rs`, so they predate the pane-order change. Fix each failure, then add the tests to `make tmux-ci` so they cannot rot again. Do not delete or ignore tests to make the suite pass.
 - [ ] 🚧 [#tmuxscopesteward] [agent-doc-bug] agent-doc leaks systemd transient `tmux-spawn-*.scope` units in the user manager: 3,911 were loaded at the time of the 2026-10-16 X11 crash, while the live tmux server had about 50 pane processes. The previous boot journal has 2,718 scopes that ended `Failed with result resources` (`No PIDs left to attach`): the pane process exited before systemd could attach it. Failed transient units stay loaded until `systemctl --user reset-failed`. Launchers were many short-lived tmux servers with about 120-135 panes each, consistent with real-tmux tests on private sockets. Fix: (1) stop test and runtime tmux servers from leaking scopes, (2) add a rate-limited, binary-owned sweep that resets failed `tmux-spawn-*` units and stops only scopes provably holding leaked agent-doc processes, logged to ops.log, with an admin `--dry-run` command. Dispatched to subagent:tmuxscopes on branch fix/tmux-spawn-scope-stewardship (worktree agent-doc-wt/tmuxscopes).
 <!-- /agent:backlog -->

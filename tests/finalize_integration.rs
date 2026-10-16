@@ -5105,6 +5105,8 @@ fn respond_does_not_supersede_a_session_check_refusal_that_survives_its_commit()
     assert!(
         !check.status.success(),
         "the refusal respond reported is the one session-check still reports"
+    );
+}
 
 /// `#reportedrelease`: src/haiven-dev/tasks/docs.md, 2026-10-15. The
 /// operator added a free-text queue question after the coordinator's cycle had

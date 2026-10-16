@@ -185,6 +185,8 @@ mod tests {
             claimed_at_secs: 1,
             expires_at_secs: 100,
             owner_session: None,
+            anchor: None,
+            followed_from: Vec::new(),
         }
     }
 

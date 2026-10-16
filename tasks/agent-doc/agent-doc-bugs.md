@@ -336,6 +336,27 @@ The exchange is 213 lines. The queue is active, so I am not compacting.
 - **Possible overlap:** the `#tmuxscopesteward` agent is changing how test tmux servers start and shut down, which may touch the same test helpers. I told the `#syncioredlivetmux` agent to keep any shared change small and report it, and I will reconcile the two when I merge.
 
 **When it reports**, I merge to `main`, run one `make install`, and close `#syncioredlivetmux`. `#tmuxscopesteward` is still running its full test suite.
+
+### Re: are multi-line free-text queue items recognized without `---`? No, a fix is under way — opus-5.5 · 2026-10-16T13:29-04:00
+
+**Short answer: no, not with either layout.** agent-doc runs a check before every turn that reads the queue, and that check listed:
+- **Without `---` (your queue now):** one merged item. It joined your question bullet, the "My X11 windows crashed…" paragraph, and the "> I found a persistent amplifier…" quote. Markdown treats unindented lines right after a list item as more of that item, and agent-doc's queue parser follows that rule.
+- **With `---` (the earlier layout):** the X11 note was not a queue item at all. The check listed only the bullet above it, and `agent-doc queue claim --item 'My X11 windows crashed…'` failed with "no live queue head matches". Nothing warned you that the text was ignored. That silent drop is the worse half of the bug.
+
+**Sent to a subagent** (queue item claimed as `subagent:queuefreetextsplit`; branch `fix/queue-free-text-item-boundaries` in its own worktree, based on `origin/main`). Proposed rule:
+- **What starts a new item:** a bullet at the start of a line, or an unindented paragraph that follows a bullet.
+- **What stays in the item:** lines indented under a bullet, and a blockquote that continues a free-text paragraph.
+- **`---`:** separates items and is never part of one.
+- **Leftover text:** any queue text that still fits no item produces a warning instead of being dropped.
+
+The agent will:
+- **Check existing documents first:** if many of them wrap bullets with unindented lines, it will ask you before changing that behavior.
+- **Update everything that reads the queue:** listing, claim, striking answered items, and copying backlog items into the queue, plus the SPEC.
+- **Test it:** add tests for both of your layouts, break each fix on purpose to confirm its test fails, run `make check`, then commit and push its branch.
+
+**The X11/tmux-spawn half is not repeated:** `#tmuxscopesteward` already covers it, so this agent only handles item parsing. When it lands, your X11 note will parse as its own item, and I'll close it as answered by `#tmuxscopesteward`.
+
+**In flight:** `#tmuxscopesteward` (running its tests), `#syncioredlivetmux` (the 14 failing real-tmux tests), and this one. I merge each one serially and run one `make install` per batch.
 <!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 
@@ -344,12 +365,11 @@ The exchange is 213 lines. The queue is active, so I am not compacting.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#tmuxpanesreversed]: The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances. #gh-fix https://github.com/btakita/agent-doc/issues/278~~
----
+- Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?
 My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
 > I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
-- do [#tmuxscopesteward]
-- do [#syncioredlivetmux]
+- 🚧 do [#tmuxscopesteward]
+- 🚧 do [#syncioredlivetmux]
 <!-- /agent:queue -->
 
 ## Todo
@@ -366,8 +386,8 @@ My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#syncioredlivetmux] [agent-doc-bug] 14 live-tmux tests in `agent-doc-sync-io` fail on current main and are not run by CI. The tmuxpanesreversed subagent found them while running the suite (2026-10-16); they fail the same way with the original `sync.rs`, so they predate the pane-order change. Fix each failure, then add the tests to `make tmux-ci` so they cannot rot again. Do not delete or ignore tests to make the suite pass.
-- [ ] [#tmuxscopesteward] [agent-doc-bug] agent-doc leaks systemd transient `tmux-spawn-*.scope` units in the user manager: 3,911 were loaded at the time of the 2026-10-16 X11 crash, while the live tmux server had about 50 pane processes. The previous boot journal has 2,718 scopes that ended `Failed with result resources` (`No PIDs left to attach`): the pane process exited before systemd could attach it. Failed transient units stay loaded until `systemctl --user reset-failed`. Launchers were many short-lived tmux servers with about 120-135 panes each, consistent with real-tmux tests on private sockets. Fix: (1) stop test and runtime tmux servers from leaking scopes, (2) add a rate-limited, binary-owned sweep that resets failed `tmux-spawn-*` units and stops only scopes provably holding leaked agent-doc processes, logged to ops.log, with an admin `--dry-run` command. Dispatched to subagent:tmuxscopes on branch fix/tmux-spawn-scope-stewardship (worktree agent-doc-wt/tmuxscopes).
+- [ ] 🚧 [#syncioredlivetmux] [agent-doc-bug] 14 live-tmux tests in `agent-doc-sync-io` fail on current main and are not run by CI. The tmuxpanesreversed subagent found them while running the suite (2026-10-16); they fail the same way with the original `sync.rs`, so they predate the pane-order change. Fix each failure, then add the tests to `make tmux-ci` so they cannot rot again. Do not delete or ignore tests to make the suite pass.
+- [ ] 🚧 [#tmuxscopesteward] [agent-doc-bug] agent-doc leaks systemd transient `tmux-spawn-*.scope` units in the user manager: 3,911 were loaded at the time of the 2026-10-16 X11 crash, while the live tmux server had about 50 pane processes. The previous boot journal has 2,718 scopes that ended `Failed with result resources` (`No PIDs left to attach`): the pane process exited before systemd could attach it. Failed transient units stay loaded until `systemctl --user reset-failed`. Launchers were many short-lived tmux servers with about 120-135 panes each, consistent with real-tmux tests on private sockets. Fix: (1) stop test and runtime tmux servers from leaking scopes, (2) add a rate-limited, binary-owned sweep that resets failed `tmux-spawn-*` units and stops only scopes provably holding leaked agent-doc processes, logged to ops.log, with an admin `--dry-run` command. Dispatched to subagent:tmuxscopes on branch fix/tmux-spawn-scope-stewardship (worktree agent-doc-wt/tmuxscopes).
 <!-- /agent:backlog -->
 
 ## Review

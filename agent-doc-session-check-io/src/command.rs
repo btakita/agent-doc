@@ -5455,7 +5455,13 @@ mod terminal_convergence_tests {
 
     #[test]
     fn retained_pending_write_guidance_preserves_same_capture() {
-        let file = Path::new("session.md");
+        // An absolute file inside its own project: a relative path resolves the
+        // project root from the test's cwd, which walks up into the operator's
+        // home controller when the checkout lives outside a project.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let file = file.as_path();
         let message = retained_pending_write_message(
             file,
             RetainedPendingWriteMessage {
@@ -5472,14 +5478,23 @@ mod terminal_convergence_tests {
         assert!(message.contains("same capture will resume"));
         assert!(message.contains("Do not issue another closeout payload"));
         assert!(message.contains("do not force disk"));
-        assert!(message.contains("retry only `agent-doc session-check session.md`"));
+        assert!(message.contains(&format!(
+            "retry only `agent-doc session-check {}`",
+            file.display()
+        )));
         assert!(!message.contains("agent-doc finalize"));
         assert!(!message.contains("write --commit"));
     }
 
     #[test]
     fn retained_pending_write_guidance_distinguishes_non_capture_projection() {
-        let file = Path::new("session.md");
+        // An absolute file inside its own project: a relative path resolves the
+        // project root from the test's cwd, which walks up into the operator's
+        // home controller when the checkout lives outside a project.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let file = file.as_path();
         let message = retained_pending_write_message(
             file,
             RetainedPendingWriteMessage {

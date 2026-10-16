@@ -2,6 +2,69 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.511
+
+- **A controller whose socket was unlinked exits (`detachedexitci`).** When a
+  root's removal raced a controller-side write, the socket was gone but the root
+  survived with its original inode. The controller served it, unreachable, until
+  an idle timeout. A stable controller now exits at its next idle tick when
+  `.agent-doc/controller.sock` is missing or names another listener, and leaves
+  that pathname alone on the way out. The process-exit watcher's poller now
+  stops when its controller does. Before, in-process test controllers kept
+  writing other tests' dead editor pids into roots that were being deleted.
+- **A todo whose work is done can be closed by its own id (`sdktododone`).**
+  `--done <id>` naming an `agent:todo` item's own id, and no tracked work, now
+  checks that todo off in place and strikes its `[#id]: ...` queue head. Before,
+  it failed with "id not found in backlog/icebox", so agents ticked the box by
+  hand. A bare leading `#id` (`- [ ] #tdfoo action`) now counts as the row's own
+  id, as `[#tdfoo]` does. `--todo-edit` keeps that id instead of dropping it,
+  and `--todo-done` picks the row that owns the id even when another row cites
+  it. A leading `#157` stays a GitHub reference. A queue head drained without
+  `--done` still never completes a todo.
+- **Todo rows without an id get one at preflight (`todoidbackfill`).** A row
+  typed by hand, or one an older write left without an id, now gets an own id
+  by the `--todo-add` rules. It reuses the one open backlog/review id it cites,
+  else a fresh id is minted. The pass uses the free-text typing gate, never
+  re-ids a row, and inserts only the id. A row with an id can be closed by id,
+  so a hand-written "re-authenticate the connector" todo no longer stays open
+  after the work it unblocks finishes.
+- **Todo ids layer on the tracked item they surface (`todoidlayer`).** A todo
+  that asks the operator to decide on one backlog, review, or icebox item now
+  carries that item's id, so `[#jb262dynlauncherrecommen]` is both the review
+  gate and its todo. Icebox items count now too, and an operator check on an
+  icebox todo reports `operator_done_icebox_open`. A caller-chosen `id=` that
+  names no tracked work gives way to the one cited item, and the receipt says
+  `requested id=<id> not used`. A new id is minted only when the todo cites
+  several tracked items or none, or follows up a checked todo for the item.
+- **Preflight reads pending callbacks from the document's project
+  (`preflightcallbackroot`).** It used the process cwd, so a preflight run
+  from another checkout opened that checkout's `state.db`.
+- **docs.md-style queue wedge after a duplicated answer (`rundocsissue`).**
+  When the Codex Stop hook saved a second copy of an already-committed answer
+  as a pending response, the replay guard refused it on every preflight, so the
+  repair step stopped before it cleared answered queue lines and every Run Agent
+  Doc was refused. Repair now sets such a capture aside in
+  `.agent-doc/repair-blocked/` (never replayed) and strikes a free-text head only
+  when the set-aside answer echoes it and the committed exchange already holds
+  its `### Re:` answer. The residue hint no longer tells a refused agent to run
+  `agent-doc preflight`, which neither the skill nor pane authority allowed.
+- **JetBrains native-reload report counts late attaches (GH #276).** The
+  post-reload report rechecks each replica's real state, waits up to 3 s for
+  attaches still in flight, and reports a document still retrying as `pending`
+  instead of `failed`. Plugin 0.2.648 / 262 0.2.649 / 263 0.2.650.
+- **Modular JetBrains decline is reported as permanent (GH #277).** On exact-262
+  and 263 builds, the `declined_by=modular_package` restart-free decline now
+  prints the once-per-run permanent-loss NOTE, ends the summary line with
+  "restart-free upgrade is unavailable on this build", and records
+  `restart_free_unavailable=true`. The NOTE says the restart can wait: routes
+  stay admitted while the IDE's native endpoint answers with this binary's
+  build, native saves stay admitted at or above plugin 0.2.497, and a
+  `plugin_bytes_superseded` refusal takes `agent-doc admin reload-lib`, then a
+  restart. The restart-free path itself is unchanged.
+- **Retained-write guidance tests run from any checkout location.** Two
+  session-check tests resolved their project root from the working directory
+  and tripped the test-isolation guard in a worktree outside a project.
+
 ## 0.35.510
 
 - **Non-ASCII text no longer turns into `?` or a second response copy (GH #274).**
@@ -64,41 +127,6 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   tests now take an injected clock. Autoclaim's post-claim layout sync now
   resolves registry files against its project root instead of the process cwd,
   so it no longer syncs whichever project the cwd sits in.
-- **A controller whose socket was unlinked exits (`detachedexitci`).** When a
-  root's removal raced a controller-side write, the socket was gone but the root
-  survived with its original inode. The controller served it, unreachable, until
-  an idle timeout. A stable controller now exits at its next idle tick when
-  `.agent-doc/controller.sock` is missing or names another listener, and leaves
-  that pathname alone on the way out. The process-exit watcher's poller now
-  stops when its controller does. Before, in-process test controllers kept
-  writing other tests' dead editor pids into roots that were being deleted.
-- **A todo whose work is done can be closed by its own id (`sdktododone`).**
-  `--done <id>` naming an `agent:todo` item's own id, and no tracked work, now
-  checks that todo off in place and strikes its `[#id]: ...` queue head. Before,
-  it failed with "id not found in backlog/icebox", so agents ticked the box by
-  hand. A bare leading `#id` (`- [ ] #tdfoo action`) now counts as the row's own
-  id, as `[#tdfoo]` does. `--todo-edit` keeps that id instead of dropping it,
-  and `--todo-done` picks the row that owns the id even when another row cites
-  it. A leading `#157` stays a GitHub reference. A queue head drained without
-  `--done` still never completes a todo.
-- **Todo rows without an id get one at preflight (`todoidbackfill`).** A row
-  typed by hand, or one an older write left without an id, now gets an own id
-  by the `--todo-add` rules. It reuses the one open backlog/review id it cites,
-  else a fresh id is minted. The pass uses the free-text typing gate, never
-  re-ids a row, and inserts only the id. A row with an id can be closed by id,
-  so a hand-written "re-authenticate the connector" todo no longer stays open
-  after the work it unblocks finishes.
-- **Todo ids layer on the tracked item they surface (`todoidlayer`).** A todo
-  that asks the operator to decide on one backlog, review, or icebox item now
-  carries that item's id, so `[#jb262dynlauncherrecommen]` is both the review
-  gate and its todo. Icebox items count now too, and an operator check on an
-  icebox todo reports `operator_done_icebox_open`. A caller-chosen `id=` that
-  names no tracked work gives way to the one cited item, and the receipt says
-  `requested id=<id> not used`. A new id is minted only when the todo cites
-  several tracked items or none, or follows up a checked todo for the item.
-- **Preflight reads pending callbacks from the document's project
-  (`preflightcallbackroot`).** It used the process cwd, so a preflight run
-  from another checkout opened that checkout's `state.db`.
 
 ## 0.35.509
 

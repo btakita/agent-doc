@@ -380,6 +380,104 @@ pub fn supervisor_restart_admission(
     SupervisorRestartAdmission::Spawn
 }
 
+/// Gate the child replacement an operator **Clear Session Context** requests
+/// (`#clearcapturedcycle`).
+///
+/// A context clear changes the harness conversation, not the document. The
+/// open-cycle gate ([`supervisor_restart_admission`]) exists so a restart never
+/// replaces a child that still OWNS a turn. Once the actor is back at a
+/// dispatch-ready prompt and the open cycle's response is durably captured,
+/// the child owns nothing: the remaining closeout is the supervisor's keyed
+/// captured-finalize resume (`#midturn-recycle-resume`, `#gh181`), which runs
+/// without the harness and keeps the retained write durable either way.
+///
+/// Holding the clear behind that closeout made it wait on DOCUMENT convergence.
+/// Observed 2026-10-16 on `src/haiven-dev/tasks/sdk.md` (Codex): the retained
+/// write was blocked by `editor_holds_unmerged_visible_text` (06:01:53Z), the
+/// operator pressed Clear Session Context at 06:03:31Z and 06:03:41Z, both were
+/// latched behind `agent_doc_cycle_open`, the client reported "Cleared", and no
+/// `restart_fresh_spawn` ever ran — the latch was later overwritten by an
+/// install recycle and lost. The cycle itself committed at 06:05:50Z without
+/// any harness involvement.
+///
+/// Every other shape keeps the shared gate: a live turn (`busy`), a harness
+/// permission prompt (`waiting_input`), and an uncaptured preflight still own
+/// the cycle.
+pub fn operator_clear_restart_admission(
+    cycle_open: bool,
+    child_alive: bool,
+    actor_ready: bool,
+    cycle_response_captured: bool,
+) -> SupervisorRestartAdmission {
+    if cycle_open && child_alive && actor_ready && cycle_response_captured {
+        return SupervisorRestartAdmission::Spawn;
+    }
+    supervisor_restart_admission(cycle_open, child_alive)
+}
+
+#[cfg(test)]
+mod operator_clear_restart_admission_tests {
+    use super::*;
+
+    /// `#clearcapturedcycle`: the exact 2026-10-16 sdk.md shape — Codex at its
+    /// ready prompt, the cycle open only because its captured response's
+    /// closeout waits on the editor. The clear replaces the child now.
+    #[test]
+    fn ready_actor_over_a_captured_cycle_clears_now() {
+        assert_eq!(
+            operator_clear_restart_admission(true, true, true, true),
+            SupervisorRestartAdmission::Spawn
+        );
+    }
+
+    /// A captured response with the harness still inside its turn (busy, or a
+    /// permission prompt reported as not-ready) still owns the cycle.
+    #[test]
+    fn captured_cycle_without_a_ready_prompt_keeps_the_open_cycle_gate() {
+        assert_eq!(
+            operator_clear_restart_admission(true, true, false, true),
+            SupervisorRestartAdmission::DeferCycleOpen
+        );
+    }
+
+    /// An uncaptured open cycle (a preflight the harness has not answered)
+    /// is still the harness's work; the clear waits as before.
+    #[test]
+    fn uncaptured_open_cycle_keeps_the_open_cycle_gate() {
+        assert_eq!(
+            operator_clear_restart_admission(true, true, true, false),
+            SupervisorRestartAdmission::DeferCycleOpen
+        );
+    }
+
+    /// Outside the crossed shape the clear gate IS the shared restart gate.
+    #[test]
+    fn every_other_shape_agrees_with_the_shared_restart_gate() {
+        for cycle_open in [false, true] {
+            for child_alive in [false, true] {
+                for actor_ready in [false, true] {
+                    for captured in [false, true] {
+                        if cycle_open && child_alive && actor_ready && captured {
+                            continue;
+                        }
+                        assert_eq!(
+                            operator_clear_restart_admission(
+                                cycle_open,
+                                child_alive,
+                                actor_ready,
+                                captured
+                            ),
+                            supervisor_restart_admission(cycle_open, child_alive),
+                            "cycle_open={cycle_open} child_alive={child_alive} \
+                             actor_ready={actor_ready} captured={captured}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod restart_admission_tests {
     use super::*;

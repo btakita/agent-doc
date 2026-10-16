@@ -302,6 +302,21 @@ pub trait SupervisorIpcLifecycleState {
     /// `#haivendupsession`: the restart path needs the same fact the recycle
     /// path gates on, so both refuse to replace a child that still owns a turn.
     fn agent_doc_cycle_open(&self) -> bool;
+    /// True when the open document cycle already holds a durable response
+    /// capture (`response_captured` or later), so its remaining closeout is the
+    /// supervisor's keyed captured-finalize resume rather than harness work
+    /// (`#clearcapturedcycle`). The default is fail-closed: an implementation
+    /// that cannot observe the capture keeps the open-cycle gate.
+    fn agent_doc_cycle_response_captured(&self) -> bool {
+        false
+    }
+    /// True when an accepted child-replacing restart is latched behind the
+    /// open-cycle boundary (`restart_requested` with the deferral latch set and
+    /// no in-place reexec). A later supervisor-only `continue` recycle must not
+    /// overwrite that intent (`#clearcapturedcycle`).
+    fn deferred_child_replacement_pending(&self) -> bool {
+        false
+    }
     /// Reclaim an empty preflight after an explicit Restart Agent request has
     /// proven the old harness run is already at `Ready`. The default stays
     /// fail-closed for lifecycle implementations that cannot perform repair.
@@ -428,7 +443,36 @@ pub fn decode_restart_intent(mode: String) -> (String, bool) {
     (intent.mode, intent.restart_agent)
 }
 
-pub fn request_supervisor_restart<S>(state: &S, mode: String) -> Result<(), String>
+/// What a restart request did with the current harness child.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestartRequestOutcome {
+    /// The restart (child replacement or in-place reexec) was armed now.
+    Armed,
+    /// `#clearcapturedcycle`: an operator Clear replaced the child over an open
+    /// cycle whose response is durably captured; the supervisor finishes that
+    /// closeout without the harness.
+    ArmedOverCapturedCycle,
+    /// Accepted and latched: the child still owns an open cycle, so it is
+    /// replaced only after durable cycle closure and a later `Ready` prompt.
+    DeferredUntilCycleCloses,
+    /// A supervisor-only `continue` recycle arrived while a child-replacing
+    /// restart was already latched; the latched intent was kept untouched.
+    PendingReplacementRetained,
+}
+
+impl RestartRequestOutcome {
+    pub fn deferred_until_cycle_closes(self) -> bool {
+        matches!(
+            self,
+            Self::DeferredUntilCycleCloses | Self::PendingReplacementRetained
+        )
+    }
+}
+
+pub fn request_supervisor_restart<S>(
+    state: &S,
+    mode: String,
+) -> Result<RestartRequestOutcome, String>
 where
     S: SupervisorIpcLifecycleState + ?Sized,
 {
@@ -437,7 +481,7 @@ where
     let RestartIntent {
         mode,
         restart_agent,
-        ..
+        operator_clear,
     } = intent;
     // Refresh the IPC-visible binary projection on every restart request even
     // when the child is dead and the request will take the normal relaunch
@@ -455,6 +499,18 @@ where
     // path instead.
     let preserve_live_child =
         !restart_agent && mode.trim().eq_ignore_ascii_case("continue") && child_alive;
+    // `#clearcapturedcycle`: a supervisor-only recycle (install fan-out,
+    // `restart-supervisor` continue) must not overwrite an accepted
+    // child-replacing request that is latched behind the open cycle. On
+    // 2026-10-16 (`tasks/sdk.md`) the install's `session_restart mode=continue`
+    // replaced a latched `clear:fresh` with `continue`, the reexec then ran, and
+    // the operator's Clear Session Context was silently lost. The reexec path
+    // already yields to a pending replacement (`#reexecdeadchild`
+    // `child_replacement_pending`); keep the latched intent and let the stale
+    // generation recycle again after the replacement fires.
+    if preserve_live_child && state.deferred_child_replacement_pending() {
+        return Ok(RestartRequestOutcome::PendingReplacementRetained);
+    }
     let mut cycle_open = state.agent_doc_cycle_open();
     // `#weeklylimitrestart`: Claude can return to its dispatch-ready prompt
     // after a weekly-limit failure without producing a response, leaving the
@@ -474,9 +530,26 @@ where
     // host releases this latch only after durable cycle closure and a real Ready
     // prompt. This preserves the operator request without ever spawning two
     // children on the pane.
+    // `#clearcapturedcycle`: an operator Clear changes the harness context, not
+    // the document. At a Ready prompt over a durably captured cycle the child
+    // owns no turn, so the clear must not wait on document convergence.
+    let plain_operator_clear = operator_clear && !restart_agent;
+    let admission = if plain_operator_clear {
+        agent_doc_supervisor::lifecycle::operator_clear_restart_admission(
+            cycle_open,
+            child_alive,
+            state.actor_ready(),
+            cycle_open && state.agent_doc_cycle_response_captured(),
+        )
+    } else {
+        agent_doc_supervisor::lifecycle::supervisor_restart_admission(cycle_open, child_alive)
+    };
+    let clear_crosses_captured_cycle = plain_operator_clear
+        && cycle_open
+        && child_alive
+        && admission == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::Spawn;
     if !preserve_live_child
-        && agent_doc_supervisor::lifecycle::supervisor_restart_admission(cycle_open, child_alive)
-            == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
+        && admission == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
     {
         state.set_restart_mode(encoded_intent);
         state.set_restart_reexec(false);
@@ -484,7 +557,7 @@ where
         // Publish the request last. Production uses a release/acquire pair so
         // the host can never observe the request before its deferral latch.
         state.set_restart_requested(true);
-        return Ok(());
+        return Ok(RestartRequestOutcome::DeferredUntilCycleCloses);
     }
     let waiting_input = state.actor_waiting_input();
     state.transition_actor_busy("supervisor", "ipc_restart_requested");
@@ -513,7 +586,10 @@ where
         state.transition_actor_waiting_input("supervisor", "ipc_restart_prompt_wake_failed");
         return Err(err);
     }
-    Ok(())
+    if clear_crosses_captured_cycle {
+        return Ok(RestartRequestOutcome::ArmedOverCapturedCycle);
+    }
+    Ok(RestartRequestOutcome::Armed)
 }
 
 pub fn request_supervisor_stop<S>(state: &S)
@@ -680,17 +756,7 @@ where
                     // `#idlecleartriggerinject`: tag the restart as operator-Clear
                     // provenance so the relaunch only re-triggers the document
                     // when pending work exists.
-                    match request_supervisor_restart(
-                        state,
-                        RestartIntent::operator_clear_fresh().encode(),
-                    ) {
-                        Ok(()) => IpcResponse::ok(serde_json::json!({
-                            "n": 0,
-                            "restart_fresh": true,
-                            "reason": reason.as_str(),
-                        })),
-                        Err(err) => IpcResponse::err(err),
-                    }
+                    operator_clear_restart_response(state, reason)
                 }
                 agent_doc_supervisor::lifecycle::OperatorClearDelivery::TypeNativeClear => {
                     match deliver_supervisor_inject(state, &bytes, "ipc_clear") {
@@ -716,7 +782,7 @@ where
             }
         }
         IpcMethod::Restart { mode } => match request_supervisor_restart(state, mode) {
-            Ok(()) => IpcResponse::ok_empty(),
+            Ok(_) => IpcResponse::ok_empty(),
             Err(err) => IpcResponse::err(err),
         },
         IpcMethod::Stop { graceful: _ } => {
@@ -727,6 +793,29 @@ where
             request_supervisor_stop_agent(state);
             IpcResponse::ok_empty()
         }
+    }
+}
+
+/// Arm the fresh restart an operator Clear requires and answer the `Clear` IPC.
+///
+/// `#clearcapturedcycle`: the answer reports a latch truthfully, so the client
+/// never prints "Cleared" for a clear that is still waiting on an open cycle.
+pub fn operator_clear_restart_response<S>(
+    state: &S,
+    reason: agent_doc_supervisor::lifecycle::OperatorClearRestartReason,
+) -> IpcResponse
+where
+    S: SupervisorIpcLifecycleState + ?Sized,
+{
+    match request_supervisor_restart(state, RestartIntent::operator_clear_fresh().encode()) {
+        Ok(outcome) => IpcResponse::ok(serde_json::json!({
+            "n": 0,
+            "restart_fresh": true,
+            "reason": reason.as_str(),
+            "deferred_until_cycle_closes": outcome.deferred_until_cycle_closes(),
+            "captured_cycle_crossed": outcome == RestartRequestOutcome::ArmedOverCapturedCycle,
+        })),
+        Err(err) => IpcResponse::err(err),
     }
 }
 
@@ -1483,6 +1572,202 @@ mod tests {
         assert!(state.restart_requested.load(Ordering::Relaxed));
         assert!(!state.restart_reexec.load(Ordering::Relaxed));
         assert!(state.child_killed.load(Ordering::Relaxed));
+    }
+
+    /// `#clearcapturedcycle` fixture: a supervisor whose actor sits at its
+    /// ready prompt over an open cycle, with the capture fact and the
+    /// deferral latch observable exactly as production stores them.
+    #[derive(Default)]
+    struct ClearLifecycleState {
+        actor_ready: bool,
+        waiting_input: bool,
+        cycle_open: bool,
+        response_captured: bool,
+        child_alive: bool,
+        restart_requested: AtomicBool,
+        restart_deferred: AtomicBool,
+        restart_reexec: AtomicBool,
+        child_killed: AtomicBool,
+        restart_mode: Mutex<String>,
+    }
+
+    impl ClearLifecycleState {
+        fn sdk_md_2026_10_16(response_captured: bool) -> Self {
+            Self {
+                actor_ready: true,
+                cycle_open: true,
+                response_captured,
+                child_alive: true,
+                ..Default::default()
+            }
+        }
+    }
+
+    impl SupervisorIpcLifecycleState for ClearLifecycleState {
+        fn actor_waiting_input(&self) -> bool {
+            self.waiting_input
+        }
+        fn actor_ready(&self) -> bool {
+            self.actor_ready
+        }
+        fn agent_doc_cycle_open(&self) -> bool {
+            self.cycle_open
+        }
+        fn agent_doc_cycle_response_captured(&self) -> bool {
+            self.response_captured
+        }
+        fn deferred_child_replacement_pending(&self) -> bool {
+            self.restart_requested.load(Ordering::Acquire)
+                && self.restart_deferred.load(Ordering::Relaxed)
+                && !self.restart_reexec.load(Ordering::Relaxed)
+        }
+        fn child_alive(&self) -> bool {
+            self.child_alive
+        }
+        fn transition_actor_busy(&self, _caller: &str, _reason: &str) {}
+        fn transition_actor_waiting_input(&self, _caller: &str, _reason: &str) {}
+        fn set_restart_mode(&self, mode: String) {
+            *self.restart_mode.lock().unwrap() = mode;
+        }
+        fn set_restart_requested(&self, requested: bool) {
+            self.restart_requested.store(requested, Ordering::Release);
+        }
+        fn set_restart_deferred_until_boundary(&self, deferred: bool) {
+            self.restart_deferred.store(deferred, Ordering::Relaxed);
+        }
+        fn binary_stale(&self) -> bool {
+            false
+        }
+        fn set_restart_reexec(&self, reexec: bool) {
+            self.restart_reexec.store(reexec, Ordering::Relaxed);
+        }
+        fn set_stop_requested(&self, _requested: bool) {}
+        fn set_stop_agent_requested(&self, _requested: bool) {}
+        fn kill_child_for_ipc(&self) {
+            self.child_killed.store(true, Ordering::Relaxed);
+        }
+        fn wake_restart_prompt(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// `#clearcapturedcycle`: the 2026-10-16 `tasks/sdk.md` shape. Codex at its
+    /// ready prompt; the cycle is open only because its captured response's
+    /// closeout waits on the editor (`editor_holds_unmerged_visible_text`). The
+    /// operator Clear replaces the child NOW instead of latching behind a
+    /// document convergence the harness cannot influence.
+    #[test]
+    fn operator_clear_at_ready_over_captured_cycle_replaces_child_now() {
+        let state = ClearLifecycleState::sdk_md_2026_10_16(true);
+        let outcome =
+            request_supervisor_restart(&state, RestartIntent::operator_clear_fresh().encode())
+                .expect("operator clear is accepted");
+        assert_eq!(outcome, RestartRequestOutcome::ArmedOverCapturedCycle);
+        assert!(!outcome.deferred_until_cycle_closes());
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(!state.restart_deferred.load(Ordering::Relaxed));
+        assert!(!state.restart_reexec.load(Ordering::Relaxed));
+        assert!(state.child_killed.load(Ordering::Relaxed));
+        assert_eq!(*state.restart_mode.lock().unwrap(), "clear:fresh");
+    }
+
+    /// An uncaptured open cycle is still harness work: the clear stays latched
+    /// and the child untouched (`#haivendupsession`).
+    #[test]
+    fn operator_clear_over_uncaptured_cycle_stays_latched() {
+        let state = ClearLifecycleState::sdk_md_2026_10_16(false);
+        let outcome =
+            request_supervisor_restart(&state, RestartIntent::operator_clear_fresh().encode())
+                .expect("operator clear is accepted");
+        assert_eq!(outcome, RestartRequestOutcome::DeferredUntilCycleCloses);
+        assert!(outcome.deferred_until_cycle_closes());
+        assert!(state.restart_deferred.load(Ordering::Relaxed));
+        assert!(!state.child_killed.load(Ordering::Relaxed));
+    }
+
+    /// A harness permission prompt inside a captured turn is `waiting_input`,
+    /// not `Ready`: the child still owns the turn, so the clear latches.
+    #[test]
+    fn operator_clear_at_waiting_input_over_captured_cycle_stays_latched() {
+        let state = ClearLifecycleState {
+            actor_ready: false,
+            waiting_input: true,
+            ..ClearLifecycleState::sdk_md_2026_10_16(true)
+        };
+        let outcome =
+            request_supervisor_restart(&state, RestartIntent::operator_clear_fresh().encode())
+                .expect("operator clear is accepted");
+        assert_eq!(outcome, RestartRequestOutcome::DeferredUntilCycleCloses);
+        assert!(!state.child_killed.load(Ordering::Relaxed));
+    }
+
+    /// Restart Agent keeps its documented contract: a captured cycle latches
+    /// it until closeout, even at Ready.
+    #[test]
+    fn restart_agent_over_captured_cycle_is_not_widened_by_the_clear_gate() {
+        let state = ClearLifecycleState::sdk_md_2026_10_16(true);
+        let outcome = request_supervisor_restart(&state, "agent:continue".to_string())
+            .expect("restart agent is accepted");
+        assert_eq!(outcome, RestartRequestOutcome::DeferredUntilCycleCloses);
+        assert!(!state.child_killed.load(Ordering::Relaxed));
+    }
+
+    /// `#clearcapturedcycle`: the second half of the 2026-10-16 loss. With a
+    /// clear latched behind an open cycle, the install fan-out's
+    /// `session_restart mode=continue` used to overwrite `clear:fresh` with
+    /// `continue` and drop the latch, so the reexec ran and the clear vanished.
+    #[test]
+    fn continue_recycle_does_not_overwrite_a_latched_operator_clear() {
+        let state = ClearLifecycleState::sdk_md_2026_10_16(false);
+        request_supervisor_restart(&state, RestartIntent::operator_clear_fresh().encode())
+            .expect("operator clear is accepted");
+        assert!(state.restart_deferred.load(Ordering::Relaxed));
+
+        let outcome = request_supervisor_restart(&state, "continue".to_string())
+            .expect("the recycle request is accepted");
+
+        assert_eq!(outcome, RestartRequestOutcome::PendingReplacementRetained);
+        assert_eq!(*state.restart_mode.lock().unwrap(), "clear:fresh");
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(state.restart_deferred.load(Ordering::Relaxed));
+        assert!(!state.restart_reexec.load(Ordering::Relaxed));
+        assert!(!state.child_killed.load(Ordering::Relaxed));
+    }
+
+    /// Without a latched replacement, `continue` keeps its in-place reexec.
+    #[test]
+    fn continue_recycle_without_a_latched_replacement_still_reexecs() {
+        let state = ClearLifecycleState::sdk_md_2026_10_16(true);
+        let outcome = request_supervisor_restart(&state, "continue".to_string())
+            .expect("the recycle request is accepted");
+        assert_eq!(outcome, RestartRequestOutcome::Armed);
+        assert!(state.restart_reexec.load(Ordering::Relaxed));
+        assert_eq!(*state.restart_mode.lock().unwrap(), "continue");
+    }
+
+    /// The Clear IPC answer must say when the clear was only latched, so the
+    /// client never reports "Cleared" for a session that was not replaced.
+    #[test]
+    fn clear_ipc_reports_latch_and_captured_crossing() {
+        let crossed = ClearLifecycleState::sdk_md_2026_10_16(true);
+        let response = operator_clear_restart_response(
+            &crossed,
+            agent_doc_supervisor::lifecycle::OperatorClearRestartReason::HarnessClearExitsProcess,
+        );
+        assert!(response.ok, "{response:?}");
+        let data = response.data.expect("clear data");
+        assert_eq!(data["restart_fresh"], true);
+        assert_eq!(data["deferred_until_cycle_closes"], false);
+        assert_eq!(data["captured_cycle_crossed"], true);
+
+        let latched = ClearLifecycleState::sdk_md_2026_10_16(false);
+        let response = operator_clear_restart_response(
+            &latched,
+            agent_doc_supervisor::lifecycle::OperatorClearRestartReason::HarnessClearExitsProcess,
+        );
+        let data = response.data.expect("clear data");
+        assert_eq!(data["deferred_until_cycle_closes"], true);
+        assert_eq!(data["captured_cycle_crossed"], false);
     }
 
     fn start_echo_handler(root: &Path, uuid: &str) -> SupervisorIpc {

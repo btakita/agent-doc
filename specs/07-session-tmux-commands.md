@@ -1292,7 +1292,14 @@ shells with no report) — through the same canonical
   `restart_fresh=true` (logged `delivery=supervisor_restart_fresh`) only when no
   live child exists, the actor is `waiting_input` (keepalive or permission
   prompt), or the harness's clear exits the process (Codex,
-  `#clear-ready-restart`); see `specs/supervisor.md`. For Codex, it still
+  `#clear-ready-restart`); see `specs/supervisor.md`. A fresh restart over an
+  open cycle is applied at once only when the actor is `Ready` and the cycle's
+  response is durably captured (`#clearcapturedcycle`); otherwise the
+  supervisor latches it until the cycle closes, the client logs
+  `session_clear_deferred ... deferred_until=agent_doc_cycle_closes`, and its
+  output says the clear is accepted but NOT applied yet instead of "Cleared"
+  (an empty preflight abandoned by the clear's own reclaim releases the latch
+  and reports as cleared). For Codex, it still
   records the clear prompt state so the next reroute can reapply the original
   launch contract. Before contacting tmux or the supervisor, it must record a
   controller operator-command acceptance or fail with the rejected stage. A

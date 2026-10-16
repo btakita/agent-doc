@@ -163,6 +163,11 @@ ifneq ($(filter __refused__,$(AGENT_DOC_TEST_ROOT_CEILING)),)
 $(error refusing to run tests with TMPDIR=$(AGENT_DOC_TEST_TMPDIR); see the error above (#testisolationtests))
 endif
 $(TEST_ISOLATION_GOALS): export AGENT_DOC_ROOT_CEILING_DIRECTORIES := $(AGENT_DOC_TEST_ROOT_CEILING)
+# `#testisolationleaks`: confine every test process, and the agent-doc binaries
+# it spawns, to the test temp root: /proc discovery never returns a live
+# controller or supervisor, and driving a live socket, state.db, or
+# install-recycle request fails the test.
+$(TEST_ISOLATION_GOALS): export AGENT_DOC_TEST_RUNTIME_SCOPE := $(AGENT_DOC_TEST_TMPDIR)
 endif
 
 $(VSCODE_NODE_LOCK): editors/vscode/package.json editors/vscode/package-lock.json

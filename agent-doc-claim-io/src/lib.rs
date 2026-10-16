@@ -784,6 +784,10 @@ pub fn run(
 /// requested document.
 fn validate_file_claim(file: &Path) -> Result<()> {
     let file_str = file.to_string_lossy();
+    // `#testisolationleaks`: no CWD registry for a test outside its scope.
+    if !agent_doc_session_registry_io::cwd_registry_in_test_scope() {
+        return Ok(());
+    }
     let registry_path = agent_doc_session_registry_io::registry_path();
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)
         .with_context(|| format!("failed to lock registry before claiming {}", file.display()))?;

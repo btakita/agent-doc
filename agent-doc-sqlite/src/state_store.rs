@@ -371,6 +371,9 @@ pub fn open_state_db_with_timeout(
         "SQLite state connections are forbidden in this process; use the Project Controller projection/command plane"
     );
     let path = state_db_path(project_root);
+    // `#testisolationleaks`: a test never opens (or creates) a state.db outside
+    // its runtime scope.
+    agent_doc_fs::guard_test_runtime_target(&path, "a state.db open");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

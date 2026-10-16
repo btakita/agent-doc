@@ -1295,6 +1295,16 @@ pub fn controller_model_pressure_cooldown_active_for_doc(doc: &Path) -> bool {
         < deadline.saturating_add(controller_model_pressure_jitter_secs(doc))
 }
 
+/// `#testisolationleaks`: a test process may not connect to a live controller
+/// socket outside its runtime scope. Only a socket that exists is checked: a
+/// path with no listener cannot reach a live runtime, and fixtures probe
+/// fabricated paths (`#ctrlsockpathtoolong`).
+fn guard_test_controller_socket(path: &Path) {
+    if path.exists() {
+        agent_doc_fs::guard_test_runtime_target(path, "a project controller socket connect");
+    }
+}
+
 pub(crate) fn connect_path(path: &Path) -> Result<interprocess::local_socket::Stream> {
     // Without this the OS reports a bare ENOENT/EINVAL, which is
     // indistinguishable from "the controller has not started yet" — so callers
@@ -1302,6 +1312,7 @@ pub(crate) fn connect_path(path: &Path) -> Result<interprocess::local_socket::St
     if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(path) {
         anyhow::bail!(reason);
     }
+    guard_test_controller_socket(path);
     let name = path.to_fs_name::<GenericFilePath>()?;
     interprocess::local_socket::ConnectOptions::new()
         .name(name)
@@ -1313,6 +1324,7 @@ async fn connect_path_async(path: &Path) -> Result<interprocess::local_socket::t
     if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(path) {
         anyhow::bail!(reason);
     }
+    guard_test_controller_socket(path);
     let name = path.to_fs_name::<GenericFilePath>()?;
     interprocess::local_socket::ConnectOptions::new()
         .name(name)
@@ -8159,6 +8171,7 @@ fn recycle_controller_request(
     command: &str,
     reason: Option<&str>,
 ) -> Result<bool> {
+    agent_doc_fs::guard_test_runtime_target(project_root, "a controller recycle request");
     let checkpoint =
         checkpoint_route_owned_documents_for_project(project_root, "controller_recycle_request")?;
     warn_controller_recycle_checkpoint_failures(&project_root.display().to_string(), checkpoint);
@@ -8522,6 +8535,7 @@ fn checkpoint_crdt_via_controller_document_model(
 }
 
 fn checkpoint_route_owned_document_crdt(doc: &Path, source: &str) -> Result<Option<String>> {
+    agent_doc_fs::guard_test_runtime_target(doc, "a route-owned document CRDT checkpoint");
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
     let authority = crdt_authority_for_file(&file_arg);
@@ -14761,6 +14775,7 @@ pub fn authoritative_reentry_document_for_pid(
 }
 
 fn request_supervisor_recycle_over_ipc(document: &Path, pid: u32) -> Result<()> {
+    agent_doc_fs::guard_test_runtime_target(document, "a supervisor recycle over IPC");
     let socket = supervisor_recycle_socket_for_pid(document, pid)?.with_context(|| {
         format!(
             "no authoritative supervisor lease maps pid {pid} from stale document {}",
@@ -56196,15 +56211,43 @@ mod tests {
         );
     }
 
+    /// `#turnsaferecycle` Goal 1: the /proc supervisor fan-out is fail-open and
+    /// returns a (marked, skipped) tally.
+    ///
+    /// `#testisolationleaks`: this test used to run the real fan-out over every
+    /// supervisor on the machine. Each concurrent `make check` checkpointed the
+    /// operator's live documents (a bare-build IPC hello that the editors
+    /// rejected) and appended an `install_fanout` recycle request to every live
+    /// project's state.db, so open supervisors recycled with nothing installed.
+    /// A live-looking supervisor outside the runtime scope now stays invisible
+    /// to the fan-out. If discovery regressed, the fan-out would reach the
+    /// `guard_test_runtime_target` checks on that document and fail this test.
     #[test]
-    fn recycle_supervisors_all_projects_force_enumerates_without_error() {
-        // `#turnsaferecycle` Goal 1: the /proc supervisor fan-out is fail-open and
-        // returns a (marked, skipped) tally even when no route-owned supervisor is
-        // running in this test environment.
-        let (marked, skipped) = recycle_supervisors_all_projects_force(false).unwrap();
-        // Fail-open: the tally is well-formed; no route-owned supervisor is expected
-        // in the test environment, but the walk must not panic or error.
+    fn recycle_supervisors_all_projects_force_never_reaches_a_supervisor_outside_the_test_scope() {
+        let live_doc = std::path::Path::new(crate::process::tests::OUT_OF_SCOPE_LIVE_ROOT)
+            .join("tasks/plan.md");
+        let mut live = crate::process::tests::spawn_fake_agent_doc_process(
+            std::path::Path::new("agent-doc"),
+            &["start", "--route-owned", &live_doc.to_string_lossy()],
+        );
+        let raw = crate::process::open_supervisor_document(live.id());
+        let outcome = std::panic::catch_unwind(|| recycle_supervisors_all_projects_force(false));
+        let _ = live.kill();
+        let _ = live.wait();
+
+        assert_eq!(
+            raw.as_deref(),
+            Some(live_doc.as_path()),
+            "raw discovery must see the live probe, or this test proves nothing"
+        );
+        let (marked, skipped) = outcome
+            .expect("the install fan-out reached a supervisor outside the test runtime scope")
+            .expect("the fan-out is fail-open");
         let _total = marked + skipped;
+        assert!(
+            !std::path::Path::new(crate::process::tests::OUT_OF_SCOPE_LIVE_ROOT).exists(),
+            "the fan-out must not create state under the out-of-scope root"
+        );
     }
 
     #[test]

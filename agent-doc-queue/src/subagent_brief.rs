@@ -13,6 +13,10 @@
 //! declared preset that frontmatter does not define is reported as
 //! unresolved, its body is never invented, and the preamble tells the
 //! subagent no authorization beyond the verbatim item text was resolved.
+//! Resolved item and preset directives are current task authorization: a
+//! worker must not ask the operator to repeat `go`, `push`, or `#auth` merely
+//! to reconfirm an action already named there. Harness-native tool permission
+//! remains a separate grant and still uses the operator-request handback.
 
 use agent_doc_element::element;
 use serde::{Deserialize, Serialize};
@@ -299,8 +303,9 @@ pub const SUBAGENT_OPERATOR_REQUEST_MARKER: &str =
 /// worker cannot present to the operator itself. The field names are deliberately
 /// stable so the coordinator can preserve the complete request in `agent:exchange`.
 pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
-    "If a blocking question or permission request arises, do not guess, silently deny it, or ",
-    "treat prior authorization as the answer. Send the coordinator this exact packet before ",
+    "If required scope or a choice is still missing, or a protected tool action still requires ",
+    "harness approval, do not guess or silently deny it. Send the coordinator this exact packet ",
+    "before ",
     "stopping; use the harness's native parent-message mechanism when available, otherwise ",
     "return the packet as your result:\n\n",
     "[agent-doc] subagent operator request (#waypostrequest)\n",
@@ -318,6 +323,17 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "back to the same worker when continuation is available. A chat reply is context, not a tool ",
     "permission grant: retry a protected action only after the harness permission system records ",
     "the grant for that exact action.\n"
+);
+
+/// Task authorization guidance emitted only when all declared presets resolved
+/// (or when the item text is the whole authorization). An unresolved preset
+/// must not inherit example outward actions from this text.
+pub const SUBAGENT_RESOLVED_AUTHORIZATION_RULE: &str = concat!(
+    "The queue item and resolved preset bodies above are current operator authorization for the ",
+    "work and actions they name. If they say `go`, `push`, `commit + push`, or carry an ",
+    "authorizing preset such as `#auth`, do the work without asking the operator to repeat those ",
+    "words, reconfirm, or invoke the preset again. This task authorization does not itself grant ",
+    "a harness-native tool permission.\n"
 );
 
 /// Marker line present exactly when the authorization failed closed.
@@ -357,6 +373,10 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
                 preset.name
             ));
         }
+    }
+    if auth.status != AuthorizationStatus::UnresolvedPreset {
+        out.push('\n');
+        out.push_str(SUBAGENT_RESOLVED_AUTHORIZATION_RULE);
     }
     match auth.status {
         AuthorizationStatus::UnresolvedPreset => {
@@ -476,7 +496,50 @@ mod tests {
         assert!(p.contains("kind: question | permission"));
         assert!(p.contains("context: <why it is needed, current state, target/scope"));
         assert!(p.contains("A chat reply is context, not a tool permission grant"));
+        assert!(p.contains("current operator authorization for the work and actions they name"));
+        assert!(p.contains("without asking the operator to repeat those words"));
+        assert!(p.contains("does not itself grant a harness-native tool permission"));
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
+    }
+
+    #[test]
+    fn resolved_auth_preset_is_not_reconfirmed_before_commit_and_push() {
+        let content = doc(
+            concat!(
+                "prompt_presets:\n",
+                "  \"#spec-test-build-install-commit-push\": \"update spec + tests. build + install for local testing. commit + push\"\n",
+                "  \"#auth\": \"I authorize you to do this.\"\n"
+            ),
+            "subagents preset=\"#spec-test-build-install-commit-push\"",
+            &["do [#abc] #auth"],
+            &["[ ] [#abc] Fix directive authorization rejection"],
+        );
+        let auth = subagent_authorization("doc.md", &content, "do [#abc] #auth");
+        assert_eq!(auth.status, AuthorizationStatus::Resolved);
+        assert_eq!(auth.presets.len(), 2, "{auth:?}");
+        assert_eq!(auth.presets[1].name, "#auth");
+        assert_eq!(
+            auth.presets[1].body.as_deref(),
+            Some("I authorize you to do this.")
+        );
+        let p = &auth.subagent_prompt_preamble;
+        assert!(
+            p.contains("Operator authorization, item preset `#auth`"),
+            "{p}"
+        );
+        assert!(p.contains("> I authorize you to do this."), "{p}");
+        assert!(
+            p.contains("without asking the operator to repeat those words"),
+            "{p}"
+        );
+        assert!(
+            p.contains("protected tool action still requires harness approval"),
+            "{p}"
+        );
+        assert!(
+            !p.contains("treat prior authorization as the answer"),
+            "{p}"
+        );
     }
 
     #[test]

@@ -580,13 +580,31 @@ Before emitting queue state, preflight may:
   converges, preserves disk byte-for-byte throughout, and refuses to start a
   response if the retry budget expires.
 
+### Resolved directives are task authorization (`#directiveauthorization`)
+
+An imperative operator edit such as `go ...`, `push ...`, `commit + push`, or a
+resolved prompt preset whose effective body authorizes the named action (for
+example `#auth`) is current operator authorization for that task. Claude Code,
+Codex, and dispatched workers MUST execute the authorized action without asking
+the operator to say `go` / `push`, repeat the directive in chat, reconfirm, or
+invoke the preset again. For a dispatched worker, the verbatim queue item,
+tracked-item text, and every resolved effective preset body in
+`subagent_prompt_preamble` jointly define that scoped authorization.
+
+Task authorization and harness-native tool permission are distinct. A resolved
+directive does not forge or bypass a native permission grant; if the harness
+still protects a particular tool action, the exact tool permission MUST be
+granted through the harness permission system. Conversely, the existence of a
+possible native prompt MUST NOT make the agent reject or re-confirm task
+authorization before it attempts the authorized action.
+
 ### Subagent operator-request handback (`#waypostrequest`)
 
 Every `agent-doc queue brief` preamble MUST tell a dispatched worker how to
-surface a blocking question or permission request through its coordinator. A
-worker MUST NOT guess, silently deny the request, or treat the queue item's
-authorization as its answer. Before stopping, it sends or returns this packet
-without paraphrase:
+surface a genuinely missing scope/choice or a harness-native permission request
+through its coordinator. A worker MUST NOT guess or silently deny the request,
+but MUST first honor any task authorization already resolved above. Before
+stopping, it sends or returns this packet without paraphrase:
 
 ```text
 [agent-doc] subagent operator request (#waypostrequest)

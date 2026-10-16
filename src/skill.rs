@@ -3533,9 +3533,10 @@ mod tests {
     #[test]
     fn bundled_skill_treats_imperative_document_edits_as_executable_work() {
         assert!(SKILL_TEMPLATE.contains("Imperative edits are executable directives"));
-        assert!(
-            SKILL_TEMPLATE.contains("Do not require the same instruction to be repeated in chat")
-        );
+        assert!(SKILL_TEMPLATE.contains("is already operator authorization for the work it names"));
+        assert!(SKILL_TEMPLATE.contains("do not ask the operator to say `go` / `push`"));
+        assert!(SKILL_TEMPLATE.contains("or invoke the preset again"));
+        assert!(SKILL_TEMPLATE.contains("harness-native tool-permission prompt"));
         assert!(
             SKILL_TEMPLATE
                 .contains("MCP auth / OAuth steps are sub-steps, not closeout boundaries")
@@ -3806,7 +3807,9 @@ mod tests {
         assert!(content.contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00"));
         assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
         assert!(content.contains("Imperative edits are executable directives"));
-        assert!(content.contains("Do not require the same instruction to be repeated in chat"));
+        assert!(content.contains("do not ask the operator to say `go` / `push`"));
+        assert!(content.contains("or invoke the preset again"));
+        assert!(content.contains("harness-native tool-permission prompt"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
     }
 
@@ -3823,7 +3826,7 @@ mod tests {
         assert!(content.contains("final document-mutation boundary for the cycle"));
         assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
         assert!(content.contains("Imperative edits are executable directives"));
-        assert!(content.contains("Do not require the same instruction to be repeated in chat"));
+        assert!(content.contains("do not ask the operator to say `go` / `push`"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
         assert!(!content.contains("Codex CLI will reject it"));
         assert!(!content.contains("In OpenCode, invoke agent-doc by writing"));
@@ -3881,6 +3884,9 @@ mod tests {
         assert!(content.contains("continue this turn"));
         assert!(content.contains("binary-owned response cycle"));
         assert!(content.contains("Do not manually patch the final assistant response"));
+        assert!(content.contains("do not ask the operator to say `go` / `push`"));
+        assert!(content.contains("or invoke the preset again"));
+        assert!(content.contains("harness-native tool-permission prompt"));
     }
 
     #[test]

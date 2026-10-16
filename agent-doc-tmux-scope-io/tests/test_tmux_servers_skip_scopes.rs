@@ -8,6 +8,7 @@ use std::path::Path;
 
 const TEST_TARGETS: &[&str] = &[
     "check",
+    "check-fast",
     "test",
     "tmux-ci",
     "sim-medium",

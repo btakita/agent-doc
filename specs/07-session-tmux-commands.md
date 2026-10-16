@@ -1475,6 +1475,31 @@ when it is available. Bare `display-message -p "#{session_name}"` may follow
 another attached client's selected session and must only be used as a fallback.
 Windowless sync must prefer the live project pin over the caller pane's tmux session.
 
+## tmux-spawn scope stewardship
+
+- GNU Make Rust-test entry points (`check`, `check-fast`, `test`, `tmux-ci`,
+  `sim-medium`, `sim-net`, and `cross-editor-simworld`) export an unreachable
+  `DBUS_SESSION_BUS_ADDRESS` target-specifically. The value reaches test
+  processes and the private tmux servers they create, preventing systemd-backed
+  tmux from creating a transient scope per pane. Install and release targets do
+  not inherit the override.
+- A non-temporary project controller may trigger the binary-owned sweep from its
+  idle maintenance boundary. A per-user locked timestamp limits all controllers
+  to one sweep per configured interval; inability to read or advance the stamp
+  is logged as an unavailable sweep rather than silently disabling maintenance.
+- The sweep acts only on names matching `tmux-spawn-*.scope`. It resets failed
+  units because reset-failed does not signal a process. It keeps a scope whose
+  launching tmux server and pane process are both alive.
+- A running orphan may be stopped only when its cgroup is empty, or every member
+  is proven by `/proc/<pid>/exe` to be the `agent-doc` executable and every
+  relevant path is lexically contained by a `tempfile` `.tmp*` fixture root
+  that is gone or old enough. `argv[0]` is not ownership evidence, parent-path
+  traversal is not fixture containment, and unreadable or foreign processes are
+  reported without signalling them.
+- `agent-doc admin tmux-scopes [--dry-run] [--json]` runs the same classifier on
+  demand. Scheduled and admin runs emit bounded `tmux_scope_sweep` detail plus
+  aggregate counts to the project ops log when a project log is available.
+
 ## controller
 
 `agent-doc controller status [--project-root ROOT] [--ensure]` reports the

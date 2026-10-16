@@ -21,7 +21,7 @@
 //!    reported and left alone: an operator process is never killed.
 
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 /// Unit-name prefix tmux (built with systemd support) uses for pane scopes.
@@ -224,8 +224,17 @@ pub fn is_temp_fixture_path(path: &Path, temp_bases: &[PathBuf]) -> bool {
 pub fn temp_fixture_root(path: &Path, temp_bases: &[PathBuf]) -> Option<PathBuf> {
     temp_bases.iter().find_map(|base| {
         let rest = path.strip_prefix(base).ok()?;
-        let first = rest.components().next()?.as_os_str().to_str()?;
-        first.starts_with(".tmp").then(|| base.join(first))
+        let mut components = rest.components();
+        let first = match components.next()? {
+            Component::Normal(first) => first.to_str()?,
+            _ => return None,
+        };
+        if !first.starts_with(".tmp")
+            || components.any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return None;
+        }
+        Some(base.join(first))
     })
 }
 
@@ -233,10 +242,13 @@ fn basename(value: &str) -> &str {
     value.rsplit('/').next().unwrap_or(value)
 }
 
-/// True when the process is the `agent-doc` binary (by argv[0] or exe name).
+/// True only when `/proc/<pid>/exe` proves this is the `agent-doc` binary.
+///
+/// `argv[0]` is deliberately not ownership proof: any operator process can set
+/// it with `exec -a agent-doc ...`, and the steward must never signal a process
+/// merely because it chose an agent-doc-looking display name.
 pub fn is_agent_doc_binary(process: &ScopeProcess) -> bool {
-    let argv0 = process.argv.first().map(|arg| basename(arg));
-    argv0 == Some("agent-doc") || process.exe_name.as_deref() == Some("agent-doc")
+    process.exe_name.as_deref().map(basename) == Some("agent-doc")
 }
 
 /// The absolute paths a process names: absolute argv tokens, including the
@@ -607,6 +619,33 @@ ControlGroup=/user.slice/user-1000.slice/user@1000.service/kitty-6968-0.scope
     fn mixed_path_operands_disprove_fixture_ownership() {
         let mut process = controller(11, "/tmp/.tmpAbc", 99_999);
         process.argv.push("/home/u/work/plan.md".to_string());
+        assert_eq!(
+            agent_doc_fixture_roots(&process, &policy().temp_bases),
+            None
+        );
+    }
+
+    #[test]
+    fn argv_zero_cannot_spoof_agent_doc_ownership() {
+        let mut process = controller(11, "/tmp/.tmpAbc", 99_999);
+        process.exe_name = Some("sleep".to_string());
+        process.argv[0] = "agent-doc".to_string();
+        assert!(!is_agent_doc_binary(&process));
+        assert_eq!(
+            agent_doc_fixture_roots(&process, &policy().temp_bases),
+            None
+        );
+    }
+
+    #[test]
+    fn parent_components_cannot_escape_a_fixture_root() {
+        let mut process = controller(11, "/tmp/.tmpAbc/../../home/user/project", 99_999);
+        assert_eq!(
+            agent_doc_fixture_roots(&process, &policy().temp_bases),
+            None
+        );
+        process.argv = vec!["agent-doc".to_string(), "start".to_string()];
+        process.cwd = Some(PathBuf::from("/tmp/.tmpAbc/../operator-project"));
         assert_eq!(
             agent_doc_fixture_roots(&process, &policy().temp_bases),
             None

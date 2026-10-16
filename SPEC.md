@@ -1,5 +1,12 @@
 # agent-doc Functional Specification
 
+- systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming
+  ownership (`#tmuxscopesteward`): Rust-test targets prevent new scope creation,
+  scheduled and on-demand sweeps reset failed units, and a running orphan is
+  stopped only with empty-cgroup or executable-plus-temp-fixture ownership proof.
+  All ambiguous processes are reported and left running. See
+  [Session And Tmux Commands](specs/07-session-tmux-commands.md#tmux-spawn-scope-stewardship).
+
 - An exhausted replica-rebuild budget (`state=editor_holds_unmerged_visible_text`)
   is resolved in place, not by a controller recycle (`#jetbrainsreplicaloops`):
   the controller sends a hash-fenced `editor_visible_roll_forward` event, the

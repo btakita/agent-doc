@@ -11,7 +11,7 @@
 # and release targets keep the real bus. `systemctl --user` is unaffected: it
 # reaches the manager over `$XDG_RUNTIME_DIR/systemd/private`.
 TEST_SESSION_BUS_ADDRESS := unix:path=/nonexistent/agent-doc-test-no-session-bus
-check test tmux-ci sim-medium sim-net cross-editor-simworld: export DBUS_SESSION_BUS_ADDRESS = $(TEST_SESSION_BUS_ADDRESS)
+check check-fast test tmux-ci sim-medium sim-net cross-editor-simworld: export DBUS_SESSION_BUS_ADDRESS = $(TEST_SESSION_BUS_ADDRESS)
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 

@@ -534,10 +534,20 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   `agent-doc-jetbrains-263-<version>.zip`, and an unprovable or unsupported
   target fails before any installed tree is replaced. `--local --all-installed`
   applies the same policy independently to every existing installation.
-  When a live IDE owns a 262 target, the modular package has no restart-free
-  dynamic upgrade entry point: the installer skips the attach, replaces the
-  files, and reports restart-required naming that reason
+  When a live IDE owns a 262 or 263 target, the modular package has no
+  restart-free dynamic upgrade entry point: the installer skips the attach,
+  replaces the files, and reports restart-required naming that reason
   (`declined_by=modular_package`), not a legacy-package or upgrader failure.
+  That loss is permanent on the build (GH #277), so it is reported like the
+  GH #108 decline: the permanent-loss NOTE (once per process), the summary
+  line "restart-free upgrade is unavailable on this build", and
+  `restart_free_unavailable=true` in `plugin_upgrade_summary`. The NOTE and the
+  summary also say the restart can wait for a convenient moment: routes stay
+  admitted while the IDE's native endpoint answers with this binary's build
+  (GH #267), native saves stay admitted at or above the native-save protocol
+  floor (GH #236), the new plugin's own changes load only at the restart, and a
+  `plugin_bytes_superseded` route refusal is answered with
+  `agent-doc admin reload-lib`, then a restart if that reload is refused.
 - A live IDE counts as owning a JetBrains install target only when it loads
   plugins from that target (GH #238). Ownership is decided from process
   evidence BEFORE any package-level refusal, strongest first: an agent-doc

@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -140,7 +141,25 @@ v0.35.511 is tagged and pushed, main is at `822df43fec`, and the local install i
 **Other notes:**
 - A test isolation fix (`413fc47dbb`) makes the two `retained_pending_write_guidance_*` tests use their own temporary project. Every subagent had hit them when working outside agent-loop.
 - `install-full` deletes `target/` when it finishes. My release log was in there, so it looked like a failure; it wasn't.
-<!-- agent:boundary:33825235 -->
+
+### Re: Subagent completed: `subagent:clearrelaunch` returned work for queue item “do [#clearsessioncontext]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=e1401c22cbd6164ca8c4401367c431d5c96a1daa725ebebb8fbd5bcc652ab461 -->
+
+### Re: Subagent completed: `subagent:jbreplicaloops` returned work for queue item “do [#jetbrainsreplicaloops]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=6fb3249361d74ee506d5448855d3cc74ec1a7fa9cf82d27669ba16e9c664666a -->
+> **Chat prompt (#chatprompt):** Is the releas published?
+
+### Re: is v0.35.511 published — opus-5.5 · 2026-10-16T10:15-04:00
+
+**Yes. v0.35.511 is fully published.**
+- **Release workflow:** run 38863189738 finished `success`. All six platform builds passed, plus `plugins`, `release`, `pypi` and `homebrew / bump-formula`.
+- **GitHub Release:** `v0.35.511` was published at 2026-10-16T07:30:50Z with 15 assets.
+- **PyPI:** the latest version is 0.35.511.
+
+**What's next:** the two follow-ups (`clearsessioncontext`, `jetbrainsreplicaloops`) are merged in `integ-followups`, and its `make check` is still running. They aren't in 0.35.511; they ship in 0.35.512 along with the sdk.md Clear fix already on main. There were no actionable follow-up items to capture this turn. The splice-rebase bug the subagent found will be added to the backlog when the follow-ups close.
+<!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 
 <!--

@@ -14,7 +14,7 @@ fn document(frontmatter: &str, queue_attr: &str, queue: &[&str], backlog: &[&str
     )
 }
 
-const PRESETS: &str = "prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tests. build + install for local testing. commit + push\"\n";
+const PRESETS: &str = "prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tests. build + install for local testing. commit + push\"\n  \"#auth\": \"I authorize you to do this.\"\n";
 const PRESET_BODY: &str = "update spec + tests. build + install for local testing. commit + push";
 
 fn write_doc(content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
@@ -29,7 +29,7 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
     let (_dir, doc) = write_doc(&document(
         PRESETS,
         "subagents preset=\"#spec-test-build-install-commit-push\"",
-        &["do [#waypost]", "rename foo to bar"],
+        &["do [#waypost] #auth", "rename foo to bar"],
         &["[ ] [#waypost] Post authorization to Claude Code subagents"],
     ));
     cargo_bin_cmd!("agent-doc")
@@ -44,6 +44,17 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
             "> Post authorization to Claude Code subagents",
         ))
         .stdout(predicate::str::contains(format!("> {PRESET_BODY}")))
+        .stdout(predicate::str::contains(
+            "Operator authorization, item preset `#auth`",
+        ))
+        .stdout(predicate::str::contains("> I authorize you to do this."))
+        .stdout(predicate::str::contains(
+            "without asking the operator to repeat those words",
+        ))
+        .stdout(predicate::str::contains(
+            "does not itself grant a harness-native tool permission",
+        ))
+        .stdout(predicate::str::contains("treat prior authorization as the answer").not())
         .stdout(predicate::str::contains("Never run `make install`"))
         .stdout(predicate::str::contains("#waypostrequest"))
         .stdout(predicate::str::contains("kind: question | permission"))

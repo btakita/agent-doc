@@ -4879,6 +4879,13 @@ const RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS: u32 = 3;
 /// ~15 s (2.4 MB per rebuild on a large document) and minted the new delivery
 /// epoch that restarted its own budget.
 const RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS: u32 = 2;
+/// `#jetbrainsreplicaloops`: delivered in-place visible roll-forward requests
+/// per refused content, sent on the same every-third-refusal cadence once the
+/// rebuild budget is spent. The first one is the recovery; the second covers a
+/// request the editor declined because the operator was mid-keystroke or its
+/// replica was still behind canonical. After them the durable exhausted state
+/// stands alone and its remedy governs.
+const RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RetainedPersistenceRetryDecision {
@@ -4887,6 +4894,10 @@ struct RetainedPersistenceRetryDecision {
     /// `#rebuildconverge`: the rebuild budget for this content was spent and
     /// the editor still refuses it. Surface the operator-visible state once.
     report_rebuild_exhausted: bool,
+    /// `#jetbrainsreplicaloops`: the rebuild budget is spent, so ask the editor
+    /// to roll its visible buffer forward in place onto this exact content
+    /// instead of waiting for a controller recycle to do the same reseed.
+    request_visible_roll_forward: bool,
     refusals: u32,
     rebuilds: u32,
 }
@@ -4904,6 +4915,7 @@ struct RetainedPersistenceRefusalStreak {
     refusals: u32,
     rebuilds: u32,
     exhausted_reported: bool,
+    roll_forwards: u32,
 }
 
 /// Backoff before re-claim attempt `attempt` (1-based): 1s doubling, capped at 30s.
@@ -4968,12 +4980,22 @@ fn retained_persistence_retry_step(
     if report_rebuild_exhausted {
         entry.exhausted_reported = true;
     }
+    // `#jetbrainsreplicaloops`: past the rebuild budget the refusal is the
+    // visible buffer's, so the escalation edge asks the editor to roll that
+    // buffer forward in place, bounded per content like the rebuilds.
+    let request_visible_roll_forward = escalation_due
+        && !request_replica_rebuild
+        && entry.roll_forwards < RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS;
+    if request_visible_roll_forward {
+        entry.roll_forwards += 1;
+    }
     Some(RetainedPersistenceRetryDecision {
         delay: retained_persistence_retry_delay(
             entry.refusals.min(RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES),
         ),
         request_replica_rebuild,
         report_rebuild_exhausted,
+        request_visible_roll_forward,
         refusals: entry.refusals,
         rebuilds: entry.rebuilds,
     })
@@ -4990,6 +5012,20 @@ fn refund_undelivered_retained_persistence_rebuild(
         && entry.content_hash == content_hash
     {
         entry.rebuilds = entry.rebuilds.saturating_sub(1);
+    }
+}
+
+/// `#jetbrainsreplicaloops`: a roll-forward request that reached no editor
+/// replica is not an attempt, so it does not spend the per-content budget.
+fn refund_undelivered_retained_persistence_roll_forward(
+    retries: &mut std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
+    key: &str,
+    content_hash: &str,
+) {
+    if let Some(entry) = retries.get_mut(key)
+        && entry.content_hash == content_hash
+    {
+        entry.roll_forwards = entry.roll_forwards.saturating_sub(1);
     }
 }
 
@@ -5011,6 +5047,7 @@ pub struct TestSupportRetainedPersistenceLedger {
 pub struct TestSupportRetainedPersistenceStep {
     pub request_replica_rebuild: bool,
     pub report_rebuild_exhausted: bool,
+    pub request_visible_roll_forward: bool,
     pub refusals: u32,
     pub rebuilds: u32,
 }
@@ -5060,6 +5097,7 @@ impl TestSupportRetainedPersistenceLedger {
         TestSupportRetainedPersistenceStep {
             request_replica_rebuild: decision.request_replica_rebuild,
             report_rebuild_exhausted: decision.report_rebuild_exhausted,
+            request_visible_roll_forward: decision.request_visible_roll_forward,
             refusals: decision.refusals,
             rebuilds: decision.rebuilds,
         }
@@ -6330,7 +6368,7 @@ impl ControllerDocumentGraphs {
                                 agent_doc_ops_log_io::log_op(
                                     &file,
                                     &format!(
-                                        "retained_persistence_replica_rebuild_exhausted document_hash={} generation={} epoch={} content_hash={} content_len={} refusals={} rebuilds={} state=editor_holds_unmerged_visible_text recovery=capped_native_save_retry operator_action=reconcile_editor_buffer_with_retained_write",
+                                        "retained_persistence_replica_rebuild_exhausted document_hash={} generation={} epoch={} content_hash={} content_len={} refusals={} rebuilds={} state=editor_holds_unmerged_visible_text recovery=editor_visible_roll_forward operator_action=reconcile_editor_buffer_with_retained_write",
                                         document_hash,
                                         generation,
                                         epoch,
@@ -6340,6 +6378,68 @@ impl ControllerDocumentGraphs {
                                         retry.rebuilds,
                                     ),
                                 );
+                            }
+                            if retry.request_visible_roll_forward {
+                                // `#jetbrainsreplicaloops`: the same in-place
+                                // reseed a fresh controller performs from the
+                                // editor's retained replica, without the
+                                // recycle: the editor publishes its visible
+                                // buffer onto this exact canonical (fenced by
+                                // its hash) and the retained transition
+                                // re-applies the pending write on top of the
+                                // operator's text. Never a controller write
+                                // over that buffer.
+                                let delivered = match agent_doc_crdt_relay_io::signal_editor_visible_roll_forward(
+                                    &file,
+                                    agent_doc_crdt_relay_io::ReplicaEventExpectedContent {
+                                        content_hash: &content_hash,
+                                        content_len,
+                                    },
+                                ) {
+                                    Ok(outcome) => {
+                                        agent_doc_ops_log_io::log_op(
+                                            &file,
+                                            &format!(
+                                                "retained_persistence_visible_roll_forward_requested document_hash={} generation={} epoch={} content_hash={} content_len={} found={} notified={} diagnosis={} refusals={} rebuilds={} max_roll_forwards={} recovery=editor_visible_roll_forward",
+                                                document_hash,
+                                                generation,
+                                                epoch,
+                                                content_hash,
+                                                content_len,
+                                                outcome.found,
+                                                outcome.notified,
+                                                outcome.diagnosis(),
+                                                retry.refusals,
+                                                retry.rebuilds,
+                                                RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS,
+                                            ),
+                                        );
+                                        outcome.notified > 0
+                                    }
+                                    Err(error) => {
+                                        agent_doc_ops_log_io::log_op(
+                                            &file,
+                                            &format!(
+                                                "retained_persistence_visible_roll_forward_deferred document_hash={} generation={} epoch={} content_hash={} error={error:#}",
+                                                document_hash,
+                                                generation,
+                                                epoch,
+                                                content_hash,
+                                            ),
+                                        );
+                                        false
+                                    }
+                                };
+                                if !delivered
+                                    && let Some(runtime) = worker_sink.runtime.upgrade()
+                                {
+                                    runtime
+                                        .document_graphs
+                                        .refund_retained_persistence_roll_forward(
+                                            &document_hash,
+                                            &content_hash,
+                                        );
+                                }
                             }
                             schedule_refused_retained_persistence_retry(
                                 worker_sink.runtime.clone(),
@@ -7595,6 +7695,15 @@ impl ControllerDocumentGraphs {
     /// `#rebuildconverge`: return an undelivered rebuild to the content's budget.
     fn refund_retained_persistence_rebuild(&self, document_hash: &str, content_hash: &str) {
         refund_undelivered_retained_persistence_rebuild(
+            &mut self.retained_persistence_retries.lock(),
+            document_hash,
+            content_hash,
+        );
+    }
+
+    /// `#jetbrainsreplicaloops`: return an undelivered roll-forward request.
+    fn refund_retained_persistence_roll_forward(&self, document_hash: &str, content_hash: &str) {
+        refund_undelivered_retained_persistence_roll_forward(
             &mut self.retained_persistence_retries.lock(),
             document_hash,
             content_hash,
@@ -21379,6 +21488,94 @@ agent:queue\n\
         )
     }
 
+    /// `#jetbrainsreplicaloops` (sdk.md, 2026-10-16T05:57Z-06:05Z): the
+    /// editor's visible buffer held operator typing (new queue items, a struck
+    /// line removed) the retained response lacked, and every native save was
+    /// refused. The in-place roll-forward makes that visible buffer the
+    /// canonical; this proves the controller's own retained transition then
+    /// re-applies the response on top of it exactly once, keeps every operator
+    /// line, waits for the rolled-forward delivery to converge before writing,
+    /// and reaches its fixed point instead of inserting the response again.
+    #[test]
+    fn a_rolled_forward_visible_buffer_gets_the_retained_response_reapplied_once() {
+        let base = "## Exchange\n<!-- agent:exchange -->\nWhat is the full todo text for #tdc?\n<!-- agent:boundary:5d1f0a2c -->\n<!-- /agent:exchange -->\n## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs]\n<!-- /agent:queue -->\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+        let response = "### Re: full todo text for #tdc\n\nHere is the full text.\n";
+        let target = base.replace(
+            "<!-- agent:boundary:5d1f0a2c -->",
+            &format!("{response}<!-- agent:boundary:5d1f0a2c -->"),
+        );
+        // The operator's visible buffer: struck line removed, two items added.
+        let visible = base.replace(
+            "- ~~do [#tdc]~~\n- do [#sdkdocs]\n",
+            "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
+        );
+        let mut projection = retained_resume_projection("jetbrains-replica-loops");
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
+        intent.target_content = target.clone();
+        intent.target_hash = agent_doc_hash::content_hash(&target);
+        intent.continuation = None;
+        projection.closeout.captured_response = None;
+        let delivery = |cut: &str, converged: bool| RetainedDeliveryObservation {
+            file: PathBuf::from("/work/sdk.md"),
+            content: Arc::from(cut),
+            content_hash: agent_doc_hash::content_hash(cut),
+            live_editors: 1,
+            delivery_converged: converged,
+            delivery_version: 254,
+        };
+
+        // Ordering: the editor published its buffer but the controller has
+        // not yet observed it visibly projected. No write lands over it.
+        let pending =
+            retained_transition_state(Some(&projection), Some(&delivery(&visible, false)), 7);
+        assert_eq!(
+            retained_transition_state_tag(&pending),
+            "awaiting_convergence"
+        );
+
+        let state =
+            retained_transition_state(Some(&projection), Some(&delivery(&visible, true)), 7);
+        assert_eq!(retained_transition_state_tag(&state), "apply_target");
+        let RetainedTransitionState::ApplyTarget(transition) = &state else {
+            unreachable!();
+        };
+        assert_eq!(
+            transition.base_content.as_ref(),
+            visible,
+            "the operator's visible text is the base the response rolls forward onto"
+        );
+        let rolled = transition.target_content.as_ref();
+        assert_eq!(rolled.matches(response).count(), 1, "{rolled}");
+        for operator_line in [
+            "- do [#sdkdocs]\n",
+            "- review [#retryloop]\n",
+            "- do [#sdkexamples]\n",
+        ] {
+            assert!(
+                rolled.contains(operator_line),
+                "lost {operator_line:?}: {rolled}"
+            );
+        }
+        assert!(
+            !rolled.contains("~~do [#tdc]~~"),
+            "the struck line the operator removed must not come back from the base: {rolled}"
+        );
+        assert_eq!(
+            rolled.replacen(response, "", 1),
+            visible,
+            "exactly the operator text plus the response (its placement beside the \
+             binary-owned boundary is the write policy's)"
+        );
+
+        // Fixed point: once the editor shows the projected target, the
+        // transition settles instead of inserting the response a second time.
+        let settled =
+            retained_transition_state(Some(&projection), Some(&delivery(rolled, true)), 7);
+        assert_eq!(retained_transition_state_tag(&settled), "target_visible");
+    }
+
     #[test]
     fn a_retained_delta_already_in_the_editor_cut_is_its_fixed_point() {
         let cut = "## Exchange\n<!-- agent:exchange -->\nThe performance seems slow.\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n\n1. Test 4 vCPU.\n<!-- /agent:exchange -->\n## Queue\n<!-- agent:queue -->\n- slow?\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- agent:done -->\n<!-- /agent:done -->\n";
@@ -24290,6 +24487,102 @@ mod retained_persistence_retry_tests {
         assert_eq!(
             retries["doc"].rebuilds,
             RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS
+        );
+    }
+
+    /// `#jetbrainsreplicaloops`: once the rebuild budget is spent the
+    /// escalation edge stops rebuilding the replica and instead asks the
+    /// editor to roll its visible buffer forward in place, on the same
+    /// slow cadence and bounded per content. Ordering: no roll-forward
+    /// before the last delivered rebuild (a rebuild may still converge the
+    /// replica), the first one exactly when the exhausted state is recorded,
+    /// and none past the budget, however long the capped retry runs.
+    #[test]
+    fn exhausted_rebuilds_request_a_bounded_in_place_visible_roll_forward() {
+        let mut retries = std::collections::HashMap::new();
+        let mut epoch = 240u64;
+        let mut rebuild_refusals = Vec::new();
+        let mut roll_forward_refusals = Vec::new();
+        let mut exhausted_at = None;
+        for _ in 0..200 {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "sdk", epoch, CONTENT, false, false)
+                    .unwrap();
+            assert!(
+                !(decision.request_replica_rebuild && decision.request_visible_roll_forward),
+                "one escalation edge never both rebuilds and rolls forward"
+            );
+            if decision.request_replica_rebuild {
+                rebuild_refusals.push(decision.refusals);
+                epoch += 3;
+            }
+            if decision.request_visible_roll_forward {
+                roll_forward_refusals.push(decision.refusals);
+            }
+            if decision.report_rebuild_exhausted {
+                exhausted_at = Some(decision.refusals);
+            }
+        }
+        let every = RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS;
+        assert_eq!(rebuild_refusals, vec![every, 2 * every]);
+        assert_eq!(exhausted_at, Some(3 * every));
+        assert_eq!(
+            roll_forward_refusals,
+            vec![3 * every, 4 * every],
+            "the first roll-forward rides the exhaustion edge, the second the next escalation"
+        );
+        assert_eq!(
+            roll_forward_refusals.len() as u32,
+            RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS
+        );
+        assert!(
+            rebuild_refusals.iter().max() < roll_forward_refusals.iter().min(),
+            "never roll the visible buffer forward while a rebuild could still converge"
+        );
+
+        // The rolled-forward buffer is different content: a new streak, so a
+        // later divergence of THAT content earns its own rebuilds first.
+        let rolled = ("rolled-forward-operator-text", 39914usize);
+        let first =
+            retained_persistence_retry_step(&mut retries, "sdk", epoch + 1, rolled, false, false)
+                .unwrap();
+        assert_eq!(first.refusals, 1);
+        assert!(!first.request_visible_roll_forward);
+    }
+
+    #[test]
+    fn an_undelivered_roll_forward_request_does_not_spend_the_budget() {
+        let mut retries = std::collections::HashMap::new();
+        let mut requested = 0;
+        for _ in 0..90 {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
+                    .unwrap();
+            if decision.request_visible_roll_forward {
+                // The first two requests reach no editor replica.
+                if requested < 2 {
+                    refund_undelivered_retained_persistence_roll_forward(
+                        &mut retries,
+                        "doc",
+                        CONTENT.0,
+                    );
+                }
+                requested += 1;
+            }
+        }
+        assert_eq!(
+            requested,
+            2 + RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS,
+            "undelivered requests are re-armed; delivered ones are bounded"
+        );
+        refund_undelivered_retained_persistence_roll_forward(&mut retries, "doc", "other");
+        assert_eq!(
+            retries["doc"].roll_forwards,
+            RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS
+        );
+        assert_eq!(
+            retries["doc"].rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
+            "a roll-forward refund never refunds a rebuild"
         );
     }
 

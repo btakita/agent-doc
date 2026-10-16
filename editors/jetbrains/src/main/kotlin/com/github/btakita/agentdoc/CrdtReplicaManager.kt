@@ -374,6 +374,64 @@ internal fun <M> selectReplicaManagerUtil(
 internal fun shouldReregisterForRemoteEventUtil(reasonToken: String?): Boolean =
     reasonToken == "editor_replica_reregister"
 
+/**
+ * `#jetbrainsreplicaloops`: the controller spent its replica-rebuild budget on
+ * one retained native save that this editor keeps refusing, so the visible
+ * buffer, not the replica, diverges. This typed event is the only thing that
+ * licenses rolling that buffer forward onto controller canonical in place.
+ */
+internal fun shouldRollVisibleForwardForRemoteEventUtil(reasonToken: String?): Boolean =
+    reasonToken == VISIBLE_ROLL_FORWARD_REASON_TOKEN
+
+internal const val VISIBLE_ROLL_FORWARD_REASON_TOKEN = "editor_visible_roll_forward"
+
+/** What one controller roll-forward request does, decided from exact hashes. */
+internal enum class VisibleRollForwardDecision(val token: String) {
+    /** Publish the visible buffer onto the fenced canonical. */
+    RollForward("roll_forward"),
+    /** The replica already holds the visible cut; only its publish receipt is missing. */
+    RepublishPending("republish_pending"),
+    /** Canonical already is the visible buffer: nothing to roll forward. */
+    AlreadyConverged("already_converged"),
+    /** Canonical is no longer the content the controller proved exhausted. */
+    CanonicalMoved("canonical_moved"),
+    /** The replica has not caught up with that canonical yet; drain first. */
+    ReplicaBehind("replica_behind_canonical"),
+    /** A remote apply is mutating the buffer right now. */
+    RemoteApplyInFlight("remote_apply_in_flight"),
+    /** No consistent read-locked cut of the visible buffer was available. */
+    VisibleUnavailable("visible_unavailable"),
+    /** The operator's buffer fails the template-structure guard; it stays held. */
+    VisibleStructureInvalid("visible_structure_invalid"),
+}
+
+/**
+ * `#jetbrainsreplicaloops`: the in-place roll-forward is safe only for the exact
+ * canonical the controller named (a stale request describes a state that has
+ * moved), only from a replica that holds that canonical (the single splice is
+ * computed against it), only from a complete visible cut, and only when that
+ * cut is a well-formed document. Every other case declines and leaves the
+ * buffer exactly as the operator left it.
+ */
+internal fun visibleRollForwardDecisionUtil(
+    expectedCanonicalHash: String,
+    canonicalHash: String?,
+    replicaHash: String?,
+    visibleHash: String?,
+    visibleStructureExact: Boolean,
+    remoteApplyInFlight: Boolean,
+): VisibleRollForwardDecision = when {
+    visibleHash == null -> VisibleRollForwardDecision.VisibleUnavailable
+    canonicalHash == visibleHash -> VisibleRollForwardDecision.AlreadyConverged
+    canonicalHash == null || !canonicalHash.equals(expectedCanonicalHash, ignoreCase = true) ->
+        VisibleRollForwardDecision.CanonicalMoved
+    remoteApplyInFlight -> VisibleRollForwardDecision.RemoteApplyInFlight
+    replicaHash == visibleHash -> VisibleRollForwardDecision.RepublishPending
+    replicaHash != canonicalHash -> VisibleRollForwardDecision.ReplicaBehind
+    !visibleStructureExact -> VisibleRollForwardDecision.VisibleStructureInvalid
+    else -> VisibleRollForwardDecision.RollForward
+}
+
 internal fun projectionRecoveryReregisterDueUtil(
     lastStartedMs: Long?,
     nowMs: Long,
@@ -4550,6 +4608,129 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     /**
+     * `#jetbrainsreplicaloops`: the controller's exhausted-rebuild recovery, done
+     * in place. Before, a replica looping on a stale-baseline local delta
+     * (`recovery=canonical-rebootstrap-captured-local-delta`) with every native
+     * save refused (`visible_length_mismatch`) was only broken by a controller
+     * recycle, whose fresh-controller retained reseed published this exact
+     * buffer and re-applied the captured response on top (sdk.md,
+     * 2026-10-16T06:05Z). The same roll-forward now runs on the controller's
+     * request without the recycle: the operator's visible text is the base and
+     * becomes canonical as one bounded splice from the fenced canonical; the
+     * controller's retained transition re-applies the pending write on top of
+     * it. Nothing here writes controller text into the buffer.
+     */
+    internal fun scheduleVisibleRollForward(filePath: String, expectedCanonicalHash: String, reason: String) {
+        try {
+            documentWorkers.forDocument(filePath).execute {
+                if (!disposed.get()) rollVisibleBufferForward(filePath, expectedCanonicalHash, reason)
+            }
+        } catch (error: RejectedExecutionException) {
+            if (!disposed.get()) {
+                log.warn("[crdt-replica] visible roll-forward scheduling rejected for $filePath", error)
+            }
+        }
+    }
+
+    private fun rollVisibleBufferForward(filePath: String, expectedCanonicalHash: String, reason: String) {
+        val name = File(filePath).name
+        val forwarder = forwarders[filePath]
+        val root = resolveProjectRoot(filePath)
+        if (forwarder == null || !forwarder.attached || root == null) {
+            log.warn(
+                "[crdt-replica] visible roll-forward declined for $name; decision=no_attached_replica " +
+                    "expected_canonical_hash=$expectedCanonicalHash reason=$reason (#jetbrainsreplicaloops)",
+            )
+            return
+        }
+        val canonical = CpSocketReplicaTransport(root).currentCanonicalText(filePath)
+        val replica = forwarder.replicaText()
+        // The complete visible buffer under one read action: the text the
+        // operator can see, including every keystroke a captured batch holds.
+        val visible = withEditorCaptureCut(filePath) { it }
+        val visibleExact =
+            visible?.let {
+                templateStructureState(filePath, it, TemplateValidationPlane.Lane.Editor, "visible-roll-forward") ==
+                    TemplateStructureProjectionState.Exact
+            } ?: false
+        val decision =
+            visibleRollForwardDecisionUtil(
+                expectedCanonicalHash = expectedCanonicalHash,
+                canonicalHash = canonical?.let(::contentHash),
+                replicaHash = replica?.let(::contentHash),
+                visibleHash = visible?.let(::contentHash),
+                visibleStructureExact = visibleExact,
+                remoteApplyInFlight = isApplyingRemote(filePath) || remoteEditorApplyPaths.contains(filePath),
+            )
+        when (decision) {
+            VisibleRollForwardDecision.RollForward,
+            VisibleRollForwardDecision.RepublishPending -> Unit
+            VisibleRollForwardDecision.AlreadyConverged -> {
+                log.info(
+                    "[crdt-replica] visible roll-forward not needed for $name; decision=${decision.token} " +
+                        "reason=$reason (#jetbrainsreplicaloops)",
+                )
+                requestUrgentRemoteDrain(filePath, "visible-roll-forward-converged")
+                return
+            }
+            else -> {
+                log.warn(
+                    "[crdt-replica] visible roll-forward declined for $name; decision=${decision.token} " +
+                        "expected_canonical_hash=$expectedCanonicalHash " +
+                        "canonical_hash=${canonical?.let(::contentHash) ?: "unavailable"} " +
+                        "replica_hash=${replica?.let(::contentHash) ?: "missing"} " +
+                        "buffer_hash=${visible?.let(::contentHash) ?: "unavailable"} reason=$reason " +
+                        "recovery=await_next_controller_request (#jetbrainsreplicaloops)",
+                )
+                if (decision == VisibleRollForwardDecision.ReplicaBehind) {
+                    requestUrgentRemoteDrain(filePath, "visible-roll-forward-replica-behind")
+                }
+                return
+            }
+        }
+        val visibleText = visible!!
+        val published =
+            if (decision == VisibleRollForwardDecision.RepublishPending) {
+                forwarder.republishUndurableLocalEdits()
+            } else {
+                forwarders[filePath] === forwarder && forwarder.ensureEditorText(visibleText)
+            }
+        if (forwarders[filePath] !== forwarder || forwarder.replicaText() != visibleText) {
+            log.warn(
+                "[crdt-replica] visible roll-forward publication failed for $name; the buffer is untouched " +
+                    "and the controller's next request retries; reason=$reason (#jetbrainsreplicaloops)",
+            )
+            requestRemoteDrain(filePath, "visible-roll-forward-retry")
+            return
+        }
+        // The replica now holds exactly the visible cut. Re-base local
+        // bookkeeping on it: the quarantined stale-baseline batch is subsumed,
+        // and anything typed after the cut is kept and forwarded from it.
+        shadows[filePath] = visibleText
+        undurableLocalForwards.remove(filePath)
+        unforwardedOperatorTextObservations.remove(filePath)
+        retainedCanonicalProjectionPaths.remove(filePath)
+        fenceCapturedEditsSubsumedByPublishedBuffer(filePath, visibleText, "visible-roll-forward")
+        val canonicalAfter = CpSocketReplicaTransport(root).currentCanonicalText(filePath)
+        val settled =
+            canonicalAfter == visibleText && projectSettledVisibleState(filePath, forwarder, visibleText)
+        if (!settled) {
+            // Canonical kept controller text the buffer merely lacked (the
+            // relay's component isolation, or the retained write re-applied
+            // on top). Projecting the bare cut would only force a whole-buffer
+            // rebootstrap; drain that delta into the now-unblocked buffer.
+            requestUrgentRemoteDrain(filePath, "visible-roll-forward-drain")
+        }
+        log.warn(
+            "[crdt-replica] rolled the visible operator buffer forward in place for $name; " +
+                "decision=${decision.token} expected_canonical_hash=$expectedCanonicalHash " +
+                "buffer_hash=${contentHash(visibleText)} " +
+                "canonical_hash=${canonicalAfter?.let(::contentHash) ?: "unavailable"} published=$published " +
+                "settled=$settled reason=$reason recovery=editor_visible_roll_forward (#jetbrainsreplicaloops)",
+        )
+    }
+
+    /**
      * `retainedtargetdropsedit` self-heal. A replica that lost an operator splice
      * never converges by itself: the controller keeps asking the editor to save
      * the replica's text, the editor rightly refuses because its visible buffer
@@ -4933,6 +5114,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun requestUrgentRemoteDrain(project: Project, filePath: String, reason: String) {
             managerForFile(project, filePath)?.requestUrgentRemoteDrain(filePath, reason)
+        }
+
+        /**
+         * `#jetbrainsreplicaloops`: schedule the controller-licensed in-place
+         * visible roll-forward on the document's serialized worker. False only
+         * when no replica manager serves [filePath].
+         */
+        fun rollVisibleBufferForward(
+            project: Project,
+            filePath: String,
+            expectedCanonicalHash: String,
+            reason: String,
+        ): Boolean {
+            val manager = managerForFile(project, filePath) ?: return false
+            manager.scheduleVisibleRollForward(filePath, expectedCanonicalHash, reason)
+            return true
         }
 
         /**

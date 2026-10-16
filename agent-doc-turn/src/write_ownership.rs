@@ -629,24 +629,43 @@ pub const EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE: &str = "editor_holds_unmerge
 pub const RECONCILE_EDITOR_BUFFER_OPERATOR_ACTION: &str =
     "reconcile_editor_buffer_with_retained_write";
 
+/// The ops-log event the controller writes when it asks the editor to roll its
+/// visible buffer forward in place (`#jetbrainsreplicaloops`). The remedy names
+/// it so an agent can tell "requested, still converging" from "never asked".
+pub const VISIBLE_ROLL_FORWARD_REQUESTED_EVENT: &str =
+    "retained_persistence_visible_roll_forward_requested";
+
 /// The one instruction for an editor whose visible buffer holds text the
 /// retained write lacks after the controller's replica-rebuild budget is spent
 /// (`#splicesessionack`, GH #273). `session-check`'s terminal report and the
 /// write path's retained refusal both render it, so they cannot disagree.
+///
+/// `#jetbrainsreplicaloops`: the controller no longer leaves this state to the
+/// operator. Its exhaustion edge asks the editor to roll the visible buffer
+/// forward in place (the operator's text becomes canonical, the retained write
+/// is re-applied on top once), which is what a controller recycle's
+/// fresh-controller reseed did. The remedy used to forbid `admin recycle`, the
+/// one command that ended the loop; it is now the sanctioned fallback for an
+/// editor that does not honour the in-place request, after that request.
 pub fn editor_holds_unmerged_visible_text_remedy(file: &str) -> String {
     format!(
         "The editor that has {file} open refused every native save of the retained write, and \
          the controller's replica rebuilds did not change that: its VISIBLE buffer holds text the \
          retained write does not contain — typically operator typing held as an unmerged local \
-         batch (state={EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE}). Waiting will not converge it, \
-         and the controller deliberately never overwrites that buffer. The retained write is \
-         durable and NOT lost: do NOT re-send it, force disk (that discards the operator's \
-         text), or run `admin recycle` or `admin reload-lib` (the replica was already rebuilt). \
-         Do NOT run `agent-doc commit {file}` either; it adopts neither text. Operator action \
-         (operator_action={RECONCILE_EDITOR_BUFFER_OPERATOR_ACTION}): ask the operator to \
-         reconcile the editor buffer of {file} with the retained write, keeping the text they \
-         typed. Once the buffer and the retained write agree, the controller's capped \
-         native-save retry persists it on its own; then run `agent-doc session-check {file}`"
+         batch (state={EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE}). The retained write is durable \
+         and NOT lost, and the controller resolves this in place: it asks that editor to roll its \
+         visible buffer forward onto canonical, so the operator's text becomes the base and the \
+         retained write is re-applied on top of it once. Do NOT re-send it, force disk (that \
+         discards the operator's text), or run `admin reload-lib` (the replica was already \
+         rebuilt). Do NOT run `agent-doc commit {file}` either; it adopts neither text. Re-run \
+         `agent-doc session-check {file}` shortly. Only if this state still holds after the ops \
+         log records `{VISIBLE_ROLL_FORWARD_REQUESTED_EVENT}` for {file} (an editor plugin that \
+         predates the in-place roll-forward, or a visible buffer the template-structure guard \
+         refuses) run `agent-doc admin recycle`: a fresh controller reseeds from the editor's \
+         retained replica, the same roll-forward. Operator action \
+         (operator_action={RECONCILE_EDITOR_BUFFER_OPERATOR_ACTION}) only if that also leaves \
+         it in place: ask the operator to reconcile the editor buffer of {file} with the \
+         retained write, keeping the text they typed; then run `agent-doc session-check {file}`"
     )
 }
 
@@ -2088,9 +2107,32 @@ mod tests {
                 remedy.contains("Do NOT run `agent-doc commit plan.md`"),
                 "{remedy}"
             );
-            for invented in ["re-send", "force disk", "admin recycle"] {
+            for invented in ["re-send", "force disk", "admin reload-lib"] {
                 assert!(remedy.contains(invented), "{invented}: {remedy}");
             }
+            // `#jetbrainsreplicaloops`: the controller rolls the visible buffer
+            // forward in place, and `admin recycle` — the command that ended
+            // the measured loop — is the sanctioned fallback after that
+            // request, never forbidden.
+            assert!(
+                remedy.contains("roll its visible buffer forward"),
+                "{remedy}"
+            );
+            assert!(
+                remedy.contains(VISIBLE_ROLL_FORWARD_REQUESTED_EVENT),
+                "{remedy}"
+            );
+            let recycle = remedy
+                .find("run `agent-doc admin recycle`")
+                .expect("recycle is the named fallback");
+            assert!(
+                remedy.find(VISIBLE_ROLL_FORWARD_REQUESTED_EVENT).unwrap() < recycle,
+                "the fallback is gated on the in-place request: {remedy}"
+            );
+            assert!(
+                !remedy.contains("or run `admin recycle`"),
+                "the remedy no longer forbids the recovery that works: {remedy}"
+            );
             assert!(
                 !remedy.contains("deferral, not a lost response"),
                 "waiting cannot end this state: {remedy}"

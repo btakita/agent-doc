@@ -6183,6 +6183,145 @@ mod retained_persistence_rebuild_exhausted_model {
             ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery
         );
     }
+
+    /// `#jetbrainsreplicaloops` (sdk.md 2026-10-16T05:57Z-06:05Z). Before, the
+    /// exhausted state could only be left by a controller recycle (a fresh
+    /// controller reseeds from the editor's retained replica) while its remedy
+    /// forbade `admin recycle`. Now the controller's own exhaustion edge asks
+    /// the editor to roll its VISIBLE buffer forward in place, fenced by the
+    /// refused canonical's hash: the operator's text becomes canonical, the
+    /// retained transition re-applies the response on top through the
+    /// production rebase, the editor saves it, and the durable state clears
+    /// with no recycle and no operator action.
+    #[test]
+    fn exhausted_rebuilds_roll_the_visible_buffer_forward_in_place_without_a_recycle() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        let file = project.path().join("sdk.md");
+        let base = "## Exchange\n<!-- agent:exchange -->\nWhat is the full todo text?\n<!-- /agent:exchange -->\n## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs]\n<!-- /agent:queue -->\n";
+        let response = "### Re: full todo text\n\nHere it is.\n";
+        let retained_target = base.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{response}<!-- /agent:exchange -->"),
+        );
+        // The visible buffer (= disk): struck line removed, new items typed
+        // against a native baseline the replica no longer holds.
+        let visible = base.replace(
+            "- ~~do [#tdc]~~\n- do [#sdkdocs]\n",
+            "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
+        );
+        std::fs::write(&file, &visible).unwrap();
+        let project_root = project.path().to_path_buf();
+        let mut world = World {
+            ledger: TestSupportRetainedPersistenceLedger::new(&project_root, 240),
+            _project: project,
+            file: file.clone(),
+            authority: retained_target.clone(),
+        };
+
+        // The editor side of the event, as the plugin implements it: only the
+        // exact canonical the request names may be replaced by the visible
+        // buffer, and only the buffer the operator can currently see.
+        let roll_forward = |authority: &mut String, fence: &str, visible: &str| -> bool {
+            if agent_doc_hash::content_hash(authority) != fence || authority == visible {
+                return false;
+            }
+            *authority = visible.to_string();
+            true
+        };
+
+        // A stale request (the canonical already moved) is declined.
+        let mut moved = format!("{retained_target}moved\n");
+        assert!(!roll_forward(
+            &mut moved,
+            &agent_doc_hash::content_hash(&retained_target),
+            &visible
+        ));
+        assert!(
+            moved.ends_with("moved\n"),
+            "a declined request changes nothing"
+        );
+
+        let mut rolled_at = None;
+        for refusal in 1..=40u32 {
+            let step = world.ledger.refuse(&file, &world.authority);
+            assert!(
+                !(step.request_replica_rebuild && step.request_visible_roll_forward),
+                "refusal {refusal}"
+            );
+            if step.request_visible_roll_forward {
+                let fence = agent_doc_hash::content_hash(&world.authority);
+                assert!(
+                    step.report_rebuild_exhausted,
+                    "the first roll-forward rides the exhaustion edge"
+                );
+                assert_eq!(
+                    world.session_check().0,
+                    ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText,
+                    "the durable state is recorded before the editor acts"
+                );
+                assert!(roll_forward(&mut world.authority, &fence, &visible));
+                rolled_at = Some(refusal);
+                break;
+            }
+        }
+        assert_eq!(rolled_at, Some(9), "after the second delivered rebuild");
+        assert_eq!(
+            world.authority, visible,
+            "the operator's text is the canonical base"
+        );
+
+        // The controller's retained transition re-applies the pending write on
+        // top of the operator's text (production rebase), exactly once.
+        let reapplied =
+            agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                base,
+                &retained_target,
+                &world.authority,
+            )
+            .expect("the response rebases over the operator's queue edits");
+        assert!(!agent_doc_merge::captured_splice::current_contains_delta(
+            base,
+            &retained_target,
+            &world.authority
+        ));
+        world.authority = reapplied.clone();
+        assert_eq!(world.authority.matches(response).count(), 1);
+        for line in [
+            "- do [#sdkdocs]\n",
+            "- review [#retryloop]\n",
+            "- do [#sdkexamples]\n",
+        ] {
+            assert!(world.authority.contains(line), "lost {line:?}");
+        }
+        assert!(!world.authority.contains("~~do [#tdc]~~"));
+        assert!(
+            agent_doc_merge::captured_splice::current_contains_delta(
+                base,
+                &retained_target,
+                &world.authority
+            ),
+            "re-deriving now finds the delta present: no second insertion"
+        );
+
+        // The editor's buffer equals the new canonical, so its native save is
+        // applied: the different content clears the stale exhausted record and
+        // the applied save retires it.
+        let first = world.ledger.refuse(&file, &world.authority);
+        assert_eq!((first.refusals, first.rebuilds), (1, 0), "a new streak");
+        assert!(retained_persistence_exhaustion::observe(&file).is_none());
+        std::fs::write(&file, &world.authority).unwrap();
+        world.ledger.apply(&file, &world.authority);
+        assert_eq!(
+            retained_persistence_exhaustion::load(&project_root, &file).unwrap(),
+            None
+        );
+        assert_eq!(
+            world.session_check().0,
+            ReadOnlyTerminalProjectionDecision::Converged,
+            "converged without a controller recycle"
+        );
+    }
 }
 
 /// SimWorld for the mid-turn editor-plugin update failure class. It couples the

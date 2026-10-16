@@ -472,6 +472,67 @@ impl PluginProtocolHarness {
         Ok(())
     }
 
+    /// Apply the controller's pending updates to this replica WITHOUT
+    /// publishing a visible projection: the stuck plugin of
+    /// `#jetbrainsreplicaloops`, whose captured local delta owns the visible
+    /// buffer, so the controller canonical reaches its replica but never its
+    /// editor (`deferred retained controller projection`).
+    fn pull_into_replica_only(&mut self) -> anyhow::Result<usize> {
+        let data = request(
+            &self.project_root,
+            &self.file,
+            self.kind,
+            "replica_pull",
+            serde_json::Map::new(),
+        )?;
+        let updates = data["updates"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("replica pull omitted updates: {data}"))?;
+        for update in updates {
+            self.replica
+                .apply_update(&decode_field(update, "update_b64")?)?;
+        }
+        self.pushed_state_vector = self.replica.state_vector();
+        Ok(updates.len())
+    }
+
+    /// Pull every pending update, apply them all, then project the final cut
+    /// once: the coalescing drain the plugin runs, which proves generation N
+    /// and so advances every older pending generation through it.
+    fn pull_coalesced_and_project(&mut self) -> anyhow::Result<usize> {
+        let pulled = self.pull_into_replica_only()?;
+        self.project_visible_state()?;
+        Ok(pulled)
+    }
+
+    /// `#jetbrainsreplicaloops`: the editor half of the in-place roll-forward,
+    /// exactly like `CrdtReplicaManager.rollVisibleBufferForward`. Fenced by
+    /// the canonical hash the controller named; the replica must hold that
+    /// canonical; then ONE bounded splice turns it into the visible buffer and
+    /// the visible cut is projected as settled.
+    ///
+    /// Returns whether the visible cut was projected as settled. It is
+    /// projected only when canonical IS that cut: when the relay kept
+    /// controller text the editor never visibly took (component isolation
+    /// keeps a region the buffer merely lacked), the plugin drains that delta
+    /// into the now-unblocked buffer instead. Projecting a cut canonical does
+    /// not hold would only mark the member for a whole-buffer rebootstrap.
+    fn roll_visible_forward(&mut self, fence: &str, visible: &str) -> anyhow::Result<bool> {
+        let replica = self.replica.text();
+        anyhow::ensure!(
+            agent_doc_hash::content_hash(&replica) == fence,
+            "the replica does not hold the fenced canonical"
+        );
+        let batch = captured_splice_batch(&replica, vec![single_splice(&replica, visible)]);
+        anyhow::ensure!(batch.resulting_text == visible);
+        self.forward_local_edits(&batch)?;
+        if controller_canonical_text(&self.project_root, &self.file)? != visible {
+            return Ok(false);
+        }
+        self.project_visible_state()?;
+        Ok(true)
+    }
+
     fn disconnect(self) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
         request(
             &self.project_root,
@@ -565,6 +626,27 @@ fn apply_splices(base: &str, edits: &[agent_doc_merge::captured_splice::Captured
         chars.splice(edit.offset_code_points..end, edit.insert.chars());
     }
     chars.iter().collect()
+}
+
+/// The one bounded code-point splice turning `from` into `to` (common prefix
+/// and suffix kept), as the plugin's `singleSpliceBatchUtil` computes it.
+fn single_splice(from: &str, to: &str) -> agent_doc_merge::captured_splice::CapturedSplice {
+    let a: Vec<char> = from.chars().collect();
+    let b: Vec<char> = to.chars().collect();
+    let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let max_suffix = a.len().min(b.len()) - prefix;
+    let suffix = a
+        .iter()
+        .rev()
+        .zip(b.iter().rev())
+        .take(max_suffix)
+        .take_while(|(x, y)| x == y)
+        .count();
+    splice(
+        prefix,
+        a.len() - prefix - suffix,
+        &b[prefix..b.len() - suffix].iter().collect::<String>(),
+    )
 }
 
 /// The editor's captured typing burst: ordered code-point splices plus the cut
@@ -1062,6 +1144,194 @@ fn held_captured_batch_beside_head_marker_and_closeout_merges_forward_across_pee
         controller_canonical_text(project_root, &file).unwrap(),
         expected,
         "the controller canonical converges on the merge, so a native save of it can succeed"
+    );
+
+    let _ = jetbrains.disconnect().unwrap();
+    let _ = vscode.disconnect().unwrap();
+}
+
+/// `#jetbrainsreplicaloops` end to end through the real controller relay
+/// (sdk.md, 2026-10-16T05:57Z-06:05Z). The operator removed a struck queue line
+/// and typed new items against a native baseline; meanwhile canonical edited
+/// that same line and appended a response. The exact rebase of the captured
+/// batch refuses (a true overlap), so before this fix the plugin retried it
+/// every 30 s forever (`recovery=canonical-rebootstrap-captured-local-delta`)
+/// while its replica held canonical and its visible buffer held the operator
+/// text. The controller-licensed roll-forward publishes that visible buffer
+/// in place, as one bounded splice from the replica's canonical: the relay
+/// accepts it from the in-lineage member, canonical becomes the operator's
+/// text byte for byte, and every peer converges on it without a recycle.
+#[test]
+fn stale_baseline_loop_converges_by_rolling_the_visible_buffer_forward_in_place() {
+    let _env_guard = agent_doc_test_support::env_lock();
+    let temp = tempfile::TempDir::new().unwrap();
+    let project_root = temp.path();
+    let baseline = concat!(
+        "<!-- agent:exchange -->\n",
+        "What is the full todo text? 🌍\n",
+        "<!-- /agent:exchange -->\n",
+        "<!-- agent:queue -->\n",
+        "- ~~do [#tdc]~~\n",
+        "- do [#sdkdocs]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let file = agent_doc_test_support::init_repo_with_doc(project_root, "sdk.md", baseline);
+    std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
+    std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
+    agent_doc_test_support::seed_reliable_sync_editor_registration(
+        &file,
+        "visible-roll-forward-simworld",
+        &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+    );
+    agent_doc()
+        .args([
+            "controller",
+            "status",
+            "--project-root",
+            &project_root.to_string_lossy(),
+            "--ensure",
+        ])
+        .assert()
+        .success();
+    let _controller = ControllerGuard {
+        project_root: project_root.to_path_buf(),
+    };
+
+    let mut jetbrains =
+        PluginProtocolHarness::attach(PluginHarnessKind::JetBrains, project_root, &file).unwrap();
+    let mut vscode =
+        PluginProtocolHarness::attach(PluginHarnessKind::VsCode, project_root, &file).unwrap();
+    let captured_base = jetbrains.text();
+    assert_eq!(captured_base, baseline);
+
+    // The operator's burst against the captured base: the struck line removed,
+    // two queue items typed.
+    let struck = "- ~~do [#tdc]~~\n";
+    let struck_at = code_point_offset(&captured_base, struck);
+    let typed = "- review [#retryloop]\n- do [#sdkexamples]\n";
+    let typed_at =
+        code_point_offset(&captured_base, "<!-- /agent:queue -->") - struck.chars().count();
+    // ...and retargets the remaining item, at the exact point canonical edits.
+    let retarget_at = code_point_offset(&captured_base, "sdkdocs]") + "sdkdocs".chars().count()
+        - struck.chars().count();
+    let captured = captured_splice_batch(
+        &captured_base,
+        vec![
+            splice(struck_at, struck.chars().count(), ""),
+            splice(retarget_at, 0, "-api"),
+            splice(typed_at + "-api".chars().count(), 0, typed),
+        ],
+    );
+    let visible = captured.resulting_text.clone();
+    assert_eq!(
+        visible,
+        concat!(
+            "<!-- agent:exchange -->\n",
+            "What is the full todo text? 🌍\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#sdkdocs-api]\n",
+            "- review [#retryloop]\n",
+            "- do [#sdkexamples]\n",
+            "<!-- /agent:queue -->\n",
+        )
+    );
+
+    // Canonical advances ON the operator's change: it edits the struck line
+    // and appends a response the editor never visibly takes.
+    let mut canonical_edit = |needle: &str, text: &str| {
+        let current = vscode.text();
+        let at = code_point_offset(&current, needle) + needle.chars().count();
+        vscode.edit_without_pulling(at, text).unwrap();
+        vscode.pull_and_project().unwrap();
+    };
+    canonical_edit("~~do [#tdc]~~", " (closed)");
+    canonical_edit("do [#sdkdocs", "-guide");
+    canonical_edit(
+        "full todo text? 🌍\n",
+        "### Re: full todo text\n\nHere it is.\n",
+    );
+    let canonical = controller_canonical_text(project_root, &file).unwrap();
+    assert!(
+        canonical.contains("- ~~do [#tdc]~~ (closed)\n"),
+        "{canonical:?}"
+    );
+    assert!(
+        canonical.contains("- do [#sdkdocs-guide]\n"),
+        "{canonical:?}"
+    );
+    assert!(canonical.contains("Here it is."), "{canonical:?}");
+
+    // The loop: the stuck JetBrains replica holds canonical, its visible
+    // buffer holds the operator's text, and the exact rebase refuses.
+    jetbrains.pull_into_replica_only().unwrap();
+    assert_eq!(jetbrains.text(), canonical);
+    for _ in 0..3 {
+        let attempt =
+            agent_doc_merge::captured_splice::rebase(&captured_base, &canonical, &captured);
+        assert!(
+            attempt.is_err(),
+            "a true overlap refuses the exact translation every retry: {:?}",
+            attempt.map(|batch| batch.resulting_text)
+        );
+    }
+
+    // A stale fence (the canonical moved since the controller's request) is
+    // declined without touching anything.
+    assert!(
+        jetbrains
+            .roll_visible_forward(&agent_doc_hash::content_hash(&captured_base), &visible)
+            .is_err()
+    );
+    assert_eq!(
+        controller_canonical_text(project_root, &file).unwrap(),
+        canonical
+    );
+
+    // The controller-licensed roll-forward, fenced by the refused canonical.
+    let settled = jetbrains
+        .roll_visible_forward(&agent_doc_hash::content_hash(&canonical), &visible)
+        .unwrap();
+    // The operator's deletion of the response it never saw is not operator
+    // intent: the relay keeps the exchange region the buffer merely lacked,
+    // while every queue change the operator made lands as typed.
+    let response = "### Re: full todo text\n\nHere it is.\n";
+    let expected = visible.replacen(
+        "full todo text? 🌍\n",
+        &format!("full todo text? 🌍\n{response}"),
+        1,
+    );
+    assert_eq!(
+        controller_canonical_text(project_root, &file).unwrap(),
+        expected,
+        "the operator's visible text is the base; the response is kept exactly once"
+    );
+    if !settled {
+        // The plugin's projection retry: drain that delta into the buffer.
+        assert!(jetbrains.pull_coalesced_and_project().unwrap() > 0);
+    }
+    for _ in 0..3 {
+        vscode.pull_and_project().unwrap();
+    }
+    assert_eq!(jetbrains.text(), expected);
+    assert_eq!(vscode.text(), expected, "every peer converges on one text");
+    assert_eq!(expected.matches(response).count(), 1);
+    for line in [
+        "- do [#sdkdocs-api]\n",
+        "- review [#retryloop]\n",
+        "- do [#sdkexamples]\n",
+    ] {
+        assert!(expected.contains(line), "lost operator line {line:?}");
+    }
+    assert!(
+        !expected.contains("(closed)") && !expected.contains("-guide") && !expected.contains("~~"),
+        "nothing the operator removed or retyped comes back: {expected:?}"
+    );
+
+    let ops = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        !ops.contains("crdt_replica_update_quarantined"),
+        "the in-lineage member's roll-forward is relayed, not quarantined"
     );
 
     let _ = jetbrains.disconnect().unwrap();

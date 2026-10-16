@@ -79,6 +79,24 @@ pub enum CrdtReplicaEventReason {
     Rebootstrap,
     CanonicalProjection,
     EditorReplicaReregister,
+    /// `#jetbrainsreplicaloops`: the controller spent its replica-rebuild
+    /// budget on one retained native save and the editor still refuses it, so
+    /// its VISIBLE buffer, not its replica, is what diverges. The editor rolls
+    /// that buffer forward in place onto the exact canonical named by the
+    /// event's `content_hash`: the operator's text becomes canonical and the
+    /// controller's retained transition re-applies the pending write on top.
+    /// Sent only through [`signal_editor_visible_roll_forward`], which carries
+    /// that hash fence.
+    EditorVisibleRollForward,
+}
+
+/// The exact controller canonical an [`CrdtReplicaEventReason::EditorVisibleRollForward`]
+/// event is fenced to. An editor whose canonical no longer has this hash
+/// ignores the event: the state it described has already moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplicaEventExpectedContent<'a> {
+    pub content_hash: &'a str,
+    pub content_len: usize,
 }
 
 /// Decision at the controller cold-start boundary for an incoming editor
@@ -170,6 +188,7 @@ impl CrdtReplicaEventReason {
             Self::Rebootstrap => "rebootstrap",
             Self::CanonicalProjection => "canonical_projection",
             Self::EditorReplicaReregister => "editor_replica_reregister",
+            Self::EditorVisibleRollForward => "editor_visible_roll_forward",
         }
     }
 }
@@ -6241,10 +6260,68 @@ pub fn signal_crdt_replica_event_reporting(
     signal_crdt_replica_event_counting_inner(file, reason, targets)
 }
 
+/// `#jetbrainsreplicaloops`: ask every live editor replica of `file` to roll
+/// its visible buffer forward in place onto the exact canonical `expected`
+/// names (see [`CrdtReplicaEventReason::EditorVisibleRollForward`]).
+pub fn signal_editor_visible_roll_forward(
+    file: &Path,
+    expected: ReplicaEventExpectedContent<'_>,
+) -> Result<ReplicaSignalOutcome> {
+    signal_crdt_replica_event_counting_inner_with(
+        file,
+        CrdtReplicaEventReason::EditorVisibleRollForward,
+        0,
+        Some(expected),
+    )
+}
+
+/// The `deliver_crdt_remote` payload for one editor route. `expected` adds the
+/// hash fence a roll-forward event carries; every other event omits it, so
+/// their wire shape is unchanged.
+fn replica_event_payload(
+    canonical: &Path,
+    reason: CrdtReplicaEventReason,
+    targets: usize,
+    editor_id: &str,
+    editor_pid: u64,
+    expected: Option<ReplicaEventExpectedContent<'_>>,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "type": agent_doc_ipc_protocol::EditorIntent::DeliverCrdtRemote.as_str(),
+        "file": canonical.to_string_lossy(),
+        "reason": reason.token(),
+        "targets": targets,
+        "editor_id": editor_id,
+        "editor_pid": editor_pid,
+    });
+    if let Some(expected) = expected
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert(
+            "content_hash".to_string(),
+            serde_json::Value::String(expected.content_hash.to_string()),
+        );
+        object.insert(
+            "content_len".to_string(),
+            serde_json::Value::from(expected.content_len),
+        );
+    }
+    payload
+}
+
 fn signal_crdt_replica_event_counting_inner(
     file: &Path,
     reason: CrdtReplicaEventReason,
     targets: usize,
+) -> Result<ReplicaSignalOutcome> {
+    signal_crdt_replica_event_counting_inner_with(file, reason, targets, None)
+}
+
+fn signal_crdt_replica_event_counting_inner_with(
+    file: &Path,
+    reason: CrdtReplicaEventReason,
+    targets: usize,
+    expected: Option<ReplicaEventExpectedContent<'_>>,
 ) -> Result<ReplicaSignalOutcome> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let _ = reliable_sync_editor_live_for_file(&canonical);
@@ -6281,14 +6358,14 @@ fn signal_crdt_replica_event_counting_inner(
     let mut build_mismatches = Vec::new();
     let mut build_mismatch_refusals = Vec::new();
     for route in routes {
-        let payload = serde_json::json!({
-            "type": agent_doc_ipc_protocol::EditorIntent::DeliverCrdtRemote.as_str(),
-            "file": canonical.to_string_lossy(),
-            "reason": reason.token(),
-            "targets": targets,
-            "editor_id": route.editor_id.clone(),
-            "editor_pid": route.editor_pid,
-        });
+        let payload = replica_event_payload(
+            &canonical,
+            reason,
+            targets,
+            &route.editor_id,
+            route.editor_pid,
+            expected,
+        );
         match agent_doc_ipc_io::send_message_to_pid_recovering_build_mismatch(
             &project_root,
             route.editor_pid,
@@ -6839,6 +6916,46 @@ mod tests {
 
         assert!(reached_log_boundary.get());
         assert!(matches!(current, CurrentText::Current { .. }));
+    }
+
+    #[test]
+    fn visible_roll_forward_event_carries_its_canonical_hash_fence() {
+        // `#jetbrainsreplicaloops`: the roll-forward is licensed only for the
+        // exact canonical the controller proved exhausted, so its payload must
+        // name that canonical; every other event keeps its old wire shape.
+        let file = Path::new("/work/sdk.md");
+        let fenced = replica_event_payload(
+            file,
+            CrdtReplicaEventReason::EditorVisibleRollForward,
+            0,
+            "jetbrains-1-a",
+            7,
+            Some(ReplicaEventExpectedContent {
+                content_hash: "72a301c0",
+                content_len: 40485,
+            }),
+        );
+        assert_eq!(fenced["reason"], "editor_visible_roll_forward");
+        assert_eq!(fenced["content_hash"], "72a301c0");
+        assert_eq!(fenced["content_len"], 40485);
+        assert_eq!(fenced["type"], "deliver_crdt_remote");
+        assert_eq!(fenced["editor_pid"], 7);
+
+        let plain = replica_event_payload(
+            file,
+            CrdtReplicaEventReason::EditorReplicaReregister,
+            0,
+            "jetbrains-1-a",
+            7,
+            None,
+        );
+        assert!(plain.get("content_hash").is_none(), "{plain}");
+        assert!(plain.get("content_len").is_none(), "{plain}");
+        assert_eq!(plain["reason"], "editor_replica_reregister");
+        assert_ne!(
+            CrdtReplicaEventReason::EditorVisibleRollForward.token(),
+            CrdtReplicaEventReason::EditorReplicaReregister.token()
+        );
     }
 
     #[test]

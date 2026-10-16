@@ -1,5 +1,14 @@
 # agent-doc Functional Specification
 
+- An exhausted replica-rebuild budget (`state=editor_holds_unmerged_visible_text`)
+  is resolved in place, not by a controller recycle (`#jetbrainsreplicaloops`):
+  the controller sends a hash-fenced `editor_visible_roll_forward` event, the
+  JetBrains editor publishes its complete visible buffer onto that exact
+  canonical as one bounded splice, and the retained transition re-applies the
+  pending write on top of the operator's text once. The remedy no longer forbids
+  `admin recycle`; it is the fallback after the request. See
+  [Real-Time Workflow Authority](specs/14-realtime-workflow.md).
+
 - Grok Build uses a native final-JSON backend and the existing managed
   supervisor lifecycle, with exact document-bound resume IDs and structural
   composer readiness. Passive hooks are not admission/continuation authority;

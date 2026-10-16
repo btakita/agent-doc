@@ -261,14 +261,24 @@ fn route_claimed_items(file: &Path, content: &str, items: &mut [SteeringItem]) {
         return;
     }
     let owners = agent_doc_queue_io::queue_claim::claim_owners_for_content(file, content);
-    if owners.is_empty() {
-        return;
+    if !owners.is_empty() {
+        core::apply_claim_owners(items, |text| {
+            owners
+                .get(&agent_doc_queue::queue_claim::claim_identity(text))
+                .cloned()
+        });
     }
-    core::apply_claim_owners(items, |text| {
-        owners
-            .get(&agent_doc_queue::queue_claim::claim_identity(text))
-            .cloned()
-    });
+    // `#reportedrelease`: a line whose worker reported (released with a
+    // receipt) is the coordinator's to persist now, never new dispatch work.
+    let reported =
+        agent_doc_queue_io::claim_release_receipt::reported_owners_for_content(file, content);
+    if !reported.is_empty() {
+        core::apply_release_receipts(items, |text| {
+            reported
+                .get(&agent_doc_queue::queue_claim::claim_identity(text))
+                .cloned()
+        });
+    }
 }
 
 fn load_watermark(

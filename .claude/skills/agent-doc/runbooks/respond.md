@@ -125,6 +125,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     note or a corrected URL or wording (`#claimfollowedit`), and the worker
     can still `--refresh` / `release` by the text it was handed. An edit of a
     claimed head also wakes an idle coordinator.
+  - `persist_reported` (`#reportedrelease`): a queue item whose worker already
+    reported and whose claim you released; `owner=` names that worker. Its
+    answer is only in your context. Persist it now with the closeout that
+    strikes the line (the `> **Queue prompt:**` echo, or `--done <id>`). Never
+    dispatch a new subagent for it and never re-claim it.
   - `sent=explicit` (`#claimedsteerwake`): the operator pressed Run Agent Doc
     (`agent-doc route`), which flushes all pending steering at once past the
     typing gate. Treat those items as final. Explicitly sent ordinary queue
@@ -261,12 +266,20 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      the committed closeout or change cycle/claim state. Then
      integrate the work serially: rebase or
      cherry-pick each onto main, run the preset's verification, run ONE
-     `make install` per integrated batch, and push. Finally run
-     `agent-doc queue release <FILE> --item <...>`. Release only ends the claim;
-     it does not report completion for abandoned, failed, or requeued work. The
-     next cycle answers and closes
-     the item: `--done <id>` for an `#id` head, or quote a free-text head as
-     `> **Queue prompt:**`.
+     `make install` per integrated batch, and push. Then persist the result in
+     THIS turn with the closeout that strikes the item: `--done <id>` for an
+     `#id` head, or open the response with the verbatim
+     `> **Queue prompt:** <line>` echo for a free-text head (a `### Re:`
+     heading alone leaves the line queued). That closeout also ends the claim,
+     so no release is needed first (`#claimstrike`). A bare
+     `agent-doc queue release <FILE> --item <...>` records that the worker
+     reported (`#reportedrelease`): the line stays queued, is never offered to
+     a new worker, steering routes it `dispatch=persist_reported`, and the
+     Codex Stop hook blocks until it is persisted, so release only when
+     integration must finish before you can answer, and persist before the
+     turn ends. For abandoned, failed, or requeued work run
+     `agent-doc queue release <FILE> --item <...> --requeue`: no report is
+     recorded and the line is dispatchable to a new worker again.
   Harnesses without an in-session Agent tool (Codex, OpenCode, Grok Build,
   Cursor) claim the same items and fall back to
   `agent-doc orchestrate <FILE> --mode parallel --task "<item>" ...` over the

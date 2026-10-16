@@ -1,0 +1,324 @@
+//! Durable reported-worker release receipts (`#reportedrelease`).
+//!
+//! Storage for [`agent_doc_queue::claim_release_receipt`]: one
+//! `queue_document_state` row per document
+//! (`state_kind = "queue_claim_release_receipts"`) in the project `state.db`,
+//! beside (not inside) the claim ledger, so a claim mutation never rewrites a
+//! receipt and the other way round.
+//!
+//! `queue release` records a receipt for the claim it ends; `queue release
+//! --requeue` ends the claim and forgets any receipt. Readers (mid-turn
+//! steering, the subagent dispatch plan, the Codex Stop hook) are actorless
+//! one-shot boundaries, like the claim readers: an unreadable receipt row is
+//! reported on stderr and treated as "no receipts", the pre-receipt behaviour.
+
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use agent_doc_queue::claim_release_receipt::{
+    CLAIM_RELEASE_RECEIPTS_STATE_KIND, ClaimReleaseReceipt, ClaimReleaseReceiptLedger,
+    DEFAULT_RELEASE_RECEIPT_TTL_SECS,
+};
+use agent_doc_queue::queue_claim::{ClaimedQueueItems, QueueClaim};
+use agent_doc_queue::queue_continuation::live_queue_head_identities;
+use anyhow::{Context, Result};
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
+}
+
+fn state_identity(file: &Path) -> Result<Option<(PathBuf, String, String)>> {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(None);
+    };
+    let hash = agent_doc_hash::path_hash(file)
+        .with_context(|| format!("canonicalize document path for hash: {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    Ok(Some((root, hash, canonical.to_string_lossy().into_owned())))
+}
+
+fn load_from_conn(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    document_hash: &str,
+) -> Result<ClaimReleaseReceiptLedger> {
+    let Some(record) = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+        conn,
+        document_hash,
+        CLAIM_RELEASE_RECEIPTS_STATE_KIND,
+    )?
+    else {
+        return Ok(ClaimReleaseReceiptLedger::default());
+    };
+    serde_json::from_str(&record.payload_json).context("parse queue claim release receipts")
+}
+
+/// The document's stored receipts, including closed/expired rows.
+pub fn load(file: &Path) -> Result<ClaimReleaseReceiptLedger> {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
+        return Ok(ClaimReleaseReceiptLedger::default());
+    };
+    if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+        return Ok(ClaimReleaseReceiptLedger::default());
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    load_from_conn(&conn, &document_hash)
+}
+
+/// Apply `mutate` to the receipts in one immediate transaction. A document
+/// outside any agent-doc project has no state.db and nothing to record.
+fn mutate<T: Default>(
+    file: &Path,
+    mutate: impl FnOnce(&mut ClaimReleaseReceiptLedger) -> T,
+) -> Result<T> {
+    let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
+        return Ok(T::default());
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .context("begin queue release receipt transaction")?;
+    let result = (|| {
+        let mut ledger = load_from_conn(&conn, &document_hash)?;
+        let value = mutate(&mut ledger);
+        if ledger.receipts.is_empty() {
+            agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+                &conn,
+                &document_hash,
+                CLAIM_RELEASE_RECEIPTS_STATE_KIND,
+            )?;
+        } else {
+            agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+                &conn,
+                &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                    document_hash: document_hash.clone(),
+                    state_kind: CLAIM_RELEASE_RECEIPTS_STATE_KIND.to_string(),
+                    canonical_path,
+                    payload_json: serde_json::to_string(&ledger)
+                        .context("serialize queue claim release receipts")?,
+                    updated_at_secs: now_secs(),
+                },
+            )?;
+        }
+        Ok(value)
+    })();
+    match result {
+        Ok(value) => {
+            conn.execute_batch("COMMIT")
+                .context("commit queue release receipt transaction")?;
+            Ok(value)
+        }
+        Err(err) => {
+            if let Err(rollback) = conn.execute_batch("ROLLBACK") {
+                eprintln!(
+                    "[queue-claim] WARNING: release receipt rollback failed after {err:#}: {rollback}"
+                );
+            }
+            Err(err)
+        }
+    }
+}
+
+/// How a `queue release` ends its claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseKind {
+    /// The worker reported back: record a receipt so the line is persisted by
+    /// the coordinator and never offered to a new worker.
+    Reported,
+    /// Abandoned, failed, or requeued work: no receipt, the line is
+    /// dispatchable again.
+    Requeue,
+}
+
+/// `agent-doc queue release`: end the claim on `item` and record (or, for
+/// [`ReleaseKind::Requeue`], forget) its release receipt.
+pub fn release(file: &Path, item: &str, kind: ReleaseKind) -> Result<Option<QueueClaim>> {
+    let released = crate::queue_claim::release(file, item)?;
+    match kind {
+        ReleaseKind::Reported => {
+            if let Some(claim) = &released {
+                let live = std::fs::read_to_string(file)
+                    .ok()
+                    .as_deref()
+                    .and_then(live_queue_head_identities);
+                let now = now_secs();
+                mutate(file, |ledger| {
+                    ledger.prune(now, live.as_ref());
+                    ledger.record(claim, now, DEFAULT_RELEASE_RECEIPT_TTL_SECS);
+                })?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_claim_release_receipt_recorded owner={} item_bytes={} (#reportedrelease)",
+                        claim.owner,
+                        claim.item_text.trim().len()
+                    ),
+                );
+            }
+        }
+        ReleaseKind::Requeue => {
+            let forgot = mutate(file, |ledger| {
+                let by_item = ledger.forget(item);
+                let by_claim = released
+                    .as_ref()
+                    .is_some_and(|claim| ledger.forget(&claim.item_text));
+                by_item || by_claim
+            })?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_claim_release_requeued receipt_forgotten={forgot} item_bytes={} (#reportedrelease)",
+                    item.trim().len()
+                ),
+            );
+        }
+    }
+    Ok(released)
+}
+
+fn ledger_or_warn(file: &Path) -> ClaimReleaseReceiptLedger {
+    match load(file) {
+        Ok(ledger) => ledger,
+        Err(err) => {
+            eprintln!(
+                "[queue-claim] WARNING: could not read release receipts for {}; treating every released line as unreported: {err:#}",
+                file.display()
+            );
+            ClaimReleaseReceiptLedger::default()
+        }
+    }
+}
+
+/// The receipt governing the live queue line `text` of `content`, if its
+/// worker reported and no live claim superseded it.
+pub fn governing_receipt(file: &Path, content: &str, text: &str) -> Option<ClaimReleaseReceipt> {
+    let ledger = ledger_or_warn(file);
+    if ledger.receipts.is_empty() {
+        return None;
+    }
+    let live = live_queue_head_identities(content);
+    let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
+    ledger
+        .governing(now_secs(), live.as_ref(), &claimed, text)
+        .cloned()
+}
+
+/// Lines of `content` whose worker reported: never offered to a new worker.
+pub fn reported_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    let ledger = ledger_or_warn(file);
+    if ledger.receipts.is_empty() {
+        return ClaimedQueueItems::none();
+    }
+    let live = live_queue_head_identities(content);
+    let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
+    ledger.reported_items(now_secs(), live.as_ref(), &claimed)
+}
+
+/// Released owner of every governing receipt on a live line of `content`, by
+/// line identity (mid-turn steering's `persist_reported` routing).
+pub fn reported_owners_for_content(
+    file: &Path,
+    content: &str,
+) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, String> {
+    let ledger = ledger_or_warn(file);
+    if ledger.receipts.is_empty() {
+        return Default::default();
+    }
+    let live = live_queue_head_identities(content);
+    let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
+    let now = now_secs();
+    ledger
+        .receipts
+        .iter()
+        .filter(|receipt| {
+            ledger
+                .governing(now, live.as_ref(), &claimed, &receipt.item_text)
+                .is_some_and(|governing| governing == *receipt)
+        })
+        .map(|receipt| (receipt.identity.clone(), receipt.owner.clone()))
+        .collect()
+}
+
+/// Durably drop receipts whose line closed or expired (closeout
+/// reconciliation, beside the claim prune).
+pub fn prune_closed(file: &Path, content: &str) -> Result<usize> {
+    if load(file)?.receipts.is_empty() {
+        return Ok(0);
+    }
+    let live = live_queue_head_identities(content);
+    let now = now_secs();
+    let pruned = mutate(file, |ledger| ledger.prune(now, live.as_ref()))?;
+    if pruned > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("queue_claim_release_receipt_prune pruned={pruned} (#reportedrelease)"),
+        );
+    }
+    Ok(pruned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_doc(root: &Path, prompts: &[&str]) -> PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("task.md");
+        let queue: String = prompts.iter().map(|p| format!("- {p}\n")).collect();
+        std::fs::write(
+            &doc,
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Queue\n\n<!-- agent:queue go -->\n{queue}<!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        doc
+    }
+
+    /// `#reportedrelease`: a reported release keeps a receipt through the
+    /// real `state.db`; a re-claim supersedes it, a requeue forgets it, and a
+    /// struck line prunes it.
+    #[test]
+    fn reported_release_records_a_receipt_that_requeue_and_closure_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let question = "Does the page status enum have an archived value?";
+        let doc = write_doc(dir.path(), &[question, "other"]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+
+        // No claim: nothing released, nothing recorded.
+        assert!(
+            release(&doc, question, ReleaseKind::Reported)
+                .unwrap()
+                .is_none()
+        );
+        assert!(governing_receipt(&doc, &content, question).is_none());
+
+        crate::queue_claim::claim(&doc, question, "subagent:page-status-enum", 3600).unwrap();
+        let released = release(&doc, question, ReleaseKind::Reported)
+            .unwrap()
+            .expect("claim released");
+        assert_eq!(released.owner, "subagent:page-status-enum");
+        let receipt = governing_receipt(&doc, &content, question).expect("receipt governs");
+        assert_eq!(receipt.owner, "subagent:page-status-enum");
+        assert!(reported_items_for_content(&doc, &content).claims(question));
+        assert!(!reported_items_for_content(&doc, &content).claims("other"));
+
+        crate::queue_claim::claim(&doc, question, "subagent:again", 3600).unwrap();
+        assert!(
+            governing_receipt(&doc, &content, question).is_none(),
+            "a live claim supersedes the receipt"
+        );
+        release(&doc, question, ReleaseKind::Requeue).unwrap();
+        assert!(governing_receipt(&doc, &content, question).is_none());
+        assert!(load(&doc).unwrap().receipts.is_empty(), "requeue forgot it");
+
+        crate::queue_claim::claim(&doc, question, "subagent:third", 3600).unwrap();
+        release(&doc, question, ReleaseKind::Reported).unwrap();
+        let struck = content.replace(&format!("- {question}\n"), "");
+        assert_eq!(prune_closed(&doc, &content).unwrap(), 0);
+        assert_eq!(prune_closed(&doc, &struck).unwrap(), 1);
+        assert!(load(&doc).unwrap().receipts.is_empty());
+    }
+}

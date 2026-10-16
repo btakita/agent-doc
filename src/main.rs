@@ -4371,14 +4371,23 @@ enum QueueAction {
         /// Path to the session document
         file: PathBuf,
     },
-    /// Release a queue claim (`#queueclaim`) so the in-session loop can take the
-    /// item again, e.g. when its subagent reports back.
+    /// Release a queue claim (`#queueclaim`) when its subagent reported back but
+    /// the result is not persisted yet. The line stays queued and unanswered:
+    /// release records that its worker reported (`#reportedrelease`), so the
+    /// line is never offered to a new worker, and the coordinator must persist
+    /// the result in the same turn (`finalize` with the `> **Queue prompt:**`
+    /// echo, or `--done <id>`). A finalize that strikes the line ends its claim
+    /// by itself; no release is needed first.
     Release {
         /// Path to the session document
         file: PathBuf,
         /// The claimed queue item: `#id` / `do [#id]`, or the queue line's text
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
+        /// The work was abandoned or failed: record no report, so the line is
+        /// dispatchable to a new worker again
+        #[arg(long)]
+        requeue: bool,
     },
     /// Print the operator authorization preamble for a dispatched queue item
     /// (`#waypostauthorization`): the verbatim item, the backlog text an id head
@@ -7492,13 +7501,38 @@ fn try_main() -> anyhow::Result<()> {
                 );
                 Ok(())
             }
-            QueueAction::Release { file, item } => {
-                match agent_doc_queue_io::queue_claim::release(&file, &item)? {
+            QueueAction::Release {
+                file,
+                item,
+                requeue,
+            } => {
+                use agent_doc_queue_io::claim_release_receipt::{ReleaseKind, release};
+                let kind = if requeue {
+                    ReleaseKind::Requeue
+                } else {
+                    ReleaseKind::Reported
+                };
+                match release(&file, &item, kind)? {
+                    Some(claim) if requeue => eprintln!(
+                        "[queue] released {:?} (owner {}) for requeue; the line is dispatchable to a new worker again",
+                        claim.item_text, claim.owner
+                    ),
                     Some(claim) => {
                         eprintln!(
                             "[queue] released {:?} (owner {})",
                             claim.item_text, claim.owner
-                        )
+                        );
+                        // `#reportedrelease`: the line is still queued and its
+                        // answer is not in the document. Hand the persistence
+                        // step back at the edge where it gets dropped.
+                        eprintln!(
+                            "[queue] next: {}",
+                            agent_doc_queue::claim_release_receipt::persist_reported_instruction(
+                                &file.display().to_string(),
+                                &claim.item_text,
+                                &claim.owner,
+                            )
+                        );
                     }
                     None => eprintln!("[queue] no claim on {item:?}; nothing to release"),
                 }

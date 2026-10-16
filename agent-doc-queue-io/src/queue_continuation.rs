@@ -105,6 +105,13 @@ pub fn reconcile_marker(
                     file.display()
                 );
             }
+            // `#reportedrelease`: a struck line ends its release receipt too.
+            if let Err(err) = crate::claim_release_receipt::prune_closed(file, &content) {
+                eprintln!(
+                    "[queue-continuation] WARNING: failed to prune closed release receipts for {}: {err:#}",
+                    file.display()
+                );
+            }
         }
         // A missing document has no queue and no claims to prune; `detect`
         // below reports no continuation for it.

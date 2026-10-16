@@ -1,5 +1,6 @@
 //! Queue-related marker storage I/O for agent-doc.
 
+pub mod claim_release_receipt;
 pub mod continuation_detect;
 pub mod continuation_marker;
 pub mod continuation_request;

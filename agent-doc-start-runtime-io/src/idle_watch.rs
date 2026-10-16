@@ -1822,6 +1822,48 @@ pub(super) fn spawn_idle_queue_watch_thread(
         .name("idle-queue-watch".into())
         .spawn(move || {
             let path = PathBuf::from(&file);
+            // GH #280: a busy state database during a recycle burst must not
+            // strand the supervisor's durable registry row. The failed startup
+            // target is stable process input; idle ticks are the retry event
+            // source, and the effect publishes success/failure receipts back to
+            // the process-scoped graph with bounded exponential backoff.
+            let _registry_publication_retry_effect = shared
+                .registry_publication_retry_target()
+                .map(|target| {
+                    shared.registry_publication_retry.on_due(move |attempt| {
+                        match agent_doc_start_io::retry_start_supervisor_registry(&target) {
+                            Ok(()) => {
+                                agent_doc_ops_log_io::log_op(
+                                    &target.file,
+                                    &format!(
+                                        "start_registry_publish_retry_succeeded file={} pane={} session={} project_root={} attempt={} (#gh280)",
+                                        target.canonical.display(),
+                                        target.pane_id,
+                                        target.session_id,
+                                        target.project_root.display(),
+                                        attempt,
+                                    ),
+                                );
+                                Ok(())
+                            }
+                            Err(err) => {
+                                if attempt == 1 || attempt.is_power_of_two() {
+                                    let message = format!(
+                                        "start_registry_publish_retry_failed file={} pane={} session={} project_root={} attempt={} err={err:#} (#gh280)",
+                                        target.canonical.display(),
+                                        target.pane_id,
+                                        target.session_id,
+                                        target.project_root.display(),
+                                        attempt,
+                                    );
+                                    agent_doc_ops_log_io::log_op(&target.file, &message);
+                                    eprintln!("[agent-doc] warning: {message}");
+                                }
+                                Err(format!("{err:#}"))
+                            }
+                        }
+                    })
+                });
             // `#jbdisprecycle`: a freshly-started (post-recycle) supervisor
             // publishes the CP graph settle transition so route waiters reopen.
             // `#recyclesettleretry`: retried every tick (with backoff) until the
@@ -2155,6 +2197,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
                 }
+                shared.registry_publication_retry.observe_idle_tick();
                 publish_recycle_settled(&mut recycle_settle_publish);
                 // `#adturnscopehotloop`: one turn-attribution memo per tick.
                 //

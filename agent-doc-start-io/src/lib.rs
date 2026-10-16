@@ -841,6 +841,7 @@ pub struct StartRuntime {
     pub harness: agent_doc_harness::HarnessConfig,
     pub pane_id: String,
     pub supervisor_instance_id: String,
+    pub registry_publication_retry: Option<StartSupervisorRegistryTarget>,
     pub actor_record: agent_doc_controller::actor::ActorRecord,
     pub post_start_document_model_ensure: bool,
 }
@@ -1976,7 +1977,7 @@ fn prepare_start_runtime_with_admission(
         );
         record
     };
-    publish_start_supervisor_registry(StartSupervisorRegistryPublication {
+    let registry_publication_retry = publish_start_supervisor_registry(StartSupervisorRegistryPublication {
         file,
         canonical: &canonical,
         project_root: &project_root,
@@ -2012,6 +2013,7 @@ fn prepare_start_runtime_with_admission(
         harness,
         pane_id,
         supervisor_instance_id,
+        registry_publication_retry,
         actor_record,
         post_start_document_model_ensure,
     })
@@ -2350,7 +2352,41 @@ struct StartSupervisorRegistryPublication<'a> {
     route_owned: bool,
 }
 
-fn publish_start_supervisor_registry(input: StartSupervisorRegistryPublication<'_>) {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartSupervisorRegistryTarget {
+    pub file: PathBuf,
+    pub canonical: PathBuf,
+    pub project_root: PathBuf,
+    pub session_id: String,
+    pub pane_id: String,
+    pub pane_window: String,
+    pub cwd: String,
+    pub supervisor_instance_id: String,
+}
+
+pub fn retry_start_supervisor_registry(target: &StartSupervisorRegistryTarget) -> Result<()> {
+    sessions::register_start_supervisor_in(
+        &target.project_root,
+        &target.session_id,
+        &target.pane_id,
+        &target.canonical.to_string_lossy(),
+        std::process::id(),
+        &target.pane_window,
+        &target.cwd,
+        &target.supervisor_instance_id,
+    )
+}
+
+fn publish_start_supervisor_registry(
+    input: StartSupervisorRegistryPublication<'_>,
+) -> Option<StartSupervisorRegistryTarget> {
+    publish_start_supervisor_registry_with(input, retry_start_supervisor_registry)
+}
+
+fn publish_start_supervisor_registry_with(
+    input: StartSupervisorRegistryPublication<'_>,
+    publish: impl FnOnce(&StartSupervisorRegistryTarget) -> Result<()>,
+) -> Option<StartSupervisorRegistryTarget> {
     let StartSupervisorRegistryPublication {
         file,
         canonical,
@@ -2362,21 +2398,21 @@ fn publish_start_supervisor_registry(input: StartSupervisorRegistryPublication<'
         session_log,
         route_owned,
     } = input;
-    let canonical_file = canonical.to_string_lossy().to_string();
     let cwd = std::env::current_dir()
         .unwrap_or_else(|_| project_root.to_path_buf())
         .to_string_lossy()
         .to_string();
-    match sessions::register_start_supervisor_in(
-        project_root,
-        session_id,
-        pane_id,
-        &canonical_file,
-        std::process::id(),
-        pane_window,
-        &cwd,
-        supervisor_instance_id,
-    ) {
+    let target = StartSupervisorRegistryTarget {
+        file: file.to_path_buf(),
+        canonical: canonical.to_path_buf(),
+        project_root: project_root.to_path_buf(),
+        session_id: session_id.to_string(),
+        pane_id: pane_id.to_string(),
+        pane_window: pane_window.to_string(),
+        cwd,
+        supervisor_instance_id: supervisor_instance_id.to_string(),
+    };
+    match publish(&target) {
         Ok(()) => {
             log_event(
                 session_log,
@@ -2388,6 +2424,7 @@ fn publish_start_supervisor_registry(input: StartSupervisorRegistryPublication<'
                     project_root.display()
                 ),
             );
+            None
         }
         Err(err) => {
             let message = format!(
@@ -2404,6 +2441,7 @@ fn publish_start_supervisor_registry(input: StartSupervisorRegistryPublication<'
                 route_owned,
                 format!("[start] warning: durable registry refresh failed: {err}"),
             );
+            Some(target)
         }
     }
 }
@@ -3115,22 +3153,23 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(
             &doc,
-            "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
+            "---\nagent_doc_session: sample-session\nagent: codex\n---\nBody\n",
         )
         .unwrap();
         let mut session_log = None;
 
-        publish_start_supervisor_registry(StartSupervisorRegistryPublication {
+        let retry = publish_start_supervisor_registry(StartSupervisorRegistryPublication {
             file: &doc,
             canonical: &doc,
             project_root: dir.path(),
-            session_id: "efs",
+            session_id: "sample-session",
             pane_id: "%26",
             pane_window: "@3",
-            supervisor_instance_id: "sup-efs",
+            supervisor_instance_id: "sup-sample",
             session_log: &mut session_log,
             route_owned: true,
         });
+        assert!(retry.is_none());
 
         let registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         let key =
@@ -3138,10 +3177,44 @@ mod tests {
         let entry = registry
             .get(&key)
             .expect("start registry publication should write the project-root registry");
-        assert_eq!(entry.session_id, "efs");
+        assert_eq!(entry.session_id, "sample-session");
         assert_eq!(entry.pane, "%26");
         assert_eq!(entry.window, "@3");
-        assert_eq!(entry.supervisor_instance_id, "sup-efs");
+        assert_eq!(entry.supervisor_instance_id, "sup-sample");
+    }
+
+    #[test]
+    fn failed_start_registry_publication_returns_exact_retry_target() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/professional/sampleportal.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: sample-session\n---\nBody\n").unwrap();
+        let mut session_log = None;
+
+        let retry = publish_start_supervisor_registry_with(
+            StartSupervisorRegistryPublication {
+                file: &doc,
+                canonical: &doc,
+                project_root: dir.path(),
+                session_id: "sample-session",
+                pane_id: "%26",
+                pane_window: "@3",
+                supervisor_instance_id: "sup-sample",
+                session_log: &mut session_log,
+                route_owned: true,
+            },
+            |_| Err(anyhow::anyhow!("database is locked")),
+        )
+        .expect("a failed durable publication must remain retryable");
+
+        assert_eq!(retry.file, doc);
+        assert_eq!(retry.canonical, doc);
+        assert_eq!(retry.project_root, dir.path());
+        assert_eq!(retry.session_id, "sample-session");
+        assert_eq!(retry.pane_id, "%26");
+        assert_eq!(retry.pane_window, "@3");
+        assert_eq!(retry.supervisor_instance_id, "sup-sample");
     }
 
     #[test]

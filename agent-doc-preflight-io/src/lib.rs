@@ -831,8 +831,10 @@ backlog text, preset body) and the coordinator rules; never paraphrase it, and w
 them inline in queue order; they are excluded from `selected_queue_prompts`. If a worker sends a \
 `#waypostrequest` packet, copy the complete packet (request, context, and every choice) verbatim \
 into `agent:exchange`, present it from the main session, and return the operator's answer to the \
-same worker when the harness can continue it. Never treat a chat answer as a tool permission \
-grant; the harness must grant the exact protected action. Run `agent-doc queue release <FILE> \
+same worker when the harness can continue it. The closeout that presents a blocking packet must \
+also record its concrete operator action in `agent:todo` with `--todo-add`; when the answer and \
+worker result complete that action, check it off with `--todo-done`. Never treat a chat answer as \
+a tool permission grant; the harness must grant the exact protected action. Run `agent-doc queue release <FILE> \
 --item <item>` when a subagent reports back, then close the item normally.";
 
 /// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.
@@ -9700,6 +9702,12 @@ mod tests {
             "{auth:?}"
         );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("request, context, and every choice"));
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+                .contains("also record its concrete operator action")
+        );
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--todo-add"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--todo-done"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Never treat a chat answer"));
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json["authorization"]["subagent_prompt_preamble"].is_string());

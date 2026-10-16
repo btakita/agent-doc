@@ -621,7 +621,12 @@ valid only when the harness supplied no choices. The coordinator MUST copy the
 complete packet verbatim into `agent:exchange`, present the same request from
 the main harness session, and send the operator's answer verbatim to the same
 worker when the harness supports continuation. The claim remains live while
-the request is pending; a packet is not worker completion.
+the request is pending; a packet is not worker completion. The closeout that
+presents a blocking packet MUST add one brief, concrete operator action to
+`agent:todo` with `--todo-add`. When the operator's answer and the continued
+worker result complete that action, the completion closeout MUST check it off
+with `--todo-done`; the handback path must neither omit the TODO nor leave a
+completed request open (`#wayposttodo`).
 
 Permission safety is stricter than question routing: a conversational answer is
 context, not a tool permission grant. The worker may retry a protected action

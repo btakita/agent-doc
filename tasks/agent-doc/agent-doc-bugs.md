@@ -416,6 +416,17 @@ Verification completed:
 - Integrated `make check` passed: 10,922 Rust tests, 202 VS Code tests, cross-editor simulation, JetBrains builds, docs, bootstrap, and TLA receipt checks.
 - Private-name diff scan was clean; the two full-tree matches are pre-existing in untouched files.
 - `make install` installed the combined binary/library and editor packages, and issued runtime recycle/reload signals.
+
+### Re: recovered response
+
+Completed, committed, pushed, and installed both fixes.
+
+- Queue parser now separates column-zero free-text items while preserving indented continuations and attached blockquotes.
+- Added safe, rate-limited stewardship of leaked `tmux-spawn-*` scopes without terminating unproven processes or live panes.
+- Combined branch: `fix/queue-free-text-item-boundaries` at `e55848a031`.
+- Verification: 10,922 Rust tests, 202 VS Code tests, editor builds, mutation tests, and `make tmux-ci` passed.
+- Session closeout committed at `51b1bbf153`; both answered queue items are struck. Only the unrelated `#syncioredlivetmux` item remains.
+- No live panes or user session were terminated.
 <!-- agent:boundary:0ab78b2a -->
 <!-- /agent:exchange -->
 

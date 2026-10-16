@@ -18903,8 +18903,12 @@ fn spawn_tmux_scope_sweep(project_root: &Path, in_flight: &Arc<AtomicBool>) {
             }
             worker_in_flight.store(false, Ordering::SeqCst);
         });
-    if spawned.is_err() {
+    if let Err(error) = spawned {
         in_flight.store(false, Ordering::SeqCst);
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!("tmux_scope_sweep status=worker_spawn_failed error={error}"),
+        );
     }
 }
 

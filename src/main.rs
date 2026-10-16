@@ -6872,12 +6872,23 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 AdminAction::TmuxScopes { dry_run, json } => {
                     let report = agent_doc_tmux_scope_io::sweep(dry_run);
-                    if let Ok(cwd) = std::env::current_dir()
-                        && let Some(root) = agent_doc_project_root_io::project_root_containing(&cwd)
-                    {
-                        for line in report.log_lines("admin") {
-                            agent_doc_ops_log_io::log_op(&root, &line);
+                    match std::env::current_dir() {
+                        Ok(cwd) => {
+                            if let Some(root) =
+                                agent_doc_project_root_io::project_root_containing(&cwd)
+                            {
+                                for line in report.log_lines("admin") {
+                                    agent_doc_ops_log_io::log_op(&root, &line);
+                                }
+                            } else {
+                                eprintln!(
+                                    "[admin] warning: tmux scope sweep ran outside an agent-doc project; no ops.log is available"
+                                );
+                            }
                         }
+                        Err(error) => eprintln!(
+                            "[admin] warning: tmux scope sweep could not resolve cwd for ops.log: {error}"
+                        ),
                     }
                     if json {
                         println!("{}", serde_json::to_string_pretty(&report)?);

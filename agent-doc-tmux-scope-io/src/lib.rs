@@ -350,35 +350,58 @@ fn now_epoch_secs() -> u64 {
 /// stamp, so concurrent controllers cannot both win the same slot. The stamp is
 /// advanced BEFORE the sweep runs: a sweep that crashes or hangs costs one
 /// interval, never a hot retry loop.
-pub fn claim_sweep_slot(dir: &Path, now_epoch_secs: u64, interval: Duration) -> bool {
+pub fn claim_sweep_slot(
+    dir: &Path,
+    now_epoch_secs: u64,
+    interval: Duration,
+) -> Result<bool, String> {
     use fs2::FileExt;
     use std::io::{Read, Seek, Write};
-    if std::fs::create_dir_all(dir).is_err() {
-        return false;
-    }
-    let Ok(mut file) = std::fs::OpenOptions::new()
+    std::fs::create_dir_all(dir)
+        .map_err(|error| format!("sweep_stamp_mkdir_failed:{}:{error}", dir.display()))?;
+    let stamp = dir.join("tmux-scope-sweep.stamp");
+    let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(dir.join("tmux-scope-sweep.stamp"))
-    else {
-        return false;
+        .open(&stamp)
+        .map_err(|error| format!("sweep_stamp_open_failed:{}:{error}", stamp.display()))?;
+    if let Err(error) = file.try_lock_exclusive() {
+        return if error.kind() == std::io::ErrorKind::WouldBlock {
+            Ok(false)
+        } else {
+            Err(format!(
+                "sweep_stamp_lock_failed:{}:{error}",
+                stamp.display()
+            ))
+        };
     };
-    if file.try_lock_exclusive().is_err() {
-        return false;
-    }
     let mut contents = String::new();
-    let last = file
-        .read_to_string(&mut contents)
-        .ok()
-        .and_then(|_| contents.trim().parse::<u64>().ok());
-    let claimed = sweep_due(last, now_epoch_secs, interval)
-        && file.set_len(0).is_ok()
-        && file.rewind().is_ok()
-        && writeln!(file, "{now_epoch_secs}").is_ok();
-    let _ = FileExt::unlock(&file);
-    claimed
+    file.read_to_string(&mut contents)
+        .map_err(|error| format!("sweep_stamp_read_failed:{}:{error}", stamp.display()))?;
+    let trimmed = contents.trim();
+    let last = if trimmed.is_empty() {
+        None
+    } else {
+        Some(
+            trimmed
+                .parse::<u64>()
+                .map_err(|error| format!("sweep_stamp_parse_failed:{}:{error}", stamp.display()))?,
+        )
+    };
+    if !sweep_due(last, now_epoch_secs, interval) {
+        return Ok(false);
+    }
+    file.set_len(0)
+        .map_err(|error| format!("sweep_stamp_truncate_failed:{}:{error}", stamp.display()))?;
+    file.rewind()
+        .map_err(|error| format!("sweep_stamp_rewind_failed:{}:{error}", stamp.display()))?;
+    writeln!(file, "{now_epoch_secs}")
+        .map_err(|error| format!("sweep_stamp_write_failed:{}:{error}", stamp.display()))?;
+    // Dropping `file` releases the advisory lock even if a later return path is
+    // added. There is no explicit unlock whose failure could be hidden.
+    Ok(true)
 }
 
 /// Rate-limited automatic sweep for long-lived agent-doc processes.
@@ -390,10 +413,11 @@ pub fn run_scheduled_sweep(log: &mut dyn FnMut(&str)) -> Option<ScopeSweepReport
         return None;
     }
     let interval = scheduled_sweep_interval(std::env::var(SWEEP_INTERVAL_SECS_ENV).ok().as_deref());
-    if !claim_sweep_slot(&stamp_dir(), now_epoch_secs(), interval) {
-        return None;
-    }
-    let report = sweep(false);
+    let report = match claim_sweep_slot(&stamp_dir(), now_epoch_secs(), interval) {
+        Ok(false) => return None,
+        Ok(true) => sweep(false),
+        Err(error) => ScopeSweepReport::unavailable(false, error),
+    };
     for line in report.log_lines("scheduled") {
         log(&line);
     }
@@ -543,40 +567,111 @@ mod system {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| format!("spawn_systemctl_failed:{error}"))?;
-        let mut stdout = child.stdout.take();
-        let reader = std::thread::spawn(move || {
-            let mut text = String::new();
-            if let Some(stdout) = stdout.as_mut() {
-                let _ = stdout.read_to_string(&mut text);
+        let terminate = |child: &mut std::process::Child, reason: &str| -> String {
+            let kill = child
+                .kill()
+                .map(|()| "killed".to_string())
+                .unwrap_or_else(|error| format!("kill_failed:{error}"));
+            let wait = child
+                .wait()
+                .map(|status| format!("waited:{status}"))
+                .unwrap_or_else(|error| format!("wait_failed:{error}"));
+            format!("{reason}:{kill}:{wait}")
+        };
+        let mut stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => return Err(terminate(&mut child, "systemctl_stdout_pipe_missing")),
+        };
+        let mut stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => return Err(terminate(&mut child, "systemctl_stderr_pipe_missing")),
+        };
+        let stdout_reader = match std::thread::Builder::new()
+            .name("tmux-scope-systemctl-stdout".to_string())
+            .spawn(move || {
+                let mut text = String::new();
+                stdout
+                    .read_to_string(&mut text)
+                    .map_err(|error| format!("systemctl_stdout_read_failed:{error}"))?;
+                Ok::<String, String>(text)
+            }) {
+            Ok(reader) => reader,
+            Err(error) => {
+                let cleanup = terminate(&mut child, "systemctl_stdout_reader_spawn_failed");
+                return Err(format!("{cleanup}:{error}"));
             }
-            text
-        });
+        };
+        let stderr_reader = match std::thread::Builder::new()
+            .name("tmux-scope-systemctl-stderr".to_string())
+            .spawn(move || {
+                let mut text = String::new();
+                stderr
+                    .read_to_string(&mut text)
+                    .map_err(|error| format!("systemctl_stderr_read_failed:{error}"))?;
+                Ok::<String, String>(text)
+            }) {
+            Ok(reader) => reader,
+            Err(error) => {
+                let cleanup = terminate(&mut child, "systemctl_stderr_reader_spawn_failed");
+                let stdout_result = stdout_reader
+                    .join()
+                    .map_err(|_| "systemctl_stdout_reader_panicked".to_string())?;
+                return Err(format!(
+                    "{cleanup}:{error}:stdout={}",
+                    reader_outcome(&stdout_result)
+                ));
+            }
+        };
+        let join_reader = |reader: std::thread::JoinHandle<Result<String, String>>, name: &str| {
+            reader
+                .join()
+                .map_err(|_| format!("systemctl_{name}_reader_panicked"))?
+        };
         let deadline = Instant::now() + timeout;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() >= deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("systemctl_timeout".to_string());
+                    let cleanup = terminate(&mut child, "systemctl_timeout");
+                    let stdout_result = join_reader(stdout_reader, "stdout");
+                    let stderr_result = join_reader(stderr_reader, "stderr");
+                    return Err(format!(
+                        "{cleanup}:stdout={}:stderr={}",
+                        reader_outcome(&stdout_result),
+                        reader_outcome(&stderr_result)
+                    ));
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-                Err(error) => return Err(format!("systemctl_wait_failed:{error}")),
+                Err(error) => {
+                    let cleanup = terminate(&mut child, "systemctl_wait_failed");
+                    let stdout_result = join_reader(stdout_reader, "stdout");
+                    let stderr_result = join_reader(stderr_reader, "stderr");
+                    return Err(format!(
+                        "{cleanup}:{error}:stdout={}:stderr={}",
+                        reader_outcome(&stdout_result),
+                        reader_outcome(&stderr_result)
+                    ));
+                }
             }
         };
-        let text = reader.join().unwrap_or_default();
+        let stdout = join_reader(stdout_reader, "stdout")?;
+        let stderr = join_reader(stderr_reader, "stderr")?;
         if status.success() {
-            Ok(text)
+            Ok(stdout)
         } else {
-            let mut stderr = String::new();
-            if let Some(mut pipe) = child.stderr.take() {
-                let _ = pipe.read_to_string(&mut stderr);
-            }
             Err(format!(
                 "systemctl_exit_{}:{}",
                 status.code().unwrap_or(-1),
                 stderr.trim().replace('\n', " ")
             ))
+        }
+    }
+
+    fn reader_outcome(result: &Result<String, String>) -> String {
+        match result {
+            Ok(text) if text.is_empty() => "empty".to_string(),
+            Ok(text) => format!("bytes_{}", text.len()),
+            Err(error) => error.clone(),
         }
     }
 }
@@ -878,9 +973,9 @@ mod tests {
     fn sweep_slot_is_claimed_once_per_interval() {
         let dir = tempfile::tempdir().unwrap();
         let interval = Duration::from_secs(600);
-        assert!(claim_sweep_slot(dir.path(), 10_000, interval));
-        assert!(!claim_sweep_slot(dir.path(), 10_100, interval));
-        assert!(claim_sweep_slot(dir.path(), 10_600, interval));
+        assert_eq!(claim_sweep_slot(dir.path(), 10_000, interval), Ok(true));
+        assert_eq!(claim_sweep_slot(dir.path(), 10_100, interval), Ok(false));
+        assert_eq!(claim_sweep_slot(dir.path(), 10_600, interval), Ok(true));
         let stamp = std::fs::read_to_string(dir.path().join("tmux-scope-sweep.stamp")).unwrap();
         assert_eq!(stamp.trim(), "10600");
     }
@@ -897,16 +992,22 @@ mod tests {
             .open(dir.path().join("tmux-scope-sweep.stamp"))
             .unwrap();
         holder.lock_exclusive().unwrap();
-        assert!(!claim_sweep_slot(
-            dir.path(),
-            10_000,
-            Duration::from_secs(600)
-        ));
+        assert_eq!(
+            claim_sweep_slot(dir.path(), 10_000, Duration::from_secs(600)),
+            Ok(false)
+        );
         FileExt::unlock(&holder).unwrap();
-        assert!(claim_sweep_slot(
-            dir.path(),
-            10_000,
-            Duration::from_secs(600)
-        ));
+        assert_eq!(
+            claim_sweep_slot(dir.path(), 10_000, Duration::from_secs(600)),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn corrupt_sweep_stamp_is_reported_instead_of_silently_disabling_cleanup() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tmux-scope-sweep.stamp"), "not-an-epoch\n").unwrap();
+        let error = claim_sweep_slot(dir.path(), 10_000, Duration::from_secs(600)).unwrap_err();
+        assert!(error.starts_with("sweep_stamp_parse_failed:"));
     }
 }

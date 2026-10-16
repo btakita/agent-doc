@@ -17,7 +17,7 @@
 //! - `install_local(editor)` — returns `Err` if no `editors/` directory is found or no artifact exists.
 //! - `update(editor)` — returns `Ok(())` early (no-op) when the JetBrains plugin is already at the latest version.
 //! - `update_all_installed()` attempts editor families independently and reports all failures after the remaining installed targets have been attempted.
-//! - A staged target is never counted as updated: it needs an IDE restart, and when agent-doc declined the restart-free upgrade on that JetBrains build the summary says the restart-free path is unavailable there (GH #114).
+//! - A staged target is never counted as updated: it needs an IDE restart, and when agent-doc declined the restart-free upgrade on that JetBrains build the summary says the restart-free path is unavailable there (GH #114). A modular 262/263 package line with no upgrade entry point is the same permanent loss (GH #277): its restart-required target is `RestartRequired { permanent: true }`, gets the same once-per-process NOTE, summary line and `restart_free_unavailable=true`, and the NOTE/summary state the between-restarts rule the code enforces (routes admitted while the native endpoint answers with this build, native saves at or above the protocol floor, `admin reload-lib` before a restart on a `plugin_bytes_superseded` refusal).
 //! - `list()` — always returns `Ok(())`; emits a stderr message when no plugins are found.
 //! - Unrecognized `editor` strings return `Err` with a list of supported values.
 //! - Byte-identical local JetBrains packages are true no-ops: the installed tree is not
@@ -2518,7 +2518,7 @@ fn already_staged_outcome(
             .as_deref()
             .and_then(|body| {
                 body.lines()
-                    .find(|line| agent_doc_declined_dynamic_upgrade(line))
+                    .find(|line| restart_free_upgrade_permanently_unavailable(line))
             })
             .map(|original| format!("{base_reason}; original staging reason: {original}"))
             .unwrap_or(base_reason)
@@ -2578,8 +2578,8 @@ fn install_jetbrains_package_bytes(
                         "staged it for the next IDE start instead"
                     )
                 );
-                if agent_doc_declined_dynamic_upgrade(&reason) {
-                    print_permanent_dynamic_upgrade_loss_once();
+                if restart_free_upgrade_permanently_unavailable(&reason) {
+                    print_permanent_dynamic_upgrade_loss_once(&reason);
                 }
                 log_jetbrains_upgrade_decision(&format!(
                     "plugin_dynamic_upgrade outcome=staged_for_restart declined_by={} staged_version={expected_version} target={} reason={reason:?}",
@@ -2633,6 +2633,12 @@ fn install_jetbrains_package_bytes(
                     "WARNING: {}",
                     dynamic_upgrade_fallback_warning(&reason, "replacing the plugin files instead")
                 );
+                // GH #277: a modular package line's missing entry point is as
+                // permanent on this build as agent-doc's own decline (GH #108),
+                // so it gets the same once-per-process NOTE.
+                if restart_free_upgrade_permanently_unavailable(&reason) {
+                    print_permanent_dynamic_upgrade_loss_once(&reason);
+                }
                 log_jetbrains_upgrade_decision(&format!(
                     "plugin_dynamic_upgrade outcome=restart_required declined_by={} version={expected_version} target={} reason={reason:?}",
                     dynamic_upgrade_decliner(&reason),
@@ -2691,6 +2697,17 @@ fn agent_doc_declined_dynamic_upgrade(reason: &str) -> bool {
         || reason.contains(LEGACY_ASYNC_RETIREMENT_DECLINE)
 }
 
+/// GH #277: is the restart-free upgrade unavailable on this JetBrains build for
+/// every future install, not only for this attempt? Two causes qualify:
+/// agent-doc's own asynchronous-classloader decline (GH #108) and a modular
+/// package line that ships no upgrade entry point (`#jbmodulardynupgrade`).
+/// Attribution stays separate ([`dynamic_upgrade_decliner`]): the modular case is
+/// `declined_by=modular_package`, never "agent-doc declined".
+fn restart_free_upgrade_permanently_unavailable(reason: &str) -> bool {
+    agent_doc_declined_dynamic_upgrade(reason)
+        || reason.contains(JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE)
+}
+
 /// Who stopped the restart-free upgrade, as an `ops.log` field value.
 fn dynamic_upgrade_decliner(reason: &str) -> &'static str {
     if agent_doc_declined_dynamic_upgrade(reason) {
@@ -2728,16 +2745,54 @@ fn dynamic_upgrade_fallback_warning(reason: &str, fallback: &str) -> String {
     format!("{cause}; {fallback}.")
 }
 
-/// GH #108: printed once per process, because the decline is a property of the
-/// JetBrains build, not of this attempt -- retrying can never succeed there.
-fn permanent_dynamic_upgrade_loss_note() -> &'static str {
-    "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build (it retires plugin classloaders asynchronously); every future install will stage the same way. Use `agent-doc upgrade` (or the plugin install) and then restart the IDE; re-running the install will not load the plugin without a restart."
+/// GH #108 / #277: printed once per process, because the decline is a property
+/// of the JetBrains build (or of its package line), not of this attempt --
+/// retrying can never succeed there. `reason` picks the stated cause.
+fn permanent_dynamic_upgrade_loss_note(reason: &str) -> String {
+    let (cause, consequence) = if reason.contains(JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE) {
+        let line = if reason.contains("exact-262") {
+            "exact-262"
+        } else {
+            "exact-263"
+        };
+        (
+            format!("its {line} modular plugin package ships no upgrade entry point"),
+            "every future plugin install will replace the files and need an IDE restart the same way",
+        )
+    } else {
+        (
+            "it retires plugin classloaders asynchronously".to_string(),
+            "every future install will stage the same way",
+        )
+    };
+    format!(
+        "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build ({cause}); {consequence}. Use `agent-doc upgrade` (or the plugin install) and then restart the IDE; re-running the install will not load the plugin without a restart. {}",
+        between_restarts_guidance()
+    )
 }
 
-fn print_permanent_dynamic_upgrade_loss_once() {
-    static PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        eprintln!("{}", permanent_dynamic_upgrade_loss_note());
+/// GH #277: what an operator may do between a binary upgrade and the IDE
+/// restart. Every clause is a guarantee the code enforces, not a policy wish:
+/// editor routes to an IDE running superseded plugin bytes are admitted while its
+/// native endpoint answers with this binary's build (GH #267,
+/// `superseded_editor_route_verdict`), native saves are admitted by protocol
+/// floor rather than version equality (GH #236,
+/// `editor_native_save_compatibility`), and an other-build endpoint is refused
+/// with `agent-doc admin reload-lib` as its first remedy.
+fn between_restarts_guidance() -> String {
+    let floor = agent_doc_reliable_sync_io::liveness::native_save_protocol_floor("jetbrains")
+        .unwrap_or("?");
+    format!(
+        "The restart can wait for a convenient moment: agent-doc keeps routing to the running IDE while its native agent-doc endpoint answers with this binary's build (the IDE reloads the native library when the file changes, where native hot reload is supported) and keeps native saves while the running plugin is at or above the JetBrains native-save protocol floor {floor}; the new plugin's own changes load only at the restart, and preflight keeps a `stale_plugin` warning until then. If a route is refused with `plugin_bytes_superseded`, run `agent-doc admin reload-lib`; restart the IDE then if that native reload is refused too."
+    )
+}
+
+static PERMANENT_DYNAMIC_UPGRADE_LOSS_PRINTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn print_permanent_dynamic_upgrade_loss_once(reason: &str) {
+    if !PERMANENT_DYNAMIC_UPGRADE_LOSS_PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("{}", permanent_dynamic_upgrade_loss_note(reason));
     }
 }
 
@@ -3139,8 +3194,10 @@ pub enum PluginTargetOutcome {
     /// restart there.
     StagedForRestart { permanent: bool },
     /// The files were replaced on disk while a live IDE keeps the previous
-    /// generation loaded.
-    RestartRequired,
+    /// generation loaded. `permanent` (GH #277): the restart-free upgrade is
+    /// unavailable on this build for every future install (a modular package
+    /// line with no upgrade entry point), not just this attempt.
+    RestartRequired { permanent: bool },
     /// GH #233: the target's proven platform build lies outside every
     /// published package range, so nothing was installed and the plugin
     /// already there (`version` on the report) stays in place. Not a failure:
@@ -3155,14 +3212,27 @@ impl PluginTargetOutcome {
             JetbrainsLocalInstallOutcome::HotUpgraded { .. } => Self::HotUpgraded,
             JetbrainsLocalInstallOutcome::Unchanged => Self::Unchanged,
             JetbrainsLocalInstallOutcome::StagedForRestart { reason } => Self::StagedForRestart {
-                permanent: agent_doc_declined_dynamic_upgrade(reason),
+                permanent: restart_free_upgrade_permanently_unavailable(reason),
             },
-            JetbrainsLocalInstallOutcome::RestartRequired { .. } => Self::RestartRequired,
+            JetbrainsLocalInstallOutcome::RestartRequired { reason } => Self::RestartRequired {
+                permanent: restart_free_upgrade_permanently_unavailable(reason),
+            },
         }
     }
 
     fn needs_restart(&self) -> bool {
-        matches!(self, Self::StagedForRestart { .. } | Self::RestartRequired)
+        matches!(
+            self,
+            Self::StagedForRestart { .. } | Self::RestartRequired { .. }
+        )
+    }
+
+    /// GH #114 / #277: no retry can avoid the restart on this target's build.
+    fn restart_free_unavailable(&self) -> bool {
+        matches!(
+            self,
+            Self::StagedForRestart { permanent: true } | Self::RestartRequired { permanent: true }
+        )
     }
 }
 
@@ -3240,7 +3310,7 @@ impl PluginReconcileReport {
                 "staged_for_restart",
             ),
             (
-                self.count(|o| *o == O::RestartRequired),
+                self.count(|o| matches!(o, O::RestartRequired { .. })),
                 "replaced under a live IDE",
                 "restart_required",
             ),
@@ -3301,7 +3371,10 @@ impl PluginReconcileReport {
                 (_, PluginTargetOutcome::StagedForRestart { permanent: false }) => format!(
                     "Restart {label} to load plugin v{version}; the restart-free upgrade did not complete, so it was staged for the next start."
                 ),
-                (_, PluginTargetOutcome::RestartRequired) => format!(
+                (_, PluginTargetOutcome::RestartRequired { permanent: true }) => format!(
+                    "Restart {label} to load plugin v{version}; the running IDE keeps the previous plugin until then, and restart-free upgrade is unavailable on this build."
+                ),
+                (_, PluginTargetOutcome::RestartRequired { permanent: false }) => format!(
                     "Restart {label} to load plugin v{version}; the running IDE keeps the previous plugin until then."
                 ),
                 (PluginEditorFamily::JetBrains, PluginTargetOutcome::Installed) => format!(
@@ -3329,6 +3402,16 @@ impl PluginReconcileReport {
                 "The native library is reloaded by the running IDE when its file changes; only the plugin needs the restart."
                     .to_string(),
             );
+            // GH #277: where the restart-free path is gone for good, every
+            // release that changes the plugin needs a restart, so say what the
+            // code guarantees until then instead of implying "restart now".
+            if self
+                .targets
+                .iter()
+                .any(|target| target.outcome.restart_free_unavailable())
+            {
+                lines.push(between_restarts_guidance());
+            }
         }
         lines.join("\n")
     }
@@ -3348,9 +3431,10 @@ impl PluginReconcileReport {
             .map(|target| format!("{}@{}", target.label, target.version))
             .collect::<Vec<_>>()
             .join(",");
-        let permanent = self.targets.iter().any(|target| {
-            target.outcome == PluginTargetOutcome::StagedForRestart { permanent: true }
-        });
+        let permanent = self
+            .targets
+            .iter()
+            .any(|target| target.outcome.restart_free_unavailable());
         format!(
             "plugin_upgrade_summary release={release} {counts} restart_targets={restart_targets:?} restart_free_unavailable={permanent}"
         )
@@ -3360,10 +3444,35 @@ impl PluginReconcileReport {
 /// GH #114: print the reconciliation summary and record it in `ops.log`
 /// (best-effort, like the per-install upgrade decision).
 pub fn report_reconcile_summary(report: &PluginReconcileReport, release: &str) {
-    eprintln!("{}", report.summary(release));
+    let note_printed =
+        PERMANENT_DYNAMIC_UPGRADE_LOSS_PRINTED.load(std::sync::atomic::Ordering::Relaxed);
+    eprintln!(
+        "{}",
+        printed_reconcile_summary(report, release, note_printed)
+    );
     if !report.targets.is_empty() {
         log_jetbrains_upgrade_decision(&report.ops_log_line(release));
     }
+}
+
+/// GH #277: the summary as printed. When this process already printed the
+/// permanent-loss NOTE, which carries the same between-restarts guidance, the
+/// summary does not repeat it.
+fn printed_reconcile_summary(
+    report: &PluginReconcileReport,
+    release: &str,
+    permanent_note_printed: bool,
+) -> String {
+    let summary = report.summary(release);
+    if !permanent_note_printed {
+        return summary;
+    }
+    let guidance = between_restarts_guidance();
+    summary
+        .lines()
+        .filter(|line| *line != guidance)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The operator-facing name of a JetBrains plugins directory: the IDE data
@@ -5343,7 +5452,15 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             super::dynamic_upgrade_decliner("NoClassDefFoundError"),
             "upgrader_failure"
         );
-        assert!(super::permanent_dynamic_upgrade_loss_note().contains("permanently unavailable"));
+        let note = super::permanent_dynamic_upgrade_loss_note(current);
+        assert!(note.contains("permanently unavailable"), "{note}");
+        assert!(
+            note.contains("retires plugin classloaders asynchronously"),
+            "{note}"
+        );
+        assert!(!note.contains("modular"), "{note}");
+        assert!(super::restart_free_upgrade_permanently_unavailable(current));
+        assert!(super::restart_free_upgrade_permanently_unavailable(legacy));
     }
 
     /// GH #108: a staged install must not print "Plugin installed (v<old>)"; it
@@ -6145,8 +6262,161 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 .any(|line| line.contains("declined_by=modular_package")),
             "{logged:?}"
         );
-        // Not an agent-doc platform decline: no permanent-loss classification.
+        // GH #277: attribution stays `modular_package` (agent-doc did not
+        // decline on a classloader-retirement platform), but the loss is just as
+        // permanent on this build, so it is classified permanent.
         assert!(!super::agent_doc_declined_dynamic_upgrade(&refusal));
+        assert!(super::restart_free_upgrade_permanently_unavailable(
+            &refusal
+        ));
+        assert_eq!(
+            super::PluginTargetOutcome::from_jetbrains(&outcome),
+            super::PluginTargetOutcome::RestartRequired { permanent: true }
+        );
+        assert!(
+            super::PERMANENT_DYNAMIC_UPGRADE_LOSS_PRINTED
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+        let note = super::permanent_dynamic_upgrade_loss_note(&refusal);
+        assert!(note.contains("permanently unavailable"), "{note}");
+        assert!(note.contains("exact-262 modular"), "{note}");
+        assert!(!note.contains("asynchronously"), "{note}");
+    }
+
+    /// GH #277: the exact-263 modular decline is permanent on that build, so it
+    /// reaches every surface GH #108 / #114 added for a permanent loss -- the
+    /// once-per-process NOTE, the summary's "unavailable on this build" line,
+    /// `restart_free_unavailable=true` -- and says what the operator may do
+    /// until the restart, without changing whether the restart-free path runs.
+    #[test]
+    fn modular_263_decline_reports_permanent_loss_and_between_restart_guidance() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("IntelliJIdea2026.3/plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("agent.doc-0.2.641.jar"), b"old").unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-263-0.2.647.zip");
+        write_test_modern_jetbrains_zip(&zip, "0.2.647", b"new");
+        let refusal = super::jetbrains_dynamic_upgrade_entry_point_refusal(
+            JetbrainsPackageRange::Modular263,
+            "0.2.647",
+            || unreachable!("the 263 package has no launcher"),
+        )
+        .unwrap()
+        .unwrap();
+
+        super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow_mut().clear());
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.647",
+            true,
+            || anyhow::bail!("{refusal}"),
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        // The decline itself is unchanged: files replaced, restart required,
+        // attributed to the package line.
+        let reason = match &outcome {
+            JetbrainsLocalInstallOutcome::RestartRequired { reason } => reason.clone(),
+            other => panic!("expected RestartRequired, got {other:?}"),
+        };
+        assert_eq!(fs::read(lib.join("agent.doc-0.2.647.jar")).unwrap(), b"new");
+        assert_eq!(super::dynamic_upgrade_decliner(&refusal), "modular_package");
+        let logged = super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow().clone());
+        assert!(
+            logged
+                .iter()
+                .any(|line| line.contains("outcome=restart_required declined_by=modular_package")),
+            "{logged:?}"
+        );
+        assert!(
+            super::PERMANENT_DYNAMIC_UPGRADE_LOSS_PRINTED
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+
+        // The NOTE names the real cause and the between-restarts rule.
+        let note = super::permanent_dynamic_upgrade_loss_note(&reason);
+        assert!(
+            note.starts_with(
+                "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build (its exact-263 modular plugin package ships no upgrade entry point)"
+            ),
+            "{note}"
+        );
+        assert!(!note.contains("asynchronously"), "{note}");
+        assert!(note.contains(&super::between_restarts_guidance()), "{note}");
+        let guidance = super::between_restarts_guidance();
+        assert!(
+            guidance.starts_with("The restart can wait for a convenient moment"),
+            "{guidance}"
+        );
+        let floor =
+            agent_doc_reliable_sync_io::liveness::native_save_protocol_floor("jetbrains").unwrap();
+        assert!(
+            guidance.contains(&format!("native-save protocol floor {floor}")),
+            "{guidance}"
+        );
+        assert!(
+            guidance.contains("agent-doc admin reload-lib"),
+            "{guidance}"
+        );
+
+        // Summary and ops.log surfaces.
+        use super::PluginEditorFamily::JetBrains;
+        let permanent = super::PluginTargetOutcome::from_jetbrains(&outcome);
+        assert_eq!(
+            permanent,
+            super::PluginTargetOutcome::RestartRequired { permanent: true }
+        );
+        let report = super::PluginReconcileReport {
+            targets: vec![reconcile_target(
+                JetBrains,
+                "IntelliJIdea2026.3",
+                "0.2.647",
+                permanent,
+            )],
+        };
+        let summary = report.summary("0.35.510");
+        assert!(
+            summary.contains(
+                "Restart IntelliJIdea2026.3 to load plugin v0.2.647; the running IDE keeps the previous plugin until then, and restart-free upgrade is unavailable on this build."
+            ),
+            "{summary}"
+        );
+        assert!(summary.contains(&guidance), "{summary}");
+        assert!(
+            report
+                .ops_log_line("0.35.510")
+                .contains("restart_free_unavailable=true"),
+            "{}",
+            report.ops_log_line("0.35.510")
+        );
+        // Printed after the NOTE, the summary does not repeat the guidance.
+        let after_note = super::printed_reconcile_summary(&report, "0.35.510", true);
+        assert!(!after_note.contains(&guidance), "{after_note}");
+        assert!(
+            after_note.contains("restart-free upgrade is unavailable on this build"),
+            "{after_note}"
+        );
+        assert_eq!(
+            super::printed_reconcile_summary(&report, "0.35.510", false),
+            summary
+        );
+
+        // GH #257: a later run that finds the same bytes keeps the recorded
+        // verdict, and the verdict still classifies as permanent.
+        let marker = target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+        let recorded = fs::read_to_string(&marker).unwrap();
+        assert!(
+            recorded.contains(super::JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE),
+            "{recorded}"
+        );
+        assert_eq!(
+            super::PluginTargetOutcome::from_jetbrains(
+                &JetbrainsLocalInstallOutcome::RestartRequired { reason: recorded }
+            ),
+            super::PluginTargetOutcome::RestartRequired { permanent: true }
+        );
     }
 
     /// GH #238 fixture host: a fake `/proc` with one RemoteDev backend whose
@@ -6491,7 +6761,12 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 reconcile_target(JetBrains, "IntelliJIdea2026.1", "0.2.481", O::HotUpgraded),
                 reconcile_target(JetBrains, "PyCharm2026.2", "0.2.481", O::HotUpgraded),
                 reconcile_target(JetBrains, "GoLand2026.2", "0.2.481", O::Unchanged),
-                reconcile_target(JetBrains, "RustRover2026.2", "0.2.481", O::RestartRequired),
+                reconcile_target(
+                    JetBrains,
+                    "RustRover2026.2",
+                    "0.2.481",
+                    O::RestartRequired { permanent: false },
+                ),
                 reconcile_target(
                     JetBrains,
                     "WebStorm2026.2",
@@ -6521,6 +6796,11 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             "{summary}"
         );
         assert!(!summary.contains("unavailable on this build"), "{summary}");
+        // GH #277: the between-restarts guidance belongs to a permanent loss.
+        assert!(
+            !summary.contains(&super::between_restarts_guidance()),
+            "{summary}"
+        );
         // Hot-upgraded and unchanged targets need no action line.
         assert!(!summary.contains("IntelliJIdea2026.1"), "{summary}");
         assert!(!summary.contains("GoLand2026.2"), "{summary}");
@@ -6629,7 +6909,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                     reason: "x".to_string()
                 }
             ),
-            super::PluginTargetOutcome::RestartRequired
+            super::PluginTargetOutcome::RestartRequired { permanent: false }
         );
     }
 

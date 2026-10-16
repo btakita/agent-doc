@@ -3437,8 +3437,13 @@ fn run_with_options_internal_at_root(
             Err(e) => eprintln!("[sync] actor gc warning: {}", e),
         }
         if !matches!(auto_start_mode, AutoStartMode::SafePassive) {
-            match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+            match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_for_caller(
                 &scope_root,
+                |pane| {
+                    agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(
+                        tmux, pane,
+                    )
+                },
                 false,
                 "sync",
                 "stale_dead_pane_actor",
@@ -5470,14 +5475,19 @@ fn run_with_options_internal_at_root(
         if !window_driven_by_other_root {
             return false;
         }
-        let Some(document) = agent_doc_controller_io::project_controller::foreign_pane_owner_document(
-            tmux,
-            pane_id,
-            project_root,
-        ) else {
+        let Some(document) =
+            agent_doc_controller_io::project_controller::foreign_pane_owner_document(
+                tmux,
+                pane_id,
+                project_root,
+            )
+        else {
             return false;
         };
-        if logged_foreign_panes.borrow_mut().insert(pane_id.to_string()) {
+        if logged_foreign_panes
+            .borrow_mut()
+            .insert(pane_id.to_string())
+        {
             sync_log(&format!(
                 "layout_foreign_pane_protected pane={} document={} project_root={} (#stalecontrollerhotupdate)",
                 pane_id,
@@ -7292,6 +7302,44 @@ mod th {
         }
         predicate()
     }
+    /// `#syncioredlivetmux`: make `pane` the live owner of `doc` the way a
+    /// route-owned `agent-doc start` would. Since `#adsessreap2` an open
+    /// session log only names an owner while that pane runs a non-shell
+    /// foreground process, and since `#bare-foreign-session-guard` a harness
+    /// that binds no document is foreign, so a bare shell pane is no longer
+    /// enough. The pane's shell is replaced by a long-lived process exec'd
+    /// directly (no shell startup to race) whose command line binds `doc`; it
+    /// dies with the isolated tmux server.
+    pub(crate) fn respawn_pane_as_document_owner(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        cwd: &Path,
+        doc: &Path,
+    ) {
+        let command = format!(
+            "bash -c \"exec -a agent-doc perl -e 'sleep 600' start --route-owned -- {}\"",
+            doc.display()
+        );
+        let cwd = cwd.to_string_lossy();
+        tmux.raw_cmd(&[
+            "respawn-pane",
+            "-k",
+            "-c",
+            cwd.as_ref(),
+            "-t",
+            pane,
+            &command,
+        ])
+        .unwrap();
+        assert!(
+            wait_for(Duration::from_secs(15), || {
+                agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane)
+                    && !pane_runs_other_document_owner(tmux, pane, doc)
+            }),
+            "pane {pane} should run a live owner of {}",
+            doc.display()
+        );
+    }
     pub(crate) fn pane_current_command(tmux: &IsolatedTmux, pane: &str) -> Option<String> {
         agent_doc_tmux_io::target_current_command(tmux, pane)
     }
@@ -7425,6 +7473,15 @@ mod th {
         let detached_pane = iso.split_window(&protected_pane, root, "-dh").unwrap();
         let target_window = iso.pane_window(&protected_pane).unwrap();
         let requested_pane = iso.new_window(&tmux_session, root).unwrap();
+        let requested_window = iso.pane_window(&requested_pane).unwrap();
+
+        for (pane, doc) in [
+            (&protected_pane, &protected_doc),
+            (&detached_pane, &detached_doc),
+            (&requested_pane, &requested_doc),
+        ] {
+            respawn_pane_as_document_owner(&iso, pane, root, doc);
+        }
 
         sessions::register_full_with_cwd(
             "sync-replace-protected",
@@ -7449,10 +7506,41 @@ mod th {
             &requested_pane,
             &requested_doc.to_string_lossy(),
             pane_pid_from_tmux(&iso, &requested_pane).unwrap(),
-            &iso.pane_window(&requested_pane).unwrap(),
+            &requested_window,
             &root.to_string_lossy(),
         )
         .unwrap();
+        for (session, pane, window, doc) in [
+            (
+                "sync-replace-protected",
+                &protected_pane,
+                &target_window,
+                &protected_doc,
+            ),
+            (
+                "sync-replace-detached",
+                &detached_pane,
+                &target_window,
+                &detached_doc,
+            ),
+            (
+                "sync-replace-requested",
+                &requested_pane,
+                &requested_window,
+                &requested_doc,
+            ),
+        ] {
+            agent_doc_session_actor_io::project_binding_in(
+                root,
+                &doc.to_string_lossy(),
+                session,
+                pane,
+                window,
+                "sync",
+                "replace_detachable_fixture",
+            )
+            .unwrap();
+        }
 
         let protected_content = std::fs::read_to_string(&protected_doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(
@@ -8178,6 +8266,7 @@ mod tests {
 
         let iso = agent_doc_tmux_io::isolated_test_tmux("sync-session-log-owner");
         let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        respawn_pane_as_document_owner(&iso, &owner_pane, tmp.path(), &doc);
         std::fs::write(
             tmp.path().join(".agent-doc/logs/session-log-owner.log"),
             format!(
@@ -8208,6 +8297,7 @@ mod tests {
         let iso = agent_doc_tmux_io::isolated_test_tmux("sync-session-log-beats-process-tree");
         let stale_pane = iso.new_session("test", tmp.path()).unwrap();
         let owner_pane = iso.split_window(&stale_pane, tmp.path(), "-dh").unwrap();
+        respawn_pane_as_document_owner(&iso, &owner_pane, tmp.path(), &doc);
 
         let fake_bin_dir = tmp.path().join("bin");
         std::fs::create_dir_all(&fake_bin_dir).unwrap();
@@ -8382,10 +8472,22 @@ mod tests {
             }),
             "the nested document's fake supervisor is live"
         );
-        assert_eq!(foreign(&bugs_pane, &outer), None, "agent-loop owns its own pane");
-        assert_eq!(foreign(&sdk_pane, &outer), None, "agent-loop owns the main window");
+        assert_eq!(
+            foreign(&bugs_pane, &outer),
+            None,
+            "agent-loop owns its own pane"
+        );
+        assert_eq!(
+            foreign(&sdk_pane, &outer),
+            None,
+            "agent-loop owns the main window"
+        );
         assert_eq!(foreign(&sdk_pane, &inner), None, "haiven-dev's own pane");
-        assert_eq!(foreign(&shell_pane, &inner), None, "a shell owns no document");
+        assert_eq!(
+            foreign(&shell_pane, &inner),
+            None,
+            "a shell owns no document"
+        );
 
         // The haiven-dev controller realises its own `[sdk]` in the shared
         // window: the foreign pane is protected from the stash, the unmanaged
@@ -8421,10 +8523,16 @@ mod tests {
         let panes = realise(&protect);
         assert!(panes.contains(&bugs_pane), "foreign pane kept: {panes:?}");
         assert!(panes.contains(&sdk_pane), "own column realised: {panes:?}");
-        assert!(!panes.contains(&shell_pane), "unmanaged shell stashed: {panes:?}");
+        assert!(
+            !panes.contains(&shell_pane),
+            "unmanaged shell stashed: {panes:?}"
+        );
         // Sensitivity: without the guard the same pass stashes the foreign pane.
         let panes = realise(&|_: &str| false);
-        assert!(!panes.contains(&bugs_pane), "unguarded pass stashes it: {panes:?}");
+        assert!(
+            !panes.contains(&bugs_pane),
+            "unguarded pass stashes it: {panes:?}"
+        );
 
         // The guard is armed only while another root holds the window claim:
         // a nested controller that holds it (the editor went 2 -> 1 pane onto
@@ -9826,6 +9934,7 @@ mod tests {
         let pane0 = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let agent_doc_window = iso.pane_window(&pane0).unwrap();
+        respawn_pane_as_document_owner(&iso, &pane0, root, &doc);
         sessions::register_full_with_cwd(
             "full-sync-repair",
             &pane0,
@@ -9833,6 +9942,16 @@ mod tests {
             pane_pid_from_tmux(&iso, &pane0).unwrap(),
             &agent_doc_window,
             &root.to_string_lossy(),
+        )
+        .unwrap();
+        agent_doc_session_actor_io::project_binding_in(
+            root,
+            &doc_str,
+            "full-sync-repair",
+            &pane0,
+            &agent_doc_window,
+            "sync",
+            "full_sync_window_order_fixture",
         )
         .unwrap();
         let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "corky", "-d"]);
@@ -9859,15 +9978,12 @@ mod tests {
             "0",
             "full sync should repair the agent-doc window to index 0"
         );
-        assert_eq!(
-            windows_after
-                .iter()
-                .find(|(_, name)| name == "stash")
-                .unwrap()
-                .0,
-            "1",
-            "full sync should repair the primary stash window to 1:stash"
-        );
+        if let Some((index, _)) = windows_after.iter().find(|(_, name)| name == "stash") {
+            assert_eq!(
+                index, "1",
+                "a surviving primary stash window must be repaired to 1:stash"
+            );
+        }
         assert!(
             !windows_after
                 .iter()
@@ -9902,6 +10018,7 @@ mod tests {
         let pane0 = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "stash"]);
         let stash_window = iso.pane_window(&pane0).unwrap();
+        respawn_pane_as_document_owner(&iso, &pane0, root, &doc);
         sessions::register_full_with_cwd(
             "full-sync-doctor-repair",
             &pane0,
@@ -9909,6 +10026,16 @@ mod tests {
             pane_pid_from_tmux(&iso, &pane0).unwrap(),
             &stash_window,
             &root.to_string_lossy(),
+        )
+        .unwrap();
+        agent_doc_session_actor_io::project_binding_in(
+            root,
+            &doc_str,
+            "full-sync-doctor-repair",
+            &pane0,
+            &stash_window,
+            "sync",
+            "full_sync_doctor_fixture",
         )
         .unwrap();
         let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash", "-d"]);
@@ -9934,14 +10061,17 @@ mod tests {
             "0",
             "full sync should let the doctor repair path recreate 0:agent-doc"
         );
-        assert_eq!(
-            windows_after
+        if let Some((index, _)) = windows_after.iter().find(|(_, name)| name == "stash") {
+            assert_eq!(
+                index, "1",
+                "a surviving repaired stash window must remain at 1:stash"
+            );
+        }
+        assert!(
+            !windows_after
                 .iter()
-                .find(|(_, name)| name == "stash")
-                .unwrap()
-                .0,
-            "1",
-            "full sync should leave the repaired stash window at 1:stash"
+                .any(|(_, name)| name.starts_with("stash-")),
+            "doctor repair must not leave legacy stash aliases"
         );
     }
     #[test]
@@ -10730,7 +10860,7 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn safe_passive_sync_focuses_local_projection_when_sync_lock_is_contended() {
+    fn safe_passive_sync_preserves_operator_focus_when_sync_lock_is_contended() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -10820,8 +10950,8 @@ mod tests {
         fs2::FileExt::unlock(&holder).unwrap();
         assert_eq!(
             iso.active_pane("test").unwrap(),
-            active_pane,
-            "safe-passive editor sync should focus the known local actor pane before sync lock contention defers prune/reconcile"
+            stale_pane,
+            "safe-passive editor sync must not steal operator focus before sync lock contention defers prune/reconcile"
         );
     }
     #[test]
@@ -11054,22 +11184,44 @@ mod tests {
         ).unwrap();
 
         let win = iso.pane_window(&pane0).unwrap();
+        respawn_pane_as_document_owner(&iso, &pane0, tmp.path(), &doc_a);
+        respawn_pane_as_document_owner(&iso, &pane1, tmp.path(), &doc_b);
         sessions::register_full_with_cwd(
             session_a,
             &pane0,
             &doc_a.to_string_lossy(),
-            std::process::id(),
+            pane_pid_from_tmux(&iso, &pane0).unwrap(),
             &win,
             &tmp.path().to_string_lossy(),
+        )
+        .unwrap();
+        agent_doc_session_actor_io::project_binding_in(
+            tmp.path(),
+            &doc_a.to_string_lossy(),
+            session_a,
+            &pane0,
+            &win,
+            "sync",
+            "deferred_stash_rescue_fixture",
         )
         .unwrap();
         sessions::register_full_with_cwd(
             session_b,
             &pane1,
             &doc_b.to_string_lossy(),
-            std::process::id(),
+            pane_pid_from_tmux(&iso, &pane1).unwrap(),
             &win,
             &tmp.path().to_string_lossy(),
+        )
+        .unwrap();
+        agent_doc_session_actor_io::project_binding_in(
+            tmp.path(),
+            &doc_b.to_string_lossy(),
+            session_b,
+            &pane1,
+            &win,
+            "sync",
+            "deferred_stash_rescue_fixture",
         )
         .unwrap();
 
@@ -12059,6 +12211,9 @@ mod tests {
         let focus = tmp.path().join("focused.md");
         let focus = focus.to_string_lossy().to_string();
         let iso = agent_doc_tmux_io::isolated_test_tmux("sync-windowless-focused-actor-session");
+        let actor_pane = iso.new_session("terminal-owner", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "terminal-owner:0", "agent-doc"])
+            .unwrap();
         let _controller_pane = iso
             .new_session("replacement-controller", tmp.path())
             .unwrap();
@@ -12069,9 +12224,6 @@ mod tests {
             "agent-doc",
         ])
         .unwrap();
-        let actor_pane = iso.new_session("terminal-owner", tmp.path()).unwrap();
-        iso.raw_cmd(&["rename-window", "-t", "terminal-owner:0", "agent-doc"])
-            .unwrap();
         let bindings = vec![
             agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
                 document_path: focus.clone(),
@@ -12578,6 +12730,9 @@ mod tests {
         let pane_b = iso.split_window(&pane_a, root, "-dh").unwrap();
         let window = iso.pane_window(&pane_a).unwrap();
 
+        respawn_pane_as_document_owner(&iso, &pane_a, root, &doc_a);
+        respawn_pane_as_document_owner(&iso, &pane_b, root, &doc_b);
+
         sessions::register_full_with_cwd(
             "sync-open-cycle-a",
             &pane_a,
@@ -12587,6 +12742,16 @@ mod tests {
             &root.to_string_lossy(),
         )
         .unwrap();
+        agent_doc_session_actor_io::project_binding_in(
+            root,
+            &doc_a.to_string_lossy(),
+            "sync-open-cycle-a",
+            &pane_a,
+            &window,
+            "sync",
+            "open_cycle_detach_fixture",
+        )
+        .unwrap();
         sessions::register_full_with_cwd(
             "sync-open-cycle-b",
             &pane_b,
@@ -12594,6 +12759,16 @@ mod tests {
             pane_pid_from_tmux(&iso, &pane_b).unwrap(),
             &window,
             &root.to_string_lossy(),
+        )
+        .unwrap();
+        agent_doc_session_actor_io::project_binding_in(
+            root,
+            &doc_b.to_string_lossy(),
+            "sync-open-cycle-b",
+            &pane_b,
+            &window,
+            "sync",
+            "open_cycle_detach_fixture",
         )
         .unwrap();
 
@@ -12848,6 +13023,10 @@ mod tests {
         let pane_c = iso.new_window("test", root).unwrap();
         let pane_c_window = iso.pane_window(&pane_c).unwrap();
 
+        for (pane, doc) in [(&pane_a, &doc_a), (&pane_b, &doc_b), (&pane_c, &doc_c)] {
+            respawn_pane_as_document_owner(&iso, pane, root, doc);
+        }
+
         sessions::register_full_with_cwd(
             "apresync-a",
             &pane_a,
@@ -12962,6 +13141,10 @@ mod tests {
         let pane_c = iso.new_window("test", root).unwrap();
         let pane_c_window = iso.pane_window(&pane_c).unwrap();
 
+        for (pane, doc) in [(&pane_a, &doc_a), (&pane_b, &doc_b), (&pane_c, &doc_c)] {
+            respawn_pane_as_document_owner(&iso, pane, root, doc);
+        }
+
         sessions::register_full_with_cwd(
             "amanual-a",
             &pane_a,
@@ -12989,6 +13172,22 @@ mod tests {
             &root.to_string_lossy(),
         )
         .unwrap();
+        for (session, pane, window, doc) in [
+            ("amanual-a", &pane_a, &target_window, &doc_a),
+            ("bmanual-b", &pane_b, &target_window, &doc_b),
+            ("cmanual-c", &pane_c, &pane_c_window, &doc_c),
+        ] {
+            agent_doc_session_actor_io::project_binding_in(
+                root,
+                &doc.to_string_lossy(),
+                session,
+                pane,
+                window,
+                "sync",
+                "manual_protected_grow_fixture",
+            )
+            .unwrap();
+        }
 
         let doc_a_content = std::fs::read_to_string(&doc_a).unwrap();
         agent_doc_cycle_state_io::start_preflight(
@@ -13162,7 +13361,7 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn safe_passive_focus_only_editor_switch_preserves_sibling_pane() {
+    fn safe_passive_editor_switch_preserves_sibling_and_operator_focus() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -13256,13 +13455,13 @@ mod tests {
         );
         assert_eq!(
             iso.active_pane("test").unwrap(),
-            new_left_pane,
-            "focused replacement pane should be selected after the same-side handoff"
+            left_pane,
+            "safe-passive same-side handoff must not steal operator focus"
         );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn safe_passive_focus_only_existing_sibling_focus_does_not_replace_active_pane() {
+    fn safe_passive_existing_sibling_focus_does_not_replace_or_select_it() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -13343,13 +13542,13 @@ mod tests {
         );
         assert_eq!(
             iso.active_pane("test").unwrap(),
-            docs_pane,
-            "focus-only sync should select the existing focused sibling pane"
+            bugs_pane,
+            "safe-passive sync must preserve operator focus instead of selecting the editor-focused sibling"
         );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn safe_passive_focus_only_editor_switch_preserves_sibling_without_saved_layout() {
+    fn safe_passive_editor_switch_without_saved_layout_preserves_operator_focus() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -13438,8 +13637,8 @@ mod tests {
         );
         assert_eq!(
             iso.active_pane("test").unwrap(),
-            new_left_pane,
-            "focused replacement pane should be selected without collapsing the sibling pane"
+            left_pane,
+            "safe-passive replacement must preserve operator focus without collapsing the sibling pane"
         );
     }
     /// A window id no live tmux window in these fixtures can hold.
@@ -13576,7 +13775,7 @@ mod tests {
 
     #[test]
     #[ignore = "covered by sync_sim_tmuxbudget_seed_3004; safe-passive attach/focus tmux smoke keeps the real pane/window path covered"]
-    fn safe_passive_protected_open_cycle_sync_still_selects_visible_focus_pane() {
+    fn safe_passive_protected_open_cycle_sync_preserves_operator_focus() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -13675,8 +13874,8 @@ mod tests {
         );
         assert_eq!(
             iso.active_pane("test").unwrap(),
-            pane_b,
-            "sync should still select the already-visible focused pane"
+            pane_a,
+            "safe-passive sync must preserve operator focus even when its pane moves to stash"
         );
         assert_eq!(
             iso.pane_window(&pane_c).unwrap(),

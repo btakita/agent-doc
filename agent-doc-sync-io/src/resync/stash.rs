@@ -1020,7 +1020,12 @@ mod tests {
     fn purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root() {
         let root = tempfile::tempdir().unwrap();
         let child_root = root.path().join("src/session-share");
-        std::fs::create_dir_all(&child_root).unwrap();
+        // `#syncioredlivetmux`: the nested project is a real agent-doc project.
+        // Its `.agent-doc/` used to appear only as a side effect of binding the
+        // supervisor socket inside it, so a TMPDIR long enough to push that
+        // socket into the runtime fallback dir left the pane mapped to the
+        // outer root and the cross-root supervisor lookup never ran.
+        std::fs::create_dir_all(child_root.join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(root.path());
 
         let iso =

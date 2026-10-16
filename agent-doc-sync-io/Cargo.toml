@@ -61,5 +61,10 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# `#syncioredlivetmux`: `cargo test -p agent-doc-sync-io` must resolve actor
+# bindings the way the workspace run does. Without this feature the test build
+# asks a real controller for the binding instead of the durable store, so a
+# package-scoped run and a `--workspace` run exercised different code.
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.513", features = ["test-support"] }
 portable-pty = "0.9"
 tempfile = "3"

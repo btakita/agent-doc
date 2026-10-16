@@ -137,43 +137,83 @@ const SUN_PATH_MAX: usize = 107;
 /// the session UUID. The fallback is deterministic — same inputs always produce
 /// the same path.
 pub fn socket_path(project_root: &Path, session_uuid: &str) -> PathBuf {
-    let preferred = project_root
-        .join(".agent-doc")
-        .join(SUPERVISOR_DIR)
-        .join(format!("{session_uuid}.sock"));
+    let preferred = project_supervisor_dir(project_root).join(format!("{session_uuid}.sock"));
 
     if preferred.as_os_str().len() <= SUN_PATH_MAX {
         return preferred;
     }
 
     // Fallback: short deterministic path in a runtime directory
-    let hash = agent_doc_hash::bytes_hash(project_root.as_os_str().as_encoded_bytes());
-    let short_hash = &hash[..12];
     let short_uuid = &session_uuid[..session_uuid.len().min(8)];
+    fallback_socket_dir().join(format!(
+        "{}{short_uuid}.sock",
+        fallback_socket_prefix(project_root)
+    ))
+}
 
+fn project_supervisor_dir(project_root: &Path) -> PathBuf {
+    project_root.join(".agent-doc").join(SUPERVISOR_DIR)
+}
+
+/// Runtime directory holding the sockets of projects whose preferred socket
+/// path is too long for `sun_path`.
+fn fallback_socket_dir() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
         .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
-    PathBuf::from(runtime_dir)
-        .join("agent-doc")
-        .join(format!("{short_hash}-{short_uuid}.sock"))
+    PathBuf::from(runtime_dir).join("agent-doc")
+}
+
+/// File-name prefix (`<hash>-`) every fallback socket of `project_root` shares.
+fn fallback_socket_prefix(project_root: &Path) -> String {
+    let hash = agent_doc_hash::bytes_hash(project_root.as_os_str().as_encoded_bytes());
+    format!("{}-", &hash[..12])
+}
+
+/// Every socket a supervisor of `project_root` may be listening on, paired with
+/// the session label it is reported under.
+///
+/// `#syncioredlivetmux`: [`socket_path`] moves a session's socket out of the
+/// project into [`fallback_socket_dir`] when the preferred path exceeds
+/// `sun_path`, so a scan of `.agent-doc/supervisor/` alone misses every
+/// supervisor of a deeply nested project. A fallback socket name keeps only
+/// the first 8 characters of the session id, so that short id is its label.
+fn project_supervisor_sockets(project_root: &Path) -> Vec<(String, PathBuf)> {
+    let mut sockets = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(project_supervisor_dir(project_root)) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("sock") {
+                continue;
+            }
+            let Some(session_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            sockets.push((session_id.to_string(), path.clone()));
+        }
+    }
+    let prefix = fallback_socket_prefix(project_root);
+    if let Ok(entries) = std::fs::read_dir(fallback_socket_dir()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("sock") {
+                continue;
+            }
+            let Some(short_id) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.strip_prefix(prefix.as_str()))
+            else {
+                continue;
+            };
+            sockets.push((short_id.to_string(), path.clone()));
+        }
+    }
+    sockets
 }
 
 pub fn active_supervisor_pids(project_root: &Path) -> Vec<(String, u32)> {
-    let supervisor_dir = project_root.join(".agent-doc").join(SUPERVISOR_DIR);
-    let entries = match std::fs::read_dir(&supervisor_dir) {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
-    };
-
     let mut active = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("sock") {
-            continue;
-        }
-        let Some(session_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            continue;
-        };
+    for (session_id, path) in project_supervisor_sockets(project_root) {
         let response = match send_command(&path, &IpcMethod::Pid) {
             Ok(response) => response,
             Err(_) => continue,
@@ -188,7 +228,7 @@ pub fn active_supervisor_pids(project_root: &Path) -> Vec<(String, u32)> {
             continue;
         };
         if response.ok && pid > 0 {
-            active.push((session_id.to_string(), pid));
+            active.push((session_id, pid));
         }
     }
 
@@ -2162,6 +2202,45 @@ mod tests {
 
         ipc.stop();
         assert!(!sock.exists(), "socket should be removed after stop");
+    }
+
+    #[test]
+    fn active_supervisor_pids_finds_sockets_in_the_project_and_the_fallback_dir() {
+        // `#syncioredlivetmux`: a project whose preferred socket path exceeds
+        // `sun_path` listens in the runtime fallback dir. Pane-preservation
+        // guards ask `active_supervisor_pids` which supervisors are live, so a
+        // scan of `.agent-doc/supervisor/` alone reported no live supervisor
+        // and let resync kill the pane hosting it.
+        let dir = tempfile::tempdir().unwrap();
+        let short_root = dir.path().join("short");
+        let long_root = dir.path().join("l".repeat(SUN_PATH_MAX)).join("project");
+        for root in [&short_root, &long_root] {
+            std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        }
+        let long_uuid = "fa11bacc-0000-4000-8000-000000000001";
+        assert!(
+            !socket_path(&long_root, long_uuid).starts_with(&long_root),
+            "precondition: the long project root must use the fallback socket dir"
+        );
+        assert!(socket_path(&short_root, "short-session").starts_with(&short_root));
+
+        let mut long_ipc = start_echo_handler(&long_root, long_uuid);
+        let mut short_ipc = start_echo_handler(&short_root, "short-session");
+
+        assert_eq!(
+            active_supervisor_pids(&long_root),
+            vec![("fa11bacc".to_string(), 12345)],
+            "the fallback socket is reported under its short session id"
+        );
+        assert_eq!(
+            active_supervisor_pids(&short_root),
+            vec![("short-session".to_string(), 12345)],
+            "another project's fallback socket is never attributed to this one"
+        );
+
+        long_ipc.stop();
+        short_ipc.stop();
+        assert!(active_supervisor_pids(&long_root).is_empty());
     }
 
     #[test]

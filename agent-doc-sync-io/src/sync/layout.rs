@@ -203,6 +203,7 @@ mod tests {
 
         let iso = agent_doc_tmux_io::isolated_test_tmux("sync-associated-session-log-owner");
         let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        respawn_pane_as_document_owner(&iso, &owner_pane, tmp.path(), &doc);
         std::fs::write(
             tmp.path().join(".agent-doc/logs/associated-session-log.log"),
             format!(

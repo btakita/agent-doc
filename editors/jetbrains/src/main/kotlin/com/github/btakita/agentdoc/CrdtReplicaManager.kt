@@ -63,6 +63,16 @@ internal fun crdtPerfWarns(elapsedMs: Long, warnMs: Long, onEdt: Boolean): Boole
     elapsedMs >= if (onEdt) warnMs else maxOf(warnMs, CRDT_OFF_EDT_WARN_FLOOR_MS)
 private const val NATIVE_RELOAD_WORKER_TIMEOUT_MS = 5_000L
 
+/**
+ * GH #276: how long a native-reload restart waits, after awaiting every document
+ * once, for registrations that outlived their 750 ms attach wait. The reload gate is
+ * held throughout, so it is bounded; a path still converging after it is reported
+ * `pending`, never `failed`. The measured late attaches landed 0.03-3.2 s after their
+ * wait elapsed.
+ */
+internal const val NATIVE_RELOAD_REPLICA_SETTLE_MS = 3_000L
+internal const val NATIVE_RELOAD_REPLICA_SETTLE_POLL_MS = 25L
+
 internal fun nativeReloadRemainingWaitMillis(deadlineNanos: Long, nowNanos: Long): Long? {
     val remainingNanos = deadlineNanos - nowNanos
     if (remainingNanos <= 0L) return null
@@ -74,9 +84,19 @@ internal data class NativeReloadReplicaRestartReport(
     val attached: Int,
     val failedPaths: List<String>,
     val liveProjects: Int,
+    /**
+     * GH #276: unattached paths whose registration is still converging -- the awaited
+     * attach outlived its bounded wait and is still running, or a register retry is
+     * armed. They are not attached yet, but nothing about them has failed.
+     */
+    val pendingPaths: List<String> = emptyList(),
 ) {
     val converged: Boolean
-        get() = expected > 0 && expected == attached && failedPaths.isEmpty()
+        get() = expected > 0 && expected == attached && failedPaths.isEmpty() && pendingPaths.isEmpty()
+
+    /** Every expected path without an attached replica: failed first, then pending. */
+    val unattachedPaths: List<String>
+        get() = failedPaths + pendingPaths
 }
 
 internal data class NativeReloadReplicaHandoff(
@@ -106,16 +126,78 @@ internal fun nativeReloadReplicaRestartReport(
     expectedPaths: Collection<String>,
     attachedPaths: Collection<String>,
     liveProjects: Int = 0,
+    pendingPaths: Collection<String> = emptyList(),
 ): NativeReloadReplicaRestartReport {
     val expected = expectedPaths.toSortedSet()
     val attached = attachedPaths.toSet()
-    val failed = expected.filterNot(attached::contains)
+    val pending = pendingPaths.toSet()
+    val unattached = expected.filterNot(attached::contains)
     return NativeReloadReplicaRestartReport(
         expected = expected.size,
         attached = expected.count(attached::contains),
-        failedPaths = failed,
+        failedPaths = unattached.filterNot(pending::contains),
         liveProjects = liveProjects,
+        pendingPaths = unattached.filter(pending::contains),
     )
+}
+
+/**
+ * GH #276: the native-reload restart report, taken from the replicas' state when it
+ * is reported rather than from each awaited attach's bounded answer.
+ *
+ * The restart awaits each document's registration for at most the ordinary 750 ms
+ * attach wait. A registration that outlives that wait keeps running (or its retry
+ * fires) and attaches seconds later, often while the restart is still awaiting the
+ * remaining documents -- yet the old report counted only the awaited answers, so a
+ * reload whose 30 replicas had all attached logged `attached=26/30 failed=<4 paths>`.
+ *
+ * This recounts every expected path through [isAttached] at report time, then waits
+ * at most [settleMillis] for the paths that are still converging ([isPending]: the
+ * attach is in flight or a register retry is armed). It stops as soon as every path
+ * is attached, or when two consecutive polls find unattached paths with nothing
+ * converging (a retry firing hands off from its timer to its attach through one
+ * editor-thread hop, so one poll can land between the two). What remains is reported
+ * as `pending` when it is still converging and `failed` only when nothing will retry it.
+ */
+internal fun settledNativeReloadReplicaRestartReport(
+    expectedPaths: Collection<String>,
+    isAttached: (String) -> Boolean,
+    isPending: (String) -> Boolean,
+    settleMillis: Long,
+    liveProjects: Int = 0,
+    pollMillis: Long = NATIVE_RELOAD_REPLICA_SETTLE_POLL_MS,
+    nowNanos: () -> Long = System::nanoTime,
+    sleepMillis: (Long) -> Unit = { Thread.sleep(it) },
+): NativeReloadReplicaRestartReport {
+    val expected = expectedPaths.toSortedSet()
+    val deadlineNanos = nowNanos() + TimeUnit.MILLISECONDS.toNanos(settleMillis.coerceAtLeast(0L))
+    var idlePolls = 0
+    while (true) {
+        val attached = expected.filter(isAttached)
+        val unattached = expected.filterNot(attached::contains)
+        val pending = unattached.filter(isPending)
+        idlePolls = if (pending.isEmpty()) idlePolls + 1 else 0
+        val remainingMs = nativeReloadRemainingWaitMillis(deadlineNanos, nowNanos())
+        if (unattached.isEmpty() || idlePolls >= 2 || remainingMs == null) {
+            return nativeReloadReplicaRestartReport(
+                expectedPaths = expected,
+                attachedPaths = attached,
+                liveProjects = liveProjects,
+                pendingPaths = pending,
+            )
+        }
+        try {
+            sleepMillis(minOf(pollMillis.coerceAtLeast(1L), remainingMs))
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return nativeReloadReplicaRestartReport(
+                expectedPaths = expected,
+                attachedPaths = expected.filter(isAttached),
+                liveProjects = liveProjects,
+                pendingPaths = expected.filter { !isAttached(it) && isPending(it) },
+            )
+        }
+    }
 }
 
 /**
@@ -142,6 +224,7 @@ internal fun mergeReplicaRestartReports(
         attached = reports.sumOf { it.attached },
         failedPaths = reports.flatMap { it.failedPaths },
         liveProjects = reports.sumOf { it.liveProjects },
+        pendingPaths = reports.flatMap { it.pendingPaths },
     )
 
 /**
@@ -157,8 +240,9 @@ internal fun dynamicLoadReattachReceipt(report: NativeReloadReplicaRestartReport
     if (report.expected == 0) {
         return "$documents:state=no-open-documents:live_projects=${report.liveProjects}"
     }
-    if (report.failedPaths.isEmpty()) return documents
-    val pending = report.failedPaths.joinToString(",") { path ->
+    val unattached = report.unattachedPaths
+    if (unattached.isEmpty()) return documents
+    val pending = unattached.joinToString(",") { path ->
         path.replace('\n', ' ').replace('\r', ' ')
     }
     return "$documents:pending=$pending"
@@ -1546,10 +1630,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 logSlow("open-document-attach", filePath, started, details = "chars=$chars force_refresh=$forceRefresh")
             }
         }
+        // GH #276: count the attach as in flight from submission until it finishes, so a
+        // receipt taken while it is queued or running reads "still converging", not
+        // "failed". An awaited attach routinely outlives its bounded wait below.
+        val inFlight = inFlightAttaches.computeIfAbsent(filePath) { AtomicInteger() }
+        val trackedAttach: () -> Boolean = {
+            try {
+                attach()
+            } finally {
+                inFlight.decrementAndGet()
+            }
+        }
+        inFlight.incrementAndGet()
         if (await) {
             return try {
-                documentWorkers.forDocument(filePath).submit<Boolean> { attach() }
-                    .get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                val submitted = try {
+                    documentWorkers.forDocument(filePath).submit<Boolean> { trackedAttach() }
+                } catch (rejected: RejectedExecutionException) {
+                    inFlight.decrementAndGet()
+                    throw rejected
+                }
+                submitted.get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             } catch (e: TimeoutException) {
                 log.warn("[crdt-replica] open-document attach timed out for $filePath after ${CRDT_AWAIT_ATTACH_TIMEOUT_MS}ms (attach still running; receipt=deferred)")
                 onAwaitTimeout?.invoke()
@@ -1562,7 +1663,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 false
             }
         }
-        documentWorkers.forDocument(filePath).execute { attach() }
+        try {
+            documentWorkers.forDocument(filePath).execute { trackedAttach() }
+        } catch (rejected: RejectedExecutionException) {
+            inFlight.decrementAndGet()
+            throw rejected
+        }
         return true
     }
 
@@ -4725,6 +4831,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         ): NativeReloadReplicaRestartReport {
             val targets = linkedMapOf<String, Pair<CrdtReplicaManager, Document>>()
             val expectedPaths = linkedSetOf<String>()
+            val managersByPath = linkedMapOf<String, CrdtReplicaManager>()
             val collectTargets = {
                 (handoff.projectDocuments.keys + liveProjects)
                     .distinct()
@@ -4746,6 +4853,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             observedPaths = observedDocuments.keys,
                         )
                         expectedPaths.addAll(projectExpected)
+                        projectExpected.forEach { filePath -> managersByPath.putIfAbsent(filePath, manager) }
                         projectExpected.forEach { filePath ->
                             val document = observedDocuments[filePath]
                                 ?: LocalFileSystem.getInstance().findFileByPath(filePath)
@@ -4767,8 +4875,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             } else {
                 ApplicationManager.getApplication().invokeAndWait(collectTargets)
             }
+            // The manager that awaits a path's registration is the one whose state answers for it.
+            targets.forEach { (filePath, target) -> managersByPath[filePath] = target.first }
 
-            val attachedPaths = linkedSetOf<String>()
+            val awaitedNotAttached = linkedSetOf<String>()
             targets.forEach { (filePath, target) ->
                 val (manager, document) = target
                 manager.log.info(
@@ -4782,24 +4892,38 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         forceRefresh = true,
                     )
                 ) {
-                    attachedPaths.add(filePath)
                     manager.log.info(
                         "[crdt-replica] native-generation re-register outcome=attached file=$filePath",
                     )
                 } else {
+                    awaitedNotAttached.add(filePath)
                     manager.log.warn(
                         "[crdt-replica] native-generation re-register outcome=not_attached " +
                             "file=$filePath retry=scheduled",
                     )
                 }
             }
-            return nativeReloadReplicaRestartReport(
-                expectedPaths,
-                attachedPaths,
+            // GH #276: report the replicas' state now, not each awaited attach's bounded
+            // answer. A registration that outlived its 750 ms wait keeps running and
+            // usually attaches while later documents are still being awaited; the old
+            // report counted it failed (`attached=26/30` after all 30 had attached).
+            val report = settledNativeReloadReplicaRestartReport(
+                expectedPaths = expectedPaths,
+                isAttached = { path -> managersByPath[path]?.nativeReloadReplicaAttached(path) == true },
+                isPending = { path -> managersByPath[path]?.nativeReloadRegistrationConverging(path) == true },
+                settleMillis = NATIVE_RELOAD_REPLICA_SETTLE_MS,
                 liveProjects = (handoff.projectDocuments.keys + liveProjects)
                     .distinct()
                     .count { !it.isDisposed },
             )
+            awaitedNotAttached
+                .filter { path -> managersByPath[path]?.nativeReloadReplicaAttached(path) == true }
+                .forEach { path ->
+                    managersByPath[path]?.log?.info(
+                        "[crdt-replica] native-generation re-register outcome=attached_after_wait file=$path",
+                    )
+                }
+            return report
         }
 
         fun requestRemoteDrain(project: Project, filePath: String? = null, reason: String = "event") {
@@ -5514,6 +5638,29 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /** Last refusal reason per document path; cleared on a successful register. */
     private val attachFailureReasons = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * GH #276: open-document attaches submitted to a document worker and not yet
+     * finished, per path. While one is queued or running -- typically an awaited attach
+     * that outlived its bounded wait, or a register retry's attach -- the document's
+     * registration is still converging rather than failed.
+     */
+    private val inFlightAttaches = java.util.concurrent.ConcurrentHashMap<String, AtomicInteger>()
+
+    /** GH #276: whether [filePath] holds an attached replica right now. */
+    internal fun nativeReloadReplicaAttached(filePath: String): Boolean =
+        forwarders[filePath]?.attached == true
+
+    /**
+     * GH #276: whether [filePath]'s registration is still converging -- an awaited attach
+     * that outlived its wait is still running, or a register retry is armed. A path for
+     * which neither holds has nothing left that could attach it.
+     */
+    internal fun nativeReloadRegistrationConverging(filePath: String): Boolean {
+        if (disposed.get() || PluginGeneration.retired) return false
+        if ((inFlightAttaches[filePath]?.get() ?: 0) > 0) return true
+        return registerRetryTasks[filePath]?.isDone == false
+    }
 
     private fun ownsFilePath(filePath: String): Boolean {
         val base = project.basePath ?: return false

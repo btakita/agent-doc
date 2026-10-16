@@ -213,6 +213,14 @@ Editor adapters must keep lifecycle and refresh work bounded:
 - Native reload stops inbound callbacks before disposing the CRDT managers
   they can call. A failed listener quiesce must not rebuild every replica from
   a half-disposed generation.
+- The post-reload replica restart report counts each document's replica as it
+  stands when the report is taken, not the answer of each bounded attach wait:
+  an attach that outlives its wait keeps running and usually lands while later
+  documents are still being awaited. After the awaited pass the adapter waits a
+  bounded settle interval for registrations still converging. An unattached
+  document whose attach is in flight or whose register retry is armed is
+  reported `pending`; only one that nothing will retry is `failed`, and only a
+  `failed` document makes the restart `incomplete`.
 - Native callback threads never wait indefinitely for an editor read permit.
   Capture editor-owned objects on the editor thread without blocking the
   caller, then continue native, socket, and CRDT work on a pooled executor.

@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.512
+
+- **Clear Session Context no longer waits on a stuck document write
+  (`clearcapturedcycle`).** With the agent at its idle prompt and the response
+  already captured, a clear that needs a fresh harness process (Codex) applies
+  immediately while the supervisor finishes the document closeout. A clear that
+  still has to wait says "accepted but NOT applied yet" instead of "Cleared",
+  and an install or recycle restart no longer discards it.
+
 ## 0.35.511
 
 - **A controller whose socket was unlinked exits (`detachedexitci`).** When a

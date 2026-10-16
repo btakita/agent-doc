@@ -401,7 +401,7 @@ pub fn free_text_queue_completed_residue_result(file: &str, heads: &[String]) ->
         .collect::<Vec<_>>()
         .join("; ");
     GuardResult::Error(format!(
-        "[session-check] INTERRUPTED: completed free-text agent:queue head(s) {heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: this cycle is already committed, so run `agent-doc preflight {file}` first to open the binary-owned repair cycle and strike the answered head, then run `agent-doc commit {file}` without resubmitting the response; add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue/#qresiduecommittedhint/#qresiduecommitonly)"
+        "[session-check] INTERRUPTED: completed free-text agent:queue head(s) {heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: this cycle is already committed, so no agent action is needed or permitted: `agent-doc preflight {file}` is binary-owned (never invoke it from the model turn), do not resubmit the response, and do not strike the row by hand. The next `agent-doc {file}` admission strikes the answered head itself in preflight's binary-owned queue maintenance (and repair parks a retained replay of an already-committed answer instead of refusing on it). If this check followed a refused admission, report that refusal's reason and stop. Add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue/#qresiduecommittedhint/#qresiduewedge)"
     ))
 }
 
@@ -1308,20 +1308,25 @@ mod tests {
         ) else {
             panic!("completed queue residue must interrupt session-check");
         };
-        let preflight = residue_message
-            .find("agent-doc preflight doc.md")
-            .expect("the committed-cycle repair must start a new preflight");
-        let commit = residue_message
-            .find("agent-doc commit doc.md")
-            .expect("the response-free repair cycle must cross the commit boundary directly");
+        // `#qresiduewedge`: the hint names only what an agent whose admission
+        // was refused may still do. `agent-doc preflight` is binary-owned
+        // (`#preflightinbinary`) and pane-authority bound, so naming it as the
+        // repair left the committed residue unreachable for every actor.
         assert!(
-            preflight < commit,
-            "preflight must be ordered before commit"
+            !residue_message.contains("run `agent-doc preflight"),
+            "the hint must never prescribe a model-run preflight: {residue_message}"
         );
+        assert!(
+            residue_message
+                .contains("`agent-doc preflight doc.md` is binary-owned (never invoke it")
+        );
+        assert!(!residue_message.contains("run `agent-doc commit"));
         assert!(!residue_message.contains("agent-doc write --commit doc.md"));
-        assert!(residue_message.contains("without resubmitting the response"));
+        assert!(residue_message.contains("do not resubmit the response"));
+        assert!(residue_message.contains("next `agent-doc doc.md` admission strikes"));
+        assert!(residue_message.contains("refused admission, report that refusal's reason"));
         assert!(residue_message.contains("#qresiduecommittedhint"));
-        assert!(residue_message.contains("#qresiduecommitonly"));
+        assert!(residue_message.contains("#qresiduewedge"));
     }
 
     #[test]

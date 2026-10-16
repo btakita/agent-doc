@@ -2347,6 +2347,22 @@ fn try_recover_repeated_queue_head_response(
         note.push_str(" The response was written through the normal repair/write path.");
     } else if repair_outcome == agent_doc_turn::repair::RepairOutcome::AlreadyApplied {
         note.push_str(" The response was already present and was adopted by repair.");
+    } else if repair_outcome == agent_doc_turn::repair::RepairOutcome::BlockedCaptureQuarantined
+        && active_auto_queue_prompt(file)?.as_deref() != Some(prompt)
+    {
+        // `#qresiduewedge`: the head's answer was already committed under the
+        // same `### Re:` heading, so repair parked this duplicate instead of
+        // writing it and struck the answered head. Nothing is left to commit
+        // for this head; the next admission's commit carries the strike.
+        agent_doc_ops_log_io::log_op(
+            file,
+            "codex_stop_repeated_queue_committed_heading_replay_parked #qresiduewedge",
+        );
+        return Ok(RepeatedQueueHeadRecovery::Recovered {
+            note: format!(
+                " The answer to repeated queue head {prompt:?} was already committed under the same heading, so the hook did not write a duplicate; repair parked the summary and struck the answered head."
+            ),
+        });
     } else {
         return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
             note: format!(

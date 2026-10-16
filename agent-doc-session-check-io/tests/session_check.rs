@@ -7146,6 +7146,95 @@ Body\n\
             }
         }
     }
+
+    /// `#qresiduewedge` fixture: a committed cycle whose captured response
+    /// echoes `head` while `head` is still live in the committed queue.
+    fn committed_residue_fixture(root: &Path, head: &str) -> (std::path::PathBuf, String) {
+        let response = format!(
+            "### Re: {head}\n\n> **Queue prompt:**\n>\n> {head}\n\nReviewed; request changes.\n"
+        );
+        let committed = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n- {head}\n- Unrelated later work item\n<!-- /agent:queue -->\n",
+            ),
+            response = response,
+            head = head,
+        );
+        let doc = init_committed_doc_for_queue_guard(root, &committed);
+        record_current_cycle_response(&doc, &response);
+        (doc, committed)
+    }
+
+    /// `#qresiduewedge`: the residue INTERRUPT fires on the committed residue,
+    /// and clears once the operator deletes the answered row — the cycle's
+    /// recorded head list does not keep it firing, because residue requires
+    /// the row to still be in the document.
+    #[test]
+    fn completed_residue_guard_clears_when_operator_deletes_the_answered_row() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let head =
+            "See https://example.com/pull/48/changes#r1 https://example.com/pull/48/changes#r2";
+        let (doc, committed) = committed_residue_fixture(tmp.path(), head);
+
+        let rc = agent_doc_run_context_io::cycle_context(doc.clone());
+        rc.set_doc_content(committed.clone());
+        match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {
+            GuardResult::Error(message) => {
+                assert!(message.contains("completed free-text"), "got: {message}");
+                assert!(
+                    !message.contains("run `agent-doc preflight"),
+                    "the hint must not prescribe a model-run preflight: {message}"
+                );
+            }
+            other => panic!("committed residue must INTERRUPT, got {other:?}"),
+        }
+
+        let deleted = committed.replace(&format!("- {head}\n"), "");
+        fs::write(&doc, &deleted).unwrap();
+        let rc = agent_doc_run_context_io::cycle_context(doc.clone());
+        rc.set_doc_content(deleted);
+        assert!(
+            matches!(
+                check_free_text_queue_head_provenance(&doc, &rc).unwrap(),
+                GuardResult::None
+            ),
+            "deleting the answered row must clear the residue guard"
+        );
+    }
+
+    /// `#qresiduewedge`: a capture repair parked (never written) never makes a
+    /// still-queued head completed residue.
+    #[test]
+    fn completed_residue_guard_ignores_a_parked_committed_heading_replay() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let head =
+            "See https://example.com/pull/48/changes#r1 https://example.com/pull/48/changes#r2";
+        let (doc, committed) = committed_residue_fixture(tmp.path(), head);
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .unwrap();
+        agent_doc_cycle_state_io::retire_projected_captured_response(
+            &doc,
+            &state.cycle_id,
+            "queue-guard-test-capture",
+            agent_doc_turn::repair::COMMITTED_HEADING_REPLAY_PARKED_REASON,
+        )
+        .unwrap();
+
+        let rc = agent_doc_run_context_io::cycle_context(doc.clone());
+        rc.set_doc_content(committed);
+        assert!(
+            matches!(
+                check_free_text_queue_head_provenance(&doc, &rc).unwrap(),
+                GuardResult::None
+            ),
+            "a parked replay's echo must not INTERRUPT as completed residue"
+        );
+    }
+
     #[test]
     fn free_text_queue_head_guard_passes_when_head_still_queued() {
         let tmp = tempfile::TempDir::new().unwrap();

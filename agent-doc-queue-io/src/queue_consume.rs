@@ -18,9 +18,11 @@ use agent_doc_queue::{
         consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
         first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
-        project_answered_free_text_strike_with_claims, queue_consume_count_for_done_ids,
-        queue_consume_node_ops, queue_mark_done_node_ops, queue_prompt_node_keys_for_count,
-        queue_prompt_node_keys_for_done_ids, strike_all_noise_queue_heads,
+        project_answered_free_text_strike_with_claims,
+        project_committed_heading_replay_free_text_strike_with_claims,
+        queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
+        queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
+        strike_all_noise_queue_heads,
     },
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
@@ -963,6 +965,54 @@ pub fn strike_answered_free_text_queue_heads(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
+    strike_free_text_queue_heads_with_proof(
+        file,
+        response_body,
+        skip_visible_guard,
+        AnswerPresenceProof::Materialized,
+        effects,
+    )
+}
+
+/// `#qresiduewedge`: strike the free-text heads a committed-heading replay
+/// answers — a response repair parks instead of replaying because the
+/// document already holds an answer under its `### Re:` heading. A head
+/// strikes only when that replay answers it AND the exchange already holds an
+/// answer titled with the head itself
+/// ([`agent_doc_queue::queue_consume::project_committed_heading_replay_free_text_strike_with_claims`]).
+/// Same write, snapshot sync, baseline gate, and claim release as the
+/// `#ftstrike` closeout strike; returns the number of heads struck.
+pub fn strike_free_text_heads_answered_by_committed_heading_replay(
+    file: &Path,
+    replay_body: &str,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<usize> {
+    strike_free_text_queue_heads_with_proof(
+        file,
+        replay_body,
+        false,
+        AnswerPresenceProof::CommittedHeadingReplay,
+        effects,
+    )
+}
+
+/// What proves the answer is in the document before a free-text head strikes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnswerPresenceProof {
+    /// `#ftstrike`: the response body itself is materialized in the cut.
+    Materialized,
+    /// `#qresiduewedge`: the response is an unwritable replay; the cut must
+    /// already hold an answer titled with each head that strikes.
+    CommittedHeadingReplay,
+}
+
+fn strike_free_text_queue_heads_with_proof(
+    file: &Path,
+    response_body: &str,
+    skip_visible_guard: bool,
+    proof: AnswerPresenceProof,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<usize> {
     if response_body.trim().is_empty() {
         return Ok(0);
     }
@@ -991,7 +1041,12 @@ pub fn strike_answered_free_text_queue_heads(
     // proof that the same response is present in the authoritative document cut
     // we are about to mutate.  Without this fence a retained write can time out,
     // leave the response absent, and still auto-strike its prompt (#ftstrike).
-    if !agent_doc_turn::response_replay::response_materialized_in_content(response_body, &content) {
+    if proof == AnswerPresenceProof::Materialized
+        && !agent_doc_turn::response_replay::response_materialized_in_content(
+            response_body,
+            &content,
+        )
+    {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1018,13 +1073,23 @@ pub fn strike_answered_free_text_queue_heads(
     let claimed_heads = crate::queue_claim::claimed_live_head_texts_for_content(file, &content);
     // `#ftstrikeclaimedmention`: a claimed head strikes only on an exact
     // agent-authored echo, never on a mention or preset-body quote.
-    let Some(projected) = project_answered_free_text_strike_with_claims(
-        &content,
-        response_body,
-        baseline.as_deref(),
-        &claimed_heads,
-    )?
-    else {
+    let project = |doc: &str| match proof {
+        AnswerPresenceProof::Materialized => project_answered_free_text_strike_with_claims(
+            doc,
+            response_body,
+            baseline.as_deref(),
+            &claimed_heads,
+        ),
+        AnswerPresenceProof::CommittedHeadingReplay => {
+            project_committed_heading_replay_free_text_strike_with_claims(
+                doc,
+                response_body,
+                baseline.as_deref(),
+                &claimed_heads,
+            )
+        }
+    };
+    let Some(projected) = project(&content)? else {
         return Ok(0);
     };
     let keys = projected.node_keys;
@@ -1035,20 +1100,13 @@ pub fn strike_answered_free_text_queue_heads(
     // and need not equal the document's). Required closeouts must prove both sides
     // converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
-        Some(snap) => {
-            match project_answered_free_text_strike_with_claims(
-                &snap,
-                response_body,
-                baseline.as_deref(),
-                &claimed_heads,
-            ) {
-                Ok(snapshot) => snapshot.map(|projected| projected.target_content),
-                Err(err) => {
-                    log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
-                    None
-                }
+        Some(snap) => match project(&snap) {
+            Ok(snapshot) => snapshot.map(|projected| projected.target_content),
+            Err(err) => {
+                log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
+                None
             }
-        }
+        },
         None => None,
     };
 
@@ -1088,16 +1146,27 @@ pub fn strike_answered_free_text_queue_heads(
         save_snapshot_recovery_only(file, &snap, "free-text strike snapshot sync");
     }
 
-    eprintln!(
-        "[queue] struck {} answered free-text head(s) by response match (#ftstrike)",
-        keys.len()
-    );
+    match proof {
+        AnswerPresenceProof::Materialized => eprintln!(
+            "[queue] struck {} answered free-text head(s) by response match (#ftstrike)",
+            keys.len()
+        ),
+        AnswerPresenceProof::CommittedHeadingReplay => eprintln!(
+            "[queue] struck {} free-text head(s) already answered under a committed heading (#qresiduewedge)",
+            keys.len()
+        ),
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "freetext_head_strike file={} struck={}",
+            "freetext_head_strike file={} struck={}{}",
             file.display(),
-            keys.len()
+            keys.len(),
+            match proof {
+                AnswerPresenceProof::Materialized => "",
+                AnswerPresenceProof::CommittedHeadingReplay =>
+                    " proof=committed_heading_replay #qresiduewedge",
+            }
         ),
     );
     // `#qstrikenote` observability: one marker per struck head naming a short text

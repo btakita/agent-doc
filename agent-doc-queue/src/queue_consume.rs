@@ -1331,6 +1331,115 @@ pub fn project_answered_free_text_strike_with_claims(
         baseline,
         claimed_heads,
     )?;
+    project_free_text_strike_of_node_keys(content, node_keys)
+}
+
+/// `#qresiduewedge`: the answered-head strike for a response the replay guard
+/// refuses because the document already holds an answer under its `### Re:`
+/// heading (a committed-heading replay, typically a second answer the Codex
+/// Stop hook captured for a head whose first answer was committed without an
+/// echo).
+///
+/// The replay is never written, so its body cannot be the materialization
+/// proof [`project_answered_free_text_strike_with_claims`] callers require.
+/// Two proofs replace it, and a head strikes only with both:
+///
+/// - the replay itself answers the head, by the same predicate the finalize
+///   strike and the session-check `#qheadresidue` guard use (echo, claimed-head
+///   proof, `#deferstrike`, and the `baseline` in-flight-edit gate), and
+/// - the document's `agent:exchange` already holds an answer titled with the
+///   head's own text (`### Re: <head>`, attribution ignored).
+///
+/// A head echoed only by the replay, or an answer titled with some other
+/// topic, never strikes: the never-written replay is not an answer.
+pub fn project_committed_heading_replay_free_text_strike_with_claims(
+    content: &str,
+    replay_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
+    if replay_body.trim().is_empty() {
+        return Ok(None);
+    }
+    agent_doc_frontmatter::frontmatter::parse(content)?;
+    let titled = exchange_answer_topics(content);
+    if titled.is_empty() {
+        return Ok(None);
+    }
+    let answered: HashSet<String> = answered_free_text_head_node_keys_with_claims(
+        content,
+        replay_body,
+        baseline,
+        claimed_heads,
+    )?
+    .into_iter()
+    .collect();
+    if answered.is_empty() {
+        return Ok(None);
+    }
+    let node_keys = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| {
+            anyhow::anyhow!("committed-heading replay strike: failed to derive queue nodes: {err}")
+        })?
+        .into_iter()
+        .filter(|node| answered.contains(&node.node_key))
+        .filter(|node| {
+            head_answer_topic(&node.item.text).is_some_and(|topic| titled.contains(&topic))
+        })
+        .map(|node| node.node_key)
+        .collect();
+    project_free_text_strike_of_node_keys(content, node_keys)
+}
+
+/// Normalized topics of every `### Re:` answer heading in `agent:exchange`:
+/// the text after `### Re:` up to the attribution's last spaced em dash
+/// (`### Re: topic — model · time`), whitespace-collapsed and lowercased.
+fn exchange_answer_topics(content: &str) -> HashSet<String> {
+    let Ok(components) = element::parse(content) else {
+        return HashSet::new();
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return HashSet::new();
+    };
+    exchange
+        .content(content)
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("### Re:")?;
+            let rest = rest.trim_end().trim_end_matches("(HEAD)");
+            let topic = rest.rfind(" — ").map_or(rest, |at| &rest[..at]);
+            let topic = normalize_answer_topic(topic);
+            (!topic.is_empty()).then_some(topic)
+        })
+        .collect()
+}
+
+/// The answer topic a queue head is titled by: its first line without
+/// priority / in-progress markers, normalized like [`exchange_answer_topics`].
+fn head_answer_topic(head: &str) -> Option<String> {
+    let head = strip_in_progress_marker(&strip_priority_markers(head));
+    let first_line = head.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let topic = normalize_answer_topic(first_line);
+    (!topic.is_empty()).then_some(topic)
+}
+
+fn normalize_answer_topic(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// Strike `node_keys` (free-text queue heads already proven answered) and
+/// annotate them; when no live head remains and the body is losslessly
+/// discardable, clear it and drop the queue activation, as one projection.
+fn project_free_text_strike_of_node_keys(
+    content: &str,
+    node_keys: Vec<String>,
+) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
     if node_keys.is_empty() {
         return Ok(None);
     }
@@ -2100,6 +2209,85 @@ mod tests {
             ),
             "the sole consumed head must leave an empty queue projection:\n{}",
             projected.target_content
+        );
+    }
+
+    /// `#qresiduewedge`: a committed-heading replay strikes a head only when
+    /// the replay answers it AND the exchange already holds an answer titled
+    /// with that head. Attribution and case differences do not matter; a head
+    /// only the never-written replay answers, or an answer under another
+    /// title, never strikes.
+    #[test]
+    fn committed_heading_replay_strikes_only_heads_the_exchange_answers_by_title() {
+        let titled =
+            "See https://example.com/pull/48/changes#r1 https://example.com/pull/48/changes#r2";
+        let untitled = "Audit the archived Confluence pages for drifted status values";
+        let content = format!(
+            "---\nqueue_active: true\n---\n\n\
+             <!-- agent:exchange patch=append -->\n\
+             ### Re: {} — gpt-5 · 2026-10-15\nReviewed. Verdict: request changes.\n\
+             <!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n- 🚧 {titled}\n- {untitled}\n<!-- /agent:queue -->\n",
+            titled.to_uppercase().replace("HTTPS", "https"),
+        );
+        let replay = format!(
+            "<!-- patch:exchange -->\n### Re: {titled} — gpt-5\n\n\
+             > **Queue prompt:**\n>\n> {titled}\n\n\
+             > **Queue prompt:**\n>\n> {untitled}\n\n\
+             Refreshed.\n<!-- /patch:exchange -->\n"
+        );
+
+        let projected = project_committed_heading_replay_free_text_strike_with_claims(
+            &content,
+            &replay,
+            Some(&content),
+            &[],
+        )
+        .unwrap()
+        .expect("the head the exchange answers by title must strike");
+        assert!(
+            projected.target_content.contains(&format!("~~{titled}")),
+            "{}",
+            projected.target_content
+        );
+        assert!(
+            projected
+                .target_content
+                .contains(&format!("- {untitled}\n")),
+            "a head only the replay echoes must stay live:\n{}",
+            projected.target_content
+        );
+        assert_eq!(projected.node_keys.len(), 1);
+
+        // Without the replay's own answer evidence nothing strikes, even
+        // though the exchange is titled with the head.
+        let unanswering = format!(
+            "<!-- patch:exchange -->\n### Re: {titled} — gpt-5\n\nRefreshed.\n<!-- /patch:exchange -->\n"
+        );
+        assert!(
+            project_committed_heading_replay_free_text_strike_with_claims(
+                &content,
+                &unanswering,
+                Some(&content),
+                &[],
+            )
+            .unwrap()
+            .is_none()
+        );
+
+        // A head the operator typed after the baseline is never struck. (A
+        // `🚧` head is exempt from that gate by design, so use a plain one.)
+        let plain = content.replace("- 🚧 ", "- ");
+        let baseline = plain.replace(&format!("- {titled}\n"), "");
+        assert!(
+            project_committed_heading_replay_free_text_strike_with_claims(
+                &plain,
+                &replay,
+                Some(&baseline),
+                &[],
+            )
+            .unwrap()
+            .is_none()
         );
     }
 

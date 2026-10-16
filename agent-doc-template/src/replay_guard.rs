@@ -218,16 +218,12 @@ pub fn classify_replay_payload_against_document<'a>(
             "it repeated the assistant response heading `{duplicate}` within one payload"
         ));
     }
-    if let Some(document) = document {
-        let committed = re_heading_topics(document);
-        if let Some(already) = payload_topics
-            .iter()
-            .find(|topic| committed.contains(topic))
-        {
-            return ReplayPayloadClassification::Blocked(format!(
-                "its assistant response heading `{already}` is already committed in the document"
-            ));
-        }
+    if let Some(document) = document
+        && let Some(already) = first_committed_topic(&payload_topics, document)
+    {
+        return ReplayPayloadClassification::Blocked(format!(
+            "its assistant response heading `{already}` is already committed in the document"
+        ));
     }
 
     let has_patch_markers = trimmed.contains("<!-- patch:") || trimmed.contains("<!-- /patch:");
@@ -326,6 +322,32 @@ fn re_heading_topics(text: &str) -> Vec<String> {
             }
         })
         .collect()
+}
+
+fn first_committed_topic(payload_topics: &[String], document: &str) -> Option<String> {
+    let committed = re_heading_topics(document);
+    payload_topics
+        .iter()
+        .find(|topic| committed.contains(topic))
+        .cloned()
+}
+
+/// `#qresiduewedge`: the first `### Re:` topic of `message` that `document`
+/// already holds, when `message` is otherwise a replayable response.
+///
+/// Such a payload is a replay by construction
+/// ([`classify_replay_payload_against_document`] refuses it), so it can never
+/// be written; recovery parks it instead of retrying it forever. A payload the
+/// document-independent checks already refuse returns `None`: its refusal is
+/// about its shape, not about a committed answer.
+pub fn committed_heading_replay_topic(message: &str, document: &str) -> Option<String> {
+    if !matches!(
+        classify_replay_payload(message),
+        ReplayPayloadClassification::Replayable(_)
+    ) {
+        return None;
+    }
+    first_committed_topic(&re_heading_topics(message.trim()), document)
 }
 
 /// The first topic that appears more than once, if any.

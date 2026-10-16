@@ -1180,6 +1180,186 @@ mod tests {
         );
     }
 
+    /// The committed session document a `#qresiduewedge` fixture starts from:
+    /// an answer titled with the free-text head's exact text, committed without
+    /// a `> **Queue prompt:**` echo, so the head stayed live in the queue.
+    fn committed_heading_replay_doc(head: &str, extra_heads: &str, answered: bool) -> String {
+        let answer = if answered {
+            format!("### Re: {head}\nReviewed against the full PR. Verdict: request changes.\n")
+        } else {
+            String::new()
+        };
+        format!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n\
+             ## Exchange\n\n<!-- agent:exchange patch=append -->\n\
+             {answer}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n- do [#other]\n- {head}\n{extra_heads}<!-- /agent:queue -->\n"
+        )
+    }
+
+    /// Run one cycle that answers `head` without an echo and commits it, the
+    /// way cycle-1792108344702 did: the cycle is `committed`, its capture is
+    /// terminal, and the head is still live in the committed queue.
+    fn commit_unechoed_answer_cycle(
+        dir: &Path,
+        doc: &Path,
+        head: &str,
+        extra_heads: &str,
+    ) -> String {
+        let baseline = committed_heading_replay_doc(head, extra_heads, false);
+        std::fs::write(doc, &baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            doc,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir, doc);
+        agent_doc_cycle_state_io::start_preflight(doc, Some(&baseline), Some(&baseline)).unwrap();
+        let answer = format!(
+            "<!-- patch:exchange -->\n### Re: {head}\nReviewed against the full PR. Verdict: request changes.\n<!-- /patch:exchange -->\n"
+        );
+        agent_doc_capture_io::capture_response(doc, &answer).unwrap();
+        agent_doc_capture_io::mark_committed(doc).unwrap();
+        let committed = committed_heading_replay_doc(head, extra_heads, true);
+        std::fs::write(doc, &committed).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        for args in [
+            vec!["add", "session.md"],
+            vec!["commit", "-m", "committed answer", "--no-verify"],
+        ] {
+            ProcessCommand::new("git")
+                .current_dir(dir)
+                .args(args)
+                .status()
+                .unwrap();
+        }
+        committed
+    }
+
+    /// The payload the Codex Stop hook saves for a repeated queue head
+    /// (`wrap_repeated_queue_response_patch`): the chat summary under a
+    /// `### Re: <head>` heading, with the head echoed as its queue prompt.
+    fn repeated_head_stop_payload(head: &str) -> String {
+        format!(
+            "<!-- patch:exchange -->\n### Re: {head} — gpt-5\n\n\
+             > **Queue prompt:**\n>\n> {head}\n\n\
+             The assessment was refreshed; the PR is unchanged.\n<!-- /patch:exchange -->\n"
+        )
+    }
+
+    /// `#qresiduewedge` (haiven-dev docs.md, 2026-10-16): a cycle committed an
+    /// answer titled with the free-text head but without an echo, so the head
+    /// stayed live. The Codex Stop hook then saved the closing chat summary as
+    /// a second answer to that head. Its `### Re:` heading is already
+    /// committed, so the replay guard refuses it by construction, and repair
+    /// used to fail closed on it: every later preflight replayed the same
+    /// capture and refused admission, and nothing could strike the head. The
+    /// capture is now parked like any other unreplayable capture, and the head
+    /// it proves answered is struck in the same repair.
+    #[test]
+    fn committed_heading_replay_capture_is_quarantined_and_strikes_answered_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let head =
+            "See https://example.com/pull/48/changes#r1 https://example.com/pull/48/changes#r2";
+        let unrelated = "Does the page status enum have an archived value?";
+        let committed =
+            commit_unechoed_answer_cycle(dir.path(), &doc, head, &format!("- {unrelated}\n"));
+        // The operator queues more work after the commit (live-only edit).
+        let live = committed.replace(
+            "<!-- /agent:queue -->",
+            "- audit the follow-up PR\n<!-- /agent:queue -->",
+        );
+        std::fs::write(&doc, &live).unwrap();
+        let payload = repeated_head_stop_payload(head);
+        agent_doc_repair_io::pending::save_pending(&doc, &payload).unwrap();
+
+        let outcome = run(&doc).expect("a committed-heading replay must not fail closed");
+        assert_eq!(outcome, RepairOutcome::BlockedCaptureQuarantined);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains(&format!("~~{head}")),
+            "the head the committed answer and the capture's echo both answer must be struck:\n{repaired}"
+        );
+        assert!(
+            repaired.contains(&format!("- {unrelated}\n"))
+                && repaired.contains("- audit the follow-up PR\n")
+                && repaired.contains("- do [#other]\n"),
+            "unanswered heads and the operator's new edit must stay live:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("### Re: ").count(),
+            1,
+            "the duplicate answer must not be written:\n{repaired}"
+        );
+        assert!(!repaired.contains("The assessment was refreshed"));
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        assert!(
+            agent_doc_repair_io::pending::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none(),
+            "the quarantined capture must never be replayed again"
+        );
+        let blocked_dir = dir.path().join(".agent-doc/repair-blocked");
+        let parked = std::fs::read_dir(&blocked_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(parked.len(), 1, "the payload is preserved for forensics");
+        assert!(parked[0].contains("The assessment was refreshed"));
+
+        // The next admission's repair finds nothing left to replay.
+        assert_eq!(run(&doc).unwrap(), RepairOutcome::Noop);
+    }
+
+    /// `#qresiduewedge` safety: the capture's echo alone is never enough. A head
+    /// is struck only when the committed exchange already holds an answer
+    /// titled with that head; a head echoed only by the parked (never written)
+    /// capture stays live.
+    #[test]
+    fn committed_heading_replay_never_strikes_a_head_only_the_capture_answers() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let head =
+            "See https://example.com/pull/48/changes#r1 https://example.com/pull/48/changes#r2";
+        let other = "Audit the archived Confluence pages for drifted status values";
+        commit_unechoed_answer_cycle(dir.path(), &doc, head, &format!("- {other}\n"));
+        // The replay is titled with the committed head, but echoes a DIFFERENT
+        // live head that no committed answer is titled with.
+        let payload = format!(
+            "<!-- patch:exchange -->\n### Re: {head} — gpt-5\n\n\
+             > **Queue prompt:**\n>\n> {other}\n\nDone.\n<!-- /patch:exchange -->\n"
+        );
+        agent_doc_repair_io::pending::save_pending(&doc, &payload).unwrap();
+
+        let outcome = run(&doc).expect("a committed-heading replay must not fail closed");
+        assert_eq!(outcome, RepairOutcome::BlockedCaptureQuarantined);
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains(&format!("- {other}\n")) && !repaired.contains(&format!("~~{other}")),
+            "a head answered only by the parked capture must stay live:\n{repaired}"
+        );
+        assert!(
+            repaired.contains(&format!("- {head}\n")),
+            "the committed head was not echoed by this capture, so it stays live:\n{repaired}"
+        );
+    }
+
     #[test]
     fn repair_reorders_response_before_prompt_tail_when_pending_response_is_visible() {
         let dir = setup_project();

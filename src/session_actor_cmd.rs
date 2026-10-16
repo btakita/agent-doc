@@ -973,7 +973,9 @@ fn restart_fresh_clear_message(
         RestartFreshClearOutcome::CrossedCapturedCycle => format!(
             "Cleared session context for {file} (controller stage {accepted_stage}). The open \
              cycle's response is already durably captured; the supervisor finishes its closeout \
-             without the old {harness} context, and nothing about the document was discarded."
+             without the old {harness} context, and nothing about the document was discarded. \
+             The fresh {harness} session waits at its prompt instead of re-running that cycle; \
+             queued work and new edits still reach it through the supervisor's idle dispatch."
         ),
         RestartFreshClearOutcome::DeferredUntilCycleCloses => format!(
             "Clear Session Context accepted for {file} but NOT applied yet (controller stage \
@@ -6984,6 +6986,12 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "{crossed}"
         );
         assert!(crossed.contains("durably captured"), "{crossed}");
+        // `#clearsessioncontext`: the relaunch does not re-run the
+        // document over the supervisor-owned closeout.
+        assert!(
+            crossed.contains("waits at its prompt instead of re-running that cycle"),
+            "{crossed}"
+        );
 
         assert_eq!(
             restart_fresh_clear_message(

@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -148,13 +147,7 @@ v0.35.511 is tagged and pushed, main is at `822df43fec`, and the local install i
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#rundocsissue]~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/277
-- 🚧 todo ids opportunistically layer on existing `agent:review` ids if an operator decision needs to be made on the backlog/review/icebox item. The todo is for visibility. A surrogate todo id would be created only if there are multiple backlog/review/icebox ids or if it is not associated with a backlog/review/icebox item.
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/276
-- 🚧 Clear Session Context on sdk.md wedged: • The response is committed, but the IDE editor buffer for tasks/sdk.md contains unmerged typing. Please reconcile/save that buffer while preserving your text. The retained agent-doc write is durable and 04will apply automatically once they agree.
-- 🚧 release + publish
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 - do [#jetbrainsreplicaloops]
 - do [#clearsessioncontext]
 <!-- /agent:queue -->
@@ -169,6 +162,7 @@ v0.35.511 is tagged and pushed, main is at `822df43fec`, and the local install i
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#n7kq] In the sdk.md session: restore the 7 todo ids the 23:30 --todo-edit dropped (#tdclireview, #tdcontracts162, #tdpromotioncallers, #tdinspectclones, #tdfpe202, #tdadr0033, #tdadr0030) with --todo-edit "<exact text>=#tdX <same text>", or accept the ids the preflight backfill assigns
 - [ ] [#8ph6] In the docs.md session: check off the Google Drive re-auth todo (--todo-done httpsdocsgoogle once backfilled, or --todo-done with its exact text)
+- [ ] [#t1v0] In the sdk.md pane, press Clear Session Context again: the 06:03 presses were held behind the open cycle and then dropped by the install restart. Check first that sdk.md's queue has not opened its tdue4cpuset cycle.
 <!-- /agent:todo -->
 
 ## Backlog

@@ -28,9 +28,19 @@
 //!   gated) already carries the same action text, the add is a no-op. A replayed
 //!   closeout therefore never duplicates a todo, and never resurrects one the
 //!   operator already checked off.
-//! - Only a LEADING `[#id]` is an item's own id. An id cited later in the
-//!   action (`Verify [#gate] live`, `Decide X (#gate)`) is a reference to
-//!   tracked work. Operator-authored and legacy items may have no own id.
+//! - Only a LEADING id is an item's own id: bracketed `[#id]`, or bare `#id`
+//!   followed by whitespace with at least one letter (`#sdktododone`; a
+//!   leading `#157` stays a GitHub citation). Rewrites keep the row's
+//!   spelling. An id cited later in the action (`Verify [#gate] live`,
+//!   `Decide X (#gate)`) is a reference to tracked work. Operator-authored and
+//!   legacy items may have no own id.
+//! - [`assign_missing_todo_ids`] (`#todoidbackfill`) gives each id-less row
+//!   an own id by the `--todo-add` rules (reuse the one open review/backlog id
+//!   it cites, else mint), behind a typing gate, never re-id'ing a row and
+//!   inserting only the id token. Preflight runs it every cycle.
+//! - [`todo_owns_id`] reports whether a todo owns an id, so a closeout's
+//!   `--done <id>` naming a todo's own id (and no tracked work) checks that
+//!   todo off instead of failing (`#sdktododone`).
 //! - Item selectors (`--todo-done`, `--todo-reopen`, `--todo-edit`,
 //!   `--todo-remove`) resolve, first match wins: the item's own id; else the
 //!   one item citing `#id` (narrowed to open items for done, checked items for
@@ -224,14 +234,19 @@ impl TodoState {
 ///
 /// The layout is `<prefix>[<state>] [#<own id>] <action>`, where `prefix` is
 /// the indentation plus list marker (`- `, `* `, `1. `, ...) and the
-/// `[#<own id>] ` token is optional. Only a LEADING bracketed id is the item's
-/// own id; an id cited later in the action (`Verify [#gate] live`,
-/// `... (#gate)`) is a reference to tracked work, not the item's identity.
+/// `[#<own id>] ` token is optional. Only a LEADING id is the item's own id:
+/// bracketed `[#id]`, or bare `#id` (`#sdktododone`, see
+/// `split_leading_bare_id`). An id cited later in the action
+/// (`Verify [#gate] live`, `... (#gate)`) is a reference to tracked work, not
+/// the item's identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TodoLine<'a> {
     pub prefix: &'a str,
     pub state: TodoState,
     pub own_id: Option<&'a str>,
+    /// `#sdktododone`: the own id was written bare (`#<id> action`) rather than
+    /// bracketed (`[#<id>] action`). Rewrites keep the spelling the row uses.
+    pub own_id_bare: bool,
     pub action: &'a str,
 }
 
@@ -255,6 +270,38 @@ fn split_leading_bracket_id(text: &str) -> Option<(&str, &str)> {
     Some((id, after.trim_start()))
 }
 
+/// `#sdktododone`: split a leading BARE `#id` token off `text`, returning
+/// `(id, rest)`.
+///
+/// A bare own id is the `- [ ] #<id> action` spelling some documents use. It
+/// must be followed by whitespace (or end the line) and contain at least one
+/// ASCII letter, so a GitHub reference that opens a row (`#157 needs review`)
+/// stays a citation rather than becoming the item's identity.
+fn split_leading_bare_id(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('#')?;
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .unwrap_or(rest.len());
+    let id = &rest[..end];
+    if !is_valid_todo_id(id) || !id.chars().any(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let after = &rest[end..];
+    if !(after.is_empty() || after.starts_with(' ') || after.starts_with('\t')) {
+        return None;
+    }
+    Some((id, after.trim_start()))
+}
+
+/// Split a row's leading own id off `text`: bracketed `[#id]` first, else a
+/// bare `#id`. Returns `(id, rest, bare)`.
+fn split_leading_own_id(text: &str) -> Option<(&str, &str, bool)> {
+    if let Some((id, rest)) = split_leading_bracket_id(text) {
+        return Some((id, rest, false));
+    }
+    split_leading_bare_id(text).map(|(id, rest)| (id, rest, true))
+}
+
 /// Parse one checklist line of an `agent:todo` body (no trailing newline).
 pub fn parse_todo_line(line: &str) -> Option<TodoLine<'_>> {
     let line = line.strip_suffix('\r').unwrap_or(line);
@@ -263,29 +310,43 @@ pub fn parse_todo_line(line: &str) -> Option<TodoLine<'_>> {
     let box_start = line.len() - text.len() - 4;
     let marker = line[box_start + 1..].chars().next()?;
     let state = TodoState::from_marker(marker)?;
-    let (own_id, action) = match split_leading_bracket_id(text) {
-        Some((id, rest)) => (Some(id), rest),
-        None => (None, text),
+    let (own_id, action, own_id_bare) = match split_leading_own_id(text) {
+        Some((id, rest, bare)) => (Some(id), rest, bare),
+        None => (None, text, false),
     };
     Some(TodoLine {
         prefix: &line[..box_start],
         state,
         own_id,
+        own_id_bare,
         action: action.trim_end(),
     })
 }
 
-/// Render one todo line in the canonical layout.
-fn render_todo_line(prefix: &str, state: TodoState, own_id: Option<&str>, action: &str) -> String {
+/// Render one todo line in the canonical layout. `bare` writes the own id as
+/// `#id` (the spelling a bare-id row already uses) instead of `[#id]`.
+fn render_todo_line(
+    prefix: &str,
+    state: TodoState,
+    own_id: Option<&str>,
+    bare: bool,
+    action: &str,
+) -> String {
     let mut out = String::with_capacity(prefix.len() + action.len() + 16);
     out.push_str(prefix);
     out.push('[');
     out.push(state.marker());
     out.push_str("] ");
     if let Some(id) = own_id {
-        out.push_str("[#");
-        out.push_str(id);
-        out.push_str("] ");
+        if bare {
+            out.push('#');
+            out.push_str(id);
+            out.push(' ');
+        } else {
+            out.push_str("[#");
+            out.push_str(id);
+            out.push_str("] ");
+        }
     }
     out.push_str(action);
     out
@@ -581,7 +642,13 @@ pub fn add_todo_item_to_document(
     if !new_body.is_empty() && !new_body.ends_with('\n') {
         new_body.push('\n');
     }
-    new_body.push_str(&render_todo_line("- ", TodoState::Open, Some(&id), &action));
+    new_body.push_str(&render_todo_line(
+        "- ",
+        TodoState::Open,
+        Some(&id),
+        false,
+        &action,
+    ));
     new_body.push('\n');
     Ok(TodoAddOutcome {
         content: todo.replace_content(&ensured, &new_body),
@@ -590,6 +657,158 @@ pub fn add_todo_item_to_document(
         id: Some(id),
         linked,
     })
+}
+
+/// One own id [`assign_missing_todo_ids`] gave an id-less todo row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoIdAssignment {
+    /// The new own id.
+    pub id: String,
+    /// The tracked-work component (`review` / `backlog`) whose id the row now
+    /// reuses, or `None` for a minted id.
+    pub linked: Option<String>,
+    /// The row's action text, unchanged.
+    pub action: String,
+}
+
+/// Result of [`assign_missing_todo_ids`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoIdAssignOutcome {
+    /// The document after the assignment (unchanged when nothing was assigned).
+    pub content: String,
+    /// The rows that received an own id, in item order.
+    pub assigned: Vec<TodoIdAssignment>,
+}
+
+/// `#todoidbackfill`: give every id-less `agent:todo` row an own id, by the
+/// same rules `--todo-add` uses, so a row the operator typed by hand (or an
+/// older binary or a `patch:todo` wrote) can be addressed and completed by id.
+///
+/// - A row that already has an own id (`[#id]` or bare `#id`) is never re-id'd.
+/// - `admit(line)` is the typing gate: a row it rejects (still being typed) is
+///   left for a later pass. The line is passed trimmed, list marker included.
+/// - An OPEN row whose action cites exactly one OPEN `agent:review` /
+///   `agent:backlog` id that no todo owns REUSES that id: the row is the
+///   operator prompt for that tracked work, so the existing `#todoids` signals
+///   apply (an operator check reports the prerequisite done; resolving the
+///   work checks the row off). Otherwise an id is minted with `id_for`,
+///   avoiding every `#id` token in the document, `reserved`, every id `links`
+///   knows, and ids assigned earlier in this pass.
+/// - Rows whose action text duplicates another row's are skipped: duplicate
+///   folding (`#tododupdone`) handles them, and two distinct ids would make the
+///   copies permanent.
+/// - Only the id token is inserted (`- [ ] [#id] <action>`); the checkbox, list
+///   marker, indentation, and action text are kept byte-for-byte.
+///
+/// Pure and deterministic: the same inputs always yield the same ids.
+pub fn assign_missing_todo_ids(
+    content: &str,
+    id_for: &dyn Fn(&str, u64) -> String,
+    reserved: &std::collections::HashSet<String>,
+    links: &TodoLinkIndex,
+    admit: &dyn Fn(&str) -> bool,
+) -> Result<TodoIdAssignOutcome> {
+    let unchanged = |content: &str| TodoIdAssignOutcome {
+        content: content.to_string(),
+        assigned: Vec::new(),
+    };
+    let Some(todo) = find_todo_component(content)? else {
+        return Ok(unchanged(content));
+    };
+    let mut body = TodoBody::parse(todo.content(content));
+    let mut owned: std::collections::HashSet<String> = body
+        .items
+        .iter()
+        .filter_map(|item| item.own_id.clone())
+        .collect();
+    let mut taken = body_id_tokens(content);
+    let mut text_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for item in &body.items {
+        *text_counts
+            .entry(normalize_action_text(&item.action))
+            .or_default() += 1;
+    }
+    let mut assigned = Vec::new();
+    for item in body.items.clone() {
+        if item.own_id.is_some() {
+            continue;
+        }
+        let normalized = normalize_action_text(&item.action);
+        if normalized.is_empty() || text_counts.get(&normalized).copied().unwrap_or(0) > 1 {
+            continue;
+        }
+        let line = body.lines[item.line].trim_end_matches(['\n', '\r']).trim();
+        if !admit(line) {
+            continue;
+        }
+        let link_candidates: Vec<String> = cited_ids(&item.action)
+            .into_iter()
+            .filter(|id| links.linkable_component(id).is_some())
+            .collect();
+        let reuse = match link_candidates.as_slice() {
+            [only] if item.state.is_open() && !owned.contains(only) => Some(only.clone()),
+            _ => None,
+        };
+        let (id, linked) = match reuse {
+            Some(id) => {
+                let linked = links.linkable_component(&id).map(str::to_string);
+                (id, linked)
+            }
+            None => {
+                let mut chosen = None;
+                for counter in 0..256u64 {
+                    let candidate = id_for(&item.action, counter).to_ascii_lowercase();
+                    if is_valid_todo_id(&candidate)
+                        && !taken.contains(&candidate)
+                        && !reserved.contains(&candidate)
+                        && !links.knows(&candidate)
+                        && !owned.contains(&candidate)
+                    {
+                        chosen = Some(candidate);
+                        break;
+                    }
+                }
+                (
+                    chosen.context("todo id backfill could not derive a collision-free todo id")?,
+                    None,
+                )
+            }
+        };
+        body.rewrite_line(item.line, item.state, Some(&id), &item.action);
+        owned.insert(id.clone());
+        taken.insert(id.clone());
+        assigned.push(TodoIdAssignment {
+            id,
+            linked,
+            action: item.action.clone(),
+        });
+    }
+    if assigned.is_empty() {
+        return Ok(unchanged(content));
+    }
+    Ok(TodoIdAssignOutcome {
+        content: todo.replace_content(content, &body.render()),
+        assigned,
+    })
+}
+
+/// `#todoidbackfill`: carry the ids [`assign_missing_todo_ids`] gave `before`'s
+/// todo rows into `snapshot`, when the snapshot's todo body still equals
+/// `before`'s (no unsnapshotted operator todo edit). `None` when there is
+/// nothing to carry or the bodies differ, so a pending operator edit stays
+/// visible as a diff.
+pub fn carry_todo_body_into_snapshot(snapshot: &str, before: &str, after: &str) -> Option<String> {
+    let snap_todo = find_todo_component(snapshot).ok()??;
+    let before_todo = find_todo_component(before).ok()??;
+    let after_todo = find_todo_component(after).ok()??;
+    let after_body = after_todo.content(after);
+    if snap_todo.content(snapshot) != before_todo.content(before)
+        || snap_todo.content(snapshot) == after_body
+    {
+        return None;
+    }
+    Some(snap_todo.replace_content(snapshot, after_body))
 }
 
 /// One checklist item located in a todo body, by line index.
@@ -655,10 +874,25 @@ impl TodoBody {
         let original = &self.lines[index];
         let bare = original.trim_end_matches(['\n', '\r']);
         let ending = &original[bare.len()..];
-        let prefix = parse_todo_line(bare)
-            .map(|line| line.prefix)
-            .unwrap_or("- ");
-        let mut rendered = render_todo_line(prefix, state, own_id, action);
+        let parsed = parse_todo_line(bare);
+        let prefix = parsed.map(|line| line.prefix).unwrap_or("- ");
+        // `#sdktododone`: keep the row's own id spelling. A bare `#id` row
+        // stays bare when the rewrite keeps that same id, so `--todo-done`
+        // flips only the checkbox and `--todo-edit` keeps the id it replaces
+        // the action after.
+        let keep_bare = parsed.is_some_and(|line| {
+            line.own_id_bare
+                && line
+                    .own_id
+                    .zip(own_id)
+                    .is_some_and(|(was, now)| was.eq_ignore_ascii_case(now))
+        });
+        let own_id = if keep_bare {
+            parsed.and_then(|line| line.own_id)
+        } else {
+            own_id
+        };
+        let mut rendered = render_todo_line(prefix, state, own_id, keep_bare, action);
         rendered.push_str(ending);
         self.lines[index] = rendered;
     }
@@ -866,7 +1100,17 @@ pub fn edit_todo_item_in_document(
     let (todo, mut body) = todo_body_for_mutation(content, flag)?;
     let index = resolve_todo_selector(&body, selector, None, flag)?;
     let item = body.items[index].clone();
-    let (new_id, action) = parse_todo_input(text, flag)?;
+    let (new_id, mut action) = parse_todo_input(text, flag)?;
+    // `#sdktododone`: text that repeats a bare own id (`#id new text`) names
+    // the same item; drop the repeat so the row does not read `#id #id ...`.
+    if new_id.is_none()
+        && let Some(own) = item.own_id.as_deref()
+        && let Some((repeated, rest)) = split_leading_bare_id(&action)
+        && repeated.eq_ignore_ascii_case(own)
+        && !rest.is_empty()
+    {
+        action = rest.to_string();
+    }
     if let Some(new_id) = new_id {
         anyhow::ensure!(
             item.own_id.as_deref() == Some(new_id.as_str()),
@@ -912,6 +1156,26 @@ pub fn remove_todo_item_from_document(
         label,
         reconciled: 0,
     })
+}
+
+/// `#sdktododone`: whether an `agent:todo` item in `content` carries `id` as
+/// its OWN id (bracketed `[#id]` or bare `#id`), in any checkbox state.
+///
+/// A closeout's `--done <id>` that names no tracked work but names a todo's
+/// own id completes that todo instead of failing with "id not found". An id
+/// the todo only cites does not count.
+pub fn todo_owns_id(content: &str, id: &str) -> bool {
+    let id = normalize_link_id(id);
+    if id.is_empty() {
+        return false;
+    }
+    let Ok(Some(todo)) = find_todo_component(content) else {
+        return false;
+    };
+    TodoBody::parse(todo.content(content))
+        .items
+        .iter()
+        .any(|item| item.own_id.as_deref() == Some(id.as_str()))
 }
 
 /// Whether `selector` still resolves to an `agent:todo` item in `content`.
@@ -2066,5 +2330,311 @@ mod tests {
         assert_eq!(again.content, outcome.content);
         let none = auto_complete_linked_todos(&content, &TodoLinkIndex::default()).unwrap();
         assert_eq!(none.content, content);
+    }
+
+    /// `#sdktododone`: the anonymized `tasks/sdk.md` todo shapes from
+    /// 2026-10-15. Most rows wrote their own id bare (`- [ ] #tdfoo action`), a
+    /// workaround for the pre-0.35.510 shadow-backlog guard; a few use the
+    /// bracketed `[#tdfoo]`. A row's own id is its LEADING id in either
+    /// spelling; a leading GitHub number stays a citation.
+    fn sdk_todo_body() -> String {
+        wrap(concat!(
+            "- [x] #tdactionsbudget Raise the Actions spending limit (#sdkmainciverify)\n",
+            "- [ ] #tdclireview Review haiven-cli #2 and make the login decision (#cligoshell)\n",
+            "- [ ] #tdsdkdevrename Rename haiven-sdk and haiven-cli `dev` to `sdk-dev`\n",
+            "- [ ] #tdcontracts041 Decide the contracts 0.4.1 bump (split from #tdsdkdevrename; #publicbundleadopt)\n",
+            "- [ ] [#tdsdkwebui] Decide the SDK web UI shape (#sdkjiraweb)\n",
+            "- [ ] #157 needs review before Friday\n",
+        ))
+    }
+
+    #[test]
+    fn sdktododone_bare_and_bracketed_leading_ids_are_own_ids() {
+        let bare =
+            parse_todo_line("- [ ] #tdclireview Review haiven-cli #2 (#cligoshell)").unwrap();
+        assert_eq!(bare.own_id, Some("tdclireview"));
+        assert!(bare.own_id_bare);
+        assert_eq!(bare.action, "Review haiven-cli #2 (#cligoshell)");
+        let bracketed = parse_todo_line("- [ ] [#tdsdkwebui] Decide (#sdkjiraweb)").unwrap();
+        assert_eq!(bracketed.own_id, Some("tdsdkwebui"));
+        assert!(!bracketed.own_id_bare);
+        // A leading GitHub number, a glued token, or an id-only row without
+        // a letter is not an own id.
+        for line in [
+            "- [ ] #157 needs review",
+            "- [ ] #tdfoo: see the doc",
+            "- [ ] #2026-10-15 cut",
+        ] {
+            let parsed = parse_todo_line(line).unwrap();
+            assert_eq!(parsed.own_id, None, "{line}");
+            assert!(!parsed.own_id_bare, "{line}");
+        }
+        let content = sdk_todo_body();
+        assert!(todo_owns_id(&content, "tdsdkdevrename"));
+        assert!(todo_owns_id(&content, "#tdsdkwebui"));
+        assert!(todo_owns_id(&content, "tdactionsbudget"));
+        assert!(
+            !todo_owns_id(&content, "publicbundleadopt"),
+            "cited, not owned"
+        );
+        assert!(!todo_owns_id(&content, "157"));
+    }
+
+    /// `#sdktododone`: `--todo-done <bare own id>` selects the row that OWNS the
+    /// id even when another open row cites it (`split from #tdsdkdevrename`),
+    /// and flips only the checkbox: the bare spelling survives byte-for-byte.
+    /// Before the fix the selector fell through to "cite that id" and failed
+    /// as ambiguous between the two rows.
+    #[test]
+    fn sdktododone_todo_done_by_bare_own_id_flips_only_the_checkbox() {
+        let content = sdk_todo_body();
+        let outcome =
+            set_todo_item_state_in_document(&content, "tdsdkdevrename", TodoTransition::Done)
+                .unwrap();
+        assert!(outcome.changed);
+        assert_eq!(outcome.label, "#tdsdkdevrename");
+        assert_eq!(
+            outcome.content,
+            content.replace(
+                "- [ ] #tdsdkdevrename Rename",
+                "- [x] #tdsdkdevrename Rename"
+            )
+        );
+        let again = set_todo_item_state_in_document(
+            &outcome.content,
+            "#tdsdkdevrename",
+            TodoTransition::Done,
+        )
+        .unwrap();
+        assert!(!again.changed);
+        // The bracketed row keeps its brackets.
+        let web =
+            set_todo_item_state_in_document(&content, "tdsdkwebui", TodoTransition::Done).unwrap();
+        assert!(
+            todo_body(&web.content).contains("- [x] [#tdsdkwebui] Decide the SDK web UI shape")
+        );
+    }
+
+    /// `#sdktododone`: the 23:30 sync ran `--todo-edit "tdclireview=Re-run ..."`
+    /// on bare-id rows, and each rewritten row LOST its id (the bare `#id` was
+    /// part of the replaced action). An edit keeps the bare own id, and text
+    /// that repeats it does not double it.
+    #[test]
+    fn sdktododone_todo_edit_keeps_a_bare_own_id() {
+        let content = sdk_todo_body();
+        let edited = edit_todo_item_in_document(
+            &content,
+            "tdclireview",
+            "Re-run haiven-cli #2 CI, then review it (#cligoshell)",
+        )
+        .unwrap();
+        assert!(
+            todo_body(&edited.content).contains(
+                "- [ ] #tdclireview Re-run haiven-cli #2 CI, then review it (#cligoshell)\n"
+            ),
+            "{}",
+            edited.content
+        );
+        let repeated = edit_todo_item_in_document(
+            &content,
+            "tdclireview",
+            "#tdclireview Re-run haiven-cli #2 CI (#cligoshell)",
+        )
+        .unwrap();
+        assert!(
+            todo_body(&repeated.content)
+                .contains("- [ ] #tdclireview Re-run haiven-cli #2 CI (#cligoshell)\n"),
+            "{}",
+            repeated.content
+        );
+        // Every other row is untouched.
+        assert_eq!(
+            edited.content.replace(
+                "#tdclireview Re-run haiven-cli #2 CI, then review it (#cligoshell)",
+                "#tdclireview Review haiven-cli #2 and make the login decision (#cligoshell)"
+            ),
+            content
+        );
+    }
+
+    /// `#sdktododone`: the closeout auto-check ("own id resolved") reaches a bare
+    /// own id, and a row that only CITES the resolved id stays open.
+    #[test]
+    fn sdktododone_auto_complete_reaches_bare_own_ids_only() {
+        let index = links(&[], &["tdsdkdevrename", "publicbundleadopt"]);
+        let content = sdk_todo_body();
+        let outcome = auto_complete_linked_todos(&content, &index).unwrap();
+        assert_eq!(outcome.completed, vec!["tdsdkdevrename".to_string()]);
+        let body = todo_body(&outcome.content);
+        assert!(body.contains("- [x] #tdsdkdevrename Rename"), "{body}");
+        assert!(
+            body.contains("- [ ] #tdcontracts041 Decide the contracts 0.4.1 bump"),
+            "a cite-only row is surfaced, never completed: {body}"
+        );
+        let findings = todo_link_findings(&outcome.content, &index).unwrap();
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].kind, TodoLinkFindingKind::CitedWorkResolved);
+        assert_eq!(findings[0].selector, "tdcontracts041");
+    }
+
+    /// `#todoidbackfill`: the anonymized `tasks/docs.md` row from 2026-10-15.
+    /// The operator re-authenticated the Drive connector, but the id-less row
+    /// stayed open: nothing could address it by id, and the closeout's
+    /// "own id resolved" check never saw it.
+    fn docs_todo_doc() -> String {
+        concat!(
+            "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n- [ ] [#httpsdocsgoogle] Does the Google Doc change PR #51?\n<!-- /agent:backlog -->\n",
+            "<!-- agent:review -->\n- [/] [#cligoshell] CLI shell review\n<!-- /agent:review -->\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] Re-authenticate the Google Drive connector (/mcp, sign in) or paste the Google Doc text into tasks/docs.md so #httpsdocsgoogle can proceed; or say skip\n",
+            "- [ ] #tdsdk157 Review/approve haiven-sdk #157 (#cligoshell)\n",
+            "- [ ] [#tdwebui] Decide the SDK web UI shape (#cligoshell)\n",
+            "- [ ] Re-run haiven-cli #2 CI, then review it (#cligoshell)\n",
+            "- [ ] Optional: delete the clean inspection worktrees\n",
+            "- [x] Already done by me (#httpsdocsgoogle)\n",
+            "  - [ ] Nested follow-up with no id\n",
+            "- [ ] Call the vendor\n",
+            "- [ ] Call the vendor\n",
+            "<!-- /agent:todo -->\n",
+        )
+        .to_string()
+    }
+
+    fn backfill_links(content: &str) -> TodoLinkIndex {
+        let _ = content;
+        links(
+            &[("httpsdocsgoogle", "backlog"), ("cligoshell", "review")],
+            &[],
+        )
+    }
+
+    #[test]
+    fn todoidbackfill_assigns_ids_to_id_less_rows_only_and_keeps_their_text() {
+        let content = docs_todo_doc();
+        let index = backfill_links(&content);
+        let outcome = assign_missing_todo_ids(
+            &content,
+            &test_id,
+            &std::collections::HashSet::new(),
+            &index,
+            &|_| true,
+        )
+        .unwrap();
+        let ids: Vec<(&str, Option<&str>)> = outcome
+            .assigned
+            .iter()
+            .map(|a| (a.id.as_str(), a.linked.as_deref()))
+            .collect();
+        assert_eq!(ids.len(), 5, "{ids:?}");
+        // The docs.md row is the operator prompt for the one open backlog item
+        // it cites, so it reuses that id.
+        assert_eq!(ids[0], ("httpsdocsgoogle", Some("backlog")));
+        // `#cligoshell` is already cited by owned rows but OWNED by none, so the
+        // first id-less row citing it reuses it.
+        assert_eq!(ids[1], ("cligoshell", Some("review")));
+        // Nothing linkable: minted. A checked row never reuses a gate.
+        assert!(
+            ids[2].1.is_none() && ids[3].1.is_none() && ids[4].1.is_none(),
+            "{ids:?}"
+        );
+        let body = todo_body(&outcome.content);
+        assert_eq!(
+            body,
+            format!(
+                concat!(
+                    "- [ ] [#httpsdocsgoogle] Re-authenticate the Google Drive connector (/mcp, sign in) or paste the Google Doc text into tasks/docs.md so #httpsdocsgoogle can proceed; or say skip\n",
+                    "- [ ] #tdsdk157 Review/approve haiven-sdk #157 (#cligoshell)\n",
+                    "- [ ] [#tdwebui] Decide the SDK web UI shape (#cligoshell)\n",
+                    "- [ ] [#cligoshell] Re-run haiven-cli #2 CI, then review it (#cligoshell)\n",
+                    "- [ ] [#{}] Optional: delete the clean inspection worktrees\n",
+                    "- [x] [#{}] Already done by me (#httpsdocsgoogle)\n",
+                    "  - [ ] [#{}] Nested follow-up with no id\n",
+                    "- [ ] Call the vendor\n",
+                    "- [ ] Call the vendor\n",
+                ),
+                ids[2].0, ids[3].0, ids[4].0
+            ),
+            "only the id token is inserted; owned rows and duplicate copies are untouched"
+        );
+        // Idempotent: a second pass assigns nothing.
+        let again = assign_missing_todo_ids(
+            &outcome.content,
+            &test_id,
+            &std::collections::HashSet::new(),
+            &index,
+            &|_| true,
+        )
+        .unwrap();
+        assert!(again.assigned.is_empty());
+        assert_eq!(again.content, outcome.content);
+    }
+
+    #[test]
+    fn todoidbackfill_respects_the_typing_gate_and_minted_ids_avoid_known_ids() {
+        let content = docs_todo_doc();
+        let index = backfill_links(&content);
+        let gated = assign_missing_todo_ids(
+            &content,
+            &test_id,
+            &std::collections::HashSet::new(),
+            &index,
+            &|line| !line.contains("Optional"),
+        )
+        .unwrap();
+        assert!(
+            todo_body(&gated.content)
+                .contains("- [ ] Optional: delete the clean inspection worktrees\n"),
+            "a row the gate holds stays id-less this pass"
+        );
+        // A minted candidate colliding with a reserved or cited id is skipped.
+        let first = test_id("Optional: delete the clean inspection worktrees", 0);
+        let reserved: std::collections::HashSet<String> = [first.clone()].into_iter().collect();
+        let outcome =
+            assign_missing_todo_ids(&content, &test_id, &reserved, &index, &|_| true).unwrap();
+        let optional = outcome
+            .assigned
+            .iter()
+            .find(|a| a.action.starts_with("Optional"))
+            .unwrap();
+        assert_ne!(optional.id, first);
+    }
+
+    /// `#todoidbackfill`: once the row owns the id, the existing completion
+    /// paths reach it — the operator's check reports the prerequisite done, and
+    /// resolving the backlog item checks the row off.
+    #[test]
+    fn todoidbackfill_rows_join_the_todoids_completion_paths() {
+        let content = docs_todo_doc();
+        let outcome = assign_missing_todo_ids(
+            &content,
+            &test_id,
+            &std::collections::HashSet::new(),
+            &backfill_links(&content),
+            &|_| true,
+        )
+        .unwrap();
+        let resolved = links(&[("cligoshell", "review")], &["httpsdocsgoogle"]);
+        let done = auto_complete_linked_todos(&outcome.content, &resolved).unwrap();
+        assert!(done.completed.contains(&"httpsdocsgoogle".to_string()));
+        assert!(todo_body(&done.content).starts_with("- [x] [#httpsdocsgoogle] Re-authenticate"));
+        let checked = outcome.content.replace(
+            "- [ ] [#httpsdocsgoogle] Re-auth",
+            "- [x] [#httpsdocsgoogle] Re-auth",
+        );
+        let findings = todo_link_findings(&checked, &backfill_links(&checked)).unwrap();
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.kind == TodoLinkFindingKind::OperatorDoneBacklogOpen
+                    && f.selector == "httpsdocsgoogle"),
+            "{findings:?}"
+        );
+        // A snapshot holding the same todo body gets the ids carried over; one
+        // with an unsnapshotted operator todo edit does not.
+        let carried = carry_todo_body_into_snapshot(&content, &content, &outcome.content).unwrap();
+        assert_eq!(todo_body(&carried), todo_body(&outcome.content));
+        let edited = content.replace("Call the vendor\n<!--", "Call the vendor today\n<!--");
+        assert!(carry_todo_body_into_snapshot(&edited, &content, &outcome.content).is_none());
     }
 }

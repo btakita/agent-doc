@@ -72,6 +72,25 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   that pathname alone on the way out. The process-exit watcher's poller now
   stops when its controller does. Before, in-process test controllers kept
   writing other tests' dead editor pids into roots that were being deleted.
+- **A todo whose work is done can be closed by its own id (`sdktododone`).**
+  `--done <id>` naming an `agent:todo` item's own id, and no tracked work, now
+  checks that todo off in place and strikes its `[#id]: ...` queue head. Before,
+  it failed with "id not found in backlog/icebox", so agents ticked the box by
+  hand. A bare leading `#id` (`- [ ] #tdfoo action`) now counts as the row's own
+  id, as `[#tdfoo]` does. `--todo-edit` keeps that id instead of dropping it,
+  and `--todo-done` picks the row that owns the id even when another row cites
+  it. A leading `#157` stays a GitHub reference. A queue head drained without
+  `--done` still never completes a todo.
+- **Todo rows without an id get one at preflight (`todoidbackfill`).** A row
+  typed by hand, or one an older write left without an id, now gets an own id
+  by the `--todo-add` rules. It reuses the one open backlog/review id it cites,
+  else a fresh id is minted. The pass uses the free-text typing gate, never
+  re-ids a row, and inserts only the id. A row with an id can be closed by id,
+  so a hand-written "re-authenticate the connector" todo no longer stays open
+  after the work it unblocks finishes.
+- **Preflight reads pending callbacks from the document's project
+  (`preflightcallbackroot`).** It used the process cwd, so a preflight run
+  from another checkout opened that checkout's `state.db`.
 
 ## 0.35.509
 

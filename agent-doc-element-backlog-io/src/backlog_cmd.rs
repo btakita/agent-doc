@@ -1028,6 +1028,35 @@ pub fn icebox_backfill(file: &Path) -> Result<()> {
     backfill_list(file, backlog::TrackedWorkList::Icebox)
 }
 
+/// `#sdktododone`: when `id` names no tracked work but is the OWN id of an
+/// `agent:todo` item, check that item off in place and return the updated
+/// document (unchanged when it was already checked). `None` when no todo owns
+/// `id`, so the caller keeps its "id not found" error.
+///
+/// A todo's own id is resolved by the closeout that names it with `--done`,
+/// the same "own id resolved" rule that auto-completes a todo reusing a
+/// backlog/review id. A todo that only CITES `id` is never touched.
+fn complete_todo_owning_done_id(content: &str, id: &str) -> Result<Option<String>> {
+    if !agent_doc_element::todo::todo_owns_id(content, id) {
+        return Ok(None);
+    }
+    let id = backlog::normalize_pending_id(id);
+    let outcome = agent_doc_element::todo::set_todo_item_state_in_document(
+        content,
+        &id,
+        agent_doc_element::todo::TodoTransition::Done,
+    )?;
+    if outcome.changed {
+        pending_receipt!(
+            "[todo] done: {} checked off in agent:todo (--done named its own id)",
+            outcome.label
+        );
+    } else {
+        pending_receipt!("[todo] done: {} already checked off", outcome.label);
+    }
+    Ok(Some(outcome.content))
+}
+
 /// Mark an item `[x]` by id.
 pub fn done(file: &Path, id: &str) -> Result<()> {
     let (full_content, comp) = match find_component_containing_open_id(file, id) {
@@ -1039,7 +1068,18 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
             );
             return Ok(());
         }
-        Err(err) => return Err(err),
+        Err(err) => {
+            // `#sdktododone`: an id that names no tracked work but is an
+            // `agent:todo` item's own id completes that todo.
+            let content = read_command_document(file, "backlog_done_todo")?;
+            if let Some(updated) = complete_todo_owning_done_id(&content, id)? {
+                if updated != content {
+                    persist_pending_write(file, &content, &updated)?;
+                }
+                return Ok(());
+            }
+            return Err(err);
+        }
     };
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_done(existing, id)?;
@@ -1331,7 +1371,16 @@ where
                 );
                 continue;
             }
-            Err(err) => return Err(err),
+            Err(err) => {
+                // `#sdktododone`: `--done <todo own id>` completes the todo in
+                // this same transaction; its `[#id]: ...` queue head is struck
+                // by the queue projection below like any other done id.
+                if let Some(updated) = complete_todo_owning_done_id(&target, &id)? {
+                    target = updated;
+                    continue;
+                }
+                return Err(err);
+            }
         };
         let existing = &target[comp.open_end..comp.close_start];
         let (new_content, item) = backlog::op_take_item(existing, &id)?;

@@ -322,6 +322,112 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
     }
 }
 
+/// `#todoidbackfill`: give every id-less `agent:todo` row an own id this
+/// preflight, the way queue maintenance coins free-text queue lines into
+/// backlog ids. A row typed by hand, written by an older binary, or added
+/// through `patch:todo` then has an id a closeout can complete (`--done <id>`,
+/// `--todo-done <id>`, or the `#todoids` own-id-resolved check).
+///
+/// Runs before queue maintenance, against the same editor/CP authority, behind
+/// the same typing gate (`coin_gate`): a row the operator is still typing keeps
+/// no id until a later pass. Rows that already own an id are never touched,
+/// and only the id token is inserted. The snapshot's todo body follows when it
+/// matched the pre-assignment body, so the ids do not read as an operator
+/// diff. Fail closed: unreadable tracked-work evidence, an editor head that is
+/// not current, or a refused write assigns nothing this pass. Returns the ids
+/// assigned.
+pub fn run_todo_id_maintenance(file: &Path, coin_gate: &FreeTextCoinGate) -> Result<Vec<String>> {
+    let source = "preflight_todo_id_maintenance";
+    let content = match current_text_via_preflight_authority_retrying(file, source)? {
+        Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+        Some(agent_doc_crdt_relay_io::CurrentText::Detached) | None => {
+            match std::fs::read_to_string(file) {
+                Ok(text) => text,
+                Err(_) => return Ok(Vec::new()),
+            }
+        }
+        Some(_) => return Ok(Vec::new()),
+    };
+    if agent_doc_element::todo::find_todo_component(&content)
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        return Ok(Vec::new());
+    }
+    let links = match agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
+        file, &content, true, &[],
+    ) {
+        Ok(links) => links,
+        Err(err) => {
+            eprintln!(
+                "[preflight] todo: tracked-work evidence unreadable ({err:#}); todo id backfill skipped"
+            );
+            return Ok(Vec::new());
+        }
+    };
+    let reserved = agent_doc_element_backlog::backlog::document_reserved_identity_ids(&content);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
+    let id_for = |action: &str, counter: u64| {
+        agent_doc_element_backlog::backlog::generate_hash_n(action, &doc_id, counter, 4)
+    };
+    let outcome = agent_doc_element::todo::assign_missing_todo_ids(
+        &content,
+        &id_for,
+        &reserved,
+        &links,
+        &|line| coin_gate.allows_coining(line),
+    )?;
+    if outcome.assigned.is_empty() {
+        return Ok(Vec::new());
+    }
+    let project_root = agent_doc_project_root_io::project_root_containing(file);
+    let persisted = persist_queue_maintenance_doc(
+        file,
+        &outcome.content,
+        &content,
+        project_root.as_deref(),
+        source,
+    )?;
+    if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
+        && let Some(new_snapshot) = agent_doc_element::todo::carry_todo_body_into_snapshot(
+            &snapshot,
+            &content,
+            &persisted,
+        )
+        && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &new_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+    {
+        eprintln!("[preflight] todo: snapshot sync warning: {err}");
+    }
+    let mut ids = Vec::with_capacity(outcome.assigned.len());
+    for assignment in &outcome.assigned {
+        let link = match assignment.linked.as_deref() {
+            Some(component) => format!(" (reuses agent:{component} #{})", assignment.id),
+            None => String::new(),
+        };
+        let short: String = assignment.action.chars().take(60).collect();
+        eprintln!(
+            "[preflight] todo: assigned own id [#{}]{link} to \"{short}\" (#todoidbackfill)",
+            assignment.id
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "todo_id_assigned file={} id={} linked={}",
+                file.display(),
+                assignment.id,
+                assignment.linked.as_deref().unwrap_or("none")
+            ),
+        );
+        ids.push(assignment.id.clone());
+    }
+    Ok(ids)
+}
+
 /// `#todoids`: evaluate the document's `agent:todo` against its tracked work
 /// (including the external done archive). Fail closed: unreadable evidence
 /// yields no signal and a stderr note, never a "nothing to do" that could be

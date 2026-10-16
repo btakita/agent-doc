@@ -1216,6 +1216,12 @@ fn run_with_options_to_writer_in_pass(
             .as_ref()
             .map(agent_doc_preflight_io::debounce::OperatorEditEvidence::coin_gate)
             .unwrap_or_default();
+        // `#todoidbackfill`: id-less todo rows get an own id before queue
+        // maintenance re-reads the authority. Best-effort: a failure assigns
+        // nothing and never blocks admission.
+        if let Err(err) = agent_doc_preflight_io::run_todo_id_maintenance(file, &coin_gate) {
+            eprintln!("[preflight] todo: id backfill not applied this pass: {err:#}");
+        }
         match run_queue_maintenance_with_coin_gate(file, diff_result.as_deref(), &coin_gate) {
             Ok(state) => state,
             Err(e) => {
@@ -2037,7 +2043,16 @@ fn run_with_options_to_writer_in_pass(
 
     crate::progress::enter("callbacks_and_accretion")?;
     // Step 5: Scan for pending callback requests from other processes.
-    let pending_callbacks = agent_doc_callback_io::scan_pending_callbacks(None).unwrap_or_default();
+    // `#preflightcallbackroot`: scan the DOCUMENT's project, never the
+    // process cwd's. With the cwd fallback, a preflight run from another
+    // checkout (a test harness in the agent-doc worktree, or an agent shell in
+    // a sibling repo) opened that checkout's state.db.
+    let pending_callbacks = agent_doc_project_root_io::project_root_containing(file)
+        .map(|root| {
+            agent_doc_callback_io::scan_pending_callbacks(Some(&root.to_string_lossy()))
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
     if !pending_callbacks.is_empty() {
         eprintln!(
             "[preflight] found {} pending callback(s)",

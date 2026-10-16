@@ -608,3 +608,18 @@ When a closeout resolves work (`--done`, `--review-resolve`), an OPEN todo that
 owns that id is checked off in the same closeout (`[todo] auto-done`); one that
 only cites it gets `[todo] advisory (#tododone)` with the exact `--todo-done`
 command — if the operator action is finished, run it next cycle.
+
+**Queue heads that name a todo (`#sdktododone`).** When the operator queues a
+todo's own id (`[#tdrename]: rename to sdk-dev`, `[#tdgo]: go ahead`) and you
+finish that work, close with `--done <id>`: it checks the todo off in place
+and strikes the head in one transaction. Never hand-patch the box. When the
+head only asks a question about a decision todo, answer it and leave the todo
+open; do not pass `--done` for it. A todo's own id is its leading `[#id]` or
+bare `#id`; `--todo-edit` keeps either spelling.
+
+**Id-less todo rows get ids at preflight (`#todoidbackfill`).** A row the
+operator typed by hand, or one an older write left without an id, gets an own
+id at the next preflight (`[preflight] todo: assigned own id ...`). A row citing
+exactly one open review/backlog id reuses that id. When the operator reports
+the action done, close the row by that id (`--todo-done <id>`); never append a
+checked copy.

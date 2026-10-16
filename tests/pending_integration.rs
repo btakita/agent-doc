@@ -1442,6 +1442,216 @@ fn write_todo_add_rows_keep_session_check_clean() {
     );
 }
 
+/// `#sdktododone`, anonymized from `tasks/sdk.md` on 2026-10-15: the
+/// operator drove todos as annotated queue heads (`[#tdrename]: rename to
+/// sdk-dev`). The work finished, but the closeout had no way to say "this
+/// todo's own id is resolved": `--done tdrename` failed with "id not found in
+/// backlog/icebox" because a minted todo id is not tracked work, and the
+/// auto-check never saw the bare `#tdrename` own id. The agent hand-patched the
+/// box instead. Now `--done <todo own id>` checks that todo off in place (bare
+/// or bracketed spelling kept), strikes its queue head in the same
+/// transaction, and leaves a todo that only cites the id open.
+#[test]
+fn write_done_naming_a_todo_own_id_checks_it_off_and_strikes_its_queue_head() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let todo_rows = concat!(
+        "- [ ] #tdrename Rename the `dev` branches to `sdk-dev`\n",
+        "- [ ] #tdbump Decide the contracts bump (split from #tdrename; #gate1; #cligoshell)\n",
+        "- [ ] [#tdwebui] Decide the SDK web UI shape (#gate1)\n",
+    );
+    fs::write(
+        &doc,
+        format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- [#tdrename]: rename to sdk-dev\n",
+                "- [#tdue]: go ahead\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n- [/] [#gate1] gated work\n<!-- /agent:backlog -->\n\n",
+                "## Todo\n\n<!-- agent:todo -->\n{}<!-- /agent:todo -->\n",
+            ),
+            todo_rows
+        ),
+    )
+    .unwrap();
+    let write = |args: &[&str]| {
+        let mut full = vec![
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+        ];
+        full.extend_from_slice(args);
+        agent_doc().args(&full).output().unwrap()
+    };
+
+    let done = write(&["--done", "tdrename"]);
+    let stderr = String::from_utf8_lossy(&done.stderr);
+    assert!(
+        done.status.success(),
+        "--done <todo own id> must not fail: {stderr}"
+    );
+    assert!(
+        stderr.contains("[todo] done: #tdrename checked off in agent:todo"),
+        "{stderr}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        component_body(&content, "todo"),
+        todo_rows
+            .replace("- [ ] #tdrename Rename", "- [x] #tdrename Rename")
+            .trim_end_matches('\n'),
+        "only the owning row's checkbox changes; the cite-only row stays open"
+    );
+    let queue = component_body(&content, "queue");
+    assert!(
+        queue.contains("- ~~[#tdrename]: rename to sdk-dev~~"),
+        "queue head struck in the same transaction: {queue}"
+    );
+    assert!(
+        queue.contains("- [#tdue]: go ahead"),
+        "other heads stay: {queue}"
+    );
+    assert!(
+        component_body(&content, "backlog").contains("- [/] [#gate1] gated work"),
+        "tracked work is untouched: {content}"
+    );
+
+    // Replaying the same closeout is a no-op, and a bracketed own id works too.
+    let replay = write(&["--done", "tdrename", "--done", "tdwebui"]);
+    let stderr = String::from_utf8_lossy(&replay.stderr);
+    assert!(replay.status.success(), "{stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    let todo = component_body(&content, "todo");
+    assert!(todo.contains("- [x] #tdrename Rename"), "{todo}");
+    assert!(
+        todo.contains("- [x] [#tdwebui] Decide the SDK web UI shape (#gate1)"),
+        "{todo}"
+    );
+    assert!(todo.contains("- [ ] #tdbump Decide"), "{todo}");
+    assert_eq!(
+        todo.matches("tdrename Rename").count(),
+        1,
+        "no second [x] copy: {todo}"
+    );
+
+    // An id that names neither tracked work nor a todo's own id still fails;
+    // a cited-only id is not an own id.
+    for missing in ["nosuchid", "cligoshell"] {
+        let failed = write(&["--done", missing]);
+        assert!(!failed.status.success(), "--done {missing} must still fail");
+        assert!(
+            String::from_utf8_lossy(&failed.stderr).contains("id not found"),
+            "{}",
+            String::from_utf8_lossy(&failed.stderr)
+        );
+    }
+}
+
+/// `#todoidbackfill`, anonymized from `tasks/docs.md` on 2026-10-15: the
+/// operator re-authenticated the Drive connector, but the hand-written,
+/// id-less todo row stayed open because nothing could address it by id.
+/// Preflight now gives every id-less row an own id by the `--todo-add` rules
+/// (reuse the one open backlog/review id it cites, else mint), never re-ids a
+/// row, keeps the text, and a closeout can then complete the row by that id.
+#[test]
+fn preflight_assigns_own_ids_to_id_less_todo_rows_and_closeout_completes_them() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let reauth = "Re-authenticate the Google Drive connector (/mcp, sign in) or paste the Google Doc text into tasks/docs.md so #httpsdocsgoogle can proceed; or say skip";
+    fs::write(
+        &doc,
+        format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:backlog -->\n- [ ] [#httpsdocsgoogle] Does the Google Doc change PR #51?\n<!-- /agent:backlog -->\n\n",
+                "## Todo\n\n<!-- agent:todo -->\n",
+                "- [ ] {}\n",
+                "- [ ] #tdbare Keep my bare id\n",
+                "- [ ] Optional: delete the clean inspection worktrees\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            reauth
+        ),
+    )
+    .unwrap();
+    let preflight = || {
+        let output = agent_doc()
+            .args(["preflight", doc.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let _: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|err| panic!("preflight JSON ({err}):\n{stdout}\n{stderr}"));
+        stderr
+    };
+    let stderr = preflight();
+    assert!(stderr.contains("(#todoidbackfill)"), "{stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    let todo = component_body(&content, "todo").to_string();
+    let lines: Vec<&str> = todo.lines().collect();
+    assert_eq!(lines.len(), 3, "{todo}");
+    assert_eq!(lines[0], format!("- [ ] [#httpsdocsgoogle] {reauth}"));
+    assert_eq!(
+        lines[1], "- [ ] #tdbare Keep my bare id",
+        "an owned row is never re-id'd"
+    );
+    let minted = lines[2]
+        .strip_prefix("- [ ] [#")
+        .and_then(|rest| rest.split_once("] Optional: delete the clean inspection worktrees"))
+        .map(|(id, tail)| {
+            assert!(tail.is_empty(), "{}", lines[2]);
+            id.to_string()
+        })
+        .unwrap_or_else(|| panic!("minted own id expected: {}", lines[2]));
+
+    // Idempotent: the next preflight assigns nothing.
+    let again = preflight();
+    assert!(!again.contains("(#todoidbackfill)"), "{again}");
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        todo
+    );
+
+    // The closeout completes a row by its backfilled id, and resolving the
+    // backlog item the reauth row prompts for checks that row off too.
+    let write = |args: &[&str]| {
+        let mut full = vec![
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+        ];
+        full.extend_from_slice(args);
+        agent_doc().args(&full).output().unwrap()
+    };
+    let done = write(&["--done", &minted, "--done", "httpsdocsgoogle"]);
+    assert!(
+        done.status.success(),
+        "{}",
+        String::from_utf8_lossy(&done.stderr)
+    );
+    let todo = component_body(&fs::read_to_string(&doc).unwrap(), "todo").to_string();
+    assert!(
+        todo.contains(&format!("- [x] [#httpsdocsgoogle] {reauth}")),
+        "{todo}"
+    );
+    assert!(
+        todo.contains(&format!(
+            "- [x] [#{minted}] Optional: delete the clean inspection worktrees"
+        )),
+        "{todo}"
+    );
+    assert!(todo.contains("- [ ] #tdbare Keep my bare id"), "{todo}");
+}
+
 /// `#tododone`: the granular todo flags close the operator action loop —
 /// add, check off in place, edit, reopen, remove — and never touch an
 /// operator-authored item they did not select.
@@ -2042,6 +2252,53 @@ fn preflight_emits_backlog_gated_count() {
         parsed.get("pending_gated_count").is_none(),
         "pending_gated_count alias should not be emitted, full output: {}",
         stdout
+    );
+}
+
+/// `#preflightcallbackroot`: preflight scans pending callbacks in the
+/// DOCUMENT's project, not the process cwd's. Observed in `make check` on
+/// 2026-10-16: once a test left `.agent-doc/state.db` in the agent-doc
+/// checkout, every later preflight test (cwd = the checkout, document in a temp
+/// dir) opened that checkout's state.db, tripped the `#testisolationleaks`
+/// runtime-scope guard, and printed no JSON.
+#[test]
+fn preflight_scans_callbacks_in_the_document_project_not_the_cwd_project() {
+    let outer = TempDir::new().unwrap();
+    let cwd_project = outer.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc")).unwrap();
+    // A foreign project's state.db, in the cwd's project root.
+    fs::write(cwd_project.join(".agent-doc/state.db"), "").unwrap();
+    let doc_project = outer.path().join("doc-project");
+    fs::create_dir_all(doc_project.join(".agent-doc/snapshots")).unwrap();
+    let doc = doc_project.join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n- [ ] [#aaaa] open\n<!-- /agent:pending -->\n",
+    )
+    .unwrap();
+    let doc_scope = doc_project.canonicalize().unwrap();
+    let output = agent_doc()
+        .current_dir(&cwd_project)
+        .env("AGENT_DOC_TEST_RUNTIME_SCOPE", &doc_scope)
+        .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", outer.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("outside its runtime scope"),
+        "preflight must not open the cwd project's state.db:\n{stderr}"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("preflight JSON ({err}):\n{stdout}\n{stderr}"));
+    assert!(parsed.is_object(), "{stdout}");
+    assert_eq!(
+        fs::metadata(cwd_project.join(".agent-doc/state.db"))
+            .unwrap()
+            .len(),
+        0,
+        "the cwd project's state.db stays untouched"
     );
 }
 

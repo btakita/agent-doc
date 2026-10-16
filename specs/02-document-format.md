@@ -160,11 +160,16 @@ present in any checkbox state is a no-op). Template patches may also update
 `todo`, but the write path rejects replacements that reduce its checklist-item
 count, so an agent MUST preserve every existing item when emitting `patch:todo`.
 
-**Todo item identity.** A todo item's own id is the LEADING `[#<id>]` token
-after its checkbox: `- [ ] [#gate1] Verify [#gate1] in a live pane`. An id
-cited later in the action (`[#gate1]`, `(#gate1)`) is a reference to tracked
-work; only the leading token is the item's identity. Operator-written and
-legacy items may have no own id. A todo own id is a tracked id everywhere a
+**Todo item identity.** A todo item's own id is the LEADING id token after
+its checkbox, bracketed or bare: `- [ ] [#gate1] Verify [#gate1] in a live
+pane` or `- [ ] #tdrename Rename the branch` (`#sdktododone`). A bare own id
+must be followed by whitespace and contain at least one letter, so a row that
+opens with a GitHub number (`- [ ] #157 needs review`) has no own id and cites
+`#157`. Every rewrite (`--todo-done`, `--todo-edit`, `--todo-reopen`,
+duplicate folding, the sticky operator check) keeps the spelling the row
+already uses. An id cited later in the action (`[#gate1]`, `(#gate1)`) is a
+reference to tracked work; only the leading token is the item's identity.
+Operator-written and legacy items may have no own id. A todo own id is a tracked id everywhere a
 backlog id is: the shadow-backlog guard never reports it as an open backlog
 item outside `agent:backlog`, the coined-id guards (`session-check` warn and
 the `PreToolUse` source/commit hook) resolve it, and a queue line citing it
@@ -198,10 +203,36 @@ file):
 Minted ids avoid every `#id` token in the document, the active tracked-work
 ids, and every id in the done archive, so a minted id is never mistaken for a
 link. A `patch:todo` that adds an item without an own id prints a
-non-blocking `[todo] advisory (#todoids)`; the binary does not mint ids into a
+non-blocking `[todo] advisory (#todoids)`; the write does not mint ids into the
 patch, because the keyed merge keys an id-less item by its text and re-keying a
-line the operator may be editing would duplicate it. Operator-written and
-legacy items may stay id-less; they are selected by their exact text.
+line the operator may be editing would duplicate it.
+
+**Id backfill (`#todoidbackfill`).** Every preflight (except `--probe`) gives
+each id-less todo row an own id, the way queue maintenance coins finished
+free-text queue lines into backlog ids. That covers rows the operator typed by
+hand, rows an older binary wrote, and `patch:todo` additions. The rules match
+`--todo-add`: an OPEN row whose action cites exactly one OPEN
+`agent:review`/`agent:backlog` id that no todo owns reuses that id (the row is
+the operator prompt for that work, so checking it reports the prerequisite done
+and resolving the work checks it off); every other row gets a minted id that
+avoids every document, tracked-work, done-archive, and todo id. The pass:
+
+- never re-ids a row that already has an own id, bracketed or bare;
+- inserts only the `[#id] ` token, keeping checkbox, marker, indentation, and
+  text byte-for-byte;
+- runs behind the free-text typing gate, so a row the operator is still typing
+  stays id-less until a later pass;
+- skips rows whose text duplicates another row's (duplicate folding owns them);
+- runs before queue maintenance against the same editor authority with the same
+  compare-and-swap write, carries the ids into the snapshot when its todo body
+  matched, and logs `todo_id_assigned id=<id> linked=<component|none>`;
+- fails closed: unreadable tracked-work evidence, an editor head that is not
+  current, or a refused write assigns nothing that pass and never blocks
+  admission.
+
+A backfilled row is then completed like any other: `--todo-done <id>`, the
+operator's checkbox, `--done <id>` (`#sdktododone`), or the own-id-resolved
+closeout check.
 
 **Operator done signal (`#todoids`).** The operator declares a todo done by
 checking its box (`- [x]`) in the editor. No agent turn is needed: the
@@ -239,6 +270,17 @@ and its done archive; no network, no clock, no prose heuristics:
   completion. A todo that only cites resolved work is never auto-completed —
   its action may cover more than the resolved item, which needs human
   judgement — and keeps the `#tododone` advisory below.
+- **`--done <todo own id>`** (`#sdktododone`). A minted todo id is not tracked
+  work, so before this rule a closeout had no way to resolve it: `--done
+  <id>` failed with `id not found in backlog/icebox`, and the auto-check above
+  never fired for it. When `--done <id>` names no open or resolved tracked
+  work but names an `agent:todo` item's OWN id, the closeout checks that item
+  off in place (`[todo] done: #<id> checked off in agent:todo`; a checked item
+  is a no-op) and strikes its `[#<id>]: ...` queue head in the same
+  transaction, like any other done id. An id the todo only cites, or an id
+  nothing owns, still fails. A queue head that drains without `--done` (a
+  question or note about a decision todo) never completes the todo: only the
+  explicit `--done` says the todo's work is finished.
 
 Unreadable evidence is not absent evidence: when the document's components or
 an existing done archive cannot be read, preflight emits no todo signal and the
@@ -249,7 +291,9 @@ as open.
 
 **Completing a todo (`#tododone`).** When the operator action is finished, the
 agent MUST check the existing item off in the same closeout, never append a
-second checked copy. The granular flags address one existing item by a
+second checked copy. When the agent itself finished a todo's work (typically a
+queue head `[#<id>]: go ahead` naming the todo), `--done <id>` both checks the
+todo off and strikes that head (`#sdktododone`). The granular flags address one existing item by a
 selector: its own id; else the single item citing `#<id>` (narrowed to open
 items for done and checked items for reopen when several cite it); else the
 single item whose action text equals the selector. No match, or several, is an

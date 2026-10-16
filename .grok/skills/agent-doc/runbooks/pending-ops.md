@@ -46,7 +46,7 @@ Combine any number of flags in one `agent-doc write` call:
 | Flag | Purpose |
 |------|---------|
 | `--backlog-add "text"` | Add a new item at the beginning of the backlog. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds; repeated flags keep caller order at the top of the backlog. Legacy alias: `--pending-add`. |
-| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending`, `agent:review`, or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
+| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending`, `agent:review`, or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. `#sdktododone`: an id that names no tracked work but is an `agent:todo` item's own id checks that todo off in place and strikes its `[#id]: ...` queue head. |
 | `--backlog-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. Legacy alias: `--pending-edit`. |
 | `--backlog-clear` | Drop all backlog items. Legacy alias: `--pending-clear`. |
 | `--backlog-reorder <id1,id2,...>` | Reorder by id. Missing ids keep their relative order. Legacy alias: `--pending-reorder`. |
@@ -61,8 +61,8 @@ Combine any number of flags in one `agent-doc write` call:
 | `--review-edit "id=new text"` | Rewrite a review item's text, preserve hash. |
 | `--review-resolve <id>` | Resolve a review item: remove it from `agent:review` and archive to `agent:done` (the completion path when the gated work is actually finished). |
 | `--todo-add "action"` | `#operatortodo`: append `- [ ] [#id] <action>` to `agent:todo` for something the operator must do. `#todoids`: when the action cites exactly one open `agent:review`/`agent:backlog` id, the todo reuses it as its own id (one open todo per id; a repeat is a no-op); otherwise an id is minted. `id=<id> ` reuses open work or picks a custom id, and is rejected for resolved work. The binary creates `agent:todo` if the document has none, keeps every existing item, and skips an action already listed. |
-| `--todo-done <id>` | `#tododone`: check an `agent:todo` item off (`[x]`) in place in the same closeout that the operator action was finished. Selects by own `[#id]`, a cited `#id`, or exact text; idempotent; folds duplicate copies of the item. Never append a second `[x]` copy instead. |
-| `--todo-edit "id=new text"` | Rewrite an `agent:todo` item's text, keeping its id, checkbox state, and position. |
+| `--todo-done <id>` | `#tododone`: check an `agent:todo` item off (`[x]`) in place in the same closeout that the operator action was finished. Selects by own id (leading `[#id]` or bare `#id`), a cited `#id`, or exact text; idempotent; folds duplicate copies of the item. Never append a second `[x]` copy instead. |
+| `--todo-edit "id=new text"` | Rewrite an `agent:todo` item's text, keeping its id (bracketed or bare), checkbox state, and position. |
 | `--todo-reopen <id>` | Uncheck an `agent:todo` item (`[ ]`) in place. |
 | `--todo-remove <id>` | Delete an `agent:todo` item that no longer applies (a finished one uses `--todo-done`). |
 | `--review-remove <id>` | Delete a review item by id, clearing **every** entry that shares the id — use for a stale or duplicate review entry (e.g. the identical `[/]` pair an interleaved finalize leaves behind, flagged as `preset_item_id_collision`). |

@@ -10,6 +10,20 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   immediately while the supervisor finishes the document closeout. A clear that
   still has to wait says "accepted but NOT applied yet" instead of "Cleared",
   and an install or recycle restart no longer discards it.
+- **Clear Session Context no longer re-runs the document over a closeout the
+  supervisor already owns (`clearsessioncontext`).** When a Codex clear restarts
+  the agent while the open cycle's response is already captured, the fresh agent
+  waits at its prompt instead of restating the retained-closeout blocker. The
+  supervisor finishes the closeout, queued work and new edits still dispatch
+  through the idle watch, and an uncaptured open cycle still re-runs.
+- **A JetBrains replica stuck on an outdated baseline recovers in place
+  (`jetbrainsreplicaloops`).** When every native save is refused and replica
+  rebuilds are used up (`state=editor_holds_unmerged_visible_text`), the
+  controller sends a hash-fenced `editor_visible_roll_forward` request. The
+  editor publishes its visible buffer onto that exact canonical, and the
+  retained response is re-applied once on top of the operator's text. The
+  remedy allows `admin recycle` only as a fallback. Plugin 0.2.654 / 262
+  0.2.656 / 263 0.2.655; other editors keep the recycle fallback.
 
 ## 0.35.511
 

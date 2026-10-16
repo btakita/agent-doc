@@ -2306,12 +2306,16 @@ pub fn classify_closeout_recovery_state_for_file(
         });
     if cycle.phase == agent_doc_turn::CyclePhase::Abandoned {
         input.uncommitted_response_vs_head = uncommitted_response_vs_head(file, effects);
+        input.uncommitted_response_duplicates_head =
+            uncommitted_response_duplicates_head(file, effects);
         return classify_closeout_recovery_state_from_input(input);
     }
     if !cycle.needs_file_recovery_evidence() {
         return classify_closeout_recovery_state_from_input(input);
     }
     input.uncommitted_response_vs_head = uncommitted_response_vs_head(file, effects);
+    input.uncommitted_response_duplicates_head =
+        uncommitted_response_duplicates_head(file, effects);
 
     let observed_evidence = load_current_observed_closeout_recovery_evidence(file, effects)
         .ok()
@@ -2421,6 +2425,25 @@ fn uncommitted_response_vs_head(file: &Path, effects: &dyn CloseoutEffects) -> b
         current.content(),
     )
     .is_some()
+}
+
+/// `#closeoutduplicatedcommit`: the current document authority carries more
+/// copies of a response block than `HEAD` does, judged modulo binary-owned
+/// decoration. The extra `### Re:` heading is what makes
+/// [`uncommitted_response_vs_head`] fire, but its recovery (`write --commit`)
+/// refuses a response already in HEAD, so the classifier needs this fact to
+/// name the remedy that terminates (`dedupe`, then `commit`).
+fn uncommitted_response_duplicates_head(file: &Path, effects: &dyn CloseoutEffects) -> bool {
+    let Ok(Some(head)) = agent_doc_git_io::revision::show_head(file) else {
+        return false;
+    };
+    let Ok(current) =
+        effects.resolve_current_document(file, "classify_closeout_recovery_duplicate_response")
+    else {
+        return false;
+    };
+    agent_doc_turn::committed_text_integrity::added_response_copy(current.content(), &head)
+        .is_some()
 }
 
 fn head_exchange_has_escaped_markers(file: &Path) -> bool {

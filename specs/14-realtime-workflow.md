@@ -2571,14 +2571,32 @@ input, and committed document text read from git (`show_rev`/`show_head`)
 fails closed on a non-UTF-8 blob instead of decoding lossily.
 
 Invariant: a repair never commits a candidate that **adds** a copy of
-committed text. A copy is either a second exact copy of a committed response
-block, or a line that differs from a committed line only by encoder replacement
+committed text. A copy is either a second copy of a committed response block,
+or a line that differs from a committed line only by encoder replacement
 characters (`?`/U+FFFD in place of each non-ASCII scalar or UTF-8 byte; the
 line must keep at least eight ASCII alphanumerics). Agent-authored text never
 comes from an encoder, so such a line is corruption, not authorship. The check
 is `agent_doc_turn::committed_text_integrity::committed_text_violation` against
 committed `HEAD`. Copies and corruption that `HEAD` already carries are not
 "added", so they never wedge a document.
+
+A second copy of a response block is judged modulo binary-owned decoration
+(`#dupemoduloecho`), never byte-exactly. Two copies are the same response when
+they differ only by what the binary inserts or rewrites around agent-authored
+text: a labeled `> **Queue prompt:**` / `> **Queue prompts:**` echo block (the
+label line and every contiguous `>` line under it), a `❯ ` prompt prefix on a
+body line, `<!-- agent:boundary:… -->` markers, the `(HEAD)` heading suffix,
+and blank-line spacing. The one shape is
+`agent_doc_turn::response_replay::response_block_signature`; the integrity
+guard, the live-prompt-drift recovery target, and `agent-doc dedupe` all read
+it. Only the labeled echo block is decoration: an unlabeled blockquote, or a
+one-line `> **Queue prompt:** text` quote the agent wrote, stays response
+content, and prose that differs still differs. `#closeoutduplicatedcommit`
+(agent-doc-bugs.md, 2026-10-15) committed a second copy that differed from the
+first only by a binary done-id echo on one side and repair's `❯ ` prefixes on
+the other; a byte-exact comparison let it through, and the same comparison made
+`dedupe` report no duplicates. A duplicate refusal names `agent-doc dedupe
+<FILE>`, the editor-aware removal path, as its remedy.
 
 The choke point is `agent_doc_repair_io::refuse_added_committed_text_copy`. The
 preflight commit stages the recovery baseline, so every repair candidate that

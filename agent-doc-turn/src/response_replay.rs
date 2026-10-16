@@ -1143,12 +1143,7 @@ fn split_scaffold_and_responses(content: &str) -> (Vec<String>, Vec<String>) {
             {
                 i += 1;
             }
-            let block = lines[start..i]
-                .iter()
-                .filter_map(|line| normalize_response_block_line(line))
-                .collect::<Vec<_>>()
-                .join("\n");
-            responses.push(block);
+            responses.push(normalized_response_block(&lines[start..i]));
         } else {
             if !trimmed.is_empty() && !trimmed.starts_with("<!-- agent:boundary:") {
                 scaffold.push(trimmed.to_string());
@@ -1211,9 +1206,31 @@ fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
         return (content.to_string(), None);
     }
 
+    let is_boundary = |line: &str| line.trim_start().starts_with("<!-- agent:boundary:");
+    let in_skip = |i: usize| skip_ranges.iter().any(|(s, e)| i >= *s && i < *e);
+    // `#dupemoduloecho`: the last block of an exchange runs through the
+    // trailing `<!-- agent:boundary:… -->` marker. When the dropped copy holds
+    // the document's only boundary, that marker belongs to the exchange, not to
+    // the copy, so it survives the dedupe. A copy that brought its own extra
+    // boundary still loses it, and at most one marker is ever carried over.
+    let boundary_kept_elsewhere = lines
+        .iter()
+        .enumerate()
+        .any(|(i, line)| is_boundary(line) && !in_skip(i));
+    // At most one marker is carried over: the last one, which is the
+    // exchange's trailing boundary.
+    let carried_boundary = (!boundary_kept_elsewhere)
+        .then(|| {
+            lines
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(i, line)| is_boundary(line) && in_skip(*i))
+                .map(|(i, _)| i)
+        })
+        .flatten();
     for (i, line) in lines.iter().enumerate() {
-        let in_skip = skip_ranges.iter().any(|(s, e)| i >= *s && i < *e);
-        if !in_skip {
+        if !in_skip(i) || carried_boundary == Some(i) {
             result_lines.push(line);
         }
     }
@@ -1247,33 +1264,89 @@ fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
 /// `<!-- agent:boundary: -->` and the `(HEAD)` suffix: they are binary-inserted
 /// decoration, never response content. Blocks that differ in real prose still
 /// differ.
+///
+/// `#dupemoduloecho`: only the labeled echo block is dropped, on BOTH sides.
+/// This used to drop every `>` line of a block that carried the label, so a
+/// copy holding the binary echo AND the agent's own one-line
+/// `> **Queue prompt:** …` quotes lost those quotes while the echo-less copy
+/// kept them, and the two never compared equal.
 fn normalized_response_block(block_lines: &[&str]) -> String {
-    let mut out: Vec<String> = Vec::with_capacity(block_lines.len());
-    let carries_queue_prompt_quote = block_lines
-        .iter()
-        .any(|line| is_queue_prompt_quote_marker(line));
-    for line in block_lines {
-        if carries_queue_prompt_quote && line.trim_start().starts_with('>') {
-            continue;
-        }
-        let Some(normalized) = normalize_response_block_line(line) else {
-            continue;
-        };
-        if normalized.is_empty() {
-            continue;
-        }
-        out.push(normalized);
-    }
-    out.join("\n")
+    without_binary_queue_prompt_echo_blocks(block_lines)
+        .into_iter()
+        .filter_map(normalize_response_block_line)
+        .filter(|normalized| !normalized.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-/// The opening line of the drain's quoted queue prompt (`#qdeferstrike`).
-fn is_queue_prompt_quote_marker(line: &str) -> bool {
+/// Canonical identity of one response block (`### Re:` heading through the
+/// line before the next heading or component close), modulo binary-owned
+/// decoration (`#dupemoduloecho`).
+///
+/// Two copies of the same response are the same response when they differ only
+/// by what the binary inserts or rewrites around agent-authored text:
+///
+/// * a `> **Queue prompt:**` / `> **Queue prompts:**` echo block — the label
+///   line plus every contiguous `>` line under it (`#queue-prompt-echo-in-response`),
+/// * a `❯ ` prompt prefix on a body line (repair's prompt-prefix normalization),
+/// * `<!-- agent:boundary:… -->` markers, the `(HEAD)` heading suffix, and
+///   blank-line spacing.
+///
+/// Observed 2026-10-15 on `tasks/agent-doc/agent-doc-bugs.md`
+/// (`#closeoutduplicatedcommit`): the live copy of a response carried a
+/// done-id echo the committed copy did not, so a contiguous containment check
+/// called the committed copy "missing" and re-appended it; repair then
+/// `❯`-prefixed the second copy, and neither the committed-text integrity
+/// guard nor `dedupe` matched the two because each compared bytes the binary
+/// had changed. Every response-identity comparison reads this one shape.
+///
+/// Only the labeled echo is decoration. An unlabeled blockquote or a one-line
+/// `> **Queue prompt:** text` the agent wrote stays part of the response, and
+/// prose that differs still differs.
+pub fn response_block_signature(block: &str) -> String {
+    let lines: Vec<&str> = block.lines().collect();
+    normalized_response_block(&lines)
+}
+
+/// The block's lines with every binary-owned queue-prompt echo block removed.
+fn without_binary_queue_prompt_echo_blocks<'a>(block_lines: &[&'a str]) -> Vec<&'a str> {
+    let mut out = Vec::with_capacity(block_lines.len());
+    let mut in_echo = false;
+    for line in block_lines {
+        if is_queue_prompt_quote_marker(line) {
+            in_echo = true;
+            continue;
+        }
+        if in_echo && quoted_line_body(line).is_some() {
+            continue;
+        }
+        in_echo = false;
+        out.push(*line);
+    }
+    out
+}
+
+/// The text after a line's leading `>` (tolerating a `❯ ` prompt prefix a
+/// repair may have added), or `None` for a non-blockquote line.
+fn quoted_line_body(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
-    let Some(quoted) = trimmed.strip_prefix('>') else {
+    let trimmed = trimmed
+        .strip_prefix('❯')
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    trimmed.strip_prefix('>')
+}
+
+/// The opening line of a binary-owned queue-prompt echo block (`#qdeferstrike`,
+/// `#queue-prompt-echo-in-response`): exactly the label, with the prompt on the
+/// following `>` lines.
+fn is_queue_prompt_quote_marker(line: &str) -> bool {
+    let Some(quoted) = quoted_line_body(line) else {
         return false;
     };
-    quoted.trim().eq_ignore_ascii_case("**Queue prompt:**")
+    let label = quoted.trim();
+    label.eq_ignore_ascii_case("**Queue prompt:**")
+        || label.eq_ignore_ascii_case("**Queue prompts:**")
 }
 
 fn normalize_response_block_line(line: &str) -> Option<String> {
@@ -2289,6 +2362,102 @@ mod tests {
         assert!(
             deduped.contains("**Verification:** all green."),
             "response content must survive:\n{deduped}"
+        );
+    }
+
+    /// `#closeoutduplicatedcommit` / `#dupemoduloecho`: the committed shape of
+    /// `tasks/agent-doc/agent-doc-bugs.md` at 8462722c53. The first copy carries
+    /// the binary's done-id echo above the agent's own one-line quotes; the
+    /// second copy is the re-appended response whose body lines repair
+    /// `❯`-prefixed. They are one response, so dedupe keeps the first (clean
+    /// body) copy and the exchange's boundary marker.
+    const DONE_ID_ECHO_DUPLICATE: &str = concat!(
+        "<!-- agent:exchange -->\n",
+        "> **Chat prompt (#chatprompt):** cont\n",
+        "\n",
+        "### Re: batch integrated \u{2014} opus-5-5 \u{b7} 2026-10-15T19:50-04:00\n",
+        "\n",
+        "> **Queue prompt:**\n",
+        ">\n",
+        "> do [#alpha]\n",
+        ">\n",
+        "> do [#beta]\n",
+        "\n",
+        "\n",
+        "**Done.** Every branch is merged.\n",
+        "- **check:** exit 0.\n",
+        "\n",
+        "**What landed**\n",
+        "- alpha fixed.\n",
+        "\n",
+        "> **Queue prompt:** #gh-fix https://example.test/issues/274\n",
+        "\n",
+        "Fixed and closed (above).\n",
+        "### Re: batch integrated \u{2014} opus-5-5 \u{b7} 2026-10-15T19:50-04:00\n",
+        "\n",
+        "**Done.** Every branch is merged.\n",
+        "- **check:** exit 0.\n",
+        "\n",
+        "\u{276f} **What landed**\n",
+        "- alpha fixed.\n",
+        "\n",
+        "> **Queue prompt:** #gh-fix https://example.test/issues/274\n",
+        "\n",
+        "\u{276f} Fixed and closed (above).\n",
+        "<!-- agent:boundary:0710c595 -->\n",
+        "<!-- /agent:exchange -->\n",
+    );
+
+    #[test]
+    fn dedupe_matches_a_copy_modulo_binary_echo_and_prompt_prefixes() {
+        assert_eq!(
+            first_duplicate_response_heading(DONE_ID_ECHO_DUPLICATE).as_deref(),
+            Some("### Re: batch integrated \u{2014} opus-5-5 \u{b7} 2026-10-15T19:50-04:00"),
+        );
+        let deduped = dedupe_responses(DONE_ID_ECHO_DUPLICATE);
+        assert_eq!(
+            deduped.matches("### Re: batch integrated").count(),
+            1,
+            "{deduped}"
+        );
+        assert!(
+            !deduped.contains('\u{276f}'),
+            "the prompt-prefixed copy is the one dropped:\n{deduped}"
+        );
+        assert!(
+            deduped.contains("> do [#alpha]"),
+            "the surviving copy is the first one:\n{deduped}"
+        );
+        assert!(
+            deduped.contains("> **Queue prompt:** #gh-fix https://example.test/issues/274"),
+            "the agent's own one-line quote survives:\n{deduped}"
+        );
+        assert!(
+            deduped.ends_with("Fixed and closed (above).\n<!-- agent:boundary:0710c595 -->\n<!-- /agent:exchange -->\n"),
+            "the exchange boundary marker survives the dedupe:\n{deduped}"
+        );
+        assert_eq!(dedupe_responses(&deduped), deduped, "dedupe is idempotent");
+    }
+
+    #[test]
+    fn response_block_signature_ignores_only_binary_owned_decoration() {
+        let with_echo = "### Re: x (HEAD)\n\n> **Queue prompt:**\n>\n> do [#a]\n\nBody.\n> **Queue prompt:** keep me\n";
+        let prefixed =
+            "### Re: x\n\u{276f} Body.\n> **Queue prompt:** keep me\n<!-- agent:boundary:abc -->\n";
+        assert_eq!(
+            response_block_signature(with_echo),
+            response_block_signature(prefixed)
+        );
+        let one_line_quote_dropped = "### Re: x\nBody.\n";
+        assert_ne!(
+            response_block_signature(with_echo),
+            response_block_signature(one_line_quote_dropped),
+            "an agent-authored one-line quote is response content, not decoration"
+        );
+        let other_prose = "### Re: x\nA different body.\n> **Queue prompt:** keep me\n";
+        assert_ne!(
+            response_block_signature(with_echo),
+            response_block_signature(other_prose)
         );
     }
 

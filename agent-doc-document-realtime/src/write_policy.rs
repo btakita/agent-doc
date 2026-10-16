@@ -2346,6 +2346,15 @@ pub fn live_prompt_drift_recovery_target(
         &response_block,
     );
     let recovered = exchange.replace_content(file_content, &exchange_body);
+    // `#closeoutduplicatedcommit`: the materialization site's own backstop. A
+    // target that carries more copies of a response than the document it is
+    // rebased onto would re-append a response the document already holds; the
+    // editor applies it and the next commit makes the duplicate history.
+    if agent_doc_turn::committed_text_integrity::added_response_copy(&recovered, file_content)
+        .is_some()
+    {
+        return None;
+    }
     (normalize_visible_recovery_compare(&recovered)
         != normalize_visible_recovery_compare(file_content))
     .then_some(recovered)
@@ -2375,6 +2384,21 @@ fn latest_missing_snapshot_response_block(
     let snapshot_body = snapshot_exchange.content(snapshot);
     let file_body = file_exchange.content(file_content);
     let file_norm = normalize_visible_recovery_compare(file_body);
+    // `#closeoutduplicatedcommit` / `#dupemoduloecho`: a response the document
+    // already holds is not missing just because the binary decorated one copy.
+    // The live copy carried a done-id `> **Queue prompt:**` echo under its
+    // heading that the snapshot copy lacked, so the contiguous containment
+    // check below failed and the whole response was re-appended (agent-doc-bugs.md,
+    // 2026-10-15 19:51, cycle-1792108257994).
+    let file_signatures: std::collections::HashSet<String> =
+        exchange_response_block_ranges(file_body)
+            .into_iter()
+            .map(|range| {
+                agent_doc_turn::response_replay::response_block_signature(
+                    &normalize_visible_recovery_compare(&file_body[range]),
+                )
+            })
+            .collect();
     for range in exchange_response_block_ranges(snapshot_body)
         .into_iter()
         .rev()
@@ -2385,9 +2409,14 @@ fn latest_missing_snapshot_response_block(
         if block_trimmed.is_empty() {
             continue;
         }
-        if !file_norm.contains(block_trimmed) {
-            return Some(block.to_string());
+        if file_norm.contains(block_trimmed)
+            || file_signatures.contains(&agent_doc_turn::response_replay::response_block_signature(
+                &block_norm,
+            ))
+        {
+            continue;
         }
+        return Some(block.to_string());
     }
     None
 }
@@ -4088,6 +4117,41 @@ Working.
             normalize_visible_recovery_compare(left),
             normalize_visible_recovery_compare(right)
         );
+    }
+
+    /// `#closeoutduplicatedcommit` (agent-doc-bugs.md 2026-10-15 19:51,
+    /// cycle-1792108257994): the live document already held the response, but
+    /// its copy carried the binary's done-id `> **Queue prompt:**` echo under
+    /// the heading while the snapshot copy did not. The contiguous containment
+    /// check called the response missing and the convergence re-appended a
+    /// whole second copy. A copy modulo binary-owned decoration is present.
+    #[test]
+    fn live_prompt_drift_recovery_target_does_not_reappend_a_response_the_document_holds() {
+        let snapshot = drift_content_ours();
+        let echoed = snapshot.replace(
+            "### Re: do #fix — opus-4-8\n\n",
+            "### Re: do #fix — opus-4-8\n\n> **Queue prompt:**\n>\n> do [#fix]\n>\n> do [#other]\n\n\n",
+        );
+        assert!(
+            echoed.contains("> do [#other]"),
+            "fixture must carry the echo"
+        );
+        assert_eq!(
+            live_prompt_drift_recovery_target(&snapshot, &echoed, identity_normalize),
+            None,
+            "a response present modulo the binary echo must not be re-appended"
+        );
+        let prefixed = snapshot.replace("Implemented the fix", "\u{276f} Implemented the fix");
+        assert_eq!(
+            live_prompt_drift_recovery_target(&snapshot, &prefixed, identity_normalize),
+            None,
+            "a response present modulo `❯ ` prompt prefixes must not be re-appended"
+        );
+        // A genuinely missing response still lands exactly once.
+        let target =
+            live_prompt_drift_recovery_target(&snapshot, &drift_baseline(), identity_normalize)
+                .expect("the missing response is rebased onto the live document");
+        assert_eq!(target.matches("### Re: do #fix").count(), 1);
     }
 
     #[test]

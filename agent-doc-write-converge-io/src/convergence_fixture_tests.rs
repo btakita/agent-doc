@@ -1343,6 +1343,50 @@ mod core_tests {
             "auto-recovery must leave an observable ops.log marker:\n{log}"
         );
     }
+    /// `#closeoutduplicatedcommit` (agent-doc-bugs.md 2026-10-15 19:51): the
+    /// drift guard fired, the response materialized anyway, and the binary then
+    /// embedded a done-id echo under its heading in the live document only.
+    /// Commit-time auto-recovery must see the response as present, write
+    /// nothing, and leave one copy.
+    #[test]
+    fn try_auto_recover_live_prompt_drift_never_reappends_a_materialized_echoed_response() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let heading = snapshot
+            .lines()
+            .find(|line| line.starts_with("### Re:"))
+            .expect("fixture response heading")
+            .to_string();
+        let live = snapshot.replacen(
+            &format!("{heading}\n"),
+            &format!("{heading}\n\n> **Queue prompt:**\n>\n> do [#fix]\n>\n> do [#other]\n\n"),
+            1,
+        );
+        assert_ne!(live, snapshot, "fixture must carry the doc-only echo");
+        fs::write(&doc, &live).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&live)).unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &live).unwrap();
+        assert_eq!(
+            recovered, None,
+            "nothing is missing, so nothing is recovered"
+        );
+        let after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(after, live, "the document must not gain a second copy");
+        assert_eq!(after.matches(heading.as_str()).count(), 1);
+    }
+
     #[test]
     fn try_auto_recover_live_prompt_drift_prefers_editor_ipc_when_listener_active() {
         let dir = TempDir::new().unwrap();

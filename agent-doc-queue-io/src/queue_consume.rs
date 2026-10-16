@@ -1721,6 +1721,64 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     done_ids: &[String],
     requested_free_text_count: usize,
 ) -> Result<Option<QueueConsumptionPlan>> {
+    plan_queue_prompt_consumption_inner(
+        file,
+        content,
+        snapshot_content,
+        done_ids,
+        requested_free_text_count,
+        ConsumedPromptEcho::EmbedInResponse,
+    )
+}
+
+/// Whether a consumption plan embeds the `#queue-prompt-echo-in-response`
+/// blockquote into this cycle's response block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConsumedPromptEcho {
+    /// The cycle's own prompt consumption: the echo records what the response
+    /// answered, in the document and (when one is supplied) the snapshot.
+    EmbedInResponse,
+    /// A tracked-work strike: the queue lines are struck, the response cell is
+    /// left untouched.
+    StrikeOnly,
+}
+
+/// `#donequeuestrike` strike projection for a terminal tracked-work transition
+/// (`--done`, `--pending-gate`, `--review-resolve`): strike the matching
+/// `agent:queue` heads and nothing else (`#closeoutduplicatedcommit`).
+///
+/// A tracked-work transition is not the consumption of this cycle's prompt, so
+/// it never writes a `> **Queue prompt:**` echo into the response cell. The
+/// projection runs with no snapshot (the transaction checkpoints its target
+/// afterwards), so an echo it embedded reached the document only whenever that
+/// checkpoint did not run. On agent-doc-bugs.md (2026-10-15 19:51,
+/// cycle-1792108257994) the transaction deferred behind the retained delivery
+/// projection, the captured-finalize resume re-baselined without the echo, and
+/// the live response carried nine `do [#id]` echo lines its committed copy did
+/// not; commit-time live-prompt-drift recovery then re-appended the response.
+pub fn plan_queue_completion_strike_projection(
+    file: &Path,
+    content: &str,
+    done_ids: &[String],
+) -> Result<Option<QueueConsumptionPlan>> {
+    plan_queue_prompt_consumption_inner(
+        file,
+        content,
+        None,
+        done_ids,
+        1,
+        ConsumedPromptEcho::StrikeOnly,
+    )
+}
+
+fn plan_queue_prompt_consumption_inner(
+    file: &Path,
+    content: &str,
+    snapshot_content: Option<&str>,
+    done_ids: &[String],
+    requested_free_text_count: usize,
+    echo: ConsumedPromptEcho,
+) -> Result<Option<QueueConsumptionPlan>> {
     let caller_named_done_ids = !done_ids.is_empty();
     let eligible_done_ids =
         agent_doc_queue::queue_closeout_guard::done_ids_for_unchanged_queue_revisions(
@@ -1843,7 +1901,10 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 }
             }
 
-            let response_locator = response_embedding_locator(file)?;
+            let response_locator = match echo {
+                ConsumedPromptEcho::EmbedInResponse => response_embedding_locator(file)?,
+                ConsumedPromptEcho::StrikeOnly => None,
+            };
             if let Some(response_first_line) = response_locator.as_ref() {
                 current = embed_consumed_prompt_in_response(
                     &current,
@@ -2248,7 +2309,10 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     // and the snapshot, so the selective-commit boundary stays consistent) when
     // the prompt is not already present in the exchange. Fail-safe: any locator
     // miss leaves the content unchanged rather than risk corrupting the exchange.
-    let response_locator = response_embedding_locator(file)?;
+    let response_locator = match echo {
+        ConsumedPromptEcho::EmbedInResponse => response_embedding_locator(file)?,
+        ConsumedPromptEcho::StrikeOnly => None,
+    };
     if let Some(response_first_line) = response_locator.as_ref() {
         current = embed_consumed_prompt_in_response(
             &current,
@@ -3330,6 +3394,68 @@ mod core_tests {
         );
         let (frontmatter, _) = frontmatter::parse(&planned.new_document).unwrap();
         assert_ne!(frontmatter.queue_active, Some(true));
+    }
+
+    /// `#closeoutduplicatedcommit`: the tracked-work `--done` strike projection
+    /// strikes the queue heads and leaves the response cell byte-identical. The
+    /// cycle's own consumption planner still echoes the same heads, so only the
+    /// tracked-work transition changed.
+    #[test]
+    fn tracked_work_strike_projection_strikes_heads_without_a_response_echo() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("bugs.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let exchange = "### Re: batch integrated\n\n**Done.** Merged.\n";
+        let content = format!(
+            "---\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#alpha]\n- do [#beta]\n- do [#gamma]\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let done = ["alpha".to_string(), "beta".to_string()];
+
+        let strike = plan_queue_completion_strike_projection(&doc, &content, &done)
+            .unwrap()
+            .expect("the done-id heads are struck");
+        assert_eq!(
+            strike.consumed_texts.len(),
+            2,
+            "{:?}",
+            strike.consumed_texts
+        );
+        assert!(
+            !strike.new_document.contains("- do [#alpha]"),
+            "{}",
+            strike.new_document
+        );
+        assert!(
+            !strike.new_document.contains("- do [#beta]"),
+            "{}",
+            strike.new_document
+        );
+        assert!(
+            strike.new_document.contains("- do [#gamma]"),
+            "{}",
+            strike.new_document
+        );
+        assert!(
+            !strike.new_document.contains("> **Queue prompt:**"),
+            "a tracked-work strike must not write into the response cell:\n{}",
+            strike.new_document
+        );
+        assert!(strike.new_document.contains(&format!(
+            "<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->"
+        )));
+
+        let consumed =
+            plan_queue_prompt_consumption_with_snapshot_and_count(&doc, &content, None, &done, 1)
+                .unwrap()
+                .expect("the cycle's own consumption plan");
+        assert!(
+            consumed
+                .new_document
+                .contains("> **Queue prompt:**\n>\n> do [#alpha]"),
+            "the cycle's own consumption keeps #queue-prompt-echo-in-response:\n{}",
+            consumed.new_document
+        );
     }
 
     fn annotated_head_doc(exchange: &str) -> String {

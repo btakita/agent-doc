@@ -1359,7 +1359,7 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
 
     let head = agent_doc_git_io::revision::show_head(file).ok().flatten();
 
-    let reject = |reason: &str| -> anyhow::Error {
+    let log_rejection = |reason: &str| {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1368,6 +1368,9 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
                 cycle_id
             ),
         );
+    };
+    let reject = |reason: &str| -> anyhow::Error {
+        log_rejection(reason);
         anyhow::anyhow!(
             "[finalize] pre-write gate: the latest agent-doc cycle `{}` for {} is already `committed`; refusing to replay the response without reopening the binary-owned write/commit path. Run `agent-doc preflight {}` and retry.",
             cycle_id,
@@ -1378,10 +1381,20 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
 
     // True replay: the incoming response is already committed in HEAD. Re-applying
     // it risks a duplicate block, and the work is already durable — fail closed.
+    //
+    // `#closeoutduplicatedcommit`: the guidance must terminate (GH #131). The
+    // generic "run preflight and retry" does not: preflight reopens a cycle, and
+    // the retry then re-applies a response HEAD already holds — the duplicate
+    // this gate exists to prevent. Say the work is durable and name the
+    // remedies that are executable in this state.
     if let Some(head) = head.as_deref()
         && response_materialized_in_content(&response, head)
     {
-        return Err(reject("response_already_in_head"));
+        log_rejection("response_already_in_head");
+        return Err(anyhow::anyhow!(
+            "{}",
+            committed_response_replay_refusal(&cycle_id, &file.display().to_string())
+        ));
     }
 
     // Empty/repair response (pending-only closeout) — keep failing closed; the
@@ -1413,6 +1426,16 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
         cycle_id
     );
     Ok(Some(head))
+}
+
+/// The refusal `write --commit` prints when the response it was handed is
+/// already committed in HEAD (`#closeoutduplicatedcommit`). Every command it
+/// names is executable while the cycle is `committed`, and it never sends the
+/// agent back to resubmit the response.
+pub fn committed_response_replay_refusal(cycle_id: &str, file: &str) -> String {
+    format!(
+        "[finalize] pre-write gate: the latest agent-doc cycle `{cycle_id}` for {file} is already `committed` and this response is already committed in HEAD; there is nothing to replay. Do NOT run preflight and resubmit it — that re-applies a committed response. If the visible document shows an extra copy of it, run `agent-doc dedupe {file}` and then `agent-doc commit {file}`; otherwise run `agent-doc session-check {file}` for any remaining recovery."
+    )
 }
 
 fn ensure_pending_add_target(target: &Path) -> Result<()> {
@@ -2267,13 +2290,14 @@ fn apply_pending_and_status_mutations_with_mode(
                             // a live `- do [#id]` queue head, which the next preflight
                             // and the go-mode drain would re-serve as unfinished work.
                             let project_queue_completion = |content: &str| {
-                                let mut plan = queue_consume::plan_queue_prompt_consumption_with_snapshot_and_count(
-                                    file,
-                                    content,
-                                    None,
-                                    &queue_resolution_ids,
-                                    1,
-                                )?;
+                                // `#closeoutduplicatedcommit`: a strike, never a
+                                // response-cell echo.
+                                let mut plan =
+                                    queue_consume::plan_queue_completion_strike_projection(
+                                        file,
+                                        content,
+                                        &queue_resolution_ids,
+                                    )?;
                                 let planned = plan
                                     .as_ref()
                                     .map(|plan| plan.new_document.as_str())

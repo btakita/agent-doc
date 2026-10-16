@@ -4072,8 +4072,22 @@ pub fn refuse_added_committed_text_copy(file: &Path, candidate: &str, site: &str
             agent_doc_hash::content_hash(&head),
         ),
     );
+    // `#closeoutduplicatedcommit`: the remedy must be executable in this state
+    // (GH #131 "guidance must terminate"). A second copy of a committed
+    // response is removed through the binary-owned, editor-aware `dedupe`
+    // path, which matches copies modulo binary-owned echo lines and prompt
+    // prefixes; a lossy line is the operator's to delete.
+    let remedy = match violation.kind {
+        agent_doc_turn::committed_text_integrity::CommittedTextViolationKind::DuplicateCommittedResponse => format!(
+            "Run `agent-doc dedupe {}` to remove the extra copy through the editor-aware write path (the committed copy stays), then rerun.",
+            file.display()
+        ),
+        agent_doc_turn::committed_text_integrity::CommittedTextViolationKind::LossyCommittedTextCopy => {
+            "Remove that copy from the visible document (keep the committed line), then rerun.".to_string()
+        }
+    };
     anyhow::bail!(
-        "refusing {site} for {}: the candidate adds a {} of committed text, so committing it would duplicate or corrupt an already-committed response. Candidate line: `{}`; committed line: `{}`. Remove that copy from the visible document (keep the committed line), then rerun.",
+        "refusing {site} for {}: the candidate adds a {} of committed text, so committing it would duplicate or corrupt an already-committed response. Candidate line: `{}`; committed line: `{}`. {remedy}",
         file.display(),
         violation.kind.as_str(),
         violation.candidate_line,

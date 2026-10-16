@@ -121,6 +121,7 @@ fn expected_closeout_recovery_decision(
         CloseoutRecoveryState::Clean => "already_committed",
         CloseoutRecoveryState::BlockedCapture
         | CloseoutRecoveryState::DirectResponsePatchback
+        | CloseoutRecoveryState::DuplicateCommittedResponse
         | CloseoutRecoveryState::BoundaryOnlyDrift
         | CloseoutRecoveryState::NestedParentPointerStale
         | CloseoutRecoveryState::OpenEmptyPreflight

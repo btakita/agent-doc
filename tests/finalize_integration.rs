@@ -1662,7 +1662,14 @@ fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
         .assert()
         .failure()
         .stderr(predicates::str::contains("already `committed`"))
-        .stderr(predicates::str::contains("agent-doc preflight"));
+        // `#closeoutduplicatedcommit`: the refusal terminates — it names the
+        // remedies executable in a committed cycle and never sends the agent
+        // to preflight-and-resubmit a response HEAD already holds.
+        .stderr(predicates::str::contains("already committed in HEAD"))
+        .stderr(predicates::str::contains("agent-doc dedupe"))
+        .stderr(predicates::str::contains(
+            "Do NOT run preflight and resubmit",
+        ));
 
     let head = head_blob(tmp.path());
     assert_eq!(

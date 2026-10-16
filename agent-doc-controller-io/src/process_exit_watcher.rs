@@ -38,10 +38,23 @@
 //! The poller runs on a dedicated background thread owned by the project controller; the
 //! authority gate never blocks on it. Tests never install this watcher — they install a
 //! fake one and drive synthetic exit events (see `editor_attach`'s SimWorld tests).
+//!
+//! ## The poller lives exactly as long as its controller's serve loop (`#detachedexitci`)
+//!
+//! [`install_process_exit_watcher`] returns a [`ProcessExitWatcherLifetime`]; dropping it
+//! stops the poller at once. The serve loop holds it until it returns. A production
+//! process serves one controller and exits after `serve` returns, so nothing changes
+//! there. A test binary serves hundreds of in-process controllers, and the poller used to
+//! run until the process exited: every finished controller kept polling the process-global
+//! liveness plane and wrote each dead pid it found, including another test's synthetic
+//! editor pid, into its own project root. Those writes recreate `.agent-doc` under a root
+//! its test is deleting, so `TempDir`'s removal fails with `ENOTEMPTY` and the root
+//! survives.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
@@ -54,18 +67,51 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// The controller-owned OS process-exit watcher. Installed once on the process-global
 /// [`editor_attach`] registry at controller startup. Stateless: the polled candidate set
 /// is derived on each tick from the reliable-sync liveness plane, never from a private
-/// tally (`#ghosteditorliveness`; see the module docs).
+/// tally (`#ghosteditorliveness`; see the module docs). The poller thread's lifetime is
+/// owned separately by [`ProcessExitWatcherLifetime`].
 pub struct OsProcessExitWatcher;
 
-impl OsProcessExitWatcher {
-    /// Spawn the background poller thread and return the watcher handle. The thread runs
-    /// for the lifetime of the controller process (it exits when the process does).
-    pub fn new(project_root: PathBuf) -> Self {
-        thread::Builder::new()
+/// Owns one controller's exit-watcher poller thread (`#detachedexitci`).
+///
+/// Dropping it disconnects the poller's stop channel, which wakes the poller out of its
+/// poll-interval wait and ends the thread before it reaps again. Drop does not join:
+/// a reap already in progress finishes its one durable write, and the serve loop
+/// must not wait on that.
+#[must_use = "dropping the lifetime stops the exit-watcher poller immediately"]
+pub struct ProcessExitWatcherLifetime {
+    stop: Option<mpsc::Sender<()>>,
+    poller: Option<thread::JoinHandle<()>>,
+}
+
+impl ProcessExitWatcherLifetime {
+    /// Spawn the poller for `project_root`. It runs until the lifetime is dropped.
+    fn start(project_root: PathBuf) -> Self {
+        let (stop, stopped) = mpsc::channel();
+        let poller = thread::Builder::new()
             .name("agent-doc-process-exit-watcher".to_string())
-            .spawn(move || run_poll_loop(project_root))
+            .spawn(move || run_poll_loop(project_root, stopped))
             .expect("spawn agent-doc process-exit watcher thread");
-        Self
+        Self {
+            stop: Some(stop),
+            poller: Some(poller),
+        }
+    }
+
+    /// Stop the poller and wait for its thread to end.
+    #[cfg(test)]
+    fn stop_and_join(mut self) -> thread::Result<()> {
+        drop(self.stop.take());
+        self.poller
+            .take()
+            .expect("the poller handle is taken only here")
+            .join()
+    }
+}
+
+impl Drop for ProcessExitWatcherLifetime {
+    fn drop(&mut self) {
+        drop(self.stop.take());
+        drop(self.poller.take());
     }
 }
 
@@ -82,13 +128,23 @@ impl ProcessExitWatcher for OsProcessExitWatcher {
 /// Install the OS process-exit watcher on the process-global editor-attachment registry.
 /// Idempotent-safe to call once at controller startup; after this the registry seeds its
 /// reactive authority on attach and the hot path reads pure reactive state.
-pub fn install_process_exit_watcher(project_root: PathBuf) {
-    editor_attach().install_watcher(Arc::new(OsProcessExitWatcher::new(project_root)));
+///
+/// The returned lifetime owns the poller thread. The serve loop holds it until it returns
+/// (`#detachedexitci`).
+pub fn install_process_exit_watcher(project_root: PathBuf) -> ProcessExitWatcherLifetime {
+    let lifetime = ProcessExitWatcherLifetime::start(project_root);
+    editor_attach().install_watcher(Arc::new(OsProcessExitWatcher));
+    lifetime
 }
 
-fn run_poll_loop(project_root: PathBuf) {
+fn run_poll_loop(project_root: PathBuf, stopped: mpsc::Receiver<()>) {
     loop {
-        thread::sleep(POLL_INTERVAL);
+        // The poll-interval wait doubles as the stop signal: dropping the
+        // lifetime disconnects the channel and ends the poller at once.
+        match stopped.recv_timeout(POLL_INTERVAL) {
+            Err(RecvTimeoutError::Timeout) => {}
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+        }
         // The poll candidates are the liveness plane's own open-and-alive set — the
         // single authority. Because `editor_attach` only ever attaches pids it read
         // out of this plane (`mark_editor_attach_open` seeds `attach()` *from*
@@ -237,5 +293,20 @@ mod tests {
             "OsProcessExitWatcher must stay stateless; the poll candidate set is \
              derived from the liveness plane, not from a private watch() tally"
         );
+    }
+
+    /// `#detachedexitci`: a finished controller's poller must stop. It used to
+    /// run until the process exited, writing other tests' dead editor pids
+    /// into a root its own test was deleting.
+    #[test]
+    fn exit_watcher_poller_stops_when_its_controller_lifetime_ends() {
+        let root = tempfile::tempdir().unwrap();
+        let lifetime = ProcessExitWatcherLifetime::start(root.path().to_path_buf());
+        // Disconnecting the stop channel wakes the poller out of its interval
+        // wait, so this join returns without waiting on any clock. A poller
+        // with no stop path would never return here.
+        lifetime
+            .stop_and_join()
+            .expect("the exit-watcher poller exits cleanly when its lifetime ends");
     }
 }

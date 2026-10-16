@@ -17275,6 +17275,77 @@ impl ProjectRootIncarnation {
     }
 }
 
+/// The listener pathname a controller bound, by file identity (`#detachedexitci`).
+///
+/// Clients and editors reach a controller only through `<root>/.agent-doc/controller.sock`.
+/// When that pathname is unlinked, or another listener now owns it, this controller is
+/// unreachable, and the next client launches a second one. [`ProjectRootIncarnation`]
+/// cannot see this when the root directory survives with its original inode. That is
+/// the shape a `TempDir` removal leaves behind when it races a concurrent writer:
+/// `remove_dir_all` unlinks the socket and the ledger, then a writer recreates
+/// `.agent-doc/state.db` and the final `rmdir` fails with `ENOTEMPTY`. `TempDir`
+/// ignores that error. The controller then kept serving a gutted root with no socket
+/// until an idle timeout (60s for a temp root, 30 minutes otherwise).
+///
+/// The identity is the `(device, inode)` of the socket file. A promotion `rename`
+/// keeps it, so a handoff replacement that becomes public still matches. The
+/// serving listener holds a reference to its socket inode, so an unlinked socket's
+/// inode number cannot be reused by a replacement while this controller still
+/// serves. Platforms without filesystem sockets record no identity and always match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ControllerSocketIncarnation {
+    identity: Option<(u64, u64)>,
+}
+
+impl ControllerSocketIncarnation {
+    fn capture(socket: &Path) -> Self {
+        Self {
+            identity: socket_file_identity(socket),
+        }
+    }
+
+    /// Whether `socket` still names the listener this controller bound.
+    fn still_published_at(&self, socket: &Path) -> bool {
+        match self.identity {
+            Some(identity) => socket_file_identity(socket) == Some(identity),
+            None => true,
+        }
+    }
+}
+
+#[cfg(unix)]
+fn socket_file_identity(socket: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::symlink_metadata(socket)
+        .ok()
+        .map(|metadata| (metadata.dev(), metadata.ino()))
+}
+
+#[cfg(not(unix))]
+fn socket_file_identity(_socket: &Path) -> Option<(u64, u64)> {
+    None
+}
+
+/// Whether a serving controller has lost its public socket pathname and must exit
+/// (`#detachedexitci`).
+///
+/// Only a stable public controller with no self-handoff in flight or promoted is
+/// judged. An outgoing self-handoff replaces the public pathname on purpose, and a
+/// handoff replacement still bound to its temp socket is covered by the stranded
+/// replacement watchdog.
+fn controller_public_socket_lost(
+    socket: &ControllerSocketIncarnation,
+    public_sock: &Path,
+    serving_handoff_temp_socket: bool,
+    self_handoff_in_flight: bool,
+    self_handoff_promoted: bool,
+) -> bool {
+    !serving_handoff_temp_socket
+        && !self_handoff_in_flight
+        && !self_handoff_promoted
+        && !socket.still_published_at(public_sock)
+}
+
 /// `#installworktreecontrollers`: how long a stale-binary controller must have
 /// seen no client before it may retire instead of handing off.
 const IDLE_ROOT_RETIRE_QUIET: Duration = Duration::from_secs(60);
@@ -17523,6 +17594,7 @@ pub(crate) fn serve_with_options(
         .name(name)
         .create_sync()
         .with_context(|| format!("failed to listen on {}", sock.display()))?;
+    let socket_incarnation = ControllerSocketIncarnation::capture(&sock);
     if !root_incarnation.still_matches(project_root) {
         drop(listener);
         let _ = std::fs::remove_file(&sock);
@@ -17552,7 +17624,9 @@ pub(crate) fn serve_with_options(
     // #s4b: install the OS process-exit watcher on the process-global
     // editor-attachment registry so `authority_for_file` reads reactive state
     // and editor crashes publish a bounded-latency liveness transition.
-    crate::process_exit_watcher::install_process_exit_watcher(durable_project_root.clone());
+    // `#detachedexitci`: the poller stops when this serve returns.
+    let _process_exit_watcher =
+        crate::process_exit_watcher::install_process_exit_watcher(durable_project_root.clone());
 
     // `#ctrlbindbeforeserve`: name the window a client can connect into without
     // being served. It should be sub-millisecond; if a stall ever reappears, this
@@ -17610,6 +17684,10 @@ pub(crate) fn serve_with_options(
     let recycle_retry_backoff = Arc::new(Mutex::new(
         agent_doc_controller::recycle::HandoffRetryBackoff::default(),
     ));
+    // `#detachedexitci`: set when this controller exits because its root or its
+    // socket pathname no longer belongs to it. The pathname may then name another
+    // controller's live socket, so retirement must not unlink it.
+    let mut socket_pathname_relinquished = false;
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
@@ -17637,11 +17715,32 @@ pub(crate) fn serve_with_options(
                 // The path can be recreated by a concurrent cleanup/bootstrap after
                 // its original directory is removed. Existence alone would let this
                 // detached controller attach itself to that new project incarnation.
+                //
+                // `#detachedexitci`: both teardown checks run first in the tick,
+                // before any maintenance can open (and recreate) state in the
+                // torn-down root. Neither writes to the ops log for the same
+                // reason.
                 if !root_incarnation.still_matches(project_root) {
                     eprintln!(
                         "[controller] project root {} no longer names its original incarnation; shutting down detached controller",
                         project_root.display()
                     );
+                    socket_pathname_relinquished = true;
+                    should_stop.store(true, Ordering::SeqCst);
+                    break;
+                }
+                if controller_public_socket_lost(
+                    &socket_incarnation,
+                    &public_sock,
+                    handoff_temp_socket.is_some(),
+                    recycle_handoff_in_flight.load(Ordering::SeqCst),
+                    recycle_handoff_promoted.load(Ordering::SeqCst),
+                ) {
+                    eprintln!(
+                        "[controller] public socket {} no longer names this controller's listener; shutting down unreachable controller",
+                        public_sock.display()
+                    );
+                    socket_pathname_relinquished = true;
                     should_stop.store(true, Ordering::SeqCst);
                     break;
                 }
@@ -18038,7 +18137,7 @@ pub(crate) fn serve_with_options(
     retire_controller_listener(
         &mut listener,
         &sock,
-        recycle_handoff_promoted.load(Ordering::SeqCst),
+        recycle_handoff_promoted.load(Ordering::SeqCst) || socket_pathname_relinquished,
     );
     Ok(())
 }
@@ -18080,12 +18179,16 @@ fn run_controller_background_ticks(
 /// for the successor (its guard still names the vanished temp path) but wrong
 /// for a predecessor that originally bound `controller.sock`: dropping that
 /// predecessor would unlink the successor's live pathname.
+///
+/// `#detachedexitci`: the same holds for a controller that exits because its
+/// root was replaced or its public pathname was unlinked or rebound. The path
+/// may now name another controller's socket.
 pub(crate) fn retire_controller_listener(
     listener: &mut interprocess::local_socket::Listener,
     sock: &Path,
-    handoff_promoted: bool,
+    pathname_belongs_to_another_listener: bool,
 ) {
-    if handoff_promoted {
+    if pathname_belongs_to_another_listener {
         listener.do_not_reclaim_name_on_drop();
         return;
     }
@@ -53172,7 +53275,7 @@ mod tests {
         });
         wait_for_test_controller(&project_root, &ready_rx);
 
-        drop(dir);
+        remove_root_despite_concurrent_writers(dir);
         // Recreate the same path before the next idle tick. A path-existence check
         // cannot distinguish this new directory from the controller's original
         // project root; the retained incarnation must.
@@ -53189,6 +53292,197 @@ mod tests {
         assert_eq!(result, Ok(()));
         handle.join().unwrap();
         std::fs::remove_dir_all(&project_root).unwrap();
+    }
+
+    /// Remove a served test root and prove it is gone (`#detachedexitci`).
+    ///
+    /// `TempDir`'s drop ignores removal errors. A controller thread that writes
+    /// into the root while `remove_dir_all` walks it (an exit-watcher reap, an
+    /// idle-tick state.db open) makes the final `rmdir` fail with `ENOTEMPTY`,
+    /// and the root silently survives with its original inode. Retry until the
+    /// path is gone so the test's precondition actually holds; each attempt
+    /// removes what the last writer added.
+    fn remove_root_despite_concurrent_writers(dir: tempfile::TempDir) {
+        let root = dir.path().to_path_buf();
+        let mut last = match dir.close() {
+            Ok(()) => return,
+            Err(err) => err,
+        };
+        for _ in 0..100 {
+            match std::fs::remove_dir_all(&root) {
+                Ok(()) => return,
+                Err(err) if err.kind() == ErrorKind::NotFound => return,
+                Err(err) => last = err,
+            }
+        }
+        panic!("test root {} could not be removed: {last}", root.display());
+    }
+
+    /// Serve `project_root` in-process and return the serve result channel once
+    /// the listener is ready.
+    fn serve_test_root_in_process(
+        project_root: &Path,
+    ) -> (
+        std::sync::mpsc::Receiver<std::result::Result<(), String>>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let server_root = project_root.to_path_buf();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let result = serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx)
+                .map_err(|err| err.to_string());
+            let _ = tx.send(result);
+        });
+        wait_for_test_controller(project_root, &ready_rx);
+        (rx, handle)
+    }
+
+    /// A root whose name does not start with `.tmp`, so the 60s detached-temp
+    /// idle exit cannot end the controller and mask the exit under test.
+    fn non_temp_shaped_root() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("detachedexitci-")
+            .tempdir()
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn inode(path: &Path) -> u64 {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::symlink_metadata(path).unwrap().ino()
+    }
+
+    /// `#detachedexitci`: CI run 38837770714. The test's `TempDir` removal raced
+    /// a controller-side writer: `remove_dir_all` unlinked the socket and the
+    /// ledger, the writer recreated `.agent-doc/state.db`, and the final `rmdir`
+    /// failed. The root and `.agent-doc` kept their original inodes, so the
+    /// root-incarnation check passed and the controller served a gutted root
+    /// with no socket until the 60s temp-root idle exit, which lost the race
+    /// against the test's 60s ceiling. This replays that end state directly.
+    #[cfg(unix)]
+    #[test]
+    fn controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root() {
+        let dir = non_temp_shaped_root();
+        let project_root = dir.path().to_path_buf();
+        let (rx, handle) = serve_test_root_in_process(&project_root);
+        let state_dir = project_root.join(".agent-doc");
+        let (root_inode, state_dir_inode) = (inode(&project_root), inode(&state_dir));
+
+        // What `remove_dir_all` finished before its `rmdir` failed: every file
+        // directly under `.agent-doc` is gone, the directories remain.
+        for entry in std::fs::read_dir(&state_dir).unwrap().flatten() {
+            if !entry.file_type().unwrap().is_dir() {
+                std::fs::remove_file(entry.path()).unwrap();
+            }
+        }
+        // The concurrent writer: an exit-watcher reap recreates the ledger.
+        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+            &agent_doc_sqlite::state_store::state_db_path(&project_root),
+            "controller-alive:4100001",
+            1,
+            "[]",
+        )
+        .unwrap();
+        assert_eq!(
+            (inode(&project_root), inode(&state_dir)),
+            (root_inode, state_dir_inode),
+            "precondition: the root keeps its incarnation, so only the socket check can see this"
+        );
+
+        let result = rx
+            // `#remainingwallclock`: a hang ceiling, not a reaper budget. The
+            // exit happens on the next idle tick.
+            .recv_timeout(Duration::from_secs(60))
+            .expect("a controller whose public socket was unlinked must exit");
+        assert_eq!(result, Ok(()));
+        handle.join().unwrap();
+    }
+
+    /// `#detachedexitci`: a controller whose public pathname another listener
+    /// now owns is unreachable and must exit, and it must not unlink that
+    /// listener's socket on the way out.
+    #[cfg(unix)]
+    #[test]
+    fn controller_exits_without_unlinking_a_public_socket_another_listener_now_owns() {
+        let dir = non_temp_shaped_root();
+        let project_root = dir.path().to_path_buf();
+        let (rx, handle) = serve_test_root_in_process(&project_root);
+        let public_sock = socket_path(&project_root);
+
+        std::fs::remove_file(&public_sock).unwrap();
+        let foreign = std::os::unix::net::UnixListener::bind(&public_sock).unwrap();
+        let foreign_inode = inode(&public_sock);
+
+        let result = rx
+            // `#remainingwallclock`: a hang ceiling, not a reaper budget.
+            .recv_timeout(Duration::from_secs(60))
+            .expect("a controller whose public pathname was rebound must exit");
+        assert_eq!(result, Ok(()));
+        handle.join().unwrap();
+        assert_eq!(
+            std::fs::symlink_metadata(&public_sock)
+                .ok()
+                .map(|_| inode(&public_sock)),
+            Some(foreign_inode),
+            "the exiting controller unlinked the socket another listener owns"
+        );
+        drop(foreign);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn controller_socket_incarnation_tracks_the_bound_listener_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("controller.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let incarnation = ControllerSocketIncarnation::capture(&sock);
+        assert!(incarnation.identity.is_some());
+        assert!(incarnation.still_published_at(&sock));
+
+        // A promotion `rename` keeps the identity.
+        let promoted = dir.path().join("promoted.sock");
+        std::fs::rename(&sock, &promoted).unwrap();
+        assert!(incarnation.still_published_at(&promoted));
+        assert!(!incarnation.still_published_at(&sock), "unlinked pathname");
+
+        // The original listener stays open, as a serving controller's does: a
+        // bound socket pins its inode, so the rebound file cannot reuse it.
+        std::fs::remove_file(&promoted).unwrap();
+        let _rebound = std::os::unix::net::UnixListener::bind(&promoted).unwrap();
+        assert!(
+            !incarnation.still_published_at(&promoted),
+            "another listener bound at the same pathname"
+        );
+        drop(listener);
+    }
+
+    #[test]
+    fn public_socket_loss_is_judged_only_for_a_stable_controller_outside_a_handoff() {
+        let lost = ControllerSocketIncarnation {
+            identity: Some((u64::MAX, u64::MAX)),
+        };
+        let gone = Path::new("/nonexistent-detachedexitci/controller.sock");
+        assert!(controller_public_socket_lost(
+            &lost, gone, false, false, false
+        ));
+        assert!(
+            !controller_public_socket_lost(&lost, gone, true, false, false),
+            "a replacement on its temp socket belongs to the stranded-replacement watchdog"
+        );
+        assert!(
+            !controller_public_socket_lost(&lost, gone, false, true, false),
+            "an outgoing self-handoff replaces the public pathname on purpose"
+        );
+        assert!(
+            !controller_public_socket_lost(&lost, gone, false, false, true),
+            "a promoted predecessor drains; its successor owns the pathname"
+        );
+        let untracked = ControllerSocketIncarnation { identity: None };
+        assert!(
+            !controller_public_socket_lost(&untracked, gone, false, false, false),
+            "a platform without filesystem sockets never judges loss"
+        );
     }
 
     #[cfg(unix)]

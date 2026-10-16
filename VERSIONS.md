@@ -64,6 +64,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   tests now take an injected clock. Autoclaim's post-claim layout sync now
   resolves registry files against its project root instead of the process cwd,
   so it no longer syncs whichever project the cwd sits in.
+- **A controller whose socket was unlinked exits (`detachedexitci`).** When a
+  root's removal raced a controller-side write, the socket was gone but the root
+  survived with its original inode. The controller served it, unreachable, until
+  an idle timeout. A stable controller now exits at its next idle tick when
+  `.agent-doc/controller.sock` is missing or names another listener, and leaves
+  that pathname alone on the way out. The process-exit watcher's poller now
+  stops when its controller does. Before, in-process test controllers kept
+  writing other tests' dead editor pids into roots that were being deleted.
 
 ## 0.35.509
 

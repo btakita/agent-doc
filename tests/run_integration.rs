@@ -12,8 +12,18 @@ use std::process::Command as ProcessCommand;
 use std::time::Duration;
 use tempfile::TempDir;
 
+/// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
+/// a controller launch by that CLI is production behavior, so every spawned
+/// command opts in with this reason.
+const CONTROLLER_LAUNCH_REASON: &str = "agent-doc run drives a turn through the project controller, which it launches as production does";
+
 fn agent_doc() -> Command {
-    cargo_bin_cmd!("agent-doc")
+    let mut command = cargo_bin_cmd!("agent-doc");
+    command.env(
+        agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+        CONTROLLER_LAUNCH_REASON,
+    );
+    command
 }
 
 struct OwnedPaneFixture {
@@ -940,6 +950,10 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
     let stderr = fs::File::create(&stderr_log).unwrap();
 
     let mut child = ProcessCommand::new(bin)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
         .env("AGENT_DOC_TMUX_INPUT_DIAG", "1")
@@ -992,6 +1006,10 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
     let stderr_capture = tmp.path().join("managed-stderr.txt");
 
     let mut child = ProcessCommand::new(bin)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
         .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
@@ -1596,6 +1614,10 @@ fn orchestrate_keeps_partial_step_output_out_of_document_until_finalize() {
     let bin = std::env::var("CARGO_BIN_EXE_agent-doc").unwrap();
 
     let mut child = ProcessCommand::new(bin)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
         .args([

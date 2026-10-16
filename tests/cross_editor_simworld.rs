@@ -10,8 +10,18 @@ use std::process::{Child, ChildStdin, Command as ProcessCommand, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
+/// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
+/// a controller launch by that CLI is production behavior, so every spawned
+/// command opts in with this reason.
+const CONTROLLER_LAUNCH_REASON: &str = "cross-editor CLI commands share one project controller, which the first command launches as production does";
+
 fn agent_doc() -> Command {
-    cargo_bin_cmd!("agent-doc")
+    let mut command = cargo_bin_cmd!("agent-doc");
+    command.env(
+        agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+        CONTROLLER_LAUNCH_REASON,
+    );
+    command
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

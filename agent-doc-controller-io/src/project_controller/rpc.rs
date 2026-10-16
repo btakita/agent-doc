@@ -1489,9 +1489,10 @@ mod warm_test_actor_sockets {
 }
 
 /// Opt in to cold-launching a real detached `agent-doc controller serve`
-/// process for `project_root` from a workspace lib test (`#coldlaunchflakes`).
+/// process for `project_root` from a workspace test harness, lib or
+/// integration (`#coldlaunchflakes`, `#integrationtesttargets`).
 ///
-/// Without this marker a lib test never starts a controller process:
+/// Without this marker a test harness never starts a controller process:
 /// [`connect_or_launch`] serves the root from this process's warm state actor
 /// ([`ensure_state_actor_for_tests`]) instead, and any other launch path
 /// panics. Only a test whose subject IS the process launch (spawn, socket
@@ -1507,18 +1508,24 @@ pub fn allow_cold_controller_launch_for_tests(project_root: &Path) {
 #[path = "cold_launch_test_policy.rs"]
 mod cold_launch_test_policy;
 
-/// `#coldlaunchflakes` guard: a lib test may only spawn a controller process
-/// after [`allow_cold_controller_launch_for_tests`]. [`connect_or_launch`]
-/// already serves unopted lib tests in-process, so reaching a spawn here means
-/// a new launch path (handoff, recycle, helper) would reintroduce the
-/// process-startup race; fail the test that took it instead.
-fn refuse_unopted_lib_test_controller_launch(project_root: &Path) {
+/// The env opt-in an integration test sets on the `agent-doc` command it spawns
+/// when that command may cold-launch a real controller (`#integrationtesttargets`).
+#[cfg(feature = "test-support")]
+pub use cold_launch_test_policy::TEST_CONTROLLER_LAUNCH_REASON_ENV;
+
+/// `#coldlaunchflakes` / `#integrationtesttargets` guard: a test harness may
+/// only spawn a controller process after
+/// [`allow_cold_controller_launch_for_tests`], and a process a test harness
+/// spawned (the CLI an integration test drives) only when the test set
+/// `AGENT_DOC_TEST_CONTROLLER_LAUNCH_REASON`. [`connect_or_launch`] already
+/// serves unopted harnesses in-process, so reaching a spawn here means a new
+/// launch path (handoff, recycle, helper) or a new target would reintroduce
+/// the process-startup race; fail the test that took it instead.
+fn refuse_unopted_test_controller_launch(project_root: &Path) {
     #[cfg(feature = "test-support")]
-    if cold_launch_test_policy::unopted_lib_test_launch(project_root) {
+    if let Some(reason) = cold_launch_test_policy::refused_test_launch(project_root) {
         panic!(
-            "lib test tried to launch a detached `agent-doc controller serve` for {} without opting in (#coldlaunchflakes). \
-             Serve the root in-process with ensure_state_actor_for_tests, or call \
-             allow_cold_controller_launch_for_tests if the process launch is what the test exercises.",
+            "refusing a controller launch for {} (#coldlaunchflakes #integrationtesttargets): {reason}",
             project_root.display()
         );
     }
@@ -6313,8 +6320,10 @@ pub(crate) fn reap_stale_duplicate_controllers(
 /// SAME binary refuses (`fresh_controller_requires_explicit_shutdown_reason`):
 /// only a provably newer caller may displace a fresh controller that way. The
 /// refused controller kept accepting, so the connect poll spun for the full
-/// `CONNECT_WAIT` on every closeout-owner claim in a `test-support` build (every
-/// CLI closeout an integration test drives), and then the actor took the
+/// `CONNECT_WAIT` on every closeout-owner claim in a `test-support` build (then
+/// including every CLI closeout an integration test drove; since
+/// `#integrationtesttargets` only a test harness takes this path), and then the
+/// actor took the
 /// socket from under a still-live controller anyway. Ask with the reason a
 /// fresh controller accepts, and wait for the controller PROCESS to exit, not
 /// for its socket to stop answering: an exiting controller unlinks its socket
@@ -6912,6 +6921,26 @@ pub fn new_closeout_owner_id(role: &str) -> String {
 pub const CLOSEOUT_OWNER_CLAIM_SERIAL_ROUND_TRIPS: u64 = 2;
 pub const CLOSEOUT_OWNER_RELEASE_SERIAL_ROUND_TRIPS: u64 = 2;
 
+/// In a test harness that did not opt in to real launches, closeout ownership
+/// is served by this process's in-process state actor (`#coldlaunchflakes`).
+///
+/// `#integrationtesttargets`: only a test harness. The `test-support` build of
+/// the `agent-doc` CLI an integration test runs used to take this path too:
+/// every CLI closeout shut down the test project's launched controller
+/// (`test_shutdown`) and served the claim from an actor that died with the
+/// CLI, so the project's next command cold-launched a fresh controller. Over
+/// one integration-test run that was most of the multi-launch tests. The CLI
+/// now adopts the project's controller like production does, so one launched
+/// controller serves every command of a test project.
+fn ensure_closeout_test_controller(project_root: &Path) -> Result<()> {
+    #[cfg(feature = "test-support")]
+    if cold_launch_test_policy::unopted_harness_launch(project_root) {
+        ensure_state_actor_for_tests(project_root)?;
+    }
+    let _ = project_root;
+    Ok(())
+}
+
 pub fn claim_closeout_owner_for_file(
     file: &Path,
     request: CloseoutOwnerClaimRequest,
@@ -6923,8 +6952,7 @@ pub fn claim_closeout_owner_for_file(
     // `request_controller_with_timeout` already runs the same
     // `connect_or_launch`, so the extra call only cost one more `status` round
     // trip and connect on every claim and every lease heartbeat.
-    #[cfg(feature = "test-support")]
-    ensure_state_actor_for_tests(&project_root)?;
+    ensure_closeout_test_controller(&project_root)?;
     let document_path = file
         .canonicalize()
         .unwrap_or_else(|_| file.to_path_buf())
@@ -6970,8 +6998,7 @@ pub fn release_closeout_owner_for_file(
         .with_context(|| format!("no project root found for {}", file.display()))?;
     // `#netadv5` RTT budget: `request_controller_with_timeout` already
     // connects-or-launches; see `claim_closeout_owner_for_file`.
-    #[cfg(feature = "test-support")]
-    ensure_state_actor_for_tests(&project_root)?;
+    ensure_closeout_test_controller(&project_root)?;
     let document_path = file
         .canonicalize()
         .unwrap_or_else(|_| file.to_path_buf())
@@ -16152,11 +16179,12 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
     // reported "timed out waiting for project controller", hiding the real
     // cause the child wrote to its stderr log.
     //
-    // `#coldlaunchflakes`: a lib test that did not opt in to a real process
-    // launch is served by this process's state actor, bound before it returns,
+    // `#coldlaunchflakes`: a test harness (lib or integration test) that did not
+    // opt in to a real process launch is served by this process's state actor,
+    // bound before it returns,
     // so the connect below has no startup race and no launch deadline.
     #[cfg(feature = "test-support")]
-    if cold_launch_test_policy::unopted_lib_test_launch(project_root) {
+    if cold_launch_test_policy::unopted_harness_launch(project_root) {
         ensure_state_actor_for_tests(project_root)?;
         return connect(project_root);
     }
@@ -16367,7 +16395,7 @@ pub(crate) fn launch_detached_at(
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
 ) -> Result<DetachedControllerLaunch> {
-    refuse_unopted_lib_test_controller_launch(project_root);
+    refuse_unopted_test_controller_launch(project_root);
     if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
         return launch_detached_via_helper(
             project_root,
@@ -16424,6 +16452,16 @@ pub(crate) fn launch_detached_at(
                 ControllerHandoffState::Retiring => "retiring",
                 ControllerHandoffState::Failed => "failed",
             });
+        }
+        // `#integrationtesttargets`: a controller a test harness launched after
+        // opting in carries that opt-in across the process boundary, so its own
+        // launches (a handoff replacement) stay admitted.
+        #[cfg(feature = "test-support")]
+        if let Some(reason) = cold_launch_test_policy::child_launch_reason(project_root) {
+            command.env(
+                cold_launch_test_policy::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                reason,
+            );
         }
         close_inherited_fds_on_exec(&mut command);
         let stderr_log = std::fs::OpenOptions::new()
@@ -16875,8 +16913,10 @@ fn wait_for_controller_path_with_launch(
     }
 }
 
-/// `#coldlaunchflakes`: in a lib test that opted in to a real controller launch,
-/// the wait for the child is condition-based. It ends when the child publishes
+/// `#coldlaunchflakes` / `#integrationtesttargets`: in any launch the test
+/// policy admitted (a test harness that opted in, or the CLI an integration
+/// test spawned with a launch reason), the wait for the child is
+/// condition-based. It ends when the child publishes
 /// its socket or exits (both observed by the loop above), and the budget is only
 /// a hang ceiling: the test-mode `LAUNCH_CONNECT_WAIT` (2s) turned "this child
 /// is alive but descheduled under load" into a test failure. The ceiling stays
@@ -16888,7 +16928,7 @@ const LAUNCHED_CHILD_HANG_CEILING: Duration = Duration::from_secs(150);
 
 fn launched_child_wait_budget(timeout: Duration) -> Duration {
     #[cfg(feature = "test-support")]
-    if cold_launch_test_policy::running_in_workspace_lib_test() {
+    if cold_launch_test_policy::launched_child_wait_is_readiness_based() {
         return timeout.max(LAUNCHED_CHILD_HANG_CEILING);
     }
     timeout
@@ -21316,7 +21356,7 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     if agent_doc_crdt_relay_io::process_serves_relay_hub() {
         return false;
     }
-    // `#coldlaunchflakes`: a lib test that routes this document's relay
+    // `#coldlaunchflakes`: a test harness that routes this document's relay
     // in-process (`seed_embedded_relay_for_file` / a replica registration) is
     // modelling the controller-hosted topology, in which this process owns the
     // document's relay and, like the controller above, answers from its own
@@ -21327,7 +21367,7 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     // this process's relay registry and would report the test's own hub as a
     // second, controller-side allocation, which no production topology has.
     #[cfg(feature = "test-support")]
-    if cold_launch_test_policy::running_in_workspace_lib_test()
+    if cold_launch_test_policy::running_in_workspace_test_harness()
         && agent_doc_crdt_relay_io::embedded_relay_route_is_registered_for_file(file)
     {
         return false;

@@ -301,31 +301,6 @@ fn side_edits(base: &str, yours: &str, agent: &str) -> (Vec<Edit>, Vec<Edit>) {
     (y_edits, g_edits)
 }
 
-/// `#heldbatchmerge` (GH #273): [`reconcile`] for a captured editor batch
-/// replayed after its receipt may have been lost. Answers `Ok(None)` when an
-/// operator insertion and an agent insertion land at the SAME base offset:
-/// rule 1 (agent first) is right for two live authors, but for a replayed batch
-/// canonical text placed exactly at the operator's anchor may be the
-/// controller's transformation of a burst it already consumed. Each side is
-/// diffed once.
-pub(crate) fn reconcile_without_same_point_insertions(
-    base: &str,
-    yours: &str,
-    agent: &str,
-) -> Result<Option<Reconciled>, ReconcileError> {
-    let (y_edits, g_edits) = side_edits(base, yours, agent);
-    let same_point = y_edits.iter().any(|ours| {
-        ours.is_insert()
-            && g_edits
-                .iter()
-                .any(|theirs| theirs.is_insert() && theirs.range.start == ours.range.start)
-    });
-    if same_point {
-        return Ok(None);
-    }
-    reconcile_edits(base, yours, None, &y_edits, &g_edits).map(Some)
-}
-
 fn reconcile_edits(
     base: &str,
     yours: &str,

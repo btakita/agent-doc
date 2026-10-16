@@ -781,7 +781,7 @@ pub(crate) fn deliver_queue_auto_clear_effect(
                 shared,
                 "fresh".to_string(),
             ) {
-                Ok(()) => QueueAutoClearEffect::RestartRequested,
+                Ok(_) => QueueAutoClearEffect::RestartRequested,
                 Err(err) => QueueAutoClearEffect::RestartFailed(err),
             }
         }

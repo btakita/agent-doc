@@ -753,6 +753,7 @@ pub fn clear(file: &Path) -> Result<()> {
         return Ok(());
     }
     let mut restarted_fresh_from_supervisor_prompt = false;
+    let mut restart_fresh_outcome = RestartFreshClearOutcome::Armed;
     if supervisor_clear_inject_available(&ctx) {
         let pre_delivery_capture_hash = ctx
             .supervisor_runtime
@@ -760,15 +761,17 @@ pub fn clear(file: &Path) -> Result<()> {
             .as_deref()
             .and_then(|pane| capture_context_clear_submit_content_hash(&tmux, pane));
         match send_clear_via_supervisor(&ctx)? {
-            SupervisorClearDelivery::RestartedFresh { reason } => {
+            SupervisorClearDelivery::RestartedFresh {
+                reason,
+                deferred_until_cycle_closes,
+                captured_cycle_crossed,
+            } => {
                 restarted_fresh_from_supervisor_prompt = true;
-                agent_doc_ops_log_io::log_op(
-                    &ctx.canonical_file,
-                    &format!(
-                        "session_clear_sent file={} delivery=supervisor_restart_fresh reason={reason}",
-                        ctx.canonical_file.display()
-                    ),
+                restart_fresh_outcome = restart_fresh_clear_outcome(
+                    deferred_until_cycle_closes,
+                    captured_cycle_crossed,
                 );
+                log_restart_fresh_clear(&ctx.canonical_file, &reason, restart_fresh_outcome);
             }
             SupervisorClearDelivery::Sent => {
                 agent_doc_ops_log_io::log_op(
@@ -806,15 +809,17 @@ pub fn clear(file: &Path) -> Result<()> {
             .as_deref()
             .and_then(|pane| capture_context_clear_submit_content_hash(&tmux, pane));
         match send_clear_via_supervisor(&ctx)? {
-            SupervisorClearDelivery::RestartedFresh { reason } => {
+            SupervisorClearDelivery::RestartedFresh {
+                reason,
+                deferred_until_cycle_closes,
+                captured_cycle_crossed,
+            } => {
                 restarted_fresh_from_supervisor_prompt = true;
-                agent_doc_ops_log_io::log_op(
-                    &ctx.canonical_file,
-                    &format!(
-                        "session_clear_sent file={} delivery=supervisor_restart_fresh reason={reason}",
-                        ctx.canonical_file.display()
-                    ),
+                restart_fresh_outcome = restart_fresh_clear_outcome(
+                    deferred_until_cycle_closes,
+                    captured_cycle_crossed,
                 );
+                log_restart_fresh_clear(&ctx.canonical_file, &reason, restart_fresh_outcome);
             }
             SupervisorClearDelivery::Sent => {
                 agent_doc_ops_log_io::log_op(
@@ -879,13 +884,105 @@ pub fn clear(file: &Path) -> Result<()> {
     // preflight cycle the cleared run left behind so the next Run Agent Doc
     // starts fresh instead of waiting on a stale open cycle.
     reclaim_orphaned_cycle_after_run_cancel(&ctx.canonical_file, "session_clear");
+    // A clear latched only because an EMPTY preflight was still open is
+    // released by the supervisor's next Ready tick once the reclaim above
+    // abandoned that cycle; report it as armed rather than waiting.
+    if restart_fresh_outcome == RestartFreshClearOutcome::DeferredUntilCycleCloses
+        && !document_cycle_open(&ctx.canonical_file)
+    {
+        restart_fresh_outcome = RestartFreshClearOutcome::Armed;
+    }
     clear_durable_context_on_explicit_clear(&ctx)?;
     println!(
-        "Cleared session context for {} (controller stage {}).",
-        ctx.canonical_file.display(),
-        authorization.accepted_stage
+        "{}",
+        restart_fresh_clear_message(
+            &ctx.canonical_file.display().to_string(),
+            &ctx.harness,
+            &authorization.accepted_stage.to_string(),
+            restart_fresh_outcome,
+        )
     );
     Ok(())
+}
+
+/// Whether the document's agent-doc cycle is still open. Fails CLOSED (open)
+/// so an unreadable projection never reports a latched clear as applied.
+fn document_cycle_open(file: &Path) -> bool {
+    match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
+        Ok(state) => state.is_some_and(|state| state.is_open()),
+        Err(_) => true,
+    }
+}
+
+/// How a supervisor fresh-restart Clear landed (`#clearcapturedcycle`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestartFreshClearOutcome {
+    /// Typed clear, or a fresh restart armed now.
+    Armed,
+    /// The fresh restart replaced the child over an open cycle whose response
+    /// is durably captured; the supervisor finishes that closeout.
+    CrossedCapturedCycle,
+    /// Accepted but latched behind the open cycle the child still owns.
+    DeferredUntilCycleCloses,
+}
+
+fn restart_fresh_clear_outcome(
+    deferred_until_cycle_closes: bool,
+    captured_cycle_crossed: bool,
+) -> RestartFreshClearOutcome {
+    if deferred_until_cycle_closes {
+        RestartFreshClearOutcome::DeferredUntilCycleCloses
+    } else if captured_cycle_crossed {
+        RestartFreshClearOutcome::CrossedCapturedCycle
+    } else {
+        RestartFreshClearOutcome::Armed
+    }
+}
+
+fn log_restart_fresh_clear(file: &Path, reason: &str, outcome: RestartFreshClearOutcome) {
+    let event = match outcome {
+        RestartFreshClearOutcome::Armed => format!(
+            "session_clear_sent file={} delivery=supervisor_restart_fresh reason={reason}",
+            file.display()
+        ),
+        RestartFreshClearOutcome::CrossedCapturedCycle => format!(
+            "session_clear_sent file={} delivery=supervisor_restart_fresh reason={reason} open_cycle=captured_supervisor_closeout (#clearcapturedcycle)",
+            file.display()
+        ),
+        RestartFreshClearOutcome::DeferredUntilCycleCloses => format!(
+            "session_clear_deferred file={} delivery=supervisor_restart_fresh reason={reason} deferred_until=agent_doc_cycle_closes (#clearcapturedcycle)",
+            file.display()
+        ),
+    };
+    agent_doc_ops_log_io::log_op(file, &event);
+}
+
+/// The operator-facing line for an accepted Clear. A latched clear must never
+/// read as "Cleared": on 2026-10-16 (`tasks/sdk.md`) two latched clears printed
+/// "Cleared session context" and the Codex session was never replaced.
+fn restart_fresh_clear_message(
+    file: &str,
+    harness: &str,
+    accepted_stage: &str,
+    outcome: RestartFreshClearOutcome,
+) -> String {
+    match outcome {
+        RestartFreshClearOutcome::Armed => {
+            format!("Cleared session context for {file} (controller stage {accepted_stage}).")
+        }
+        RestartFreshClearOutcome::CrossedCapturedCycle => format!(
+            "Cleared session context for {file} (controller stage {accepted_stage}). The open \
+             cycle's response is already durably captured; the supervisor finishes its closeout \
+             without the old {harness} context, and nothing about the document was discarded."
+        ),
+        RestartFreshClearOutcome::DeferredUntilCycleCloses => format!(
+            "Clear Session Context accepted for {file} but NOT applied yet (controller stage \
+             {accepted_stage}): the {harness} session still owns the document's open agent-doc \
+             cycle, so the supervisor replaces it automatically when that cycle closes. \
+             Pressing Clear Session Context again does not make it sooner; use Interrupt and \
+             clear to stop the running turn now."
+        ),
+    }
 }
 
 /// After an explicit clear delivers `/clear` (aborting the current turn),
@@ -979,6 +1076,11 @@ enum SupervisorClearDelivery {
     /// clear exits the process). `reason` is the supervisor's restart reason.
     RestartedFresh {
         reason: String,
+        /// `#clearcapturedcycle`: the supervisor latched the restart behind an
+        /// open cycle the child still owns; nothing was replaced yet.
+        deferred_until_cycle_closes: bool,
+        /// The restart crossed an open cycle whose response is durably captured.
+        captured_cycle_crossed: bool,
     },
     Sent,
     LegacyClearUnsupported {
@@ -1029,7 +1131,16 @@ fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDeli
             .and_then(serde_json::Value::as_str)
             .unwrap_or("unknown")
             .to_string();
-        return Ok(SupervisorClearDelivery::RestartedFresh { reason });
+        let flag = |key: &str| {
+            data.and_then(|data| data.get(key))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        return Ok(SupervisorClearDelivery::RestartedFresh {
+            reason,
+            deferred_until_cycle_closes: flag("deferred_until_cycle_closes"),
+            captured_cycle_crossed: flag("captured_cycle_crossed"),
+        });
     }
     Ok(SupervisorClearDelivery::Sent)
 }
@@ -6825,6 +6936,78 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(!supervisor_clear_legacy_unsupported_error(
             "supervisor response timeout (2s)"
         ));
+    }
+
+    /// `#clearcapturedcycle`: on 2026-10-16 (`tasks/sdk.md`) two Clear presses
+    /// latched behind an open cycle each printed "Cleared session context" and
+    /// the Codex session was never replaced. A latched clear must say it is
+    /// not applied yet; a clear that crossed a captured cycle must say the
+    /// closeout continues without the old context.
+    #[test]
+    fn restart_fresh_clear_message_never_reports_a_latched_clear_as_cleared() {
+        assert_eq!(
+            restart_fresh_clear_outcome(true, false),
+            RestartFreshClearOutcome::DeferredUntilCycleCloses
+        );
+        // A latch always wins: never report "Cleared" while latched.
+        assert_eq!(
+            restart_fresh_clear_outcome(true, true),
+            RestartFreshClearOutcome::DeferredUntilCycleCloses
+        );
+        assert_eq!(
+            restart_fresh_clear_outcome(false, true),
+            RestartFreshClearOutcome::CrossedCapturedCycle
+        );
+        assert_eq!(
+            restart_fresh_clear_outcome(false, false),
+            RestartFreshClearOutcome::Armed
+        );
+
+        let latched = restart_fresh_clear_message(
+            "/repo/tasks/sdk.md",
+            "codex",
+            "operator_ready",
+            RestartFreshClearOutcome::DeferredUntilCycleCloses,
+        );
+        assert!(!latched.contains("Cleared"), "{latched}");
+        assert!(latched.contains("NOT applied yet"), "{latched}");
+        assert!(latched.contains("when that cycle closes"), "{latched}");
+
+        let crossed = restart_fresh_clear_message(
+            "/repo/tasks/sdk.md",
+            "codex",
+            "operator_ready",
+            RestartFreshClearOutcome::CrossedCapturedCycle,
+        );
+        assert!(
+            crossed.starts_with("Cleared session context for /repo/tasks/sdk.md"),
+            "{crossed}"
+        );
+        assert!(crossed.contains("durably captured"), "{crossed}");
+
+        assert_eq!(
+            restart_fresh_clear_message(
+                "/repo/plan.md",
+                "claude",
+                "operator_ready",
+                RestartFreshClearOutcome::Armed,
+            ),
+            "Cleared session context for /repo/plan.md (controller stage operator_ready)."
+        );
+    }
+
+    /// A latched clear is released once its cycle is closed (the reclaim
+    /// abandoned an empty preflight); an unreadable or open cycle keeps it
+    /// reported as latched.
+    #[test]
+    fn document_cycle_open_reads_the_closeout_projection() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        std::fs::write(&doc, "# sdk\n").unwrap();
+        assert!(!document_cycle_open(&doc), "no cycle recorded");
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("# sdk\n"), Some("# sdk\n")).unwrap();
+        assert!(document_cycle_open(&doc), "preflight is open");
     }
 
     #[test]

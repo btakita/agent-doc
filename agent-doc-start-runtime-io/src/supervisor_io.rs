@@ -193,6 +193,31 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
         }
     }
 
+    fn agent_doc_cycle_response_captured(&self) -> bool {
+        // `#clearcapturedcycle`: the same projection the idle watch reads for
+        // `durable_response_captured`. Fail CLOSED — an unreadable projection
+        // reports no capture, which keeps the open-cycle gate.
+        let Some(file) = self
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.file.clone())
+        else {
+            return false;
+        };
+        match agent_doc_cycle_state_io::load_with_closeout_projection(&file) {
+            Ok(Some(state)) => state.is_open() && state.has_durable_response_capture(),
+            Ok(None) | Err(_) => false,
+        }
+    }
+
+    fn deferred_child_replacement_pending(&self) -> bool {
+        // Read the request first: it is the release/acquire publication edge
+        // for its deferral latch (see `request_supervisor_restart`).
+        self.restart_requested.load(Ordering::Acquire)
+            && self.restart_deferred_until_boundary.load(Ordering::Relaxed)
+            && !self.restart_reexec.load(Ordering::Relaxed)
+    }
+
     fn reclaim_ready_restart_preflight(
         &self,
     ) -> Result<agent_doc_supervisor_io::ipc::ReadyRestartPreflight, String> {
@@ -748,6 +773,93 @@ mod tests {
         assert!(intent.operator_clear);
         assert!(!intent.restart_agent);
         assert!(written.lock().is_empty(), "must not type /clear into Codex");
+    }
+
+    /// `#clearcapturedcycle` production wiring: a Codex supervisor at its ready
+    /// prompt whose document holds an open cycle on disk. With the response
+    /// durably captured (the 2026-10-16 `tasks/sdk.md` shape, closeout blocked
+    /// on `editor_holds_unmerged_visible_text`), Clear replaces the child now.
+    /// Before capture the child still owns the cycle and the clear is latched
+    /// — and the answer says so instead of letting the client print "Cleared".
+    #[test]
+    fn clear_ipc_crosses_a_captured_open_cycle_but_latches_an_uncaptured_one() {
+        for captured in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let doc = dir.path().join("sdk.md");
+            std::fs::write(&doc, "# sdk\n").unwrap();
+            let opened =
+                agent_doc_cycle_state_io::start_preflight(&doc, Some("# sdk\n"), Some("# sdk\n"))
+                    .unwrap();
+            if captured {
+                let state = agent_doc_cycle_state_io::mark_response_captured(
+                    &doc,
+                    "response_captured",
+                    Some("# sdk\n"),
+                    Some("# sdk\n"),
+                    "response-sha",
+                    Some(&opened.cycle_id),
+                )
+                .unwrap();
+                assert!(state.has_durable_response_capture());
+            }
+            let runtime = SessionActorRuntime {
+                project_root: dir.path().to_path_buf(),
+                file: doc.clone(),
+                session_id: "sdk-session".to_string(),
+                pane_id: "%180".to_string(),
+                generation: 72,
+            };
+            let shared = Arc::new(SupervisorShared::with_actor_runtime(
+                "test",
+                "clear-captured-cycle".to_string(),
+                None,
+                "codex",
+                Some(runtime),
+                Some(agent_doc_controller::actor::ActorState::Ready),
+                None,
+            ));
+            let mut child = LiveTestChild::spawn();
+            shared.child_pid.store(child.pid(), Ordering::Relaxed);
+
+            let clear = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
+                IpcMethod::Clear {
+                    bytes: "/clear".to_string(),
+                },
+                shared.as_ref(),
+            );
+
+            assert!(clear.ok, "captured={captured}: {clear:?}");
+            let data = clear.data.expect("clear data");
+            assert_eq!(data["restart_fresh"], true, "captured={captured}");
+            assert_eq!(data["reason"], "harness_clear_exits_process");
+            assert_eq!(
+                data["captured_cycle_crossed"], captured,
+                "captured={captured}"
+            );
+            assert_eq!(
+                data["deferred_until_cycle_closes"], !captured,
+                "captured={captured}"
+            );
+            assert!(shared.restart_requested.load(Ordering::Acquire));
+            assert_eq!(
+                shared
+                    .restart_deferred_until_boundary
+                    .load(Ordering::Relaxed),
+                !captured,
+                "captured={captured}"
+            );
+            assert_eq!(*shared.restart_mode.lock(), "clear:fresh");
+            // The capture crosses only the harness context: the cycle stays
+            // open for the supervisor's keyed closeout.
+            assert!(
+                agent_doc_cycle_state_io::load(&doc)
+                    .unwrap()
+                    .is_some_and(|state| state.is_open()),
+                "captured={captured}"
+            );
+            child.reap();
+        }
     }
 
     /// A short-lived real child process standing in for the harness, so

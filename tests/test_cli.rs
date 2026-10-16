@@ -11,8 +11,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
+/// a controller launch by that CLI is production behavior, so every spawned
+/// command opts in with this reason.
+const CONTROLLER_LAUNCH_REASON: &str =
+    "test_cli drives the agent-doc CLI end to end; a command that needs the project controller launches it exactly as production does";
+
 fn agent_doc_cmd() -> Command {
     let mut command = cargo_bin_cmd!("agent-doc");
+    command.env(
+        agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+        CONTROLLER_LAUNCH_REASON,
+    );
     // `#testisolationtests`: a raw `cargo test` (no Makefile / nextest setup
     // script export) must still keep the spawned binary's project-root walk
     // inside the test temp tree instead of adopting `$HOME/.agent-doc`.
@@ -232,6 +242,57 @@ fn template_doc(title: &str, exchange: &str, backlog: &str, icebox: &str) -> Str
     format!(
         "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# {title}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n{backlog}<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n{icebox}<!-- /agent:icebox -->\n"
     )
+}
+
+/// `#integrationtesttargets`: the cold-launch guard reaches the CLI an
+/// integration test spawns. Without a launch reason, a command that needs the
+/// project controller refuses before spawning one; with a reason it launches
+/// the controller as production does.
+#[test]
+fn test_cli_controller_launch_requires_an_explicit_test_reason() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    let doc = root.join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+    )
+    .unwrap();
+    let stderr_log = root.join(".agent-doc/logs/controller-stderr.log");
+
+    let mut unopted = agent_doc_cmd();
+    unopted
+        .env_remove(agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV);
+    let refused = unopted
+        .current_dir(root)
+        .args(["read", doc.to_str().unwrap()])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&refused.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("#integrationtesttargets")
+            && stderr.contains("AGENT_DOC_TEST_CONTROLLER_LAUNCH_REASON"),
+        "an unopted CLI launch must name the guard and the opt-in: {stderr}"
+    );
+    assert!(
+        !stderr_log.exists(),
+        "the refusal must precede any controller spawn"
+    );
+
+    agent_doc_cmd()
+        .current_dir(root)
+        .args(["read", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    assert!(
+        stderr_log.exists(),
+        "an opted-in CLI command launches the project controller"
+    );
+    let _ = agent_doc_cmd()
+        .current_dir(root)
+        .args(["controller", "shutdown"])
+        .output();
 }
 
 #[test]

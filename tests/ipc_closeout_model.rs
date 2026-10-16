@@ -11,8 +11,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
 
+/// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
+/// a controller launch by that CLI is production behavior, so every spawned
+/// command opts in with this reason.
+const CONTROLLER_LAUNCH_REASON: &str = "the IPC closeout model runs CLI commands that launch the project controller as production does";
+
 fn agent_doc() -> Command {
-    cargo_bin_cmd!("agent-doc")
+    let mut command = cargo_bin_cmd!("agent-doc");
+    command.env(
+        agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+        CONTROLLER_LAUNCH_REASON,
+    );
+    command
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

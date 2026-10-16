@@ -7,6 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
 
+/// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
+/// a controller launch by that CLI is production behavior, so every spawned
+/// command opts in with this reason.
+const CONTROLLER_LAUNCH_REASON: &str = "the Codex hook CLI reaches the project controller during closeout; that launch is production behavior";
+
 fn agent_doc() -> Command {
     let mut cmd = cargo_bin_cmd!("agent-doc");
     // `#stophookdeadlineflake`: these tests assert what the Stop hook does, not
@@ -17,6 +22,10 @@ fn agent_doc() -> Command {
     // capture_over_editor_convergence_block`. Wait for the worker's completion
     // event instead; the budget itself is unit-tested in agent-doc-codex-stop-io.
     cmd.env("AGENT_DOC_CODEX_STOP_HOOK_DEADLINE", "worker_completion");
+    cmd.env(
+        agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+        CONTROLLER_LAUNCH_REASON,
+    );
     cmd
 }
 
@@ -410,21 +419,25 @@ fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
         ops.contains("codex_stop_repeated_queue_recovery_success source=strict_replay_receipt"),
         "repeated-stop recovery must reuse the strict replay receipt instead of re-running closeout:\n{ops}"
     );
-    // `terminal_closeout_proof_recorded` is written once per terminal closeout.
-    // `closeout_latency` is not an oracle: it is logged only when a closeout
-    // takes at least `CloseoutTimer::REPORT_THRESHOLD_MS`, so a fast host logs
-    // zero lines and an honest single closeout failed this assertion.
+    // Count completed closeouts by their terminal proof, which every closeout
+    // records. `closeout_latency` is only logged for a closeout slower than
+    // 250ms; it counted one here only while each CLI closeout shut down the
+    // project controller first (`#integrationtesttargets`).
     assert_eq!(
         ops.matches("terminal_closeout_proof_recorded ").count(),
         1,
         "exactly one closeout must run for one recovered response:\n{ops}"
     );
-    // A `test-support` build displaces the lazily launched controller with an
-    // in-process actor. That must ask with a reason a fresh controller
-    // accepts; a refused request used to cost a fixed connect-poll stall.
+    // `#integrationtesttargets`: the CLI adopts the project's launched
+    // controller instead of displacing it with an in-process actor, so no
+    // shutdown is requested at all, let alone refused.
     assert!(
         !ops.contains("controller_shutdown_refused"),
         "test actor shutdown was refused by a fresh controller:\n{ops}"
+    );
+    assert!(
+        !ops.contains("controller_shutdown_accepted"),
+        "a CLI closeout must reuse the project controller, not shut it down:\n{ops}"
     );
 }
 

@@ -2,6 +2,11 @@ use std::fs;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
+/// a controller launch by that CLI is production behavior, so every spawned
+/// command opts in with this reason.
+const CONTROLLER_LAUNCH_REASON: &str = "queue claim/repair CLI commands reach the project controller, which they launch as production does";
+
 #[test]
 fn four_cli_reporters_serialize_without_losing_completion_feedback() {
     let dir = tempfile::tempdir().unwrap();
@@ -33,6 +38,10 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
     let binary = env!("CARGO_BIN_EXE_agent-doc");
     for item in items {
         let status = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
             .current_dir(dir.path())
             .args([
                 "queue",
@@ -55,6 +64,10 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
         .into_iter()
         .map(|item| {
             Command::new(binary)
+                .env(
+                    agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                    CONTROLLER_LAUNCH_REASON,
+                )
                 .current_dir(dir.path())
                 .args([
                     "queue",
@@ -136,6 +149,10 @@ fn repair_completion_feedback_cli_migrates_bodyless_notices_without_replaying_cl
 
     let binary = env!("CARGO_BIN_EXE_agent-doc");
     let first = Command::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
         .current_dir(dir.path())
         .args(["queue", "repair-completion-feedback", doc.to_str().unwrap()])
         .output()
@@ -168,6 +185,10 @@ fn repair_completion_feedback_cli_migrates_bodyless_notices_without_replaying_cl
     assert!(repaired.contains("- finish dev"));
 
     let session_check = Command::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
         .current_dir(dir.path())
         .args(["session-check", doc.to_str().unwrap()])
         .output()
@@ -180,6 +201,10 @@ fn repair_completion_feedback_cli_migrates_bodyless_notices_without_replaying_cl
     );
 
     let second = Command::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
         .current_dir(dir.path())
         .args(["queue", "repair-completion-feedback", doc.to_str().unwrap()])
         .output()
@@ -244,6 +269,10 @@ fn committed_session(dir: &std::path::Path, items: &[&str]) -> std::path::PathBu
 
 fn run_agent_doc(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
         .current_dir(dir)
         .args(args)
         .output()

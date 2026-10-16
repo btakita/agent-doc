@@ -508,7 +508,7 @@ pub struct ChatPromptPruneFacts<'a> {
     /// Current document content, when read.
     pub document: Option<&'a str>,
     /// `started_at` of the document's latest cycle when that cycle COMMITTED a
-    /// response: the closeout of every chat turn noted at or before it.
+    /// response: the closeout of every chat turn noted strictly before it.
     pub committed_response_cycle_started_at: Option<u64>,
 }
 
@@ -519,8 +519,13 @@ pub struct ChatPromptPruneFacts<'a> {
 /// - it is older than the TTL;
 /// - the document records it (any recording, including the
 ///   `> **Chat prompt (#chatprompt):**` line);
-/// - a response cycle opened at or after it committed: the agent's response
-///   for that harness turn closed out.
+/// - a response cycle opened after it committed: the agent's response for
+///   that harness turn closed out. Both clocks are whole seconds, so a cycle
+///   that opened in the SAME second as the prompt does not order the two: the
+///   prompt may have arrived after the cycle opened (a chat turn right after a
+///   fast closeout). The tie keeps the entry, because dropping it would lose an
+///   unanswered chat prompt, while keeping it at worst carries an answered one
+///   into one more contract (which then clears the ledger).
 ///
 /// Then the newest [`CHAT_PROMPT_LEDGER_CAP`] entries are kept. Returns whether
 /// anything was dropped.
@@ -541,7 +546,7 @@ pub fn prune_chat_prompt_ledger(
                 .is_some_and(|document| chat_prompt_recorded(document, &entry.text))
             && !facts
                 .committed_response_cycle_started_at
-                .is_some_and(|started_at| started_at >= entry.noted_at)
+                .is_some_and(|started_at| started_at > entry.noted_at)
     });
     if ledger.prompts.len() > CHAT_PROMPT_LEDGER_CAP {
         let excess = ledger.prompts.len() - CHAT_PROMPT_LEDGER_CAP;
@@ -1663,6 +1668,20 @@ mod tests {
             now,
             ChatPromptPruneFacts::default()
         ));
+
+        // A cycle that opened in the same second as the prompt does not order
+        // the two: the chat prompt may have arrived right after a fast
+        // closeout, so it stays unanswered.
+        ledger.prompts = vec![entry("same second", now - 50)];
+        assert!(!prune_chat_prompt_ledger(
+            &mut ledger,
+            now,
+            ChatPromptPruneFacts {
+                document: None,
+                committed_response_cycle_started_at: Some(now - 50),
+            },
+        ));
+        assert_eq!(ledger.prompts.len(), 1);
     }
 
     #[test]

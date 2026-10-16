@@ -504,6 +504,22 @@ Fixed (above). Restarting IDEA could not help: the stuck controller was in haive
 > **Queue prompt:** #todo
 
 ❯ Done last cycle.
+
+### Re: next batch dispatched — opus-5-5 · 2026-10-15T20:02-04:00
+
+Four queued follow-ups are claimed and dispatched, each in its own worktree from `main` `8cc279f603` (the installed batch-0.35.510):
+- `subagent:closeoutduplicatedcommit` (`fix/closeoutduplicatedcommit`):
+  - the double-written 19:50 response;
+  - the stray `do [#id]` echo block;
+  - the `session-check` → `write --commit` → "run preflight" recovery that dead-ends;
+  - `dedupe` matching duplicates modulo binary-owned echo lines.
+
+  It hands back the exact command to remove the second copy, and I run that after installing its fix.
+- `subagent:testisolationleaks` (`fix/testisolationleaks`): test binaries reaching live project sockets, `state.db`, or the install-recycle trigger. It confines them to tmp roots and adds a guard.
+- `subagent:integrationtesttargets` (`fix/integrationtesttargets`): integration tests that still cold-launch a controller. They get readiness-based waits or the in-process route, plus a cold-launch guard extended to integration tests.
+- `subagent:shadowbacklogscan` (`fix/shadowbacklogscan`): skip only the backtick spans, not the whole line. A read-only sweep of every live session document runs first, so the change cannot start refusing them.
+
+Still in flight: the docs.md Stop-hook item (`subagent:docsstophook`). All five go into one next batch: one `make check`, then one `make install`.
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
@@ -512,19 +528,20 @@ Fixed (above). Restarting IDEA could not help: the stuck controller was in haive
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#closeoutduplicatedcommit]
 - ~~do [#pollintervalattribute]~~
 - ~~do [#rundocsstop]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/274~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~`agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/274~~
+- ~~`agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.~~
 - ~~do [#keylogrebase]~~
 - ~~do [#claimfollowedit]~~
 - ~~do [#splicesessionack]~~
 - ~~do [#rearmreadfailclosed2]~~
 - ~~do [#execfailpipe]~~
 - ~~do [#staleplugwarnflake]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.~~
+- ~~Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked~~
+- ~~idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?~~
 ~~~done
 sdk.md issue: I asked the agent to add ids on the todo items:
 ```
@@ -558,10 +575,10 @@ sdk.md issue: I asked the agent to add ids on the todo items:
   5. Chat about this
 ```
 ~~~
-- ~~tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#todo~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.~~
+- ~~#todo~~
 ---
-docs.md issue:
+🚧 docs.md issue:
 ```
 • Blocked by hook
   └ agent-doc Stop hook found fresh unresolved exchange work for /home/brian/work/btakita/agent-loop/src/haiven-dev/
@@ -574,6 +591,7 @@ write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md`
   recording that answer now with the official schema distinction and live Haiven evidence, then I’ll run the required
   terminal-state check.
 ```
+---
 - do [#testisolationleaks]
 - do [#integrationtesttargets]
 - do [#shadowbacklogscan]

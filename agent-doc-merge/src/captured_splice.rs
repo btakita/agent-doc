@@ -111,6 +111,21 @@ pub fn rebase(
     Ok(answer)
 }
 
+/// `#jetbrainscleanregistrati`: whether `merged`, a conflict-free three-way
+/// merge of `yours` and `agent` over `base` produced by some other planner
+/// (the char-level [`crate::conflict_reconcile::reconcile`]), keeps whole-line
+/// anchoring: it is exactly the line-granular merge ([`line_merge`]), and no
+/// change of either side sits on a base line the other side deleted or
+/// rewrote into a different line. A char-level merge that fails this re-anchored
+/// one side's change onto the other side's text by a coincidental code-point
+/// alignment (`- do [#sdkexamples] (closed)`), so its zero conflict count is
+/// not evidence of independence and the caller must refuse it.
+pub fn clean_merge_keeps_line_anchors(base: &str, yours: &str, agent: &str, merged: &str) -> bool {
+    line_merge(base, yours, agent).as_deref() == Some(merged)
+        && !canonical_change_lost_its_anchor(base, agent, yours)
+        && !canonical_change_lost_its_anchor(base, yours, agent)
+}
+
 /// `#heldbatchmerge` (GH #273): the exit for a captured batch the exact planner
 /// refused only because an operator change sits BESIDE a canonical change.
 ///
@@ -1935,6 +1950,129 @@ mod tests {
         ));
     }
 
+    /// The batch a re-registering JetBrains editor derives from its settled
+    /// shadow and live buffer (`singleSpliceBatchUtil`): one splice keeping the
+    /// common code-point prefix and suffix.
+    fn single_splice_batch(before: &str, after: &str) -> CapturedSpliceBatch {
+        let (old, new): (Vec<char>, Vec<char>) =
+            (before.chars().collect(), after.chars().collect());
+        let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+        let suffix = old[prefix..]
+            .iter()
+            .rev()
+            .zip(new[prefix..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let insert: String = new[prefix..new.len() - suffix].iter().collect();
+        let delete = old.len() - prefix - suffix;
+        let edits = if delete == 0 && insert.is_empty() {
+            Vec::new()
+        } else {
+            vec![edit(prefix, delete, &insert)]
+        };
+        let captured = batch(before, edits);
+        assert_eq!(captured.resulting_text, after);
+        captured
+    }
+
+    /// The registration merge the JetBrains plugin computes
+    /// (`cleanRegistrationMergeUtil`): the captured-splice rebase of the one
+    /// splice from the settled shadow to the live buffer.
+    fn registration_merge(shadow: &str, buffer: &str, canonical: &str) -> Result<String> {
+        rebase(shadow, canonical, &single_splice_batch(shadow, buffer))
+            .map(|answer| answer.resulting_text)
+    }
+
+    /// `#jetbrainscleanregistrati` (sdk.md 2026-10-16). JetBrains
+    /// `cleanRegistrationMerge` asked the char-level reconcile first: the
+    /// operator deleted the struck line `- ~~do [#tdc]~~` and typed new items
+    /// while canonical closed the kept `- do [#sdkdocs]`, and the char diff
+    /// aligned base `- do [#sdkdocs]` with the operator's typed
+    /// `- do [#sdkexamples]` (`- do [#sdk`, `s]`, the newline), so the close
+    /// marker landed on operator text with zero conflicts reported. The
+    /// registration merge is now the captured-splice rebase alone, which holds
+    /// whole-line anchoring: the close stays on the line it closed.
+    #[test]
+    fn registration_merge_never_reanchors_a_close_onto_a_typed_queue_item() {
+        let base = concat!(
+            "## Queue\n",
+            "<!-- agent:queue -->\n",
+            "- ~~do [#tdc]~~\n",
+            "- do [#sdkdocs]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let queue = "- ~~do [#tdc]~~\n- do [#sdkdocs]\n";
+        let buffer = base.replace(
+            queue,
+            "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
+        );
+        let canonical = base.replace("- do [#sdkdocs]\n", "- do [#sdkdocs] (closed)\n");
+        let expected = buffer.replace("- do [#sdkdocs]\n", "- do [#sdkdocs] (closed)\n");
+
+        // The char-level reconcile the plugin used to try first: a corrupted
+        // merge reported clean. The whole-line check refuses it.
+        let char_level = crate::conflict_reconcile::reconcile(base, &buffer, &canonical, None)
+            .expect("the char-level reconcile answers");
+        assert_eq!(char_level.conflicts, 0, "{}", char_level.text);
+        assert!(
+            char_level.text.contains("- do [#sdkexamples] (closed)\n"),
+            "fixture no longer reproduces the reported re-anchoring:\n{}",
+            char_level.text
+        );
+        assert!(!clean_merge_keeps_line_anchors(
+            base,
+            &buffer,
+            &canonical,
+            &char_level.text
+        ));
+
+        // The merge the plugin now asks for: the close stays on its own line.
+        let merged = registration_merge(base, &buffer, &canonical)
+            .expect("a close of a line the operator kept is independent of the typed items");
+        assert_eq!(merged, expected);
+        assert!(!merged.contains("[#sdkexamples] (closed)"), "{merged}");
+        assert!(clean_merge_keeps_line_anchors(
+            base, &buffer, &canonical, &merged
+        ));
+
+        // The deleted-anchor variant: canonical closes the struck line the
+        // operator deleted. There is no line to carry the close, so the
+        // registration merge refuses (the plugin then holds the operator's
+        // buffer) instead of attaching it to a typed item.
+        let closed_struck = base.replace("- ~~do [#tdc]~~\n", "- ~~do [#tdc]~~ (closed)\n");
+        for operator_queue in [
+            "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
+            "- review [#retryloop]\n- do [#sdkdocs]\n",
+            "- do [#sdkdocs]\n",
+        ] {
+            let buffer = base.replace(queue, operator_queue);
+            if let Ok(merged) = registration_merge(base, &buffer, &closed_struck) {
+                panic!("a close whose anchor line the operator deleted must refuse:\n{merged}");
+            }
+            if let Ok(char_level) =
+                crate::conflict_reconcile::reconcile(base, &buffer, &closed_struck, None)
+                && char_level.conflicts == 0
+            {
+                assert!(
+                    !clean_merge_keeps_line_anchors(
+                        base,
+                        &buffer,
+                        &closed_struck,
+                        &char_level.text
+                    ),
+                    "{}",
+                    char_level.text
+                );
+            }
+        }
+
+        // Control: an independent edit on another line still merges cleanly
+        // through both, and the two agree.
+        let edited_heading = buffer.replace("## Queue\n", "## Queue (next)\n");
+        let merged = registration_merge(base, &edited_heading, &canonical).unwrap();
+        assert_eq!(merged, expected.replace("## Queue\n", "## Queue (next)\n"));
+    }
+
     /// `#mergecapturedsplice` property: no canonical change ever lands inside
     /// or on text the operator inserted unless its anchor line survived. The
     /// operator keeps, deletes, rewrites (similar or unrelated text), or types
@@ -1954,6 +2092,8 @@ mod tests {
             (state % bound as u64) as usize
         };
         let (mut answered, mut refused, mut same_line) = (0, 0, 0);
+        let (mut registration_answered, mut registration_refused) = (0, 0);
+        let mut char_level_reanchored = 0;
         for case in 0..400 {
             let lines = 3 + next(8);
             let base_lines: Vec<String> = (0..lines).map(|n| format!("- do [#item{n}]")).collect();
@@ -2019,6 +2159,44 @@ mod tests {
             let yours = join(&operator_lines);
             let captured = captured_typing(&base, &yours);
             same_line += usize::from(both_changed_a_line);
+            // `#jetbrainscleanregistrati`: the JetBrains registration merge
+            // rebases the one splice from shadow to buffer, a different batch
+            // shape than per-keystroke typing; it is held to the same answer.
+            let expected = join(&merged_lines);
+            match registration_merge(&base, &yours, &canonical) {
+                Err(_) => registration_refused += 1,
+                Ok(merged) => {
+                    registration_answered += 1;
+                    assert!(
+                        !both_changed_a_line,
+                        "case {case}: registration merged a line both sides changed\n{merged}"
+                    );
+                    assert_eq!(
+                        merged, expected,
+                        "case {case} (registration)\nbase:\n{base}\ncanonical:\n{canonical}\nyours:\n{yours}"
+                    );
+                }
+            }
+            // The char-level reconcile is admitted (over FFI) only when it
+            // keeps whole-line anchoring; anything admitted is the same answer.
+            if let Ok(char_level) =
+                crate::conflict_reconcile::reconcile(&base, &yours, &canonical, None)
+                && char_level.conflicts == 0
+            {
+                if clean_merge_keeps_line_anchors(&base, &yours, &canonical, &char_level.text) {
+                    assert!(
+                        !both_changed_a_line,
+                        "case {case}: admitted a char-level merge of a line both changed\n{}",
+                        char_level.text
+                    );
+                    assert_eq!(
+                        char_level.text, expected,
+                        "case {case} (char-level admitted)"
+                    );
+                } else if !both_changed_a_line && char_level.text != expected {
+                    char_level_reanchored += 1;
+                }
+            }
             match rebase(&base, &canonical, &captured) {
                 Err(_) => refused += 1,
                 Ok(out) => {
@@ -2049,6 +2227,19 @@ mod tests {
         // Non-vacuity: the generator reaches both outcomes and the bug class.
         assert!(answered >= 40, "answered {answered}, refused {refused}");
         assert!(same_line >= 100, "same-line cases {same_line}");
-        eprintln!("answered {answered} refused {refused} same-line {same_line}");
+        assert!(
+            registration_answered >= 40,
+            "registration answered {registration_answered}, refused {registration_refused}"
+        );
+        // The generator reaches the char-level re-anchoring the FFI now refuses.
+        assert!(
+            char_level_reanchored >= 1,
+            "char-level re-anchored {char_level_reanchored}"
+        );
+        eprintln!(
+            "answered {answered} refused {refused} same-line {same_line} registration \
+             answered {registration_answered} refused {registration_refused} char-level \
+             reanchored {char_level_reanchored}"
+        );
     }
 }

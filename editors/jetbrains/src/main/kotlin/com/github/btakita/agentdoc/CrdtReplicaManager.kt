@@ -4114,37 +4114,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /**
      * `#editorauth2`: the clean three-way merge of a registration's generations,
-     * or null when any is missing, they need no merge, the reconciler is
-     * unavailable, or the merge has conflicts (those stay held, never overwritten).
+     * or null when any is missing, they need no merge, the native library is
+     * unavailable, or the merge refuses (those stay held, never overwritten).
+     * See [cleanRegistrationMergeUtil].
      */
-    private fun cleanRegistrationMerge(shadow: String?, buffer: String?, canonical: String?): String? {
-        if (shadow == null || buffer == null || canonical == null) return null
-        if (buffer == canonical || buffer == shadow || canonical == shadow) return null
-        val json = NativePatching.reconcileText(shadow, buffer, canonical, -1)
-        val reconciled =
-            json?.let {
-                try {
-                    val root = com.google.gson.JsonParser.parseString(it).asJsonObject
-                    if (!root.get("ok").asBoolean || root.get("conflicts").asInt != 0) {
-                        null
-                    } else {
-                        root.get("text").asString
-                    }
-                } catch (e: Exception) {
-                    log.warn("[crdt-replica] registration merge result unreadable: ${e.message}")
-                    null
-                }
-            }
-        // `#steerreplicachurn`: a line merge conflicts when canonical already
-        // holds the first part of a prompt the operator kept typing (its push
-        // was ingested but the receipt was lost, then a native reload dropped
-        // the captured splice stream). The native rebase merges exactly that
-        // case by inserting only what canonical lacks, and refuses any overlap
-        // with controller text, so the hold still covers every real conflict.
-        return reconciled
-            ?: NativePatching.rebaseCapturedSplices(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))
-                ?.resultingText
-    }
+    private fun cleanRegistrationMerge(shadow: String?, buffer: String?, canonical: String?): String? =
+        cleanRegistrationMergeUtil(shadow, buffer, canonical, NativePatching::rebaseCapturedSplices)
 
     /** Complete the causal projection decision only after this endpoint owns the map slot. */
     private fun finalizeRegistrationProjection(
@@ -6073,6 +6048,37 @@ private val BINARY_OWNED_HEAD_SUFFIX = Regex("""(?m)^(#{1,6} .*?) \(HEAD\)[ \t]*
  */
 internal fun withoutBinaryOwnedMarkersUtil(text: String): String =
     text.replace(BINARY_OWNED_BOUNDARY_LINE, "").replace(BINARY_OWNED_HEAD_SUFFIX, "$1")
+
+/**
+ * `#editorauth2`: the clean three-way merge of a registration's generations (the settled
+ * [shadow], the live [buffer], the controller [canonical]), or null when any is missing, they
+ * need no merge, or [rebase] (the native captured-splice rebase) refuses.
+ *
+ * `#jetbrainscleanregistrati`: the merge is the captured-splice rebase of the one splice from
+ * shadow to buffer, and nothing else. It used to ask the char-level `conflict_reconcile` first
+ * (`NativePatching.reconcileText`), which diffs by character with no line anchoring: an operator
+ * who deleted the struck `- ~~do [#tdc]~~` and typed new items while canonical closed the kept
+ * `- do [#sdkdocs]` got `- do [#sdkexamples] (closed)` back with zero conflicts, and registration
+ * merged that forward over the operator's text. The rebase holds whole-line anchoring
+ * (`#mergecapturedsplice`): it answers only the line-granular merge, and refuses any canonical
+ * change whose anchor line the operator deleted or rewrote. A refusal is null here, so the
+ * registration decision holds the operator's buffer exactly as typed (never adopts a merge over
+ * it) and the existing recovery settles it.
+ *
+ * `#steerreplicachurn`: the rebase also merges the case where canonical already holds the first
+ * part of a prompt the operator kept typing (its push was ingested but the receipt was lost),
+ * inserting only what canonical lacks.
+ */
+internal fun cleanRegistrationMergeUtil(
+    shadow: String?,
+    buffer: String?,
+    canonical: String?,
+    rebase: (base: String, canonical: String, batch: PreparedLocalEditorBatch) -> PreparedLocalEditorBatch?,
+): String? {
+    if (shadow == null || buffer == null || canonical == null) return null
+    if (buffer == canonical || buffer == shadow || canonical == shadow) return null
+    return rebase(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))?.resultingText
+}
 
 /** One splice turning [before] into [after]: the common code-point prefix and suffix stay. */
 internal fun singleSpliceBatchUtil(before: String, after: String): PreparedLocalEditorBatch {

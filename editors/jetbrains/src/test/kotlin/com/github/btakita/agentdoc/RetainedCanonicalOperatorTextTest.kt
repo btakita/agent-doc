@@ -566,24 +566,118 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     /**
-     * `#steerreplicachurn`: the line merge conflicts when canonical holds the first
-     * part of a prompt the operator kept typing. Registration must fall back to the
-     * native captured-splice rebase (which refuses controller-text overlap) rather
-     * than hold the operator's buffer forever.
+     * `#steerreplicachurn` / `#jetbrainscleanregistrati`: the registration merge is the
+     * native captured-splice rebase (which refuses controller-text overlap and holds whole-line
+     * anchoring) and nothing else. The char-level `reconcileText` it used to ask first re-anchored
+     * a canonical close onto a queue item the operator typed with zero conflicts.
      */
     @Test
-    fun `registration merge falls back to the native captured splice rebase`() {
-        val manager = Files.readString(
-            listOf(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-            ).first { Files.exists(it) },
-        )
+    fun `registration merge is only the native captured splice rebase`() {
+        val source = { relative: String ->
+            Files.readString(
+                listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/$relative"),
+                    Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/$relative"),
+                ).first { Files.exists(it) },
+            )
+        }
+        val manager = source("CrdtReplicaManager.kt")
         val merge = manager
             .substringAfter("private fun cleanRegistrationMerge(")
             .substringBefore("private fun finalizeRegistrationProjection(")
         assertTrue(
-            merge.contains("NativePatching.rebaseCapturedSplices(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))"),
+            merge.contains(
+                "cleanRegistrationMergeUtil(shadow, buffer, canonical, NativePatching::rebaseCapturedSplices)",
+            ),
         )
+        val util = manager
+            .substringAfter("internal fun cleanRegistrationMergeUtil(")
+            .substringBefore("internal fun singleSpliceBatchUtil(")
+        assertTrue(util.contains("rebase(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))"))
+        for (code in listOf(merge, util.substringAfter("): String? {"))) {
+            assertFalse("registration merge must not use the char-level reconcile", code.contains("reconcile"))
+        }
+        assertFalse(
+            "the plugin must not bind the char-level reconcile at all",
+            source("NativeLib.kt").contains("reconcile_text") || source("NativeLib.kt").contains("reconcileText"),
+        )
+    }
+
+    private val queueBase =
+        "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs]\n<!-- /agent:queue -->\n"
+    private val typedBuffer =
+        queueBase.replace(
+            "- ~~do [#tdc]~~\n- do [#sdkdocs]\n",
+            "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
+        )
+
+    /**
+     * `#jetbrainscleanregistrati`: the decision `cleanRegistrationMerge` makes, over a fake
+     * native layer. The rebase is asked exactly once, with the one splice from settled shadow to
+     * live buffer; its answer is the merge and a refusal is no merge, so registration holds the
+     * operator's buffer instead of merging forward. There is no second, char-level attempt.
+     */
+    @Test
+    fun `registration merge answers the native rebase or holds the operator buffer`() {
+        val closedKept = queueBase.replace("- do [#sdkdocs]\n", "- do [#sdkdocs] (closed)\n")
+        val lineMerged = typedBuffer.replace("- do [#sdkdocs]\n", "- do [#sdkdocs] (closed)\n")
+        val calls = mutableListOf<Triple<String, String, PreparedLocalEditorBatch>>()
+
+        val merged =
+            cleanRegistrationMergeUtil(queueBase, typedBuffer, closedKept) { base, canonical, batch ->
+                calls += Triple(base, canonical, batch)
+                PreparedLocalEditorBatch(edits = emptyList(), resultingText = lineMerged)
+            }
+        assertEquals(lineMerged, merged)
+        assertEquals(
+            listOf(Triple(queueBase, closedKept, singleSpliceBatchUtil(queueBase, typedBuffer))),
+            calls,
+        )
+        assertEquals(
+            RetainedRegistrationProjectionAction.MergeForward,
+            retainedRegistrationProjectionActionUtil(
+                publishedShadow = queueBase,
+                bufferText = typedBuffer,
+                canonicalText = closedKept,
+                cleanMergeAvailable = merged != null,
+            ),
+        )
+
+        // The deleted-anchor case: canonical closed the struck line the operator deleted, the
+        // native rebase refuses, and nothing else is tried. Registration holds the buffer.
+        val closedStruck = queueBase.replace("- ~~do [#tdc]~~\n", "- ~~do [#tdc]~~ (closed)\n")
+        calls.clear()
+        val refused =
+            cleanRegistrationMergeUtil(queueBase, typedBuffer, closedStruck) { base, canonical, batch ->
+                calls += Triple(base, canonical, batch)
+                null
+            }
+        assertEquals(null, refused)
+        assertEquals(1, calls.size)
+        assertEquals(
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            retainedRegistrationProjectionActionUtil(
+                publishedShadow = queueBase,
+                bufferText = typedBuffer,
+                canonicalText = closedStruck,
+                cleanMergeAvailable = refused != null,
+            ),
+        )
+
+        // No merge is needed (or possible) without three distinct generations: the native layer
+        // is never asked.
+        val never: (String, String, PreparedLocalEditorBatch) -> PreparedLocalEditorBatch? = { _, _, _ ->
+            throw AssertionError("native rebase asked without three distinct generations")
+        }
+        for ((shadow, buffer, canonical) in listOf(
+            Triple(null, typedBuffer, closedKept),
+            Triple(queueBase, null, closedKept),
+            Triple(queueBase, typedBuffer, null),
+            Triple(queueBase, closedKept, closedKept),
+            Triple(queueBase, queueBase, closedKept),
+            Triple(queueBase, typedBuffer, queueBase),
+        )) {
+            assertEquals(null, cleanRegistrationMergeUtil(shadow, buffer, canonical, never))
+        }
     }
 }

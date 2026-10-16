@@ -948,8 +948,20 @@ pub unsafe extern "C" fn agent_doc_merge_crdt(
 /// `cursor_utf16` is the operator's caret in UTF-16 code units (the offset
 /// unit of both JetBrains and VS Code), or negative for none. Returns JSON:
 /// `{"ok":true,"text":…,"cursor_utf16":N|null,"conflicts":N}` or
-/// `{"ok":false,"error":"marker_syntax_in_input"|"cursor_out_of_bounds"|"invalid_utf8"}`.
+/// `{"ok":false,"error":"marker_syntax_in_input"|"cursor_out_of_bounds"|"invalid_utf8"|"line_anchor_lost"}`.
 /// On `ok:false` the caller keeps the operator's buffer unchanged.
+///
+/// `#jetbrainscleanregistrati`: the reconcile diffs by character with no line
+/// anchoring, so a conflict-free answer can re-anchor one side's change onto
+/// the other side's new text (an operator who deleted `- ~~do [#tdc]~~` and
+/// typed `- do [#sdkexamples]` while the agent closed `- do [#sdkdocs]` got
+/// `- do [#sdkexamples] (closed)`, zero conflicts). A conflict-free answer is
+/// therefore returned only when it keeps whole-line anchoring
+/// ([`agent_doc_merge::captured_splice::clean_merge_keeps_line_anchors`]);
+/// otherwise the result is `{"ok":false,"error":"line_anchor_lost"}`. Plugins
+/// that predate the fix call this first for a registration merge and fall back
+/// to the captured-splice rebase on `ok:false`, so this also closes the hole
+/// for them while the native library is newer than the plugin.
 ///
 /// # Safety
 ///
@@ -976,6 +988,14 @@ pub unsafe extern "C" fn agent_doc_reconcile_text(
             }
         };
         match agent_doc_merge::conflict_reconcile::reconcile(base, yours, agent, cursor) {
+            Ok(out)
+                if out.conflicts == 0
+                    && !agent_doc_merge::captured_splice::clean_merge_keeps_line_anchors(
+                        base, yours, agent, &out.text,
+                    ) =>
+            {
+                serde_json::json!({"ok": false, "error": "line_anchor_lost"})
+            }
             Ok(out) => serde_json::json!({
                 "ok": true,
                 "cursor_utf16": out.cursor.map(|c| out.text[..c].encode_utf16().count()),
@@ -1339,6 +1359,38 @@ mod tests {
         let out = reconcile_json("😀\n", "😀\n", "😀\n", 1);
         assert_eq!(out["ok"], false);
         assert_eq!(out["error"], "cursor_out_of_bounds");
+    }
+
+    /// `#jetbrainscleanregistrati`: a conflict-free char-level merge that
+    /// re-anchors the agent's close onto a line the operator typed is refused
+    /// over FFI, so a plugin that still asks this first for its registration
+    /// merge falls back to the captured-splice rebase instead of adopting
+    /// `- do [#sdkexamples] (closed)`.
+    #[test]
+    fn reconcile_text_ffi_refuses_a_clean_merge_that_reanchors_across_lines() {
+        let base =
+            "<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs]\n<!-- /agent:queue -->\n";
+        let yours = base.replace(
+            "- ~~do [#tdc]~~\n- do [#sdkdocs]\n",
+            "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
+        );
+        let agent = base.replace("- do [#sdkdocs]\n", "- do [#sdkdocs] (closed)\n");
+        let out = reconcile_json(base, &yours, &agent, -1);
+        assert_eq!(out["ok"], false, "{out}");
+        assert_eq!(out["error"], "line_anchor_lost");
+
+        // Control: whole-line independent edits stay a clean merge.
+        let yours = base.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- do [#new]\n",
+        );
+        let out = reconcile_json(base, &yours, &agent, -1);
+        assert_eq!(out["ok"], true, "{out}");
+        assert_eq!(
+            out["text"],
+            yours.replace("- do [#sdkdocs]\n", "- do [#sdkdocs] (closed)\n")
+        );
+        assert_eq!(out["conflicts"], 0);
     }
 
     #[test]

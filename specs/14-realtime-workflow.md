@@ -1617,10 +1617,34 @@ queue edit look like an overlap.
 When the attached endpoint's replica text already equals the canonical the delta
 was rebased onto, and the operator has not typed since the captured cut, the
 rebased splices forward on that endpoint. Only otherwise does recovery register
-a replacement from a full canonical bootstrap. At registration, when the line
-merge of shadow, live buffer, and canonical conflicts (the splice stream did not
-survive a native reload), the same native rebase of the single shadow-to-buffer
-splice is the merge-forward candidate before the ambiguity hold applies.
+a replacement from a full canonical bootstrap.
+
+**Registration merge (`#jetbrainscleanregistrati`).** At registration, when the
+settled shadow, the live buffer, and canonical are three distinct generations,
+the merge-forward candidate is exactly the native captured-splice rebase of the
+single shadow-to-buffer splice (`rebase`, above, with its whole-line anchoring),
+and nothing else. It is asked once; its answer is the merge, and a refusal
+means no merge, so the registration decision holds the operator's visible
+buffer byte-for-byte (`HoldOperatorBuffer`, never adopting canonical or a merge
+over it) and the existing recovery (a later registration with fresh cuts, the
+controller-licensed in-place roll-forward on an attached endpoint) settles it;
+the retained response is untouched. The same candidate is recomputed from the
+exact captured bytes at the publication edge before it is merged forward.
+
+The registration path previously asked the char-level `conflict_reconcile`
+first (FFI `agent_doc_reconcile_text`). Its character diff has no line
+anchoring: an operator who deleted the struck `- ~~do [#tdc]~~` and typed
+`- review [#retryloop]` and `- do [#sdkexamples]` while canonical closed the
+kept `- do [#sdkdocs]` got `- do [#sdkexamples] (closed)` with zero conflicts,
+and registration merged it forward over the operator's text. The line-anchored
+answer is `- do [#sdkdocs] (closed)` with the typed items verbatim; had
+canonical closed the struck line instead, the rebase refuses. The plugin no
+longer binds the char-level reconcile. Because the native library hot-reloads
+ahead of an IDE restart, `agent_doc_reconcile_text` itself returns
+`{"ok":false,"error":"line_anchor_lost"}` for a conflict-free answer that is not
+the line-granular merge or keeps a change of either side on a base line the
+other deleted or rewrote (`captured_splice::clean_merge_keeps_line_anchors`);
+an older plugin that still asks it first then falls back to the same rebase.
 
 The deferred candidate remains retained as an ordered semantic intent, and the
 per-document settlement graph resumes persistence and closeout only when its

@@ -54,7 +54,40 @@ Compacted content:
 3. **Wait for the #rundocsissue fix and `make install`**, then Run Agent Doc should clear it by itself.
 
 **Batch status:** #rundocsissue, GH #276 and the todo-id-layering line are still with their subagents. "release + publish" is held by me until the batch is merged.
-<!-- agent:boundary:acf450de -->
+
+### Re: Subagent completed: `subagent:todoidlayer` returned work for queue item “todo ids opportunistically layer on existing `agent:review` ids if an operator decision needs to be made on the backlog/review/icebox item. The todo is for visibility. A surrogate todo id would be created only if there are multiple backlog/review/icebox ids or if it is not associated with a backlog/review/icebox item.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=3fa29b461f84d9af123b6362720693cb14c07f7d26a56843bb8353c37fe0f39a -->
+
+### Re: Subagent completed: `subagent:gh276` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/276” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=59b09b51610fa8ae89a1857b250398ba288d449fb9bf436d83200f904a3f6453 -->
+
+### Re: Subagent completed: `subagent:rundocsissue` returned work for queue item “do [#rundocsissue]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=59b51ee4c294da088da3db2fc0e015b979fe4f3fdfa8a2f087f88b4cfc751c6e -->
+> **Chat prompt (#chatprompt):** docs.md is still wedged
+
+### Re: docs.md still stuck — opus-5.5 · 2026-10-16T02:08-04:00
+
+**It was still stuck because the fix wasn't installed yet. I installed the batch early, and docs.md is now unstuck.**
+
+**The cause was different from what I said before.** The #rundocsissue subagent traced it. The Codex Stop hook saved a second copy of the already-committed `### Re: See …pull/48…` answer as a pending response. The replay guard refuses any response whose heading is already in the document, so every preflight's repair stopped there. It never reached the step that clears answered queue lines. So my earlier option 1 (delete the queue line) would not have worked: the blocker was the stuck pending response, not the queue line.
+
+**What I did:**
+- Batch `batch-20261016a` merges the todo-id change, GH #276 and #rundocsissue, plus a test isolation fix (`413fc47dbb`). Its `make check` passed: exit 0, 0 `result: FAILED`, nextest `10840 tests run: 10840 passed, 169 skipped`.
+- I ran `make install` from it ahead of the release (exit 0). The release will install again.
+
+**What I checked on docs.md:**
+- The pane %197 supervisor switched itself to the new binary at 06:05:09Z (`supervisor_binary_stale_self_recycled`).
+- The next turn was admitted (`post_repair_closeout_drift_check admission=continue_with_steering`) and committed docs.md as `c718b1a7` (02:06).
+- The answered `See …pull/48…` line is gone from docs.md's queue. None of the operator's queue lines were lost.
+- `agent-doc session-check tasks/docs.md` now reports `ok — cycle … is committed`, and its next queue item is the `ContentStatus` line.
+
+**New queue item (sdk.md Clear Session Context stuck):** claimed and dispatched to a subagent on branch `fix/clear-context-retained-write-wedge`. After the install, sdk.md's ops.log shows `session_check_retained_capture_write_applied` (06:05:47Z), and its session-check reports the cycle committed. So sdk.md may already have recovered. The subagent is reconstructing the timeline and fixing why a context clear waits on a document write at all. One slip on my side: my read-only `session-check` on sdk.md surfaced 2 of that session's mid-turn steering notices (`midturn_steering_surfaced consumer=hook count=2`, 06:07:26Z). Both are subagent-intent queue lines, so sdk.md's next preflight still lists them; nothing is lost. I've told the subagent not to run session-check on foreign documents.
+
+There were no actionable follow-up items to capture. Everything left is already a claimed queue item: GH #277 (its subagent is still running `make check`), the sdk.md item above, and "release + publish". When #277 reports, I'll merge it, write VERSIONS 0.35.511, bump the version and run `make release`. Then I'll close #276/#277 and close out #rundocsissue and the todo-id line.
+<!-- agent:boundary:33825235 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -62,10 +95,12 @@ Compacted content:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#rundocsissue]
+- 🚧 do [#rundocsissue]
+- #gh-fix https://github.com/btakita/agent-doc/issues/277
 - 🚧 todo ids opportunistically layer on existing `agent:review` ids if an operator decision needs to be made on the backlog/review/icebox item. The todo is for visibility. A surrogate todo id would be created only if there are multiple backlog/review/icebox ids or if it is not associated with a backlog/review/icebox item.
-- #gh-fix https://github.com/btakita/agent-doc/issues/276
-- release + publish
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/276
+- Clear Session Context on sdk.md wedged: • The response is committed, but the IDE editor buffer for tasks/sdk.md contains unmerged typing. Please reconcile/save that buffer while preserving your text. The retained agent-doc write is durable and 04will apply automatically once they agree.
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Todo
@@ -83,7 +118,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rundocsissue] Run Agent Doc on docs.md issue
+- [ ] 🚧 [#rundocsissue] Run Agent Doc on docs.md issue
   ```
   › agent-doc tasks/docs.md
 

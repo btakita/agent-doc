@@ -443,9 +443,11 @@ Claude Code ran out of tokens mid-tasks. Please continue:
      Use your limit reset to reset it now: clau.de/reset
 ```
 ~~~
-- 🚧 Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?
+- ~~Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?~~
+~~~done
 My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
 > I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
+~~~
 - ~~do [#tmuxscopesteward]~~
 - 🚧 do [#syncioredlivetmux]
 - ~~do [#queuefreetextsplit]~~

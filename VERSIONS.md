@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.513
+
+- **Free-text queue paragraphs keep their item boundaries
+  (`queuefreetextsplit`).** Adjacent bare prose lines are now distinct queue
+  heads unless Markdown continuation syntax explicitly joins them. Selection,
+  claims, closeout evidence, consumption, continuation, and AST overlays share
+  that boundary rule, so finishing one pasted report no longer silently drops
+  the next one.
+- **Test-owned tmux servers no longer leak systemd scopes
+  (`tmuxscopesteward`).** A dedicated scope steward classifies agent-doc and
+  test servers, tracks their lifecycle, cleans abandoned transient scopes, and
+  exposes bounded diagnostics. Tmux CI exercises the classification without
+  creating real user scopes, while production controller reconciliation owns
+  the idempotent cleanup effect.
+- **An explicit release/publish instruction cannot close at a tag push
+  (`releasepublishcontract`).** The deterministic plan now requires `make
+  release` plus GitHub Release and PyPI proof for direct shipping requests,
+  while status questions and process-design questions remain non-shipping
+  prompts. `make release` waits for the exact tag's green Release and PyPI
+  workflows, verifies all platform/editor assets, and confirms the exact wheel
+  on PyPI's PEP 691 simple index before its public-publication phase succeeds.
+
 ## 0.35.512
 
 - **Clear Session Context no longer waits on a stuck document write

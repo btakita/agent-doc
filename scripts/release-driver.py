@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run and report the irreversible and local phases of an agent-doc release."""
+"""Run and report the irreversible, local, and public phases of a release."""
 
 from __future__ import annotations
 
@@ -94,18 +94,26 @@ def run_release(
         clock=clock,
         stream=stream,
     )
+    publication = timed_phase(
+        "public-publication",
+        (["python3", "scripts/verify-release-publication.py", "--tag", tag],),
+        runner=runner,
+        clock=clock,
+        stream=stream,
+    )
     print(
         "release summary: "
-        f"tag_publish_handoff=complete local_install_full={install.status}",
+        f"tag_publish_handoff=complete local_install_full={install.status} "
+        f"public_publication={publication.status}",
         file=stream,
         flush=True,
     )
-    return install.returncode
+    return install.returncode or publication.returncode
 
 
 def self_test() -> None:
     commands: list[list[str]] = []
-    times = iter((10.0, 12.25, 20.0, 25.5))
+    times = iter((10.0, 12.25, 20.0, 25.5, 30.0, 38.0))
     output = io.StringIO()
 
     def success(command: Sequence[str]) -> int:
@@ -123,15 +131,17 @@ def self_test() -> None:
         ["git", "tag", "v1.2.3"],
         ["git", "push", "origin", "HEAD:main", "v1.2.3"],
         ["gmake", "install-full"],
+        ["python3", "scripts/verify-release-publication.py", "--tag", "v1.2.3"],
     ]
     assert output.getvalue().splitlines() == [
         "release phase tag-publish-handoff: complete elapsed=2.250s",
         "release phase local-install-full: complete elapsed=5.500s",
-        "release summary: tag_publish_handoff=complete local_install_full=complete",
+        "release phase public-publication: complete elapsed=8.000s",
+        "release summary: tag_publish_handoff=complete local_install_full=complete public_publication=complete",
     ]
 
     commands.clear()
-    times = iter((1.0, 2.0, 3.0, 7.0))
+    times = iter((1.0, 2.0, 3.0, 7.0, 8.0, 10.0))
     output = io.StringIO()
 
     def install_fails(command: Sequence[str]) -> int:
@@ -144,8 +154,13 @@ def self_test() -> None:
         clock=lambda: next(times),
         stream=output,
     ) == 23
-    assert "tag_publish_handoff=complete local_install_full=failed" in output.getvalue()
-    assert commands[-1] == ["make", "install-full"]
+    assert "tag_publish_handoff=complete local_install_full=failed public_publication=complete" in output.getvalue()
+    assert commands[-1] == [
+        "python3",
+        "scripts/verify-release-publication.py",
+        "--tag",
+        "v1.2.4",
+    ]
 
     commands.clear()
     times = iter((4.0, 6.0))

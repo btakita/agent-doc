@@ -370,9 +370,14 @@ When publishing a release:
 7. Branch → PR → squash merge to main (or commit + push to main directly in this
    dogfooding repo).
 8. Run `make release`; the recipe revalidates/reuses the release proofs, tags
-   `v<version>`, pushes main plus the tag, and then performs the one local
-   `install-full`. Treat the tag/publish handoff as complete once its phase says
-   `complete`, regardless of the separately reported local-install outcome.
+   `v<version>`, pushes main plus the tag, performs the one local `install-full`,
+   then waits for the matching GitHub Release and PyPI workflows and proves the
+   complete GitHub asset set plus the wheel on PyPI's PEP 691 simple index
+   (`#releasepublishcontract`). A tag/publish handoff is not a published release;
+   do not close an explicit release/publish request until the
+   `public-publication` phase says `complete`. If the local install fails after
+   the tag push, publication verification still runs and both outcomes are
+   reported independently.
 9. The tag push drives the GitHub Release: `.github/workflows/release.yml`
    builds six Linux, Windows, and Darwin target binaries and packages each one **with its
    platform cdylib beside it** (`libagent_doc.so` / `agent_doc.dll` /
@@ -412,10 +417,12 @@ When publishing a release:
    `/manage/project/agent-doc/settings/` page, which PyPI gates behind a password
    re-confirmation. Deleting release history is reserved for a ceiling the check
    actually reports; verify any deletion from the authenticated `/manage/` pages.
-10. Verify the release run went green (`gh run list --limit 5`) and that
-   `gh release view v<version>` lists six automated platform archives plus
-   `SHA256SUMS`. `make release-macos-assets TAG=v<version>` remains available as
-   a repair path for a failed or legacy Darwin upload.
+10. `make release` now performs this verification as its final mandatory phase:
+   the exact-tag Release workflow and PyPI workflow must be green, `gh release
+   view v<version>` must expose all six automated platform archives, editor
+   packages, and checksums, and PyPI's simple index must expose the exact wheel.
+   `make release-macos-assets TAG=v<version>` remains available as a repair path
+   for a failed or legacy Darwin upload.
    The PyPI `verify` job asserts both that the version is resolvable and that a
    clean install can fetch and execute the pinned native release; the local
    fallback is `make publish-pypi`.

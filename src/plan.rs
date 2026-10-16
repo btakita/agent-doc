@@ -310,7 +310,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &prompt_bearing_changes,
         &effective_prompt_presets,
     )?;
-    let routing = routing_fields(
+    let mut routing = routing_fields(
         file,
         &content,
         execution_scope,
@@ -319,6 +319,17 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &pending_mutations,
         &fm,
     );
+    let release_publish_requested = execution_scope == ExecutionScope::Normal
+        && prompt_targets
+            .iter()
+            .chain(repo_actions.iter())
+            .any(|text| explicitly_requests_release_publish(text));
+    if release_publish_requested {
+        agent_doc_prompt_contract::push_unique_strings(
+            &mut routing.required_proof,
+            ["github_release".to_string(), "pypi_publication".to_string()],
+        );
+    }
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
     let mut warnings = Vec::new();
     if let Some(deferral) = plan_backlog_only_deferral_warning(execution_scope, &prompt_diff_text) {
@@ -351,6 +362,18 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let mut required_commands = Vec::new();
     let mut handoff = HandoffTarget::None;
+
+    // `#releasepublishcontract`: a branch push, local install, or successful tag
+    // push is not the publication the operator requested.  Put the irreversible
+    // command and its public proof in the deterministic plan so the harness
+    // cannot silently reinterpret "release + publish" as ordinary closeout.
+    // `make release` owns the wait for both GitHub Release and PyPI visibility.
+    if release_publish_requested {
+        required_commands.push(
+            "After integrating and versioning the release batch, run `make release`. Do not finalize until it exits successfully: it must verify the tag's green Release workflow, complete GitHub Release assets, green PyPI workflow, and PyPI simple-index wheel."
+                .to_string(),
+        );
+    }
 
     if exchange_compaction_requested {
         required_commands.push(format!(
@@ -646,6 +669,64 @@ fn dispatch_mode(fm: &frontmatter::Frontmatter) -> String {
         .unwrap_or("manual")
         .trim()
         .to_ascii_lowercase()
+}
+
+/// `#releasepublishcontract`: recognize an operator instruction to ship, while
+/// excluding status questions and requests to change the release process itself.
+/// The latter may contain the same words but does not authorize a release now.
+fn explicitly_requests_release_publish(text: &str) -> bool {
+    let normalized = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+
+    let meta_request = [
+        "release process",
+        "release workflow",
+        "publishing process",
+        "publishing workflow",
+        "when i tell you",
+        "whenever i tell you",
+        "always release",
+        "always publish",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+    if meta_request {
+        return false;
+    }
+
+    let status_question = [
+        "is the release published",
+        "is this release published",
+        "was the release published",
+        "has the release been published",
+        "did the release publish",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+    if status_question {
+        return false;
+    }
+
+    [
+        "release + publish",
+        "release and publish",
+        "publish + release",
+        "publish and release",
+        "cut a release",
+        "make a release",
+        "ship the release",
+        "release this",
+        "publish this",
+        "release it",
+        "publish it",
+        "release now",
+        "publish now",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
 }
 
 fn infer_task_class(repo_actions: &[String], text: &str) -> String {
@@ -1503,6 +1584,89 @@ Done.
             "{:?}",
             plan.prompt_targets
         );
+    }
+
+    /// `#releasepublishcontract`: explicit shipping language is an executable
+    /// plan requirement, not prose an agent may satisfy with a branch push or a
+    /// local install.
+    #[test]
+    fn build_plan_requires_publication_for_explicit_release_request() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = sealed_turn_doc();
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_chat_prompts(
+            &doc,
+            &["Fix the queue parser + release + publish".to_string()],
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|command| command.contains("run `make release`")),
+            "{:?}",
+            plan.required_commands
+        );
+        assert!(
+            plan.required_proof.contains(&"github_release".to_string()),
+            "{:?}",
+            plan.required_proof
+        );
+        assert!(
+            plan.required_proof
+                .contains(&"pypi_publication".to_string()),
+            "{:?}",
+            plan.required_proof
+        );
+    }
+
+    /// A question about the current release and a request to improve the process
+    /// mention the same terms but do not themselves authorize a new release.
+    #[test]
+    fn build_plan_does_not_turn_release_status_or_process_questions_into_a_release() {
+        for prompt in [
+            "Is the release published?",
+            "Can we fix the process to always release + publish when I tell you to",
+        ] {
+            let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+            let dir = setup_project();
+            let doc = dir.path().join("plan.md");
+            let content = sealed_turn_doc();
+            std::fs::write(&doc, content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+            agent_doc_cycle_state_io::record_chat_prompts(&doc, &[prompt.to_string()]).unwrap();
+
+            let plan = build(&doc).unwrap();
+            assert!(
+                plan.required_commands
+                    .iter()
+                    .all(|command| !command.contains("make release")),
+                "prompt={prompt:?} commands={:?}",
+                plan.required_commands
+            );
+            assert!(!plan.required_proof.contains(&"github_release".to_string()));
+            assert!(
+                !plan
+                    .required_proof
+                    .contains(&"pypi_publication".to_string())
+            );
+        }
     }
 
     /// `#plansealedturn`: the free-text queue head preflight selected for the

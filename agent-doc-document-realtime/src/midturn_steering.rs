@@ -74,6 +74,11 @@ pub enum SteeringDispatch {
     /// forward the operator's change to that owner, never dispatch a new
     /// subagent (`#claimedsteerwake`). [`SteeringItem::owner`] names it.
     ForwardToOwner,
+    /// The item's worker already reported and its claim was released with a
+    /// receipt (`#reportedrelease`): the coordinator persists that result in
+    /// the current turn, with the closeout that strikes the line. Never a new
+    /// subagent dispatch. [`SteeringItem::owner`] names the reported worker.
+    PersistReported,
 }
 
 impl SteeringDispatch {
@@ -83,6 +88,7 @@ impl SteeringDispatch {
             Self::DrainAfterCurrent => "drain_after_current",
             Self::Subagent => "subagent",
             Self::ForwardToOwner => "forward_to_owner",
+            Self::PersistReported => "persist_reported",
         }
     }
 }
@@ -1414,7 +1420,7 @@ pub fn render_steering_context(
                 .join("; ");
             out.push_str(&format!("\npresets: {names}"));
         }
-        out.push_str(&format!("\naction: {}", instruction_for(item)));
+        out.push_str(&format!("\naction: {}", action_for(document, item)));
     }
     if pending > 0 {
         out.push_str(&format!(
@@ -1424,6 +1430,17 @@ pub fn render_steering_context(
     }
     Some(out)
 }
+
+/// How a dispatched queue item closes once its worker reports
+/// (`#reportedrelease`): the closeout that strikes the line, not a bare
+/// `queue release`, which leaves the line queued and answered nowhere.
+pub const REPORTED_WORKER_CLOSEOUT: &str = "When the subagent reports back, persist its result in \
+     THIS turn with the closeout that strikes the item: `agent-doc finalize` with the verbatim \
+     `> **Queue prompt:** <line>` echo for a free-text line, or `--done <id>` for an id head. \
+     That closeout also ends the claim. Only when integration must finish first, run \
+     `agent-doc queue release` (it records that the worker reported, so the line is never \
+     re-dispatched) and persist the result before you end the turn; `queue release --requeue` \
+     abandons the work for a new worker.";
 
 const FORWARD_EDITED: &str = "the operator EDITED a queue item a worker already claimed (`owner` \
      above; the claim followed the edit). FORWARD the change (`previous` -> `verbatim`) to that \
@@ -1468,6 +1485,50 @@ pub fn apply_claim_owners(items: &mut [SteeringItem], owner_of: impl Fn(&str) ->
             item.presets.clear();
             item.owner = Some(owner);
         }
+    }
+}
+
+/// Re-route queue items whose worker already reported (`#reportedrelease`).
+///
+/// `reported_owner` answers the released owner for a queue line that carries
+/// a live release receipt (the caller's receipt ledger; a live claim already
+/// supersedes a receipt there). Such an item becomes
+/// [`SteeringDispatch::PersistReported`]: its answer exists in the
+/// coordinator's context, so the action is to persist it now, never to offer
+/// it to a NEW subagent. Runs after [`apply_claim_owners`]; a claimed item
+/// keeps its forward routing.
+pub fn apply_release_receipts(
+    items: &mut [SteeringItem],
+    reported_owner: impl Fn(&str) -> Option<String>,
+) {
+    for item in items.iter_mut() {
+        if item.source != SteeringSource::Queue
+            || item.current_item
+            || item.change == SteeringChange::Deleted
+            || item.dispatch == SteeringDispatch::ForwardToOwner
+        {
+            continue;
+        }
+        if let Some(owner) = reported_owner(&item.verbatim) {
+            item.dispatch = SteeringDispatch::PersistReported;
+            item.presets.clear();
+            item.owner = Some(owner);
+        }
+    }
+}
+
+/// The document-specific action for `item`: [`instruction_for`], except a
+/// reported line names its exact closeout (`#reportedrelease`).
+fn action_for(document: &str, item: &SteeringItem) -> String {
+    match item.dispatch {
+        SteeringDispatch::PersistReported => {
+            agent_doc_queue::claim_release_receipt::persist_reported_instruction(
+                document,
+                &item.verbatim,
+                item.owner.as_deref().unwrap_or("its worker"),
+            )
+        }
+        _ => instruction_for(item).to_string(),
     }
 }
 
@@ -1558,9 +1619,11 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              <id-or-line> --owner subagent:<label>` so the loop and Stop hook do not re-enter for \
              it; then paste the output of `agent-doc queue brief <FILE> --item <id-or-line>` \
              verbatim at the top of the subagent prompt (the operator's authorization for the \
-             item, `#waypostauthorization`). Run `agent-doc queue release` when the subagent \
-             reports back. Keep working the current item yourself; record the item as dispatched \
-             in your response."
+             item, `#waypostauthorization`). When the subagent reports back, persist its result \
+             in THIS turn with the closeout that strikes the item (`agent-doc finalize` with the \
+             verbatim `> **Queue prompt:** <line>` echo, or `--done <id>`); that also ends the \
+             claim. Keep working the current item yourself; record the item as dispatched in \
+             your response."
         }
         (SteeringDispatch::Subagent, SteeringSource::Exchange, _, _) => {
             concat!(
@@ -1577,6 +1640,12 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Deleted, _) => FORWARD_DELETED,
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Added, _) => FORWARD_ADDED,
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Edited, _) => FORWARD_EDITED,
+        (SteeringDispatch::PersistReported, _, _, _) => {
+            "this queue item's worker already reported and its claim was released: persist that \
+             result in THIS turn with the closeout that strikes the item (`agent-doc finalize` \
+             with the verbatim `> **Queue prompt:** <line>` echo, or `--done <id>`). Do NOT \
+             dispatch a new subagent for it and do NOT re-claim it."
+        }
         (SteeringDispatch::DrainAfterCurrent, _, _, _) => {
             "queued in operator order: it runs AFTER the current item closes, through the normal \
              queue drain. Do NOT interrupt, interleave, or start it now; acknowledge it and \
@@ -1684,17 +1753,19 @@ pub fn render_closeout_steering_context(
             );
         }
         let action = match (item.dispatch, item.source) {
-            (SteeringDispatch::ForwardToOwner, _) => instruction_for(item).to_string(),
+            (SteeringDispatch::ForwardToOwner | SteeringDispatch::PersistReported, _) => {
+                action_for(document, item)
+            }
             (SteeringDispatch::Subagent, SteeringSource::Queue) => format!(
                 "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
                  `{}` so the loop and Stop hook do not drain it inline, then dispatch; if it \
                  touches a repository, give the subagent its own git worktree outside the \
                  IDE-watched project. Paste the output of `{}` verbatim at the top of the \
                  subagent prompt: it carries the operator's authorization for the item \
-                 (`#waypostauthorization`). Run `agent-doc queue release` when the subagent \
-                 reports back.",
+                 (`#waypostauthorization`). {}",
                 claim_command_for(document, &item.verbatim),
-                brief_command_for(document, &item.verbatim)
+                brief_command_for(document, &item.verbatim),
+                REPORTED_WORKER_CLOSEOUT,
             ),
             (SteeringDispatch::Subagent, SteeringSource::Exchange) => {
                 concat!(
@@ -2860,7 +2931,18 @@ mod tests {
         let queue =
             render_steering_context("tasks/bugs.md", &[item(SteeringSource::Queue)], 0).unwrap();
         assert!(queue.contains("agent-doc queue claim"), "{queue}");
-        assert!(queue.contains("agent-doc queue release"), "{queue}");
+        // `#reportedrelease`: the queue lifecycle ends in the closeout that
+        // strikes the line, not in a bare release.
+        assert!(
+            queue.contains("When the subagent reports back, persist its result"),
+            "{queue}"
+        );
+        assert!(queue.contains("> **Queue prompt:** <line>"), "{queue}");
+        let closeout =
+            render_closeout_steering_context("tasks/bugs.md", &[item(SteeringSource::Queue)], 0)
+                .unwrap();
+        assert!(closeout.contains(REPORTED_WORKER_CLOSEOUT), "{closeout}");
+        assert!(closeout.contains("queue release --requeue"), "{closeout}");
 
         let exchange =
             render_steering_context("tasks/bugs.md", &[item(SteeringSource::Exchange)], 0).unwrap();
@@ -2870,6 +2952,58 @@ mod tests {
         );
         assert!(!exchange.contains("agent-doc queue claim"), "{exchange}");
         assert!(!exchange.contains("agent-doc queue release"), "{exchange}");
+    }
+
+    /// `#reportedrelease`: a line whose worker reported is routed to the
+    /// coordinator's persist-now closeout in both renders, never to a NEW
+    /// subagent dispatch; a claimed (forwarded) or deleted line is untouched.
+    #[test]
+    fn reported_release_routes_to_persist_reported_never_a_new_dispatch() {
+        let line = "Does the page status enum have an archived value?";
+        let item = |change, dispatch| SteeringItem {
+            source: SteeringSource::Queue,
+            change,
+            dispatch,
+            current_item: false,
+            verbatim: line.to_string(),
+            previous: None,
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: None,
+            explicit: false,
+        };
+        let mut items = vec![
+            item(SteeringChange::Added, SteeringDispatch::Subagent),
+            item(SteeringChange::Added, SteeringDispatch::ForwardToOwner),
+            item(SteeringChange::Deleted, SteeringDispatch::Subagent),
+        ];
+        apply_release_receipts(&mut items, |_| {
+            Some("subagent:page-status-enum".to_string())
+        });
+        assert_eq!(items[0].dispatch, SteeringDispatch::PersistReported);
+        assert_eq!(items[0].owner.as_deref(), Some("subagent:page-status-enum"));
+        assert_eq!(items[1].dispatch, SteeringDispatch::ForwardToOwner);
+        assert_eq!(items[2].dispatch, SteeringDispatch::Subagent);
+
+        for rendered in [
+            render_steering_context("tasks/docs.md", &items[..1], 0).unwrap(),
+            render_closeout_steering_context("tasks/docs.md", &items[..1], 0).unwrap(),
+        ] {
+            assert!(rendered.contains("dispatch=persist_reported"), "{rendered}");
+            assert!(
+                rendered.contains("owner=subagent:page-status-enum"),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains(&format!("`> **Queue prompt:** {line}`")),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains("agent-doc finalize tasks/docs.md"),
+                "{rendered}"
+            );
+            assert!(!rendered.contains("DISPATCH NOW"), "{rendered}");
+        }
     }
 
     #[test]

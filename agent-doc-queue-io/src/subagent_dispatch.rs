@@ -85,8 +85,17 @@ pub fn reference_queue_for_dispatch(file: &Path) -> Result<Option<Vec<String>>> 
 pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
+    // `#reportedrelease`: a line whose worker already reported (its claim was
+    // released with a receipt) is the coordinator's to persist, never a new
+    // worker's: offering it again dispatched a duplicate subagent for an
+    // answered question (haiven-dev tasks/docs.md, 2026-10-15).
+    let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
     if let Some(plan) = queue_attr_subagent_plan_with_presets(file, content, &prompt_presets) {
-        return Ok(plan.dispatch);
+        return Ok(plan
+            .dispatch
+            .into_iter()
+            .filter(|head| !reported.claims(head))
+            .collect());
     }
     let reference = reference_queue_for_dispatch(file)?;
     let heads =
@@ -97,7 +106,7 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
     let claimed = crate::queue_claim::claimed_items_for_content(file, content);
     Ok(heads
         .into_iter()
-        .filter(|head| !claimed.claims(head))
+        .filter(|head| !claimed.claims(head) && !reported.claims(head))
         .collect())
 }
 
@@ -600,6 +609,49 @@ mod tests {
         );
         let plan = queue_attr_subagent_plan(&file, &content).unwrap();
         assert!(plan.held.is_empty(), "a bare attr has no capacity hold");
+    }
+
+    /// `#reportedrelease` (haiven-dev tasks/docs.md, 2026-10-15): under the
+    /// queue `subagents` attribute, releasing a reported worker's claim put
+    /// the answered line straight back into the dispatch set, and the
+    /// coordinator dispatched a second worker for it. A reported release
+    /// keeps the line out of dispatch (the coordinator persists it); a
+    /// `--requeue` release returns it to dispatch.
+    #[test]
+    fn reported_release_is_not_redispatched_but_a_requeue_is() {
+        use crate::claim_release_receipt::{ReleaseKind, release};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let question = "Does the page status enum have an archived value?";
+        let content = attr_doc("subagents", &[question, "other question"]);
+        std::fs::write(&file, &content).unwrap();
+        let both = vec![question.to_string(), "other question".to_string()];
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            both
+        );
+
+        crate::queue_claim::claim(&file, question, "subagent:page-status-enum", 3600).unwrap();
+        release(&file, question, ReleaseKind::Reported).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec!["other question".to_string()],
+            "a reported line must not be offered to a new worker"
+        );
+        let excluded = crate::queue_claim::claimed_items_for_content(&file, &content);
+        assert!(
+            !excluded.claims(question),
+            "the reported line stays drainable for the coordinator to persist"
+        );
+
+        crate::queue_claim::claim(&file, question, "subagent:retry", 3600).unwrap();
+        release(&file, question, ReleaseKind::Requeue).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            both,
+            "a requeued line is dispatchable again"
+        );
     }
 
     /// `#waypostauthorization`: the dispatch entry's authorization and the

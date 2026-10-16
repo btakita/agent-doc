@@ -1801,10 +1801,48 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
     let current = current_document_content(file, "codex_stop_committed_prompt_diff")?;
     let pending =
         agent_doc_session_check_io::midturn_steering::pending_steering_items(file, &current);
-    let coordinator_prompt = pending
+    let coordinator_item = pending
         .iter()
-        .find(|item| item.dispatch.as_str() != "forward_to_owner")
-        .map(|item| item.verbatim.clone());
+        .find(|item| item.dispatch.as_str() != "forward_to_owner");
+    let coordinator_prompt = coordinator_item.map(|item| item.verbatim.clone());
+    let disp = file.display().to_string();
+    // `#reportedrelease`: a queue line whose worker already reported is not
+    // fresh work to answer; its result exists only in this turn's context.
+    // Name the exact persistence (the closeout that strikes the line) so the
+    // agent neither re-dispatches it nor persists a heading-only answer that
+    // leaves the line queued to be re-served.
+    if let Some(item) = coordinator_item
+        && item.dispatch.as_str() == "persist_reported"
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_committed_prompt_diff_reported_worker_unpersisted owner={} item_bytes={} (#reportedrelease)",
+                item.owner.as_deref().unwrap_or("-"),
+                item.verbatim.trim().len(),
+            ),
+        );
+        return Ok(Some(StopResponse::Block {
+            decision: "block",
+            reason: format!(
+                "agent-doc Stop hook found a reported worker result for {disp} that was never persisted. {} Do NOT send the final answer yet.",
+                agent_doc_queue::claim_release_receipt::persist_reported_instruction(
+                    &disp,
+                    &item.verbatim,
+                    item.owner.as_deref().unwrap_or("its worker"),
+                ),
+            ),
+        }));
+    }
+    let queue_close = coordinator_item
+        .filter(|item| !agent_doc_session_check_io::midturn_steering::is_exchange_item(item))
+        .map(|item| {
+            format!(
+                " It is a queue line: {}; that closeout strikes it.",
+                agent_doc_queue::claim_release_receipt::queue_line_closeout(&disp, &item.verbatim)
+            )
+        })
+        .unwrap_or_default();
     if !pending.is_empty() && coordinator_prompt.is_none() {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1835,8 +1873,7 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
-            "agent-doc Stop hook found fresh unresolved exchange work for {disp} after the previous cycle was already committed. Continue THIS turn in-pane: answer {prompt:?} in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT send the final answer yet.",
-            disp = file.display(),
+            "agent-doc Stop hook found fresh unresolved exchange work for {disp} after the previous cycle was already committed. Continue THIS turn in-pane: answer {prompt:?} in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`).{queue_close} Do NOT send the final answer yet.",
             prompt = first_nonempty_prompt_line(&prompt),
         ),
     }))
@@ -9459,6 +9496,112 @@ Reviewed the gated items.\n\
                     && reason.contains(prompt)),
             "{response:?}"
         );
+    }
+
+    /// `#reportedrelease`: src/haiven-dev/tasks/docs.md, 2026-10-15. The
+    /// coordinator released `subagent:page-status-enum` when it reported and
+    /// stopped with the answer only in chat. Stop bounced it to "answer" the
+    /// line as fresh work, without the strike contract: the agent persisted a
+    /// `### Re:` answer, the line stayed queued, and steering re-offered it to
+    /// a NEW subagent. A reported release now carries a receipt: Stop names
+    /// the worker's unpersisted result and the exact echo that strikes the
+    /// line, and steering routes it `persist_reported`, never `subagent`.
+    #[test]
+    fn committed_reported_release_names_the_unpersisted_worker_result_and_echo() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &[]);
+        init_git_repo(dir.path(), &doc);
+        complete_run(&doc);
+
+        let prompt = "Does the page status enum have an archived value? What are the values?";
+        let current = fs::read_to_string(&doc).unwrap().replace(
+            "<!-- /agent:queue -->",
+            &format!("- {prompt}\n<!-- /agent:queue -->"),
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, prompt, "subagent:page-status-enum", 3600)
+            .unwrap();
+        agent_doc_queue_io::claim_release_receipt::release(
+            &doc,
+            prompt,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap()
+        .expect("the worker's claim is released");
+
+        let pending =
+            agent_doc_session_check_io::midturn_steering::pending_steering_items(&doc, &current);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].dispatch.as_str(), "persist_reported");
+        assert_eq!(
+            pending[0].owner.as_deref(),
+            Some("subagent:page-status-enum")
+        );
+        let rendered =
+            agent_doc_session_check_io::midturn_steering::render_pending_steering_items(&pending)
+                .unwrap();
+        assert!(!rendered.contains("DISPATCH NOW"), "{rendered}");
+
+        let reason = format!(
+            "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started; prompt_target: {prompt}"
+        );
+        let response = committed_prompt_diff_stop_response(&doc, &reason)
+            .unwrap()
+            .expect("an unpersisted reported result must be handed back");
+        let StopResponse::Block { reason, .. } = &response else {
+            panic!("expected a block: {response:?}");
+        };
+        assert!(
+            reason.contains("subagent:page-status-enum already reported"),
+            "{reason}"
+        );
+        assert!(
+            reason.contains(&format!("`> **Queue prompt:** {prompt}`")),
+            "the bounce must carry the echo that strikes the line: {reason}"
+        );
+        assert!(
+            reason.contains("Do NOT dispatch a new subagent"),
+            "{reason}"
+        );
+        assert!(
+            !reason.contains("fresh unresolved exchange work"),
+            "{reason}"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_committed_prompt_diff_reported_worker_unpersisted"),
+            "{ops}"
+        );
+
+        // A requeue (abandoned work) returns the line to ordinary fresh work,
+        // still with the strike contract for a queue line.
+        agent_doc_queue_io::queue_claim::claim(&doc, prompt, "subagent:retry", 3600).unwrap();
+        agent_doc_queue_io::claim_release_receipt::release(
+            &doc,
+            prompt,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+        )
+        .unwrap();
+        let response = committed_prompt_diff_stop_response(&doc, &reason_for(prompt))
+            .unwrap()
+            .expect("requeued line re-enters");
+        let StopResponse::Block { reason, .. } = &response else {
+            panic!("expected a block: {response:?}");
+        };
+        assert!(
+            reason.contains("fresh unresolved exchange work"),
+            "{reason}"
+        );
+        assert!(
+            reason.contains(&format!("`> **Queue prompt:** {prompt}`")),
+            "{reason}"
+        );
+    }
+
+    fn reason_for(prompt: &str) -> String {
+        format!(
+            "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started; prompt_target: {prompt}"
+        )
     }
 
     /// A claimed item may share one post-commit diff with genuine fresh work.

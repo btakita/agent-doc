@@ -2782,7 +2782,9 @@ fn finalize_reports_concurrent_prompt_added_after_baseline_as_pending_steering()
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicates::str::contains("[session-check] steering pending:"))
+        .stdout(predicates::str::contains(
+            "[session-check] steering pending:",
+        ))
         .stdout(predicates::str::contains("dispatch=address_now"))
         .stdout(predicates::str::contains("prompt_target"))
         .stdout(predicates::str::contains(
@@ -4736,7 +4738,10 @@ fn unstrike_then_response_closeout_case(disk_holds_operator_cut: bool) {
     let content = fs::read_to_string(&doc).unwrap();
     let head = head_blob(tmp.path());
     for (label, materialized) in [("document", &content), ("HEAD", &head)] {
-        assert!(materialized.contains("Dispatched to a subagent."), "{label}:\n{materialized}");
+        assert!(
+            materialized.contains("Dispatched to a subagent."),
+            "{label}:\n{materialized}"
+        );
         assert!(
             materialized.contains("- release + publish\n")
                 && !materialized.contains("~~release + publish~~"),
@@ -5024,4 +5029,112 @@ fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
         .assert()
         .success();
     assert_not_requeued("next preflight");
+}
+
+/// `#reportedrelease`: src/haiven-dev/tasks/docs.md, 2026-10-15. The
+/// operator added a free-text queue question after the coordinator's cycle had
+/// committed; the coordinator claimed it for a subagent and released the claim
+/// when the worker reported. `queue release` must hand back the exact
+/// persist-now closeout (the `> **Queue prompt:**` echo), and a late finalize
+/// (auto-reopened from a HEAD that predates the line) carrying that echo must
+/// strike the line and end its release receipt, so nothing re-serves or
+/// re-dispatches the answered question.
+#[test]
+fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let setup = "Setup head held by a running worker.";
+    let question = "Does the page status enum have an archived value? What are the values?";
+    let original = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- agent:backlog -->",
+        &format!(
+            "<!-- agent:queue go -->\n- {setup}\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->"
+        ),
+    );
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), &original);
+    agent_doc_queue_io::queue_claim::claim(&doc, setup, "subagent:setup", 3600).unwrap();
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+    assert!(!head_blob(tmp.path()).contains(question));
+
+    // The operator adds the question after the commit; the coordinator claims
+    // it for a worker, and releases the claim when the worker reports.
+    let current = fs::read_to_string(&doc).unwrap().replace(
+        &format!("- {setup}\n<!-- /agent:queue -->"),
+        &format!("- {setup}\n- {question}\n<!-- /agent:queue -->"),
+    );
+    fs::write(&doc, &current).unwrap();
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "queue",
+            "claim",
+            doc.to_str().unwrap(),
+            "--item",
+            question,
+            "--owner",
+            "subagent:page-status-enum",
+        ])
+        .assert()
+        .success();
+    let released = agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "queue",
+            "release",
+            doc.to_str().unwrap(),
+            "--item",
+            question,
+        ])
+        .assert()
+        .success();
+    let released = String::from_utf8_lossy(&released.get_output().stderr).into_owned();
+    assert!(
+        released.contains("subagent:page-status-enum already reported")
+            && released.contains(&format!("`> **Queue prompt:** {question}`"))
+            && released.contains("Do NOT dispatch a new subagent"),
+        "release must hand back the persist-now closeout:\n{released}"
+    );
+    assert_eq!(
+        agent_doc_queue_io::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts
+            .len(),
+        1,
+        "a reported release records its receipt"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
+        .write_stdin(format!(
+            "<!-- patch:exchange -->\n### Re: page status enum — gpt-5\n\n> **Queue prompt:** {question}\n\nYes: `current`, `draft`, `archived`, `historical`, `trashed`, `deleted`, `any`.\n<!-- /patch:exchange -->\n"
+        ))
+        .assert()
+        .success();
+
+    let head = head_blob(tmp.path());
+    assert!(head.contains("`archived`, `historical`"), "{head}");
+    assert!(
+        head.contains(&format!("~~{question}")),
+        "the echoed, worker-reported head must be struck:\n{head}"
+    );
+    assert!(
+        head.contains(&format!("- {setup}\n")),
+        "the unrelated claimed head stays queued:\n{head}"
+    );
+    assert!(
+        agent_doc_queue_io::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts
+            .is_empty(),
+        "the strike's closeout reconciliation ends the receipt"
+    );
 }

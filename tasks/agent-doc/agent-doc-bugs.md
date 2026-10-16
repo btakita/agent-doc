@@ -446,6 +446,21 @@ Verification completed on the final release bytes: the authoritative suite passe
 
 Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.513  
 PyPI: https://pypi.org/project/agent-doc/0.35.513/
+
+### Re: Response 2026-10-16 (gpt-6.1-sol)
+
+> **Queue prompt:** do [#syncioredlivetmux]
+> **Chat prompt (#chatprompt):** Has a recent release been published?
+> **Chat prompt (#chatprompt):** ont
+> **Chat prompt (#chatprompt):** cont
+
+Yes. agent-doc v0.35.513 was published successfully and remains the latest public release: the GitHub Release is public with 15 assets, and the exact `agent_doc-0.35.513-py3-none-any.whl` is live on PyPI.
+
+Completed `#syncioredlivetmux` as a separate post-release fix. Package-scoped `agent-doc-sync-io` live-tmux coverage is now explicit in `make tmux-ci`; test-only controller feature parity no longer depends on workspace feature unification; long-path fallback supervisor sockets are included in live-owner discovery; actor GC uses the injected tmux transport; and stale live-tmux fixtures/assertions now reflect the current ownership and safe-passive focus contracts.
+
+Landed commit `742c68d7e5` (`fix: cover package-scoped live tmux sync tests`) on `origin/main` and installed it locally. Verification was fully green: the new package-scoped ignored suite passed 123/123, `make tmux-ci` passed, and `make check` passed including 10,925 Rust tests, 202 VS Code tests, cross-editor/native harnesses, JetBrains builds, and bootstrap checks. Two targeted mutation checks also failed as expected before restoration, proving the fallback-socket and test-feature regressions are covered.
+
+This commit landed after v0.35.513, so it is on main and installed locally but is not claimed as part of the already-published v0.35.513 artifacts. The document exchange is large; queue auto-clear will reset agent context at the idle boundary.
 <!-- agent:boundary:59f6e63f -->
 <!-- /agent:exchange -->
 
@@ -454,7 +469,10 @@ PyPI: https://pypi.org/project/agent-doc/0.35.513/
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#syncioredlivetmux]
+- ~~do [#syncioredlivetmux]~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/279
+- In docs.md, I was instructed to "publish `docs/public-code-policy-adr`" in the exchange but there was no todo item. Since this task requires operator action, a todo item should have been created.
+- release + publish
 <!-- /agent:queue -->
 
 ## Todo
@@ -471,7 +489,6 @@ PyPI: https://pypi.org/project/agent-doc/0.35.513/
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#syncioredlivetmux] [agent-doc-bug] 14 live-tmux tests in `agent-doc-sync-io` fail on current main and are not run by CI. The tmuxpanesreversed subagent found them while running the suite (2026-10-16); they fail the same way with the original `sync.rs`, so they predate the pane-order change. Fix each failure, then add the tests to `make tmux-ci` so they cannot rot again. Do not delete or ignore tests to make the suite pass.
 <!-- /agent:backlog -->
 
 ## Review

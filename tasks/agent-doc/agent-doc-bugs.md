@@ -427,7 +427,26 @@ Completed, committed, pushed, and installed both fixes.
 - Verification: 10,922 Rust tests, 202 VS Code tests, editor builds, mutation tests, and `make tmux-ci` passed.
 - Session closeout committed at `51b1bbf153`; both answered queue items are struck. Only the unrelated `#syncioredlivetmux` item remains.
 - No live panes or user session were terminated.
-<!-- agent:boundary:0ab78b2a -->
+> **Chat prompt (#chatprompt):** Is the release published?
+>
+> **Chat prompt (#chatprompt):** Can we fix the process to always release + publish when I tell you to
+
+### Re: release publication and process contract — gpt-6.1-sol · 2026-10-16T17:25:59-04:00
+
+Yes. v0.35.513 is now published from commit `d764b6c0b34a741c8fde93cc7cf28594acf2ade1`, and it contains the queue free-text boundary fix, the tmux scope-stewardship fixes, and the release-process hardening. The prior public v0.35.512 release did not contain those fixes.
+
+The process is now deterministic when an instruction explicitly asks to release and publish:
+
+- Planning recognizes explicit shipping intent such as “release + publish” and makes `make release` plus GitHub/PyPI proof mandatory.
+- Status questions such as “Is the release published?” and meta-process requests such as “Can we fix the process…” do not accidentally authorize a release.
+- `make release` no longer treats a pushed tag or local install as completion. It waits for the exact tagged commit’s GitHub Release workflow, verifies the non-draft release and its full 15-asset set, waits for the exact PyPI workflow, and verifies the exact public wheel.
+- If the local post-tag install fails, public-publication verification still runs so the release state remains observable and recoverable.
+
+Verification completed on the final release bytes: the authoritative suite passed 10,924 Rust tests, 202 VS Code tests, all JetBrains package/build checks, editor parity and documentation/version gates; `make tmux-ci` passed; the GitHub Release is public with 15 assets; and PyPI exposes `agent_doc-0.35.513-py3-none-any.whl`.
+
+Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.513  
+PyPI: https://pypi.org/project/agent-doc/0.35.513/
+<!-- agent:boundary:59f6e63f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -435,33 +454,7 @@ Completed, committed, pushed, and installed both fixes.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-~~~done
-Claude Code ran out of tokens mid-tasks. Please continue:
-```
-❯ create a backlog + queue item for codex to pick up the work
-
-● Stopped the three agents so Codex won't collide with them in the same worktrees. Now writing one handoff file per
-  agent, then the backlog and queue items.
-
-● Bash(mkdir -p /home/brian/work/btakita/agent-loop/tasks/agent-doc; cat >
-      /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-tmuxscopesteward.md <<'EOF'
-      # Ha…)
-  ⎿  8337 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-2026-10-05-codex.md
-     4868 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-queuefreetextsplit.md
-     3096 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-syncioredlivetmux.md
-     5229 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-tmuxscopesteward.md
-  ⎿  You've hit your weekly limit · resets Oct 19, 6am (America/New_York)
-     Use your limit reset to reset it now: clau.de/reset
-```
-~~~
-- ~~Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?~~
-~~~done
-My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
-> I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
-~~~
-- ~~do [#tmuxscopesteward]~~
 - 🚧 do [#syncioredlivetmux]
-- ~~do [#queuefreetextsplit]~~
 <!-- /agent:queue -->
 
 ## Todo

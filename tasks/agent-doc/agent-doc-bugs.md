@@ -528,6 +528,18 @@ The CI re-run of the failed job is still in progress. The subagent will use its 
 - `make install` succeeded.
 
 **Also in flight:** `subagent:sdktododone` is working the new queue item about sdk.md todos not being checked off when their work finishes. It is fixing the auto-check in agent-doc and will hand back a list of sdk.md rows to check. It will not edit sdk.md itself.
+
+### Re: todo auto-ids (docs.md) folded into the sdk.md todo fix — opus-5-5 · 2026-10-16T00:19-04:00
+
+The new queue item, auto-assign ids to todo items after the docs.md Google Drive todo stayed open, is claimed by `subagent:sdktododone`. That is the worker already fixing the sdk.md todo item, in worktree `~/work/btakita/agent-loop-worktrees/sdktododone` on branch `fix/sdktododone`. Both items change the same todo-id and completion code. Splitting them across two workers would produce conflicting edits, so one worker takes both, possibly as two commits on one branch.
+
+Brief for the new part:
+- **Why the docs.md row stayed open:** it has no own id (`- [ ] Re-authenticate the Google Drive connector … so #httpsdocsgoogle can proceed`), so closeout had nothing to resolve. Its only cited id is the work it unblocks, not the todo itself.
+- **Fix:** mint an own id for every id-less `agent:todo` row using the same machinery as free-text queue items and backlog items. Keep the operator's text, and never re-id a row that already has an own id.
+- **Completion:** then make sure the completion path checks such a row off once the operator or agent reports it done.
+- **Hand-back:** neither docs.md nor sdk.md gets edited by the worker. It returns the list of rows to check off or re-id.
+
+When it reports, I'll integrate the branch, run one `make install`, and close both items.
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
@@ -535,9 +547,13 @@ The CI re-run of the failed job is still in progress. The subagent will use its 
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- ~~do [#detachedexitci]~~
-- todo items in sdk.md did not get marked as completed when done?
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 todo items in sdk.md did not get marked as completed when done?
+---
+In docs.md, I did re-authenticate the google drive connector, but the todo item remained. We should auto-assign ids to todo items, like we do with free text queue items + backend items.
+```
+- [ ] Re-authenticate the Google Drive connector (/mcp, sign in) or paste the Google Doc text into tasks/docs.md so #httpsdocsgoogle can proceed; or say skip
+```
 <!-- /agent:queue -->
 
 ## Todo

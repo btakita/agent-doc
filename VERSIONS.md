@@ -2,6 +2,34 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.514
+
+- **A stale route-owned supervisor can re-exec when the editor has already
+  reloaded (`#279`).** The typed sender-executable-replaced build-mismatch
+  receipt now bypasses stale document-resolution preflight and reaches the
+  existing exec boundary. Other build-mismatch states, malformed documents,
+  and untyped resolution failures remain fail-closed.
+- **Recycle bursts cannot permanently strand stale supervisor registry rows
+  (`#280`).** A failed startup publication retains its exact target in
+  process-scoped reactive state. Idle ticks drive idempotent retries with
+  bounded exponential backoff until a success receipt retires the effect,
+  without blocking startup or the PTY bridge.
+- **JetBrains native reload follows a successfully reattached replica
+  (`#281`).** A checkpoint serialized behind projection recovery resolves the
+  current authoritative forwarder instead of rejecting it solely because its
+  object identity differs from the earlier snapshot. Missing and detached
+  replacements still fail closed.
+- **Resolved directives are authorization (`#directiveauthorization`).**
+  Claude Code, Codex, and dispatched workers no longer ask the operator to
+  repeat `go`, `push`, or `#auth` after the document item and resolved presets
+  already authorized that scoped work. Harness-native tool approval remains a
+  separate grant; unresolved presets remain fail-closed.
+- **Blocking subagent handbacks create operator TODOs (`#wayposttodo`).** The
+  coordinator records the concrete action with `--todo-add` when it presents a
+  `#waypostrequest`, then checks it with `--todo-done` once the answer and
+  continued worker result complete it, so exchange-only requests cannot become
+  invisible operator work.
+
 ## 0.35.513
 
 - **Free-text queue paragraphs keep their item boundaries

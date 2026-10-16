@@ -217,7 +217,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      available. Do not infer an answer from the task, choose on the operator's
      behalf, or convert a chat reply into a tool permission: a protected action
      may be retried only after the harness permission system grants that exact
-     action.
+     action. The closeout that presents the blocking packet must also use
+     `--todo-add` to record one brief, concrete operator action. When the
+     operator's answer and the worker's result complete it, use `--todo-done`
+     in that completion closeout; do not leave a stale open TODO.
 
      Harness transport is capability-specific:
 

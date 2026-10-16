@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -424,87 +423,6 @@ Fixed (above). Restarting IDEA could not help: the stuck controller was in haive
 > **Queue prompt:** #todo
 
 Done last cycle.
-### Re: batch-0.35.510 integrated, checked, installed, pushed to main — opus-5-5 · 2026-10-15T19:50-04:00
-
-**Done.** Every finished subagent branch is merged into `batch-0.35.510`.
-- **One full `make check`:** exit 0, 10790/10790 tests passed. TLA+ was skipped because its models are identical to a run that passed earlier.
-- **One `make install`:**
-  - JetBrains 0.2.642 hot-upgraded in the live IDE. 262 0.2.643 was written to Rider and loads at its next start. 263 is 0.2.644.
-  - VS Code 0.2.82 installed.
-  - 27 supervisors and 3 controllers recycle at their next idle boundary.
-- **`main`:** fast-forwarded to `8cc279f603`. CI for that push is still running; I recorded that rather than waiting on it.
-- **GitHub:** GH 274 and GH 275 are closed with fix commits. No tag yet: this is a local install, and the release is the next step whenever you want it.
-
-❯ **What landed**
-- **GH 274 (`?` duplicate response):** the JetBrains plugin passed native strings in the JVM locale. An ASCII-locale backend turned non-ASCII into `?`, and repair later committed that copy beside the real one. Now UTF-8 is explicit and strict at the JNA boundary. The projection and repair also refuse a second exact copy, or a lossy copy, of a committed response.
-- **GH 275 and the `agent:todo` guard:** todo rows are no longer shadow backlog. A committed closeout whose session check still refuses now exits nonzero instead of printing "superseded".
-- **Todo ids:**
-  - `--todo-add` reuses the open review/backlog id it cites, or mints a fresh id.
-  - Checking the box is the operator's done signal, and no agent write unchecks it.
-  - Preflight reports todo signals, and closeout auto-checks a todo only when its own id is resolved.
-- **`keylogrebase`:** a keystroke log reopened after compaction now restarts on its real base. Admission trusts it only when replay reproduces the recorded tip. This closes the disk-only double-arrival gap, and the TLA+ residual config now passes.
-- **`rundocsstop`:** a Run Agent Doc or operator edit is admitted past shadow-backlog rows, with a repair directive, instead of having its turn stopped. The closeout guard still flags the rows.
-- **Queue scheduling:**
-  - `interval=`, `time=HH:MM[,…]`, `loop` and `loop=N` on `agent:queue`.
-  - One sleeping scheduler per controller, with a 60 s floor and a 300 s cap. Missed ticks coalesce, and failures back off.
-  - Pass counts survive restarts. Attribute edits reschedule live.
-- **Clear Session Context:**
-  - The first press was correctly queued behind a not-yet-started Run, but the notice described a live turn. It now says the clear runs after that Run.
-  - JetBrains and VS Code no longer "cancel" the Run, which only dropped its outcome and allowed a second trigger. VS Code had the same bug, and I fixed it there too.
-- **Stale controller / tmux 2→1→2:**
-  - `[X, X]` layouts collapse to one column, and projection retries are capped at 12.
-  - A per-window claim stops an older layout from another project's controller overriding a newer one.
-  - The stale-supervisor marker on `%180` was five weeks old (pane ids get reused); markers now require a live writer.
-- **Captured-delta livelock:** a typing burst whose acknowledgement was lost under load froze the plugin's baseline. The response then sat in the replica but never reached the visible buffer. The plugin now re-sends the unacknowledged burst and advances only on proof, with a bound. Your 17:51 response did survive (it is in HEAD).
-- **IDE snappiness:**
-  - Build, test and gradle entrypoints run at low priority with core headroom left for the IDE.
-  - Visual highlights reconcile incrementally.
-  - New operator doc: `docs/development/ide-responsiveness.md`.
-- **Test reliability:**
-  - Lib tests no longer cold-launch a separate controller (498 launches → 0), and a guard rejects new ones.
-  - Two wall-clock tests that failed every subagent's `make check` now take an injected clock. Each subagent had "fixed" one its own way; I kept the injected-clock versions.
-- **Already in the batch:** `claimfollowedit`, `splicesessionack` (GH 273 remainder), `rearmreadfailclosed2`, `execfailpipe`, `staleplugwarnflake`.
-
-❯ **sdk.md and `#todo`:** bracketed todo ids are safe again once sdk.md's supervisor picks up the new build. The `#todo` sync was done last cycle (`#gh262tabtmux`, `#sdkmdcleanup`). This echo closes its queue head.
-
-❯ **In flight (next batch):** the docs.md Stop-hook item (an answer released but not persisted) is with `subagent:docsstophook` on `fix/docs-stophook-unpersisted`.
-
-❯ **Follow-ups added** at the end of the backlog: test binaries reaching live project sockets, integration tests still cold-launching controllers, and a recommended tightening of the shadow scan's inline-code skip.
-
-❯ The exchange is large (over 290 lines). Noting it, not stopping for it.
-
-> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/274
-
-Fixed and closed (above).
-
-> **Queue prompt:** `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
-
-❯ Done: id reuse or mint, the operator check as the done signal, and preflight signals plus closeout auto-done (above).
-
-> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.
-
-Fixed and closed. The new comment (only rows without backticks tripped the guard) is covered: `agent:todo` is now excluded as a whole component.
-
-> **Queue prompt:** Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked
-
-Fixed (above).
-
-> **Queue prompt:** idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?
-
-❯ Yes, it was the builds. Fixed (above). The guide is `docs/development/ide-responsiveness.md`.
-
-> **Queue prompt:** sdk.md issue: I asked the agent to add ids on the todo items:
-
-Fixed with option 1 (fix the guard), now installed.
-
-> **Queue prompt:** tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.
-
-Fixed (above). Restarting IDEA could not help: the stuck controller was in haiven-dev, not the IDE.
-
-> **Queue prompt:** #todo
-
-❯ Done last cycle.
-
 ### Re: next batch dispatched — opus-5-5 · 2026-10-15T20:02-04:00
 
 Four queued follow-ups are claimed and dispatched, each in its own worktree from `main` `8cc279f603` (the installed batch-0.35.510):
@@ -520,6 +438,41 @@ Four queued follow-ups are claimed and dispatched, each in its own worktree from
 - `subagent:shadowbacklogscan` (`fix/shadowbacklogscan`): skip only the backtick spans, not the whole line. A read-only sweep of every live session document runs first, so the change cannot start refusing them.
 
 Still in flight: the docs.md Stop-hook item (`subagent:docsstophook`). All five go into one next batch: one `make check`, then one `make install`.
+
+### Re: batch integrated: v0.35.510 released and installed — opus-5-5 · 2026-10-15T22:06-04:00
+
+> **Queue prompt:** do [#closeoutduplicatedcommit]
+
+> **Queue prompt:** docs.md issue:
+> ```
+> • Blocked by hook
+>   └ agent-doc Stop hook found fresh unresolved exchange work for /home/brian/work/btakita/agent-loop/src/haiven-dev/
+> tasks/docs.md after the previous cycle was already committed. Continue THIS turn in-pane: answer "Does the page status
+> enum have an archived value? What are the values?" in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
+> and persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md` (or `agent-doc
+> write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md`). Do NOT send the final answer yet.
+>
+> • The stop hook found that the status-enum result was released but not yet persisted into the session document. I’m
+>   recording that answer now with the official schema distinction and live Haiven evidence, then I’ll run the required
+>   terminal-state check.
+> ```
+
+All five subagent fixes are merged, released as **v0.35.510** (tag pushed, `main` = `2e2a52905c`), and installed locally (`agent-doc 0.35.510`, `.bin/agent-doc` too).
+
+**What shipped:**
+- **`#closeoutduplicatedcommit`:** a committed response can no longer be written twice. Recovery counts a response as present when a block matches it apart from the binary's queue-prompt echo, `❯` prefixes and boundary markers. A commit that would add a second copy is refused and names `agent-doc dedupe`. The `--done` queue strike no longer adds an echo of the id heads.
+- **docs.md Stop-hook item (`reportedrelease`):** `agent-doc queue release` now records a release receipt. A released line is kept until it is persisted and is never dispatched again. Before this fix, releasing the claim erased the fact that the line had been answered, so the Stop hook and closeout steering treated it as new work and dispatched a second subagent for the same question.
+- **`#testisolationleaks`:** test processes are confined to their temp root. Sockets, `state.db`, recycle requests and registry loads outside it now panic. A lib test had been recycling every live supervisor during each `make check`.
+- **`#integrationtesttargets`:** integration tests no longer cold-launch controllers unless they opt in with a reason (546 launches per run before). An admitted launch waits for its socket instead of a fixed 2s.
+- **`#shadowbacklogscan`:** the shadow-backlog scan ignores only backtick spans that cover a row's head, so a drifted row with inline code later in the line is still caught. A read-only sweep of 3,946 live markdown files showed 0 verdict changes.
+
+**Two problems during release, both fixed:**
+1. The previous coordinator wrote its logs (`.coordinator-*.log`) inside the batch worktree. The release check fingerprints untracked files too, so a log that grew during `make check` voided the receipt ("repository/toolchain changed since full-check"). I moved the logs out and re-ran.
+2. `tmux-ci` then failed two tests. The new `#testisolationleaks` guard caught them opening the worktree's real `.agent-doc/state.db`. One was a real production bug: autoclaim's post-claim layout sync passed root-relative registry paths to `sync::run_with_tmux`, which resolved them against the process cwd. That synced whichever project the cwd sat in. The fix resolves them against autoclaim's project root. The other was a test that registered into the cwd registry; it now uses `register_full_in` under its fixture root. Commit `2e2a52905c`, noted in VERSIONS.md.
+
+**Verification:** `make check`: 10,821 passed, 169 skipped. `tmux-ci` passed, and so did both repaired tests on their own. `install-full` completed. GitHub CI and Release runs for the tag are still in progress.
+
+**Not done:** I did not bump the superproject's `src/agent-doc` pointer. That checkout is held by another session: its local `main` sits on unpushed netadv batch2 work (`e8990627cc`) with uncommitted edits, so recording a pointer from here would clobber or misstate it.
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
@@ -527,74 +480,7 @@ Still in flight: the docs.md Stop-hook item (`subagent:docsstophook`). All five 
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#closeoutduplicatedcommit]
-- ~~do [#pollintervalattribute]~~
-- ~~do [#rundocsstop]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/274~~
-- ~~`agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.~~
-- ~~do [#keylogrebase]~~
-- ~~do [#claimfollowedit]~~
-- ~~do [#splicesessionack]~~
-- ~~do [#rearmreadfailclosed2]~~
-- ~~do [#execfailpipe]~~
-- ~~do [#staleplugwarnflake]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.~~
-- ~~Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked~~
-- ~~idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?~~
-~~~done
-sdk.md issue: I asked the agent to add ids on the todo items:
-```
-❯ /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
-
-● Bash(agent-doc session-check tasks/sdk.md 2>&1 | grep -v '^\[perf\]' | cut -c1-200; git --no-pager diff --stat
-      tasks/sdk.md | cat)
-  ⎿  [session-check] INTERRUPTED: open backlog item(s) exist only outside live agent:backlog: #tdidsasstrings (lin
-     e 51), #tdadr0026 (line 52), #tdrobloxaccess (line 53), #tdclireview (line 54), #tdlyraplay
-     tasks/sdk.md | 2 ++
-      1 file changed, 2 insertions(+)
-
-● Nothing has changed, so re-invoking will keep hitting the same refusal. I need a decision from you to get past it.
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ☐ Unblock
-
-│ Preflight keeps refusing tasks/sdk.md because the guard reads the [#id] tags on open agent:todo items as stray
-│ backlog items. How should I unblock it?
-
-❯ 1. Fix the guard (Recommended)
-     Change the orphaned-backlog check in agent-doc (src/agent-doc in agent-loop) so it skips ids that sit in
-     agent:todo. Add a regression test, run make check, make install, then re-run /agent-doc tasks/sdk.md.
-  2. Strip todo [#id] prefixes
-     Remove the [#id] prefixes from the 21 open todo items so preflight admits the turn. The two queue lines use
-     #tdsdkdevrename / #tdue427go, so they lose their id link.
-  3. File an issue only
-     File the false positive against btakita/agent-doc with `agent-doc admin issue` and change nothing else. The
-     session stays blocked.
-  4. Type something.
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  5. Chat about this
-```
-~~~
-- ~~tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.~~
-- ~~#todo~~
----
-🚧 docs.md issue:
-```
-• Blocked by hook
-  └ agent-doc Stop hook found fresh unresolved exchange work for /home/brian/work/btakita/agent-loop/src/haiven-dev/
-tasks/docs.md after the previous cycle was already committed. Continue THIS turn in-pane: answer "Does the page status
-enum have an archived value? What are the values?" in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
-and persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md` (or `agent-doc
-write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md`). Do NOT send the final answer yet.
-
-• The stop hook found that the status-enum result was released but not yet persisted into the session document. I’m
-  recording that answer now with the official schema distinction and live Haiven evidence, then I’ll run the required
-  terminal-state check.
-```
----
-- do [#testisolationleaks]
-- do [#integrationtesttargets]
-- do [#shadowbacklogscan]
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Todo
@@ -610,10 +496,6 @@ write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md`
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#closeoutduplicatedcommit] Closeout duplicated a committed response (agent-doc-bugs.md, cycle-1792108257994, 2026-10-15 19:50-19:57 local, right after make install hot-upgraded JetBrains 0.2.642 and marked 27 supervisors / 3 controllers for recycle): respond hit live_prompt_drift_after_preflight, retained the tracked-work half, then commit 0e3f550b85 landed without the response and 8462722c53 landed TWO copies of the 19:50 Re: section (HEAD lines 328 and 427). The first copy also carries a binary-inserted Queue prompt echo of the nine reaped do-id heads that the response never wrote, which is why agent-doc dedupe reports no duplicates. Meanwhile session-check named write --commit as the recovery while write --commit refused (cycle already committed, run preflight). Fix the double materialization (same class as GH 274), the stray id-head echo, the contradictory recovery guidance, and teach dedupe to match a duplicate modulo binary-owned echo lines; then remove the second copy through the binary path.
-- [ ] [#testisolationleaks] Test isolation leaks into live project roots: haiven-dev ops.log shows bare 0.35.509 clients (no build hash) connecting and being rejected for build mismatch, and supervisor install recycles fired at 19:40, 19:56 and 20:27Z with no install to ~/.cargo/bin (found by fix/stale-controller-hot-update). Find the test binaries reaching live sockets/state.db and confine them to their tmp roots.
-- [ ] [#integrationtesttargets] Integration-test targets still cold-launch a CLI controller serve (~540 launches per full nextest run; fix/cold-launch-test-flakes covered lib tests only). Route them through the in-process controller or a readiness-based wait and extend the cold-launch guard to integration tests.
-- [ ] [#shadowbacklogscan] [recommended] The shadow-backlog scan skips any line overlapping inline code, so a genuinely drifted open backlog row containing backticks is never caught (found during the GH 275 fix). Tighten it without refusing live documents that legitimately quote ids in code.
 <!-- /agent:backlog -->
 
 ## Review

@@ -554,13 +554,21 @@ document has none (right below `agent:backlog`), keeps every existing checklist
 item, and skips an action that is already listed. A missing `agent:todo`
 component is never a reason to skip the TODO.
 
-**Todo ids (`#todoids`).** Every todo you add carries an own id. When the
-action cites exactly one open `agent:review` or `agent:backlog` id, the todo
-REUSES it — the example above becomes `- [ ] [#gate1] Verify [#gate1] in a
-live pane`, the actionable operator prompt for that gate. A second add for an
-id an open todo already owns is a no-op (edit it with `--todo-edit` instead).
-Otherwise the binary mints a fresh id. `id=<id> ` reuses open work or picks a
-custom id, and is rejected when `<id>` is already resolved. Prefer
+**Todo ids (`#todoids`, `#todoidlayer`).** Every todo you add carries an own
+id, and todo ids LAYER on tracked-work ids: a todo is the visibility layer for
+an operator decision on a backlog, review, or icebox item, so when the action
+cites exactly one open `agent:review`, `agent:backlog`, or `agent:icebox` id,
+the todo REUSES it — the example above becomes `- [ ] [#gate1] Verify [#gate1]
+in a live pane`, the actionable operator prompt for that gate. To surface a
+decision on a tracked item, cite its id in the action and let the binary layer
+on it; do not coin a `td...` id for it. A second add for an id an open todo
+already owns is a no-op (edit it with `--todo-edit` instead). A surrogate id is
+minted only when the action cites several open tracked items or none (or as a
+follow-up when a checked todo already owns the one id). `id=<id> ` reuses open
+work, or picks a custom surrogate only when the action does not layer on
+exactly one tracked item (otherwise the receipt prints `requested id=<id> not
+used` and the todo takes the tracked id), and is rejected when `<id>` is
+already resolved. Prefer
 `--todo-add` over `patch:todo` for new items: a patch line without an own id
 gets a `[todo] advisory (#todoids)`.
 
@@ -575,6 +583,11 @@ unchecks). Preflight reconciles it in `todo_signals`:
   a gate from a checkbox.
 - `operator_done_backlog_open` — the operator prerequisite for a backlog item
   is done; treat it as unblocked (`--backlog-ungate <id>` when gated).
+- `operator_done_icebox_open` — the operator made the decision a todo
+  surfaced for a parked icebox item: read any operator note, then act on it
+  this cycle (`--done <id>` to drop it, move it into active work, or record
+  the follow-up). The binary never moves or closes parked work from a
+  checkbox.
 - `linked_work_resolved` — the todo's own id is resolved work; the next
   closeout with tracked-work flags checks it off automatically
   (`[todo] auto-done`), or run `--todo-done <id>` now.
@@ -620,6 +633,6 @@ bare `#id`; `--todo-edit` keeps either spelling.
 **Id-less todo rows get ids at preflight (`#todoidbackfill`).** A row the
 operator typed by hand, or one an older write left without an id, gets an own
 id at the next preflight (`[preflight] todo: assigned own id ...`). A row citing
-exactly one open review/backlog id reuses that id. When the operator reports
+exactly one open review/backlog/icebox id reuses that id. When the operator reports
 the action done, close the row by that id (`--todo-done <id>`); never append a
 checked copy.

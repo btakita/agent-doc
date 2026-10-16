@@ -174,16 +174,21 @@ backlog id is: the shadow-backlog guard never reports it as an open backlog
 item outside `agent:backlog`, the coined-id guards (`session-check` warn and
 the `PreToolUse` source/commit hook) resolve it, and a queue line citing it
 (`- [#<id>]: note`) is a reference, not stray work. A todo that reuses a
-review/backlog id (`#todoids` below) shares that id with its tracked item by
-design; it is the operator prompt for that item, not a duplicate of it. The
+review/backlog/icebox id (`#todoids` below) shares that id with its tracked
+item by design; it is the operator prompt for that item, not a duplicate of it. The
 keyed document merge splits `agent:todo` per item like the list components, so
 a concurrent operator edit and agent write to the checklist merge item by item
 instead of character by character (which could duplicate an edit both sides
 made, `#tododupdone`).
 
-**Todo id discipline (`#todoids`).** Every todo an agent adds with
-`--todo-add` carries an own id: it either REUSES the id of the tracked work it
-is the operator prompt for, or MINTS a new one. An id-less add is never written
+**Todo id discipline (`#todoids`, `#todoidlayer`).** Todo ids LAYER on
+tracked-work ids. A todo exists for visibility: it surfaces an operator
+decision on a backlog, review, or icebox item, so it carries that item's id
+rather than a new one. Every todo an agent adds with `--todo-add` carries an
+own id: it either REUSES the id of the one tracked item it is the operator
+prompt for, or gets a SURROGATE id (minted, or a caller-chosen `id=` that names
+no tracked work) — only when the action cites several open tracked items or
+none. An id-less add is never written
 (auto-mint, not rejection). The binary decides from the document's tracked
 work (open `agent:review` / `agent:backlog` / `agent:icebox` ids; resolved ids
 from `[x]` items, inline `agent:done` entries, and the `agent:done archive=`
@@ -191,12 +196,13 @@ file):
 
 | `--todo-add` input | Own id |
 |---|---|
-| Action cites exactly one OPEN `agent:review` or `agent:backlog` id (`Verify [#gate1] live`) | Reuses it: `- [ ] [#gate1] Verify [#gate1] live`. The todo text is the actionable operator prompt for that item. |
+| Action cites exactly one OPEN `agent:review`, `agent:backlog`, or `agent:icebox` id (`Verify [#gate1] live`; unknown ids such as `GH #267` beside it do not count) | Reuses it: `- [ ] [#gate1] Verify [#gate1] live`. The todo text is the actionable operator prompt for that item. |
 | …and an OPEN todo already owns that id | No-op: duplicate todos for one id fold into the existing item (`--todo-edit` changes its text). |
-| …and only a CHECKED todo owns that id | A follow-up action: minted id, still citing the gate. |
-| Action cites no open review/backlog id, several, or only icebox/resolved/unknown ids (`GH #267`) | Minted, like a backlog id. |
-| Explicit `id=<id>` / `[#<id>]` naming open review/backlog work | Reuses it. |
-| Explicit id naming nothing tracked | A custom minted id. |
+| …and only a CHECKED todo owns that id | A follow-up action: surrogate id (minted, or the caller's `id=`), still citing the item. One id names one row, so the checked row keeps it. |
+| Action cites several open tracked ids, or none (only resolved/unknown ids such as `GH #267`) | Surrogate: minted like a backlog id. |
+| Explicit `id=<id>` / `[#<id>]` naming open review/backlog/icebox work | Reuses it. |
+| Explicit id naming nothing tracked, action cites exactly one open tracked id | Layers on the cited id; the receipt prints `requested id=<id> not used`. |
+| Explicit id naming nothing tracked, action cites several open tracked ids or none | A custom surrogate id. |
 | Explicit id naming RESOLVED tracked work | Rejected: a todo for finished work is moot. |
 | Explicit id already owned by a todo item | Rejected; use `--todo-edit`. |
 
@@ -212,10 +218,13 @@ each id-less todo row an own id, the way queue maintenance coins finished
 free-text queue lines into backlog ids. That covers rows the operator typed by
 hand, rows an older binary wrote, and `patch:todo` additions. The rules match
 `--todo-add`: an OPEN row whose action cites exactly one OPEN
-`agent:review`/`agent:backlog` id that no todo owns reuses that id (the row is
+`agent:review`/`agent:backlog`/`agent:icebox` id that no todo owns reuses that id (the row is
 the operator prompt for that work, so checking it reports the prerequisite done
 and resolving the work checks it off); every other row gets a minted id that
-avoids every document, tracked-work, done-archive, and todo id. The pass:
+avoids every document, tracked-work, done-archive, and todo id. A CHECKED
+id-less row always gets a surrogate: no decision is pending on it, and taking
+the tracked id would leave the open row that surfaces the live decision
+without it (`#todoidlayer`). The pass:
 
 - never re-ids a row that already has an own id, bracketed or bare;
 - inserts only the `[#id] ` token, keeping checkbox, marker, indentation, and
@@ -244,6 +253,7 @@ preflight with this mapping:
 |---|---|---|
 | Own id is an OPEN `agent:review` gate | `operator_done_review_open` | The agent resolves the gate that cycle (`--review-resolve <id>`) after reading any operator note, or records the follow-up. The binary never resolves a gate from a checkbox: which outcome the operator chose is judgement. |
 | Own id is OPEN `agent:backlog` work | `operator_done_backlog_open` | The operator prerequisite is done; the item is unblocked (`--backlog-ungate <id>` when gated). |
+| Own id is an OPEN `agent:icebox` item (`#todoidlayer`) | `operator_done_icebox_open` | The operator made the decision the todo surfaced for the parked item; the agent reads any operator note and acts that cycle (`--done <id>` to drop it, move it into active work, or record the follow-up). The binary never moves or closes parked work from a checkbox. |
 | No link, or linked work already resolved | none | Nothing; the operator prunes checked items. |
 
 An operator check is never reverted by an agent write. A `patch:todo` that

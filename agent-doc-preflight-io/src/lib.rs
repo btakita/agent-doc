@@ -270,6 +270,7 @@ pub struct GateVerifyResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TodoSignal {
     /// `operator_done_review_open`, `operator_done_backlog_open`,
+    /// `operator_done_icebox_open`,
     /// `linked_work_resolved`, or `cited_work_resolved`.
     pub kind: String,
     /// The `--todo-*` selector of the item (its own id, else its text).
@@ -302,6 +303,11 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
         ),
         Kind::OperatorDoneBacklogOpen => format!(
             "The operator checked todo {label}, the operator prerequisite for backlog {ids}. Treat {ids} as unblocked (--backlog-ungate {id} if it is gated).",
+            label = finding.label,
+            id = finding.ids.first().map(String::as_str).unwrap_or_default(),
+        ),
+        Kind::OperatorDoneIceboxOpen => format!(
+            "The operator checked todo {label}, the operator decision on parked icebox item {ids}. Read any operator note, then act on it this cycle (close it with --done {id}, move it into active work, or record the follow-up); agent-doc never moves or closes parked work from a checkbox.",
             label = finding.label,
             id = finding.ids.first().map(String::as_str).unwrap_or_default(),
         ),

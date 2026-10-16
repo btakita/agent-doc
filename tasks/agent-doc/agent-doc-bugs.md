@@ -319,6 +319,23 @@ The exchange is 213 lines. The queue is active, so I am not compacting.
 **Local `main` is stale:** the shared `src/agent-doc` checkout's local `main` is 807 commits behind `origin/main`, and that checkout also holds another session's uncommitted work, so I left it alone. I told the `#tmuxscopesteward` agent, which had branched from that stale `main`, to rebase onto `origin/main`.
 
 `#tmuxscopesteward` is still running.
+
+### Re: fix the real tmux tests — an agent is already on it as `#syncioredlivetmux` — opus-5.5 · 2026-10-16T13:25-04:00
+
+> **Chat prompt (#chatprompt):** Fix the real tmux tests
+
+**An agent is already fixing the 14 failing real-tmux tests.** I gave the item to a background agent at 13:22, before your message arrived. I am not starting a second agent or working the tests myself, because both would edit the same files in parallel.
+- **Branch and worktree:** `fix/sync-io-live-tmux-tests` in its own worktree, `agent-doc-wt/syncioredlivetmux`, based on `origin/main` (`46bc541bd8`, which includes the pane-order fix).
+- **The job:**
+  - Find each failing test, why CI skips it, and the real cause of each failure.
+  - Fix the cause. Deleting a test, skipping it, rerunning until it passes, or raising timeouts does not count.
+  - Run every real-tmux test on its own private tmux server, killed even if a test panics.
+  - Break each key fix on purpose to prove its test goes red.
+  - Add the tests to `make tmux-ci` so CI covers them.
+  - Run `make tmux-ci` and `make check`, then commit and push its branch.
+- **Possible overlap:** the `#tmuxscopesteward` agent is changing how test tmux servers start and shut down, which may touch the same test helpers. I told the `#syncioredlivetmux` agent to keep any shared change small and report it, and I will reconcile the two when I merge.
+
+**When it reports**, I merge to `main`, run one `make install`, and close `#syncioredlivetmux`. `#tmuxscopesteward` is still running its full test suite.
 <!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 

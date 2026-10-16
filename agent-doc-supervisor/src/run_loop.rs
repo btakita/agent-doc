@@ -46,9 +46,15 @@ pub fn child_launch_plan(
 /// top of it would add a second dispatcher for the same work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OperatorClearPendingWork {
-    /// An agent-doc cycle is still open (a real pending turn the relaunch must
-    /// resume, e.g. a captured response awaiting closeout).
+    /// An agent-doc cycle is still open. Without a durable response capture it
+    /// is a real pending turn the relaunch must resume (an unanswered
+    /// preflight).
     pub cycle_open: bool,
+    /// The open cycle's response is durably captured
+    /// (`response_captured`/`write_applied` with capture id and response hash).
+    /// Its remaining closeout is the supervisor's keyed captured-finalize
+    /// resume, which needs no harness (`#clearsessioncontext`).
+    pub cycle_response_captured: bool,
     /// The visible document carries unanswered operator steering / an explicit
     /// route relative to the closed cycle's baseline (`TurnAdmission`).
     pub operator_intent_pending: bool,
@@ -68,11 +74,22 @@ pub enum RequestedRestartTrigger {
     /// Operator Clear at an idle prompt with nothing pending: the Clear's whole
     /// effect is the fresh context, so no `/agent-doc <file>` turn is injected.
     SuppressOperatorClearIdle,
+    /// Operator Clear over an open cycle whose response is already durably
+    /// captured (`#clearsessioncontext`). The supervisor owns the
+    /// remaining closeout, so the fresh child has no turn to resume: re-running
+    /// the document would only make it restate the retained-closeout blocker
+    /// the previous context already reported (or act on supervisor-owned work).
+    /// Queue heads and operator steering stay with the idle-queue watch, which
+    /// dispatches them on the fresh child's idle boundary once admission allows.
+    SuppressSupervisorOwnedCloseout,
 }
 
 impl RequestedRestartTrigger {
     pub const fn auto_trigger(self) -> bool {
-        !matches!(self, Self::SuppressOperatorClearIdle)
+        !matches!(
+            self,
+            Self::SuppressOperatorClearIdle | Self::SuppressSupervisorOwnedCloseout
+        )
     }
 
     pub const fn as_str(self) -> &'static str {
@@ -80,6 +97,7 @@ impl RequestedRestartTrigger {
             Self::RetriggerRestart => "restart_request",
             Self::RetriggerPendingWork(reason) => reason,
             Self::SuppressOperatorClearIdle => "operator_clear_no_pending_work",
+            Self::SuppressSupervisorOwnedCloseout => "captured_cycle_supervisor_closeout",
         }
     }
 }
@@ -94,6 +112,12 @@ pub fn requested_restart_trigger(
         return RequestedRestartTrigger::RetriggerRestart;
     }
     if pending.cycle_open {
+        // `#clearsessioncontext`: a captured cycle's closeout belongs to
+        // the supervisor, not to the fresh harness context. Only an uncaptured
+        // open cycle is a turn the relaunch must resume.
+        if pending.cycle_response_captured {
+            return RequestedRestartTrigger::SuppressSupervisorOwnedCloseout;
+        }
         return RequestedRestartTrigger::RetriggerPendingWork("open_cycle");
     }
     if pending.operator_intent_pending {
@@ -233,12 +257,81 @@ mod tests {
         }
     }
 
+    /// `#clearsessioncontext`: the 2026-10-16 `tasks/sdk.md` follow-up.
+    /// A Clear crossed an open cycle whose response was durably captured
+    /// (`#clearcapturedcycle`); re-running the document on the fresh Codex
+    /// only made it restate the retained-closeout blocker the supervisor
+    /// already owns. The relaunch stays at its idle prompt instead.
+    #[test]
+    fn operator_clear_over_a_captured_cycle_does_not_retrigger_the_document() {
+        let pending = OperatorClearPendingWork {
+            cycle_open: true,
+            cycle_response_captured: true,
+            ..Default::default()
+        };
+        let decision = requested_restart_trigger(true, pending);
+        assert_eq!(
+            decision,
+            RequestedRestartTrigger::SuppressSupervisorOwnedCloseout
+        );
+        assert!(!decision.auto_trigger());
+        assert_eq!(decision.as_str(), "captured_cycle_supervisor_closeout");
+        assert!(!child_launch_plan(true, decision.auto_trigger(), false).auto_trigger);
+    }
+
+    /// A capture only matters while its cycle is open: a stale capture flag
+    /// on a closed cycle never suppresses observed operator intent, and an
+    /// uncaptured open cycle still re-triggers.
+    #[test]
+    fn captured_flag_suppresses_only_an_open_cycle() {
+        assert_eq!(
+            requested_restart_trigger(
+                true,
+                OperatorClearPendingWork {
+                    cycle_response_captured: true,
+                    operator_intent_pending: true,
+                    ..Default::default()
+                }
+            ),
+            RequestedRestartTrigger::RetriggerPendingWork("operator_intent_pending")
+        );
+        assert_eq!(
+            requested_restart_trigger(
+                true,
+                OperatorClearPendingWork {
+                    cycle_open: true,
+                    ..Default::default()
+                }
+            ),
+            RequestedRestartTrigger::RetriggerPendingWork("open_cycle")
+        );
+    }
+
+    /// Restart Agent / IPC restart keep re-triggering even over a captured
+    /// cycle: only the operator Clear's provenance makes the fresh context the
+    /// whole effect.
+    #[test]
+    fn non_clear_restart_over_a_captured_cycle_keeps_retriggering() {
+        assert_eq!(
+            requested_restart_trigger(
+                false,
+                OperatorClearPendingWork {
+                    cycle_open: true,
+                    cycle_response_captured: true,
+                    ..Default::default()
+                }
+            ),
+            RequestedRestartTrigger::RetriggerRestart
+        );
+    }
+
     #[test]
     fn non_clear_restart_requests_keep_retriggering_regardless_of_pending_work() {
         for pending in [
             OperatorClearPendingWork::default(),
             OperatorClearPendingWork {
                 cycle_open: true,
+                cycle_response_captured: false,
                 operator_intent_pending: true,
                 observation_failed: true,
             },

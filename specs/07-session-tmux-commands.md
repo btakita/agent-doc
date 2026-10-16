@@ -1294,7 +1294,9 @@ shells with no report) — through the same canonical
   prompt), or the harness's clear exits the process (Codex,
   `#clear-ready-restart`); see `specs/supervisor.md`. A fresh restart over an
   open cycle is applied at once only when the actor is `Ready` and the cycle's
-  response is durably captured (`#clearcapturedcycle`); otherwise the
+  response is durably captured (`#clearcapturedcycle`), and the relaunched
+  child then waits at its prompt instead of re-running the document over that
+  supervisor-owned closeout (`#clearsessioncontext`); otherwise the
   supervisor latches it until the cycle closes, the client logs
   `session_clear_deferred ... deferred_until=agent_doc_cycle_closes`, and its
   output says the clear is accepted but NOT applied yet instead of "Cleared"

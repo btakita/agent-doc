@@ -41,6 +41,11 @@ fn deferred_restart_ready_to_replace_child(
 /// same projection the restart/recycle gates read, and operator intent is the
 /// shared closed-cycle `TurnAdmission` verdict, so this cannot disagree with what
 /// preflight would admit.
+///
+/// `#clearsessioncontext`: for an open cycle it also observes whether the
+/// response is durably captured — the same fail-closed projection the Clear's
+/// restart admission (`#clearcapturedcycle`) read — so a clear that crossed a
+/// supervisor-owned closeout does not re-drive the fresh child into it.
 fn operator_clear_pending_work(
     shared: &SupervisorShared,
     file: &Path,
@@ -49,6 +54,7 @@ fn operator_clear_pending_work(
     if cycle_open {
         return agent_doc_supervisor::run_loop::OperatorClearPendingWork {
             cycle_open,
+            cycle_response_captured: shared.agent_doc_cycle_response_captured(),
             ..Default::default()
         };
     }
@@ -2481,6 +2487,9 @@ pub fn run_with_reap_policy_resume_and_harness(
                 // `#idlecleartriggerinject`: an operator Clear at an idle prompt
                 // re-triggers the document only when pending work exists; every
                 // other restart request keeps the historical re-trigger.
+                // `#clearsessioncontext`: an open cycle whose response is
+                // durably captured is supervisor-owned closeout, not pending
+                // harness work, so it does not re-trigger either.
                 let trigger = agent_doc_supervisor::run_loop::requested_restart_trigger(
                     operator_clear,
                     if operator_clear {
@@ -3108,6 +3117,108 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
+
+    /// `#clearsessioncontext` production wiring: the relaunch after a
+    /// Codex Clear that crossed an open cycle (`#clearcapturedcycle`) reads the
+    /// same on-disk projection the Clear's admission read. A durably captured
+    /// response is supervisor-owned closeout, so the fresh child is NOT re-run
+    /// on the document (it would only restate the retained-closeout blocker);
+    /// an uncaptured preflight is still the harness's turn and re-triggers.
+    #[test]
+    fn operator_clear_relaunch_skips_the_document_over_a_captured_cycle() {
+        for captured in [true, false] {
+            let dir = TempDir::new().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let doc = dir.path().join("sdk.md");
+            std::fs::write(&doc, "# sdk\n").unwrap();
+            let opened =
+                agent_doc_cycle_state_io::start_preflight(&doc, Some("# sdk\n"), Some("# sdk\n"))
+                    .unwrap();
+            if captured {
+                agent_doc_cycle_state_io::mark_response_captured(
+                    &doc,
+                    "response_captured",
+                    Some("# sdk\n"),
+                    Some("# sdk\n"),
+                    "response-sha",
+                    Some(&opened.cycle_id),
+                )
+                .unwrap();
+            }
+            let shared = SupervisorShared::with_actor_runtime(
+                "test",
+                "clear-relaunch-owned-closeout".to_string(),
+                None,
+                "codex",
+                Some(SessionActorRuntime {
+                    project_root: dir.path().to_path_buf(),
+                    file: doc.clone(),
+                    session_id: "sdk-session".to_string(),
+                    pane_id: "%180".to_string(),
+                    generation: 72,
+                }),
+                Some(agent_doc_controller::actor::ActorState::Ready),
+                None,
+            );
+
+            // Clear IPC first: Codex's `/clear` exits the process, so the
+            // supervisor arms a fresh restart. Over the captured cycle it
+            // crosses at once (`#clearcapturedcycle`); over the uncaptured one
+            // it latches, and the relaunch below is what fires when it releases.
+            let mut child = std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn stand-in harness child");
+            shared.child_pid.store(child.id(), Ordering::Relaxed);
+            let clear = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
+                IpcMethod::Clear {
+                    bytes: "/clear".to_string(),
+                },
+                &shared,
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+            assert!(clear.ok, "captured={captured}: {clear:?}");
+            let data = clear.data.expect("clear data");
+            assert_eq!(data["captured_cycle_crossed"], captured);
+            let intent = agent_doc_supervisor_io::ipc::RestartIntent::decode(
+                shared.restart_mode.lock().clone(),
+            );
+            assert!(intent.operator_clear && intent.mode == "fresh");
+
+            // The child-exit boundary: the run loop's one-shot observation.
+            let pending = operator_clear_pending_work(&shared, &doc);
+            assert!(pending.cycle_open, "captured={captured}");
+            assert_eq!(pending.cycle_response_captured, captured);
+            let trigger = agent_doc_supervisor::run_loop::requested_restart_trigger(
+                intent.operator_clear,
+                pending,
+            );
+            assert_eq!(trigger.auto_trigger(), !captured, "captured={captured}");
+            assert_eq!(
+                trigger.as_str(),
+                if captured {
+                    "captured_cycle_supervisor_closeout"
+                } else {
+                    "open_cycle"
+                }
+            );
+            // A non-clear restart (Restart Agent) over the same cycle keeps the
+            // historical re-trigger.
+            assert!(
+                agent_doc_supervisor::run_loop::requested_restart_trigger(false, pending)
+                    .auto_trigger()
+            );
+            // Skipping the re-trigger leaves the cycle open for the
+            // supervisor's keyed captured-finalize resume.
+            assert!(
+                agent_doc_cycle_state_io::load(&doc)
+                    .unwrap()
+                    .is_some_and(|state| state.is_open()),
+                "captured={captured}"
+            );
+        }
+    }
 
     #[test]
     fn deferred_restart_releases_only_after_cycle_close_and_ready_prompt() {

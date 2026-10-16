@@ -460,9 +460,21 @@ idle prompt.
   closed-cycle `TurnAdmission` verdict reports unanswered operator intent
   (steering or an explicit route). It re-submits `/agent-doc <file>` only when one
   of those holds, or when the observation itself failed (fail open); otherwise
-  the fresh child stays at its idle prompt and no `auto_trigger_inject` runs. The
-  decision is logged as `operator_clear_restart_trigger auto_trigger=<bool>
-  reason=<open_cycle|operator_intent_pending|pending_work_unobservable|operator_clear_no_pending_work>`.
+  the fresh child stays at its idle prompt and no `auto_trigger_inject` runs.
+  An open cycle counts as pending work only while its response is NOT durably
+  captured (`#clearsessioncontext`): a clear that crossed a captured
+  cycle (`#clearcapturedcycle`) leaves the closeout to the supervisor's keyed
+  captured-finalize resume, and re-running the document on the fresh child only
+  made it restate the retained-closeout blocker (Codex Stop hook
+  `codex_stop_retained_closeout_needs_operator action=report_operator_blocker`)
+  the old context had already reported, or act on work the supervisor owns. The
+  fresh child therefore waits at its prompt, exactly as the old child did over
+  the same captured cycle, and the client's crossed-cycle Clear message says
+  so. The capture observation reads the same fail-closed projection as the
+  clear's restart admission, so an unreadable projection re-triggers as before.
+  The pure decision is `agent_doc_supervisor::run_loop::requested_restart_trigger`.
+  The decision is logged as `operator_clear_restart_trigger auto_trigger=<bool>
+  reason=<open_cycle|captured_cycle_supervisor_closeout|operator_intent_pending|pending_work_unobservable|operator_clear_no_pending_work>`.
   Go-mode queue heads are not part of this decision: the per-child idle-queue
   watch is the single owner of queue continuation and drains a pending head on
   the new child's first idle boundary. Restart Agent, IPC `session restart`,

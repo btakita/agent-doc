@@ -7559,14 +7559,30 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         .unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let pane_window = iso.pane_window(&pane).unwrap();
-        agent_doc_session_registry_io::registration::register(
+        // Register under the fixture root, never the process cwd's project
+        // registry (#testisolationleaks).
+        agent_doc_session_registry_io::registration::register_full_in(
+            dir.path(),
             &session_id,
             &pane,
             &doc.to_string_lossy(),
+            std::process::id(),
+            &pane_window,
         )
         .unwrap();
-        agent_doc_session_actor_io::record_session_start(&doc, &session_id, &pane, &pane_window, 1)
-            .unwrap();
+        // The fixture-root registration already committed a generation; start
+        // the session at the next one so the actor CAS sees its true prior.
+        let generation = agent_doc_session_actor_io::next_generation(&doc, &session_id)
+            .unwrap()
+            .new_generation;
+        agent_doc_session_actor_io::record_session_start(
+            &doc,
+            &session_id,
+            &pane,
+            &pane_window,
+            generation,
+        )
+        .unwrap();
         clear(&doc).unwrap();
         let latest = agent_doc_codex_hook_io::load_latest_prompt_for_file(&doc)
             .unwrap()

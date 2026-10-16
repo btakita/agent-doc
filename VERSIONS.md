@@ -61,7 +61,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   every live supervisor and connecting to editors as a bare build. Lib and
   integration tests stop cold-launching controllers unless they opt in with a
   reason (546 → 237 launches, none from test processes). Several wall-clock
-  tests now take an injected clock.
+  tests now take an injected clock. Autoclaim's post-claim layout sync now
+  resolves registry files against its project root instead of the process cwd,
+  so it no longer syncs whichever project the cwd sits in.
 
 ## 0.35.509
 

@@ -192,7 +192,17 @@ fn sync_after_autoclaim_in(
                 && tmux.pane_window(&entry.pane).ok().as_deref() == Some(&window_id)
                 && !entry.file.is_empty()
         })
-        .map(|entry| entry.file.clone())
+        // Registry files are relative to `base_dir`, not the process cwd: resolve
+        // them here so sync scopes to this project instead of whichever project
+        // the cwd happens to sit in (#testisolationleaks).
+        .map(|entry| {
+            let file = std::path::Path::new(&entry.file);
+            if file.is_absolute() {
+                entry.file.clone()
+            } else {
+                base_dir.join(file).to_string_lossy().into_owned()
+            }
+        })
         .collect();
 
     if window_files.len() < 2 {

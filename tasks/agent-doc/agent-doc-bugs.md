@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a13cac-54da-7403-9456-6fc418818870
+  codex: 01a145c7-ab88-7c71-87df-073dff16e979
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -390,6 +390,32 @@ Added `#queuefreetextsplit` to the backlog and appended its mirrored `do [#queue
 Committed the three completed handoff documents as `241c641c7b` (`docs: add interrupted task handoffs`). No implementation tests, build, or install were run because this cycle only recovered and tracked the handoffs; the implementation handoffs retain their own remaining verification requirements.
 
 The exchange is large (327 lines); queue auto-clear will reset context after this closeout. No compaction was requested.
+
+### Re: queue free-text boundaries and tmux-scope stewardship completed — gpt-6.1-sol · 2026-10-16T14:51-04:00
+
+> **Queue prompt:** 🚧 Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?
+
+Yes. The installed parser now recognizes that question and the following column-zero prose as distinct queue heads. Indented lines remain continuations of the preceding list item; a bare paragraph plus its immediately attached blockquote is one multiline head; `***`, `___`, and unpaired `---` remain boundaries; and unexpected prose elsewhere remains visible as freeform input instead of being silently dropped. Preflight, queue claims, exact response striking, session guards, and the Markdown AST overlay now use the same boundaries.
+
+> **Queue prompt:**
+>
+> My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
+> > I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
+
+Implemented tmux-spawn scope stewardship. Rust/tmux test targets now inherit an unreachable session-bus address so tests cannot create transient user scopes. A rate-limited controller sweep, guarded by a host-wide stamp, resets failed `tmux-spawn-*` units and stops only empty scopes or orphan scopes whose processes are proven through `/proc/<pid>/exe` to be `agent-doc` and lexically contained in tempfile fixture roots. Everything else is reported without signalling. The admin command supports dry-run/JSON reporting, and sweep-slot, worker-spawn, command-output, and logging failures are observable.
+
+The final hardening rejects forged `argv[0]` ownership and `..` fixture escapes, drains stdout/stderr concurrently to avoid pipe deadlocks, and records failures that previously could silently disable stewardship.
+
+The combined branch is `fix/queue-free-text-item-boundaries` at `e55848a031`, containing parser commit `e8c79ab331` plus tmux commits `99d41bb6cb` and `e55848a031`. The dedicated tmux branch is also pushed at `ec384f1adb`.
+
+Verification completed:
+
+- Parser suites: 60 Markdown-AST tests and 817 queue tests passed; a boundary mutation failed the regression as expected, then passed after restoration.
+- Tmux scope/controller targeted tests passed; four safety/observability mutations failed as expected, then passed after restoration.
+- Dedicated `make tmux-ci` passed.
+- Integrated `make check` passed: 10,922 Rust tests, 202 VS Code tests, cross-editor simulation, JetBrains builds, docs, bootstrap, and TLA receipt checks.
+- Private-name diff scan was clean; the two full-tree matches are pre-existing in untouched files.
+- `make install` installed the combined binary/library and editor packages, and issued runtime recycle/reload signals.
 <!-- agent:boundary:0ab78b2a -->
 <!-- /agent:exchange -->
 
@@ -420,9 +446,9 @@ Claude Code ran out of tokens mid-tasks. Please continue:
 - 🚧 Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?
 My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
 > I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
-- 🚧 do [#tmuxscopesteward]
+- ~~do [#tmuxscopesteward]~~
 - 🚧 do [#syncioredlivetmux]
-- do [#queuefreetextsplit]
+- ~~do [#queuefreetextsplit]~~
 <!-- /agent:queue -->
 
 ## Todo
@@ -439,9 +465,7 @@ My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#queuefreetextsplit] [agent-doc-bug] `agent:queue` merges an unindented multi-line free-text item after a bullet into that bullet, but drops prose after a thematic break; `session-check` also falsely reports claimed free-text heads as lost. Define compatible item-boundary rules, make preflight/list/claim/#ftstrike/session-check agree, warn rather than silently drop text, update the SPEC, and add mutation-checked regressions. Handoff: `tasks/agent-doc/handoff-queuefreetextsplit.md`.
 - [ ] 🚧 [#syncioredlivetmux] [agent-doc-bug] 14 live-tmux tests in `agent-doc-sync-io` fail on current main and are not run by CI. The tmuxpanesreversed subagent found them while running the suite (2026-10-16); they fail the same way with the original `sync.rs`, so they predate the pane-order change. Fix each failure, then add the tests to `make tmux-ci` so they cannot rot again. Do not delete or ignore tests to make the suite pass.
-- [ ] 🚧 [#tmuxscopesteward] [agent-doc-bug] agent-doc leaks systemd transient `tmux-spawn-*.scope` units in the user manager: 3,911 were loaded at the time of the 2026-10-16 X11 crash, while the live tmux server had about 50 pane processes. The previous boot journal has 2,718 scopes that ended `Failed with result resources` (`No PIDs left to attach`): the pane process exited before systemd could attach it. Failed transient units stay loaded until `systemctl --user reset-failed`. Launchers were many short-lived tmux servers with about 120-135 panes each, consistent with real-tmux tests on private sockets. Fix: (1) stop test and runtime tmux servers from leaking scopes, (2) add a rate-limited, binary-owned sweep that resets failed `tmux-spawn-*` units and stops only scopes provably holding leaked agent-doc processes, logged to ops.log, with an admin `--dry-run` command. Dispatched to subagent:tmuxscopes on branch fix/tmux-spawn-scope-stewardship (worktree agent-doc-wt/tmuxscopes).
 <!-- /agent:backlog -->
 
 ## Review

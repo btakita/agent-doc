@@ -595,3 +595,5 @@
   • Agent-doc admission failed because the response heading is already committed, leaving stale completed queue residue.
   No document changes were made, and I did not rerun preflight.
   ```
+- 2026-10-16 [#jetbrainsreplicaloops] [agent-doc] When a JetBrains replica loops on stale-baseline local deltas (canonical-rebootstrap-captured-local-delta, visible_length_mismatch) and retained-persistence rebuilds are exhausted (state=editor_holds_unmerged_visible_text), roll the operator's editor text forward in place with the captured response re-applied on top, as the fresh-controller retained reseed did for sdk.md at 2026-10-16T06:05Z. Today only a controller recycle breaks the loop, and the remedy text forbids admin recycle.
+- 2026-10-16 [#clearsessioncontext] [agent-doc] After a Clear Session Context restarts Codex fresh while a document cycle is still open, the relaunch re-runs the document and the fresh agent restates the same retained-closeout blocker. Make the post-clear relaunch skip or summarize a blocker the supervisor already owns.

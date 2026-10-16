@@ -159,6 +159,25 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 - **PyPI:** the latest version is 0.35.511.
 
 **What's next:** the two follow-ups (`clearsessioncontext`, `jetbrainsreplicaloops`) are merged in `integ-followups`, and its `make check` is still running. They aren't in 0.35.511; they ship in 0.35.512 along with the sdk.md Clear fix already on main. There were no actionable follow-up items to capture this turn. The splice-rebase bug the subagent found will be added to the backlog when the follow-ups close.
+
+### Re: follow-ups integrated and installed — opus-5.5 · 2026-10-16T10:24-04:00
+
+**`jetbrainsreplicaloops`: done.** Commit `acfe824d58` is merged to main (`080a1c17bd`) and installed locally; it ships in 0.35.512. A JetBrains editor stuck re-applying operator typing over an out-of-date copy of the document now recovers without a controller recycle. Once the editor runs out of attempts to rebuild its copy, the controller asks it to publish its visible text. The request is pinned to the controller's current version of the document. The editor acts only when:
+- the controller's copy still matches that version,
+- its replica holds that version,
+- it has the whole visible buffer under a read lock,
+- no remote change is being applied,
+- the document's component markers are intact.
+
+Your text is the base, and the saved response is applied once on top of it; an existing duplicate check prevents a second copy. The remedy text now allows `admin recycle` only as a fallback. JetBrains plugin versions are 0.2.654 / 262 0.2.656 / 263 0.2.655. VS Code, Zed and older JetBrains plugins treat the new request as an ordinary wake-up, so the recycle fallback still applies there.
+
+**`clearsessioncontext`: done.** Commit `de11c8962e` is merged, installed, and ships in 0.35.512. After a Clear Session Context that crossed an open cycle whose response is already saved, the fresh agent waits at its prompt instead of re-running the document and restating the blocker. The supervisor finishes the closeout, and queued work and new edits still dispatch through the idle watch. An open cycle whose response isn't saved yet still re-runs. If the saved state can't be read, it re-runs as before.
+
+**Verification:** each branch passed its own `make check`. The merged copy `integ-followups` passed `make check`: exit 0, 0 `result: FAILED`, nextest `10860 tests run: 10860 passed, 169 skipped`. Then `make install` exited 0 and main was pushed as a fast-forward.
+
+**New backlog item (queued at the end):** the subagent found a separate bug in `captured_splice::rebase`. You delete a struck queue line while the controller inserts " (closed)" inside that same line. The " (closed)" ends up attached to your next new line instead of the edit being refused. That silently corrupts operator text, so it is queued as its own fix.
+
+0.35.512 is not released yet. On main for it: the sdk.md Clear fix, these two follow-ups, and the release notes for all three.
 <!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 
@@ -167,8 +186,9 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- do [#jetbrainsreplicaloops]
-- do [#clearsessioncontext]
+- ~~do [#jetbrainsreplicaloops]~~
+- ~~do [#clearsessioncontext]~~
+- do [#mergecapturedsplice]
 <!-- /agent:queue -->
 
 ## Todo
@@ -187,8 +207,7 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jetbrainsreplicaloops] [agent-doc] When a JetBrains replica loops on stale-baseline local deltas (canonical-rebootstrap-captured-local-delta, visible_length_mismatch) and retained-persistence rebuilds are exhausted (state=editor_holds_unmerged_visible_text), roll the operator's editor text forward in place with the captured response re-applied on top, as the fresh-controller retained reseed did for sdk.md at 2026-10-16T06:05Z. Today only a controller recycle breaks the loop, and the remedy text forbids admin recycle.
-- [ ] [#clearsessioncontext] [agent-doc] After a Clear Session Context restarts Codex fresh while a document cycle is still open, the relaunch re-runs the document and the fresh agent restates the same retained-closeout blocker. Make the post-clear relaunch skip or summarize a blocker the supervisor already owns.
+- [ ] [#mergecapturedsplice] [agent-doc] agent_doc_merge::captured_splice::rebase silently corrupts operator text: when the operator deletes a struck queue line while canonical inserts " (closed)" inside that same line, the rebase attaches " (closed)" to the operator's next new line (fixture result: "- review [retryloop] (closed)") instead of refusing the overlapping edit. Found by the jetbrainsreplicaloops subagent (branch fix/jb-stale-baseline-rollforward). The rebase must refuse or drop an insert whose anchor the operator deleted, never re-anchor it onto unrelated operator text; add the fixture as a regression test.
 <!-- /agent:backlog -->
 
 ## Review

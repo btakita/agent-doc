@@ -55,6 +55,7 @@ agent-doc-supervisor-process-io = { path = "../agent-doc-supervisor-process-io",
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.512" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.512" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.512" }
+agent-doc-tmux-scope-io = { path = "../agent-doc-tmux-scope-io", version = "0.35.512" }
 agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.512" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.512" }
 anyhow = "1"

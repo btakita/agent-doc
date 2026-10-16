@@ -132,6 +132,7 @@ dependencies = [
  "agent-doc-test-support",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
+ "agent-doc-tmux-scope-io",
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
@@ -568,6 +569,7 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
+ "agent-doc-tmux-scope-io",
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "anyhow",
@@ -2804,6 +2806,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tmux-router",
+]
+
+[[package]]
+name = "agent-doc-tmux-scope-io"
+version = "0.35.512"
+dependencies = [
+ "fs2",
+ "libc",
+ "serde",
+ "tempfile",
 ]
 
 [[package]]

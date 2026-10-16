@@ -1326,7 +1326,7 @@ pub fn read_only_terminal_projection_detail(
         // Deliberately carries none of the `SELF_CONVERGING_INTERRUPTIONS`
         // needles: the settle window must not wait out an operator-owned state.
         ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText => {
-            "the editor holds unmerged visible text (state=editor_holds_unmerged_visible_text, operator_action=reconcile_editor_buffer_with_retained_write): it refused every native save of the retained write after the controller's replica rebuilds, so this is not a pending acknowledgement and waiting will not converge it"
+            "the editor holds unmerged visible text (state=editor_holds_unmerged_visible_text, operator_action=reconcile_editor_buffer_with_retained_write): it refused every native save of the retained write after the controller's replica rebuilds, so this is not a pending acknowledgement; the controller asks that editor to roll its visible buffer forward in place"
         }
     }
 }

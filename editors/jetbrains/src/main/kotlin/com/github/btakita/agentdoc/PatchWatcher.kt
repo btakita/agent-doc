@@ -619,6 +619,33 @@ class PatchWatcher(private val project: Project) : Disposable {
                     return APPLY_FAILED
                 }
                 if (file == null) return APPLY_FAILED
+                // #jetbrainsreplicaloops: the controller's exhausted-rebuild
+                // recovery. Fenced by the canonical hash it names; the replica
+                // manager decides on its own worker whether rolling the visible
+                // buffer forward is still safe.
+                if (shouldRollVisibleForwardForRemoteEventUtil(reasonToken)) {
+                    val expectedHash = extractStringField(json, "content_hash")
+                    if (expectedHash.isNullOrBlank()) {
+                        LOG.warn(
+                            "[socket] deliver_crdt_remote rejected cause=missing_content_hash file=$file " +
+                                "reason=$reasonToken",
+                        )
+                        return APPLY_FAILED
+                    }
+                    val scheduled =
+                        CrdtReplicaManager.rollVisibleBufferForward(
+                            project,
+                            file,
+                            expectedHash,
+                            "controller-exhausted-replica-rebuilds",
+                        )
+                    LOG.info(
+                        "[crdt-replica] visible roll-forward request " +
+                            "outcome=${if (scheduled) "scheduled" else "no_replica_manager"} " +
+                            "file=$file content_hash=$expectedHash",
+                    )
+                    return if (scheduled) APPLY_APPLIED else APPLY_FAILED
+                }
                 // #editorreplicareregister: a reliable editor can outlive its relay
                 // membership. Only this typed recovery event republishes the current
                 // editor-owned buffer; routine projection wakeups remain drain-only.

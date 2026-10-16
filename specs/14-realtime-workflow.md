@@ -413,10 +413,17 @@ re-decided at a site:
   before every holder's `Deferred` wait. Its remedy
   (`editor_holds_unmerged_visible_text_remedy`) names
   `state=editor_holds_unmerged_visible_text` and
-  `operator_action=reconcile_editor_buffer_with_retained_write`, forbids
-  re-send, force disk, `admin recycle`/`reload-lib`, and `agent-doc commit`
-  (it adopts neither text), and returns to `session-check` once the buffer and
-  the retained write agree. A tracked-work repair under it is
+  `operator_action=reconcile_editor_buffer_with_retained_write`, says the
+  controller rolls the visible buffer forward in place
+  (`#jetbrainsreplicaloops`, below), forbids re-send, force disk,
+  `admin reload-lib`, and `agent-doc commit` (it adopts neither text), and
+  returns to `session-check`. It no longer forbids `admin recycle`, the one
+  command that ended the measured loop: a recycle is the sanctioned fallback
+  only after the ops log records
+  `retained_persistence_visible_roll_forward_requested` for the file and the
+  state still holds (an editor plugin that predates the in-place request, or a
+  buffer the template-structure guard refuses); operator reconciliation is the
+  last resort after that. A tracked-work repair under it is
   `RecoverEditorFirst`; the Codex auto-queue gate returns its recovery; the
   write path's retained refusal withholds `retained=delivery_projection_pending`
   and logs `recovery=editor_holds_unmerged_visible_text
@@ -1396,6 +1403,63 @@ operator_action=reconcile_editor_buffer_with_retained_write` once and never
 overwrites that buffer. Only an applied save clears the streak, and only
 different content starts a new one.
 
+Exhaustion is resolved in place, not by a recycle (`#jetbrainsreplicaloops`).
+Measured on sdk.md 2026-10-16T05:57Z-06:05Z: the JetBrains replica looped every
+30 s on a stale-baseline local delta (`local delta found a stale native baseline
+... recovery=canonical-rebootstrap-captured-local-delta`, the exact rebase of
+the captured batch refusing a true overlap), every native save was refused
+(`visible_length_mismatch`), and the rebuilds were exhausted. Only a controller
+recycle ended it: the fresh controller's retained reseed
+(`recovery=fresh_controller_retained_replica`) let the editor publish its visible
+buffer (`driver=proven-shadow-local-delta`) and the retained transition then
+re-applied the captured response on top. The controller now asks for the same
+roll-forward without the recycle:
+
+- The persistence streak's escalation edge, once the rebuild budget is spent,
+  sets `request_visible_roll_forward` instead of another rebuild: first on the
+  exhaustion edge itself (after the durable record is written), at most
+  `RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS` (2) delivered requests per
+  refused content, never on an edge that also rebuilds, and a request that
+  reached no editor replica is refunded. The worker sends
+  `deliver_crdt_remote reason=editor_visible_roll_forward` with the refused
+  `content_hash`/`content_len` as a fence
+  (`agent_doc_crdt_relay_io::signal_editor_visible_roll_forward`; every other
+  event's payload is unchanged) and logs
+  `retained_persistence_visible_roll_forward_requested ... found= notified=
+  recovery=editor_visible_roll_forward`. The exhaustion log line names
+  `recovery=editor_visible_roll_forward`.
+- The editor (JetBrains `CrdtReplicaManager.rollVisibleBufferForward`, on the
+  document's serialized worker) rolls forward only when canonical still has
+  the fenced hash, its replica holds that canonical, a read-locked cut of the
+  complete visible buffer is available, no remote apply is mutating the buffer,
+  and the cut passes the template-structure guard
+  (`visibleRollForwardDecisionUtil`; every other case declines, logs the
+  decision, and leaves the buffer untouched). It publishes the visible cut as
+  ONE bounded splice from the replica's canonical (`ensureEditorText`), re-bases
+  its shadow on that cut, fences the captured stale-baseline batch as subsumed
+  (keystrokes typed after the cut are kept and forwarded from it), and projects
+  the cut as settled only when canonical IS the cut. Otherwise canonical kept
+  controller text the buffer merely lacked, and it drains that delta into the
+  now-unblocked buffer instead: projecting a cut canonical does not hold would
+  only mark the member for a whole-buffer rebootstrap. Nothing writes
+  controller text into the buffer except that ordinary remote apply.
+- The operator's visible text is the base and the retained write rolls forward
+  onto it. The relay accepts the publication from the in-lineage member (it is
+  not an unproven-lineage fence), and its component isolation keeps a region
+  the buffer only lacked (a response the editor never visibly took). Otherwise
+  the controller's retained transition rebases the pending write's
+  `base -> target` delta over the converged operator cut and applies it once;
+  `current_contains_delta` makes the re-derived state its fixed point, so the
+  response is never inserted twice. Every previously settled controller write
+  was visibly projected before it settled, so text missing from the buffer
+  besides the pending write is operator deletion, which stands.
+- The rolled-forward content is a new persistence streak; its applied save
+  clears the durable record.
+
+An editor without the handler (VS Code, Zed, an older JetBrains plugin) treats
+the event as an ordinary drain wakeup, so the exhausted state and its remedy
+stand; that remedy then sanctions `admin recycle` as the fallback.
+
 The exhausted state is durable, not just a log line (`#splicesessionack`, GH
 #273 remainder): `session-check` kept reporting "the exact editor delivery
 acknowledgement is pending" — a self-converging wait — for a state only the
@@ -2242,6 +2306,10 @@ balanced component markers, and at most one live exchange boundary marker.
   is projected into the durable `retained_persistence_rebuild_exhausted` record
   (`#splicesessionack`) by that same completion, cleared by an applied save or
   a different refused content; it is bookkeeping and never changes the save.
+  The same completion's later escalation edges request the editor's in-place
+  visible roll-forward (`#jetbrainsreplicaloops`), bounded and refunded like
+  the rebuilds; the request is an editor-side publication, never a controller
+  write over the visible buffer.
   The ordinary idempotent persistence retry remains responsible for the final
   exact-disk proof. This extracts recovery from the pull-only imperative path.
   The capped retry timer remains the one-shot wall-clock adapter.

@@ -357,7 +357,10 @@ race class instead of papering over each symptom.
   the typed `editor_replica_reregister` event for that exact file. Receipt owns a
   forced registration from the current editor buffer before the ordinary CRDT
   drain; `canonical_projection` and every other delivery reason remain
-  drain-only. A changed relay-membership/liveness witness is the progress edge
+  drain-only, except the hash-fenced `editor_visible_roll_forward` exhaustion
+  recovery (`#jetbrainsreplicaloops`, see
+  [Real-Time Workflow Authority](14-realtime-workflow.md)), which publishes the
+  visible buffer onto the exact canonical it names and never re-registers. A changed relay-membership/liveness witness is the progress edge
   that re-arms bounded recovery, after which the same captured closeout continues
   through native editor persistence. Disk forcing, response recapture, and
   supervisor recycle are not substitutes for this editor-owned transition.

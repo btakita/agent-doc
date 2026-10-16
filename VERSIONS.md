@@ -2,6 +2,67 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.510
+
+- **Non-ASCII text no longer turns into `?` or a second response copy (GH #274).**
+  The JetBrains plugin passed native strings in the JVM locale, so an
+  ASCII-locale backend sent `?` for every non-ASCII character. It now binds
+  UTF-8 explicitly and decodes strictly. The reconnect projection and repair
+  refuse a second exact or lossy copy of a committed response.
+- **A committed response is never written twice (`closeoutduplicatedcommit`).**
+  Copies that differ only by the binary's queue-prompt echo, `❯` prefixes or
+  boundary markers count as the same response in recovery, the integrity guard,
+  session-check and `dedupe`. The `--done` queue strike no longer inserts an
+  echo of the reaped id heads, and a duplicate names `dedupe` + `commit` instead
+  of a `write --commit` that refuses.
+- **`agent:todo` ids are first-class.** Todo rows are no longer flagged as
+  shadow backlog (GH #275). `--todo-add` reuses the open review/backlog id it
+  cites or mints one, an operator-checked box is final, preflight reports todo
+  signals, and closeout checks off a todo whose own id resolved. A closeout whose
+  final session check still refuses now exits nonzero instead of reporting
+  "superseded" (GH #275). The shadow scan ignores only backtick spans covering a
+  row's head, so a drifted row with inline code is still caught.
+- **Scheduled queues.** `agent:queue` takes `interval=`, `time=HH:MM[,…]`,
+  `loop` and `loop=N`. One deadline-sleeping scheduler per controller (60 s
+  floor, 300 s cap) coalesces missed ticks, backs off on failure, persists pass
+  counts and reschedules on edits. `agent-doc queue schedule <FILE>` shows it.
+- **Run Agent Doc is not stopped by stray backlog rows.** A turn carrying an
+  operator edit or Run press is admitted with a repair directive; the closeout
+  guard still flags the rows.
+- **A reported subagent result is persisted, not re-dispatched.** `queue
+  release` records a receipt; the line is never offered to a new worker, and
+  steering, the Stop hook and the release output name the closeout that strikes
+  it. `queue release --requeue` opts out.
+- **Claims follow an edited queue line**, instead of being pruned when its text
+  changes.
+- **Keystroke logs keep op lineage across compaction.** Each typing burst
+  carries the hash of the text it was typed into and produced, and admission
+  trusts a log only when replay reproduces its tip. This closes the disk-only
+  double-arrival gap (TLA+ `AdmissionCutExclusivityResidual` now passes).
+- **A lost typing receipt no longer freezes the editor buffer.** The plugin
+  re-sends an unacknowledged local burst and advances its baseline only on
+  proof, bounded, so a response is projected into the visible buffer.
+- **tmux follows 2 → 1 → 2 pane switches under load.** `[X, X]` layouts collapse,
+  projection retries are capped at 12, a per-window claim stops an older layout
+  from another project's controller winning, and stale-supervisor markers need a
+  live writer.
+- **Clear Session Context reports a clear queued behind an unstarted Run as
+  queued**, not as a live turn. JetBrains and VS Code no longer cancel the Run.
+- **Session-check reports an exhausted replica rebuild as an operator state
+  (GH #273)** instead of an endless "acknowledgement pending".
+- **A missing controller binary reports a failed spawn.** The pre-exec hook marks
+  fds close-on-exec instead of closing Rust's exec-failure pipe, so the
+  launch-ENOENT retry runs. Two rearm-evidence reads now fail closed.
+- **IDE stays responsive during builds.** Make/gradle/nextest entrypoints run at
+  low priority with core headroom, and visual highlights reconcile
+  incrementally. See `docs/development/ide-responsiveness.md`.
+- **Test isolation.** Tests can no longer reach live supervisors, controller
+  sockets or `state.db` outside their temp root. A unit test had been recycling
+  every live supervisor and connecting to editors as a bare build. Lib and
+  integration tests stop cold-launching controllers unless they opt in with a
+  reason (546 → 237 launches, none from test processes). Several wall-clock
+  tests now take an injected clock.
+
 ## 0.35.509
 
 - **Run Agent Doc no longer duplicates the queue when the editor and disk hold

@@ -862,10 +862,10 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("bypassRegisterBackoff = forceRefresh") &&
                 source.contains("replaceCached = forceRefresh") &&
                 source.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null") &&
-                source.contains("documentWorkers.forDocument(filePath).submit<Boolean> { attach() }") &&
+                source.contains("documentWorkers.forDocument(filePath).submit<Boolean> { trackedAttach() }") &&
                 source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
                 source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
-                source.contains("documentWorkers.forDocument(filePath).execute { attach() }") &&
+                source.contains("documentWorkers.forDocument(filePath).execute { trackedAttach() }") &&
                 source.contains("retainCanonicalProjectionAfterRegistration(filePath, forwarder)"),
         )
         val forceRefreshAttachBody = source.substringAfter("fun ensureOpenDocumentReplica(")

@@ -208,9 +208,9 @@ class PluginLifecycleListener : ProjectManagerListener {
             )
             if (!report.converged) {
                 LOG.warn(
-                    "[plugin-lifecycle] dynamic plugin load left ${report.failedPaths.size} open " +
+                    "[plugin-lifecycle] dynamic plugin load left ${report.unattachedPaths.size} open " +
                         "document(s) awaiting replica re-registration: " +
-                        "${report.failedPaths.joinToString()}; the replacement generation is live " +
+                        "${report.unattachedPaths.joinToString()}; the replacement generation is live " +
                         "and each document keeps its own bounded retry armed",
                 )
             }

@@ -104,7 +104,13 @@ class NativeReloadCoordinatorTest {
             .substringAfter("internal fun restartAfterNativeReload(")
             .substringBefore("fun requestRemoteDrain(")
         assertTrue("native restart must wait for each registration", restart.contains("await = true"))
-        assertTrue("native restart must report exact per-document failures", restart.contains("nativeReloadReplicaRestartReport"))
+        assertTrue("native restart must report exact per-document failures", restart.contains("NativeReloadReplicaRestartReport"))
+        assertTrue(
+            "GH #276: the report must recount replicas when it is taken, not trust each awaited answer",
+            restart.contains("settledNativeReloadReplicaRestartReport(") &&
+                restart.contains("nativeReloadReplicaAttached(path)") &&
+                restart.contains("nativeReloadRegistrationConverging(path)"),
+        )
         assertTrue(
             "native restart must rediscover every live project's open agent-doc documents",
             restart.contains("handoff.projectDocuments.keys + liveProjects") &&
@@ -118,9 +124,152 @@ class NativeReloadCoordinatorTest {
         )
         assertTrue(
             "the coordinator must inspect convergence before releasing the reload gate",
-            coordinator.contains("if (report.converged)") &&
+            coordinator.contains("nativeReloadReplicaRestartLogLineUtil(report)") &&
+                coordinator.contains("report.converged ->") &&
                 coordinator.contains("replica restart incomplete"),
         )
+    }
+
+    /**
+     * GH #276, as measured 2026-10-15: four of 30 awaited attaches outlived the 750 ms
+     * wait (`not_attached ... retry=scheduled`) and each attached 0.03-3.2 s later,
+     * before the report was logged. The report taken at that moment must count them.
+     */
+    @Test
+    fun `a replica that attached after its bounded wait is counted at report time`() {
+        val clock = FakeClock()
+        val paths = (1..30).map { "/project/doc-%02d.md".format(it) }
+        val late = mapOf(
+            paths[3] to 33L,
+            paths[11] to 3_200L,
+            paths[19] to 701L,
+            paths[27] to 932L,
+        )
+        // The awaited pass ended with these four unattached; the report is taken 1 s
+        // later, after the last awaited document. Three have attached by then.
+        clock.nowMs = 1_000L
+        val report = settledNativeReloadReplicaRestartReport(
+            expectedPaths = paths,
+            isAttached = { path -> late[path]?.let { clock.nowMs >= it } ?: true },
+            isPending = { path -> late[path]?.let { clock.nowMs < it } ?: false },
+            settleMillis = NATIVE_RELOAD_REPLICA_SETTLE_MS,
+            nowNanos = clock::nanos,
+            sleepMillis = clock::sleep,
+        )
+
+        assertEquals(30, report.expected)
+        assertEquals(30, report.attached)
+        assertEquals(emptyList<String>(), report.failedPaths)
+        assertEquals(emptyList<String>(), report.pendingPaths)
+        assertTrue(report.converged)
+        assertEquals("the settle ends when the last replica attaches", 3_200L, clock.nowMs)
+        assertEquals("[native] replica restart converged attached=30/30", nativeReloadReplicaRestartLogLineUtil(report))
+    }
+
+    @Test
+    fun `an attach still converging after the settle is pending, not failed`() {
+        val clock = FakeClock()
+        val report = settledNativeReloadReplicaRestartReport(
+            expectedPaths = listOf("/p/a.md", "/p/slow.md", "/p/dead.md"),
+            isAttached = { path -> path == "/p/a.md" },
+            // slow.md's attach is still in flight; dead.md has nothing left to retry it.
+            isPending = { path -> path == "/p/slow.md" },
+            settleMillis = 3_000L,
+            liveProjects = 2,
+            nowNanos = clock::nanos,
+            sleepMillis = clock::sleep,
+        )
+
+        assertEquals(1, report.attached)
+        assertEquals(listOf("/p/slow.md"), report.pendingPaths)
+        assertEquals(listOf("/p/dead.md"), report.failedPaths)
+        assertEquals(2, report.liveProjects)
+        assertFalse(report.converged)
+        assertEquals("the settle is bounded by its budget", 3_000L, clock.nowMs)
+        assertEquals(
+            "[native] replica restart incomplete attached=1/3 failed=/p/dead.md pending=/p/slow.md",
+            nativeReloadReplicaRestartLogLineUtil(report),
+        )
+
+        val pendingOnly = nativeReloadReplicaRestartReport(
+            expectedPaths = listOf("/p/a.md", "/p/slow.md"),
+            attachedPaths = listOf("/p/a.md"),
+            pendingPaths = listOf("/p/slow.md"),
+        )
+        assertFalse("a pending replica is not attached yet", pendingOnly.converged)
+        assertEquals(emptyList<String>(), pendingOnly.failedPaths)
+        assertEquals(
+            "[native] replica restart pending attached=1/2 pending=/p/slow.md " +
+                "(registration still converging; retries armed)",
+            nativeReloadReplicaRestartLogLineUtil(pendingOnly),
+        )
+        assertEquals("documents=1/2:pending=/p/slow.md", dynamicLoadReattachReceipt(pendingOnly))
+    }
+
+    @Test
+    fun `the settle does not wait on a path nothing will retry`() {
+        val clock = FakeClock()
+        val report = settledNativeReloadReplicaRestartReport(
+            expectedPaths = listOf("/p/a.md", "/p/dead.md"),
+            isAttached = { path -> path == "/p/a.md" },
+            isPending = { false },
+            settleMillis = 3_000L,
+            pollMillis = 25L,
+            nowNanos = clock::nanos,
+            sleepMillis = clock::sleep,
+        )
+
+        assertEquals(listOf("/p/dead.md"), report.failedPaths)
+        assertEquals(
+            "one confirming poll, not the whole budget, for a path with nothing converging",
+            25L,
+            clock.nowMs,
+        )
+    }
+
+    @Test
+    fun `a retry handing off between timer and attach is not read as failed`() {
+        val clock = FakeClock()
+        // The retry timer has fired (no armed task) but its attach is not submitted
+        // yet for one poll; it is then in flight and attaches at 200 ms.
+        val report = settledNativeReloadReplicaRestartReport(
+            expectedPaths = listOf("/p/retry.md"),
+            isAttached = { clock.nowMs >= 200L },
+            isPending = { clock.nowMs in 25L until 200L },
+            settleMillis = 3_000L,
+            pollMillis = 25L,
+            nowNanos = clock::nanos,
+            sleepMillis = clock::sleep,
+        )
+
+        assertTrue(report.converged)
+        assertEquals(200L, clock.nowMs)
+    }
+
+    @Test
+    fun `a zero settle budget reports without waiting`() {
+        val clock = FakeClock()
+        val report = settledNativeReloadReplicaRestartReport(
+            expectedPaths = listOf("/p/slow.md"),
+            isAttached = { false },
+            isPending = { true },
+            settleMillis = 0L,
+            nowNanos = clock::nanos,
+            sleepMillis = clock::sleep,
+        )
+
+        assertEquals(listOf("/p/slow.md"), report.pendingPaths)
+        assertEquals(0L, clock.nowMs)
+    }
+
+    private class FakeClock {
+        var nowMs = 0L
+
+        fun nanos(): Long = TimeUnit.MILLISECONDS.toNanos(nowMs)
+
+        fun sleep(ms: Long) {
+            nowMs += ms
+        }
     }
 
     /**

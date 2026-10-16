@@ -34,6 +34,25 @@ internal fun hotReloadLogLineUtil(
         "after quiesce/close handoff"
 }
 
+/**
+ * GH #276: the post-reload replica restart line. [report] is counted when it is taken,
+ * so a replica that attached after its bounded attach wait reads as attached. A path
+ * whose registration is still converging (attach in flight, retry armed) is `pending`;
+ * only a path nothing will retry is `failed`, and only that makes the restart
+ * `incomplete`.
+ */
+internal fun nativeReloadReplicaRestartLogLineUtil(report: NativeReloadReplicaRestartReport): String {
+    val counts = "attached=${report.attached}/${report.expected}"
+    val pending = report.pendingPaths.takeIf { it.isNotEmpty() }?.let { " pending=${it.joinToString(",")}" }.orEmpty()
+    return when {
+        report.converged -> "[native] replica restart converged $counts"
+        report.failedPaths.isEmpty() ->
+            "[native] replica restart pending $counts$pending (registration still converging; retries armed)"
+        else ->
+            "[native] replica restart incomplete $counts failed=${report.failedPaths.joinToString(",")}$pending"
+    }
+}
+
 internal class NativeReloadGate {
     internal class Handoff internal constructor(
         internal val completion: CountDownLatch = CountDownLatch(1),
@@ -192,16 +211,12 @@ internal object NativeReloadCoordinator {
                                         "attached=0/0 live_projects=${report.liveProjects}",
                                 )
                             } else if (report.converged) {
-                                log.info(
-                                    "[native] replica restart converged " +
-                                        "attached=${report.attached}/${report.expected}",
-                                )
+                                log.info(nativeReloadReplicaRestartLogLineUtil(report))
+                            } else if (report.failedPaths.isEmpty()) {
+                                // GH #276: every unattached replica is still converging.
+                                log.info(nativeReloadReplicaRestartLogLineUtil(report))
                             } else {
-                                log.warn(
-                                    "[native] replica restart incomplete " +
-                                        "attached=${report.attached}/${report.expected} " +
-                                        "failed=${report.failedPaths.joinToString(",")}",
-                                )
+                                log.warn(nativeReloadReplicaRestartLogLineUtil(report))
                             }
                         } catch (error: Throwable) {
                             log.warn("[native] reload replica restart failed", error)

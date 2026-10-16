@@ -72,6 +72,19 @@ The controller may therefore keep its strict superseded-endpoint admission
 fence: a delayed old classloader cannot reclaim replica membership, while the
 current classloader is admitted without depending on a duplicate-open edge.
 
+The reattach awaits each document's registration for the ordinary 750 ms
+attach wait; a registration that outlives it keeps running on the document
+worker, or its register retry fires, and usually attaches while later
+documents are still awaited. The `[native] replica restart` line therefore
+recounts every document's replica when it is reported (GH #276: a reload whose
+30 replicas had all attached used to log `attached=26/30 failed=<4 paths>`).
+After the awaited pass, the coordinator waits up to 3 s, while it still holds
+the reload gate, for registrations still converging, and stops as soon as every
+replica is attached or nothing is left converging. An unattached document whose
+attach is still in flight or whose register retry is armed is reported
+`pending` (`replica restart pending ... pending=<paths>`, INFO); only one that
+nothing will retry is `failed`, which makes the restart `incomplete` (WARN).
+
 The package omits `require-restart`, so JetBrains may unload the plugin and
 replace its classloader during an update. A plugin-owned project service is the
 parent disposable for every programmatic startup listener, including VFS

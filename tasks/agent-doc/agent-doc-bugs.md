@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -490,6 +491,15 @@ What I found:
 - It does not reproduce locally: alone, the crate suite 3×, 6 concurrent copies, and 8 concurrent copies of the workspace-built binary with `--test-threads=2` (CI's exact shape) all passed.
 
 I re-ran only the failed CI job as a diagnostic, to learn whether it fails every time or intermittently. A green re-run would not mean it is fixed. Follow-up filed as `#detachedexitci` (backlog head).
+
+### Re: `#detachedexitci` dispatched — opus-5-5 · 2026-10-15T23:17-04:00
+
+`#detachedexitci` is claimed by `subagent:detachedexitci` and dispatched in its own worktree (`~/work/btakita/agent-loop-worktrees/detachedexitci`, branch `fix/detachedexitci` from v0.35.510). Its brief:
+- Find and fix the cause of the CI timeout in `detached_controller_exits_when_temp_project_root_is_removed`. Raising the timeout or rerunning does not count.
+- Prime suspect: the root-incarnation exit runs only at the top of the serve loop's idle tick, so anything later in that tick can block it. A cross-test leak is also possible: the failing test's controller logged another test's `runfrontendissue-epoch-reuse` document.
+- Add deterministic regression coverage, proven to fail before the fix, then run `make check` and push the branch.
+
+The CI re-run of the failed job is still in progress. The subagent will use its result to tell whether the failure happens every time or intermittently. I'll integrate the branch and run the single `make install` when it reports.
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 

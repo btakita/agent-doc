@@ -243,6 +243,43 @@ I also asked it for two things:
 The item stays open and claimed. I will merge, install and close it when the subagent reports back.
 
 Exchange size is 192 lines. The queue is active, so I am not compacting.
+
+### Re: issue #278 sent to the pane-order agent; tmux-spawn scope leak sent to a new agent — opus-5.5 · 2026-10-16T12:54-04:00
+
+> **Operator note:** The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances. #gh-fix https://github.com/btakita/agent-doc/issues/278
+
+**`#tmuxpanesreversed`: the first agent died in the reboot, so I restarted the work and sent it issue #278.**
+- **The reboot:** the subagent I started at 11:52 was killed by the reboot at 12:19. It left about 580 uncommitted lines and a new 404-line test in `agent-doc-wt/tmuxpaneorder`, and had committed nothing.
+- **The restart:** before this cycle, I started a new agent on the same branch, `fix/tmux-pane-order-invariant`. It continues from those changes; it does not start over.
+- **Issue #278 sent:** I passed on both of your edits to this queue line and summarized #278 for the agent.
+- **#278 now leads:** it already traces the cause, so the agent treats it as the main evidence. It must handle each of the issue's three requests, each with its test:
+  1. Put a new column into the slot a removed column left, instead of adding it at the end. Retained `[a | b]` with `{b, c}` in unknown order gives `[c | b]`.
+  2. Keep the order marked "unknown" when the plugin re-reads the same visible editors twice. That second read currently relabels a guessed order as "retained", and the controller then skips reordering.
+  3. When an uncovered document needs a slot, replace the column of the most recent focus, including focus changes that published no new layout.
+- **Still on:** the earlier work too: the rule in SPEC.md, the re-check of pane positions after each layout change, and the tests over every column order.
+- **`#gh-fix`:** the agent commits on its branch only. I merge, install, and close #278 with a summary of the fix. The agent drafts that closing comment for me.
+
+The item stays open: the fix is still in progress, so I am not marking it done.
+
+> **Operator note:** My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up.
+
+**Diagnosis: failed tmux-spawn scopes pile up in your user systemd.** tmux 3.8 puts each new pane in its own systemd unit called a scope. If the pane's process exits before systemd attaches it, the scope ends as failed. systemd keeps a failed unit loaded until someone runs `systemctl --user reset-failed`, so they pile up.
+- **Previous boot's log:** 2,718 scopes ended this way, with `No PIDs left to attach to the scope's control group` and then `Failed with result 'resources'`. Together with the scopes that were still running, that explains the 3,911 loaded scopes in your note.
+- **Who launched them:** many short-lived tmux servers, each creating about 120–135 panes. Those look like agent-doc's own tests that run real tmux on private sockets. Socket names like `sync-pane-occupant-classes-…` are in `/tmp/tmux-1000/` now. This is likely but not yet proven.
+- **Possible second leak:** a test-fixture controller that outlives its tmux pane may keep that pane's scope alive. This matches the known leak where test fixtures leave a controller behind per run.
+- **Right now:** this boot is clean, with 5 scopes, all from your live tmux server, and 0 failed. It will build up again as tests run, so there was nothing to clean today.
+
+**I sent it to a separate agent, tracked as `#tmuxscopesteward`.** It works on branch `fix/tmux-spawn-scope-stewardship` in its own worktree, `agent-doc-wt/tmuxscopes`, apart from the pane-order agent's. The work:
+1. Find the cause, with code locations.
+2. Stop the test and runtime tmux servers from leaking scopes.
+3. Add a regular cleanup that the agent-doc binary runs itself, with an `admin` command that has `--dry-run`. It clears failed `tmux-spawn-*` units. It stops a scope only when what is left in it is provably a leaked agent-doc process; otherwise it reports the scope and never kills it. Each run is logged to ops.log.
+4. Add tests and check that they fail when the fix is broken.
+
+It may run `reset-failed` on this machine, but it may not stop any running scope or process. I merge and install when it reports back.
+
+Your note sits as plain text under a `---`, not as a queue line, so it could not be claimed. I added `#tmuxscopesteward` to the backlog and queue and will claim it for that agent.
+
+The exchange is 213 lines. The queue is active, so I am not compacting.
 <!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 
@@ -251,8 +288,11 @@ Exchange size is 192 lines. The queue is active, so I am not compacting.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#tmuxpanesreversed]: The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances.
-- ~~do [#jetbrainscleanregistrati]~~
+- 🚧 do [#tmuxpanesreversed]: The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances. #gh-fix https://github.com/btakita/agent-doc/issues/278
+---
+My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
+> I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
+- do [#tmuxscopesteward]
 <!-- /agent:queue -->
 
 ## Todo
@@ -269,6 +309,7 @@ Exchange size is 192 lines. The queue is active, so I am not compacting.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmuxscopesteward] [agent-doc-bug] agent-doc leaks systemd transient `tmux-spawn-*.scope` units in the user manager: 3,911 were loaded at the time of the 2026-10-16 X11 crash, while the live tmux server had about 50 pane processes. The previous boot journal has 2,718 scopes that ended `Failed with result resources` (`No PIDs left to attach`): the pane process exited before systemd could attach it. Failed transient units stay loaded until `systemctl --user reset-failed`. Launchers were many short-lived tmux servers with about 120-135 panes each, consistent with real-tmux tests on private sockets. Fix: (1) stop test and runtime tmux servers from leaking scopes, (2) add a rate-limited, binary-owned sweep that resets failed `tmux-spawn-*` units and stops only scopes provably holding leaked agent-doc processes, logged to ops.log, with an admin `--dry-run` command. Dispatched to subagent:tmuxscopes on branch fix/tmux-spawn-scope-stewardship (worktree agent-doc-wt/tmuxscopes).
 - [ ] 🚧 [#tmuxpanesreversed] The tmux panes are reversed again on my Coder instance. We have made several releases attempting to fix this issue but it persists. A gh issue is coming soon. But I wanted to get a head start. Can we use formal logic to ensure this behavior is correct and this class of error is fixed?
 <!-- /agent:backlog -->
 

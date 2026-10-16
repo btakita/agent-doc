@@ -59,14 +59,30 @@ pub fn prepare_editor_session(
     agent: Option<&str>,
     config: &Config,
 ) -> Result<SessionPreparation> {
+    prepare_editor_session_with(file, title, agent, config, || {
+        if !Path::new(".agent-doc").exists() {
+            init_project()?;
+        }
+        Ok(())
+    })
+}
+
+/// [`prepare_editor_session`] with the working-directory project init
+/// injected. The init acts on the process CWD, which for a test is its crate
+/// checkout, so tests supply their own (`#testisolationleaks`).
+fn prepare_editor_session_with(
+    file: &Path,
+    title: Option<&str>,
+    agent: Option<&str>,
+    config: &Config,
+    ensure_project: impl FnOnce() -> Result<()>,
+) -> Result<SessionPreparation> {
     let existing = std::fs::read_to_string(file)?;
     if agent_doc_frontmatter::session_id_from_content(&existing).is_some() {
         return Ok(SessionPreparation::Existing);
     }
 
-    if !Path::new(".agent-doc").exists() {
-        init_project()?;
-    }
+    ensure_project()?;
     let title = title
         .map(str::to_owned)
         .unwrap_or_else(|| title_from_path(file));
@@ -95,6 +111,9 @@ fn init_project() -> Result<()> {
 
     // Create .agent-doc/ directory structure
     let agent_doc_dir = Path::new(".agent-doc");
+    // `#testisolationleaks`: project init writes the CWD project and installs
+    // the skill into its root. A test's CWD is its checkout, never a fixture.
+    agent_doc_fs::guard_test_runtime_target(agent_doc_dir, "a CWD project init");
     let snapshots_dir = agent_doc_dir.join("snapshots");
     std::fs::create_dir_all(&snapshots_dir)?;
     eprintln!("[init] Created {}", snapshots_dir.display());
@@ -181,11 +200,20 @@ mod tests {
         let file = dir.path().join("release-notes.md");
         std::fs::write(&file, "Keep this prompt.\n").unwrap();
 
+        let project_init = std::cell::Cell::new(false);
         let outcome =
-            prepare_editor_session(&file, None, Some("codex"), &Config::default()).unwrap();
+            prepare_editor_session_with(&file, None, Some("codex"), &Config::default(), || {
+                project_init.set(true);
+                Ok(())
+            })
+            .unwrap();
         let content = std::fs::read_to_string(&file).unwrap();
 
         assert_eq!(outcome, SessionPreparation::Initialized);
+        assert!(
+            project_init.get(),
+            "a new session ensures its project first"
+        );
         assert!(content.contains("# Release notes"));
         assert!(content.contains("agent_doc_format: template"));
         assert!(content.contains("<!-- agent:exchange -->\nKeep this prompt.\n"));
@@ -198,7 +226,10 @@ mod tests {
         let content = "---\nagent_doc_session: existing\n---\nBody\n";
         std::fs::write(&file, content).unwrap();
 
-        let outcome = prepare_editor_session(&file, None, None, &Config::default()).unwrap();
+        let outcome = prepare_editor_session_with(&file, None, None, &Config::default(), || {
+            panic!("an existing session must not initialize a project")
+        })
+        .unwrap();
 
         assert_eq!(outcome, SessionPreparation::Existing);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), content);

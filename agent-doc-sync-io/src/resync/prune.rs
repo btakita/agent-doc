@@ -110,6 +110,11 @@ pub fn prune_with_tmux_timed_in_mode(
 ) -> Result<(usize, Vec<PrunePhaseTiming>)> {
     tracing::debug!("resync::prune start");
     let mut timings = Vec::new();
+    // `#testisolationleaks`: a test whose CWD is its checkout has no CWD
+    // registry to prune, and must not sweep the configured tmux server for it.
+    if !agent_doc_session_registry_io::cwd_registry_in_test_scope() {
+        return Ok((0, timings));
+    }
     let registry_path = agent_doc_session_registry_io::registry_path();
     // Keep one coherent ownership snapshot for the whole cleanup pass. A dead
     // registered pane must be diagnosed before tmux-router forgets its document

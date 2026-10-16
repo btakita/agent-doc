@@ -7,12 +7,16 @@ pub mod plugin_jar;
 pub mod process_start;
 pub mod root_ceiling;
 pub mod rotating_log;
+pub mod test_runtime_scope;
 
 pub use root_ceiling::{
     ROOT_CEILING_ENV, agent_doc_ancestor, ancestors_within_root_ceiling,
     ensure_test_tmpdir_isolated, root_ceiling_directories,
 };
 pub use rotating_log::{SharedAppendLog, read_rotated_log, rotate_log_if_oversized};
+pub use test_runtime_scope::{
+    TEST_RUNTIME_SCOPE_ENV, guard_test_runtime_target, path_in_test_runtime_scope,
+};
 
 /// Current process descriptor count where the platform exposes a stable procfs
 /// view. Kept separate from log-size telemetry because rotation cannot diagnose

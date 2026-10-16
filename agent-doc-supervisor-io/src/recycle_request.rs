@@ -22,6 +22,9 @@ fn now_secs() -> u64 {
 /// Write (or refresh) a recycle-request for `file` with the current heartbeat,
 /// returning whether a document identity actually accepted the event.
 fn request_recycle_observed(file: &str, reason: &str) -> Result<bool> {
+    // `#testisolationleaks`: this is the install-recycle trigger. A test that
+    // reaches it for a live document makes that document's supervisor recycle.
+    agent_doc_fs::guard_test_runtime_target(Path::new(file), "an install recycle request");
     let Some(identity) = crate::state_events::document_state_identity(Path::new(file))? else {
         return Ok(false);
     };

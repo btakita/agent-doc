@@ -268,10 +268,16 @@ pub fn project_controller_pids_including_fork_images(project_root: &Path) -> Vec
 
 /// Every live controller pid, one per controller (fork images excluded, see
 /// [`project_controller_pids`]), with the project root its command line serves.
+///
+/// Cross-root discovery is confined to the test runtime scope
+/// (`#testisolationleaks`): a test process sees only controllers serving roots
+/// under its own temp root, so no test can hand a live project to a fan-out.
+/// Production processes have no scope and see every controller.
 pub fn controller_serve_pids() -> Vec<(u32, PathBuf)> {
     distinct_process_images(process_pids())
         .into_iter()
         .filter_map(|pid| controller_serve_project_root(pid).map(|root| (pid, root)))
+        .filter(|(_, root)| agent_doc_fs::path_in_test_runtime_scope(root))
         .collect()
 }
 
@@ -279,11 +285,14 @@ pub fn controller_serve_pids() -> Vec<(u32, PathBuf)> {
 ///
 /// Fork images are excluded so `exclude_pid`'s own un-exec'd child cannot put
 /// the excluded controller's root back in the set (#controllerforkimage).
+/// Confined to the test runtime scope like [`controller_serve_pids`]
+/// (`#testisolationleaks`).
 pub fn controller_project_roots(exclude_pid: u32) -> BTreeSet<PathBuf> {
     distinct_process_images(process_pids())
         .into_iter()
         .filter(|pid| *pid != exclude_pid)
         .filter_map(controller_serve_project_root)
+        .filter(|root| agent_doc_fs::path_in_test_runtime_scope(root))
         .map(|root| {
             agent_doc_controller::command_line::canonical_path_for_command_line_compare(&root)
         })
@@ -296,11 +305,16 @@ pub fn controller_project_roots(exclude_pid: u32) -> BTreeSet<PathBuf> {
 /// started: the stale command-line path can no longer carry a document-scoped
 /// recycle marker, but the authoritative supervisor lease can still address
 /// that exact process over IPC.
+///
+/// Confined to the test runtime scope (`#testisolationleaks`): the install
+/// fan-out marks every process this returns, so a test must never see the
+/// operator's supervisors here.
 pub fn open_supervisor_processes(exclude_pid: u32) -> Vec<(u32, PathBuf)> {
     distinct_process_images(process_pids())
         .into_iter()
         .filter(|pid| *pid != exclude_pid)
         .filter_map(|pid| open_supervisor_document(pid).map(|document| (pid, document)))
+        .filter(|(_, document)| agent_doc_fs::path_in_test_runtime_scope(document))
         .map(|(pid, document)| {
             (
                 pid,
@@ -350,8 +364,148 @@ fn system_boot_timestamp_secs_from_uptime(now_secs: u64, uptime: &str) -> Option
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// A path outside every test temp root that stands in for a live project.
+    /// It is never created: the probes only put it on a command line.
+    pub(crate) const OUT_OF_SCOPE_LIVE_ROOT: &str = "/agent-doc-testisolationleaks/live-project";
+
+    /// A fake process whose command line reads `agent-doc <args...>`. It blocks
+    /// on its piped stdin and has no children, so `/proc` shows exactly one
+    /// image. Kill it when done.
+    ///
+    /// `Command::spawn` can return before the kernel has published the new
+    /// command line (a vfork-style spawn resumes the parent mid-exec), so the
+    /// child reports `ready` from its own shell and this blocks on that line.
+    /// The handshake replaces a poll: once the shell can write, its argv is
+    /// in place.
+    pub(crate) fn spawn_fake_agent_doc_process(argv0: &Path, args: &[&str]) -> std::process::Child {
+        use std::io::BufRead;
+        use std::process::Stdio;
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("echo ready; read _")
+            .arg(argv0)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn fake agent-doc process");
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().expect("piped stdout"))
+            .read_line(&mut line)
+            .expect("read fake process readiness");
+        assert_eq!(line.trim(), "ready", "fake agent-doc process did not start");
+        child
+    }
+
+    fn reap(mut child: std::process::Child) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// `#testisolationleaks`: a test process sees supervisors only under its
+    /// own runtime scope. Before the fix the install fan-out test walked `/proc`,
+    /// found the operator's live supervisors, and marked each one for an install
+    /// recycle. The positive control proves the probe process is visible to raw
+    /// discovery, so the negative assertion cannot pass vacuously.
+    #[test]
+    fn test_supervisor_discovery_never_returns_a_document_outside_the_runtime_scope() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let in_scope_doc = dir.path().join("tasks/plan.md");
+        let live_doc = Path::new(OUT_OF_SCOPE_LIVE_ROOT).join("tasks/plan.md");
+        let in_scope = spawn_fake_agent_doc_process(
+            Path::new("agent-doc"),
+            &["start", "--route-owned", &in_scope_doc.to_string_lossy()],
+        );
+        let live = spawn_fake_agent_doc_process(
+            Path::new("agent-doc"),
+            &["start", "--route-owned", &live_doc.to_string_lossy()],
+        );
+        let (in_scope_pid, live_pid) = (in_scope.id(), live.id());
+
+        let raw_live = open_supervisor_document(live_pid);
+        let processes = open_supervisor_processes(std::process::id());
+        let documents = open_supervisor_documents(std::process::id());
+        reap(in_scope);
+        reap(live);
+
+        assert_eq!(
+            raw_live.as_deref(),
+            Some(live_doc.as_path()),
+            "raw discovery must see the live probe, or this test proves nothing"
+        );
+        assert!(
+            processes.iter().any(|(pid, _)| *pid == in_scope_pid),
+            "the in-scope probe must stay discoverable: {processes:?}"
+        );
+        assert!(
+            !processes.iter().any(|(pid, _)| *pid == live_pid),
+            "a test process discovered a supervisor outside its runtime scope: {processes:?}"
+        );
+        assert!(!documents.contains(&live_doc), "{documents:?}");
+    }
+
+    /// `#testisolationleaks`: the controller half of the same confinement. The
+    /// install fan-out recycles every root [`controller_project_roots`] returns,
+    /// and the cross-project reapers signal every pid [`controller_serve_pids`]
+    /// returns.
+    #[test]
+    fn test_controller_discovery_never_returns_a_root_outside_the_runtime_scope() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let in_scope_root = dir.path().canonicalize().unwrap();
+        let live_root = Path::new(OUT_OF_SCOPE_LIVE_ROOT);
+        let in_scope = spawn_fake_agent_doc_process(
+            Path::new("agent-doc"),
+            &[
+                "controller",
+                "serve",
+                "--project-root",
+                &in_scope_root.to_string_lossy(),
+            ],
+        );
+        let live = spawn_fake_agent_doc_process(
+            Path::new("agent-doc"),
+            &[
+                "controller",
+                "serve",
+                "--project-root",
+                OUT_OF_SCOPE_LIVE_ROOT,
+            ],
+        );
+        let (in_scope_pid, live_pid) = (in_scope.id(), live.id());
+
+        let raw_live = controller_serve_project_root(live_pid);
+        let serve_pids = controller_serve_pids();
+        let roots = controller_project_roots(std::process::id());
+        reap(in_scope);
+        reap(live);
+
+        assert_eq!(
+            raw_live.as_deref(),
+            Some(live_root),
+            "raw discovery must see the live probe, or this test proves nothing"
+        );
+        assert!(
+            serve_pids.iter().any(|(pid, _)| *pid == in_scope_pid),
+            "the in-scope probe must stay discoverable: {serve_pids:?}"
+        );
+        assert!(
+            !serve_pids.iter().any(|(pid, _)| *pid == live_pid),
+            "a test process discovered a controller outside its runtime scope: {serve_pids:?}"
+        );
+        let canonical_in_scope =
+            agent_doc_controller::command_line::canonical_path_for_command_line_compare(
+                &in_scope_root,
+            );
+        assert!(roots.contains(&canonical_in_scope), "{roots:?}");
+        assert!(
+            !roots.iter().any(|root| root.starts_with(live_root)),
+            "{roots:?}"
+        );
+    }
 
     #[test]
     fn parse_cmdline_args_splits_null_separated_args() {

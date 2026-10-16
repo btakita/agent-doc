@@ -35,12 +35,35 @@ pub fn registry_path_in(base_dir: &Path) -> PathBuf {
 /// This is not locked internally. Callers performing read-modify-write must
 /// acquire `tmux_router::RegistryLock` first.
 pub fn load() -> Result<Registry> {
+    if !cwd_registry_in_test_scope() {
+        return Ok(Registry::default());
+    }
     load_in(&std::env::current_dir()?)
+}
+
+/// Whether this process may use the CWD registry ([`registry_path`]).
+///
+/// `#testisolationleaks`: the working directory is ambient. In production it
+/// is the project the operator runs in, and this is always true. In a test it
+/// is the crate checkout. The CWD registry paths used to open and create that
+/// checkout's `.agent-doc/state.db` and `state.db.lock`, and in the main
+/// checkout that is a live project's ledger. A test process whose CWD is
+/// outside its runtime scope therefore has no CWD registry: [`load`] answers
+/// empty, and CWD-registry maintenance (prune, claim validation) is skipped.
+/// An explicit [`load_in`]/[`save_in`] outside the scope still fails the test.
+pub fn cwd_registry_in_test_scope() -> bool {
+    std::env::current_dir()
+        .map(|cwd| agent_doc_fs::path_in_test_runtime_scope(&cwd))
+        .unwrap_or(true)
 }
 
 /// Load the session registry from `base_dir/.agent-doc/state.db`.
 pub fn load_in(base_dir: &Path) -> Result<Registry> {
     let path = registry_path_in(base_dir);
+    // `#testisolationleaks`: the registry opens (and creates) `state.db`
+    // directly, and the CWD-relative entry points resolve it from the working
+    // directory, which for a test is its checkout, not its temp root.
+    agent_doc_fs::guard_test_runtime_target(&path, "a session registry state.db open");
     tmux_router::registry::load_registry(&path)
         .with_context(|| format!("failed to load registry from {}", path.display()))
 }
@@ -56,6 +79,7 @@ pub fn save(registry: &Registry) -> Result<()> {
 /// Save the session registry to `base_dir/.agent-doc/state.db`.
 pub fn save_in(base_dir: &Path, registry: &Registry) -> Result<()> {
     let path = registry_path_in(base_dir);
+    agent_doc_fs::guard_test_runtime_target(&path, "a session registry state.db write");
     let registry = normalize_registry(base_dir, registry.clone());
     tmux_router::registry::save_registry(&path, &registry)
         .with_context(|| format!("failed to save registry to {}", path.display()))
@@ -289,6 +313,42 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use tmux_router::registry::canonical_registry_key_in;
+
+    /// `#testisolationleaks`: a lib test's working directory is its crate
+    /// checkout. The CWD registry used to open (and create) that checkout's
+    /// `.agent-doc/state.db`. In the main checkout that ledger is a live
+    /// project's, and the leak left `.agent-doc/` directories in crate dirs.
+    #[test]
+    fn the_cwd_registry_of_a_test_process_never_touches_the_checkout() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(
+            !agent_doc_fs::path_in_test_runtime_scope(&cwd),
+            "a lib test runs from its crate checkout, outside the temp-root scope"
+        );
+        assert!(!cwd_registry_in_test_scope());
+        let db = registry_path_in(&cwd);
+        let existed = db.exists();
+        assert!(load().unwrap().is_empty());
+        assert_eq!(lookup("any-session").unwrap(), None);
+        assert_eq!(
+            db.exists(),
+            existed,
+            "the CWD registry was opened or created"
+        );
+    }
+
+    #[test]
+    fn an_explicit_registry_outside_the_test_scope_fails_the_test() {
+        let refused = std::panic::catch_unwind(|| {
+            let _ = load_in(Path::new("/agent-doc-testisolationleaks/live-project"));
+        })
+        .expect_err("a test opened a registry outside its runtime scope");
+        let message = refused
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_default();
+        assert!(message.contains("#testisolationleaks"), "{message}");
+    }
 
     fn entry(session_id: &str, pane: &str, file: &str) -> RegistryEntry {
         RegistryEntry {

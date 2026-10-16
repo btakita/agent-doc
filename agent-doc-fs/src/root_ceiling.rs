@@ -410,12 +410,28 @@ mod tests {
             .expect("run scripts/check-test-tmpdir --nextest-env");
         assert!(output.status.success());
         let printed = String::from_utf8(output.stdout).unwrap();
-        let exported = std::fs::read_to_string(&nextest_env).unwrap();
-        let exported = exported
-            .trim_end()
-            .strip_prefix(&format!("{ROOT_CEILING_ENV}="))
-            .unwrap_or_else(|| panic!("NEXTEST_ENV: {exported:?}"))
+        let written = std::fs::read_to_string(&nextest_env).unwrap();
+        let mut lines = written.lines();
+        let exported = lines
+            .next()
+            .and_then(|line| line.strip_prefix(&format!("{ROOT_CEILING_ENV}=")))
+            .unwrap_or_else(|| panic!("NEXTEST_ENV: {written:?}"))
             .to_string();
+        // `#testisolationleaks`: the runtime scope is this run's own temp root,
+        // never an inherited one.
+        assert_eq!(
+            lines.next(),
+            Some(
+                format!(
+                    "{}={}",
+                    crate::test_runtime_scope::TEST_RUNTIME_SCOPE_ENV,
+                    test_tmp_root.canonicalize().unwrap().display()
+                )
+                .as_str()
+            ),
+            "NEXTEST_ENV: {written:?}"
+        );
+        assert_eq!(lines.next(), None, "NEXTEST_ENV: {written:?}");
         assert_eq!(printed.trim_end(), exported);
         let entries: Vec<&str> = exported.split(':').collect();
         assert!(

@@ -58,8 +58,14 @@ for required in "$canonical" "$workspace"; do
     esac
 done
 
+# `#testisolationleaks`: the test runtime scope. Test binaries already scope
+# themselves to their temp dir; exporting it also confines the `agent-doc`
+# binaries an integration test spawns, so no test process -- harness or child --
+# can discover, signal, or write a live project's controller, supervisors,
+# sockets, or state.db.
 if [ "$nextest_env" = 1 ]; then
     : "${NEXTEST_ENV:?--nextest-env must run as a nextest setup script}"
     printf 'AGENT_DOC_ROOT_CEILING_DIRECTORIES=%s\n' "$ceiling" >>"$NEXTEST_ENV"
+    printf 'AGENT_DOC_TEST_RUNTIME_SCOPE=%s\n' "$canonical" >>"$NEXTEST_ENV"
 fi
 printf '%s\n' "$ceiling"

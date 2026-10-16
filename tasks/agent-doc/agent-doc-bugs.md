@@ -473,6 +473,23 @@ All five subagent fixes are merged, released as **v0.35.510** (tag pushed, `main
 **Verification:** `make check`: 10,821 passed, 169 skipped. `tmux-ci` passed, and so did both repaired tests on their own. `install-full` completed. GitHub CI and Release runs for the tag are still in progress.
 
 **Not done:** I did not bump the superproject's `src/agent-doc` pointer. That checkout is held by another session: its local `main` sits on unpushed netadv batch2 work (`e8990627cc`) with uncommitted edits, so recording a pointer from here would clobber or misstate it.
+
+### Re: release published? — opus-5-5 · 2026-10-15T23:13-04:00
+
+> **Chat prompt (#chatprompt):** release published?
+
+**Yes.** v0.35.510 is published:
+- **GitHub Release** `v0.35.510`: published 2026-10-16 02:24Z, not a draft, 15 assets. The Release workflow succeeded.
+- **PyPI** `agent-doc 0.35.510`: live and the latest version. The PyPI workflow succeeded.
+
+**But CI on the release commit is red.** It is one test in the batched libtest pass of `agent-doc-controller-io`: `detached_controller_exits_when_temp_project_root_is_removed` timed out at its 60s ceiling (752 passed, 1 failed). The full nextest pass on CI was green (10,821 passed). The same test passed in the previous eight CI runs, so this batch introduced it.
+
+What I found:
+- The test's captured output shows the controller still running its supervisor watchdog and orphan drain against the recreated root. It never ran the exit check.
+- The controller holds the original directory open, so the recreated directory cannot reuse its inode. The exit check itself is therefore sound. More likely the serve loop was stuck inside an idle tick that started before the root was removed. Candidates: the recycle/handoff path, the liveness-plane lock, or the new 150s launch-wait ceiling from `#integrationtesttargets`.
+- It does not reproduce locally: alone, the crate suite 3×, 6 concurrent copies, and 8 concurrent copies of the workspace-built binary with `--test-threads=2` (CI's exact shape) all passed.
+
+I re-ran only the failed CI job as a diagnostic, to learn whether it fails every time or intermittently. A green re-run would not mean it is fixed. Follow-up filed as `#detachedexitci` (backlog head).
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
@@ -481,6 +498,7 @@ All five subagent fixes are merged, released as **v0.35.510** (tag pushed, `main
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+- do [#detachedexitci]
 <!-- /agent:queue -->
 
 ## Todo
@@ -496,6 +514,7 @@ All five subagent fixes are merged, released as **v0.35.510** (tag pushed, `main
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#detachedexitci] CI red on v0.35.510 (run 38837770714, batched libtest pass): `detached_controller_exits_when_temp_project_root_is_removed` timed out at its 60s ceiling. The controller kept running its supervisor watchdog / orphan drain against the recreated root instead of exiting. It passed in all 8 previous CI runs and does not reproduce locally (crate suite 3x, 6x concurrent, 8x concurrent workspace-built with --test-threads=2). The retained directory handle rules out inode reuse, so suspect the serve loop stuck inside an idle tick (recycle/handoff path, liveness-plane lock, or the new 150s launch-wait ceiling from #integrationtesttargets). Next: make the incarnation exit independent of idle-tick maintenance, or add tick-phase diagnostics to the timeout message.
 <!-- /agent:backlog -->
 
 ## Review

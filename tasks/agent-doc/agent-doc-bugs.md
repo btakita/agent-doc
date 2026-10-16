@@ -365,7 +365,26 @@ The agent will:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?
+---
+Claude Code ran out of tokens mid-tasks. Please continue:
+```
+❯ create a backlog + queue item for codex to pick up the work
+
+● Stopped the three agents so Codex won't collide with them in the same worktrees. Now writing one handoff file per
+  agent, then the backlog and queue items.
+
+● Bash(mkdir -p /home/brian/work/btakita/agent-loop/tasks/agent-doc; cat >
+      /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-tmuxscopesteward.md <<'EOF'
+      # Ha…)
+  ⎿  8337 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-2026-10-05-codex.md
+     4868 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-queuefreetextsplit.md
+     3096 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-syncioredlivetmux.md
+     5229 /home/brian/work/btakita/agent-loop/tasks/agent-doc/handoff-tmuxscopesteward.md
+  ⎿  You've hit your weekly limit · resets Oct 19, 6am (America/New_York)
+     Use your limit reset to reset it now: clau.de/reset
+```
+---
+- 🚧 Does agent-doc recognize distinct queue items of multi-line free text between unordered lists without the `---` line? How is the next queue item, which is 2 lines of free text, interpreted?
 My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
 > I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
 - 🚧 do [#tmuxscopesteward]

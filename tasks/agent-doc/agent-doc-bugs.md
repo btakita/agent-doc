@@ -540,6 +540,45 @@ Brief for the new part:
 - **Hand-back:** neither docs.md nor sdk.md gets edited by the worker. It returns the list of rows to check off or re-id.
 
 When it reports, I'll integrate the branch, run one `make install`, and close both items.
+
+### Re: todo completion + auto-ids fixed, pushed, installed — opus-5-5 · 2026-10-16T00:41-04:00
+
+> **Queue prompt:** todo items in sdk.md did not get marked as completed when done?
+
+> **Queue prompt:** In docs.md, I did re-authenticate the google drive connector, but the todo item remained. We should auto-assign ids to todo items, like we do with free text queue items + backend items.
+> ```
+> - [ ] Re-authenticate the Google Drive connector (/mcp, sign in) or paste the Google Doc text into tasks/docs.md so #httpsdocsgoogle can proceed; or say skip
+> ```
+
+`subagent:sdktododone` fixed both. Commit `082fd538a0` fast-forwarded `main` and is installed locally. Its full `make check` passed: 10,831 tests run, 10,831 passed. The full-check receipt matches the pushed bytes.
+
+**sdk.md: why todos were not marked done.** The three rows that are now `[x]` (`#tdsdkdevrename`, `#tdue427go`, `#tdapi724`) were all ticked by hand; the binary never checked any of them. Three causes:
+1. **Bare ids were not ids.** Only a leading `[#id]` counted as a row's own id, so the bare `- [ ] #tdfoo` workaround rows had none. Because of that, a 23:30 `--todo-edit` dropped 7 ids, and `--todo-done tdsdkdevrename` errored as ambiguous: a second row also cites that id.
+2. **`--done <todo id>` failed** with "id not found in backlog/icebox". The 0.35.510 auto-check only fires for todos whose id is a resolved backlog or review id, and no sdk.md row has one.
+3. **Draining queue heads is deliberately not a completion signal.** Four decision rows drained as queue heads while the decisions were still open; auto-checking on drain would have wrongly closed them.
+
+**Fix:**
+- A leading bare `#id` with a letter in it now counts as the row's own id; `#157`-style numbers stay GitHub references.
+- `--todo-done` changes only the checkbox, and `--todo-edit` keeps the id.
+- `--done <id>` that names a todo's own id now checks that row off in place and strikes its `[#id]:` queue head. Running it again does nothing, and it never adds a second `[x]` line.
+
+**docs.md: todo ids are assigned automatically now.**
+- Every preflight gives each id-less `agent:todo` row an id, using the same rules as `--todo-add`, behind the same typing gate as free-text queue lines.
+- A row that cites exactly one open backlog or review id reuses it; otherwise it gets a fresh id.
+- It never re-ids a row that has an id, only inserts the `[#id]` token, and never blocks preflight.
+- The docs.md row becomes `[#httpsdocsgoogle] Re-authenticate …`. Once checked, preflight reports the prerequisite done, and when `httpsdocsgoogle` itself resolves, the row checks off automatically. Nothing is checked off on a guess.
+
+**Extra fix:** preflight looked for pending callbacks in the shell's project instead of the document's project. A one-line fix with its own test; it was crashing 7 `pending_integration` tests whenever a stray `.agent-doc/state.db` sat in the cwd.
+
+**Every new test was shown to fail before its fix.** Spec, runbooks and VERSIONS.md are updated.
+
+**Rows to apply.** I did not edit sdk.md or docs.md, because other sessions own them; both are on the todo list above.
+- **sdk.md:** there is nothing new to check off. Seven ids lost in the 23:30 edit (`#tdclireview`, `#tdcontracts162`, `#tdpromotioncallers`, `#tdinspectclones`, `#tdfpe202`, `#tdadr0033`, `#tdadr0030`) can be restored. If sdk.md's next preflight on the new binary runs first, the backfill gives those rows different ids instead (three reuse the open item they cite). Their text is unaffected.
+- **docs.md:** check the Google Drive row off, since you already re-authenticated.
+
+**Known gap:** `--done <id>` for a queue head that is neither tracked work nor a todo still fails.
+
+**CI:** runs for `e010dd62fd` and `082fd538a0` are still in progress.
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
@@ -548,7 +587,7 @@ When it reports, I'll integrate the branch, run one `make install`, and close bo
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 todo items in sdk.md did not get marked as completed when done?
+- ~~todo items in sdk.md did not get marked as completed when done?~~
 ---
 In docs.md, I did re-authenticate the google drive connector, but the todo item remained. We should auto-assign ids to todo items, like we do with free text queue items + backend items.
 ```

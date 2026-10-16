@@ -159,6 +159,20 @@ fn validate_supervisor_reexec_document(content: &str) -> Result<()> {
     agent_doc_frontmatter::frontmatter::parse(content).map(|_| ())
 }
 
+/// GH #279: a stale supervisor may be unable to resolve its editor-owned
+/// document precisely because the editor already runs the replacement build.
+/// In that case keeping the stale sender alive cannot make the validation
+/// succeed; replacing it is the recovery. Other resolution failures still
+/// defer, preserving the malformed-document guard above.
+fn supervisor_reexec_bypasses_document_failure(
+    refusal: Option<agent_doc_ipc_io::BuildMismatchRecoveryRefusal>,
+) -> bool {
+    matches!(
+        refusal,
+        Some(agent_doc_ipc_io::BuildMismatchRecoveryRefusal::SenderExecutableReplaced)
+    )
+}
+
 static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
@@ -4812,6 +4826,28 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 reexec_document_invalid_logged = false;
                                 reexec_document_validation_retry_at = None;
                             }
+                            Err(err)
+                                if supervisor_reexec_bypasses_document_failure(
+                                    agent_doc_ipc_io::build_mismatch_recovery_refusal(&err),
+                                ) =>
+                            {
+                                reexec_document_invalid_logged = false;
+                                reexec_document_validation_retry_at = None;
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "supervisor_reexec_document_preflight_bypassed reason=sender_executable_replaced action=reexec_fresh_binary error={err:#} (#gh279)"
+                                    ),
+                                );
+                                agent_doc_ops_log_io::log_op(
+                                    &path,
+                                    &format!(
+                                        "supervisor_reexec_document_preflight_bypassed file={} pane={} reason=sender_executable_replaced action=reexec_fresh_binary error={err:#} (#gh279)",
+                                        path.display(),
+                                        shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    ),
+                                );
+                            }
                             Err(err) => {
                                 reexec_document_ready = false;
                                 reexec_document_validation_retry_at =
@@ -6400,6 +6436,21 @@ mod tests {
         let content = "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n---\nBody\n";
 
         validate_supervisor_reexec_document(content).unwrap();
+    }
+
+    #[test]
+    fn stale_supervisor_reexec_bypasses_only_replaced_sender_resolution_failure() {
+        use agent_doc_ipc_io::BuildMismatchRecoveryRefusal::{
+            ReloadAlreadyRequested, SenderExecutableReplaced,
+        };
+
+        assert!(supervisor_reexec_bypasses_document_failure(Some(
+            SenderExecutableReplaced
+        )));
+        assert!(!supervisor_reexec_bypasses_document_failure(Some(
+            ReloadAlreadyRequested
+        )));
+        assert!(!supervisor_reexec_bypasses_document_failure(None));
     }
 
     /// GH #98: foreground start owns the managed pane's tty. Diagnostics from

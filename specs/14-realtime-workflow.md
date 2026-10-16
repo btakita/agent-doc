@@ -368,6 +368,15 @@ reuses the reload effect's planner and admission predicate, performs no reload,
 and does not create a second long-lived state model. A newer editor registration
 advances the liveness witness and invalidates the refusal.
 
+When the route-owned supervisor itself is stale, that same typed
+`sender_executable_replaced` refusal is affirmative permission to cross the
+idle-boundary re-exec gate (GH #279). The old process cannot resolve an
+editor-owned document through a listener that correctly rejects its build, so
+waiting for successful pre-reexec resolution would deadlock the recovery. The
+fresh image performs the recovery after `execve`; all other resolution failures,
+including malformed frontmatter and `reload_already_requested`, continue to
+defer the swap.
+
 ### Retained-write guidance must terminate (GH #131 reopened)
 
 Every instruction an agent can receive about a retained write is a step in a

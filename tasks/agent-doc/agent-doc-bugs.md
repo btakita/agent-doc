@@ -222,6 +222,27 @@ The FFI `agent_doc_reconcile_text` also checks its own answer now. It returns `l
 I will merge and install its branch when it reports back.
 
 Exchange size is 173 lines. The queue is active, so I am not compacting.
+
+### Re: `#tmuxpanesreversed` happens only on Coder — sent to the running subagent — opus-5.5 · 2026-10-16T11:58-04:00
+
+> **Operator note:** The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances.
+
+I sent this note, word for word, to the subagent already working on `#tmuxpanesreversed` (`subagent:tmuxpaneorder`, branch `fix/tmux-pane-order-invariant`). I did not start a second subagent or claim the item again.
+
+The note makes the cause likely to depend on the environment, so I asked the subagent to look at what differs on a Coder instance:
+- **tmux version:** what `split-window -b`, `join-pane -b`, `-f` and `move-pane` do changed between versions.
+- **tmux settings:** `base-index` and `pane-base-index`, or a missing or different `tmux.conf`.
+- **Window size and attach order:** a detached server or `default-size` can change the pane positions tmux reports.
+- **Editor split order over a remote IDE connection:** it may be unknown there, or come back reversed.
+- **Start-up timing:** it can change the order the panes are created in.
+
+I also asked it for two things:
+- **A check after every layout operation** that re-reads `pane_left` and either corrects the order or fails loudly. That way the rule holds whichever of the above is the real cause.
+- **A log line on each layout pass** with the tmux version, the base-index values, the wanted order, and the pane positions before and after. The next Coder occurrence can then be diagnosed from the logs alone.
+
+The item stays open and claimed. I will merge, install and close it when the subagent reports back.
+
+Exchange size is 192 lines. The queue is active, so I am not compacting.
 <!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 
@@ -230,15 +251,13 @@ Exchange size is 173 lines. The queue is active, so I am not compacting.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#tmuxpanesreversed]
+- 🚧 do [#tmuxpanesreversed]: The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances.
 - ~~do [#jetbrainscleanregistrati]~~
 <!-- /agent:queue -->
 
 ## Todo
 
 <!-- agent:todo -->
-- [x] [#gh262tabtmux] Next Remote Dev session: confirm tab switches move tmux (GH #262 fix, plugin 263 0.2.617 after v0.35.504 is installed on the backend)
-- [x] [#sdkmdcleanup] sdk.md cleanup: delete the leftover half-typed `> **Queue prompt:** ... which is not f` echo (~line 1167; the full question is ~line 1147), and the open `[ ]` copies of #apimigrationcollide / #publicbundleadopt whose `[x]` duplicates exist
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#gq2c] After the haiven-dev supervisor recycles onto the new build, re-run Agent Doc on tasks/sdk.md: bracketed todo ids are admitted again (it currently uses bare ids as a workaround).
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
@@ -250,7 +269,7 @@ Exchange size is 173 lines. The queue is active, so I am not compacting.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmuxpanesreversed] The tmux panes are reversed again on my Coder instance. We have made several releases attempting to fix this issue but it persists. A gh issue is coming soon. But I wanted to get a head start. Can we use formal logic to ensure this behavior is correct and this class of error is fixed?
+- [ ] 🚧 [#tmuxpanesreversed] The tmux panes are reversed again on my Coder instance. We have made several releases attempting to fix this issue but it persists. A gh issue is coming soon. But I wanted to get a head start. Can we use formal logic to ensure this behavior is correct and this class of error is fixed?
 <!-- /agent:backlog -->
 
 ## Review

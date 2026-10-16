@@ -24,6 +24,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   retained response is re-applied once on top of the operator's text. The
   remedy allows `admin recycle` only as a fallback. Plugin 0.2.654 / 262
   0.2.656 / 263 0.2.655; other editors keep the recycle fallback.
+- **Captured-splice recovery never moves a controller edit onto operator text
+  (`mergecapturedsplice`).** When the operator deleted the line a controller
+  edit was in (a closeout's ` (closed)` on a struck queue line the operator
+  removed), the char-level fallback merge re-anchored the edit onto a newly
+  typed item and reported no conflict. The fallback now merges whole lines, and
+  any rebase that would keep a canonical change on a line the operator deleted
+  or rewrote is refused as an overlap; the editor keeps its visible text and
+  settles through the in-place roll-forward.
 
 ## 0.35.511
 

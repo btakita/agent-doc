@@ -280,6 +280,45 @@ It may run `reset-failed` on this machine, but it may not stop any running scope
 Your note sits as plain text under a `---`, not as a queue line, so it could not be claimed. I added `#tmuxscopesteward` to the backlog and queue and will claim it for that agent.
 
 The exchange is 213 lines. The queue is active, so I am not compacting.
+
+### Re: Subagent completed: `#tmuxpanesreversed` fixed, pushed, installed; GH #278 closed — opus-5.5 · 2026-10-16T13:18-04:00
+
+> **Queue prompt:** 🚧 do [#tmuxpanesreversed]: The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances. #gh-fix https://github.com/btakita/agent-doc/issues/278
+
+> **Operator note:** The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances. #gh-fix https://github.com/btakita/agent-doc/issues/278
+
+**This explains why it only happens on Coder, and both halves of `#gh-fix` are done:** fixed in `46bc541bd8` on agent-doc `main`, and #278 closed.
+- **Fix:** `46bc541bd8` is a fast-forward from `0be815dfc6`, v0.35.512. The subagent rebased its branch onto `origin/main` and ran `make check` on the result: `10882 passed, 172 skipped`, exit 0.
+- **Close:** I closed #278 with a summary of each fix and its tests.
+
+**Cause:** your Coder instance runs the IDE as a JetBrains Remote Dev backend. Remote Dev reports which documents are visible in tab-open order, but not where the splits are, so on Coder the left-to-right order is always guessed. On this machine the plugin reads the real split positions and never reaches that code, which is why the panes only reverse on Coder. Issue #278's three faults were all in the guessing:
+1. **A new document went to the end.** It now takes the slot of the document it replaced: `[a | b]` showing `{b, c}` becomes `[c | b]`. An order marked "retained" can still place new documents, but can never swap two documents tmux already shows.
+2. **A guess became "retained" when it was read twice.** The claim's own Sync reads the same visible editors twice. The plugin now remembers that its guess is not yet anchored to the controller's layout and keeps reporting it as unknown until it is. It looks up the controller's layout through a new read-only call.
+3. **The new document replaced the wrong pane.** Focus changes that published no new layout were ignored. The controller now records every focus change, and the new document replaces the most recently focused pane.
+
+**Also added:**
+- **The rule in SPEC.md:** after every layout operation, panes left to right by `pane_left` match the wanted order.
+- **A check after every layout pass:** sync re-reads pane positions, swaps panes into place if they are out of order, and logs an error if that one repair fails.
+- **A log line per pass:** `tmux_pane_order outcome=held|repaired|violated|…` in ops.log, with the tmux version, base indices, wanted order, and pane positions before and after.
+- **Tests:**
+  - A pure test of every starting order against every wanted order, up to 5 panes.
+  - Real tmux tests up to 4 panes (and 5 panes from two starting orders), now part of `make tmux-ci`.
+  - A model test of how the Remote Dev plugin folds what it sees.
+  - Each fix was broken on purpose and its tests went red.
+
+**Proven vs. inferred:** the tests prove each fault and its fix. That these caused your Coder reversal rests on #278's log trace, not on a reproduction on Coder. If it happens again, the `tmux_pane_order` line will show where.
+
+**What I did:**
+- **Install:** ran `make install` from the subagent's worktree (exit 0). It installed the binary, the native library, and the JetBrains plugins 0.2.660 and 0.2.661. It marked 3 supervisors and 2 controllers to restart at their next idle point.
+- **IDE:** no running IDE could load the new library (`1 restart required`), and fix 2 lives in that library. Restart the IDE to get it.
+- **Coder:** it runs the public release, so the fix reaches Coder only after the next release.
+- **CI:** run 38938312292 on `46bc541bd8` is still in progress. I did not wait for it.
+
+**Found while running tests:** 14 live-tmux tests in `agent-doc-sync-io` fail on `main` and are not run by CI. They fail the same way without this change. Filed as `#syncioredlivetmux`.
+
+**Local `main` is stale:** the shared `src/agent-doc` checkout's local `main` is 807 commits behind `origin/main`, and that checkout also holds another session's uncommitted work, so I left it alone. I told the `#tmuxscopesteward` agent, which had branched from that stale `main`, to rebase onto `origin/main`.
+
+`#tmuxscopesteward` is still running.
 <!-- agent:boundary:510e6fab -->
 <!-- /agent:exchange -->
 
@@ -288,11 +327,12 @@ The exchange is 213 lines. The queue is active, so I am not compacting.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#tmuxpanesreversed]: The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances. #gh-fix https://github.com/btakita/agent-doc/issues/278
+- ~~do [#tmuxpanesreversed]: The panes do not reverse on this machine (non-Coder), but get into a reversed state on Coder instances. #gh-fix https://github.com/btakita/agent-doc/issues/278~~
 ---
 My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a good steward of tmux-spawn scopes and regularly clean up:
 > I found a persistent amplifier: the user manager has 3,911 transient tmux-spawn scopes loaded, while the live tmux server only has about 50 pane processes. The broker’s inherited soft FD limit is only 1,024. I’m consulting this workspace’s existing incident note and checking scope state before proposing cleanup; I won’t terminate panes or reset the session. I’m using the tsift workspace-navigation skill because the project instructions route incident memory through it.
 - do [#tmuxscopesteward]
+- do [#syncioredlivetmux]
 <!-- /agent:queue -->
 
 ## Todo
@@ -309,8 +349,8 @@ My X11 windows crashed due to tmux not getting cleaned up. agent-doc should be a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#syncioredlivetmux] [agent-doc-bug] 14 live-tmux tests in `agent-doc-sync-io` fail on current main and are not run by CI. The tmuxpanesreversed subagent found them while running the suite (2026-10-16); they fail the same way with the original `sync.rs`, so they predate the pane-order change. Fix each failure, then add the tests to `make tmux-ci` so they cannot rot again. Do not delete or ignore tests to make the suite pass.
 - [ ] [#tmuxscopesteward] [agent-doc-bug] agent-doc leaks systemd transient `tmux-spawn-*.scope` units in the user manager: 3,911 were loaded at the time of the 2026-10-16 X11 crash, while the live tmux server had about 50 pane processes. The previous boot journal has 2,718 scopes that ended `Failed with result resources` (`No PIDs left to attach`): the pane process exited before systemd could attach it. Failed transient units stay loaded until `systemctl --user reset-failed`. Launchers were many short-lived tmux servers with about 120-135 panes each, consistent with real-tmux tests on private sockets. Fix: (1) stop test and runtime tmux servers from leaking scopes, (2) add a rate-limited, binary-owned sweep that resets failed `tmux-spawn-*` units and stops only scopes provably holding leaked agent-doc processes, logged to ops.log, with an admin `--dry-run` command. Dispatched to subagent:tmuxscopes on branch fix/tmux-spawn-scope-stewardship (worktree agent-doc-wt/tmuxscopes).
-- [ ] 🚧 [#tmuxpanesreversed] The tmux panes are reversed again on my Coder instance. We have made several releases attempting to fix this issue but it persists. A gh issue is coming soon. But I wanted to get a head start. Can we use formal logic to ensure this behavior is correct and this class of error is fixed?
 <!-- /agent:backlog -->
 
 ## Review

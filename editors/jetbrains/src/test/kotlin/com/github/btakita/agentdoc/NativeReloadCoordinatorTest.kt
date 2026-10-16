@@ -138,28 +138,26 @@ class NativeReloadCoordinatorTest {
      */
     @Test
     fun `native checkpoint follows a live forwarder replacement`() {
-        val manager = Files.readString(
-            listOf(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-            ).first { Files.exists(it) },
-        )
-        val capture = manager
-            .substringAfter("private fun captureNativeReloadResumeStates(")
-            .substringBefore("companion object")
+        data class Forwarder(val attached: Boolean)
 
-        assertTrue(
-            "the serialized checkpoint must resolve the current authoritative forwarder",
-            capture.contains("val currentForwarder = forwarders[filePath]"),
-        )
-        assertTrue(
-            "a replacement that is live when the task runs must provide the resume state",
-            capture.contains("currentForwarder?.captureResumeState()"),
-        )
-        assertFalse(
-            "stale snapshot identity must not permanently reject a safe reload",
-            capture.contains("forwarders[filePath] !== forwarder"),
-        )
+        val snapshotted = Forwarder(attached = true)
+        val unchanged = nativeReloadCheckpointTarget(snapshotted, snapshotted) { it.attached }
+        assertTrue(unchanged.forwarder === snapshotted)
+        assertFalse(unchanged.followedReplacement)
+
+        val liveReplacement = Forwarder(attached = true)
+        val replaced = nativeReloadCheckpointTarget(snapshotted, liveReplacement) { it.attached }
+        assertTrue(replaced.forwarder === liveReplacement)
+        assertTrue(replaced.followedReplacement)
+
+        val detachedReplacement = Forwarder(attached = false)
+        val detached = nativeReloadCheckpointTarget(snapshotted, detachedReplacement) { it.attached }
+        assertNull(detached.forwarder)
+        assertFalse(detached.followedReplacement)
+
+        val removed = nativeReloadCheckpointTarget(snapshotted, null) { it.attached }
+        assertNull(removed.forwarder)
+        assertFalse(removed.followedReplacement)
     }
 
     /**

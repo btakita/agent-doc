@@ -79,6 +79,30 @@ internal fun nativeReloadRemainingWaitMillis(deadlineNanos: Long, nowNanos: Long
     return TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1L)
 }
 
+internal data class NativeReloadCheckpointTarget<T>(
+    val forwarder: T?,
+    val followedReplacement: Boolean,
+)
+
+/**
+ * Resolve the authoritative replica at the serialized checkpoint boundary.
+ * A live replacement is safe to checkpoint; a missing or detached replacement
+ * keeps the native reload fail-closed.
+ */
+internal fun <T> nativeReloadCheckpointTarget(
+    snapshottedForwarder: T,
+    currentForwarder: T?,
+    isAttached: (T) -> Boolean,
+): NativeReloadCheckpointTarget<T> {
+    if (currentForwarder == null || !isAttached(currentForwarder)) {
+        return NativeReloadCheckpointTarget(null, false)
+    }
+    return NativeReloadCheckpointTarget(
+        forwarder = currentForwarder,
+        followedReplacement = currentForwarder !== snapshottedForwarder,
+    )
+}
+
 internal data class NativeReloadReplicaRestartReport(
     val expected: Int,
     val attached: Int,
@@ -4860,14 +4884,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         // document lane before the checkpoint task runs. That replacement
                         // is now the authoritative live replica, so checkpoint it instead
                         // of permanently failing the native reload on stale identity.
-                        val currentForwarder = forwarders[filePath]
-                        if (currentForwarder !== forwarder && currentForwarder?.attached == true) {
+                        val target = nativeReloadCheckpointTarget(
+                            snapshottedForwarder = forwarder,
+                            currentForwarder = forwarders[filePath],
+                            isAttached = { it.attached },
+                        )
+                        if (target.followedReplacement) {
                             log.info(
                                 "[crdt-replica] native reload checkpoint following live forwarder " +
                                     "replacement for ${File(filePath).name}",
                             )
                         }
-                        currentForwarder?.captureResumeState()
+                        target.forwarder?.captureResumeState()
                     }
                 }
         val captured = LinkedHashMap<String, ReplicaResumeState>()

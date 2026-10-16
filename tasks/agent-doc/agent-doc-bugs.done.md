@@ -571,3 +571,27 @@
 - 2026-10-15 [#integrationtesttargets] Integration-test targets still cold-launch a CLI controller serve (~540 launches per full nextest run; fix/cold-launch-test-flakes covered lib tests only). Route them through the in-process controller or a readiness-based wait and extend the cold-launch guard to integration tests.
 - 2026-10-15 [#shadowbacklogscan] [recommended] The shadow-backlog scan skips any line overlapping inline code, so a genuinely drifted open backlog row containing backticks is never caught (found during the GH 275 fix). Tighten it without refusing live documents that legitimately quote ids in code.
 - 2026-10-15 [#detachedexitci] CI red on v0.35.510 (run 38837770714, batched libtest pass): `detached_controller_exits_when_temp_project_root_is_removed` timed out at its 60s ceiling. The controller kept running its supervisor watchdog / orphan drain against the recreated root instead of exiting. It passed in all 8 previous CI runs and does not reproduce locally (crate suite 3x, 6x concurrent, 8x concurrent workspace-built with --test-threads=2). The retained directory handle rules out inode reuse, so suspect the serve loop stuck inside an idle tick (recycle/handoff path, liveness-plane lock, or the new 150s launch-wait ceiling from #integrationtesttargets). Next: make the incarnation exit independent of idle-tick maintenance, or add tick-phase diagnostics to the timeout message.
+- 2026-10-16 [#rundocsissue] Run Agent Doc on docs.md issue
+  ```
+  › agent-doc tasks/docs.md
+
+
+  • The agent-doc turn was not admitted, so I won’t modify the document or start a response. I’m running the permitted
+  session check to recover any pending operator prompt.
+
+
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
+
+
+  • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
+  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md total_ms=299…
+    [session-check] INTERRUPTED: completed free-text agent:queue head(s) "See https://github.com/haiven-dev/haiven-doc…
+    [session-check] hint: this cycle is already committed, so run `agent-doc preflight /home/brian/work/btakita/agent-…
+    + 6 lines (^t to expand)
+
+  • The repeated invocation hit the same failed-closed recovery state. I’m completing the already-started permitted
+  session check; I will only relay its result and stop.
+
+  • Agent-doc admission failed because the response heading is already committed, leaving stale completed queue residue.
+  No document changes were made, and I did not rerun preflight.
+  ```

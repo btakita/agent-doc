@@ -87,6 +87,60 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 **New queue item (sdk.md Clear Session Context stuck):** claimed and dispatched to a subagent on branch `fix/clear-context-retained-write-wedge`. After the install, sdk.md's ops.log shows `session_check_retained_capture_write_applied` (06:05:47Z), and its session-check reports the cycle committed. So sdk.md may already have recovered. The subagent is reconstructing the timeline and fixing why a context clear waits on a document write at all. One slip on my side: my read-only `session-check` on sdk.md surfaced 2 of that session's mid-turn steering notices (`midturn_steering_surfaced consumer=hook count=2`, 06:07:26Z). Both are subagent-intent queue lines, so sdk.md's next preflight still lists them; nothing is lost. I've told the subagent not to run session-check on foreign documents.
 
 There were no actionable follow-up items to capture. Everything left is already a claimed queue item: GH #277 (its subagent is still running `make check`), the sdk.md item above, and "release + publish". When #277 reports, I'll merge it, write VERSIONS 0.35.511, bump the version and run `make release`. Then I'll close #276/#277 and close out #rundocsissue and the todo-id line.
+
+### Re: batch integrated, v0.35.511 released, sdk.md Clear fix installed — opus-5.5 · 2026-10-16T03:13-04:00
+
+> **Queue prompt:** todo ids opportunistically layer on existing `agent:review` ids if an operator decision needs to be made on the backlog/review/icebox item. The todo is for visibility. A surrogate todo id would be created only if there are multiple backlog/review/icebox ids or if it is not associated with a backlog/review/icebox item.
+
+Done in v0.35.511 (`704bec5c49`). A todo that cites exactly one open `agent:review`, `agent:backlog` or `agent:icebox` id now takes that id as its own, so the todo is a visibility layer over that item. A made-up id is used only when it cites several tracked items or none. What's new beyond the review/backlog behaviour that already existed:
+- Icebox items now count.
+- A caller-chosen `id=` that names no tracked work gives way to the one cited item, and the receipt says `requested id=<x> not used`. That follows your "made-up id only when needed" rule; say if you'd rather keep the caller's id.
+- When you check off a todo that sits on an open icebox item, preflight reports `operator_done_icebox_open`.
+- `--done <icebox id>` closes the icebox item and auto-completes the todo that shares its id.
+
+There are 4 unit tests and 1 integration test, and both fail when the change is reverted.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/276
+
+Fixed in v0.35.511 (`043d61fe09`, JetBrains plugin 0.2.648, 262 0.2.649, 263 0.2.650). After a native reload, the report now rechecks each replica's real state when it is taken, waits up to 3 s for attaches still in flight, and reports a document still retrying as `pending` instead of `failed`. A fake-clock test reproduces the measured 26/30, which now reads 30/30. 834 JetBrains Kotlin tests pass. The `Fixes #276` commit closed the issue when main was pushed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/277
+
+Fixed in v0.35.511 (`c34cf021ee`). On exact-262 and 263 builds, the modular-package decline is now reported as permanent:
+- the one-time permanent-loss NOTE,
+- the summary line ending "restart-free upgrade is unavailable on this build",
+- `restart_free_unavailable=true` in the upgrade summary.
+
+Your second question, what to do between restarts, now has an answer in the NOTE, taken from what the code enforces: **the restart can wait.**
+- Routes stay admitted while the IDE's native endpoint answers with this binary's build.
+- Native saves stay admitted while the running plugin is at or above 0.2.497.
+- The new plugin's own changes load only at the restart. Until then, preflight shows a `stale_plugin` warning.
+- If a route is refused with `plugin_bytes_superseded`, run `agent-doc admin reload-lib`, then restart if that is refused too.
+
+Whether the restart-free path is attempted is unchanged, which matches the "keep the accurate warning" option in `jb262dynlauncherrecommen`; that review item is still your call. The issue was closed by its commit.
+
+**#rundocsissue (docs.md stuck): done.** Cause: the Codex Stop hook saved a second copy of an already-committed answer as a pending response, and the replay guard refused it on every preflight, so repair never got as far as clearing answered queue lines. Repair now sets such a copy aside and strikes the answered line. The refusal hint no longer tells an agent to run `preflight`. Verified on the live file: after the install, docs.md's turn was admitted and committed (`c718b1a7`), and the answered line left the queue.
+
+> **Queue prompt:** Clear Session Context on sdk.md wedged: • The response is committed, but the IDE editor buffer for tasks/sdk.md contains unmerged typing. Please reconcile/save that buffer while preserving your text. The retained agent-doc write is durable and 04will apply automatically once they agree.
+
+Fixed (`596c5ffcc5`). It is merged and pushed to main as `11c989a422` and installed locally; it ships in 0.35.512. What happened:
+- The message you quoted was Codex restating a Stop-hook blocker. The captured response couldn't land over your real queue edits, which were typed against an out-of-date copy of the text.
+- Your Clear presses at 06:03 were never applied. Codex's `/clear` exits the process, so the clear is a supervisor restart, and that restart was held behind the open cycle while still printing "Cleared". My 06:05 install's `continue` restart then overwrote it.
+- The document recovered through that same controller recycle and committed at 06:05:50Z.
+
+Now, with the agent idle and the response already captured, Clear applies immediately while the supervisor finishes the closeout. A clear that still has to wait says "accepted but NOT applied yet". An install or recycle restart no longer discards it. Integrated `make check`: exit 0, 10854/10854 passed. **sdk.md's Codex context was never cleared, so please press Clear Session Context again** (added to the todo list). The two follow-ups the fix uncovered are now in the backlog at the end of the queue.
+
+> **Queue prompt:** release + publish
+
+v0.35.511 is tagged and pushed, main is at `822df43fec`, and the local install is 0.35.511.
+- `make release` ran `make check` again on the version-bumped tree, then tagged and pushed, then ran `install-full`.
+- The first attempt stopped at the preflight step, before tagging: it needs one `editors/release-parity.tsv` row per release, so I added one.
+- I also moved the notes for work merged after the 0.35.510 tag out of the 0.35.510 section into 0.35.511, so 0.35.510 matches its tag.
+- **Still pending in GitHub Actions:** the Release workflow (run 38863189738) has every build except x86_64 macOS done and green. The GitHub Release and PyPI upload (PyPI still shows 0.35.510) come after it.
+
+**Other notes:**
+- A test isolation fix (`413fc47dbb`) makes the two `retained_pending_write_guidance_*` tests use their own temporary project. Every subagent had hit them when working outside agent-loop.
+- `install-full` deletes `target/` when it finishes. My release log was in there, so it looked like a failure; it wasn't.
 <!-- agent:boundary:33825235 -->
 <!-- /agent:exchange -->
 
@@ -95,12 +149,14 @@ There were no actionable follow-up items to capture. Everything left is already 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#rundocsissue]
+- ~~do [#rundocsissue]~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/277
 - 🚧 todo ids opportunistically layer on existing `agent:review` ids if an operator decision needs to be made on the backlog/review/icebox item. The todo is for visibility. A surrogate todo id would be created only if there are multiple backlog/review/icebox ids or if it is not associated with a backlog/review/icebox item.
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/276
 - 🚧 Clear Session Context on sdk.md wedged: • The response is committed, but the IDE editor buffer for tasks/sdk.md contains unmerged typing. Please reconcile/save that buffer while preserving your text. The retained agent-doc write is durable and 04will apply automatically once they agree.
 - 🚧 release + publish
+- do [#jetbrainsreplicaloops]
+- do [#clearsessioncontext]
 <!-- /agent:queue -->
 
 ## Todo
@@ -118,30 +174,8 @@ There were no actionable follow-up items to capture. Everything left is already 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#rundocsissue] Run Agent Doc on docs.md issue
-  ```
-  › agent-doc tasks/docs.md
-
-
-  • The agent-doc turn was not admitted, so I won’t modify the document or start a response. I’m running the permitted
-  session check to recover any pending operator prompt.
-
-
-  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
-
-
-  • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
-  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md total_ms=299…
-    [session-check] INTERRUPTED: completed free-text agent:queue head(s) "See https://github.com/haiven-dev/haiven-doc…
-    [session-check] hint: this cycle is already committed, so run `agent-doc preflight /home/brian/work/btakita/agent-…
-    + 6 lines (^t to expand)
-
-  • The repeated invocation hit the same failed-closed recovery state. I’m completing the already-started permitted
-  session check; I will only relay its result and stop.
-
-  • Agent-doc admission failed because the response heading is already committed, leaving stale completed queue residue.
-  No document changes were made, and I did not rerun preflight.
-  ```
+- [ ] [#jetbrainsreplicaloops] [agent-doc] When a JetBrains replica loops on stale-baseline local deltas (canonical-rebootstrap-captured-local-delta, visible_length_mismatch) and retained-persistence rebuilds are exhausted (state=editor_holds_unmerged_visible_text), roll the operator's editor text forward in place with the captured response re-applied on top, as the fresh-controller retained reseed did for sdk.md at 2026-10-16T06:05Z. Today only a controller recycle breaks the loop, and the remedy text forbids admin recycle.
+- [ ] [#clearsessioncontext] [agent-doc] After a Clear Session Context restarts Codex fresh while a document cycle is still open, the relaunch re-runs the document and the fresh agent restates the same retained-closeout blocker. Make the post-clear relaunch skip or summarize a blocker the supervisor already owns.
 <!-- /agent:backlog -->
 
 ## Review

@@ -1553,8 +1553,10 @@ pub fn todo_link_index_in_content(
 /// Every existing todo line is preserved byte-for-byte, and an action already
 /// present (in any checkbox state) is a no-op, so a replayed closeout never
 /// duplicates or resurrects a todo. The own id REUSES the one open
-/// `agent:review` / `agent:backlog` id the action cites (or an explicit
-/// `id=<open id>`), else is MINTED like a backlog id, collision-free against
+/// `agent:review` / `agent:backlog` / `agent:icebox` id the action cites (or an
+/// explicit `id=<open id>`; `#todoidlayer`: a caller-chosen `id=` naming no
+/// tracked work is a surrogate only when the action does not layer on exactly
+/// one tracked item), else is MINTED like a backlog id, collision-free against
 /// the document's ids and every tracked id the done archive holds. An explicit
 /// id naming resolved work is rejected. Returns whether a line was appended.
 pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
@@ -1581,11 +1583,16 @@ pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
         &reserved,
         &links,
     )?;
-    let id_label = match (outcome.id.as_deref(), outcome.linked.as_deref()) {
+    let mut id_label = match (outcome.id.as_deref(), outcome.linked.as_deref()) {
         (Some(id), Some(component)) => format!(" [#{id}] (reuses agent:{component} #{id})"),
         (Some(id), None) => format!(" [#{id}]"),
         (None, _) => String::new(),
     };
+    if let Some(requested) = outcome.requested_id_unused.as_deref() {
+        id_label.push_str(&format!(
+            " (requested id={requested} not used: a todo about one tracked item layers on its id, #todoidlayer)"
+        ));
+    }
     if outcome.inserted {
         persist_pending_write(file, &full_content, &outcome.content)?;
         pending_receipt!(

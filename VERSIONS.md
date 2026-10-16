@@ -88,6 +88,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   re-ids a row, and inserts only the id. A row with an id can be closed by id,
   so a hand-written "re-authenticate the connector" todo no longer stays open
   after the work it unblocks finishes.
+- **Todo ids layer on the tracked item they surface (`todoidlayer`).** A todo
+  that asks the operator to decide on one backlog, review, or icebox item now
+  carries that item's id, so `[#jb262dynlauncherrecommen]` is both the review
+  gate and its todo. Icebox items count now too, and an operator check on an
+  icebox todo reports `operator_done_icebox_open`. A caller-chosen `id=` that
+  names no tracked work gives way to the one cited item, and the receipt says
+  `requested id=<id> not used`. A new id is minted only when the todo cites
+  several tracked items or none, or follows up a checked todo for the item.
 - **Preflight reads pending callbacks from the document's project
   (`preflightcallbackroot`).** It used the process cwd, so a preflight run
   from another checkout opened that checkout's `state.db`.

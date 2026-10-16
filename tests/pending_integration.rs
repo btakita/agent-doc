@@ -1717,9 +1717,10 @@ fn write_todo_done_edit_reopen_remove_round_trip_preserves_operator_items() {
 }
 
 /// `#tododone`: resolving tracked work that an open todo only CITES (its own
-/// id is a custom one) prints a non-blocking advisory naming the
-/// `--todo-done` command and never writes; checking the todo off in a later
-/// closeout silences it.
+/// id is a custom surrogate, because the todo spans two review items —
+/// `#todoidlayer`) prints a non-blocking advisory naming the `--todo-done`
+/// command and never writes; checking the todo off in a later closeout
+/// silences it.
 #[test]
 fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
     let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
@@ -1730,14 +1731,22 @@ fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
             "--force-disk",
             "--review-add",
             "id=rvw3 needs live verification",
+            "--review-add",
+            "id=rvw4 needs a second live verification",
             "--todo-add",
-            "id=vrfy3 Verify [#rvw3] in a live pane",
+            "id=vrfy3 Verify [#rvw3] and [#rvw4] in a live pane",
         ])
         .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
         .assert()
         .success();
-    let id = todo_item_id(&fs::read_to_string(&doc).unwrap(), "Verify [#rvw3] in a live pane");
-    assert_eq!(id, "vrfy3", "an explicit custom id is kept");
+    let id = todo_item_id(
+        &fs::read_to_string(&doc).unwrap(),
+        "Verify [#rvw3] and [#rvw4] in a live pane",
+    );
+    assert_eq!(
+        id, "vrfy3",
+        "an explicit surrogate id is kept for a todo spanning two tracked items"
+    );
     let resolved = agent_doc()
         .args([
             "write",
@@ -1901,6 +1910,119 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
         ])
         .assert()
         .failure();
+}
+
+/// `#todoidlayer` end to end: a todo is a visibility layer over the one
+/// review/backlog/icebox item it surfaces an operator decision for, so its id
+/// reuses that item's id. A surrogate id is written only for an action that
+/// cites several tracked items or none.
+/// 1. `--todo-add` layers on a review gate even when the caller asked for a
+///    surrogate `id=`, layers on a parked icebox item, and gives surrogates to
+///    a two-item action and an unassociated action.
+/// 2. The operator checks the icebox layer; preflight signals
+///    `operator_done_icebox_open` and never moves or closes the item itself.
+/// 3. `--done <icebox id>` resolves the icebox item (not the todo sharing the
+///    id), and the same closeout auto-completes the layered todo.
+#[test]
+fn todo_ids_layer_on_one_review_backlog_or_icebox_item_and_surrogate_otherwise() {
+    let (_tmp, doc) = setup_doc_with_icebox("- [ ] [#open] backlog task", "- [ ] [#coldwork] parked idea");
+    let write = |args: &[&str], stdin: &str| {
+        let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk"];
+        full.extend_from_slice(args);
+        agent_doc().args(&full).write_stdin(stdin.to_string()).assert().success()
+    };
+    let added = write(
+        &[
+            "--review-add",
+            "id=gatex launcher policy decision pending",
+            "--todo-add",
+            "id=tdgatex Decide the launcher policy (#gatex)",
+            "--todo-add",
+            "Thaw or drop the parked idea (#coldwork)?",
+            "--todo-add",
+            "Decide #gatex before thawing #coldwork",
+            "--todo-add",
+            "Rotate the deploy key",
+        ],
+        "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n",
+    );
+    let stderr = String::from_utf8_lossy(&added.get_output().stderr);
+    assert!(
+        stderr.contains("[#gatex] (reuses agent:review #gatex) (requested id=tdgatex not used"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("[#coldwork] (reuses agent:icebox #coldwork)"), "{stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    let todo = component_body(&content, "todo");
+    let lines: Vec<&str> = todo.lines().collect();
+    assert_eq!(lines.len(), 4, "{todo}");
+    assert_eq!(lines[0], "- [ ] [#gatex] Decide the launcher policy (#gatex)");
+    assert_eq!(lines[1], "- [ ] [#coldwork] Thaw or drop the parked idea (#coldwork)?");
+    assert!(!todo.contains("tdgatex"), "{todo}");
+    let two = todo_item_id(&content, "Decide #gatex before thawing #coldwork");
+    let none = todo_item_id(&content, "Rotate the deploy key");
+    for surrogate in [&two, &none] {
+        assert!(
+            !["gatex", "coldwork", "open"].contains(&surrogate.as_str()),
+            "surrogate {surrogate} must not reuse a tracked id: {todo}"
+        );
+    }
+    // The icebox item is still parked: layering never moves it.
+    assert!(component_body(&content, "icebox").contains("- [ ] [#coldwork] parked idea"));
+
+    // 2. The operator checks the icebox layer; preflight (fresh project, the
+    //    write cycles above were never committed) signals it.
+    let checked = content.replace("- [ ] [#coldwork] Thaw", "- [x] [#coldwork] Thaw");
+    let (_preflight_tmp, preflight_doc) = setup_doc("");
+    fs::write(&preflight_doc, &checked).unwrap();
+    let preflight = agent_doc()
+        .args(["preflight", preflight_doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&preflight.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
+        panic!(
+            "preflight JSON ({err}): stdout={stdout} stderr={}",
+            String::from_utf8_lossy(&preflight.stderr)
+        )
+    });
+    let signals = parsed
+        .get("todo_signals")
+        .and_then(|v| v.as_array())
+        .unwrap_or_else(|| panic!("todo_signals missing: {stdout}"));
+    assert_eq!(signals.len(), 1, "{stdout}");
+    assert_eq!(signals[0]["kind"], "operator_done_icebox_open");
+    assert_eq!(signals[0]["todo"], "coldwork");
+    assert!(
+        signals[0]["action"].as_str().unwrap().contains("--done coldwork"),
+        "{stdout}"
+    );
+    assert!(
+        component_body(&fs::read_to_string(&preflight_doc).unwrap(), "icebox")
+            .contains("- [ ] [#coldwork] parked idea"),
+        "preflight never moves or closes parked work from a checkbox"
+    );
+
+    // 3. `--done coldwork` resolves the icebox item, and the layered todo is
+    //    auto-completed in the same closeout.
+    let done = write(&["--backlog-only", "--done", "coldwork"], "");
+    let stderr = String::from_utf8_lossy(&done.get_output().stderr);
+    assert!(stderr.contains("[todo] auto-done: #coldwork"), "{stderr}");
+    assert!(!stderr.contains("--done named its own id"), "{stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !component_body(&content, "icebox").contains("- [ ] [#coldwork]"),
+        "the icebox item is resolved: {content}"
+    );
+    assert!(
+        component_body(&content, "todo")
+            .contains("- [x] [#coldwork] Thaw or drop the parked idea (#coldwork)?"),
+        "{content}"
+    );
+    assert!(
+        component_body(&content, "todo").contains("- [ ] [#gatex] Decide the launcher policy"),
+        "the review layer stays open: {content}"
+    );
 }
 
 /// `#tododupdone`, anonymized from the live 2026-10-15 session: a `patch:todo`

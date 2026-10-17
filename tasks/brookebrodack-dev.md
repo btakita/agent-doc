@@ -268,6 +268,16 @@ Please answer these five requests. The npm login is the only time-sensitive one 
 - [ ] [#2amm] `hermes -z` is broken in hermes-agent 0.18.2 — every one-shot run dies with an httpx ResponseNotRead inside the Gemini provider, so the local primary path always falls through. Try `hermes update` or file upstream
 <!-- /agent:backlog -->
 
+## Todo
+
+<!-- agent:todo -->
+- [ ] [#rjrh] Complete npm web login and 2FA for [#rjrh]
+- [ ] [#fhmig] Choose whether to detach the source and retry or defer [#fhmig]
+- [ ] [#50fc] Choose the plugin aggregation policy for [#50fc]
+- [ ] [#2amm] Choose a Hermes credential recovery path for [#2amm]
+- [ ] [#j0ee] Add OpenAI credits and retry, or stop blocked, for [#j0ee]
+<!-- /agent:todo -->
+
 ## Review
 
 <!-- agent:review -->
@@ -324,4 +334,11 @@ Please answer these five requests. The npm login is the only time-sensitive one 
 - 2026-07-19 [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
 - 2026-07-19 [#4s08] lib/solid-start type-check fails on solid-start@0.3.11's node_modules .tsx sources (TS2305 for Route/useRoutes/Navigate against @solidjs/router 0.8.4). skipLibCheck cannot cover .tsx, and solid-start is dead upstream (superseded by @solidjs/start). Decide: migrate to @solidjs/start, pin a compatible @solidjs/router, or retire lib/solid-start to dormant/
 - 2026-07-19 [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
+- 2026-10-17 [#nm8q] rappstack/dev has the same typescript dist-tag problem #tsnextpin fixed in ctx-core-dev: 13 packages pin `typescript: "*"` and 2 pin `"next"`, and the installed compiler is a 5.5.0-dev from April 2024 that hard-crashes tsc (TypeError: Cannot read properties of undefined reading 'flags' in getCheckFlags). Pin the repo to ^7.0.2 so rappstack can type-check itself instead of relying on downstream repos to find its errors
+- 2026-10-17 [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
+- 2026-10-17 [#mc4f] Push the ctx-core-dev typescript pin sweep: 190 per-package submodule commits + superproject are committed LOCALLY and unpushed. Same ~190-public-repo motion as #pushctxcore, so it needs operator go before pushing each submodule and the superproject
+- 2026-10-17 [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
+- 2026-10-17 [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
+- 2026-10-17 [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
+- 2026-10-17 [#y457] Set OPENAI_API_KEY on BOTH surfaces — `bunx wrangler pages secret put OPENAI_API_KEY --project-name=brookebrodack` (inline submit-time judging) and `cd workers/guestbook-moderate && bunx wrangler secret put OPENAI_API_KEY && bunx wrangler deploy` (cron sweeper). Without it entries just stay pending.
 <!-- /agent:done -->

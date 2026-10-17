@@ -1283,7 +1283,13 @@ fn todo_item_id(content: &str, action: &str) -> String {
     let body = component_body(content, "todo");
     let line = body
         .lines()
-        .find(|line| line.ends_with(action))
+        .find(|line| {
+            line.ends_with(action)
+                || line
+                    .strip_suffix(')')
+                    .and_then(|line| line.rsplit_once(" (source: agent:"))
+                    .is_some_and(|(before, _)| before.ends_with(action))
+        })
         .unwrap_or_else(|| panic!("no todo item {action:?}:\n{content}"));
     let rest = line
         .split_once("] [#")
@@ -1334,7 +1340,9 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
     );
     assert_eq!(
         component_body(&content, "todo"),
-        format!("- [ ] [#{id}] Verify [#rvw1] in a live pane")
+        format!(
+            "- [ ] [#{id}] Verify [#rvw1] in a live pane (source: agent:review [#rvw1])"
+        )
     );
     let pending_close = content.find("<!-- /agent:pending -->").unwrap();
     let todo_open = content
@@ -1348,8 +1356,12 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
 
     // The operator checks the item off and adds their own note.
     let edited = content.replace(
-        &format!("- [ ] [#{id}] Verify [#rvw1] in a live pane\n"),
-        &format!("- [x] [#{id}] Verify [#rvw1] in a live pane\noperator note\n"),
+        &format!(
+            "- [ ] [#{id}] Verify [#rvw1] in a live pane (source: agent:review [#rvw1])\n"
+        ),
+        &format!(
+            "- [x] [#{id}] Verify [#rvw1] in a live pane (source: agent:review [#rvw1])\noperator note\n"
+        ),
     );
     fs::write(&doc, &edited).unwrap();
     agent_doc()
@@ -1375,7 +1387,7 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
     assert_eq!(
         component_body(&content, "todo"),
         format!(
-            "- [x] [#{id}] Verify [#rvw1] in a live pane\noperator note\n- [ ] [#{publish}] Publish draft docs/launch-note.md"
+            "- [x] [#{id}] Verify [#rvw1] in a live pane (source: agent:review [#rvw1])\noperator note\n- [ ] [#{publish}] Publish draft docs/launch-note.md"
         )
     );
 }
@@ -1603,7 +1615,12 @@ fn preflight_assigns_own_ids_to_id_less_todo_rows_and_closeout_completes_them() 
     let todo = component_body(&content, "todo").to_string();
     let lines: Vec<&str> = todo.lines().collect();
     assert_eq!(lines.len(), 3, "{todo}");
-    assert_eq!(lines[0], format!("- [ ] [#httpsdocsgoogle] {reauth}"));
+    assert_eq!(
+        lines[0],
+        format!(
+            "- [ ] [#httpsdocsgoogle] {reauth} (source: agent:backlog [#httpsdocsgoogle])"
+        )
+    );
     assert_eq!(
         lines[1], "- [ ] #tdbare Keep my bare id",
         "an owned row is never re-id'd"
@@ -1655,6 +1672,96 @@ fn preflight_assigns_own_ids_to_id_less_todo_rows_and_closeout_completes_them() 
         "{todo}"
     );
     assert!(todo.contains("- [ ] #tdbare Keep my bare id"), "{todo}");
+}
+
+/// `#todocontextmigration`: preflight audits legacy singly linked todo rows in
+/// its result before migrating both explicit and implicit links through the
+/// same authority-safe maintenance path as id backfill. Ambiguous multi-link
+/// rows stay untouched, and the next preflight is clean.
+#[test]
+fn preflight_audits_and_migrates_legacy_todo_source_qualification() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#alpha] Alpha decision packet\n<!-- /agent:backlog -->\n\n",
+            "## Todo\n\n<!-- agent:todo -->\n",
+            "- [ ] [#alpha] Decide the alpha policy\n",
+            "- [ ] [#custom] Verify [#beta] live\n",
+            "- [ ] [#many] Compare [#alpha] with [#beta]\n",
+            "<!-- /agent:todo -->\n\n",
+            "## Review\n\n<!-- agent:review -->\n- [/] [#beta] Beta verification gate\n<!-- /agent:review -->\n",
+        ),
+    )
+    .unwrap();
+
+    let run = || {
+        let output = agent_doc()
+            .args(["preflight", doc.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|err| panic!("preflight JSON ({err}):\n{stdout}\n{stderr}"));
+        (parsed, stderr)
+    };
+
+    let (first, stderr) = run();
+    let legacy: Vec<&serde_json::Value> = first["todo_signals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|signal| signal["kind"] == "legacy_source_unqualified")
+        .collect();
+    assert_eq!(legacy.len(), 2, "{first}");
+    assert!(
+        legacy.iter().any(|signal| signal["todo"] == "alpha")
+            && legacy.iter().any(|signal| signal["todo"] == "custom"),
+        "{first}"
+    );
+    assert!(stderr.contains("#todocontextmigration"), "{stderr}");
+
+    let migrated = fs::read_to_string(&doc).unwrap();
+    let todo = component_body(&migrated, "todo");
+    assert!(
+        todo.contains(
+            "- [ ] [#alpha] Decide the alpha policy (source: agent:backlog [#alpha])"
+        ),
+        "{todo}"
+    );
+    assert!(
+        todo.contains(
+            "- [ ] [#custom] Verify [#beta] live (source: agent:review [#beta])"
+        ),
+        "{todo}"
+    );
+    assert!(
+        todo.contains("- [ ] [#many] Compare [#alpha] with [#beta]")
+            && !todo.contains("[#many] Compare [#alpha] with [#beta] (source:"),
+        "{todo}"
+    );
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops.contains("todo_source_qualification")
+            && ops.contains("todo=alpha id=alpha component=backlog status=migrated")
+            && ops.contains("todo=custom id=beta component=review status=migrated"),
+        "{ops}"
+    );
+
+    let (second, second_stderr) = run();
+    assert!(
+        second["todo_signals"].as_array().is_none_or(|signals| signals
+            .iter()
+            .all(|signal| signal["kind"] != "legacy_source_unqualified")),
+        "{second}"
+    );
+    assert!(!second_stderr.contains("#todocontextmigration"), "{second_stderr}");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), migrated);
 }
 
 /// `#tododone`: the granular todo flags close the operator action loop —
@@ -1830,7 +1937,7 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
     let content = fs::read_to_string(&doc).unwrap();
     assert_eq!(
         component_body(&content, "todo"),
-        "- [ ] [#gatea] Decide the launcher policy (#gatea)\n- [ ] [#gateb] Verify [#gateb] in the 263 IDE"
+        "- [ ] [#gatea] Decide the launcher policy (#gatea) (source: agent:review [#gatea])\n- [ ] [#gateb] Verify [#gateb] in the 263 IDE (source: agent:review [#gateb])"
     );
     // A second todo for an already-prompted gate folds into the open item.
     let again = write(&["--backlog-only", "--todo-add", "Verify [#gateb] again"], "");
@@ -1877,7 +1984,7 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
     // operator's check survives.
     write(
         &[],
-        "<!-- patch:exchange -->\nstale\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] [#gatea] Decide the launcher policy (#gatea)\n- [ ] [#gateb] Verify [#gateb] in the 263 IDE\n<!-- /patch:todo -->\n",
+        "<!-- patch:exchange -->\nstale\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] [#gatea] Decide the launcher policy (#gatea) (source: agent:review [#gatea])\n- [ ] [#gateb] Verify [#gateb] in the 263 IDE (source: agent:review [#gateb])\n<!-- /patch:todo -->\n",
     );
     assert!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo")
@@ -1961,8 +2068,14 @@ fn todo_ids_layer_on_one_review_backlog_or_icebox_item_and_surrogate_otherwise()
     let todo = component_body(&content, "todo");
     let lines: Vec<&str> = todo.lines().collect();
     assert_eq!(lines.len(), 4, "{todo}");
-    assert_eq!(lines[0], "- [ ] [#gatex] Decide the launcher policy (#gatex)");
-    assert_eq!(lines[1], "- [ ] [#coldwork] Thaw or drop the parked idea (#coldwork)?");
+    assert_eq!(
+        lines[0],
+        "- [ ] [#gatex] Decide the launcher policy (#gatex) (source: agent:review [#gatex])"
+    );
+    assert_eq!(
+        lines[1],
+        "- [ ] [#coldwork] Thaw or drop the parked idea (#coldwork)? (source: agent:icebox [#coldwork])"
+    );
     assert!(!todo.contains("tdgatex"), "{todo}");
     let two = todo_item_id(&content, "Decide #gatex before thawing #coldwork");
     let none = todo_item_id(&content, "Rotate the deploy key");

@@ -496,6 +496,17 @@ Public proof:
 - The installed CLI reports `agent-doc 0.35.514`; the release worktree is clean.
 
 The final release bytes passed 10,929 Rust tests (172 skipped), 202 VS Code tests, the cross-editor simulation, all JetBrains package/build checks, Python bootstrap checks, documentation/version/editor-parity gates, TLA receipt verification, and `make tmux-ci`. This release contains the #279/#280/#281 fixes, authorization-directive handling, and operator-todo handback rule above.
+
+### Re: v0.35.514 publication — gpt-6.1-sol · 2026-10-16T22:02-04:00
+
+> **Chat prompt (#chatprompt):** was 0.35.514 published?
+
+Yes. I rechecked both public registries:
+
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.514 — published, non-draft, non-prerelease, with 15 assets.
+- PyPI: https://pypi.org/project/agent-doc/0.35.514/ — version `0.35.514` is public with `agent_doc-0.35.514-py3-none-any.whl`.
+
+GitHub records the release publication time as 2026-10-16 23:57:37 UTC.
 <!-- agent:boundary:59f6e63f -->
 <!-- /agent:exchange -->
 

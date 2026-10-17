@@ -1,7 +1,9 @@
 ---
 agent_doc_session: d2691213-7160-4943-9751-c954341df959
-resume: aff3725f-f537-4991-9ede-2d5b54545e7d
-agent: claude
+resume:
+  claude: 1f6671b6-0e2b-41e7-9565-25805afd7ee1
+  codex: 01a14b3a-64c6-7473-a2b0-33b31c9610c7
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -154,27 +156,100 @@ Closing this one, because the rappstack work above resolved it and the recorded 
 So the symptom this item existed to track is fixed, and the stated root cause is no longer accurate. All three rappstack packages that ship marked (`ui--any`, `ui--server`, `dev-bin`) are on `^17.0.4` — the `#rappdeps` sweep aligned them. The `^13.0.2` edge that remains comes from `@btakita/dev-bin@0.1.0` on npm, which is a separate published package and only a bin-tool dependency; it no longer reaches the type program. brookebrodack's own `bun.lock` also still carries a stale metadata entry for the yalc'd `@rappstack/ui--any` claiming `^13.0.2`, which is why the split looked like a rappstack problem — the local yalc source says `^17.0.4`.
 
 Two marked majors coexisting is untidy, but it is now inert rather than a type-check blocker, and it is not something this repo can pin away. Not filing a follow-up for it.
+
+### Re: fan-out queue batch — gpt-5 · 2026-10-17T15:21-04:00
+
+Seven queue items are complete:
+
+- `#nm8q`: pinned all 18 TypeScript declarations in `rappstack/dev` to `^7.0.2`, regenerated `bun.lockb`, installed the result, and verified the real compiler is `Version 7.0.2`. Frozen-lock install and every root/submodule `git diff --check` pass. The old compiler crash is gone. The first real type-check now reaches two pre-existing TS7 config errors (`module`/`moduleResolution` pairing and removed `downlevelIteration`), so I added a separate appended follow-up for the 30-tsconfig migration instead of silently expanding this pin task.
+- `#gbdeploy1`: the two originally named runs (`29659909999`, `29660239368`) did finish red at the Pages deploy step, but replacement run `29660441139` succeeded on the same SHA as the second run, including deployment and smoke test. Both production guestbook API endpoints currently return HTTP 200 JSON.
+- `#mc4f`: fast-forward pushed all 187 recoverable ctx-core TypeScript-sweep gitlink targets to `main`; 187/187 remote heads exactly match, with zero failures. Superproject sweep commit `61bee1918` was already published and is an ancestor of current `origin/main`. The unavailable historical `lib/solid-start` target is no longer referenced.
+- `#lzeffectvoid`: integrated the `EffectRun` `| void` widening in `src/lazily-js` and removed the three obsolete `return undefined` statements in the guestbook effect code. The clean worker worktree passed `make check`, the focused consumer, and the full guestbook type-check. In the shared target checkout, the changed declaration passes focused Prettier and diff checks; its broader `make check` is currently stopped by a pre-existing untracked `tests/core-artifact-consumer/index.mjs` formatting failure, which I did not rewrite.
+- `#sbv9` and `#nd8n`: integrated both freehold hardening patches together. Bwrap now receives a classic-BPF seccomp denylist through an inherited FD and runs inside a quiet transient user systemd scope with memory/task limits. The combined implementation passes freehold `make check`, the live sandbox suite, and latest main CI is green.
+- `#y457`: set encrypted `OPENAI_API_KEY` bindings on both the `brookebrodack` Pages project and `brookebrodack-guestbook-moderate`, then deployed and verified worker version `c1a039e7-a2b1-4442-84c9-969f7a45d306` with its 15-minute schedule.
+
+The repository edits for `#nm8q`, `#lzeffectvoid`, `#sbv9`, and `#nd8n` remain uncommitted and unpushed because those queue items did not authorize commit/push.
+
+Five worker handbacks require your decision. The packets below are copied verbatim.
+
+```text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question
+blocking: true
+request: Complete npm web login at https://www.npmjs.com/login?next=/login/cli/27269c4c-95bd-482b-b6fb-8ddfb5e12a00 and confirm when it succeeds.
+context: `npm whoami` returned E401 in the isolated publish worktree. `npm login --auth-type=web` is running in PTY session 7955 and waiting at “Press ENTER to open in the browser”; publication of @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog cannot proceed until this npm account authentication (including npm 2FA if prompted) completes. The login URL is scoped to this active CLI login flow.
+choices:
+- Complete web login: Visit the URL, sign in and finish npm 2FA, then tell the coordinator it is complete so this worker can resume the same session.
+- Cancel publishing: Stop the login session and leave all three packages unpublished.
+```
+
+```text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question
+blocking: true
+request: Close `tasks/brookebrodack-dev.md` in the live editor after the current coordinator cycle (and keep `tasks/software/freehold.md` closed), then tell the coordinator to retry the already-authorized six-item migration once the concurrently dispatched `#sbv9`, `#nd8n`, and `#50fc` results/claims have been reconciled.
+context: Read-only ownership evidence now shows the former target owner `%27` is gone (`actor: missing`, `registry: missing`, `live_pane: closed-clean`), so foreign ownership is no longer the blocker. The source is still live on `%25` and the focused-extract runbook forbids `--apply` while either document is editor-attached; this subagent is also expressly forbidden to mutate either session document. The exact six-ID preview currently fails because `#p0rw` and `#k0ye` are archived in `agent:done`, not selectable tracked work. A clean preview for the other four produced operation `81cdbfc60caf`: two linked exchange nodes, backlog items `#sbv9/#nd8n/#50fc`, and review item `#dj8c`, all with `source_action: remove_on_apply`. Safe retry sequence after detachment/claim reconciliation: reopen `#p0rw` and `#k0ye` from source `agent:done` into open backlog (without adding source queue heads), rerun `agent-doc extract ... --ids sbv9,nd8n,dj8c,p0rw,k0ye,50fc`, verify the preview, then rerun it with `--apply`. No semantic reconfirmation is needed; the original imperative already authorizes the move.
+choices:
+- Detach and retry: Close the source tab after this cycle; the coordinator performs the safe reopen/preview/apply sequence when the related worker claims are settled.
+- Defer migration: Keep the source attached and leave `#fhmig` open for a later detached cycle.
+```
+
+```text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question
+blocking: true
+request: What should the truncated sentence “It will automatically …” require for plugin aggregation and downstream automation?
+context: I inspected the current plan and every recoverable committed copy of the original prompt (commits 94c6d54b59, b1b4ebcff5, af00c1e5f7, and 9c1c253795). Each ends at exactly “It will automatically”; no missing continuation is present. The current contracts already require null/crash/timeout/unparseable output to count as no opinion, never approval; unknown/disagreement to escalate; dispatch escalation to fall through to OpenAI when credentialed and otherwise leave the entry pending. The unresolved choice blocks #k0ye. The plan’s recommended fail-closed policy is the safest fit but cannot be silently substituted for the operator’s missing sentence.
+choices:
+- Fail-closed consensus (recommended): Run every configured plugin; approve only if every plugin returns approve, reject if any plugin rejects, and escalate on abstention, error, timeout, or disagreement; escalation falls through to OpenAI when available, otherwise remains pending.
+- Strict majority: Run every configured plugin; a strict approve/reject majority decides, while ties, no quorum, errors, and timeouts escalate; this tolerates one dissent/failure but weakens the fail-closed posture.
+- First decisive answer: Use the first valid approve/reject returned by a configured plugin and escalate only if none decides before the deadline; this minimizes latency and compute but lets one plugin decide alone.
+- Supply the intended continuation: Provide the missing words or a different explicit policy, including whether “automatically” meant aggregation, OpenAI fallback, reconnect, or startup rather than moderation semantics.
+```
+
+```text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question
+blocking: true
+request: Choose how to restore Hermes inference credentials so I can rerun the required one-shot verification.
+context: Hermes is already v0.21.5 (before/after unchanged). `hermes update --check` cannot update this installation because `/opt/hermes-agent` has no `.git` and the install method is reported as `unknown`; `hermes update --plan` also shows a live systemd gateway that a real update could restart, so I did not run the mutating updater. The original v0.18.2 httpx ResponseNotRead crash no longer occurs, but `hermes -z` still exits 2: the default route returns Gemini HTTP 404, and an explicit `-m gemini-2.5-flash` reveals `API key not valid`. The active key comes from the exported shell `GOOGLE_API_KEY`; removing it process-locally leaves no configured provider and exits 1. Current Hermes provides specific legacy-key rotation guidance, so an upstream issue is not justified by this evidence. A valid credential/provider choice is required for a passing exact one-shot check.
+choices:
+- Rotate Google key: Replace the exported `GOOGLE_API_KEY` with a valid Google AI Studio Gemini key, restart the Hermes gateway/shell environment as needed, then rerun the exact one-shot check.
+- Switch provider: Run `hermes model` and authenticate/select another available provider, then rerun the exact one-shot check.
+- Stop with diagnosis: Make no credential or service changes; close this queue item with the update limitation and failed verification evidence.
+```
+
+```text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question
+blocking: true
+request: Please add credits to the OpenAI project for `brookebrodack/guestbook/OPENAI_API_KEY`, then tell me to retry #j0ee; should I wait for that, or stop this item without selecting/deploying a model?
+context: I ran the exact authorized benchmark candidates from isolated worktree `/tmp/brookebrodack-j0ee.QlLuxr`, feeding the approved Passage credential directly without printing or persisting it. All five candidates (`gpt-4o-mini`, `gpt-5-nano`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.6-luna`) returned HTTP 429 `You have no credits remaining`. Therefore there is no measured UNSAFE/latency evidence, no defensible cheapest/fastest winner, and I have not set `OPENAI_MODEL` or deployed either surface.
+choices:
+- Add credits and retry: preserve the empirical selection requirement; I will rerun the same five candidates, select from UNSAFE=0 results, set both surfaces, deploy where needed, and verify.
+- Stop blocked: leave `OPENAI_MODEL` unchanged on both surfaces and close #j0ee as blocked on OpenAI billing.
+```
+
+Please answer these five requests. The npm login is the only time-sensitive one because its CLI session is already polling.
 <!-- agent:boundary:5d323eb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority go -->
-- ⏭️ do [#rjrh]
-- 🚧 do [#nm8q]
-- ~~do [#tsappclean]~~
-- ~~do [#ciappts]~~
-- ~~do [#yalcdrift]~~
-- do [#gbdeploy1]
-- do [#mc4f]
-- ⏭️ do [#lzeffectvoid]
-- do [#sbv9]
-- do [#nd8n]
+<!-- agent:queue subagents priority go -->
+- do [#rjrh]
+- ~~do [#nm8q]~~
+- ~~do [#gbdeploy1]~~
+- ~~do [#mc4f]~~
+- ~~do [#lzeffectvoid]~~
+- ~~do [#sbv9]~~
+- ~~do [#nd8n]~~
 - do [#fhmig]
 - do [#50fc]
-- do [#y457]
+- ~~do [#y457]~~
 - do [#j0ee]
 - do [#2amm]
+- do [#rappstackdevtypescript]
 <!-- /agent:queue -->
 
 ## Notes
@@ -185,16 +260,10 @@ Two marked majors coexisting is untidy, but it is now inert rather than a type-c
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev (fixes committed at 9ddb68d, currently only in the local yalc store). Needs npm 2FA. This is the sole remaining blocker on #ciappts — once published, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
-- [ ] [#nm8q] rappstack/dev has the same typescript dist-tag problem #tsnextpin fixed in ctx-core-dev: 13 packages pin `typescript: "*"` and 2 pin `"next"`, and the installed compiler is a 5.5.0-dev from April 2024 that hard-crashes tsc (TypeError: Cannot read properties of undefined reading 'flags' in getCheckFlags). Pin the repo to ^7.0.2 so rappstack can type-check itself instead of relying on downstream repos to find its errors
-- [ ] [#mc4f] Push the ctx-core-dev typescript pin sweep: 190 per-package submodule commits + superproject are committed LOCALLY and unpushed. Same ~190-public-repo motion as #pushctxcore, so it needs operator go before pushing each submodule and the superproject
-- [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
-- [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
-- [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
-- [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
+- [ ] [#rappstackdevtypescript] rappstack/dev TypeScript 7 config migration: update the 30 NodeNext tsconfigs to pair module=NodeNext with moduleResolution=NodeNext, remove the deleted downlevelIteration option, and run every package type-check so the newly pinned compiler becomes a usable repo-wide gate
+- [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev (fixes committed at 9ddb68d, currently only in the local yalc store). Needs npm 2FA. This is the sole remaining blocker on #ciappts — once published, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
 - [ ] [#fhmig] Migrate the freehold-scoped items (#sbv9, #nd8n, #dj8c, #p0rw, #k0ye, #50fc) out of tasks/brookebrodack-dev.md into tasks/software/freehold.md, whose agent:backlog is currently EMPTY. The dispatch repo was renamed + transferred to freehold-hub/freehold (submodule src/freehold); this document should keep only brookebrodack-dev site/guestbook scope. Deferred this cycle: tasks/software/freehold.md is foreign-owned by pane %27
 - [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #k0ye. Operator input required
-- [ ] [#y457] Set OPENAI_API_KEY on BOTH surfaces — `bunx wrangler pages secret put OPENAI_API_KEY --project-name=brookebrodack` (inline submit-time judging) and `cd workers/guestbook-moderate && bunx wrangler secret put OPENAI_API_KEY && bunx wrangler deploy` (cron sweeper). Without it entries just stay pending.
 - [ ] [#j0ee] Pick the moderation model empirically once the key exists: `OPENAI_API_KEY=... bun scripts/guestbook-model-bench.ts gpt-4o-mini gpt-5-nano gpt-5.4-nano gpt-5.4-mini gpt-5.6-luna` and take the cheapest/fastest with UNSAFE=0, then set OPENAI_MODEL on both surfaces
 - [ ] [#2amm] `hermes -z` is broken in hermes-agent 0.18.2 — every one-shot run dies with an httpx ResponseNotRead inside the Gemini provider, so the local primary path always falls through. Try `hermes update` or file upstream
 <!-- /agent:backlog -->

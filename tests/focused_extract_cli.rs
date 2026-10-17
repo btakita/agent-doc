@@ -124,7 +124,11 @@ fn agent_selection_previews_applies_and_reruns_idempotently() {
         .assert()
         .success()
         .stdout(predicate::str::contains("SDK legal and compliance"))
-        .stdout(predicate::str::contains("\"component\": \"backlog\""));
+        .stdout(predicate::str::contains("\"component\": \"backlog\""))
+        .stderr(predicate::str::contains(format!(
+            "preview only; no documents were changed and destination {} was not created",
+            target.display()
+        )));
     assert!(!target.exists(), "preview must not create the destination");
 
     for expected_already_applied in [false, true] {

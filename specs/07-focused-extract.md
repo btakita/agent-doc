@@ -16,7 +16,9 @@ without making an agent manually copy managed document regions.
   source and checkpoint both; second write/checkpoint failure -> restore both;
   target-first crash marker -> resume by completing source removal without a
   second target append; already applied -> no-op; either document attached to a
-  live editor -> refuse before mutation.
+  live editor -> emit the deterministic preview, then refuse before mutation
+  with the exact attached path(s) and explicit confirmation that the target was
+  not created (or was left unchanged).
 - **Evidence inputs:** parsed agent components, tracked item IDs, stable exchange
   node IDs, source-content hash, destination operation marker, frontmatter
   collaboration/security metadata, pane ownership, and durable editor liveness.
@@ -55,6 +57,9 @@ would be created, every component/item/node to move, and
 `"source_action": "remove_on_apply"`. Re-run with `--apply` to execute that
 exact selection: the target receives the selected material first, then that
 material is removed from the source. Preview never mutates either document.
+Its terminal notice names the exact target and says whether it was not created
+or was left unchanged, so another same-named Markdown file cannot be mistaken
+for the extraction result.
 Selectors can be combined.
 
 An operator does not need to discover IDs or author a manifest. They may write
@@ -121,5 +126,9 @@ Apply refuses while either document has live editor authority. Cross-document
 atomic compare-and-swap does not exist across independent CRDT actors, so a live
 focused extraction must never degrade to direct disk writes. Close both tabs
 (or otherwise detach them), inspect the preview again, and apply.
+An attached-editor `--apply` attempt still prints the deterministic preview,
+then fails nonzero with the exact attached source/target path(s), states that no
+documents changed, and states whether the intended target was not created or
+left unchanged.
 `--bypass-claim` bypasses only the tmux pane-ownership check, never the
 editor-authority gate.

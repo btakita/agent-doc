@@ -141,6 +141,10 @@
 //!   `write_applied` cycle, sync logs that fact but still lets tmux-router stash the
 //!   pane. Stashing is non-destructive, so the closeout keeps running without
 //!   forcing a third visible pane into a two-document editor projection.
+//! - Exact-visible automatic projections are atomic when ownership is blocked.
+//!   They may provision an owner in full mode, but if sync finds a legacy associated
+//!   pane that requires explicit repair, it preserves the current tmux layout rather
+//!   than reconciling only the resolved subset and collapsing the visible window.
 //!
 //! ## Evals
 //! - repair_layout_skips_correct_state: session with agent-doc at index 0 and one
@@ -212,7 +216,8 @@ use agent_doc_sync::{
     SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
     SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
     destructive_repair_throttle_state_key, effective_sync_columns, epoch_millis_now,
-    gated_layout_decision, last_visible_excerpt, latency_budget_status,
+    blocked_owner_layout_decision, gated_layout_decision, last_visible_excerpt,
+    latency_budget_status,
     plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
     rename_debounce_expired, sanitize_excerpt, sync_latency_message,
 };
@@ -5398,30 +5403,42 @@ fn run_with_options_internal_at_root(
         ));
     }
 
-    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        let mut blocked_files: Vec<String> = blocked_unresolved_files
-            .borrow()
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect();
-        blocked_files.sort();
-        if !blocked_files.is_empty() {
-            let blocked_summary = blocked_files.join(", ");
-            let message = format!(
-                "[sync] safe passive sync preserved the current tmux layout because unresolved files remain blocked: {}",
-                blocked_summary
-            );
-            eprintln!("{message}");
-            mark_sync_layout_preserved(&message);
-            // Safe-passive reconciliation is focus-neutral. In particular,
-            // unresolved ownership must never turn a durable registry entry in
-            // the stash into a `select-pane` target.
-            sync_log(&format!(
-                "safe_passive_layout_preserved blocked_files={}",
-                blocked_summary
-            ));
-            return Ok(());
-        }
+    let mut blocked_files: Vec<String> = blocked_unresolved_files
+        .borrow()
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    blocked_files.sort();
+    if blocked_owner_layout_decision(
+        auto_start_mode,
+        exact_visible_projection,
+        route_created_panes,
+        blocked_files.len(),
+    ) == GatedLayoutDecision::PreserveCurrent
+    {
+        let blocked_summary = blocked_files.join(", ");
+        let projection_kind = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+            "safe passive"
+        } else {
+            "automatic exact-visible"
+        };
+        let message = format!(
+            "[sync] {projection_kind} sync preserved the current tmux layout because unresolved files remain blocked: {blocked_summary}"
+        );
+        eprintln!("{message}");
+        mark_sync_layout_preserved(&message);
+        // Autonomous reconciliation is atomic and focus-neutral. In
+        // particular, unresolved ownership must never turn a durable registry
+        // entry in the stash into a `select-pane` target or collapse the
+        // requested editor surface to its resolved subset.
+        sync_log(&format!(
+            "blocked_owner_layout_preserved blocked_files={} mode={} exact_visible={} route_created_panes={}",
+            blocked_summary,
+            auto_start_mode.log_label(),
+            exact_visible_projection,
+            route_created_panes,
+        ));
+        return Ok(());
     }
 
     let tmux_router_registry_path = registry_path.as_path();

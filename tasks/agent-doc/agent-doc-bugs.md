@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -504,13 +503,7 @@ The final release bytes passed 10,929 Rust tests (172 skipped), 202 VS Code test
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/279~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/280
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/281
-- Claude + Codex keep on rejecting directives asking for the user to say "go ..."/"push ..." even though I typed in "go ..."/"push ..." or used #auth.
-- In docs.md, I was instructed to "publish `docs/public-code-policy-adr`" in the exchange but there was no todo item. Since this task requires operator action, a todo item should have been created.
-- release + publish
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Todo

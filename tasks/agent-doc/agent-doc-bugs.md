@@ -232,7 +232,52 @@ The integrated agent-doc fixes are installed and pushed to `main` at `94a0ef8952
 Verification: the authoritative integrated `make check` passed all 10,980 tests; the route regression passed 100/100 stress iterations; focused JetBrains/plugin suites passed; `make install` completed for the CLI/library, IntelliJ plugin `0.2.687` (plus split packages `0.2.688`/`0.2.689`), and VS Code extension `0.2.83`. The new `main` CI run is currently in progress, so local proof—not the earlier unrelated red run—is the completion evidence.
 
 Changed paths include the agent-doc Rust controller/session/queue paths, JetBrains integration and tests, specifications/runbooks, generated harness mirrors, and the root `.editorconfig`. Confidence is high. No operator escalation remains.
-<!-- agent:boundary:989e25a0 -->
+
+### Re: Subagent completed: `subagent:queue_priority_subagents` returned work for queue item “By default, `agent:queue` should have `priority subagents`.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=3cd646dad54c4f5b03d10e065b9a55bdc011ad723f87bb01c107069dd8e46b13 -->
+
+### Re: Subagent completed: `subagent:todo_priority` returned work for queue item “By default, `agent:todo` should have `priority`.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=9b189fadc17d173c6ec5d2aff4bc4d0901914bc2c8302063c7a4bfe68409a8a0 -->
+
+### Re: Subagent completed: `subagent:backlog_priority_queue` returned work for queue item “By default, `agent:backlog` should have `priority queue`.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=7515dd89bea5d8b455071766e20b8d547d7a03eba3d85dc40be0caa3b4a05469 -->
+
+### Re: Subagent completed: `subagent:todo_component_order` returned work for queue item “By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=4a036f3569ee0b435f763aa350eb61e5abd82c1db12a33c74a79a878d2211fec -->
+
+### Re: Subagent completed: `subagent:todo_context_links` returned work for queue item “todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=dc4afd4558efb52bd9fa80591f9a2eaddcaf52a508fa69c37c5297d032ed8ec2 -->
+> **Queue prompt:** By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.
+
+> **Queue prompt:** By default, `agent:queue` should have `priority subagents`.
+
+> **Queue prompt:** By default, `agent:todo` should have `priority`.
+
+> **Queue prompt:** By default, `agent:backlog` should have `priority queue`.
+
+> **Queue prompt:** todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.
+
+> **Queue prompt:** Run Agent Doc on sdk-dev.md: agent-doc command failed (exit 1):
+
+> **Queue prompt:** Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session
+
+### Re: contextual TODO links, defaults, and SDK recovery — gpt-5 · 2026-10-17T19:05-04:00
+
+Completed and landed on `main`.
+
+New documents now place `agent:todo` directly below `agent:queue` and above `agent:backlog`. Their default attributes are `agent:queue priority subagents`, `agent:todo priority`, and `agent:backlog priority queue`. The landed commits are `32095508c1`, `1efc4e9849`, `cf014114d6`, and `1e26878654`.
+
+TODO rendering now resolves a cited review/backlog id and includes its source context, so prompts such as “Decide on …” are no longer detached from the decision they reference. That fix landed as `35b0a8023f`.
+
+The two SDK routing heads are also resolved: `sdk-dev.md` has a valid session, space-indented frontmatter, and an active Codex turn in pane `%22`. The route/session recovery, visible error-cause, native-save ordering, and projection fixes are installed from `main` at `94a0ef8952`.
+
+Changed paths cover document scaffolding, TODO parsing/rendering, sync and extraction scaffolds, CLI integration, specifications, runbooks, generated harness mirrors, routing/session handling, and regressions. Verification passed: focused component/TODO tests, workspace build, authoritative `make check` (10,952 passed, 172 skipped for the TODO-link branch), `make tmux-ci`, and `git diff --check`. The combined installed `main` batch passed all 10,980 tests. Confidence is high; no escalation remains.
+<!-- agent:boundary:c41b1031 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -241,11 +286,11 @@ Changed paths include the agent-doc Rust controller/session/queue paths, JetBrai
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.~~ — auto-struck: answered this cycle (#ftstrike)
-- By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.
-- By default, `agent:queue` should have `priority subagents`.
-- By default, `agent:todo` should have `priority`.
-- By default, `agent:backlog` should have `priority queue`.
-- todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.
+- ~~By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.~~
+- 🚧 By default, `agent:queue` should have `priority subagents`.
+- 🚧 By default, `agent:todo` should have `priority`.
+- 🚧 By default, `agent:backlog` should have `priority queue`.
+- 🚧 todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.
 - Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'
 - There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
 - #gh-fix https://github.com/btakita/agent-doc/issues/284

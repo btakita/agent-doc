@@ -24,7 +24,7 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
 ];
 
 /// Prompt defaults shared by `agent:queue` and `agent:exchange`.
-const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "subagents", "fan-out"];
+const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "presets", "subagents", "fan-out"];
 
 /// Whether `key` is a flag/value attribute owned by `agent:queue`.
 ///
@@ -396,6 +396,20 @@ mod tests {
             assert!(
                 component_attr_warning(&content).is_none(),
                 "valid exchange prompt attrs must not warn: {marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn component_attr_warning_accepts_plural_presets_alias_on_prompt_components() {
+        for component in ["queue", "exchange"] {
+            let content = format!(
+                "<!-- agent:{component} presets=\"#auth\" -->\nfix it\n<!-- /agent:{component} -->\n"
+            );
+            assert!(
+                component_attr_warning(&content).is_none(),
+                "{component}: {:?}",
+                component_attr_warning(&content)
             );
         }
     }

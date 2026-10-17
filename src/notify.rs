@@ -113,7 +113,7 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     // Prefer inserting before the exchange close tag if it exists, otherwise at end.
     let insert_pos = find_pending_insert_position(&doc, &components);
 
-    let pending_block = "\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
+    let pending_block = "\n<!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n";
     let mut new_doc = String::with_capacity(doc.len() + pending_block.len());
     new_doc.push_str(&doc[..insert_pos]);
     new_doc.push_str(pending_block);
@@ -550,7 +550,7 @@ mod tests {
         run(&doc, None, None, None, false, &items, &[], false).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(result.contains("<!-- agent:backlog"));
+        assert!(result.contains("<!-- agent:backlog priority queue -->"));
         assert!(result.contains("<!-- /agent:backlog -->"));
         assert!(result.contains("implement feature X"));
         assert!(result.contains("[ ]"));

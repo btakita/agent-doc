@@ -13,7 +13,7 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "<!-- agent:queue -->\n",
     "<!-- /agent:queue -->\n",
     "\n## Backlog\n\n",
-    "<!-- agent:backlog -->\n",
+    "<!-- agent:backlog priority queue -->\n",
     "<!-- /agent:backlog -->\n",
     "\n## Todo\n\n",
     "<!-- agent:todo -->\n",
@@ -122,6 +122,7 @@ mod tests {
         assert!(scaffold.contains("agent_doc_session: session-1"));
         assert!(scaffold.contains("agent_doc_format: template"));
         assert!(scaffold.contains(concat!(
+            "<!-- agent:backlog priority queue -->\n",
             "<!-- /agent:backlog -->\n",
             "\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n",
             "\n## Review\n\n"
@@ -143,11 +144,12 @@ mod tests {
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[1].patch_mode(), Some("append"));
-        assert!(
-            components[2..]
-                .iter()
-                .all(|component| component.attrs.is_empty())
-        );
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .expect("default scaffold must contain backlog");
+        assert_eq!(backlog.attrs.get("priority").map(String::as_str), Some(""));
+        assert_eq!(backlog.attrs.get("queue").map(String::as_str), Some(""));
         assert!(
             components
                 .iter()

@@ -34312,7 +34312,7 @@ fn test_transfer_exchange_auto_creates_target_with_backlog_and_icebox_scaffold()
     let target_after = fs::read_to_string(&target).unwrap();
     assert!(target_after.contains("## Status"));
     assert!(target_after.contains("## Queue"));
-    assert!(target_after.contains("<!-- agent:backlog -->"));
+    assert!(target_after.contains("<!-- agent:backlog priority queue -->"));
     assert!(target_after.contains("<!-- agent:icebox -->"));
     assert!(target_after.contains("Transferred exchange body."));
     assert!(target_after.contains("[#back1]"));

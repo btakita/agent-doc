@@ -1595,15 +1595,22 @@ pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
     }
     if outcome.inserted {
         persist_pending_write(file, &full_content, &outcome.content)?;
-        pending_receipt!(
-            "[todo] todo-add: {}appended operator action{} to agent:todo",
-            if outcome.created_component {
-                "created agent:todo and "
-            } else {
-                ""
-            },
-            id_label
-        );
+        if outcome.source_reference_added {
+            pending_receipt!(
+                "[todo] todo-add: added visible source reference{} to existing operator action",
+                id_label
+            );
+        } else {
+            pending_receipt!(
+                "[todo] todo-add: {}appended operator action{} to agent:todo",
+                if outcome.created_component {
+                    "created agent:todo and "
+                } else {
+                    ""
+                },
+                id_label
+            );
+        }
     } else {
         pending_receipt!(
             "[todo] todo-add: operator action{} already present in agent:todo",
@@ -3692,6 +3699,40 @@ mod tests {
         let id = todo_own_id(&after, "Publish draft docs/note.md");
         assert!(
             after.contains(&format!("<!-- agent:todo -->\n- [x] Done by operator\nnote line\n- [ ] Open one\n- [ ] [#{id}] Publish draft docs/note.md\n<!-- /agent:todo -->")),
+            "{after}"
+        );
+        drop(tmp);
+    }
+
+    /// Regression for an operator checklist that said only “Decide …” while
+    /// its actual choices lived in a review row. Selecting tracked work by
+    /// `id=` must leave a visible component/id locator in the rendered todo.
+    #[test]
+    fn todo_add_exposes_the_source_of_an_explicitly_linked_decision() {
+        let (tmp, doc) = setup_test_dir();
+        fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:review -->\n",
+                "- [/] [#monitor-drift] Choose restore probe or remove stale cron and secret\n",
+                "<!-- /agent:review -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#monitor-drift] Decide the monitor policy\n",
+                "<!-- /agent:todo -->\n",
+            ),
+        )
+        .unwrap();
+
+        assert!(force_pending(|| todo_add(
+            &doc,
+            "id=monitor-drift Decide the monitor policy"
+        )));
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains(
+                "- [ ] [#monitor-drift] Decide the monitor policy (source: agent:review [#monitor-drift])"
+            ),
             "{after}"
         );
         drop(tmp);

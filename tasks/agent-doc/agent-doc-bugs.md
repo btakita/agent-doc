@@ -290,6 +290,14 @@ Resolved on `main` by `dea6e24257`. A cross-root editor route previously release
 Changed paths: `agent-doc-controller-io/src/project_controller.rs`, its RPC module, routing specification, and feature reference. Verification on current `origin/main`: the targeted cross-root regression passed, and `cargo test -p agent-doc-controller-io` passed 775 tests with 0 failures and 10 ignored. Confidence is high; no escalation remains for this item.
 
 A separate verification audit found that the TODO source-context fix is incomplete for legacy rows and implicit singly linked `[#id]` actions. I recorded that remaining migration/canonicalization work in the backlog rather than claiming it is finished.
+
+### Re: Subagent completed: `subagent:one_pane_autosync` returned work for queue item “There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=a1784a5b98586d51bfe92a164e6e89dc35d2559dd76c262fd409bc5d096b04ed -->
+
+### Re: Subagent completed: `subagent:todo_context_migration` returned work for queue item “do [#todocontextmigration]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=c2a646a2d1069050cc9ffc5531e2923a339e965a4d2a41dd4c956357038fcff7 -->
 <!-- agent:boundary:77bcbba7 -->
 <!-- /agent:exchange -->
 
@@ -305,7 +313,7 @@ A separate verification audit found that the TODO source-context fix is incomple
 - ~~By default, `agent:backlog` should have `priority queue`.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'~~
-- There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
+- 🚧 There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
 - #gh-fix https://github.com/btakita/agent-doc/issues/284
 - #gh-fix https://github.com/btakita/agent-doc/issues/285
 - #gh-fix https://github.com/btakita/agent-doc/issues/286
@@ -320,7 +328,7 @@ A separate verification audit found that the TODO source-context fix is incomple
 - ~~Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#todocontextmigration]
+- ~~do [#todocontextmigration]~~
 <!-- /agent:queue -->
 
 ## Todo
@@ -339,7 +347,6 @@ A separate verification audit found that the TODO source-context fix is incomple
 <!-- agent:backlog priority queue -->
 - [ ] [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
 - [ ] [#extractcompactselection] agent-doc extract: keep prepared extraction selections executable after exchange compaction. Persist semantic selectors/selection manifests against archive locators, and support selectively transferring completed/done items; today a saved operation can lose its live exchange-node selectors after compaction and --ids does not select done items.
-- [ ] [#todocontextmigration] Canonicalize visible source qualification for every singly linked agent:todo item (explicit and implicit), emit migration/audit findings for legacy rows, and migrate monsterrodholders.md through the supported agent-doc authority path.
 <!-- /agent:backlog -->
 
 ## Review

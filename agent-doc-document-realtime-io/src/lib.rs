@@ -6814,6 +6814,81 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
     }
 }
 
+/// Require the exact editor-visible target to reach its editor-native disk
+/// projection before a caller creates a disk-derived secondary effect.
+///
+/// Most CRDT callers intentionally complete at the visible-editor boundary and
+/// leave the buffer unsaved. Route queue writeback is stricter because its next
+/// operation checkpoints the disk-backed document baseline. Keep that durable
+/// boundary explicit instead of strengthening the shared visible-write guard.
+pub fn guard_canonical_editor_projection_persisted(
+    file: &Path,
+    canonical: &str,
+    source: &str,
+) -> Result<()> {
+    guard_visible_delivery_convergence(file, source)?;
+    match query_live_editor_authority(file, source)? {
+        agent_doc_crdt_relay_io::CurrentText::Detached => {
+            anyhow::ensure!(
+                canonical_disk_projection_is_exact(file, canonical),
+                "{source}: detached disk projection for {} changed after editor convergence; recovery=retry_crdt_merge",
+                file.display(),
+            );
+            Ok(())
+        }
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            ..
+        } => {
+            anyhow::ensure!(
+                text == canonical,
+                "{source}: editor authority for {} advanced before its route snapshot; recovery=retry_crdt_merge",
+                file.display(),
+            );
+            if await_canonical_editor_projection_persisted(file, canonical, source)? {
+                return Ok(());
+            }
+            match query_live_editor_authority(file, source)? {
+                agent_doc_crdt_relay_io::CurrentText::Detached
+                    if canonical_disk_projection_is_exact(file, canonical) =>
+                {
+                    Ok(())
+                }
+                agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
+                    if text != canonical =>
+                {
+                    anyhow::bail!(
+                        "{source}: editor authority for {} advanced while its route snapshot awaited native save; recovery=retry_crdt_merge",
+                        file.display(),
+                    )
+                }
+                agent_doc_crdt_relay_io::CurrentText::Current {
+                    delivery_version,
+                    live_editors,
+                    ..
+                } => defer_visible_delivery_projection(
+                    file,
+                    source,
+                    delivery_version,
+                    live_editors,
+                ),
+                agent_doc_crdt_relay_io::CurrentText::Detached => anyhow::bail!(
+                    "{source}: detached disk projection for {} did not preserve the route write; recovery=retry_crdt_merge",
+                    file.display(),
+                ),
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+                | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+                    guard_visible_delivery_convergence(file, source)
+                }
+            }
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            guard_visible_delivery_convergence(file, source)
+        }
+    }
+}
+
 /// `#binaryownedcli`: block until a retained write's delivery projection
 /// converges, or `wait` expires.
 ///

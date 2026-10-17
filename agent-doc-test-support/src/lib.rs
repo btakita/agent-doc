@@ -237,6 +237,23 @@ pub fn pane_current_command(iso: &tmux_router::IsolatedTmux, pane: &str) -> Opti
 }
 
 pub fn publish_editor_text_via_crdt_relay(file: &Path, editor_id: &str, content: &str) {
+    publish_editor_text_via_crdt_relay_with_save_delay(
+        file,
+        editor_id,
+        content,
+        std::time::Duration::ZERO,
+    );
+}
+
+/// Publish editor text while holding the editor-native save behind a deliberate
+/// delay. This models the independent visible-projection and durable-save edges
+/// so integration tests can prove secondary effects wait for both.
+pub fn publish_editor_text_via_crdt_relay_with_save_delay(
+    file: &Path,
+    editor_id: &str,
+    content: &str,
+    native_save_delay: std::time::Duration,
+) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     register_embedded_relay_route(&canonical);
     seed_reliable_sync_editor_registration(
@@ -261,7 +278,7 @@ pub fn publish_editor_text_via_crdt_relay(file: &Path, editor_id: &str, content:
     )
     .expect("test editor should publish through CRDT relay")
     .expect("test editor relay update should be accepted under Lazily authority");
-    let _ = spawn_crdt_delivery_pump(canonical, identity, replica);
+    let _ = spawn_crdt_delivery_pump(canonical, identity, replica, native_save_delay);
 }
 
 /// Run the editor half of CRDT delivery for integration fixtures that model a
@@ -276,13 +293,19 @@ pub fn start_crdt_delivery_pump(file: &Path, identity: &str) -> std::thread::Joi
             .expect("test editor delivery pump should remain attached");
     let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
         .expect("test editor delivery pump should decode relay bootstrap");
-    spawn_crdt_delivery_pump(canonical, identity.to_string(), replica)
+    spawn_crdt_delivery_pump(
+        canonical,
+        identity.to_string(),
+        replica,
+        std::time::Duration::ZERO,
+    )
 }
 
 fn spawn_crdt_delivery_pump(
     canonical: std::path::PathBuf,
     identity: String,
     replica: agent_doc_merge::crdt_sync::ReplicaState,
+    native_save_delay: std::time::Duration,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -325,6 +348,7 @@ fn spawn_crdt_delivery_pump(
                         // after visible-state projection. Production settlement must still
                         // observe the exact disk projection and revalidate the
                         // canonical editor version before it can commit.
+                        std::thread::sleep(native_save_delay);
                         if let Err(err) = std::fs::write(&canonical, replica.text()) {
                             eprintln!(
                                 "test CRDT delivery pump failed to save {}: {err:#}",

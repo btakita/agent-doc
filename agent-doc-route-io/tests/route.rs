@@ -1125,10 +1125,11 @@ mod tests {
         )
         .unwrap();
 
-        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+        agent_doc_test_support::publish_editor_text_via_crdt_relay_with_save_delay(
             &doc,
             "route-queue-test-editor",
             content,
+            std::time::Duration::from_millis(250),
         );
 
         let outcome = enqueue_route_dispatch_prompt(

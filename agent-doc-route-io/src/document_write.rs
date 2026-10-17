@@ -130,7 +130,11 @@ pub fn route_write_document(
             previous_content,
             reason,
         ) {
-            Ok(()) => Ok(()),
+            Ok(()) => agent_doc_document_realtime_io::guard_canonical_editor_projection_persisted(
+                file,
+                next_content,
+                reason,
+            ),
             Err(error) if retained_route_write_error(&error) => {
                 await_retained_route_write(file, next_content, previous_content, reason)
             }

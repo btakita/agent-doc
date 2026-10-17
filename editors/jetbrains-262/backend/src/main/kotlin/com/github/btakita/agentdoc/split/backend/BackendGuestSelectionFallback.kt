@@ -106,6 +106,8 @@ internal object BackendGuestSelectionFallback {
                                         edge.first,
                                         edge.second,
                                     ),
+                                    remoteControllerSelectionFocusEvidence =
+                                        BackendRemoteSessionGate.selectionProvesFocus(session.type),
                                 )
                             }
                         }
@@ -157,6 +159,8 @@ internal object BackendGuestSelectionFallback {
  */
 internal object BackendRemoteSessionGate {
     fun observes(type: ClientType): Boolean = type.isRemote
+
+    fun selectionProvesFocus(type: ClientType): Boolean = type == ClientType.CONTROLLER
 
     fun describe(sessions: List<Pair<String, ClientType>>): String =
         if (sessions.isEmpty()) "none" else sessions.joinToString(",", "[", "]") { (id, type) -> "$id:$type" }

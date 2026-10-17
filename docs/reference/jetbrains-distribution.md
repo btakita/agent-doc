@@ -66,6 +66,10 @@ snapshot exists, the backend observes the guest editor-manager selection flow so
 ordinary main-layout tab changes still reach the controller; accepted frontend
 authority suppresses that limited fallback. This degradation does not fabricate
 detached-window identities and is not a reason to widen either update's range.
+For a Remote Dev `CONTROLLER` session, the delivered selection is also positive
+focus evidence: the backend must not require a Swing active window that exists
+only in the thin client. Focus-projection gates and task failures are logged at
+INFO/WARN before controller transport so a missing publication is diagnosable.
 
 ## Release proof
 

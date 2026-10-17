@@ -109,6 +109,8 @@ The combined changes merged cleanly, passed `git diff --check` and the authorita
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
+- [ ] [#extractcompactselection] agent-doc extract: keep prepared extraction selections executable after exchange compaction. Persist semantic selectors/selection manifests against archive locators, and support selectively transferring completed/done items; today a saved operation can lose its live exchange-node selectors after compaction and --ids does not select done items.
 <!-- /agent:backlog -->
 
 ## Review

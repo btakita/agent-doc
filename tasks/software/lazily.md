@@ -3,7 +3,7 @@ agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
   codex: 01a132ff-795c-7343-b9b7-11db2db32d87
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,6 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish any lazily packages that have pending work'
-queue: go
 ---
 
 ## Status
@@ -491,13 +490,27 @@ It was built from a temporary index and moved with a compare-and-swap. Another s
 - **`#lzrustpublish`:** configure crates.io Trusted Publishing so future rs tags publish themselves. v0.60.0's `Release` run goes red at OIDC, as before; the crate itself is live.
 - **`#lzcommitpresetresolve`:** the queue still names the undefined `#spec-test-commit-push`. This release ran on your explicit "Integrate, then release" choice instead.
 - **`#lzbetascope`:** Core Beta promotion.
-<!-- agent:boundary:97a21868 -->
+
+### Re: Subagent completed: `subagent:todo-sync` returned work for queue item “#todo” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=c89c77949814219850baee1b3c2acc11ff2db6fe0c7407a2a0fccc9b0f6bfc5f -->
+> **Queue prompt:** #todo
+
+### Re: TODO ID sync — gpt-5 · 2026-10-17T13:49-04:00
+
+The managed `agent:todo` component now contains eight current operator actions. Each action reuses the ID of its open backlog or review item: `#lzcohortrelease`, `#lzcoreciactivationfixes`, `#lzcommitpresetresolve`, `#lzgenericreadmeincident`, `#lzrustpublish`, `#lzgithubbudget20`, `#lzagentdocartifactpurge`, and `#lzbetascope`.
+
+I did not migrate the historical release-handling checkbox from the exchange: that choice was already satisfied by the pre-1.0 cohort decision. I also did not create duplicate authorization todos for items already covered by `#lzcommitpresetresolve`, or todos for agent-owned/dependency-gated work.
+
+No repository code changed and no tests were needed. The unresolved `#spec-test-commit-push` preset still withholds commit, push, install, release, and publication authority; this TODO-only document closeout performs none of those actions.
+
+Preflight still reports two legacy gated items in `agent:backlog`; migrating both now would take `agent:review` from 13 to 15 items, so they need individual triage first. The exchange is also above its compaction threshold, but the active queue was drained without stalling and auto-compaction is not enabled.
+<!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- #todo
 <!-- /agent:queue -->
 
 ## Backlog

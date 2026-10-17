@@ -162,3 +162,31 @@ fn agent_selection_previews_applies_and_reruns_idempotently() {
     assert!(target_after.contains("Counsel requires an age gate"));
     assert!(target_after.contains("agent-doc-extract"));
 }
+
+#[test]
+fn legacy_extract_rejects_plain_markdown_target_without_mutating_source() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let source = dir.path().join("sdk-dev.md");
+    let target = dir.path().join("sdk-demo.md");
+    let source_before = source_document();
+    let target_before = "# SDK demo plan\n\nA regular plan, not an agent document.\n";
+    fs::write(&source, source_before).unwrap();
+    fs::write(&target, target_before).unwrap();
+
+    cargo_bin_cmd!("agent-doc")
+        .current_dir(dir.path())
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .args([
+            "extract",
+            source.to_str().unwrap(),
+            target.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("legacy extract target"))
+        .stderr(predicate::str::contains("is not an agent document"));
+
+    assert_eq!(fs::read_to_string(&source).unwrap(), source_before);
+    assert_eq!(fs::read_to_string(&target).unwrap(), target_before);
+}

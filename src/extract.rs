@@ -3,7 +3,8 @@
 //! ## Spec
 //! - `run(source, target, component_name)`: extracts the last `### Re:` block from the named
 //!   component in `source` (defaulting to `exchange`) and appends it to the matching component in
-//!   `target`.  Both files must exist.  Source component must be non-empty and contain at least one
+//!   `target`. Both files must exist, and the target must already carry agent-doc frontmatter or a
+//!   managed `agent:*` component. Source component must be non-empty and contain at least one
 //!   `### Re:` header; if absent, the entire component content is treated as a single entry.
 //! - `transfer(source, target, component_name, bypass_claim)`: moves the entire named component
 //!   content from `source` to `target`, clearing the source component and appending to the target
@@ -18,8 +19,9 @@
 //! - `split_last_entry` is private; it splits on the last `### Re:` header position.
 //!
 //! ## Agentic Contracts
-//! - Callers receive `Err` if the source file does not exist, the named component is absent, or the
-//!   component is empty.  If the target does not exist, it is auto-created.
+//! - Callers receive `Err` if the source file does not exist, the named component is absent, the
+//!   component is empty, or a legacy extract target is not an agent document. Transfer and focused
+//!   extraction may initialize a missing target; legacy last-entry extraction does not.
 //! - After `run` returns `Ok`, the last `### Re:` block has been removed from `source` and
 //!   appended to `target`; no other content is modified.
 //! - After `transfer` returns `Ok`, the named component in `source` is cleared (single newline)
@@ -215,6 +217,19 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
         agent_doc_frontmatter_io::session::parse_for_file(&source_content, source)?;
     let (target_fm, _) =
         agent_doc_frontmatter_io::session::parse_for_file(&target_content, target)?;
+    let target_components =
+        element::parse(&target_content).context("failed to parse components in target")?;
+    let target_is_agent_document = target_fm.session.is_some()
+        || target_fm.format.is_some()
+        || target_fm.write_mode.is_some()
+        || !target_components.is_empty();
+    if !target_is_agent_document {
+        anyhow::bail!(
+            "legacy extract target {} is not an agent document; initialize it with `agent-doc init {}` or use focused extract selectors to create a new target",
+            target.display(),
+            target.display()
+        );
+    }
     enforce_cross_document_review("extract", source, &source_fm, target, Some(&target_fm))?;
 
     let comp_name = component_name.unwrap_or("exchange");
@@ -256,9 +271,6 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
 
     // Append extracted content to target's exchange component with source annotation
     let annotated_content = format!("{}{}", annotation, extracted.trim_start());
-
-    let target_components =
-        element::parse(&target_content).context("failed to parse components in target")?;
 
     let target_exchange = target_components.iter().find(|c| c.name == comp_name);
     let new_target = if let Some(tc) = target_exchange {

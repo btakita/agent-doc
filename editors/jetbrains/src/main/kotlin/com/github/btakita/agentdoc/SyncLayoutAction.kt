@@ -327,9 +327,21 @@ class SyncLayoutAction : AnAction(), DumbAware {
         internal fun exactVisibleSyncDecision(
             visibleMdFiles: List<String>,
             editorLayout: EditorLayout?,
+            focusedFile: String? = null,
+            foreground: Boolean = true,
         ): ExactVisibleSyncDecision =
             editorLayout
-                ?.let { ExactVisibleSyncDecision.Publish(buildSyncColumns(visibleMdFiles, it)) }
+                ?.let {
+                    val columns = buildSyncColumns(visibleMdFiles, it)
+                    if (foreground && focusedFile != null && columns.none { column ->
+                            column.split(',').map(String::trim).any { file -> file == focusedFile }
+                        }
+                    ) {
+                        ExactVisibleSyncDecision.RefuseStaleFocusProjection
+                    } else {
+                        ExactVisibleSyncDecision.Publish(columns)
+                    }
+                }
                 ?: ExactVisibleSyncDecision.RefuseUnknownLayout
 
         /**
@@ -424,12 +436,32 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 ),
         )
         val exactVisibleColumns =
-            when (val decision = exactVisibleSyncDecision(visibleMdFiles, editorLayout)) {
+            when (
+                val decision = exactVisibleSyncDecision(
+                    visibleMdFiles,
+                    editorLayout,
+                    focusedFile,
+                    foreground = !noAutostart,
+                )
+            ) {
                 is ExactVisibleSyncDecision.Publish -> decision.columns
                 ExactVisibleSyncDecision.RefuseUnknownLayout -> {
                     val message =
                         "Editor split could not be read; the retained tmux layout was not changed."
                     LOG.warn("[sync] refusing exact-visible layout because editor columns are unknown")
+                    if (notify) {
+                        TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, message)
+                        TerminalUtil.notifyError(project, message)
+                    }
+                    return
+                }
+                ExactVisibleSyncDecision.RefuseStaleFocusProjection -> {
+                    val message =
+                        "Editor focus changed while the split layout was being read; retry after the selection settles."
+                    LOG.warn(
+                        "[sync] refusing exact-visible layout because focused file is absent " +
+                            "focus=$focusedFile visible=$visibleMdFiles layout=$editorLayout",
+                    )
                     if (notify) {
                         TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, message)
                         TerminalUtil.notifyError(project, message)
@@ -568,6 +600,7 @@ data class EditorLayout(
 internal sealed interface ExactVisibleSyncDecision {
     data class Publish(val columns: List<String>) : ExactVisibleSyncDecision
     data object RefuseUnknownLayout : ExactVisibleSyncDecision
+    data object RefuseStaleFocusProjection : ExactVisibleSyncDecision
 }
 
 /**

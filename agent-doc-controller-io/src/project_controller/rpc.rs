@@ -34301,6 +34301,16 @@ fn publish_pane_layout_desired_invocation_in_lane(
         !desired_columns.is_empty(),
         "sync_tmux_layout refused: desired pane layout is empty"
     );
+    if let Some(focus) = invocation.focus.as_deref() {
+        anyhow::ensure!(
+            pane_layout_foreground_focus_matches_columns(
+                &bootstrap.project_root,
+                &invocation,
+                &desired_columns,
+            ),
+            "sync_tmux_layout refused before layout publication: focused document `{focus}` is absent from the desired columns"
+        );
+    }
     // GH #112: a publisher without a positive split-order observation (Remote
     // Dev `unknown`) lists documents focus-first, so its order is resolved
     // against the retained desired layout instead of being applied verbatim.
@@ -35064,6 +35074,23 @@ fn pane_layout_invocation_awaits_projection(
     invocation.caller_kind != "automatic" && !invocation.no_autostart
 }
 
+/// A foreground command cannot converge focus onto a document that its own
+/// exact-visible layout omits. Passive observations may carry retained focus
+/// from an inactive editor surface; their worker suppresses that focus later.
+fn pane_layout_foreground_focus_matches_columns(
+    project_root: &Path,
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+    desired_columns: &[String],
+) -> bool {
+    !pane_layout_invocation_awaits_projection(invocation)
+        || invocation.focus.as_deref().is_none_or(|focus| {
+            let canonical_focus = canonical_layout_document_id(project_root, focus);
+            desired_columns
+                .iter()
+                .any(|document| document == &canonical_focus)
+        })
+}
+
 /// Preserve foreground/manual sync semantics across every ingress transport.
 ///
 /// Editor state-plane updates are normally coalescible facts. The explicit
@@ -35308,6 +35335,32 @@ mod pane_layout_projection_dispatch_tests {
         assert!(focus_required_for_pane_layout_generation(
             "automatic",
             &transient,
+        ));
+    }
+
+    #[test]
+    fn canonical_foreground_focus_must_belong_to_the_desired_layout() {
+        let root = Path::new("/project");
+        let desired = vec![
+            "/project/tasks/bugs.md".to_string(),
+            "/project/tasks/monster.md".to_string(),
+        ];
+        let mut request = invocation("manual", false);
+
+        request.focus = Some("tasks/bugs.md".to_string());
+        assert!(pane_layout_foreground_focus_matches_columns(
+            root, &request, &desired,
+        ));
+
+        request.focus = Some("tasks/sdk-demo.md".to_string());
+        assert!(!pane_layout_foreground_focus_matches_columns(
+            root, &request, &desired,
+        ));
+
+        request.caller_kind = "automatic".to_string();
+        request.no_autostart = true;
+        assert!(pane_layout_foreground_focus_matches_columns(
+            root, &request, &desired,
         ));
     }
 

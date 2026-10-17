@@ -594,6 +594,47 @@ class SyncLayoutActionTest {
         )
     }
 
+    @Test
+    fun `manual sync refuses a stale split projection that omits the focused file`() {
+        val visible = listOf("/repo/tasks/sdk-demo.md", "/repo/tasks/bugs.md", "/repo/tasks/monster.md")
+        val staleLayout = EditorLayout(
+            listOf(
+                LayoutColumn(listOf("/repo/tasks/bugs.md")),
+                LayoutColumn(listOf("/repo/tasks/monster.md")),
+            ),
+        )
+
+        assertEquals(
+            ExactVisibleSyncDecision.RefuseStaleFocusProjection,
+            SyncLayoutAction.exactVisibleSyncDecision(
+                visible,
+                staleLayout,
+                focusedFile = "/repo/tasks/sdk-demo.md",
+            ),
+        )
+        assertEquals(
+            ExactVisibleSyncDecision.Publish(
+                listOf("/repo/tasks/bugs.md", "/repo/tasks/monster.md"),
+            ),
+            SyncLayoutAction.exactVisibleSyncDecision(
+                visible.drop(1),
+                staleLayout,
+                focusedFile = "/repo/tasks/bugs.md",
+            ),
+        )
+        assertEquals(
+            ExactVisibleSyncDecision.Publish(
+                listOf("/repo/tasks/bugs.md", "/repo/tasks/monster.md"),
+            ),
+            SyncLayoutAction.exactVisibleSyncDecision(
+                visible,
+                staleLayout,
+                focusedFile = "/repo/tasks/sdk-demo.md",
+                foreground = false,
+            ),
+        )
+    }
+
     /**
      * GH #112/#185: only detected local geometry carries an `editor` order.
      * A Remote Dev fold carries its memory-derived order as `retained`.

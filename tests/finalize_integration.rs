@@ -5179,6 +5179,12 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         ])
         .assert()
         .success();
+    let claimed_projection = fs::read_to_string(&doc).unwrap();
+    assert!(
+        claimed_projection.contains(&format!("- 🚧 {setup}\n"))
+            && claimed_projection.contains(&format!("- 🚧 {question}\n")),
+        "claim must immediately project every active worker row:\n{claimed_projection}"
+    );
     let released = agent_doc()
         .current_dir(tmp.path())
         .args([
@@ -5196,6 +5202,13 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
             && released.contains(&format!("`> **Queue prompt:** {question}`"))
             && released.contains("Do NOT dispatch a new subagent"),
         "release must hand back the persist-now closeout:\n{released}"
+    );
+    let released_projection = fs::read_to_string(&doc).unwrap();
+    assert!(
+        released_projection.contains(&format!("- 🚧 {setup}\n"))
+            && released_projection.contains(&format!("- {question}\n"))
+            && !released_projection.contains(&format!("- 🚧 {question}\n")),
+        "release must clear only its claim marker immediately:\n{released_projection}"
     );
     assert_eq!(
         agent_doc_queue_io::claim_release_receipt::load(&doc)
@@ -5222,7 +5235,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         "the echoed, worker-reported head must be struck:\n{head}"
     );
     assert!(
-        head.contains(&format!("- {setup}\n")),
+        head.contains(&format!("- 🚧 {setup}\n")),
         "the unrelated claimed head stays queued:\n{head}"
     );
     assert!(

@@ -21,6 +21,7 @@ use std::path::Path;
 
 use crate::one_shot_sync::OneShotQueueSyncResult;
 use agent_doc_element_backlog::backlog;
+use agent_doc_queue::document_queue::QueueEntry;
 use agent_doc_queue::queue_heads::active_queue_head_text;
 use agent_doc_queue::queue_heads::{ActiveQueueHeadKind, classify_active_queue_head};
 
@@ -69,6 +70,101 @@ pub trait QueueCommandEffects {
     fn converge_captured_answered_free_text_projection(&self, _file: &Path) -> Result<usize> {
         Ok(0)
     }
+}
+
+/// Reconcile the visible `🚧` queue projection immediately after a claim
+/// lifecycle mutation (`#claimmarker`).
+///
+/// Claims live in `state.db`, but the queue marker is operator-facing runtime
+/// state. Waiting for the next preflight left every just-dispatched worker
+/// invisible for the duration of its run. This command-path projection reads
+/// the editor/CRDT authority, changes only the selected queue component, and
+/// converges that exact authoritative cut. Existing non-claim `🚧` markers are
+/// preserved; `cleared_item` identifies the released claim whose marker must be
+/// removed.
+pub fn project_claim_runtime_state_with_effects(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    cleared_item: Option<&str>,
+) -> Result<bool> {
+    let current = effects.current_document_content(file, "queue_claim_runtime_projection")?;
+    let components = agent_doc_element::element::parse(&current)?;
+    let Some(queue_component) =
+        agent_doc_queue::queue_set::selected_component(&current, &components)?
+    else {
+        return Ok(false);
+    };
+    let body = queue_component.content(&current);
+    let entries = agent_doc_queue::document_queue::parse(body)?;
+    let active_claim_identities = crate::queue_claim::active_claims_for_content(file, &current)?
+        .into_iter()
+        .map(|claim| claim.identity)
+        .collect::<std::collections::HashSet<_>>();
+    let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
+
+    // Build one target per queue occurrence. This retains marker cardinality
+    // for duplicate heads while avoiding a union that could mark an unrelated
+    // duplicate twice.
+    let targets = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => {
+                let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+                let keep_existing =
+                    agent_doc_document::queue_projection::has_in_progress_marker(&prompt.text)
+                        && cleared_identity.as_ref() != Some(&identity);
+                (keep_existing || active_claim_identities.contains(&identity)).then(|| {
+                    agent_doc_document::queue_projection::strip_in_progress_marker(&prompt.text)
+                })
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let projection = agent_doc_queue::document_queue::project_prompts_in_progress(body, &targets)?;
+    if let Some((projected_body, _)) = projection.as_ref() {
+        let projected = queue_component.replace_content(&current, projected_body);
+        effects.converge_document_or_disk(
+            file,
+            &projected,
+            &current,
+            "queue_claim_runtime_projection",
+        )?;
+        // Keep the recovery baseline aligned with this binary-owned cosmetic
+        // mutation. Otherwise the next preflight sees the marker alongside a
+        // real exchange update (for example `queue report-complete`) and the
+        // unrelated queue diff can prevent that binary feedback from reaching
+        // the document-only auto-commit boundary.
+        if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file) {
+            let synced = agent_doc_document::queue_projection::sync_in_progress_marker_regions(
+                &snapshot, &projected,
+            );
+            if synced != snapshot
+                && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                    file,
+                    &synced,
+                    agent_doc_ops_log_io::log_op,
+                )
+            {
+                eprintln!("[queue] claim marker snapshot sync warning: {err:#}");
+            }
+        }
+    }
+
+    let persisted_heads = targets
+        .iter()
+        .map(|head| agent_doc_document::queue_projection::strip_priority_markers(head))
+        .collect::<Vec<_>>();
+    agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(file, &persisted_heads)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_runtime_projection markers={} cleared={} (#claimmarker)",
+            persisted_heads.len(),
+            cleared_item.is_some()
+        ),
+    );
+    Ok(projection.is_some())
 }
 
 /// Explicitly strike the leading `count` free-text queue head(s) — the agent
@@ -332,11 +428,20 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
     #[derive(Default)]
-    struct FakeEffects;
+    struct FakeEffects {
+        current: RefCell<Option<String>>,
+    }
 
     impl FakeEffects {
+        fn with_current(content: impl Into<String>) -> Self {
+            Self {
+                current: RefCell::new(Some(content.into())),
+            }
+        }
+
         fn strike_free_text_heads(
             file: &Path,
             count: usize,
@@ -374,17 +479,29 @@ mod tests {
 
     impl QueueCommandEffects for FakeEffects {
         fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
-            Ok(std::fs::read_to_string(file)?)
+            match self.current.borrow().as_ref() {
+                Some(content) => Ok(content.clone()),
+                None => Ok(std::fs::read_to_string(file)?),
+            }
         }
 
         fn converge_document_or_disk(
             &self,
             file: &Path,
             target_content: &str,
-            _source_content: &str,
+            source_content: &str,
             _reason: &str,
         ) -> Result<()> {
+            if let Some(current) = self.current.borrow().as_ref() {
+                anyhow::ensure!(
+                    current == source_content,
+                    "projection must converge from the authoritative current cut"
+                );
+            }
             std::fs::write(file, target_content)?;
+            if self.current.borrow().is_some() {
+                *self.current.borrow_mut() = Some(target_content.to_string());
+            }
             Ok(())
         }
 
@@ -460,7 +577,7 @@ mod tests {
         )
         .unwrap();
 
-        let effects = FakeEffects;
+        let effects = FakeEffects::default();
         sync_with_effects(&effects, &doc).expect("enqueue marker should append to queue");
         let result = std::fs::read_to_string(&doc).unwrap();
 
@@ -505,7 +622,7 @@ mod tests {
         )
         .unwrap();
 
-        let effects = FakeEffects;
+        let effects = FakeEffects::default();
         consume_with_options(&effects, &doc, 2, ConsumeOptions { force_disk: true })
             .expect("consume two answered free-text heads");
         let result = std::fs::read_to_string(&doc).unwrap();
@@ -545,7 +662,7 @@ mod tests {
         )
         .unwrap();
 
-        let effects = FakeEffects;
+        let effects = FakeEffects::default();
         consume_with_options(&effects, &doc, 5, ConsumeOptions { force_disk: true })
             .expect("consume should stop at the id-backed head");
         let result = std::fs::read_to_string(&doc).unwrap();
@@ -579,7 +696,7 @@ mod tests {
         )
         .unwrap();
 
-        let effects = FakeEffects;
+        let effects = FakeEffects::default();
         let err = consume(&effects, &doc, 1).unwrap_err();
         assert!(
             err.to_string().contains("id-backed"),
@@ -613,7 +730,7 @@ mod tests {
         )
         .unwrap();
 
-        let effects = FakeEffects;
+        let effects = FakeEffects::default();
         consume(&effects, &doc, 1).expect("an unowned bare #id is a consumable free-text head");
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -641,11 +758,105 @@ mod tests {
         )
         .unwrap();
 
-        let effects = FakeEffects;
+        let effects = FakeEffects::default();
         let err = consume(&effects, &doc, 1).unwrap_err();
         assert!(
             err.to_string().contains("id-backed"),
             "should refuse a leading id-backed head: {err}"
+        );
+    }
+
+    fn write_claim_projection_doc(root: &Path, body: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("claim-runtime.md");
+        let content = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             <!-- agent:queue go -->\n{body}<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    #[test]
+    fn claim_and_release_project_runtime_marker_without_clobbering_inline_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            "- 🚧 inline coordinator work\n- dispatched worker work\n",
+        );
+        crate::queue_claim::claim(&doc, "dispatched worker work", "subagent:worker", 600).unwrap();
+
+        let effects = FakeEffects::default();
+        assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
+        let claimed = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            claimed.contains("- 🚧 inline coordinator work"),
+            "{claimed}"
+        );
+        assert!(claimed.contains("- 🚧 dispatched worker work"), "{claimed}");
+        let claimed_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            claimed_snapshot.contains("- 🚧 dispatched worker work"),
+            "{claimed_snapshot}"
+        );
+
+        let released = crate::queue_claim::release(&doc, "dispatched worker work")
+            .unwrap()
+            .unwrap();
+        assert!(
+            project_claim_runtime_state_with_effects(&effects, &doc, Some(&released.item_text),)
+                .unwrap()
+        );
+        let released_projection = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            released_projection.contains("- 🚧 inline coordinator work"),
+            "{released_projection}"
+        );
+        assert!(
+            released_projection.contains("- dispatched worker work")
+                && !released_projection.contains("- 🚧 dispatched worker work"),
+            "{released_projection}"
+        );
+        let released_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            released_snapshot.contains("- 🚧 inline coordinator work")
+                && released_snapshot.contains("- dispatched worker work")
+                && !released_snapshot.contains("- 🚧 dispatched worker work"),
+            "{released_snapshot}"
+        );
+    }
+
+    #[test]
+    fn claim_projection_rebases_on_editor_authority_cut() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(dir.path(), "- dispatched worker work\n");
+        crate::queue_claim::claim(&doc, "dispatched worker work", "subagent:worker", 600).unwrap();
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        let editor = disk.replace(
+            "- dispatched worker work\n",
+            "- operator unsaved sibling\n- dispatched worker work\n",
+        );
+        let effects = FakeEffects::with_current(editor);
+
+        assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
+        let projected = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            projected.contains("- operator unsaved sibling"),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("- 🚧 dispatched worker work"),
+            "{projected}"
         );
     }
 }

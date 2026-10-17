@@ -320,7 +320,11 @@ frontmatter control:
 - `<!-- agent:queue pause -->` (legacy spelling `stop`) holds the queue and
   converges into `queue: pause`.
 - The control token is stripped from the opening tag once the queue drains or a
-  hold is persisted, so it never re-triggers on the next cycle.
+  hold is persisted, so it never re-triggers on the next cycle. Settled drain
+  maintenance treats marker `go`/`start` as the same immediate-activation state
+  as legacy `auto`: it removes the marker token and clears the frontmatter
+  control in one persisted write. A second maintenance pass over that drained
+  queue is byte-identical, leaving no control-binding normalization pending.
 
 These marker tokens are recognized queue-only attributes (no
 `misplaced_component_attr` typo warning).

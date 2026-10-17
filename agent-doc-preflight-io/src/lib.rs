@@ -5258,7 +5258,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         marker_control,
         Some(agent_doc_frontmatter::frontmatter::QueueControl::Pause)
     );
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs)
+    let has_immediate_activation = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs)
         || matches!(
             marker_control,
             Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
@@ -5274,7 +5274,7 @@ pub fn run_queue_maintenance_with_coin_gate(
 
     let mut activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
-        has_auto,
+        has_immediate_activation,
         exchange_triggered,
         persisted_activation,
     );
@@ -6119,14 +6119,19 @@ pub fn run_queue_maintenance_with_coin_gate(
         && persisted_active
         && !activation.deferred
         && !activation.consumed_start_fence;
-    let need_strip_auto = has_auto && !queue_has_prompts;
+    // The marker `go`/`start` gestures enter the same immediate-activation path
+    // as legacy `auto`. Name the combined predicate explicitly: on a drain it
+    // must strip every activation spelling, not just the literal `auto` token
+    // (GH #292).
+    let need_strip_activation = has_immediate_activation && !queue_has_prompts;
     let need_clear_non_auto_residue =
-        !has_auto && !activation.active && !activation.deferred && drained_residue;
+        !has_immediate_activation && !activation.active && !activation.deferred && drained_residue;
     // `#queuelineclobber`: a drain clear blanks the ENTIRE queue body, and
-    // neither predicate above can see operator text. `need_strip_auto` asks only
-    // whether an actionable `do` prompt remains, and `drained_residue` classifies
-    // by entry kind — a `Freeform` line (where the parser puts an operator's
-    // `re [#id]: <question>` reference, or any prose they typed into the queue)
+    // neither predicate above can see operator text. `need_strip_activation`
+    // asks only whether an actionable `do` prompt remains, and
+    // `drained_residue` classifies by entry kind — a `Freeform` line (where the
+    // parser puts an operator's `re [#id]: <question>` reference, or any prose
+    // they typed into the queue)
     // satisfies "no prompts" while carrying words nothing else holds.
     //
     // Reported live on `src/haiven-dev/tasks/infra.md`: the operator wrote
@@ -6141,7 +6146,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     // `queue: stop` revocation it drives are wrong for the same reason. The body
     // then surfaces through the `inactive_queue_residue` warning below, which is
     // what an unanswered operator queue line should do.
-    let need_clear_drained_body = (need_strip_auto || need_clear_non_auto_residue)
+    let need_clear_drained_body = (need_strip_activation || need_clear_non_auto_residue)
         && !activation.deferred
         && queue_body_clear_is_lossless(&activation.entries_after);
     // `#queuestopretire`: a DRAIN — no live prompt left, not a `stop`-marker
@@ -6151,6 +6156,13 @@ pub fn run_queue_maintenance_with_coin_gate(
     // does not re-dispatch the head the turn just gave up on.
     let drain_clears_control =
         !queue_has_prompts && !marker_stop && backlog_ids_held_out_of_queue == 0;
+    // Couple both surfaces to the same settled drain decision. The immediate
+    // activation predicate normally covers marker `go`/`start`, but the drain
+    // invariant must not depend on which activation path populated the cached
+    // state: if frontmatter is cleared, marker control is stripped too.
+    let strip_queue_marker_control = need_strip_activation
+        || marker_stop
+        || (need_clear_active && drain_clears_control);
 
     if need_clear_drained_body {
         let comps = agent_doc_element::element::parse(&current_content)?;
@@ -6205,7 +6217,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     // (`auto`/`go`/`start`) or when a `stop` marker halts it (#queue-state-unify).
     // The token is the ephemeral activation gesture; once consumed it must not
     // re-trigger on the next cycle.
-    if need_strip_auto || marker_stop {
+    if strip_queue_marker_control {
         let comps = agent_doc_element::element::parse(&current_content)?;
         let q = agent_doc_queue::queue_set::component_for_id(
             &current_content,
@@ -6663,7 +6675,7 @@ pub fn run_queue_maintenance_with_coin_gate(
 
         // Apply queue body change to snapshot
         if !need_sync_newly_activated_queue_snapshot
-            && (activation.consumed_start_fence || need_strip_auto || need_clear_drained_body)
+            && (activation.consumed_start_fence || need_strip_activation || need_clear_drained_body)
             && let Ok(snap_comps) = agent_doc_element::element::parse(&new_snap)
             && let Ok(Some(snap_q)) = agent_doc_queue::queue_set::component_for_id(
                 &new_snap,
@@ -6678,7 +6690,7 @@ pub fn run_queue_maintenance_with_coin_gate(
             };
             new_snap = snap_q.replace_content(&new_snap, &new_body);
 
-            if (need_strip_auto || marker_stop)
+            if strip_queue_marker_control
                 && let Ok(snap_comps2) = agent_doc_element::element::parse(&new_snap)
                 && let Ok(Some(snap_q2)) = agent_doc_queue::queue_set::component_for_id(
                     &new_snap,
@@ -13311,6 +13323,53 @@ mod tests {
         );
         let rearmed = std::fs::read_to_string(&doc).unwrap();
         assert!(rearmed.contains("queue: go"), "{rearmed}");
+    }
+
+    #[test]
+    fn run_queue_maintenance_drain_strips_marker_activation_token() {
+        // GH #292: binding convergence copies a lone marker `go`/`start` into
+        // frontmatter before settled maintenance. Draining must clear both
+        // surfaces in the same pass or every replica update sees normalization
+        // pending forever.
+        for token in ["go", "start"] {
+            let dir = setup_project();
+            let doc = dir.path().join("session.md");
+            let content = format!(
+                concat!(
+                    "---\nagent_doc_session: test\nagent_doc_format: template\n",
+                    "agent_doc_write: crdt\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue priority {} -->\n<!-- /agent:queue -->\n",
+                ),
+                token,
+            );
+            std::fs::write(&doc, &content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+
+            run_queue_maintenance(&doc, None).unwrap();
+            let drained = std::fs::read_to_string(&doc).unwrap();
+            let (fm, _) = frontmatter::parse(&drained).unwrap();
+            assert_eq!(fm.queue, None, "{drained}");
+            assert_eq!(fm.queue_active, None, "{drained}");
+            assert!(
+                drained.contains("<!-- agent:queue priority -->"),
+                "drain must strip marker `{token}` together with frontmatter:\n{drained}"
+            );
+            assert!(
+                !drained.contains(&format!("agent:queue {token}")),
+                "drain left marker `{token}` behind:\n{drained}"
+            );
+
+            let idle = run_queue_maintenance(&doc, None).unwrap();
+            assert_ne!(idle.queue_active, Some(true), "{drained}");
+            assert_eq!(std::fs::read_to_string(&doc).unwrap(), drained);
+        }
     }
 
     #[test]

@@ -413,30 +413,41 @@ fn minimal_char_span_edits(current: &str, content: &str) -> Result<Vec<(u32, u32
 /// Recover the visible insertion strings carried by one text-CRDT delta.
 ///
 /// Existing characters appear in a delta only when their tombstone changed, so
-/// live operations are newly inserted characters. A local insertion mints
-/// consecutive counters for one peer; counter gaps delimit separate edits.
+/// live operations are newly inserted characters. A local insertion is a causal
+/// chain: each character names the preceding inserted character as its origin.
+/// One published delta may contain several edits from the same peer with
+/// consecutive counters, so origin discontinuities—not counter gaps—separate
+/// the lossless strings that can serve as structural-repair evidence.
 fn visible_insertion_runs(delta: &[u8]) -> Result<Vec<String>> {
-    let mut by_peer: BTreeMap<u64, Vec<(u64, char)>> = BTreeMap::new();
+    let mut by_peer = BTreeMap::<u64, Vec<_>>::new();
     for op in decode_update_ops(delta)? {
         if op.deleted.is_none() {
             by_peer
                 .entry(op.id.peer())
                 .or_default()
-                .push((op.id.counter(), op.ch));
+                .push((
+                    op.id.counter(),
+                    op.origin.map(|origin| (origin.counter(), origin.peer())),
+                    op.ch,
+                ));
         }
     }
 
     let mut runs = Vec::new();
-    for entries in by_peer.values_mut() {
-        entries.sort_unstable_by_key(|(counter, _)| *counter);
-        let mut prior = None;
+    for (&peer, entries) in &mut by_peer {
+        entries.sort_unstable_by_key(|(counter, _, _)| *counter);
+        let mut prior = None::<(u64, u64)>;
         let mut run = String::new();
-        for &(counter, ch) in entries.iter() {
-            if prior.is_some_and(|value| counter != value + 1) && !run.is_empty() {
+        for &(counter, origin, ch) in entries.iter() {
+            if prior.is_some_and(|prior_id| origin != Some(prior_id)) && !run.is_empty() {
                 runs.push(std::mem::take(&mut run));
             }
             run.push(ch);
-            prior = Some(counter);
+            // Every entry in this bucket has the same peer. Preserve it in the
+            // causal id rather than treating consecutive Lamport counters as a
+            // single insertion: one published delta can contain several edits
+            // at unrelated document positions.
+            prior = Some((counter, peer));
         }
         if !run.is_empty() {
             runs.push(run);
@@ -592,13 +603,18 @@ pub enum DiskChangeOutcome {
 
 /// Result of admitting a durable document-op batch into the canonical CRDT.
 /// Additive updates are idempotent only inside one CRDT lineage; a batch from
-/// an obsolete lineage is terminally quarantined so reliable-sync can advance
-/// its ACK cursor without corrupting the replacement canonical.
+/// an obsolete lineage or one whose visible projection is structurally unsafe
+/// is terminally quarantined so reliable-sync can advance its ACK cursor
+/// without corrupting the canonical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DocumentOpDeltaOutcome {
     Applied { changed: bool },
     StaleLineage,
     LegacyQuarantined,
+    /// The matching-lineage delta would make binary-owned component markers
+    /// structurally invalid and no unique lossless repair was provable. This is
+    /// a permanent admission result, not a retryable transport failure.
+    StructuralQuarantined,
 }
 
 impl DocumentOpDeltaOutcome {
@@ -607,7 +623,10 @@ impl DocumentOpDeltaOutcome {
     /// update are two transports for the same CRDT intent; quarantining only the
     /// durable copy would let the direct transport replay stale state.
     pub const fn requires_origin_projection(self) -> bool {
-        matches!(self, Self::StaleLineage | Self::LegacyQuarantined)
+        matches!(
+            self,
+            Self::StaleLineage | Self::LegacyQuarantined | Self::StructuralQuarantined
+        )
     }
 }
 
@@ -2112,7 +2131,10 @@ impl RelayHub {
     /// than corrupting. The resulting canonical delta is broadcast to every live
     /// member so connected editors also converge. Returns the broadcast packet;
     /// `packet.update` is the empty-delta encoding when the frame added nothing new.
-    pub fn apply_document_op_delta(&mut self, delta: &[u8]) -> Result<BroadcastPacket> {
+    fn apply_document_op_delta_checked(
+        &mut self,
+        delta: &[u8],
+    ) -> Result<Option<BroadcastPacket>> {
         let before_text = self.canonical.text();
         let before = self.canonical.state_vector();
         let candidate_text = self.canonical.preview_update_text(delta)?;
@@ -2126,9 +2148,7 @@ impl RelayHub {
                 })
                 .collect();
             let [repaired] = repairs.as_slice() else {
-                return Err(anyhow!(
-                    "document-op delta would corrupt binary-owned component scaffolding"
-                ));
+                return Ok(None);
             };
             repaired.clone()
         } else {
@@ -2161,7 +2181,13 @@ impl RelayHub {
             component_scope: ComponentScopeOutcome::NotRequested,
         };
         self.enqueue_delivery(&packet);
-        Ok(packet)
+        Ok(Some(packet))
+    }
+
+    pub fn apply_document_op_delta(&mut self, delta: &[u8]) -> Result<BroadcastPacket> {
+        self.apply_document_op_delta_checked(delta)?.ok_or_else(|| {
+            anyhow!("document-op delta would corrupt binary-owned component scaffolding")
+        })
     }
 
     /// Apply a durable editor delta only when its lineage identifies the
@@ -2184,7 +2210,9 @@ impl RelayHub {
         }
         let before_frontier = self.canonical.state_vector();
         let before = self.canonical.text();
-        self.apply_document_op_delta(delta)?;
+        let Some(_) = self.apply_document_op_delta_checked(delta)? else {
+            return Ok(DocumentOpDeltaOutcome::StructuralQuarantined);
+        };
         // A fresh controller may deliberately start with an empty canonical and
         // wait for the retained native replica to reseed it. The editor publishes
         // that frontier through both the direct replica-update path and the
@@ -4714,6 +4742,77 @@ mod tests {
         // At-least-once delivery remains idempotent after the canonical repair.
         hub.apply_document_op_delta(&delta).unwrap();
         assert_eq!(hub.canonical_text(), expected);
+    }
+
+    #[test]
+    fn document_op_delta_repairs_one_splice_inside_a_multi_edit_batch() {
+        let base = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:notes -->\n",
+            "<!-- /agent:notes -->\n",
+        );
+        let mut hub = RelayHub::from_text(1, base);
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let frontier = editor.state_vector();
+
+        let marker = base.find("<!-- /agent:queue -->").unwrap();
+        let stale_offset = base[..marker + "<!-- /ag".len()].chars().count() as u32;
+        editor.apply_local_edit(stale_offset, 0, "- Preserve this operator request.");
+        let notes = editor.text().find("<!-- /agent:notes -->").unwrap();
+        let notes_offset = editor.text()[..notes].chars().count() as u32;
+        editor.apply_local_edit(notes_offset, 0, "Independent note.\n");
+        let delta = editor.diff(&frontier).unwrap();
+
+        hub.apply_document_op_delta(&delta).unwrap();
+
+        assert_eq!(
+            hub.canonical_text(),
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- Preserve this operator request.\n",
+                "<!-- /agent:queue -->\n",
+                "<!-- agent:notes -->\n",
+                "Independent note.\n",
+                "<!-- /agent:notes -->\n",
+            )
+        );
+        assert_eq!(
+            element::structural_corruption_reason(&hub.canonical_text()),
+            None
+        );
+    }
+
+    #[test]
+    fn matching_lineage_structural_rejection_is_terminally_quarantined() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let mut hub = RelayHub::from_text(1, base);
+        hub.register(2).unwrap();
+        let lineage = hub.lineage().to_string();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let frontier = editor.state_vector();
+        let marker = base.find("<!-- /agent:exchange -->").unwrap();
+        let stale_offset = base[..marker + "<!-- /ag".len()].chars().count() as u32;
+        editor.apply_local_edit(stale_offset, 0, "unsafe");
+        let delta = editor.diff(&frontier).unwrap();
+
+        assert_eq!(
+            hub.apply_document_op_delta_in_lineage(Some(&lineage), &delta)
+                .unwrap(),
+            DocumentOpDeltaOutcome::StructuralQuarantined,
+        );
+        assert_eq!(hub.canonical_text(), base);
+
+        let fence = hub
+            .fence_registered_document_op_origins([2])
+            .expect("quarantine fences the causal origin");
+        assert_eq!(fence.registered_origins, 1);
+        assert_eq!(fence.projections_queued, 1);
+        assert!(hub.awaits_canonical_projection(2));
     }
 
     /// `#lazily-hot-path` Theme A — THE property that makes the witness usable as a

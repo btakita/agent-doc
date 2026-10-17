@@ -1344,6 +1344,18 @@ the reliable-sync cursor. The lineage is checkpointed beside the `.yrs`
 projection with that projection's SHA-256; recovery preserves it only when the
 hash matches and otherwise mints a new fail-closed lineage.
 
+A matching-lineage document-op frame is also a terminal receive when its
+projected text would corrupt binary-owned component scaffolding. The receiver
+first attempts only a unique, lossless repair proved by the delta's causal
+insertion chains; separate edits carried in one frame remain separate evidence
+even when their Lamport counters are consecutive. If no such repair exists, the
+frame is structurally quarantined, its causal editor origin is fenced for the
+current canonical projection, and the durable receive cursor advances. A
+deterministic semantic rejection must never be returned as a retryable
+transport failure: retaining that frame at the outbox head would block every
+later editor operation and prevent a retained response from reaching its
+projection and commit boundary.
+
 Quarantine covers both transports for the rejected intent. The receiver derives
 the author peer from the typed CRDT operation ids (the insertion id, or the
 newer delete clock for a deletion) and fences every matching registered replica

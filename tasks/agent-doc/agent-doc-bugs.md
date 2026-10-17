@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a145c7-ab88-7c71-87df-073dff16e979
+  codex: 01a14804-6ef4-79d0-8406-ede2a5602a7b
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -507,6 +508,84 @@ Yes. I rechecked both public registries:
 - PyPI: https://pypi.org/project/agent-doc/0.35.514/ — version `0.35.514` is public with `agent_doc-0.35.514-py3-none-any.whl`.
 
 GitHub records the release publication time as 2026-10-16 23:57:37 UTC.
+
+### Re: agent-doc bugs — gpt-6.1-sol · 2026-10-17T02:49:59-04:00
+
+Completed the requested implementation, verification, installation, publication, and recovery work.
+
+> **Queue prompt:** docs.md has the preset "#auth", but Codex is still requiring operator permission.
+
+Fixed. The queue authorization parser accepted only singular `preset=` while the live document used `presets=`. Plural preset attributes now resolve correctly, so an effective `#auth` or action-bearing preset authorizes the named work without requiring the operator to repeat it. The regression is covered by the queue/preflight test suite.
+
+> **Backlog item (#likewayextract):** I would like a way to extract focused documents, when an agent document becomes overloaded with concerns. See what I'm doing with extracting sdk.md into sdk-dev.md + sdk-legal.md. Can agent-doc provide tooling to properly transfer context + exchange + todo + backlog + icebox + review? What about `agent-doc extract`? Would `extract`, like an `extract method refactoring` be more appropriate? `split` is less characters, but does it collide with tmux pane split? If a session is commingled, would it be more appropriate to have the agent extract the pieces to keep each extraction focused?
+
+Implemented `agent-doc extract` as the focused-document refactoring. It selects stable IDs through an agent-authored manifest; moves linked context and exchange plus queue, todo, backlog, review, and icebox content; preserves IDs and states; previews by default; applies only with `--apply`; validates and writes the target first; and provides rollback and idempotent retry. `extract` is the command name; no ambiguous top-level `split` command was added.
+
+> **Backlog item (#extractwithinask):** How do I extract from within an agent doc? Do I just ask to extract?
+
+Yes. Ask imperatively, for example “Extract the SDK legal work into `sdk-legal.md`.” The agent authors the strict selection manifest, previews the move, and applies it without a redundant semantic confirmation when the request is unambiguous. Exploratory wording returns a preview; genuine ambiguity gets one focused question. Attached source/target documents fail closed with a concrete close-tabs-and-retry action.
+
+> **Queue prompt:** I would also like to make sure that I can ask the document to move a todo or backlog or review item into another document. There should be an agent-doc cli command.
+
+Covered by the same command. Preview with `agent-doc extract SOURCE TARGET --ids <stable-id>` and add `--apply` to perform the move. Todo, backlog, review, icebox, queue, and linked exchange material keep their stable IDs and completion/gate states.
+
+> **Queue prompt:** Should extract also delete the extracted items from the source document?
+
+Yes—focused extract is explicitly a move. Preview is read-only and reports `source_action: "remove_on_apply"`. On `--apply`, agent-doc writes the target durably first, then removes the selected material from the source. A source-write/checkpoint failure rolls both documents back, and the operation marker makes retries idempotent. Help, spec, runbook, and removal assertions now state this directly.
+
+> **Queue prompt:** Why is monsterrodholders.md tmux pane not opening? agent-doc provides no feedback.
+
+Root cause: JetBrains published the manual pane-creating generation, but an automatic `no_autostart=true` editor snapshot superseded it before projection. JetBrains had reported state-plane admission as success, so the missing terminal pane-creation result was invisible. Manual generations now retain a lease through terminal projection, passive snapshots are deferred across that boundary, and Sync Tmux Layout uses the awaited command plane with idempotent handoff retry and visible refusal/supersession/timeout/start/route errors. Controller tests, 62 targeted JetBrains tests, the full check, and real tmux CI passed.
+
+> **Queue prompt:** release + publish
+
+Released `v0.35.515`. The tag and release commit are public; all Linux, macOS, Windows, musl, editor-package, GitHub Release, PyPI clean-install verification, and Homebrew workflow jobs completed successfully. The release driver reported `tag_publish_handoff=complete local_install_full=complete public_publication=complete`.
+
+> **Queue prompt:** sdk-dev.md issue:
+> ```
+>   The agent-doc response is retained but awaiting editor/controller projection. Please save the open session document
+>   if it has unsaved edits; queued ADR/PR work remains preserved.
+>
+> • Blocked by hook
+>   └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
+> dev/tasks/sdk/sdk-dev.md. [session-check] INTERRUPTED: binary-owned document projection `1792216728430815591-1-
+> cc315a86524a8d98b403920fb08e7b0661f38f89705fa287a10df50cf4ae0a75` is retained for `/home/brian/work/btakita/agent-loop/
+> src/haiven-dev/tasks/sdk/sdk-dev.md` (reason=editor_projection_pending, source=start_resume_id_capture,
+> target_hash=cc315a86524a8d98b403920fb08e7b0661f38f89705fa287a10df50cf4ae0a75); the same intent will resume
+> automatically after editor/controller delivery converges. Do not issue a closeout payload and do not force disk; retry
+> only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md`. The latest
+> assistant text was captured into the pending/capture ledger before auto-close. The hook could not finish the required
+> commit boundary: [finalize] this cycle's earlier response write for /home/brian/work/btakita/agent-loop/src/haiven-dev/
+> tasks/sdk/sdk-dev.md is still converging through the editor/controller; it was not lost and commits once delivery
+> converges. Do not resend the response. Run only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/
+> haiven-dev/tasks/sdk/sdk-dev.md`; if it then reports realtime operator steering after the commit, continue THIS turn
+> and answer that steering.. The retained capture or projection is already durable and this exact retained intent commits
+> itself once delivery converges — this is a deferral, not a lost response. Wait for its controller-owned terminal state
+> edge; do not use the document's current-cycle status as proof because queue continuation can advance to a different
+> cycle. Do NOT re-send the response, force disk, or `admin recycle`, which disturb the capture being awaited. Do not
+> reach for `admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery only when `agent-doc
+> session-check` reports that the editor holding the document is not serving its replica, and then its remedy governs. Do
+> not send the final answer yet. If the response is missing from the document, run `agent-doc repair /home/brian/work/
+> btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md` first. Then finish the commit boundary for this turn and end
+> with `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md`.
+>
+> • The stop hook confirms the response is safely retained and requires the controller-owned commit boundary to finish.
+>   I’m resuming with only the mandated session check—no resend, forced write, repair, or reload.
+>
+> • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md
+>   └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md total…
+>     [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md total…
+>     [session-check] INTERRUPTED: binary-owned response delivery `1792216728430815591-1-cc315a86524a8d98b403920fb08e7b0…
+>     + 25 lines (^t to expand)
+> ```
+
+Fixed and recovered without resending, repairing, forcing disk, or manually recycling the live document. The receiver had treated a deterministic structural CRDT rejection as a retryable transport failure, leaving epoch 79 permanently at the outbox head. Structural repair now groups insertions by causal origin chains; a genuinely unsafe matching-lineage frame is terminally quarantined, causally fenced, projected, recorded, and acknowledged instead of wedging all later operations. After installation, the mandated `session-check` committed the retained `sdk-dev.md` cycle successfully with `queue_continuation_required=false`.
+
+> **Queue prompt:** [#gq2c]: done
+
+Recorded the operator action as done.
+
+Post-release fixes are pushed to `main` through commit `f9cd1ad325`. The combined authoritative check passed after integration; the pane batch also passed real tmux CI. Each integrated batch received one coordinator-owned local install.
 <!-- agent:boundary:59f6e63f -->
 <!-- /agent:exchange -->
 
@@ -514,14 +593,60 @@ GitHub records the release publication time as 2026-10-16 23:57:37 UTC.
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+sdk-dev.md issue:
+```
+  The agent-doc response is retained but awaiting editor/controller projection. Please save the open session document
+  if it has unsaved edits; queued ADR/PR work remains preserved.
+
+• Blocked by hook
+  └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
+dev/tasks/sdk/sdk-dev.md. [session-check] INTERRUPTED: binary-owned document projection `1792216728430815591-1-
+cc315a86524a8d98b403920fb08e7b0661f38f89705fa287a10df50cf4ae0a75` is retained for `/home/brian/work/btakita/agent-loop/
+src/haiven-dev/tasks/sdk/sdk-dev.md` (reason=editor_projection_pending, source=start_resume_id_capture,
+target_hash=cc315a86524a8d98b403920fb08e7b0661f38f89705fa287a10df50cf4ae0a75); the same intent will resume
+automatically after editor/controller delivery converges. Do not issue a closeout payload and do not force disk; retry
+only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md`. The latest
+assistant text was captured into the pending/capture ledger before auto-close. The hook could not finish the required
+commit boundary: [finalize] this cycle's earlier response write for /home/brian/work/btakita/agent-loop/src/haiven-dev/
+tasks/sdk/sdk-dev.md is still converging through the editor/controller; it was not lost and commits once delivery
+converges. Do not resend the response. Run only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/
+haiven-dev/tasks/sdk/sdk-dev.md`; if it then reports realtime operator steering after the commit, continue THIS turn
+and answer that steering.. The retained capture or projection is already durable and this exact retained intent commits
+itself once delivery converges — this is a deferral, not a lost response. Wait for its controller-owned terminal state
+edge; do not use the document's current-cycle status as proof because queue continuation can advance to a different
+cycle. Do NOT re-send the response, force disk, or `admin recycle`, which disturb the capture being awaited. Do not
+reach for `admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery only when `agent-doc
+session-check` reports that the editor holding the document is not serving its replica, and then its remedy governs. Do
+not send the final answer yet. If the response is missing from the document, run `agent-doc repair /home/brian/work/
+btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md` first. Then finish the commit boundary for this turn and end
+with `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md`.
+
+• The stop hook confirms the response is safely retained and requires the controller-owned commit boundary to finish.
+  I’m resuming with only the mandated session check—no resend, forced write, repair, or reload.
+
+• Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md
+  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md total…
+    [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md total…
+    [session-check] INTERRUPTED: binary-owned response delivery `1792216728430815591-1-cc315a86524a8d98b403920fb08e7b0…
+    + 25 lines (^t to expand)
+```
+---
+- ~~do [#likewayextract]~~
+- ~~do [#extractwithinask]~~
+- 🚧 docs.md has the preset "#auth", but Codex is still requiring operator permission.
+- 🚧 Why is monsterrodholders.md tmux pane not opening? agent-doc provides no feedback.
+- 🚧 [#gq2c]: done
+- 🚧 I would also like to make sure that I can ask the document to move a todo or backlog or review item into another document. There should be an agent-doc cli command.
+- Should extract also delete the extracted items from the source document?
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Todo
 
 <!-- agent:todo -->
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
-- [ ] [#gq2c] After the haiven-dev supervisor recycles onto the new build, re-run Agent Doc on tasks/sdk.md: bracketed todo ids are admitted again (it currently uses bare ids as a workaround).
+- [x] [#gq2c] After the haiven-dev supervisor recycles onto the new build, re-run Agent Doc on tasks/sdk.md: bracketed todo ids are admitted again (it currently uses bare ids as a workaround).
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#n7kq] In the sdk.md session: restore the 7 todo ids the 23:30 --todo-edit dropped (#tdclireview, #tdcontracts162, #tdpromotioncallers, #tdinspectclones, #tdfpe202, #tdadr0033, #tdadr0030) with --todo-edit "<exact text>=#tdX <same text>", or accept the ids the preflight backfill assigns
 - [ ] [#8ph6] In the docs.md session: check off the Google Drive re-auth todo (--todo-done httpsdocsgoogle once backfilled, or --todo-done with its exact text)

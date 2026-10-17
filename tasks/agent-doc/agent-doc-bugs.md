@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -594,52 +593,6 @@ Post-release fixes are pushed to `main` through commit `f9cd1ad325`. The combine
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-sdk-dev.md issue:
-```
-  The agent-doc response is retained but awaiting editor/controller projection. Please save the open session document
-  if it has unsaved edits; queued ADR/PR work remains preserved.
-
-• Blocked by hook
-  └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
-dev/tasks/sdk/sdk-dev.md. [session-check] INTERRUPTED: binary-owned document projection `1792216728430815591-1-
-cc315a86524a8d98b403920fb08e7b0661f38f89705fa287a10df50cf4ae0a75` is retained for `/home/brian/work/btakita/agent-loop/
-src/haiven-dev/tasks/sdk/sdk-dev.md` (reason=editor_projection_pending, source=start_resume_id_capture,
-target_hash=cc315a86524a8d98b403920fb08e7b0661f38f89705fa287a10df50cf4ae0a75); the same intent will resume
-automatically after editor/controller delivery converges. Do not issue a closeout payload and do not force disk; retry
-only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md`. The latest
-assistant text was captured into the pending/capture ledger before auto-close. The hook could not finish the required
-commit boundary: [finalize] this cycle's earlier response write for /home/brian/work/btakita/agent-loop/src/haiven-dev/
-tasks/sdk/sdk-dev.md is still converging through the editor/controller; it was not lost and commits once delivery
-converges. Do not resend the response. Run only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/
-haiven-dev/tasks/sdk/sdk-dev.md`; if it then reports realtime operator steering after the commit, continue THIS turn
-and answer that steering.. The retained capture or projection is already durable and this exact retained intent commits
-itself once delivery converges — this is a deferral, not a lost response. Wait for its controller-owned terminal state
-edge; do not use the document's current-cycle status as proof because queue continuation can advance to a different
-cycle. Do NOT re-send the response, force disk, or `admin recycle`, which disturb the capture being awaited. Do not
-reach for `admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery only when `agent-doc
-session-check` reports that the editor holding the document is not serving its replica, and then its remedy governs. Do
-not send the final answer yet. If the response is missing from the document, run `agent-doc repair /home/brian/work/
-btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md` first. Then finish the commit boundary for this turn and end
-with `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md`.
-
-• The stop hook confirms the response is safely retained and requires the controller-owned commit boundary to finish.
-  I’m resuming with only the mandated session check—no resend, forced write, repair, or reload.
-
-• Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md
-  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md total…
-    [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md total…
-    [session-check] INTERRUPTED: binary-owned response delivery `1792216728430815591-1-cc315a86524a8d98b403920fb08e7b0…
-    + 25 lines (^t to expand)
-```
----
-- ~~do [#likewayextract]~~
-- ~~do [#extractwithinask]~~
-- 🚧 docs.md has the preset "#auth", but Codex is still requiring operator permission.
-- 🚧 Why is monsterrodholders.md tmux pane not opening? agent-doc provides no feedback.
-- 🚧 [#gq2c]: done
-- 🚧 I would also like to make sure that I can ask the document to move a todo or backlog or review item into another document. There should be an agent-doc cli command.
-- Should extract also delete the extracted items from the source document?
-- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Todo

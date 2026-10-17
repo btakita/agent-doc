@@ -13,6 +13,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   manifest entry would not make the swap safe. The JetBrains specification
   records why the GH #108 guard remains required on 263.7031 and why a
   backend-only swap is invalid.
+- **A retained `response_captured` closeout no longer strands its native-save
+  retry (`#capturednativesaveowner`).** Session-check now preserves the realtime
+  delivery/save transition across every retained closeout phase. Once the live
+  editor acknowledges the canonical cut it requests the exact editor-native
+  save and waits on the controller-owned state edge; only semantic closeout
+  resume remains fenced to `write_applied`.
 - **A stale route-owned supervisor can re-exec when the editor has already
   reloaded (`#279`).** The typed sender-executable-replaced build-mismatch
   receipt now bypasses stale document-resolution preflight and reaches the

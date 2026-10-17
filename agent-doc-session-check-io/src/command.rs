@@ -177,9 +177,11 @@ pub enum ReadOnlyTerminalProjectionDecision {
 
 /// A direct `session-check` remains unable to replay, repair, or commit document
 /// content. It may, however, ask the live editor to save its own authoritative
-/// buffer when a durable `write_applied` closeout is blocked solely on the disk
+/// buffer when a durable retained closeout is blocked solely on the disk
 /// projection. This is an editor-owned persistence effect, not a competing
-/// document replacement.
+/// document replacement. The retained closeout's phase may decide whether the
+/// exact save receipt can resume it directly, but it does not change which
+/// document plane owns persistence.
 ///
 /// `#splicesessionack`: a durable exhausted replica-rebuild record wins over
 /// every other reading, scoped convergence included, so the check stays
@@ -198,7 +200,18 @@ pub fn decide_read_only_terminal_projection(
     if authority_matches_required_scope {
         return ReadOnlyTerminalProjectionDecision::Converged;
     }
-    if retained_document_write_blocks && cycle_phase == Some(CyclePhase::WriteApplied) {
+    // `#capturednativesaveowner`: the realtime persistence rule is independent
+    // of closeout phase. A retained `response_captured` controller can own the
+    // same exact native-save retry as `write_applied`; classifying it as
+    // `ObserveOnly` calls that controller-owned state non-recoverable and
+    // strands both its state-edge retry and any steering waiting behind it.
+    // Only direct closeout *resume* remains fenced to `write_applied` below.
+    if retained_document_write_blocks
+        && matches!(
+            cycle_phase,
+            Some(CyclePhase::ResponseCaptured | CyclePhase::WriteApplied)
+        )
+    {
         if !editor_delivery_converged {
             return ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery;
         }
@@ -4416,43 +4429,25 @@ mod terminal_convergence_tests {
     }
 
     #[test]
-    fn retained_write_applied_session_check_waits_for_delivery_before_editor_owned_save() {
-        assert_eq!(
-            decide_read_only_terminal_projection(
-                false,
-                Some(CyclePhase::WriteApplied),
-                true,
-                false,
-                false,
-            ),
-            ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery,
-        );
-        assert_eq!(
-            decide_read_only_terminal_projection(
-                false,
-                Some(CyclePhase::WriteApplied),
-                true,
-                true,
-                false
-            ),
-            ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
-        );
+    fn retained_capture_session_check_waits_for_delivery_before_editor_owned_save() {
+        for phase in [CyclePhase::ResponseCaptured, CyclePhase::WriteApplied] {
+            assert_eq!(
+                decide_read_only_terminal_projection(false, Some(phase), true, false, false),
+                ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery,
+                "a durable retained owner waits for exact delivery in {phase:?}",
+            );
+            assert_eq!(
+                decide_read_only_terminal_projection(false, Some(phase), true, true, false),
+                ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
+                "a durable retained owner persists its exact editor cut in {phase:?}",
+            );
+        }
         assert_eq!(
             decide_read_only_terminal_projection(
                 false,
                 Some(CyclePhase::WriteApplied),
                 false,
                 false,
-                false,
-            ),
-            ReadOnlyTerminalProjectionDecision::ObserveOnly,
-        );
-        assert_eq!(
-            decide_read_only_terminal_projection(
-                false,
-                Some(CyclePhase::ResponseCaptured),
-                true,
-                true,
                 false,
             ),
             ReadOnlyTerminalProjectionDecision::ObserveOnly,

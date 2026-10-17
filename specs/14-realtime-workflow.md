@@ -2196,6 +2196,14 @@ states such as idle, `preflight_started`, `response_captured`, `write_applied`,
 post-preflight, and committed may schedule work, but they must not change the
 realtime authority rules.
 
+A retained document-write owner therefore keeps the same delivery/native-save
+transition across the captured-response/write-applied boundary. Once the editor
+acknowledges the exact canonical cut, `session-check` may request the
+editor-owned save in either `response_captured` or `write_applied`; only the
+semantic closeout resume remains phase-fenced to `write_applied`. A retained
+`response_captured` owner must never be rendered as a non-recoverable
+observe-only projection while its controller owns that native-save state edge.
+
 | State | Authority | Meaning | Allowed next action |
 |---|---|---|---|
 | `DiskAuthoritative` | Current visible file | No editor listener currently owns the document. | Build a merge against the file, or wait for an editor attach. |

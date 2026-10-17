@@ -5914,6 +5914,37 @@ mod read_only_retained_projection_model {
             }
         }
 
+        /// Live dogfood shape from `agent-doc-bugs.md` (2026-10-17): the
+        /// controller retained a captured response, the JetBrains replica had
+        /// acknowledged the canonical editor cut, and disk still held the
+        /// preceding cut. Session-check used to classify this controller-owned
+        /// native-save edge as `ObserveOnly`, request no save, and strand the
+        /// steering behind a "non-recoverable projection state" interruption.
+        fn retained_response_captured_native_save_wedge() -> Self {
+            let authority = "captured response pending\nnew operator steering\n".to_string();
+            let disk = "captured response pending\n".to_string();
+            let phase = CyclePhase::ResponseCaptured;
+            let retained_write_blocks = true;
+            let retained_closeout_resume = ReadOnlyRetainedCloseoutResumeProjection::new(
+                authority == disk,
+                Some(phase),
+                retained_write_blocks,
+            );
+            Self {
+                authority,
+                disk,
+                phase,
+                retained_write_blocks,
+                delivery_converged: true,
+                native_save_requested: false,
+                native_save_requests: 0,
+                committed: false,
+                response_replays: 0,
+                operator_exit_requested: false,
+                retained_closeout_resume,
+            }
+        }
+
         fn evaluate_projection(&mut self) {
             match decide_read_only_terminal_projection(
                 self.authority == self.disk,
@@ -6020,6 +6051,26 @@ mod read_only_retained_projection_model {
         assert_eq!(world.native_save_requests, 0);
         assert_eq!(world.response_replays, 0);
         assert!(!world.operator_exit_requested);
+    }
+
+    #[test]
+    fn response_captured_controller_owner_requests_native_save_without_stranding_steering() {
+        let mut world = World::retained_response_captured_native_save_wedge();
+
+        world.step(Action::SessionCheck);
+
+        assert!(world.native_save_requested);
+        assert_eq!(world.native_save_requests, 1);
+        assert!(!world.operator_exit_requested);
+        assert!(
+            !world.committed,
+            "session-check cannot replay a captured response"
+        );
+
+        world.step(Action::ExactNativeSaveReceipt);
+        assert_eq!(world.authority, world.disk);
+        assert!(!world.operator_exit_requested);
+        assert_eq!(world.response_replays, 0);
     }
 }
 

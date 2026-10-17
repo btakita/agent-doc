@@ -29,6 +29,12 @@ pub enum EditorIntent {
     /// byte length; adapters must reject rather than replace a newer buffer.
     PersistCurrent,
     DeliverCrdtRemote,
+    /// Temporarily make one live editor document immutable and detach its CRDT
+    /// replica so a coordinated cross-document operation can own disk authority.
+    FreezeForExtract,
+    /// Reload a document changed by a coordinated extract, restore editability,
+    /// and re-register its CRDT replica.
+    ResumeAfterExtract,
     RefreshVcs,
     ReloadLibrary,
 }
@@ -43,6 +49,8 @@ impl EditorIntent {
             Self::ObserveLazilyCurrent => "observe_lazily_current",
             Self::PersistCurrent => "persist_current",
             Self::DeliverCrdtRemote => "deliver_crdt_remote",
+            Self::FreezeForExtract => "freeze_for_extract",
+            Self::ResumeAfterExtract => "resume_after_extract",
             Self::RefreshVcs => "refresh_vcs",
             Self::ReloadLibrary => "reload_library",
         }
@@ -1139,6 +1147,28 @@ pub fn persist_current_message(
     })
 }
 
+/// Ask one editor to hold a document read-only and relinquish its CRDT
+/// registration for the named coordinated extraction operation.
+pub fn freeze_for_extract_message(file: &str, operation_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": EditorIntent::FreezeForExtract.as_str(),
+        "file": file,
+        "operation_id": operation_id,
+        "issued_at_ms": now_millis(),
+    })
+}
+
+/// Ask the editor frozen by [`freeze_for_extract_message`] to reload the
+/// authoritative disk result, restore editability, and re-register its replica.
+pub fn resume_after_extract_message(file: &str, operation_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": EditorIntent::ResumeAfterExtract.as_str(),
+        "file": file,
+        "operation_id": operation_id,
+        "issued_at_ms": now_millis(),
+    })
+}
+
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1536,14 +1566,14 @@ mod tests {
         callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
         classify_socket_receipt, early_receipt_line, early_receipt_ops_marker,
         early_receipt_tagged_message, effective_unmatched_for_patch_payload,
-        ipc_accept_thread_ops_marker, ipc_handshake_rejection, ipc_hello_ack_message,
-        ipc_hello_message, is_already_applied_receipt_error_message,
+        freeze_for_extract_message, ipc_accept_thread_ops_marker, ipc_handshake_rejection,
+        ipc_hello_ack_message, ipc_hello_message, is_already_applied_receipt_error_message,
         is_socket_receipt_timeout_error, is_socket_status_error, message_is_reload_library,
         message_requests_early_receipt, normalization_repair_patch_message,
         observe_lazily_current_message, patch_message, pending_callback_from_request,
         persist_current_message, queue_convergence_message, refresh_content_message,
-        reload_lib_message, reposition_message, validate_ipc_hello, validate_ipc_hello_ack,
-        vcs_refresh_message, vcs_refresh_probe_message,
+        reload_lib_message, reposition_message, resume_after_extract_message, validate_ipc_hello,
+        validate_ipc_hello_ack, vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -2119,6 +2149,21 @@ Summary line, rewritten.
         assert_eq!(message["expected_content_len"], 42);
         assert!(message.get("content").is_none());
         assert!(message.get("early_receipt").is_none());
+    }
+
+    #[test]
+    fn coordinated_extract_messages_are_operation_scoped() {
+        let freeze = freeze_for_extract_message("/tmp/source.md", "extract-123");
+        assert_eq!(freeze["type"], "freeze_for_extract");
+        assert_eq!(freeze["file"], "/tmp/source.md");
+        assert_eq!(freeze["operation_id"], "extract-123");
+        assert!(freeze["issued_at_ms"].as_u64().unwrap() > 0);
+
+        let resume = resume_after_extract_message("/tmp/source.md", "extract-123");
+        assert_eq!(resume["type"], "resume_after_extract");
+        assert_eq!(resume["file"], "/tmp/source.md");
+        assert_eq!(resume["operation_id"], "extract-123");
+        assert!(resume["issued_at_ms"].as_u64().unwrap() > 0);
     }
 
     #[test]

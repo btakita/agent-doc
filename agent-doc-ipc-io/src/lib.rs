@@ -39,11 +39,11 @@
 use agent_doc_ipc_protocol::{
     IPC_PROTOCOL_VERSION, IpcHandshakeError, IpcPeerIdentity, SocketReceiptClassification,
     classify_socket_receipt, early_receipt_line, early_receipt_ops_marker,
-    early_receipt_tagged_message, ipc_accept_thread_ops_marker, ipc_handshake_rejection,
-    ipc_hello_ack_message, ipc_hello_message, message_is_reload_library,
+    early_receipt_tagged_message, freeze_for_extract_message, ipc_accept_thread_ops_marker,
+    ipc_handshake_rejection, ipc_hello_ack_message, ipc_hello_message, message_is_reload_library,
     message_requests_early_receipt, observe_lazily_current_message, persist_current_message,
-    refresh_content_message, reload_lib_message, validate_ipc_hello, validate_ipc_hello_ack,
-    vcs_refresh_message,
+    refresh_content_message, reload_lib_message, resume_after_extract_message, validate_ipc_hello,
+    validate_ipc_hello_ack, vcs_refresh_message,
 };
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -1342,6 +1342,38 @@ pub fn send_persist_current_to_editor(
     expected_content_len: usize,
 ) -> Result<bool> {
     let mut message = persist_current_message(file, expected_content_hash, expected_content_len);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
+    send_message_to_pid(project_root, editor_pid, &message).map(|_| true)
+}
+
+/// Freeze one explicitly registered editor document for a coordinated focused
+/// extraction. The terminal receipt means the buffer is immutable and replica
+/// detach is admitted; callers must observe detached authority before writing.
+pub fn send_freeze_for_extract_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    file: &str,
+    operation_id: &str,
+) -> Result<bool> {
+    let mut message = freeze_for_extract_message(file, operation_id);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
+    send_message_to_pid(project_root, editor_pid, &message).map(|_| true)
+}
+
+/// Resume one editor document after a coordinated focused extraction. The
+/// terminal receipt means disk was reloaded, replica registration completed,
+/// and editability was restored.
+pub fn send_resume_after_extract_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    file: &str,
+    operation_id: &str,
+) -> Result<bool> {
+    let mut message = resume_after_extract_message(file, operation_id);
     message["editor_id"] = serde_json::Value::String(editor_id.to_string());
     message["editor_pid"] = serde_json::Value::from(editor_pid);
     send_message_to_pid(project_root, editor_pid, &message).map(|_| true)

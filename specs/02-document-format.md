@@ -206,6 +206,14 @@ file):
 | Explicit id naming RESOLVED tracked work | Rejected: a todo for finished work is moot. |
 | Explicit id already owned by a todo item | Rejected; use `--todo-edit`. |
 
+Synchronization may replay an action already present in `agent:todo`. When the
+matching row is id-less, `--todo-add` normalizes that row in place to
+`- [ ] [#<id>] <action>` (or preserves its existing checked state), using the
+same tracked-id layering and collision-free surrogate rules as a new row. It
+does not append a duplicate, and the next identical add is a byte-for-byte
+no-op. A matching checked row receives a surrogate, as in id backfill below.
+A matching row that already owns an id remains unchanged.
+
 Minted ids avoid every `#id` token in the document, the active tracked-work
 ids, and every id in the done archive, so a minted id is never mistaken for a
 link. A `patch:todo` that adds an item without an own id prints a

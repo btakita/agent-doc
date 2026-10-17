@@ -1550,15 +1550,16 @@ pub fn todo_link_index_in_content(
 /// as `- [ ] [#<id>] <action>`, creating the component when the document has
 /// none.
 ///
-/// Every existing todo line is preserved byte-for-byte, and an action already
-/// present (in any checkbox state) is a no-op, so a replayed closeout never
-/// duplicates or resurrects a todo. The own id REUSES the one open
+/// Existing todo lines are preserved byte-for-byte except that a matching
+/// id-less action is normalized in place with a stable own id. An action that
+/// already has an id is a no-op, so a replayed closeout never duplicates or
+/// resurrects a todo. The own id REUSES the one open
 /// `agent:review` / `agent:backlog` / `agent:icebox` id the action cites (or an
 /// explicit `id=<open id>`; `#todoidlayer`: a caller-chosen `id=` naming no
 /// tracked work is a surrogate only when the action does not layer on exactly
 /// one tracked item), else is MINTED like a backlog id, collision-free against
 /// the document's ids and every tracked id the done archive holds. An explicit
-/// id naming resolved work is rejected. Returns whether a line was appended.
+/// id naming resolved work is rejected. Returns whether the document changed.
 pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
     let full_content = read_command_document(file, "todo_add")?;
     let doc_id = agent_doc_hash::document_id_for_path(file);
@@ -1593,24 +1594,32 @@ pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
             " (requested id={requested} not used: a todo about one tracked item layers on its id, #todoidlayer)"
         ));
     }
-    if outcome.inserted {
+    let changed = outcome.content != full_content;
+    if changed {
         persist_pending_write(file, &full_content, &outcome.content)?;
-        pending_receipt!(
-            "[todo] todo-add: {}appended operator action{} to agent:todo",
-            if outcome.created_component {
-                "created agent:todo and "
-            } else {
-                ""
-            },
-            id_label
-        );
+        if outcome.inserted {
+            pending_receipt!(
+                "[todo] todo-add: {}appended operator action{} to agent:todo",
+                if outcome.created_component {
+                    "created agent:todo and "
+                } else {
+                    ""
+                },
+                id_label
+            );
+        } else {
+            pending_receipt!(
+                "[todo] todo-add: normalized existing operator action{} with a stable id in agent:todo",
+                id_label
+            );
+        }
     } else {
         pending_receipt!(
             "[todo] todo-add: operator action{} already present in agent:todo",
             id_label
         );
     }
-    Ok(outcome.inserted)
+    Ok(changed)
 }
 
 /// `#todoids`: check off every OPEN `agent:todo` item whose OWN id is resolved
@@ -3695,6 +3704,28 @@ mod tests {
             "{after}"
         );
         drop(tmp);
+    }
+
+    #[test]
+    fn todo_add_sync_persists_a_stable_id_for_an_existing_idless_item() {
+        let (_tmp, doc) = doc_with_review("- [/] [#gate] gated work\n");
+        let action = "Verify [#gate] in a live pane";
+        let before = fs::read_to_string(&doc).unwrap();
+        let (content, todo, _) =
+            agent_doc_element::todo::ensure_todo_component_in_document(&before).unwrap();
+        fs::write(
+            &doc,
+            todo.replace_content(&content, &format!("- [ ] {action}\n")),
+        )
+        .unwrap();
+
+        assert!(force_pending(|| todo_add(&doc, action)));
+        let after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(todo_own_id(&after, action), "gate");
+        assert_eq!(after.matches(action).count(), 1, "{after}");
+
+        assert!(!force_pending(|| todo_add(&doc, action)));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), after);
     }
 
     #[test]

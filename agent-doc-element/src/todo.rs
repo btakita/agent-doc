@@ -363,14 +363,15 @@ fn render_todo_line(
 /// Result of [`add_todo_item_to_document`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TodoAddOutcome {
-    /// The document after the add (unchanged when nothing was inserted).
+    /// The document after the add (possibly with a matching id-less row
+    /// normalized in place even when no row was appended).
     pub content: String,
     /// Whether a new checklist line was appended.
     pub inserted: bool,
     /// Whether the `agent:todo` component had to be created.
     pub created_component: bool,
-    /// The item's own id: the new id when inserted, or the matching existing
-    /// item's id (`None` for an id-less legacy item) when the add was a no-op.
+    /// The item's own id: newly assigned when inserted or normalized, or the
+    /// matching existing item's id when the add was a no-op.
     pub id: Option<String>,
     /// `#todoids`: the tracked-work component (`review` / `backlog` /
     /// `icebox`) whose id the item reuses as its own id; `None` for a
@@ -568,10 +569,10 @@ pub fn add_todo_item_to_document(
     let body = todo.content(&ensured);
     let wanted = normalize_action_text(&action);
     let items: Vec<TodoLine<'_>> = body.lines().filter_map(parse_todo_line).collect();
-    if let Some(existing) = items
+    let existing = items
         .iter()
-        .find(|item| normalize_action_text(item.action) == wanted)
-    {
+        .find(|item| normalize_action_text(item.action) == wanted);
+    if let Some(existing) = existing.filter(|item| item.own_id.is_some()) {
         let id = existing.own_id.map(str::to_ascii_lowercase);
         let linked = id
             .as_deref()
@@ -606,6 +607,7 @@ pub fn add_todo_item_to_document(
     // a caller-chosen `id=` naming no tracked work) is written only when the
     // action cites zero or several such items — or when a CHECKED todo already
     // owns the one id, because one id names one row.
+    let can_layer_existing = existing.is_none_or(|item| item.state.is_open());
     let explicit_tracked = explicit_id
         .as_deref()
         .and_then(|id| links.linkable_component(id).map(|_| id.to_string()));
@@ -636,7 +638,8 @@ pub fn add_todo_item_to_document(
                     // A checked todo already owns the id: this is a follow-up
                     // action, given a surrogate below and still citing the item.
                     Some(_) => None,
-                    None => Some(only.clone()),
+                    None if can_layer_existing => Some(only.clone()),
+                    None => None,
                 },
                 _ => None,
             };
@@ -670,6 +673,29 @@ pub fn add_todo_item_to_document(
         }
     };
     let requested_id_unused = explicit_id.filter(|requested| *requested != id);
+    if let Some(existing) = existing {
+        // A todo sync commonly replays the desired action set through
+        // `--todo-add`. When the matching row predates todo ids (or was typed by
+        // the operator), normalize that row in place instead of treating it as
+        // an already-complete no-op and postponing its stable id until the next
+        // preflight.
+        let mut parsed = TodoBody::parse(body);
+        let located = parsed
+            .items
+            .iter()
+            .find(|item| normalize_action_text(&item.action) == wanted)
+            .cloned()
+            .context("--todo-add matched an item that could not be located")?;
+        parsed.rewrite_line(located.line, existing.state, Some(&id), &located.action);
+        return Ok(TodoAddOutcome {
+            content: todo.replace_content(&ensured, &parsed.render()),
+            inserted: false,
+            created_component,
+            id: Some(id),
+            linked,
+            requested_id_unused,
+        });
+    }
     let mut new_body = String::with_capacity(body.len() + action.len() + 16);
     new_body.push_str(body);
     if !new_body.is_empty() && !new_body.ends_with('\n') {
@@ -1831,7 +1857,7 @@ mod tests {
     }
 
     #[test]
-    fn add_is_idempotent_against_open_and_checked_items_with_or_without_ids() {
+    fn add_normalizes_a_matching_idless_item_then_is_idempotent() {
         let content = "<!-- agent:todo -->\n- [x] Rotate the deploy key\n- [ ] [#k3vd] Publish the note\n<!-- /agent:todo -->\n";
         for text in [
             "Rotate the deploy key",
@@ -1840,12 +1866,52 @@ mod tests {
         ] {
             let outcome = add(content, text).unwrap();
             assert!(!outcome.inserted, "{text:?}");
-            assert_eq!(outcome.content, content);
-            assert_eq!(outcome.id, None);
+            assert_eq!(outcome.id.as_deref(), Some("t01"));
+            assert_eq!(
+                todo_body(&outcome.content),
+                "- [x] [#t01] Rotate the deploy key\n- [ ] [#k3vd] Publish the note\n"
+            );
+            let repeated = add(&outcome.content, text).unwrap();
+            assert!(!repeated.inserted);
+            assert_eq!(repeated.content, outcome.content);
+            assert_eq!(repeated.id.as_deref(), Some("t01"));
         }
         let outcome = add(content, "Publish  the note").unwrap();
         assert!(!outcome.inserted);
         assert_eq!(outcome.id.as_deref(), Some("k3vd"));
+    }
+
+    #[test]
+    fn add_sync_layers_a_matching_idless_item_on_its_tracked_id() {
+        let content = wrap("- [ ] Verify [#gate] in a live pane\n");
+        let mut links = TodoLinkIndex::default();
+        links.mark_open("gate", "review");
+
+        let outcome = add_linked(&content, "Verify [#gate] in a live pane", &links).unwrap();
+
+        assert!(!outcome.inserted);
+        assert_eq!(outcome.id.as_deref(), Some("gate"));
+        assert_eq!(outcome.linked.as_deref(), Some("review"));
+        assert_eq!(
+            todo_body(&outcome.content),
+            "- [ ] [#gate] Verify [#gate] in a live pane\n"
+        );
+
+        let checked = wrap("- [x] Verify [#gate] in a live pane\n");
+        let checked_outcome =
+            add_linked(&checked, "Verify [#gate] in a live pane", &links).unwrap();
+        assert!(
+            checked_outcome
+                .id
+                .as_deref()
+                .is_some_and(|id| id.starts_with('t'))
+        );
+        assert_eq!(checked_outcome.linked, None);
+        let checked_id = checked_outcome.id.as_deref().unwrap();
+        assert_eq!(
+            todo_body(&checked_outcome.content),
+            format!("- [x] [#{checked_id}] Verify [#gate] in a live pane\n")
+        );
     }
 
     #[test]

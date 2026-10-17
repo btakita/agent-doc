@@ -57,7 +57,11 @@ embedded `ControllerTmuxLayoutSyncReceipt.applied` field separately reports
 whether the downstream tmux effect was already observed. Consequently,
 `reason: "projection_published"` is a successful command terminal with
 `applied: false` in the embedded effect receipt; retry/failure reasons remain
-rejected terminals.
+rejected terminals. A manual sync's nested waits are ordered: the pane startup
+effect has 30 seconds to publish its outcome, the controller command projection
+waits 35 seconds for that terminal receipt, and the editor waits 40 seconds for
+the command projection. Equal effect and projection deadlines must not expose a
+same-generation `projection_effect_in_flight` snapshot as a terminal failure.
 
 ## Payload schemas
 

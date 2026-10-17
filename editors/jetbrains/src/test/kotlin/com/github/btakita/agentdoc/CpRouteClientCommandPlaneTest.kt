@@ -16,6 +16,12 @@ import org.junit.Test
  * projection resolution the controller's shadow endpoint relies on.
  */
 class CpRouteClientCommandPlaneTest {
+
+    @Test
+    fun `manual layout client wait outlives controller terminal projection`() {
+        assertTrue(CpRouteClient.SYNC_TMUX_LAYOUT_COMMAND_TIMEOUT_MS > 35_000L)
+    }
+
     private fun inlinePayload(submit: com.google.gson.JsonObject): com.google.gson.JsonObject {
         val bytes = submit.getAsJsonObject("payload").getAsJsonArray("Inline")
             .map { it.asInt.toByte() }

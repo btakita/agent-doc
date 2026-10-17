@@ -1416,7 +1416,10 @@ internal fun resolveCommandSubmitTerminalData(
 /// that into a fast retry through the `#rebootselfheal` path that already exists.
 private const val COMMAND_SUBMIT_ACCEPT_TIMEOUT_MS = 10_000L
 private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
-private const val SYNC_TMUX_LAYOUT_COMMAND_TIMEOUT_MS = 35_000L
+// Outlive the controller's 35-second command projection wait. Equal nested
+// deadlines can expose a valid same-generation `Applying` projection as a
+// terminal "Sync failed" receipt before the effect publishes its outcome.
+internal const val SYNC_TMUX_LAYOUT_COMMAND_TIMEOUT_MS = 40_000L
 private const val MIN_COMMAND_AWAIT_TIMEOUT_MS = 1L
 private const val TURN_AUTHORITY_STREAM_TIMEOUT_MS = 120_000L
 private const val TURN_AUTHORITY_RECONNECT_MIN_MS = 250L

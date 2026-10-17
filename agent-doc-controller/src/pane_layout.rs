@@ -4,7 +4,22 @@
 //! decision: a newer input revision published while the current effect is
 //! finishing must keep one worker active.
 
+use std::time::Duration;
+
 pub use agent_doc_editor_surface::editor_view_policy::MainLayoutEligibility;
+
+/// Maximum readiness budget owned by a manual pane-layout effect.
+///
+/// The command projection must wait longer than this effect-local deadline so
+/// it observes the effect's terminal receipt instead of sampling the same
+/// generation while it is still `Applying`.
+pub const MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Controller-side terminal wait for an explicit pane-layout command.
+///
+/// Keep this strictly above [`MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT`]. The editor
+/// transport independently adds another five-second tier around this wait.
+pub const MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LatestProjectionWorkerState {
@@ -547,6 +562,11 @@ impl ProjectionAttemptLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_command_wait_outlives_its_nested_layout_effect() {
+        assert!(MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT > MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT);
+    }
 
     fn same(file: &str) -> String {
         file.trim_start_matches("/root/").to_string()

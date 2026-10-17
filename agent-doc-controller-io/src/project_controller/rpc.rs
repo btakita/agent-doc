@@ -11628,6 +11628,7 @@ fn handle_editor_route_rpc_with_tmux(
         request,
         live_tmux,
         delegate_editor_route_layout,
+        release_delegated_editor_route_layout,
     )
 }
 
@@ -11643,6 +11644,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
         &Path,
         &EditorRouteLayoutDelegation,
     ) -> Result<EditorRouteLayoutDelegationReceipt>,
+    release_layout: impl FnOnce(&Path, &EditorRouteLayoutRelease) -> Result<()>,
 ) -> Result<ControllerEditorRouteResult> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
@@ -11740,7 +11742,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
                 None => agent_doc_tmux_io::configured_tmux().pane_session(pane).ok(),
             }
         });
-    let _route_layout_lease = match &other_lane {
+    let mut route_layout_lease = match &other_lane {
         Some(other) => {
             agent_doc_ops_log_io::log_op(
                 &canonical,
@@ -11784,7 +11786,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
                         .as_secs(),
                 ),
             );
-            route_layout_lease
+            Some(route_layout_lease)
         }
     };
     let harness_ready_secs = route_deadline
@@ -11807,26 +11809,52 @@ fn handle_editor_route_rpc_with_layout_delegate(
 
     let _attempt_guard =
         crate::route_snapshot::EditorRouteAttemptIdGuard::set(payload.attempt_id.as_deref());
-    let result = runtime_effects()?.run_editor_route(ControllerEditorRouteInvocation {
-        file: canonical.clone(),
-        relative_path: relative_path.clone(),
-        pane: None,
-        layout_args,
-        dispatch_only: payload.dispatch_only.unwrap_or(true),
-        plain_trigger: payload.plain_trigger.unwrap_or(true),
-        // GH #110: the remainder of the shared budget, never a fresh one.
-        wait_for_ready_secs: Some(harness_ready_secs),
-        force_disk: payload.force_disk.unwrap_or(false),
-        prune_before_lookup: true,
-        background_existing_pane_only: false,
-        // `#routelaterescue`: the layout above already converged; from here the
-        // layout plane is the only topology writer for this route.
-        layout_owned_by_controller: true,
-        // P6: a pane this route starts lives in the requester's lane session.
-        navigation_client_id: (!route_lane.is_shared())
-            .then(|| payload.client_id.clone())
-            .flatten(),
-    })?;
+    let route_result = runtime_effects().and_then(|effects| {
+        effects.run_editor_route(ControllerEditorRouteInvocation {
+            file: canonical.clone(),
+            relative_path: relative_path.clone(),
+            pane: None,
+            layout_args,
+            dispatch_only: payload.dispatch_only.unwrap_or(true),
+            plain_trigger: payload.plain_trigger.unwrap_or(true),
+            // GH #110: the remainder of the shared budget, never a fresh one.
+            wait_for_ready_secs: Some(harness_ready_secs),
+            force_disk: payload.force_disk.unwrap_or(false),
+            prune_before_lookup: true,
+            background_existing_pane_only: false,
+            // `#routelaterescue`: the layout above already converged; from here the
+            // layout plane is the only topology writer for this route.
+            layout_owned_by_controller: true,
+            // P6: a pane this route starts lives in the requester's lane session.
+            navigation_client_id: (!route_lane.is_shared())
+                .then(|| payload.client_id.clone())
+                .flatten(),
+        })
+    });
+    if let Some(lease) = route_layout_lease.take() {
+        match lease {
+            EditorRouteLayoutLease::Local(lease) => drop(lease),
+            EditorRouteLayoutLease::Delegated(lease) => {
+                if let Err(error) = release_layout(&lease.owner_root, &lease.release) {
+                    // Dispatch has already settled (or failed), so a release
+                    // transport failure must not turn a successful route into
+                    // a false failure. The owner's bounded lease expiry is the
+                    // reactive fallback for this case.
+                    agent_doc_ops_log_io::log_op(
+                        &canonical,
+                        &format!(
+                            "controller_editor_route_layout_release_failed file={} owner_root={} generation={} error={}",
+                            canonical.display(),
+                            lease.owner_root.display(),
+                            lease.release.generation,
+                            format!("{error:#}").replace('\n', " "),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    let result = route_result?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -11928,8 +11956,29 @@ struct EditorRouteLayoutDelegationReceipt {
     receipt: Option<ControllerTmuxLayoutSyncReceipt>,
     #[serde(default)]
     observations: u32,
+    /// Generation of the lease retained by the main-window owner until the
+    /// delegating controller reports that route dispatch settled.
+    #[serde(default)]
+    lease_generation: Option<u64>,
     #[serde(default)]
     refusal: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct EditorRouteLayoutRelease {
+    generation: u64,
+    routed_document: String,
+    delegated_by: String,
+}
+
+struct DelegatedEditorRouteLayoutLease {
+    owner_root: PathBuf,
+    release: EditorRouteLayoutRelease,
+}
+
+enum EditorRouteLayoutLease<'a> {
+    Local(PaneLayoutRouteLeaseGuard<'a>),
+    Delegated(DelegatedEditorRouteLayoutLease),
 }
 
 /// Route an editor route's layout to the single arbiter that owns the shared
@@ -11959,7 +12008,7 @@ fn route_editor_layout_with_owner<'a>(
 ) -> Result<(
     ControllerTmuxLayoutSyncReceipt,
     u32,
-    Option<PaneLayoutRouteLeaseGuard<'a>>,
+    EditorRouteLayoutLease<'a>,
 )> {
     let controller_root = bootstrap
         .project_root
@@ -12000,7 +12049,7 @@ fn route_editor_layout_with_owner<'a>(
             route_deadline,
             live_tmux,
         )?;
-        return Ok((receipt, observations, Some(lease)));
+        return Ok((receipt, observations, EditorRouteLayoutLease::Local(lease)));
     };
     let delegation = EditorRouteLayoutDelegation {
         invocation: layout_invocation.clone(),
@@ -12017,6 +12066,7 @@ fn route_editor_layout_with_owner<'a>(
         Ok(EditorRouteLayoutDelegationReceipt {
             receipt: Some(receipt),
             observations,
+            lease_generation: Some(lease_generation),
             refusal: None,
         }) => {
             agent_doc_ops_log_io::log_op(
@@ -12032,12 +12082,27 @@ fn route_editor_layout_with_owner<'a>(
                     observations,
                 ),
             );
-            Ok((receipt, observations, None))
+            Ok((
+                receipt,
+                observations,
+                EditorRouteLayoutLease::Delegated(DelegatedEditorRouteLayoutLease {
+                    owner_root: owner_root.to_path_buf(),
+                    release: EditorRouteLayoutRelease {
+                        generation: lease_generation,
+                        routed_document: routed_document.to_string(),
+                        delegated_by: controller_root.display().to_string(),
+                    },
+                }),
+            ))
         }
         Ok(answer) => {
-            let refusal = answer
-                .refusal
-                .unwrap_or_else(|| "owner returned no layout receipt".to_string());
+            let refusal = answer.refusal.unwrap_or_else(|| {
+                if answer.receipt.is_some() {
+                    "main-window owner did not retain a cross-root route lease".to_string()
+                } else {
+                    "owner returned no layout receipt".to_string()
+                }
+            });
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
@@ -12075,16 +12140,16 @@ fn route_editor_layout_with_owner<'a>(
                 route_deadline,
                 live_tmux,
             )?;
-            Ok((receipt, observations, Some(lease)))
+            Ok((receipt, observations, EditorRouteLayoutLease::Local(lease)))
         }
     }
 }
 
 /// Owner side of [`route_editor_layout_with_owner`]: publish a delegated route
-/// layout on this controller's arbiter. The route lease is released when this
-/// returns: the delegating controller's dispatch runs elsewhere and, marked
-/// `layout_owned_by_controller` (`#routelaterescue`), never raw-joins a stashed
-/// pane back into this window.
+/// layout on this controller's arbiter. The route lease remains on this owner
+/// until the delegating controller reports that dispatch settled. This closes
+/// the interval in which a passive editor publication could stash the routed
+/// pane before the child controller sent input to it.
 fn handle_editor_route_layout_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -12135,14 +12200,35 @@ fn publish_delegated_editor_route_layout(
         route_deadline,
         None,
     ) {
-        Ok((receipt, observations, _lease)) => EditorRouteLayoutDelegationReceipt {
-            receipt: Some(receipt),
-            observations,
-            refusal: None,
-        },
+        Ok((receipt, observations, mut lease)) => {
+            let generation = lease.detach();
+            let graph = runtime
+                .pane_layout_graph_for_lane(&agent_doc_editor_surface::NavigationLane::Shared);
+            // The client's route deadline bounds its readiness wait. Two
+            // seconds matches the RPC transport grace and lets a later passive
+            // publication recover if the client exits before releasing.
+            let expires_at = route_deadline + Duration::from_secs(2);
+            if !graph.expire_route_lease_after(generation, expires_at) {
+                return EditorRouteLayoutDelegationReceipt {
+                    receipt: None,
+                    observations: 0,
+                    lease_generation: None,
+                    refusal: Some(
+                        "route lease disappeared before delegation completed".to_string(),
+                    ),
+                };
+            }
+            EditorRouteLayoutDelegationReceipt {
+                receipt: Some(receipt),
+                observations,
+                lease_generation: Some(generation),
+                refusal: None,
+            }
+        }
         Err(error) => EditorRouteLayoutDelegationReceipt {
             receipt: None,
             observations: 0,
+            lease_generation: None,
             refusal: Some(format!("{error:#}")),
         },
     }
@@ -12185,6 +12271,75 @@ fn delegate_editor_route_layout(
             },
             timeout,
         )
+    }
+}
+
+fn handle_editor_route_layout_release_rpc(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<()> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let release: EditorRouteLayoutRelease = serde_json::from_str(&payload_json)
+        .context("failed to parse delegated editor route layout release")?;
+    release_delegated_editor_route_layout_locally(bootstrap, runtime, &release);
+    Ok(())
+}
+
+fn release_delegated_editor_route_layout_locally(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    release: &EditorRouteLayoutRelease,
+) {
+    let graph =
+        runtime.pane_layout_graph_for_lane(&agent_doc_editor_surface::NavigationLane::Shared);
+    if let Some(released) = graph.release_route_lease(release.generation) {
+        log_pane_layout_narrowed(&bootstrap.project_root, &released);
+    }
+    log_pane_layout_supersessions(&bootstrap.project_root, &graph.drain_supersessions());
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_route_layout_released file={} delegated_by={} generation={}",
+            release.routed_document, release.delegated_by, release.generation,
+        ),
+    );
+}
+
+fn release_delegated_editor_route_layout(
+    owner_root: &Path,
+    release: &EditorRouteLayoutRelease,
+) -> Result<()> {
+    let diagnostic_payload = serde_json::to_string(release)
+        .context("serialize delegated editor route layout release")?;
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let _ = (owner_root, diagnostic_payload);
+        anyhow::bail!("cross-root layout release has no transport under test-support")
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let _: () = request_existing_controller_with_timeout(
+            owner_root,
+            ControllerRequest {
+                command: "editor_route_layout_release".to_string(),
+                file: Some(PathBuf::from(&release.routed_document)),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(diagnostic_payload),
+                sequence: None,
+            },
+            CONTROLLER_RPC_TIMEOUT,
+        )?;
+        Ok(())
     }
 }
 
@@ -20423,6 +20578,9 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "editor_route_layout_release" => controller_envelope(
+            handle_editor_route_layout_release_rpc(&bootstrap_snapshot, runtime.as_ref(), request),
+        ),
         "queue_control" => controller_envelope(handle_queue_control(&bootstrap_snapshot, request)),
         "admin_control" => controller_envelope(handle_admin_control(
             &bootstrap_snapshot,
@@ -34514,6 +34672,7 @@ pub(crate) fn handle_sync_tmux_layout(
             lane: lane.clone(),
             project_root: bootstrap.project_root.clone(),
             generation: desired.generation,
+            release_on_drop: true,
         });
     if !lane.is_shared() {
         return await_lane_sync_tmux_layout_projection(
@@ -34639,6 +34798,7 @@ fn handle_editor_route_layout<'a>(
         lane: lane.clone(),
         project_root: bootstrap.project_root.clone(),
         generation: desired.generation,
+        release_on_drop: true,
     };
     let published = EditorRoutePublishedLayout {
         lane: lane.clone(),
@@ -34676,10 +34836,21 @@ struct PaneLayoutRouteLeaseGuard<'a> {
     lane: agent_doc_editor_surface::NavigationLane,
     project_root: PathBuf,
     generation: u64,
+    release_on_drop: bool,
+}
+
+impl PaneLayoutRouteLeaseGuard<'_> {
+    fn detach(&mut self) -> u64 {
+        self.release_on_drop = false;
+        self.generation
+    }
 }
 
 impl Drop for PaneLayoutRouteLeaseGuard<'_> {
     fn drop(&mut self) {
+        if !self.release_on_drop {
+            return;
+        }
         let graph = self.runtime.pane_layout_graph_for_lane(&self.lane);
         // The passive publication a route lease deferred lands here, outside
         // `publish_pane_layout_desired_invocation`, so it reports its own
@@ -45313,6 +45484,24 @@ mod tests {
                 delegation.clone(),
             ))
         }
+
+        fn release_on_outer(
+            &self,
+            owner_root: &Path,
+            release: &EditorRouteLayoutRelease,
+        ) -> Result<()> {
+            assert_eq!(
+                owner_root,
+                self.outer_bootstrap.project_root.canonicalize().unwrap(),
+                "the enclosing root owns the shared main window"
+            );
+            release_delegated_editor_route_layout_locally(
+                &self.outer_bootstrap,
+                self.outer_runtime.as_ref(),
+                release,
+            );
+            Ok(())
+        }
     }
 
     /// `#crossrootcolumnflip` regression: a nested controller's editor route
@@ -45320,8 +45509,10 @@ mod tests {
     /// generation into the shared window (haiven-dev gen 21) while the
     /// superproject controller's editor-surface churn published gens 32-36;
     /// whichever projected last won. The nested controller must now publish
-    /// nothing and the one owner must order the route beside its own
-    /// editor-surface publications, so the later editor observation wins.
+    /// nothing and the one owner must retain the route through dispatch. A
+    /// passive editor publication that arrives after convergence but before
+    /// dispatch must be deferred, or it can stash the target and send input
+    /// into an off-screen pane. The deferred publication wins after release.
     #[test]
     fn cross_root_editor_route_publishes_layout_on_the_main_window_owner_only() {
         let fx = CrossRootLayoutFixture::new();
@@ -45331,7 +45522,58 @@ mod tests {
             fx.inner_runtime.as_ref(),
             request,
             None,
-            |owner, delegation| fx.deliver_to_outer(owner, delegation),
+            |owner, delegation| {
+                let receipt = fx.deliver_to_outer(owner, delegation)?;
+                let routed = fx.outer_runtime.pane_layout_desired().unwrap();
+                assert_eq!(
+                    routed.invocation.columns,
+                    vec![fx.bugs.clone(), fx.contracts.clone()]
+                );
+                assert_eq!(
+                    routed.invocation.focus.as_deref(),
+                    Some(fx.contracts.as_str())
+                );
+                assert_eq!(routed.provenance.publisher, PaneLayoutPublisher::Route);
+
+                // Reproduce the live failure: after the owner converged the
+                // route, IDE focus churn published [bugs, api] before the
+                // nested controller dispatched. The remote lease must retain
+                // the routed document during this interval.
+                let (surface, _) = publish_pane_layout_desired_invocation(
+                    &fx.outer_bootstrap,
+                    fx.outer_runtime.as_ref(),
+                    automatic_editor_surface_sync_invocation(
+                        &[
+                            SurfaceColumn {
+                                files: vec![fx.bugs.clone()],
+                            },
+                            SurfaceColumn {
+                                files: vec![fx.api.clone()],
+                            },
+                        ],
+                        &fx.api,
+                        false,
+                    ),
+                    None,
+                    PaneLayoutPublication::CoalesceIdentical,
+                    PaneLayoutPublisher::EditorSurface,
+                )?;
+                assert_eq!(
+                    surface.generation, routed.generation,
+                    "passive focus churn is deferred until route settlement"
+                );
+                assert_eq!(
+                    fx.outer_runtime
+                        .pane_layout_desired()
+                        .unwrap()
+                        .invocation
+                        .focus
+                        .as_deref(),
+                    Some(fx.contracts.as_str())
+                );
+                Ok(receipt)
+            },
+            |owner, release| fx.release_on_outer(owner, release),
         )
         .unwrap();
         assert_eq!(
@@ -45342,40 +45584,8 @@ mod tests {
             fx.inner_runtime.pane_layout_desired().is_none(),
             "the nested controller must not mint a competing layout generation"
         );
-        let routed = fx.outer_runtime.pane_layout_desired().unwrap();
-        assert_eq!(
-            routed.invocation.columns,
-            vec![fx.bugs.clone(), fx.contracts.clone()]
-        );
-        assert_eq!(
-            routed.invocation.focus.as_deref(),
-            Some(fx.contracts.as_str())
-        );
-        assert_eq!(routed.provenance.publisher, PaneLayoutPublisher::Route);
-
-        // Post-restart editor-surface churn on the owner: the editor's real
-        // visible set is [bugs, api]. It lands in the SAME generation sequence.
-        let (surface, _) = publish_pane_layout_desired_invocation(
-            &fx.outer_bootstrap,
-            fx.outer_runtime.as_ref(),
-            automatic_editor_surface_sync_invocation(
-                &[
-                    SurfaceColumn {
-                        files: vec![fx.bugs.clone()],
-                    },
-                    SurfaceColumn {
-                        files: vec![fx.api.clone()],
-                    },
-                ],
-                &fx.api,
-                false,
-            ),
-            None,
-            PaneLayoutPublication::CoalesceIdentical,
-            PaneLayoutPublisher::EditorSurface,
-        )
-        .unwrap();
-        assert!(surface.generation > routed.generation);
+        // Dispatch settled and the release RPC projected the newest deferred
+        // editor surface immediately afterward.
         let converged = fx.outer_runtime.pane_layout_desired().unwrap();
         assert_eq!(
             converged.invocation.columns,
@@ -45411,6 +45621,7 @@ mod tests {
             request,
             None,
             |owner, _| panic!("the owner must not delegate to {}", owner.display()),
+            |owner, _| panic!("a local route must not release through {}", owner.display()),
         )
         .unwrap();
         assert_eq!(result.exit_code, 0);
@@ -45434,6 +45645,7 @@ mod tests {
             request,
             None,
             |_, _| anyhow::bail!("controller socket not found"),
+            |_, _| panic!("a local fallback must not release remotely"),
         )
         .unwrap();
         assert_eq!(result.exit_code, 0);
@@ -45472,9 +45684,11 @@ mod tests {
                 Ok(EditorRouteLayoutDelegationReceipt {
                     receipt: None,
                     observations: 0,
+                    lease_generation: None,
                     refusal: Some("routed document is not visible".to_string()),
                 })
             },
+            |_, _| panic!("a refused route has no lease to release"),
         )
         .unwrap_err();
         assert!(

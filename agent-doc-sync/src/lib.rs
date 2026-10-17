@@ -148,6 +148,30 @@ pub fn gated_layout_decision(
     }
 }
 
+/// Whether unresolved owner bindings may be realised as a partial layout.
+///
+/// Safe-passive projections are always atomic. Automatic exact-visible
+/// projections are also atomic even though they run with full provisioning:
+/// unlike manual/projection callers, they do not carry explicit authority to
+/// route a newly created pane or repair a legacy associated owner. Reconciling
+/// only the files whose owners were resolved would silently collapse the
+/// editor's declared surface.
+pub fn blocked_owner_layout_decision(
+    mode: AutoStartMode,
+    exact_visible_projection: bool,
+    route_created_panes: bool,
+    blocked_files: usize,
+) -> GatedLayoutDecision {
+    if blocked_files > 0
+        && (matches!(mode, AutoStartMode::SafePassive)
+            || (exact_visible_projection && !route_created_panes))
+    {
+        GatedLayoutDecision::PreserveCurrent
+    } else {
+        GatedLayoutDecision::RealizeRemaining
+    }
+}
+
 /// Already-observed candidates for a windowless tmux layout target.
 ///
 /// The IO adapters resolve pane ids, live sessions, and project configuration;
@@ -1157,6 +1181,36 @@ mod tests {
             );
             assert_eq!(
                 gated_layout_decision(mode, 0, 0),
+                GatedLayoutDecision::RealizeRemaining,
+            );
+        }
+    }
+
+    #[test]
+    fn blocked_owner_layout_decision_preserves_autonomous_exact_visible_projection() {
+        assert_eq!(
+            blocked_owner_layout_decision(AutoStartMode::Full, true, false, 1),
+            GatedLayoutDecision::PreserveCurrent,
+        );
+        assert_eq!(
+            blocked_owner_layout_decision(AutoStartMode::SafePassive, false, false, 1),
+            GatedLayoutDecision::PreserveCurrent,
+        );
+    }
+
+    #[test]
+    fn blocked_owner_layout_decision_keeps_explicit_repair_and_unblocked_paths() {
+        assert_eq!(
+            blocked_owner_layout_decision(AutoStartMode::Full, true, true, 1),
+            GatedLayoutDecision::RealizeRemaining,
+        );
+        assert_eq!(
+            blocked_owner_layout_decision(AutoStartMode::Full, false, false, 1),
+            GatedLayoutDecision::RealizeRemaining,
+        );
+        for mode in [AutoStartMode::Full, AutoStartMode::SafePassive] {
+            assert_eq!(
+                blocked_owner_layout_decision(mode, true, false, 0),
                 GatedLayoutDecision::RealizeRemaining,
             );
         }

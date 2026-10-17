@@ -1060,10 +1060,14 @@ markdown file, sync must expand that one-column projection from the project
   currently active tmux pane; active-pane inference is only for true same-side
   replacements.
 - Automatic editor plugins that have captured the full visible markdown
-  projection must pass `--exact-visible` with `--no-autostart`. In that mode a
-  single provided `--col` is authoritative and must not expand from remembered
-  layout state, so switching the editor away from a document like
-  `tasks/software/corky.md` cannot reintroduce its stale pane as a sibling.
+  projection must publish it as exact-visible structural intent. The controller
+  may run that intent with full, safe provisioning so missing owners can be
+  staged, but the projection remains atomic: a single provided `--col` is
+  authoritative and must not expand from remembered layout state, and a blocked
+  legacy owner must preserve the current tmux layout rather than collapsing the
+  window to the resolved subset. Switching the editor away from a document like
+  `tasks/software/corky.md` therefore cannot reintroduce its stale pane as a
+  sibling.
 - A focus-only editor projection never derives columns. When its exact effect
   receipt says the selected document has no usable visible owner—because the
   pane is stashed, dead, reaped, or its actor/registry binding is missing or no
@@ -1075,7 +1079,16 @@ markdown file, sync must expand that one-column projection from the project
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Automatic stash and `resync --fix` orphan-agent cleanup must preserve live agent processes even when registry or supervisor observations are absent during a handoff. Missing ownership metadata is not exit proof. Orphan-agent reaping requires a retained-dead pane; existing dead-pane and idle-shell cleanup remains available.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
-- If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout. This includes the live mixed-root replay shape where `tasks/agent-doc/agent-doc-bugs2.md` shares the visible `agent-doc` window with `src/session-share/tasks/claudescore-3.md`; a blocked sibling file must not let the remaining visible pane set collapse into a new authoritative layout.
+- If any visible file stays blocked under passive `--no-autostart`, or under an
+  autonomous exact-visible projection that lacks explicit repair/routing
+  authority, sync must preserve the current visible tmux layout and warn instead
+  of reconciling the remaining foreign pane set into a new authoritative layout.
+  Explicit manual/projection full sync retains its repair behavior and may
+  realize the resolved remainder. This includes the live mixed-root replay shape
+  where `tasks/agent-doc/agent-doc-bugs2.md` shares the visible `agent-doc`
+  window with `src/session-share/tasks/claudescore-3.md`; a blocked sibling file
+  must not let the remaining visible pane set collapse into a new authoritative
+  layout.
 - A preserve-layout return that successfully reselects the requested already-visible focus pane must print `[sync] safe_passive_layout_preserved_reselected_focus ...` to command output, not only to `/tmp/agent-doc-sync.log`, so editor plugins can mark that focus handoff as applied.
 
 ### Sync-specific invariants

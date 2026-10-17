@@ -18,6 +18,7 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish any lazily packages that have pending work'
+queue: go
 ---
 
 ## Status
@@ -496,6 +497,7 @@ It was built from a temporary index and moved with a compare-and-swap. Another s
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
+- #todo
 <!-- /agent:queue -->
 
 ## Backlog

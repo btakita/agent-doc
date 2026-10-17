@@ -271,13 +271,24 @@ choices:
 - Specify different versions: Operator supplies three unused semver versions; coordinator prepares/provides those commits; operator completes npm authentication/2FA; this worker resumes publication.
 - Cancel publishing: Leave all three fixes unpublished and keep the brookebrodack-dev type-check steps blocked.
 ```
+
+### Re: #fhmig — gpt-5 · 2026-10-17
+
+No operator choice has been supplied, so I did not mutate either session document or claim the migration complete. I gated `#fhmig` on the existing operator handoff.
+
+The former target owner is gone, but the source is still editor-attached. A safe retry also requires reopening archived `#p0rw` and `#k0ye` before rerunning the six-ID extract; the verified four-item preview is operation `81cdbfc60caf`.
+
+Choose one:
+
+- Detach and retry: close this source tab and keep `tasks/software/freehold.md` closed; I will reopen the two archived items, preview all six IDs, verify it, and apply the extraction.
+- Defer migration: keep the source attached and leave the gated item for a later cycle.
 <!-- agent:boundary:5d323eb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue subagents priority go -->
-- do [#fhmig]
+- ~~do [#fhmig]~~
 - do [#50fc]
 - do [#j0ee]
 - do [#2amm]
@@ -293,7 +304,6 @@ choices:
 
 <!-- agent:backlog priority queue -->
 - [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev. BLOCKED: the current local manifest versions are already published (ui--any 0.1.0, domain--server 0.1.2, domain--server--blog 0.1.1 while registry latest is 0.1.4), so publishable version bumps are required in addition to npm authentication/2FA. Suggested patch releases are 0.1.1, 0.1.3, and 0.1.5; after publication, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
-- [ ] [#fhmig] Migrate the freehold-scoped items (#sbv9, #nd8n, #dj8c, #p0rw, #k0ye, #50fc) out of tasks/brookebrodack-dev.md into tasks/software/freehold.md, whose agent:backlog is currently EMPTY. The dispatch repo was renamed + transferred to freehold-hub/freehold (submodule src/freehold); this document should keep only brookebrodack-dev site/guestbook scope. Deferred this cycle: tasks/software/freehold.md is foreign-owned by pane %27
 - [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #k0ye. Operator input required
 - [ ] [#j0ee] Pick the moderation model empirically once the key exists: `OPENAI_API_KEY=... bun scripts/guestbook-model-bench.ts gpt-4o-mini gpt-5-nano gpt-5.4-nano gpt-5.4-mini gpt-5.6-luna` and take the cheapest/fastest with UNSAFE=0, then set OPENAI_MODEL on both surfaces
 - [ ] [#2amm] `hermes -z` is broken in hermes-agent 0.18.2 — every one-shot run dies with an httpx ResponseNotRead inside the Gemini provider, so the local primary path always falls through. Try `hermes update` or file upstream
@@ -312,6 +322,7 @@ choices:
 ## Review
 
 <!-- agent:review -->
+- [/operator] [#fhmig] Migrate the freehold-scoped items (#sbv9, #nd8n, #dj8c, #p0rw, #k0ye, #50fc) into tasks/software/freehold.md. GATED on operator choice: the former target owner is gone, but the source document remains editor-attached; #p0rw and #k0ye must be reopened from done before rerunning the six-ID extract. The verified four-item preview operation was 81cdbfc60caf
 - [/] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
 - [/] [#oidcnpm] Configure the npm Trusted Publisher on the rebuildjs package at npmjs.com (org rebuildjs, repo rebuildjs, workflow release.yml). Workflow is committed (bfe2707); this browser step needs 2FA ONCE and then no release needs it again. npm retires 2FA-bypass tokens for account ops early Aug 2026 and for direct publishing ~Jan 2027. Repeat for rhonojs/relysjs/ctx-core once their release workflows land; lazily-js's E404 publish failure was this same missing step. KEPT OPEN: operator-only — requires an authenticated npmjs.com browser session with 2FA
 - [/] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests

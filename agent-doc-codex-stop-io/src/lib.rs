@@ -189,6 +189,19 @@ enum DurableOwnerProgressDecision {
     StillPending,
 }
 
+/// Result of the Stop hook's single opportunistic captured-finalize attempt.
+///
+/// `NeedsOperator` must remain distinct from an ordinary pending retry. Once
+/// the exact keyed owner reaches that verdict, telling the agent to keep
+/// waiting on the owner is stale and hides the only transition that can
+/// unblock the closeout.
+#[derive(Debug, PartialEq, Eq)]
+enum CapturedFinalizeHookResume {
+    Closed,
+    Pending,
+    NeedsOperator { reason: String },
+}
+
 fn durable_owner_progress_decision(
     outcome: agent_doc_closeout_runtime_io::CloseoutCycleWaitOutcome,
 ) -> DurableOwnerProgressDecision {
@@ -1393,8 +1406,16 @@ fn apply_bound_stop(
             // existing keyed capture here as the version-independent liveness
             // boundary; strict repair preserves editor authority and never
             // recaptures or elects force-disk.
-            if try_resume_captured_finalize_in_hook(file) {
-                return apply_stop(input);
+            match try_resume_captured_finalize_in_hook(file) {
+                CapturedFinalizeHookResume::Closed => return apply_stop(input),
+                CapturedFinalizeHookResume::NeedsOperator { reason } => {
+                    return Ok(captured_finalize_needs_operator_response(
+                        file,
+                        &reason,
+                        input.stop_hook_active,
+                    ));
+                }
+                CapturedFinalizeHookResume::Pending => {}
             }
             if binary_owned_closeout_pending {
                 agent_doc_ops_log_io::log_op(file, "codex_stop_binary_owned_closeout_pending");
@@ -1569,13 +1590,13 @@ fn apply_bound_stop(
     }
 }
 
-fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
+fn try_resume_captured_finalize_in_hook(file: &Path) -> CapturedFinalizeHookResume {
     invalidate_stop_document_cache();
     let Some(key) = agent_doc_repair_command_io::captured_finalize_resume_key(file)
         .ok()
         .flatten()
     else {
-        return false;
+        return CapturedFinalizeHookResume::Pending;
     };
     // Stop is a status gate, not the retry owner. The supervisor reacts to the
     // retained state edge after this single opportunistic attempt.
@@ -1590,7 +1611,7 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                         key.cycle_id, key.capture_id, key.response_sha256, attempt,
                     ),
                 );
-                return true;
+                return CapturedFinalizeHookResume::Closed;
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
                 agent_doc_ops_log_io::log_op(
@@ -1600,14 +1621,19 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                         key.cycle_id, key.capture_id, key.response_sha256, attempt,
                     ),
                 );
-                return true;
+                return CapturedFinalizeHookResume::Closed;
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
-                return agent_doc_session_check_io::inspect(
+                return if agent_doc_session_check_io::inspect(
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )
-                .is_ok_and(|status| !status.is_failure());
+                .is_ok_and(|status| !status.is_failure())
+                {
+                    CapturedFinalizeHookResume::Closed
+                } else {
+                    CapturedFinalizeHookResume::Pending
+                };
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::WaitingForSignal {
                 reason,
@@ -1623,7 +1649,7 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                         reason.len(),
                     ),
                 );
-                return false;
+                return CapturedFinalizeHookResume::Pending;
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryAt {
                 reason,
@@ -1641,7 +1667,7 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                         reason.len(),
                     ),
                 );
-                return false;
+                return CapturedFinalizeHookResume::Pending;
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect {
                 reason,
@@ -1682,7 +1708,9 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                     ),
                 );
                 eprintln!("[agent-doc] {reason}");
-                return false;
+                return CapturedFinalizeHookResume::NeedsOperator {
+                    reason: format!("{reason} Recovery: {recovery}."),
+                };
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator {
                 reason,
@@ -1697,11 +1725,11 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                         reason.len(),
                     ),
                 );
-                return false;
+                return CapturedFinalizeHookResume::NeedsOperator { reason };
             }
         }
     }
-    false
+    CapturedFinalizeHookResume::Pending
 }
 
 fn is_binary_owned_closeout_interruption(reason: &str) -> bool {
@@ -2880,6 +2908,30 @@ fn durable_owner_repair_deferral_response(
     }
 }
 
+/// Surface the exact terminal verdict reached by a retained closeout owner.
+///
+/// This mirrors the recursive-Stop behavior of
+/// [`retained_closeout_needs_operator`]: the first Stop reports the blocker and
+/// the recursive Stop lets that report through. Crucially, it does not render
+/// the stale owner-contention note that preceded the terminal verdict.
+fn captured_finalize_needs_operator_response(
+    file: &Path,
+    reason: &str,
+    stop_hook_active: bool,
+) -> StopResponse {
+    if stop_hook_active {
+        return StopResponse::Continue { continue_: true };
+    }
+    StopResponse::Block {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook's exact retained closeout for {} reached `needs_operator` after the owner state edge. {} This is an operator blocker, not an in-progress owner wait. Report this exact blocker and its recovery to the operator; do not restart, recapture, force disk, or claim that waiting will resolve it.",
+            file.display(),
+            reason.replace('\n', " "),
+        ),
+    }
+}
+
 /// Follow the exact keyed owner's controller projection before surfacing a
 /// retained-closeout blocker.
 ///
@@ -2966,15 +3018,23 @@ fn await_durable_owner_repair_deferral(
             apply_stop(input)
         }
         DurableOwnerProgressDecision::ResumeThenReinspect => {
-            if try_resume_captured_finalize_in_hook(file) {
-                invalidate_stop_document_cache();
-                apply_stop(input)
-            } else {
-                Ok(durable_owner_repair_deferral_response(
+            match try_resume_captured_finalize_in_hook(file) {
+                CapturedFinalizeHookResume::Closed => {
+                    invalidate_stop_document_cache();
+                    apply_stop(input)
+                }
+                CapturedFinalizeHookResume::NeedsOperator { reason } => {
+                    Ok(captured_finalize_needs_operator_response(
+                        file,
+                        &reason,
+                        input.stop_hook_active,
+                    ))
+                }
+                CapturedFinalizeHookResume::Pending => Ok(durable_owner_repair_deferral_response(
                     file,
                     note,
                     input.stop_hook_active,
-                ))
+                )),
             }
         }
         DurableOwnerProgressDecision::StillPending => Ok(durable_owner_repair_deferral_response(
@@ -4972,6 +5032,33 @@ Done.\n\
                 DurableOwnerProgressDecision::StillPending
             ),
             "a terminal controller edge must be re-inspected instead of rendered as Blocked by hook",
+        );
+    }
+
+    /// Regression for `agent-doc-bugs.md` cycle `cycle-1792271879541`:
+    /// owner release woke the Stop hook, the exact resume reached a pre-write
+    /// `needs_operator` verdict, and the boolean resume boundary discarded that
+    /// verdict and rendered the superseded owner-contention note instead.
+    #[test]
+    fn durable_owner_resume_surfaces_needs_operator_instead_of_stale_wait() {
+        let file = Path::new("/p/agent-doc-bugs.md");
+        let reason = "[finalize] pre-write gate: active prompt requested backlog capture but no backlog mutations were recorded this cycle";
+
+        let response = captured_finalize_needs_operator_response(file, reason, false);
+        let rendered = serde_json::to_string(&response).unwrap();
+        assert!(rendered.contains("reached `needs_operator`"), "{rendered}");
+        assert!(rendered.contains(reason), "{rendered}");
+        assert!(
+            rendered.contains("not an in-progress owner wait"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("Wait for the existing controller state edge"));
+        assert!(!rendered.contains("durable keyed retry"));
+
+        assert_eq!(
+            captured_finalize_needs_operator_response(file, reason, true),
+            StopResponse::Continue { continue_: true },
+            "the recursive Stop must let the exact operator-blocker report through",
         );
     }
 

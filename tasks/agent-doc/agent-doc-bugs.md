@@ -240,7 +240,7 @@ Changed paths include the agent-doc Rust controller/session/queue paths, JetBrai
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.~~
+- ~~The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.~~ — auto-struck: answered this cycle (#ftstrike)
 - By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.
 - By default, `agent:queue` should have `priority subagents`.
 - By default, `agent:todo` should have `priority`.
@@ -254,15 +254,15 @@ Changed paths include the agent-doc Rust controller/session/queue paths, JetBrai
 - #gh-fix https://github.com/btakita/agent-doc/issues/287
 - #gh-fix https://github.com/btakita/agent-doc/issues/288
 - #gh-fix https://github.com/btakita/agent-doc/issues/289
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/290
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/291
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/292
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/290~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/291~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/292~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#extractliveapply]
 - do [#extractcompactselection]
 - 🚧 Run Agent Doc on sdk-dev.md: agent-doc command failed (exit 1):
 - Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session
-- 🚧 Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}
-- 🚧 The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)
+- ~~Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Todo

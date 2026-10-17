@@ -825,7 +825,8 @@ internal object CpRouteClient {
         columnOrder: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
-        val request = paneLayoutDesiredStatePublishRequest(
+        val commandId = "cmd-" + java.util.UUID.randomUUID().toString()
+        val request = syncTmuxLayoutCommandSubmitRequest(
             projectRoot = projectRoot,
             columnsJson = columnsJson,
             window = window,
@@ -834,37 +835,44 @@ internal object CpRouteClient {
             exactVisible = exactVisible,
             callerKind = callerKind,
             columnOrder = columnOrder,
+            clientId = navigationClientId,
+            commandId = commandId,
+            controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
         )
         return try {
-            val data = sendOperatorRequestDataToSocket(socket, request)
-            val publishedPlaneVersion = jsonLongFieldOrNull(data, "plane_version")
-            val accepted = if (
-                jsonBooleanFieldOrNull(data, "accepted") == true &&
-                publishedPlaneVersion != null &&
-                publishedPlaneVersion > 0
-            ) {
-                CpEditorRouteResult(
-                    exitCode = 0,
-                    output = "pane layout projection published " +
-                        "plane_version=$publishedPlaneVersion",
-                )
-            } else {
-                CpEditorRouteResult(
-                    exitCode = 1,
-                    output = jsonStringFieldOrNull(data, "reason")
-                        ?: "pane layout projection was not accepted with a valid plane version",
-                )
-            }
-            // Publishing the latest desired snapshot is the editor-side completion
-            // boundary. The controller owns retained, reactive reconciliation from
-            // here; waiting for one exact version couples the action to an obsolete
-            // snapshot whenever a newer editor observation supersedes it.
-            accepted
+            replayIdempotentControllerCommandOnce(
+                operation = {
+                    val accepted = sendAcceptedCommandSubmitToSocket(
+                        socket,
+                        request,
+                        commandId,
+                        EditorCommandName.SyncTmuxLayout.token,
+                    )
+                    if (accepted.exitCode != 0) {
+                        accepted
+                    } else {
+                        awaitCommandSubmitTerminal(
+                            socket = socket,
+                            filePath = focus ?: projectRoot,
+                            commandId = commandId,
+                            timeoutMs = SYNC_TMUX_LAYOUT_COMMAND_TIMEOUT_MS,
+                            commandName = EditorCommandName.SyncTmuxLayout.token,
+                        )
+                    }
+                },
+                waitForReplacement = { waitForControllerReplacement(projectRoot) },
+                onReplay = { drop ->
+                    log.warn(
+                        "[sync] controller handoff dropped sync_tmux_layout command_id=$commandId; " +
+                            "replaying the same idempotent request once after replacement readiness: ${drop.message}",
+                    )
+                },
+            )
         } catch (e: Exception) {
-            log.warn("[sync] pane-layout state projection publish failed via ${socket.path}: ${e.message}")
+            log.warn("[sync] command-plane sync_tmux_layout failed via ${socket.path}: ${e.message}")
             CpEditorRouteResult(
                 exitCode = 1,
-                output = "pane-layout state projection publish failed via ${socket.path}: ${e.message}",
+                output = "command-plane sync_tmux_layout failed via ${socket.path}: ${e.message}",
             )
         }
     }
@@ -1207,6 +1215,8 @@ internal fun editorCommandAwaitRequest(
         exactVisible: Boolean,
         commandId: String,
         callerKind: String = "manual",
+        columnOrder: String? = null,
+        clientId: String? = null,
         controllerCommand: String = "editor_command_submit",
     ): JsonObject {
         val payload = JsonObject()
@@ -1217,6 +1227,8 @@ internal fun editorCommandAwaitRequest(
         payload.addProperty("no_autostart", noAutostart)
         payload.addProperty("exact_visible", exactVisible)
         payload.addProperty("caller_kind", callerKind)
+        columnOrder?.let { payload.addProperty("column_order", it) }
+        clientId?.let { payload.addProperty("client_id", it) }
         return commandSubmitRequest(
             filePath = focus ?: projectRoot,
             name = EditorCommandName.SyncTmuxLayout.token,
@@ -1323,7 +1335,11 @@ internal fun resolveCommandSubmitData(data: JsonObject, commandId: String): CpEd
 }
 
 /** Return a terminal command result, or null while the command is still in flight. */
-internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: String): CpEditorRouteResult? {
+internal fun resolveCommandSubmitTerminalData(
+    data: JsonObject,
+    commandId: String,
+    commandName: String = EditorCommandName.EditorRoute.token,
+): CpEditorRouteResult? {
     val output = data.get("output")?.asString ?: ""
     val commands = data.getAsJsonObject("projection")?.getAsJsonArray("commands")
     val entry = commands?.firstOrNull {
@@ -1339,7 +1355,7 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
             return CpEditorRouteResult(
                 1,
                 output.ifEmpty {
-                    "editor_route ${status?.token ?: CommandProjectionStatus.Rejected.token}: ${reason ?: ""}"
+                    "$commandName ${status?.token ?: CommandProjectionStatus.Rejected.token}: ${reason ?: ""}"
                 },
             )
         }
@@ -1400,6 +1416,7 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
 /// that into a fast retry through the `#rebootselfheal` path that already exists.
 private const val COMMAND_SUBMIT_ACCEPT_TIMEOUT_MS = 10_000L
 private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
+private const val SYNC_TMUX_LAYOUT_COMMAND_TIMEOUT_MS = 35_000L
 private const val MIN_COMMAND_AWAIT_TIMEOUT_MS = 1L
 private const val TURN_AUTHORITY_STREAM_TIMEOUT_MS = 120_000L
 private const val TURN_AUTHORITY_RECONNECT_MIN_MS = 250L
@@ -1654,7 +1671,7 @@ private fun awaitCommandSubmitTerminal(
             timeoutMs + COMMAND_COMPLETION_GRACE_MS
         },
     )
-    return resolveCommandSubmitTerminalData(data, commandId)
+    return resolveCommandSubmitTerminalData(data, commandId, commandName)
         ?: CpEditorRouteResult(
             1,
             "$commandName await returned a non-terminal projection",

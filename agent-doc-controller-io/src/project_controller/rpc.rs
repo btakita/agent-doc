@@ -33983,7 +33983,7 @@ fn publish_pane_layout_desired(
         runtime.editor_surface_graph.navigation_mode(),
         client_id.as_deref(),
     );
-    let publication = pane_layout_publication_for_invocation(&invocation);
+    let publication = pane_layout_command_publication_for_invocation(&invocation);
     if lane.is_shared() {
         let (desired, invocation) = publish_pane_layout_desired_invocation(
             bootstrap,
@@ -34504,6 +34504,17 @@ pub(crate) fn handle_sync_tmux_layout(
     request: ControllerRequest,
 ) -> Result<ControllerTmuxLayoutSyncReceipt> {
     let (lane, desired, invocation) = publish_pane_layout_desired(bootstrap, runtime, request)?;
+    // `#manualsynclayoutlease`: the explicit command is the authority that may
+    // create a missing pane. Keep its generation current until its terminal
+    // projection receipt is known; an identical passive editor snapshot must
+    // not replace it with `no_autostart=true` between publication and effect.
+    let _lease =
+        pane_layout_invocation_awaits_projection(&invocation).then(|| PaneLayoutRouteLeaseGuard {
+            runtime,
+            lane: lane.clone(),
+            project_root: bootstrap.project_root.clone(),
+            generation: desired.generation,
+        });
     if !lane.is_shared() {
         return await_lane_sync_tmux_layout_projection(
             bootstrap,
@@ -34901,6 +34912,19 @@ fn pane_layout_publication_for_invocation(
     }
 }
 
+/// Explicit command ingress additionally holds a generation lease until the
+/// awaited projection is terminal. State-plane publications remain ordinary
+/// fresh facts because they have no command lifetime in which to hold a lease.
+fn pane_layout_command_publication_for_invocation(
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+) -> PaneLayoutPublication {
+    if pane_layout_invocation_awaits_projection(invocation) {
+        PaneLayoutPublication::FreshCommandIntent
+    } else {
+        pane_layout_publication_for_invocation(invocation)
+    }
+}
+
 /// A generation-specific layout command was replaced before it converged, or an
 /// editor route's semantic wait observed a newer layout that no longer contains
 /// the routed document.
@@ -35006,6 +35030,14 @@ mod pane_layout_projection_dispatch_tests {
         );
         assert_eq!(
             pane_layout_publication_for_invocation(&invocation("manual", true)),
+            PaneLayoutPublication::CoalesceIdentical,
+        );
+        assert_eq!(
+            pane_layout_command_publication_for_invocation(&invocation("manual", false)),
+            PaneLayoutPublication::FreshCommandIntent,
+        );
+        assert_eq!(
+            pane_layout_command_publication_for_invocation(&invocation("automatic", true)),
             PaneLayoutPublication::CoalesceIdentical,
         );
     }

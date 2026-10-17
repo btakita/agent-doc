@@ -1660,6 +1660,9 @@ impl ControllerMainLayoutEligibilityGraph {
 enum PaneLayoutPublication {
     CoalesceIdentical,
     FreshIntent,
+    /// A foreground command that must finish projecting before a passive
+    /// editor observation may replace it.
+    FreshCommandIntent,
     FreshRouteIntent,
 }
 
@@ -1672,6 +1675,7 @@ struct PaneLayoutPublicationState {
 struct PaneLayoutRouteLease {
     generation: u64,
     document: String,
+    defer_all_passive: bool,
 }
 
 struct PendingPaneLayoutPublication {
@@ -1917,7 +1921,9 @@ impl ControllerPaneLayoutGraph {
             if publication == PaneLayoutPublication::CoalesceIdentical
                 && invocation.caller_kind == "automatic"
             {
-                if !invocation_columns_contain_document(&invocation, &active_route.document) {
+                if active_route.defer_all_passive
+                    || !invocation_columns_contain_document(&invocation, &active_route.document)
+                {
                     let incoming = PendingPaneLayoutPublication {
                         invocation,
                         source_plane_version,
@@ -1940,7 +1946,10 @@ impl ControllerPaneLayoutGraph {
                 // A newer passive state that still covers the route is safe to
                 // project immediately and replaces any older deferred state.
                 publication_state.pending_passive = None;
-            } else if publication != PaneLayoutPublication::FreshRouteIntent {
+            } else if !matches!(
+                publication,
+                PaneLayoutPublication::FreshRouteIntent | PaneLayoutPublication::FreshCommandIntent
+            ) {
                 // A newer foreground command owns supersession. Retire this
                 // route's lease and do not let an older buffered editor state
                 // overwrite that explicit intent when the old guard drops.
@@ -1949,13 +1958,22 @@ impl ControllerPaneLayoutGraph {
             }
         }
         let desired = self.publish_desired(invocation, source_plane_version, publication, claim);
-        if publication == PaneLayoutPublication::FreshRouteIntent
-            && desired.provenance.publisher == claim.publisher
-            && let Some(document) = desired.invocation.focus.clone()
+        if matches!(
+            publication,
+            PaneLayoutPublication::FreshRouteIntent | PaneLayoutPublication::FreshCommandIntent
+        ) && desired.provenance.publisher == claim.publisher
+            && let Some(document) = desired.invocation.focus.clone().or_else(|| {
+                (publication == PaneLayoutPublication::FreshCommandIntent)
+                    .then(|| desired.invocation.columns.first())
+                    .flatten()
+                    .and_then(|column| column.split(',').map(str::trim).find(|file| !file.is_empty()))
+                    .map(str::to_string)
+            })
         {
             publication_state.active_route = Some(PaneLayoutRouteLease {
                 generation: desired.generation,
                 document,
+                defer_all_passive: publication == PaneLayoutPublication::FreshCommandIntent,
             });
         }
         desired
@@ -13830,6 +13848,45 @@ mod tests {
         assert_eq!(projected.invocation, latest_passive);
         assert_eq!(projected.source_plane_version, Some(43));
         assert!(projected.generation > route.generation);
+    }
+
+    /// `#manualsynclayoutlease`: the JetBrains manual sync and its automatic
+    /// surface observation can carry identical columns back-to-back. The
+    /// passive generation must not remove the manual generation's permission
+    /// to create a missing (including cross-root) pane before the effect runs.
+    #[test]
+    fn manual_command_lease_defers_an_identical_passive_layout_until_release() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut manual = pane_layout_desired_for_test(1).invocation;
+        manual.caller_kind = "manual".to_string();
+        manual.no_autostart = false;
+        let manual = graph.set_desired_attributed(
+            manual,
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+        assert!(manual.invocation.routes_created_panes());
+
+        let mut passive = manual.invocation.clone();
+        passive.caller_kind = "automatic".to_string();
+        passive.no_autostart = true;
+        let retained = graph.set_desired_attributed(
+            passive.clone(),
+            Some(42),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::EditorSurface,
+        );
+        assert_eq!(retained.generation, manual.generation);
+        assert!(retained.invocation.routes_created_panes());
+
+        graph.release_route_lease(manual.generation);
+        let projected = graph.desired().unwrap();
+        assert_eq!(projected.invocation, passive);
+        assert!(projected.generation > manual.generation);
     }
 
     /// GH #224 case 1: an escalation may derive from retained columns, then

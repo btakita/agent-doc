@@ -11,18 +11,24 @@ the matching exchange history and tracked work together. Preview is the default:
 agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --ids tdminorscompliance,prelinkid2
 agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --ids tdminorscompliance
 agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --exchange-node r:abc123 --components notes
+agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --archive-locator archive:.agent-doc/archives/hash.md#2
 agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --selection legal-selection.json
 ```
 
 Inspect the JSON plan, then add `--apply`. The preview's
 `"source_action": "remove_on_apply"` makes the move semantics explicit:
 preview changes nothing; apply writes the target first and then removes the
-listed material from the source. IDs select matching queue, todo, backlog,
-review, and icebox item blocks plus exchange turns that cite those IDs. Each
-moved item keeps its stable ID, checkbox/gate state, text, and indented
-continuations exactly.
+listed live material from the source. IDs select matching queue, todo, backlog,
+review, icebox, and inline done item blocks plus exchange turns that cite those
+IDs. Each moved item keeps its stable ID, checkbox/gate state, text, and
+indented continuations exactly; dated done entries also keep their archive date.
 Use `agent-doc exchange list SOURCE` to obtain stable exchange node IDs. A whole
 component can be selected with repeatable/comma-separated `--components`.
+If that node has since been compacted, extraction resolves its content-stable ID
+through the source archive index and records the resulting `archive:...#turn`
+locator in the preview. `--archive-locator` selects such archived context
+directly. Archived context is copied with provenance because compact archives
+are immutable canonical history; selected live content is still moved.
 
 The operator may ask naturally inside the source document, for example,
 “Extract the legal concern into `tasks/sdk/sdk-legal.md`.” They do not need to
@@ -41,7 +47,8 @@ For a commingled session, let the agent make the semantic selection without
 letting the mutation step become nondeterministic: inspect `agent-doc outline`,
 `agent-doc exchange list`, and the managed components, then author a JSON
 selection manifest with `focus`, optional `rationale`, and the explicit `ids`,
-`exchange_node_ids`, and `components` arrays. Preview it with `--selection`,
+`exchange_node_ids`, `archive_locators`, and `components` arrays. Archive
+locators are the stable values printed by `agent-doc response-toc`. Preview it with `--selection`,
 refine until it contains one coherent concern, then add `--apply`. The focus and
 rationale appear in the preview and operation identity. Do not combine a
 manifest with direct selector flags.

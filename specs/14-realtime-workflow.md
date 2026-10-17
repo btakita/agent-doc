@@ -375,7 +375,12 @@ editor-owned document through a listener that correctly rejects its build, so
 waiting for successful pre-reexec resolution would deadlock the recovery. The
 fresh image performs the recovery after `execve`; all other resolution failures,
 including malformed frontmatter and `reload_already_requested`, continue to
-defer the swap.
+defer the swap. The gate consumes the error produced by current-document
+resolution: once replica recovery has translated the low-level refusal into an
+`AttachedEditorDiskReadRefused`, `WaitForSenderRecycle` remains the authoritative
+typed proof that re-exec is required (GH #285). It must not depend on the
+low-level `BuildMismatchRecoveryRefused` remaining in the error chain after that
+translation.
 
 ### Retained-write guidance must terminate (GH #131 reopened)
 

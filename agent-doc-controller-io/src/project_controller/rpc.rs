@@ -10,6 +10,7 @@ use agent_doc_controller::dispatch::{
     pause_reason_is_stale_supervisor_churn_stop, queue_pause_predates_boot,
     spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
+use agent_doc_controller::pane_layout::MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT;
 use agent_doc_controller::status;
 #[cfg(not(any(test, feature = "test-support")))]
 use agent_doc_controller::supervisor_replacement::{
@@ -83,8 +84,6 @@ const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 /// admission prerequisite, so state-db contention must not stall startup.
 const CONTROLLER_MODEL_PRESSURE_PERSIST_TIMEOUT: Duration = Duration::from_millis(100);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
-#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-const PANE_LAYOUT_COMMAND_AWAIT: Duration = Duration::from_secs(30);
 const ASYNC_EDITOR_COMMAND_MIN_AWAIT_MS: u64 = 1;
 const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
 const PANE_LAYOUT_PROJECTION_RETRY_MIN: Duration = Duration::from_millis(250);
@@ -34522,7 +34521,7 @@ pub(crate) fn handle_sync_tmux_layout(
             &lane,
             desired,
             invocation,
-            PANE_LAYOUT_COMMAND_AWAIT,
+            MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT,
         );
     }
     await_sync_tmux_layout_projection(
@@ -34530,7 +34529,7 @@ pub(crate) fn handle_sync_tmux_layout(
         runtime,
         desired,
         invocation,
-        PANE_LAYOUT_COMMAND_AWAIT,
+        MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT,
     )
 }
 

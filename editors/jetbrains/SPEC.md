@@ -455,8 +455,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   path and repairs window order before reconciliation: `0:agent-doc`, `1:stash`, then adjacent
   overflow `N:stash` windows. When the requested document has no pane, that terminal boundary includes
   pane creation in the resolved tmux session, registration, harness readiness, and document-route submission;
-  any failure is shown with the controller diagnostic. The manual action uses the
-  same live-buffer session classification and ignores non-agent Markdown tabs;
+  any failure is shown with the controller diagnostic. Its nested deadlines are strictly ordered:
+  the pane effect owns 30 seconds, the controller waits 35 seconds for the effect's terminal projection,
+  and the plugin waits 40 seconds for the controller command. Thus a still-current `Applying` projection
+  cannot win a same-deadline race and surface as a terminal `projection_effect_in_flight` error. The
+  manual action uses the same live-buffer session classification and ignores non-agent Markdown tabs;
   if the focused split currently shows one, its last classified agent document
   remains the requested member. Automatic editor-surface
   sync publishes the same autostart-capable desired layout with

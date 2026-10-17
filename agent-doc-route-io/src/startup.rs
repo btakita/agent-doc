@@ -29,6 +29,7 @@ use agent_doc_controller::dispatch::{
     DispatchOnlyReopenDelivery, DuplicatePanePolicyErrorFacts, FreshStartAdmissionOutcome,
     RoutedDispatchStartProof, duplicate_pane_policy_error_message, fresh_route_admission_timeout,
 };
+use agent_doc_controller::pane_layout::MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT;
 use agent_doc_harness::{HarnessConfig, ResumeRequest};
 use agent_doc_supervisor::route_owned::{
     RouteOwnedReapPolicy, RouteOwnedStartAdmission, RouteOwnedStartPurpose,
@@ -51,7 +52,6 @@ pub struct RouteStartupEffects {
 /// bound the auto-start dispatch fails closed instead of typing into a
 /// not-yet-submit-ready composer.
 const AUTO_START_DISPATCH_READY_REVERIFY_TIMEOUT: Duration = Duration::from_secs(5);
-const MANUAL_SYNC_ROUTE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingStartupRegistrationDecision<'a> {
@@ -347,11 +347,14 @@ pub fn provision_and_route_pane(
     }
     // Manual Sync Tmux Layout is an explicit operator action whose controller
     // and editor completion budgets are longer than the default 10s
-    // responsiveness ceiling. Share one 30s route deadline across fresh-start
-    // readiness and the dispatch-only recheck so a normally slow Codex boot can
-    // still complete without multiplying phase-local waits.
+    // responsiveness ceiling. Share one effect-local route deadline across
+    // fresh-start readiness and the dispatch-only recheck so a normally slow
+    // Codex boot can still complete without multiplying phase-local waits. The
+    // controller command wait is deliberately longer than this nested effect.
     let _wait_for_ready_guard =
-        crate::invocation::WaitForReadyOverrideGuard::set(Some(MANUAL_SYNC_ROUTE_READY_TIMEOUT));
+        crate::invocation::WaitForReadyOverrideGuard::set(Some(
+            MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT,
+        ));
     let split_before = is_first_column(file, col_args);
     let harness = resolve_harness_for_file(file);
     let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness)?;

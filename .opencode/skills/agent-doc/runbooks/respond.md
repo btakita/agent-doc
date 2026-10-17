@@ -189,6 +189,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   excluded from the loop; do not drain them inline. Lines tagged `[inline]` or
   `[operator-verify]` drain in queue order as usual. For each dispatch item:
   1. Run its `claim_command` (`agent-doc queue claim <FILE> --item <...> --owner subagent:<label>`).
+     Dispatch only after the command succeeds: success includes projecting the
+     claimed row's visible `🚧` marker through the current editor/CRDT authority,
+     so the queue shows the worker as in progress immediately rather than waiting
+     for another preflight.
   2. Paste the entry's `authorization.subagent_prompt_preamble` VERBATIM at the
      top of the subagent's Agent prompt (`#waypostauthorization`). The binary
      resolved it from the document: the verbatim item, the backlog text a

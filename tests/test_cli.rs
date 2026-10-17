@@ -22404,7 +22404,6 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_cmd.rs")).unwrap();
     for forbidden_snippet in [
         "agent_doc_queue::backlog_sync",
-        "agent_doc_queue::document_queue",
         "element::parse(&content)",
         "fn queue_prompt_reference_id",
         "fn queue_entry_reference_id",

@@ -7601,6 +7601,12 @@ fn try_main() -> anyhow::Result<()> {
                 if refresh {
                     let claim =
                         agent_doc_queue_io::queue_claim::refresh(&file, &item, &owner, ttl_secs)?;
+                    let queue_effects = CliQueueCommandEffects;
+                    agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                        &queue_effects,
+                        &file,
+                        None,
+                    )?;
                     eprintln!(
                         "[queue] refreshed {:?} for {} until {}",
                         claim.item_text, claim.owner, claim.expires_at_secs
@@ -7609,6 +7615,12 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 let (outcome, claim) =
                     agent_doc_queue_io::queue_claim::claim(&file, &item, &owner, ttl_secs)?;
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                    &queue_effects,
+                    &file,
+                    None,
+                )?;
                 eprintln!(
                     "[queue] claimed {:?} for {} until {} ({:?})",
                     claim.item_text, claim.owner, claim.expires_at_secs, outcome
@@ -7626,7 +7638,16 @@ fn try_main() -> anyhow::Result<()> {
                 } else {
                     ReleaseKind::Reported
                 };
-                match release(&file, &item, kind)? {
+                let released = release(&file, &item, kind)?;
+                if let Some(claim) = released.as_ref() {
+                    let queue_effects = CliQueueCommandEffects;
+                    agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                        &queue_effects,
+                        &file,
+                        Some(&claim.item_text),
+                    )?;
+                }
+                match released {
                     Some(claim) if requeue => eprintln!(
                         "[queue] released {:?} (owner {}) for requeue; the line is dispatchable to a new worker again",
                         claim.item_text, claim.owner

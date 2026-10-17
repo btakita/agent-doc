@@ -1676,6 +1676,11 @@ struct PaneLayoutRouteLease {
     generation: u64,
     document: String,
     defer_all_passive: bool,
+    /// Cross-root routes retain their lease in the main-window owner while a
+    /// different controller dispatches. The deadline is a fail-open boundary
+    /// when that client disappears before sending its release RPC. Local
+    /// guards release synchronously and therefore have no expiry.
+    expires_at: Option<Instant>,
 }
 
 struct PendingPaneLayoutPublication {
@@ -1900,6 +1905,15 @@ impl ControllerPaneLayoutGraph {
             invocation.caller_kind = "projection".to_string();
         }
         let mut publication_state = self.publication_state.lock();
+        if publication_state
+            .active_route
+            .as_ref()
+            .and_then(|active| active.expires_at)
+            .is_some_and(|expires_at| Instant::now() >= expires_at)
+        {
+            publication_state.active_route = None;
+            publication_state.pending_passive = None;
+        }
         let current = self.ctx.get(&self.desired);
         let focus_outcome = self.focus_outcome.lock().clone();
         invocation = rebase_stale_focus_escalation(
@@ -1974,6 +1988,7 @@ impl ControllerPaneLayoutGraph {
                 generation: desired.generation,
                 document,
                 defer_all_passive: publication == PaneLayoutPublication::FreshCommandIntent,
+                expires_at: None,
             });
         }
         desired
@@ -2113,6 +2128,22 @@ impl ControllerPaneLayoutGraph {
                 pending.claim,
             )
         })
+    }
+
+    /// Keep a route lease alive for a remote dispatcher, but only until its
+    /// bounded route deadline plus transport grace. A later passive
+    /// publication lazily expires an abandoned lease.
+    fn expire_route_lease_after(&self, generation: u64, expires_at: Instant) -> bool {
+        let mut publication_state = self.publication_state.lock();
+        let Some(active) = publication_state
+            .active_route
+            .as_mut()
+            .filter(|active| active.generation == generation)
+        else {
+            return false;
+        };
+        active.expires_at = Some(expires_at);
+        true
     }
 
     /// Take every publication the arbiter displaced or refused since the last
@@ -13848,6 +13879,33 @@ mod tests {
         assert_eq!(projected.invocation, latest_passive);
         assert_eq!(projected.source_plane_version, Some(43));
         assert!(projected.generation > route.generation);
+    }
+
+    #[test]
+    fn expired_remote_route_lease_does_not_wedge_a_later_passive_layout() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut route_invocation = pane_layout_desired_for_test(1).invocation;
+        route_invocation.caller_kind = "editor_route".to_string();
+        let route = graph.set_fresh_route_desired(route_invocation, None);
+        assert!(
+            graph.expire_route_lease_after(
+                route.generation,
+                Instant::now() - Duration::from_millis(1),
+            )
+        );
+
+        let mut passive = pane_layout_desired_for_test(2).invocation;
+        passive.columns = vec!["tasks/later.md".to_string()];
+        passive.focus = passive.columns.first().cloned();
+        passive.caller_kind = "automatic".to_string();
+        let projected = graph.set_desired(passive.clone(), Some(44));
+
+        assert!(projected.generation > route.generation);
+        assert_eq!(projected.invocation, passive);
+        assert_eq!(projected.source_plane_version, Some(44));
     }
 
     /// `#manualsynclayoutlease`: the JetBrains manual sync and its automatic

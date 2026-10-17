@@ -19,6 +19,14 @@ class BackendRemoteSessionGateTest {
     }
 
     @Test
+    fun onlyRemoteDevControllerSelectionProvesFocus() {
+        assertTrue(BackendRemoteSessionGate.selectionProvesFocus(ClientType.CONTROLLER))
+        assertFalse(BackendRemoteSessionGate.selectionProvesFocus(ClientType.GUEST))
+        assertFalse(BackendRemoteSessionGate.selectionProvesFocus(ClientType.LOCAL))
+        assertFalse(BackendRemoteSessionGate.selectionProvesFocus(ClientType.FRONTEND))
+    }
+
+    @Test
     fun localAndFrontendSessionsAreNotObserved() {
         assertFalse(BackendRemoteSessionGate.observes(ClientType.LOCAL))
         assertFalse(BackendRemoteSessionGate.observes(ClientType.FRONTEND))

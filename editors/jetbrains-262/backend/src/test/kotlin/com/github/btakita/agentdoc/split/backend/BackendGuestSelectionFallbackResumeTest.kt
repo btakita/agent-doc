@@ -43,4 +43,16 @@ class BackendGuestSelectionFallbackResumeTest {
         )
         assertTrue(resume < forward, "the forwarded selection must publish as a live frame")
     }
+
+    @Test
+    fun remoteDevControllerSelectionCarriesFocusEvidence() {
+        val source = source()
+        assertTrue(
+            source.contains(
+                "remoteControllerSelectionFocusEvidence =\n" +
+                    "                                        BackendRemoteSessionGate.selectionProvesFocus(session.type)",
+            ),
+            source,
+        )
+    }
 }

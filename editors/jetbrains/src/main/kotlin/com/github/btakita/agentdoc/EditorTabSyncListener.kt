@@ -25,6 +25,7 @@ internal data class FocusProjectionEffectRequest(
     val filePath: String,
     val surfaceJson: String,
     val surfaceId: String = "project",
+    val remoteControllerSelectionFocusEvidence: Boolean = false,
 )
 
 internal data class FocusProjectionEffectResponse(
@@ -141,6 +142,14 @@ class EditorTabSyncListener : FileEditorManagerListener {
         TransportUnavailable,
     }
 
+    internal enum class FocusProjectionPublicationGate(val logName: String) {
+        Ready("ready"),
+        Superseded("superseded"),
+        Inactive("inactive"),
+        Disposed("disposed"),
+        Closed("closed"),
+    }
+
     companion object {
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
         private val GSON = com.google.gson.Gson()
@@ -174,8 +183,33 @@ class EditorTabSyncListener : FileEditorManagerListener {
             requestedGeneration: Long,
             currentGeneration: Long,
             projectWindowActive: Boolean,
+            remoteControllerSelectionFocusEvidence: Boolean = false,
         ): Boolean =
-            requestedGeneration == currentGeneration && projectWindowActive
+            focusProjectionPublicationGate(
+                requestedGeneration = requestedGeneration,
+                currentGeneration = currentGeneration,
+                projectWindowActive = projectWindowActive,
+                remoteControllerSelectionFocusEvidence = remoteControllerSelectionFocusEvidence,
+                listenerClosed = false,
+                projectDisposed = false,
+            ) == FocusProjectionPublicationGate.Ready
+
+        internal fun focusProjectionPublicationGate(
+            requestedGeneration: Long,
+            currentGeneration: Long,
+            projectWindowActive: Boolean,
+            remoteControllerSelectionFocusEvidence: Boolean,
+            listenerClosed: Boolean,
+            projectDisposed: Boolean,
+        ): FocusProjectionPublicationGate =
+            when {
+                listenerClosed -> FocusProjectionPublicationGate.Closed
+                projectDisposed -> FocusProjectionPublicationGate.Disposed
+                requestedGeneration != currentGeneration -> FocusProjectionPublicationGate.Superseded
+                !projectWindowActive && !remoteControllerSelectionFocusEvidence ->
+                    FocusProjectionPublicationGate.Inactive
+                else -> FocusProjectionPublicationGate.Ready
+            }
 
         internal fun shouldClaimSettledSelectionFocus(
             selectionPath: String,
@@ -198,6 +232,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     requestedGeneration = response.request.generation,
                     currentGeneration = currentGeneration,
                     projectWindowActive = projectWindowActive,
+                    remoteControllerSelectionFocusEvidence =
+                        response.request.remoteControllerSelectionFocusEvidence,
                 )
             ) {
                 return FocusProjectionReceiptDecision.Superseded
@@ -781,7 +817,12 @@ private data class CapturedSurface(
             return
         }
         focusProjectionGeneration.incrementAndGet()
-        activeFocusProjection.getAndSet(null)?.cancel(true)
+        if (activeFocusProjection.getAndSet(null)?.cancel(true) == true) {
+            LOG.info(
+                "[focus] focus projection gated gate=${if (closed) "closed" else "superseded"} " +
+                    "phase=invalidate",
+            )
+        }
     }
 
     private fun requestObservation(
@@ -1374,153 +1415,182 @@ private data class CapturedSurface(
         )
     }
 
-    private fun requestFocusProjection(project: Project, file: VirtualFile): Long? =
+    private fun requestFocusProjection(
+        project: Project,
+        file: VirtualFile,
+        remoteControllerSelectionFocusEvidence: Boolean = false,
+    ): Long? =
         synchronized(lifecycleLock) {
-            if (closed) return@synchronized null
-            val requestedGeneration = focusProjectionGeneration.incrementAndGet()
-            val focusWindow = FileEditorManagerEx.getInstanceEx(project).let { manager ->
-                manager.currentWindow?.takeIf { it.selectedFile?.path == file.path }
-                    ?: manager.windows.firstOrNull { it.selectedFile?.path == file.path }
+            if (closed) {
+                LOG.info(
+                    "[focus] focus projection gated gate=closed phase=request file=${file.path}",
+                )
+                return@synchronized null
             }
-            val focusSurfaceId =
-                JetBrainsEditorSurfaces.forEditorWindow(project, focusWindow).surfaceId
+            val requestedGeneration = focusProjectionGeneration.incrementAndGet()
             try {
                 val scheduled =
                     focusProjectionExecutor.schedule(
                     focus@{
-                        if (
-                            project.isDisposed ||
-                                !shouldPublishFocusProjection(
-                                    requestedGeneration = requestedGeneration,
-                                    currentGeneration = focusProjectionGeneration.get(),
-                                        projectWindowActive =
-                                        JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
-                                )
-                        ) {
-                            log(
-                                "focus projection: superseded, inactive, or disposed " +
-                                    "gen=$requestedGeneration",
-                            )
-                            return@focus
-                        }
-
-                        // The focused document, not the spanning editor surface, owns the
-                        // controller root for this immediate handoff. This is what lets a
-                        // superproject document and submodule document share one visible tmux
-                        // window without routing both focus intents through one controller.
-                        val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
-                        if (
-                            project.isDisposed ||
-                                !shouldPublishFocusProjection(
+                        try {
+                            fun publishGate(): FocusProjectionPublicationGate =
+                                focusProjectionPublicationGate(
                                     requestedGeneration = requestedGeneration,
                                     currentGeneration = focusProjectionGeneration.get(),
                                     projectWindowActive =
                                         JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
+                                    remoteControllerSelectionFocusEvidence =
+                                        remoteControllerSelectionFocusEvidence,
+                                    listenerClosed = closed,
+                                    projectDisposed = project.isDisposed,
                                 )
-                        ) {
-                            log(
-                                "focus projection: superseded, inactive, or disposed after " +
-                                    "root resolution gen=$requestedGeneration",
-                            )
-                            return@focus
-                        }
 
-                        val request =
-                            FocusProjectionEffectRequest(
-                                generation = requestedGeneration,
-                                projectRoot = projectRoot,
-                                filePath = file.path,
-                                surfaceId = focusSurfaceId,
-                                surfaceJson =
-                                    GSON.toJson(SurfaceReport.buildFocusProjection(file.path)),
-                            )
-                        val response =
-                            FocusProjectionEffectResponse(
-                                request = request,
-                                transport =
-                                    CpRouteClient.observeEditorFocus(
-                                        projectRoot = request.projectRoot,
-                                        surfaceJson = request.surfaceJson,
-                                        surfaceId = request.surfaceId,
-                                        mayReregister = ::projectionLive,
-                                    ),
-                            )
-                        synchronized(lifecycleLock) {
-                            if (response.transport.exitCode == 0) {
-                                surfaceEndpoints.record(
-                                    SurfaceEndpoint(request.projectRoot, request.surfaceId),
+                            fun continueAfterGate(phase: String): Boolean {
+                                val gate = publishGate()
+                                if (gate == FocusProjectionPublicationGate.Ready) return true
+                                LOG.info(
+                                    "[focus] focus projection gated gate=${gate.logName} " +
+                                        "phase=$phase file=${file.path} gen=$requestedGeneration",
                                 )
+                                return false
                             }
-                            when (
-                                decideFocusProjectionReceipt(
-                                    response = response,
-                                    currentGeneration = focusProjectionGeneration.get(),
-                                    projectWindowActive =
-                                        JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
-                                )
-                            ) {
-                                FocusProjectionReceiptDecision.Applied -> {
-                                    // Reverse tmux→editor mirroring is suppressed only after the
-                                    // controller proves that this exact retained projection selected
-                                    // the pane. A missing actor must not install a stale lease.
-                                    TmuxPaneFocusSync.recordEditorFocusIntent(project, request.filePath)
-                                    ApplicationManager.getApplication().invokeLater {
-                                        if (!project.isDisposed) {
-                                            IdeTerminalHost.applySurfaceDecision(
-                                                project,
-                                                response.transport.output,
-                                            )
-                                        }
-                                    }
-                                    log("focus projection: applied file=${request.filePath}")
-                                }
 
-                                FocusProjectionReceiptDecision.RepairLayout -> {
-                                    // A late receipt must not replace a newer document's surface.
-                                    requestObservation(
-                                        PendingSurfaceObservation(
-                                            project = project,
-                                            preferredFile = file,
-                                            forceReconcile = true,
-                                            authority = ObservationAuthority.EditorFocus,
+                            if (!continueAfterGate("before_root_resolution")) {
+                                return@focus
+                            }
+
+                            val focusWindow = FileEditorManagerEx.getInstanceEx(project).let { manager ->
+                                manager.currentWindow?.takeIf { it.selectedFile?.path == file.path }
+                                    ?: manager.windows.firstOrNull { it.selectedFile?.path == file.path }
+                            }
+                            val focusSurfaceId =
+                                JetBrainsEditorSurfaces.forEditorWindow(project, focusWindow).surfaceId
+
+                            // The focused document, not the spanning editor surface, owns the
+                            // controller root for this immediate handoff. This is what lets a
+                            // superproject document and submodule document share one visible tmux
+                            // window without routing both focus intents through one controller.
+                            val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
+                            if (!continueAfterGate("after_root_resolution")) {
+                                return@focus
+                            }
+
+                            val request =
+                                FocusProjectionEffectRequest(
+                                    generation = requestedGeneration,
+                                    projectRoot = projectRoot,
+                                    filePath = file.path,
+                                    surfaceId = focusSurfaceId,
+                                    surfaceJson =
+                                        GSON.toJson(SurfaceReport.buildFocusProjection(file.path)),
+                                    remoteControllerSelectionFocusEvidence =
+                                        remoteControllerSelectionFocusEvidence,
+                                )
+                            val response =
+                                FocusProjectionEffectResponse(
+                                    request = request,
+                                    transport =
+                                        CpRouteClient.observeEditorFocus(
+                                            projectRoot = request.projectRoot,
+                                            surfaceJson = request.surfaceJson,
+                                            surfaceId = request.surfaceId,
+                                            mayReregister = ::projectionLive,
                                         ),
-                                        requiredFocusGeneration = requestedGeneration,
-                                    )
-                                    log(
-                                        "focus projection: stashed pane; forced spanning repair " +
-                                            "file=${request.filePath}",
-                                    )
-                                }
-
-                                FocusProjectionReceiptDecision.Superseded -> {
-                                    log(
-                                        "focus projection: ignored superseded receipt " +
-                                            "file=${request.filePath} gen=$requestedGeneration",
-                                    )
-                                    return@focus
-                                }
-
-                                FocusProjectionReceiptDecision.Retained -> {
-                                    log(
-                                        "focus projection: retained without pane selection " +
-                                            "file=${request.filePath} " +
-                                            "receipt=${response.transport.output}",
+                                )
+                            if (!continueAfterGate("after_transport")) {
+                                return@focus
+                            }
+                            synchronized(lifecycleLock) {
+                                if (response.transport.exitCode == 0) {
+                                    surfaceEndpoints.record(
+                                        SurfaceEndpoint(request.projectRoot, request.surfaceId),
                                     )
                                 }
-
-                                FocusProjectionReceiptDecision.TransportUnavailable -> {
-                                    LOG.warn(
-                                        "[focus] retained focus projection unavailable for " +
-                                            "${request.filePath}: ${response.transport.output}",
+                                when (
+                                    decideFocusProjectionReceipt(
+                                        response = response,
+                                        currentGeneration = focusProjectionGeneration.get(),
+                                        projectWindowActive =
+                                            JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
                                     )
+                                ) {
+                                    FocusProjectionReceiptDecision.Applied -> {
+                                        // Reverse tmux→editor mirroring is suppressed only after the
+                                        // controller proves that this exact retained projection selected
+                                        // the pane. A missing actor must not install a stale lease.
+                                        TmuxPaneFocusSync.recordEditorFocusIntent(project, request.filePath)
+                                        ApplicationManager.getApplication().invokeLater {
+                                            if (!project.isDisposed) {
+                                                IdeTerminalHost.applySurfaceDecision(
+                                                    project,
+                                                    response.transport.output,
+                                                )
+                                            }
+                                        }
+                                        LOG.info(
+                                            "[focus] focus projection completed outcome=applied " +
+                                                "file=${request.filePath} gen=$requestedGeneration",
+                                        )
+                                    }
+
+                                    FocusProjectionReceiptDecision.RepairLayout -> {
+                                        // A late receipt must not replace a newer document's surface.
+                                        requestObservation(
+                                            PendingSurfaceObservation(
+                                                project = project,
+                                                preferredFile = file,
+                                                forceReconcile = true,
+                                                authority = ObservationAuthority.EditorFocus,
+                                            ),
+                                            requiredFocusGeneration = requestedGeneration,
+                                        )
+                                        LOG.info(
+                                            "[focus] focus projection completed outcome=repair_layout " +
+                                                "file=${request.filePath} gen=$requestedGeneration",
+                                        )
+                                    }
+
+                                    FocusProjectionReceiptDecision.Superseded -> {
+                                        LOG.info(
+                                            "[focus] focus projection completed outcome=superseded_receipt " +
+                                                "file=${request.filePath} gen=$requestedGeneration",
+                                        )
+                                        return@focus
+                                    }
+
+                                    FocusProjectionReceiptDecision.Retained -> {
+                                        LOG.info(
+                                            "[focus] focus projection completed outcome=retained " +
+                                                "file=${request.filePath} gen=$requestedGeneration " +
+                                                "receipt=${response.transport.output}",
+                                        )
+                                    }
+
+                                    FocusProjectionReceiptDecision.TransportUnavailable -> {
+                                        LOG.warn(
+                                            "[focus] retained focus projection unavailable for " +
+                                                "${request.filePath}: ${response.transport.output}",
+                                        )
+                                    }
                                 }
                             }
+                        } catch (error: Throwable) {
+                            LOG.warn(
+                                "[focus] focus projection task failed file=${file.path} " +
+                                    "gen=$requestedGeneration",
+                                error,
+                            )
                         }
                     },
                     FOCUS_COALESCE_MS,
                     TimeUnit.MILLISECONDS,
                 )
-                activeFocusProjection.getAndSet(scheduled)?.cancel(true)
+                if (activeFocusProjection.getAndSet(scheduled)?.cancel(true) == true) {
+                    LOG.info(
+                        "[focus] focus projection gated gate=superseded phase=coalesced " +
+                            "superseded_by_gen=$requestedGeneration",
+                    )
+                }
             } catch (rejected: RejectedExecutionException) {
                 if (!closed) {
                     LOG.warn(
@@ -1620,6 +1690,13 @@ private data class CapturedSurface(
     }
 
 override fun selectionChanged(event: FileEditorManagerEvent) {
+    selectionChanged(event, remoteControllerSelectionFocusEvidence = false)
+}
+
+internal fun selectionChanged(
+    event: FileEditorManagerEvent,
+    remoteControllerSelectionFocusEvidence: Boolean,
+) {
 val selectionProbeGeneration = selectionFocusProbeGeneration.incrementAndGet()
 val file = event.newFile ?: return
 val project = event.manager.project
@@ -1657,7 +1734,11 @@ LOG.info(
 )
 val requestedFocusGeneration =
 if (selectionOwnsFocus) {
-requestFocusProjection(project, file)
+requestFocusProjection(
+    project,
+    file,
+    remoteControllerSelectionFocusEvidence = remoteControllerSelectionFocusEvidence,
+)
 } else {
 null
 }

@@ -63,6 +63,62 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `remote controller selection is focus evidence without a backend active window`() {
+        assertTrue(
+            EditorTabSyncListener.shouldPublishFocusProjection(
+                requestedGeneration = 7,
+                currentGeneration = 7,
+                projectWindowActive = false,
+                remoteControllerSelectionFocusEvidence = true,
+            ),
+        )
+        assertEquals(
+            EditorTabSyncListener.FocusProjectionPublicationGate.Superseded,
+            EditorTabSyncListener.focusProjectionPublicationGate(
+                requestedGeneration = 6,
+                currentGeneration = 7,
+                projectWindowActive = false,
+                remoteControllerSelectionFocusEvidence = true,
+                listenerClosed = false,
+                projectDisposed = false,
+            ),
+        )
+        assertEquals(
+            EditorTabSyncListener.FocusProjectionPublicationGate.Inactive,
+            EditorTabSyncListener.focusProjectionPublicationGate(
+                requestedGeneration = 7,
+                currentGeneration = 7,
+                projectWindowActive = false,
+                remoteControllerSelectionFocusEvidence = false,
+                listenerClosed = false,
+                projectDisposed = false,
+            ),
+        )
+        assertEquals(
+            EditorTabSyncListener.FocusProjectionPublicationGate.Disposed,
+            EditorTabSyncListener.focusProjectionPublicationGate(
+                requestedGeneration = 7,
+                currentGeneration = 7,
+                projectWindowActive = true,
+                remoteControllerSelectionFocusEvidence = true,
+                listenerClosed = false,
+                projectDisposed = true,
+            ),
+        )
+        assertEquals(
+            EditorTabSyncListener.FocusProjectionPublicationGate.Closed,
+            EditorTabSyncListener.focusProjectionPublicationGate(
+                requestedGeneration = 7,
+                currentGeneration = 7,
+                projectWindowActive = true,
+                remoteControllerSelectionFocusEvidence = true,
+                listenerClosed = true,
+                projectDisposed = false,
+            ),
+        )
+    }
+
+    @Test
     fun `settled selection claims focus only for the current active split`() {
         assertTrue(
             EditorTabSyncListener.shouldClaimSettledSelectionFocus(
@@ -1092,7 +1148,8 @@ Files.readString(
                 .substringAfter("override fun selectionChanged(event: FileEditorManagerEvent)")
 .substringBefore("fun onEditorFocusGained")
 assertTrue(selection.contains("requestObservation("))
-assertTrue(selection.contains("requestFocusProjection(project, file)"))
+assertTrue(selection.contains("requestFocusProjection("))
+assertTrue(selection.contains("remoteControllerSelectionFocusEvidence ="))
 assertTrue(selection.contains("requiredFocusGeneration = requestedFocusGeneration"))
 assertTrue(selection.contains("FileEditorManagerEx.getInstanceEx(project).currentWindow"))
 assertTrue(selection.contains("SelectionFocusAuthority.decide("))
@@ -1140,6 +1197,9 @@ assertTrue(focusGained.contains("authority = ObservationAuthority.EditorFocus"))
         assertTrue(focusProjection.contains("requiredFocusGeneration = requestedGeneration"))
         assertTrue(focusProjection.contains("forceReconcile = true"))
         assertTrue(focusProjection.contains("authority = ObservationAuthority.EditorFocus"))
+        assertTrue(focusProjection.contains("catch (error: Throwable)"))
+        assertTrue(focusProjection.contains("focus projection gated gate="))
+        assertTrue(focusProjection.contains("focus projection completed outcome="))
     }
 
 @Test

@@ -43,7 +43,7 @@ use agent_doc_frontmatter_io::security_review::enforce_cross_document_review;
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
 /// the target has no active session. Returns Err suggesting --bypass-claim
 /// when a different pane owns the target.
-fn check_target_ownership(target: &Path) -> Result<()> {
+pub(crate) fn check_target_ownership(target: &Path) -> Result<()> {
     let current_pane = std::env::var("TMUX_PANE").unwrap_or_default();
     if current_pane.is_empty() {
         return Ok(());
@@ -122,7 +122,7 @@ fn allow_selective_item_transfer(component_name: &str) -> bool {
     is_backlog_component(component_name) || is_icebox_component(component_name)
 }
 
-fn render_target_scaffold(
+pub(crate) fn render_target_scaffold(
     title: &str,
     agent: &str,
     session_id: uuid::Uuid,
@@ -141,12 +141,19 @@ fn render_target_scaffold(
             .map(str::trim)
             .filter(|review| !review.is_empty())
             .map(str::to_string),
+        model: source_fm.model.clone(),
+        claude_model: source_fm.claude_model.clone(),
+        codex_model: source_fm.codex_model.clone(),
+        opencode_model: source_fm.opencode_model.clone(),
+        enable_tool_search: source_fm.enable_tool_search,
+        no_mcp: source_fm.no_mcp,
+        prompt_presets: source_fm.prompt_presets.clone(),
         ..Default::default()
     };
     frontmatter::write(
         &fm,
         &format!(
-            "\n# {}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
+            "\n# {}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n\n## Notes\n\n<!-- agent:notes -->\n<!-- /agent:notes -->\n",
             title
         ),
     )
@@ -997,6 +1004,10 @@ mod tests {
         assert!(scaffold.contains("<!-- /agent:backlog -->"));
         assert!(scaffold.contains("<!-- agent:icebox -->"));
         assert!(scaffold.contains("<!-- /agent:icebox -->"));
+        assert!(scaffold.contains("<!-- agent:todo -->"));
+        assert!(scaffold.contains("<!-- agent:review -->"));
+        assert!(scaffold.contains("<!-- agent:done -->"));
+        assert!(scaffold.contains("<!-- agent:notes -->"));
     }
 
     #[test]

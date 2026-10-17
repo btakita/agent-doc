@@ -3,6 +3,8 @@ package com.github.btakita.agentdoc
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
+import java.nio.file.Paths
 
 /**
  * `#replicarefusalstorm` (editor half) — the plugin registered every `.md` it
@@ -13,6 +15,14 @@ import org.junit.Test
  * marker shapes that must keep registering.
  */
 class AgentDocDocumentTextTest {
+    private fun managerSource(): String =
+        Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            ).first { Files.exists(it) },
+        )
+
     @Test
     fun `frontmatter and component markers both identify a session document`() {
         assertTrue(isAgentDocDocumentTextUtil("---\nagent_doc_format: template\n---\n"))
@@ -44,5 +54,34 @@ class AgentDocDocumentTextTest {
         val before = "# notes\n\njust prose\n"
         assertFalse(isAgentDocDocumentTextUtil(before))
         assertTrue(isAgentDocDocumentTextUtil(before + "\n<!-- agent:exchange -->\n"))
+    }
+
+    @Test
+    fun `every registration entry point treats plain current text as terminal`() {
+        val manager = managerSource()
+        val localForward =
+            manager.substringAfter("private fun forwardLocalEditsFromShadow(")
+                .substringBefore("private fun rebootstrapCanonicalAndForwardCapturedLocalEdit(")
+        val localGuard = localForward.indexOf("!isAgentDocDocumentTextUtil(editorText)")
+        val localRegister = localForward.indexOf("val forwarder =")
+        assertTrue("the local-edit path must classify current text before registering", localGuard >= 0)
+        assertTrue("the current-text guard must precede registration", localGuard < localRegister)
+        assertTrue(localForward.contains("recordNotAgentDocDocument(filePath)"))
+        assertTrue(localForward.contains("return LocalEditorForwardResult.Fenced"))
+
+        val forwarderFor =
+            manager.substringAfter("private fun forwarderFor(")
+                .substringBefore("private fun finalizeRegistrationProjection(")
+        val factoryGuard = forwarderFor.indexOf("!isAgentDocDocumentTextUtil(initialEditorText)")
+        val transportRegister = forwarderFor.indexOf("if (!forwarder.register())")
+        assertTrue("the shared factory must reject plain bootstrap text", factoryGuard >= 0)
+        assertTrue("the text guard must precede the controller round trip", factoryGuard < transportRegister)
+
+        val terminal =
+            manager.substringAfter("private fun recordNotAgentDocDocument(")
+                .substringBefore("private fun recordRetainedProjectionHold(")
+        assertTrue(terminal.contains("registerRetryTasks.remove(filePath)?.cancel(false)"))
+        assertFalse(terminal.contains("scheduleRegisterRetry("))
+        assertFalse(terminal.contains("recordRegisterFailure("))
     }
 }

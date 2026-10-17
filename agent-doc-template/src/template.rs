@@ -1101,7 +1101,7 @@ pub fn apply_patches_with_overrides_pure(
     // session documents predate it. A `patch:todo` must land in a todo
     // component rather than spill its checklist into the exchange as overflow,
     // so create the component (at the deterministic operator-facing slot
-    // directly below `agent:backlog`) before resolving patch targets.
+    // directly below `agent:queue` when present) before resolving patch targets.
     if patches
         .iter()
         .any(|patch| agent_doc_element::todo::is_todo_component(&patch.name))
@@ -2453,6 +2453,7 @@ All green.
         let doc_path = dir.path().join("test.md");
         let doc = concat!(
             "<!-- agent:exchange -->\nprevious\n<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n- next work\n<!-- /agent:queue -->\n\n",
             "## Backlog\n\n<!-- agent:backlog -->\n- [ ] [#work] do work\n<!-- /agent:backlog -->\n\n",
             "## Review\n\n<!-- agent:review -->\n- [/] [#gate] gated\n<!-- /agent:review -->\n\n",
             "## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n",
@@ -2479,16 +2480,16 @@ All green.
             !exchange.content(&result).contains("Verify [#gate]"),
             "todo checklist must not spill into exchange:\n{result}"
         );
-        // Todo lands directly below the backlog, above `## Review`.
-        let backlog_end = result.find("<!-- /agent:backlog -->").unwrap();
+        // `agent:todo` lands directly below `agent:queue` and above `agent:backlog`.
+        let queue_end = result.find("<!-- /agent:queue -->").unwrap();
         let todo_start = result.find("<!-- agent:todo -->").unwrap();
-        let review_heading = result.find("## Review").unwrap();
+        let backlog_heading = result.find("## Backlog").unwrap();
         assert!(
-            backlog_end < todo_start && todo_start < review_heading,
-            "{result}"
+            queue_end < todo_start && todo_start < backlog_heading,
+            "agent:todo must sit below agent:queue and above agent:backlog:\n{result}"
         );
         assert!(
-            result.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n"),
+            result.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n"),
             "{result}"
         );
     }

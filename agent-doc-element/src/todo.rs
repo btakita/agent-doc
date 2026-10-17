@@ -9,13 +9,12 @@
 //! - [`ensure_todo_component_in_document`] returns the document unchanged when
 //!   an `agent:todo` component exists. Otherwise it inserts an empty
 //!   `## Todo` section at one deterministic location, matching the default
-//!   template scaffold order (`backlog`, `todo`, `review`): directly after the
-//!   last `agent:backlog` / legacy `agent:pending` component (so it lands
-//!   before any `## Review` section that follows the backlog); else after the
-//!   last `agent:queue`; else after the last `agent:exchange`; else at the end
-//!   of the document. `agent:review` is never an anchor: inserting after it
-//!   would put Todo below Review, and inserting before its marker would split
-//!   the `## Review` heading from its component.
+//!   template scaffold order (`agent:queue`, `agent:todo`, `agent:backlog`,
+//!   `agent:review`): directly after the last `agent:queue`; else after the
+//!   last `agent:backlog` / legacy `agent:pending`; else after the last
+//!   `agent:exchange`; else at the end of the document. `agent:review` is never
+//!   an anchor: inserting after it would put Todo below Review, and inserting
+//!   before its marker would split the `## Review` heading from its component.
 //! - [`add_todo_item_to_document`] appends one `- [ ] [#<id>] <action>` line
 //!   to the end of the component body, creating the component first when
 //!   absent. The leading `[#<id>]` is the item's own stable id (derived from
@@ -163,8 +162,8 @@ pub fn find_todo_component(content: &str) -> Result<Option<Component>> {
 /// Byte offset where a missing `agent:todo` section is inserted.
 fn todo_insertion_offset(content: &str, components: &[Component]) -> usize {
     let anchors: [fn(&str) -> bool; 3] = [
-        element::is_backlog_component,
         |name| name == "queue",
+        element::is_backlog_component,
         |name| name == "exchange",
     ];
     anchors
@@ -1716,6 +1715,29 @@ mod tests {
         );
         // Everything outside the inserted section is byte-identical.
         assert_eq!(updated.replacen(TODO_SECTION, "", 1), content);
+    }
+
+    #[test]
+    fn ensure_places_agent_todo_below_agent_queue_and_above_agent_backlog() {
+        let content = concat!(
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "## Queue\n\n<!-- agent:queue -->\n- do x\n<!-- /agent:queue -->\n",
+            "## Backlog\n\n<!-- agent:backlog -->\n- [ ] [#work] do work\n<!-- /agent:backlog -->\n",
+            "## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n",
+        );
+        let (updated, _, created) = ensure_todo_component_in_document(content).unwrap();
+        assert!(created);
+        assert!(
+            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n## Backlog"),
+            "{updated}"
+        );
+        let queue_end = updated.find("<!-- /agent:queue -->").unwrap();
+        let todo_start = updated.find("<!-- agent:todo -->").unwrap();
+        let backlog_heading = updated.find("## Backlog").unwrap();
+        assert!(
+            queue_end < todo_start && todo_start < backlog_heading,
+            "agent:todo must sit below agent:queue and above agent:backlog:\n{updated}"
+        );
     }
 
     #[test]

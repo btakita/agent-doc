@@ -4,6 +4,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.514
 
+- **The modular JetBrains restart decline names its real blockers (GH #290).**
+  Exact-262 and exact-263 packages already carry the upgrader classes in their
+  backend module; the missing root-jar launcher is deliberate, not the final
+  obstacle. Runtime output and the permanent-loss NOTE now name the absent
+  synchronous classloader-retirement receipt and the lack of an atomic
+  backend/frontend handoff across split-mode JVMs, and explicitly say that a
+  manifest entry would not make the swap safe. The JetBrains specification
+  records why the GH #108 guard remains required on 263.7031 and why a
+  backend-only swap is invalid.
 - **A stale route-owned supervisor can re-exec when the editor has already
   reloaded (`#279`).** The typed sender-executable-replaced build-mismatch
   receipt now bypasses stale document-resolution preflight and reaches the

@@ -157,16 +157,38 @@ before the all-installed convergence.
 Restart-free dynamic upgrade is a classic-line capability
 (`#jb262dynupgrade`). Only the classic plugin jar carries the
 `JetBrainsPluginUpgradeBootstrap` `Main-Class`/`Agent-Class` launcher, and that
-launcher replaces one classic `agent-doc-jetbrains/` tree. The exact-262
-package is a Plugin Model v2 split-mode distribution (descriptor-only
+launcher replaces one classic `agent-doc-jetbrains/` tree. The exact-262 and
+exact-263 packages are Plugin Model v2 split-mode distributions (descriptor-only
 `agent.doc-<version>.jar` plus unversioned `lib/modules/agent.doc.*.jar`, with a
-frontend half that may run in a separate JetBrains Client) and ships no
-launcher. When a live IDE owns a 262 target, the installer therefore recognizes
-the package line from its `agent.doc-<version>.jar`, does not attempt an attach,
-replaces the plugin files on disk, and reports restart-required with the reason
-"the exact-262 modular JetBrains package has no restart-free dynamic upgrade
-entry point" (`ops.log`: `declined_by=modular_package`). It never reports the
-262 package as one that "predates restart-free dynamic upgrade support"; that
+frontend half that may run in a separate JetBrains Client) and expose no
+launcher. The upgrader classes do ship in `agent.doc.backend.jar`; their absence
+from the root manifest is not the final blocker and adding a `Main-Class` would
+not restore a safe upgrade (GH #290).
+
+JetBrains `DynamicPlugins` computes and validates a replacement state from the
+main plugin descriptor and its resolved module graph, so content modules are not
+an independently established prohibition. Agent Doc nevertheless cannot make
+the build-263 swap safe. First, the build uses
+`AwaitClassloaderUnloadAsyncPostReconfiguration`: the platform may report the
+reconfiguration call complete before proving the outgoing classloader retired,
+and the observed classic-package attempt in GH #95 left the old classloader live
+before the platform requested a restart. Awaiting that later notification is not
+a positive retirement receipt—it is a delayed failure report after replacement—
+so the GH #108 guard remains required on 263.7031. Second, the modular package is
+installed on both sides of split mode. Attaching only to the backend cannot
+atomically update `agent.doc.frontend` in the separate JetBrains Client JVM, and
+local-archive plugin synchronization supplies no cross-JVM handoff receipt.
+A backend-only swap while the client keeps the old frontend is therefore not a
+valid whole-package upgrade.
+
+When a live IDE owns either modular target, the installer recognizes the package
+line from its `agent.doc-<version>.jar`, does not attempt an attach, replaces the
+plugin files on disk, and reports restart-required. The reason names the deepest
+safety boundary—no synchronous classloader-retirement receipt and no atomic
+backend/frontend handoff—then explains that the absent launcher is deliberate
+and that invoking the already-shipped backend upgrader would not bypass those
+boundaries (`ops.log`: `declined_by=modular_package`). It never reports either
+package as one that "predates restart-free dynamic upgrade support"; that
 wording is reserved for a classic jar without a `Main-Class`. The live-jar
 probes (`#pluginbyteidentity` superseded-bytes detection, the controller's
 `editor_route` admission, the install's `#jbdynamicfalsereport` load proof and

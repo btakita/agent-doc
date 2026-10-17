@@ -1795,11 +1795,11 @@ mod tests {
         let (updated, _, created) = ensure_todo_component_in_document(content).unwrap();
         assert!(created);
         assert!(
-            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n## Backlog"),
+            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n## Backlog"),
             "{updated}"
         );
         let queue_end = updated.find("<!-- /agent:queue -->").unwrap();
-        let todo_start = updated.find("<!-- agent:todo -->").unwrap();
+        let todo_start = updated.find("<!-- agent:todo priority -->").unwrap();
         let backlog_heading = updated.find("## Backlog").unwrap();
         assert!(
             queue_end < todo_start && todo_start < backlog_heading,

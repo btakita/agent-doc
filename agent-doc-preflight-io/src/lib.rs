@@ -9745,6 +9745,54 @@ mod tests {
         );
     }
 
+    /// `#presetattralias`: the live `tasks/docs.md` marker used plural
+    /// `presets="#auth"`. The dispatch contract must carry that authorization
+    /// to Codex instead of degrading it to `item_text_only`.
+    #[test]
+    fn queue_subagent_dispatch_resolves_plural_presets_alias() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent: codex\n",
+            "prompt_presets:\n",
+            "  '#auth': I authorize you to do this.\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents presets=\"#auth\" priority go -->\n",
+            "- review and push the docs change\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let item = "review and push the docs change".to_string();
+        let entries = queue_subagent_dispatch_entries(&doc, content, &[item]).unwrap();
+        let auth = &entries[0].authorization;
+
+        assert_eq!(
+            auth.status,
+            agent_doc_queue::subagent_brief::AuthorizationStatus::Resolved
+        );
+        assert_eq!(auth.presets.len(), 1, "{auth:?}");
+        assert_eq!(auth.presets[0].name, "#auth");
+        assert_eq!(
+            auth.presets[0].body.as_deref(),
+            Some("I authorize you to do this.")
+        );
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains("Operator authorization, queue preset `#auth`"),
+            "{auth:?}"
+        );
+        assert!(
+            !auth
+                .subagent_prompt_preamble
+                .contains("No queue preset applies"),
+            "{auth:?}"
+        );
+    }
+
     /// Move every stored claim on `doc` to an already-lapsed TTL, writing the
     /// ledger row directly so expiry is deterministic (no sleeping).
     fn expire_queue_claims(root: &Path, doc: &Path) {

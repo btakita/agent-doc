@@ -1,9 +1,9 @@
 //! Component-scoped prompt policy shared by preflight and realtime steering.
 //!
-//! `agent:queue` and `agent:exchange` may both declare a default `preset` and
-//! subagent dispatch intent on their opening marker. The policy is parsed from
-//! structural components, so marker-like text in Markdown code ranges is never
-//! treated as configuration.
+//! `agent:queue` and `agent:exchange` may both declare a default `preset`
+//! (`presets` is a compatibility alias) and subagent dispatch intent on their
+//! opening marker. The policy is parsed from structural components, so
+//! marker-like text in Markdown code ranges is never treated as configuration.
 
 use agent_doc_element::element;
 
@@ -36,12 +36,18 @@ impl PromptComponentAttrs {
 
 /// The component's `preset` value, or `None` when there is no preset.
 ///
+/// `presets=` is a compatibility alias for the easy-to-make plural spelling.
+/// When both keys carry values, canonical `preset=` wins. The structural
+/// parser omits empty attributes, so `preset="" presets="#alias"` resolves the
+/// nonempty alias just as if the empty key were absent.
+///
 /// GH #227: `preset=""` is the operator's explicit "no preset" and is preserved
 /// byte for byte in the document. Every resolver must read it as no preset, so
 /// an empty (or whitespace-only) value is `None` exactly like an absent key.
 pub fn component_preset(attrs: &std::collections::HashMap<String, String>) -> Option<&str> {
     attrs
         .get("preset")
+        .or_else(|| attrs.get("presets"))
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
 }
@@ -126,6 +132,43 @@ mod tests {
                 .preset_names()
                 .collect::<Vec<_>>(),
             vec!["#push", "#auth"]
+        );
+    }
+
+    #[test]
+    fn plural_presets_attribute_is_an_alias_with_singular_precedence() {
+        let plural = concat!(
+            "<!-- agent:queue presets=\"#push #auth\" -->\n",
+            "- release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            prompt_component_attrs(plural, "queue")
+                .preset_names()
+                .collect::<Vec<_>>(),
+            vec!["#push", "#auth"]
+        );
+
+        let both = concat!(
+            "<!-- agent:queue preset=\"#canonical\" presets=\"#alias\" -->\n",
+            "- release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            prompt_component_attrs(both, "queue").preset.as_deref(),
+            Some("#canonical")
+        );
+
+        let empty_canonical = concat!(
+            "<!-- agent:queue preset=\"\" presets=\"#alias\" -->\n",
+            "- release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            prompt_component_attrs(empty_canonical, "queue")
+                .preset
+                .as_deref(),
+            Some("#alias")
         );
     }
 

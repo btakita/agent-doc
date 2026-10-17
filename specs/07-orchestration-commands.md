@@ -646,7 +646,7 @@ portable agent-doc fallback:
 
 ### Post-commit queue consumption
 
-Queue subagent authorization accepts multiple whitespace-separated references in a quoted queue `preset=` value, for example `preset="#push #auth"`. `queue brief` resolves them independently in source order, collapses duplicate canonical names at their first occurrence, preserves each structured preset's runbook, and reports every result in `authorization.presets`. Mixed resolved and unresolved references produce `status: unresolved_preset`; resolved details remain visible, but authorization still fails closed.
+Queue subagent authorization accepts multiple whitespace-separated references in a quoted queue `preset=` value, for example `preset="#push #auth"`. The compatibility alias `presets=` resolves through the same path (`#presetattralias`); when both spellings carry nonempty values, canonical `preset=` wins. `queue brief` must therefore carry a resolved queue-level `#auth` declared with either spelling into `authorization.presets`, rather than degrade the dispatch to `item_text_only` and ask the operator to repeat permission. References resolve independently in source order, duplicate canonical names collapse at their first occurrence, and each structured preset keeps its runbook. Mixed resolved and unresolved references produce `status: unresolved_preset`; resolved details remain visible, but authorization still fails closed.
 
 - **Completed multiline row residue drains with its row (`#queuemultilineclear`).** An indented Markdown continuation at or beyond a completed inline row's content column belongs to that row and drains with it. Unindented, shallow, or otherwise unowned freeform operator text remains a lossless-cleanup blocker.
 

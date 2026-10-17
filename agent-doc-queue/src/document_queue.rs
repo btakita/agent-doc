@@ -2506,7 +2506,7 @@ fn normalize_queue_tag_token(token: &str) -> String {
     if is_queue_boolean_attr(key) && value.eq_ignore_ascii_case("true") {
         return key.to_string();
     }
-    if key == "preset"
+    if matches!(key, "preset" | "presets")
         && let Some(stripped) = strip_malformed_true_suffix(value)
     {
         return format!("{key}={stripped}");

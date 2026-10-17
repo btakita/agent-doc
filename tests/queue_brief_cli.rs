@@ -105,6 +105,37 @@ fn brief_json_for_a_free_text_head_under_a_preset() {
     );
 }
 
+/// Regression for the live `tasks/docs.md` spelling: the plural component
+/// attribute used to be ignored, so Codex received `item_text_only` and asked
+/// the operator for permission even though `#auth` was present.
+#[test]
+fn brief_resolves_plural_presets_attribute_as_operator_authorization() {
+    let (_dir, doc) = write_doc(&document(
+        PRESETS,
+        "subagents presets=\"#auth\"",
+        &["review and push the docs change"],
+        &[],
+    ));
+    let output = cargo_bin_cmd!("agent-doc")
+        .args(["queue", "brief"])
+        .arg(&doc)
+        .args(["--item", "review and push the docs change", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["status"], "resolved", "{json}");
+    assert_eq!(json["presets"][0]["name"], "#auth", "{json}");
+    assert_eq!(json["presets"][0]["source"], "queue_attr", "{json}");
+    assert_eq!(
+        json["presets"][0]["body"], "I authorize you to do this.",
+        "{json}"
+    );
+    let preamble = json["subagent_prompt_preamble"].as_str().unwrap();
+    assert!(preamble.contains("Operator authorization, queue preset `#auth`"));
+    assert!(!preamble.contains("No queue preset applies"));
+}
+
 #[test]
 fn brief_without_a_queue_preset_is_item_text_only() {
     let (_dir, doc) = write_doc(&document("", "subagents", &["rename foo to bar"], &[]));

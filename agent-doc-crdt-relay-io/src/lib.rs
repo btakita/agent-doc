@@ -4654,6 +4654,14 @@ pub fn observe_replica_projection_for_file(
             ),
         );
     }
+    if projected {
+        let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
+        agent_doc_editor_transport_health_io::clear_after_proven_delivery(
+            &project_root,
+            file,
+            "crdt_replica_projection_observed",
+        )?;
+    }
     Ok(Some(projected))
 }
 
@@ -5697,6 +5705,27 @@ pub struct ReplicaSignalOutcome {
 /// replica-side signal that proves the requested revision reached disk.
 const NATIVE_EDITOR_SAVE_TRANSPORT: &str = "native_editor_save_request";
 
+/// Classify the aggregate relay result for transport-health accounting.
+///
+/// An exhausted build mismatch is still definitive for authority recovery: the
+/// old listener cannot serve the new controller. It is not evidence that the
+/// endpoint refuses this document, though, so it resets an older refusal run as
+/// an unsupported transport generation instead of extending it (GH #284).
+fn replica_signal_transport_health_failure(
+    outcome: &ReplicaSignalOutcome,
+) -> Option<agent_doc_ipc_protocol::SocketDeliveryFailure> {
+    let document_refusals = outcome
+        .definitive_refusals
+        .saturating_sub(outcome.build_mismatches.len());
+    if document_refusals > 0 {
+        Some(agent_doc_ipc_protocol::SocketDeliveryFailure::Rejected)
+    } else if !outcome.build_mismatches.is_empty() {
+        Some(agent_doc_ipc_protocol::SocketDeliveryFailure::Unsupported)
+    } else {
+        None
+    }
+}
+
 fn record_replica_signal_transport_health(
     file: &Path,
     delivery_id: Option<&str>,
@@ -5725,15 +5754,15 @@ fn record_replica_signal_transport_health(
         )?;
         return Ok(());
     }
-    if outcome.definitive_refusals == 0 {
+    let Some(failure) = replica_signal_transport_health_failure(outcome) else {
         return Ok(());
-    }
+    };
     let degraded = agent_doc_editor_transport_health_io::record_failure(
         &project_root,
         file,
         delivery_id,
         transport,
-        agent_doc_ipc_protocol::SocketDeliveryFailure::Rejected,
+        failure,
         |consecutive_failures| {
             agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
                 consecutive_failures,
@@ -7242,6 +7271,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_exhausted_build_mismatch_resets_transport_health_refusals() {
+        let mismatch_route = ReplicaSignalRoute {
+            editor_id: "intellij:upgrade-handoff".to_string(),
+            editor_pid: 4242,
+        };
+        let mismatch = ReplicaSignalOutcome {
+            found: 1,
+            notified: 0,
+            build_mismatches: vec![mismatch_route],
+            build_mismatch_refusals: Vec::new(),
+            generation_mismatches: 0,
+            definitive_refusals: 1,
+            dead_endpoints: Vec::new(),
+            endpoint_unregistered: false,
+        };
+        assert_eq!(
+            replica_signal_transport_health_failure(&mismatch),
+            Some(agent_doc_ipc_protocol::SocketDeliveryFailure::Unsupported),
+            "a version handoff is terminal for authority but is not a document refusal"
+        );
+
+        let refusal = ReplicaSignalOutcome {
+            build_mismatches: Vec::new(),
+            ..mismatch
+        };
+        assert_eq!(
+            replica_signal_transport_health_failure(&refusal),
+            Some(agent_doc_ipc_protocol::SocketDeliveryFailure::Rejected),
+        );
+    }
+
     /// The force-disk guard: silence is never promoted to proof. A transport
     /// failure with no typed handshake answer stays retryable.
     #[test]
@@ -8284,6 +8345,70 @@ mod tests {
         assert!(!replay.applied);
         assert_eq!(replay.cell_id, first.cell_id);
         assert_eq!(replay.content, first.content);
+    }
+
+    #[test]
+    fn canonical_replica_projection_clears_transport_health_episode() {
+        let (dir, doc) = temp_doc("projection-recovers-health.md");
+        let original = std::fs::read_to_string(&doc).unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:projection-recovers-health";
+        register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("live editor should register with the relay");
+
+        let updated = format!("{original}\ncanonical response\n");
+        apply_cp_write_for_file(&doc, &original, &updated, "test_projection_health_recovery")
+            .unwrap()
+            .expect("canonical write should use the live relay");
+        let pull = pull_replica_updates_for_file(&doc, identity)
+            .unwrap()
+            .expect("registered editor should receive the canonical response");
+
+        for attempt in 0..2 {
+            agent_doc_editor_transport_health_io::record_failure(
+                dir.path(),
+                &doc,
+                Some(&format!("upgrade-{attempt}")),
+                "crdt_replica_notify",
+                agent_doc_ipc_protocol::SocketDeliveryFailure::Rejected,
+                |count| count >= agent_doc_ipc_protocol::EDITOR_TRANSPORT_DEGRADE_FAILURE_THRESHOLD,
+            )
+            .unwrap();
+        }
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(
+            agent_doc_sqlite::state_store::load_editor_transport_health_from_db(
+                &conn,
+                &document_hash,
+            )
+            .unwrap()
+            .is_some(),
+            "precondition: the upgrade refusals opened a health episode"
+        );
+
+        let mut projected = false;
+        for update in pull.updates {
+            projected |= observe_replica_projection_for_file(
+                &doc,
+                identity,
+                &update.expected_content_hash,
+            )
+            .unwrap()
+            .unwrap_or(false);
+        }
+        assert!(projected, "the editor must prove the canonical projection");
+        assert!(
+            agent_doc_sqlite::state_store::load_editor_transport_health_from_db(
+                &conn,
+                &document_hash,
+            )
+            .unwrap()
+            .is_none(),
+            "canonical reprojection must recover degradation, recycle and refusal votes"
+        );
     }
 
     #[test]

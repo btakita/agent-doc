@@ -609,6 +609,17 @@ pub const EDITOR_TRANSPORT_DEGRADE_FAILURE_THRESHOLD: u64 = 2;
 /// once more (extending it and restarting the window).
 pub const EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS: u64 = 60;
 
+/// Maximum silence between failures that still belongs to one transport-health
+/// episode. Once the endpoint is eligible for a probe again, an unrelated later
+/// failure starts fresh instead of inheriting degradation, recycle and refusal
+/// votes from an idle document's previous episode.
+///
+/// This deliberately shares the endpoint probe horizon: durable health is an
+/// account of a current delivery episode, not a lifetime counter across editor
+/// or controller upgrades (GH #284).
+pub const EDITOR_TRANSPORT_HEALTH_EPISODE_MAX_GAP_SECS: u64 =
+    EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS;
+
 /// Pure verdict: is the editor endpoint unregistered for delivery, given its
 /// trailing refusal run and the seconds since the most recent recorded failure?
 pub const fn editor_endpoint_unregistered(

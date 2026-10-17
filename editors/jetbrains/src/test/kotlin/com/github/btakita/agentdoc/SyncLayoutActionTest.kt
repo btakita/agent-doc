@@ -75,7 +75,21 @@ class SyncLayoutActionTest {
     }
 
     @Test
-    fun `manual sync uses current editor window and submits without terminal callback`() {
+    fun `manual layout submission awaits a terminal command receipt`() {
+        val source = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt",
+        ).toFile().readText()
+        val submit = source.substringAfter("fun submitSyncTmuxLayout(")
+            .substringBefore("fun submitFocusDocumentPane(")
+
+        assertTrue(submit.contains("syncTmuxLayoutCommandSubmitRequest("))
+        assertTrue(submit.contains("EditorCommandSubmitAsync.token"))
+        assertTrue(submit.contains("awaitCommandSubmitTerminal("))
+        assertFalse(submit.contains("paneLayoutDesiredStatePublishRequest("))
+    }
+
+    @Test
+    fun `manual sync uses the current editor window before client submission`() {
         val source = java.nio.file.Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt",
         ).toFile().readText()

@@ -505,7 +505,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         columnOrder = syncColumnOrder(editorLayout),
                     )
                     if (receipt.exitCode != 0) {
-                        LOG.warn("[sync] Project Controller async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$exactVisibleColumns output=${receipt.output}")
+                        LOG.warn("[sync] Project Controller projection failed projectRoot=$projectRoot focus=$focusedFile columns=$exactVisibleColumns output=${receipt.output}")
                         if (notify) {
                             val detail = syncFailureMessage(receipt.output)
                             TerminalUtil.showEditorFailureStatus(
@@ -520,7 +520,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                             )
                         }
                     } else {
-                        LOG.info("[sync] Project Controller async submit accepted: ${receipt.output.take(500)}")
+                        LOG.info("[sync] Project Controller projection completed: ${receipt.output.take(500)}")
                     }
                 } catch (ex: Exception) {
                     if (notify) {

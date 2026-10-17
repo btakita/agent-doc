@@ -253,6 +253,8 @@ class CpRouteClientCommandPlaneTest {
             noAutostart = false,
             exactVisible = true,
             commandId = "cmd-sync",
+            columnOrder = "editor",
+            clientId = "jetbrains@test-pid:1",
         )
         assertEquals("editor_command_submit", request.get("command").asString)
         assertEquals("/proj/tasks/two.md", request.get("file").asString)
@@ -272,6 +274,8 @@ class CpRouteClientCommandPlaneTest {
         assertEquals(false, payload.get("no_autostart").asBoolean)
         assertEquals(true, payload.get("exact_visible").asBoolean)
         assertEquals("manual", payload.get("caller_kind").asString)
+        assertEquals("editor", payload.get("column_order").asString)
+        assertEquals("jetbrains@test-pid:1", payload.get("client_id").asString)
     }
 
     @Test
@@ -573,6 +577,18 @@ assertEquals(750L, submit.get("deadline_ms").asLong)
 
         assertEquals(0, result?.exitCode)
         assertEquals("routed ok", result?.output)
+    }
+
+    @Test
+    fun `terminal sync refusal names the sync command in user feedback`() {
+        val result = CpRouteClient.resolveCommandSubmitTerminalData(
+            projectionData("rejected", true, "", reason = "projection_retry_pending"),
+            "cmd-1",
+            "sync_tmux_layout",
+        )
+
+        assertEquals(1, result?.exitCode)
+        assertEquals("sync_tmux_layout rejected: projection_retry_pending", result?.output)
     }
 
     @Test

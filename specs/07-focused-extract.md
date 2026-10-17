@@ -51,8 +51,11 @@ agent-doc extract SOURCE TARGET --selection legal-selection.json
 ```
 
 The JSON preview names the deterministic operation ID, whether the destination
-would be created, and every component/item/node to move. Re-run with `--apply`
-to execute that exact selection. Selectors can be combined.
+would be created, every component/item/node to move, and
+`"source_action": "remove_on_apply"`. Re-run with `--apply` to execute that
+exact selection: the target receives the selected material first, then that
+material is removed from the source. Preview never mutates either document.
+Selectors can be combined.
 
 An operator does not need to discover IDs or author a manifest. They may write
 an imperative request naturally in the source document, for example, “Extract

@@ -389,7 +389,7 @@ Tracked-work extraction is Markdown-structural. Checklist-shaped text inside fen
 
 **Prompt-preset attribute alias (`#presetattralias`).** `presets=` is a recognized compatibility alias for the canonical prompt-component `preset=` attribute on `agent:queue` and `agent:exchange`; it is not an unknown-attribute typo. Every preset consumer, including subagent authorization, queue selection, continuation, and realtime steering, reads the same effective value. When both spellings carry nonempty values, canonical `preset=` wins. An empty alias has the same no-default meaning as `preset=""` when the other spelling is absent. Binary marker rewrites preserve the operator's spelling.
 
-One or more `agent:queue` components hold batches of prompts consumed sequentially. The default template scaffolds one unkeyed queue between `exchange` and `pending`; that legacy shape remains the implicit `default` queue.
+One or more `agent:queue` components hold batches of prompts consumed sequentially. The default template scaffolds one unkeyed `<!-- agent:queue priority subagents -->` queue between `exchange` and `backlog`; it stable-sorts id-backed work by source priority and dispatches eligible heads to background subagents. The unkeyed shape remains the implicit `default` queue. Existing explicitly authored queue markers retain their attributes and behavior; this default applies when Agent Doc creates a new scaffold.
 
 **Syntax:** hybrid list items and fenced prompts.
 

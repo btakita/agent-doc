@@ -10647,8 +10647,17 @@ mod tests {
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[1].patch_mode(), Some("append"));
+        assert_eq!(
+            components[2].attrs.get("priority").map(String::as_str),
+            Some("")
+        );
+        assert_eq!(
+            components[2].attrs.get("subagents").map(String::as_str),
+            Some("")
+        );
+        assert_eq!(components[2].attrs.len(), 2);
         assert!(
-            components[2..]
+            components[3..]
                 .iter()
                 .all(|component| component.attrs.is_empty())
         );

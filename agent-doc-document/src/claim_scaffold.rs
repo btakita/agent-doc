@@ -10,7 +10,7 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "<!-- agent:exchange patch=append -->\n",
     "<!-- /agent:exchange -->\n",
     "\n## Queue\n\n",
-    "<!-- agent:queue -->\n",
+    "<!-- agent:queue priority subagents -->\n",
     "<!-- /agent:queue -->\n",
     "\n## Backlog\n\n",
     "<!-- agent:backlog -->\n",
@@ -143,8 +143,17 @@ mod tests {
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[1].patch_mode(), Some("append"));
+        assert_eq!(
+            components[2].attrs.get("priority").map(String::as_str),
+            Some("")
+        );
+        assert_eq!(
+            components[2].attrs.get("subagents").map(String::as_str),
+            Some("")
+        );
+        assert_eq!(components[2].attrs.len(), 2);
         assert!(
-            components[2..]
+            components[3..]
                 .iter()
                 .all(|component| component.attrs.is_empty())
         );
@@ -193,6 +202,13 @@ mod tests {
             ],
             "claim must use the same canonical component sequence for non-empty templates"
         );
+        let queue = agent_doc_element::element::parse(&scaffolded)
+            .expect("default components must remain parseable")
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .expect("default scaffold must contain queue");
+        assert_eq!(queue.attrs.get("priority").map(String::as_str), Some(""));
+        assert_eq!(queue.attrs.get("subagents").map(String::as_str), Some(""));
     }
 
     #[test]

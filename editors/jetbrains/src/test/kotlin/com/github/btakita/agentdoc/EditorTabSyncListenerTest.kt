@@ -297,6 +297,35 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `focus projection captures editor surface before background scheduling`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val focusProjection =
+            source
+                .substringAfter("private fun requestFocusProjection(")
+                .substringBefore("private fun shutdown()")
+        val surfaceCapture = focusProjection.indexOf("val focusWindow =")
+        val surfaceIdCapture =
+            focusProjection.indexOf("JetBrainsEditorSurfaces.forEditorWindow(project, focusWindow)")
+        val backgroundSchedule = focusProjection.indexOf("focusProjectionExecutor.schedule(")
+
+        assertTrue(surfaceCapture >= 0)
+        assertTrue(surfaceIdCapture > surfaceCapture)
+        assertTrue(backgroundSchedule >= 0)
+        assertTrue(surfaceIdCapture < backgroundSchedule)
+        val backgroundTask = focusProjection.substring(backgroundSchedule)
+        assertFalse(backgroundTask.contains("manager.currentWindow"))
+        assertFalse(backgroundTask.contains("JetBrainsEditorSurfaces.forEditorWindow"))
+        assertTrue(backgroundTask.contains("continueAfterGate(\"before_root_resolution\")"))
+    }
+
+    @Test
     fun `focus projection installs a handoff lease only after exact pane selection`() {
         assertTrue(
             EditorTabSyncListener.focusProjectionApplied(

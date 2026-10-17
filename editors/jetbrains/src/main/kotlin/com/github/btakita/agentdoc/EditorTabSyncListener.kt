@@ -1428,6 +1428,15 @@ private data class CapturedSurface(
                 return@synchronized null
             }
             val requestedGeneration = focusProjectionGeneration.incrementAndGet()
+            // FileEditorManagerEx.currentWindow and editor-window surface discovery are EDT-only
+            // platform reads. Capture them while handling the editor event, then carry the stable
+            // surface id into the delayed transport task.
+            val focusWindow = FileEditorManagerEx.getInstanceEx(project).let { manager ->
+                manager.currentWindow?.takeIf { it.selectedFile?.path == file.path }
+                    ?: manager.windows.firstOrNull { it.selectedFile?.path == file.path }
+            }
+            val focusSurfaceId =
+                JetBrainsEditorSurfaces.forEditorWindow(project, focusWindow).surfaceId
             try {
                 val scheduled =
                     focusProjectionExecutor.schedule(
@@ -1458,13 +1467,6 @@ private data class CapturedSurface(
                             if (!continueAfterGate("before_root_resolution")) {
                                 return@focus
                             }
-
-                            val focusWindow = FileEditorManagerEx.getInstanceEx(project).let { manager ->
-                                manager.currentWindow?.takeIf { it.selectedFile?.path == file.path }
-                                    ?: manager.windows.firstOrNull { it.selectedFile?.path == file.path }
-                            }
-                            val focusSurfaceId =
-                                JetBrainsEditorSurfaces.forEditorWindow(project, focusWindow).surfaceId
 
                             // The focused document, not the spanning editor surface, owns the
                             // controller root for this immediate handoff. This is what lets a

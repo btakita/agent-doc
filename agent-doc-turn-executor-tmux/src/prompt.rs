@@ -521,6 +521,16 @@ pub fn prompt_line_body_is_dim_placeholder(raw_line: &str) -> bool {
     codex_prompt_line_body_starts_dim(raw_line)
 }
 
+/// Whether one raw composer line starts with harness-rendered ghost text.
+///
+/// Terminal-native themes render ghost text with SGR faint (`2`), while RGB
+/// themes such as GrokNight use an explicit gray foreground instead. Grok Build
+/// marks the ghost with SGR italic (`3`) in both cases, so faint-or-italic is the
+/// portable boundary between a visual suggestion and committed operator input.
+pub fn prompt_line_body_is_ghost_placeholder(raw_line: &str) -> bool {
+    prompt_line_body_style(raw_line).is_some_and(|(faint, italic)| faint || italic)
+}
+
 fn is_safe_codex_placeholder_token(word: &str) -> bool {
     if word == "@filename" {
         return true;
@@ -537,7 +547,12 @@ fn is_safe_codex_placeholder_token(word: &str) -> bool {
 }
 
 fn codex_prompt_line_body_starts_dim(raw_line: &str) -> bool {
+    prompt_line_body_style(raw_line).is_some_and(|(faint, _)| faint)
+}
+
+fn prompt_line_body_style(raw_line: &str) -> Option<(bool, bool)> {
     let mut faint = false;
+    let mut italic = false;
     let mut visible = Vec::new();
     let mut chars = raw_line.char_indices().peekable();
     while let Some((_, ch)) = chars.next() {
@@ -547,7 +562,7 @@ fn codex_prompt_line_body_starts_dim(raw_line: &str) -> bool {
             for (_, seq_ch) in chars.by_ref() {
                 if seq_ch.is_ascii_alphabetic() {
                     if seq_ch == 'm' {
-                        apply_sgr_sequence(&sequence, &mut faint);
+                        apply_sgr_sequence(&sequence, &mut faint, &mut italic);
                     }
                     break;
                 }
@@ -555,41 +570,39 @@ fn codex_prompt_line_body_starts_dim(raw_line: &str) -> bool {
             }
             continue;
         }
-        visible.push((ch, faint));
+        visible.push((ch, faint, italic));
     }
 
-    let Some(prompt) = visible
+    let prompt = visible
         .iter()
-        .position(|(ch, _)| matches!(ch, '>' | '›' | '❯'))
-    else {
-        return false;
-    };
+        .position(|(ch, _, _)| matches!(ch, '>' | '›' | '❯'))?;
     let mut body = &visible[prompt + 1..];
     body = body
         .iter()
-        .position(|(ch, _)| !ch.is_whitespace())
+        .position(|(ch, _, _)| !ch.is_whitespace())
         .map_or(&[][..], |first| &body[first..]);
 
     // Claude Code renders its IDE-context chip inside the composer row. It is
     // normal-intensity chrome, so inspect the first glyph after the chip rather
     // than mistaking `[` for the body of a dynamic dim autosuggestion.
-    if body.first().is_some_and(|(ch, _)| *ch == '[')
-        && body.get(1).is_some_and(|(ch, _)| *ch == '⧉')
-        && let Some(close) = body.iter().position(|(ch, _)| *ch == ']')
+    if body.first().is_some_and(|(ch, _, _)| *ch == '[')
+        && body.get(1).is_some_and(|(ch, _, _)| *ch == '⧉')
+        && let Some(close) = body.iter().position(|(ch, _, _)| *ch == ']')
     {
         body = &body[close + 1..];
         body = body
             .iter()
-            .position(|(ch, _)| !ch.is_whitespace())
+            .position(|(ch, _, _)| !ch.is_whitespace())
             .map_or(&[][..], |first| &body[first..]);
     }
 
-    body.first().is_some_and(|(_, faint)| *faint)
+    body.first().map(|(_, faint, italic)| (*faint, *italic))
 }
 
-fn apply_sgr_sequence(sequence: &str, faint: &mut bool) {
+fn apply_sgr_sequence(sequence: &str, faint: &mut bool, italic: &mut bool) {
     if sequence.is_empty() {
         *faint = false;
+        *italic = false;
         return;
     }
     let codes = sequence
@@ -599,9 +612,14 @@ fn apply_sgr_sequence(sequence: &str, faint: &mut bool) {
     let mut index = 0;
     while index < codes.len() {
         match codes[index] {
-            0 => *faint = false,
+            0 => {
+                *faint = false;
+                *italic = false;
+            }
             2 => *faint = true,
+            3 => *italic = true,
             22 => *faint = false,
+            23 => *italic = false,
             38 | 48 => {
                 if codes.get(index + 1) == Some(&2) {
                     index += 4;
@@ -1048,6 +1066,33 @@ in @filename
         assert!(!prompt_line_body_is_dim_placeholder(
             "\x1b[2m  some dim transcript text\x1b[0m"
         ));
+    }
+
+    #[test]
+    fn grok_rgb_ghost_suggestion_is_italic_while_typed_text_is_not() {
+        // Grok Build's RGB themes render ghost suggestions in an explicit gray
+        // foreground plus italic, rather than SGR faint. The box border and
+        // prompt glyph may have unrelated styling; only the first body glyph is
+        // authoritative.
+        let ghost = concat!(
+            "\x1b[38;2;88;88;88m│\x1b[0m ",
+            "\x1b[38;2;122;162;247m❯\x1b[0m ",
+            "\x1b[3;38;2;88;88;88magent-doc tasks/sdk/sdk-pr.md\x1b[0m ",
+            "\x1b[38;2;88;88;88m│\x1b[0m",
+        );
+        assert!(prompt_line_body_is_ghost_placeholder(ghost));
+        assert!(
+            !prompt_line_body_is_dim_placeholder(ghost),
+            "RGB ghost styling is italic but intentionally not faint"
+        );
+
+        let typed = concat!(
+            "\x1b[38;2;88;88;88m│\x1b[0m ",
+            "\x1b[38;2;122;162;247m❯\x1b[0m ",
+            "\x1b[38;2;192;202;245magent-doc tasks/sdk/sdk-pr.md\x1b[0m ",
+            "\x1b[38;2;88;88;88m│\x1b[0m",
+        );
+        assert!(!prompt_line_body_is_ghost_placeholder(typed));
     }
 
     #[test]

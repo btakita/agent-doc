@@ -13,6 +13,11 @@ uses the document-bound ID. Native streaming is not advertised.
 Interactive launch and resume use `HarnessConfig::grok` and the existing
 supervisor scopes. Grok's boxed composer is ready only when empty, structurally
 complete, and free of active cancel/stop evidence or unrecognized footer UI.
+The box may contain predicted next-prompt ghost text while the input buffer is
+still empty. Route preserves ANSI until classification: Grok's italic ghost
+(faint in terminal-native themes, explicit light gray in RGB themes) is
+`ReadyEmpty`, while the same visible text without ghost styling is an
+`OperatorDraft` and remains protected from injection.
 The Grok skill is rendered from the shared workflow; its passive hooks require
 connected MCP admission/finalize and in-turn queue continuation. The installer
 writes `[mcp_servers.agent-doc]` as `command = "agent-doc"`,

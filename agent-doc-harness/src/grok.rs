@@ -20,9 +20,10 @@ pub fn blocker(output: &str) -> Option<String> {
 }
 
 pub fn project(output: &str) -> PaneComposerProjection {
-    let lines: Vec<_> = output
-        .lines()
-        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+    let raw_lines: Vec<_> = output.lines().collect();
+    let lines: Vec<_> = raw_lines
+        .iter()
+        .map(|line| agent_doc_turn_executor_tmux::prompt::strip_ansi(line))
         .collect();
     let Some(start) = lines
         .iter()
@@ -60,7 +61,15 @@ pub fn project(output: &str) -> PaneComposerProjection {
     let Some(end) = end else {
         return PaneComposerProjection::Absent;
     };
-    if !draft.is_empty() {
+    // Grok Build's next-prompt suggestion is visual ghost text, not textarea
+    // state. Terminal-native themes mark it faint+italic; RGB themes use a
+    // light-gray foreground+italic. Preserve the raw ANSI until this boundary:
+    // stripping it first makes the ghost indistinguishable from typed input and
+    // strands dispatch-only reopen behind `submit_or_clear_pane_draft`.
+    let first_body_is_ghost = raw_lines.get(start + 1).is_some_and(|line| {
+        agent_doc_turn_executor_tmux::prompt::prompt_line_body_is_ghost_placeholder(line)
+    });
+    if !draft.is_empty() && !first_body_is_ghost {
         return PaneComposerProjection::OperatorDraft { preview: draft };
     }
     // Only the observed idle footer may follow the box. Unknown modal/help/auth
@@ -148,6 +157,49 @@ mod tests {
         assert_eq!(
             project_pane_composer(&format!("Waiting for response… 1.0s [stop]\n{IDLE}"), &h),
             PaneComposerProjection::Busy
+        );
+    }
+
+    #[test]
+    fn next_prompt_ghost_is_ready_empty_but_same_visible_typed_text_is_a_draft() {
+        let h = HarnessConfig::grok();
+        let visible = "agent-doc tasks/sdk/sdk-pr.md";
+
+        // GrokNight and other RGB themes render predicted next-prompt text as
+        // light gray + italic, without SGR faint.
+        let rgb_ghost = IDLE.replace(
+            "│ ❯                      │",
+            &format!(
+                "\x1b[38;2;88;88;88m│\x1b[0m \x1b[38;2;122;162;247m❯\x1b[0m \
+                 \x1b[3;38;2;88;88;88m{visible}\x1b[0m │"
+            ),
+        );
+        assert!(matches!(
+            project_pane_composer(&rgb_ghost, &h),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+
+        // The terminal-native theme uses faint+italic for the same ghost.
+        let terminal_ghost = IDLE.replace(
+            "│ ❯                      │",
+            &format!("│ ❯ \x1b[2;3m{visible}\x1b[0m │"),
+        );
+        assert!(matches!(
+            project_pane_composer(&terminal_ghost, &h),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+
+        // Color alone is not enough. The same visible text at normal intensity
+        // is committed operator input and must remain protected.
+        let typed = IDLE.replace(
+            "│ ❯                      │",
+            &format!("│ ❯ \x1b[38;2;192;202;245m{visible}\x1b[0m │"),
+        );
+        assert_eq!(
+            project_pane_composer(&typed, &h),
+            PaneComposerProjection::OperatorDraft {
+                preview: visible.to_string(),
+            },
         );
     }
 }

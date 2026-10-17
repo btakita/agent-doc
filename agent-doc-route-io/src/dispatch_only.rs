@@ -1760,6 +1760,38 @@ mod tests {
     }
 
     #[test]
+    fn grok_ghost_suggestion_does_not_raise_the_operator_draft_unblocker() {
+        let harness = HarnessConfig::grok();
+        let visible = "agent-doc tasks/sdk/sdk-pr.md";
+        let ghost = format!(
+            "╭──╮\n│ ❯ \x1b[3;38;2;88;88;88m{visible}\x1b[0m │\n╰──╯\n\
+             Shift+Tab:mode │ Ctrl+x:shortcuts\n"
+        );
+        let projection = agent_doc_harness::project_pane_composer(&ghost, &harness);
+        assert!(matches!(
+            projection,
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+        assert_eq!(
+            dispatch_only_starting_pane_blocker(&projection, "agent-doc /abs/tasks/sdk/sdk-pr.md"),
+            StartingPaneBlocker::Booting,
+            "visual ghost text must continue through readiness instead of asking the operator to submit or clear it"
+        );
+
+        let typed = ghost.replace("\x1b[3;38;2;88;88;88m", "\x1b[38;2;192;202;245m");
+        let projection = agent_doc_harness::project_pane_composer(&typed, &harness);
+        assert!(matches!(
+            projection,
+            PaneComposerProjection::OperatorDraft { .. }
+        ));
+        assert_eq!(
+            dispatch_only_starting_pane_blocker(&projection, "agent-doc /abs/tasks/sdk/sdk-pr.md"),
+            StartingPaneBlocker::OperatorDraft,
+            "real typed input must retain the exact submit-or-clear safety blocker"
+        );
+    }
+
+    #[test]
     fn agent_addressing_is_a_terminal_misdelivery_blocker_not_a_draft() {
         assert_eq!(
             dispatch_only_starting_pane_blocker(

@@ -231,6 +231,16 @@ choices:
 ```
 
 Please answer these five requests. The npm login is the only time-sensitive one because its CLI session is already polling.
+
+### Re: #rjrh — gpt-5 · 2026-10-17T15:23-04:00
+
+`#rjrh` remains blocked on the active npm web-login handoff. The worker is still holding its polling CLI session open; no completion or expiry output has arrived, so publishing the three packages or enabling the downstream workflow steps would be unsafe to claim.
+
+Complete npm login and 2FA at:
+
+https://www.npmjs.com/login?next=/login/cli/27269c4c-95bd-482b-b6fb-8ddfb5e12a00
+
+Then tell me to resume `#rjrh`. If you do not want to authenticate, tell me to cancel the waiting login and leave the publication item open. The existing `#rjrh` TODO remains the operator handoff.
 <!-- agent:boundary:5d323eb2 -->
 <!-- /agent:exchange -->
 
@@ -261,7 +271,7 @@ Please answer these five requests. The npm login is the only time-sensitive one 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#rappstackdevtypescript] rappstack/dev TypeScript 7 config migration: update the 30 NodeNext tsconfigs to pair module=NodeNext with moduleResolution=NodeNext, remove the deleted downlevelIteration option, and run every package type-check so the newly pinned compiler becomes a usable repo-wide gate
-- [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev (fixes committed at 9ddb68d, currently only in the local yalc store). Needs npm 2FA. This is the sole remaining blocker on #ciappts — once published, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
+- [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev (fixes committed at 9ddb68d, currently only in the local yalc store). BLOCKED on the active npm web login and 2FA handoff; after authentication, publish the packages and uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml. This is the sole remaining blocker on #ciappts
 - [ ] [#fhmig] Migrate the freehold-scoped items (#sbv9, #nd8n, #dj8c, #p0rw, #k0ye, #50fc) out of tasks/brookebrodack-dev.md into tasks/software/freehold.md, whose agent:backlog is currently EMPTY. The dispatch repo was renamed + transferred to freehold-hub/freehold (submodule src/freehold); this document should keep only brookebrodack-dev site/guestbook scope. Deferred this cycle: tasks/software/freehold.md is foreign-owned by pane %27
 - [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #k0ye. Operator input required
 - [ ] [#j0ee] Pick the moderation model empirically once the key exists: `OPENAI_API_KEY=... bun scripts/guestbook-model-bench.ts gpt-4o-mini gpt-5-nano gpt-5.4-nano gpt-5.4-mini gpt-5.6-luna` and take the cheapest/fastest with UNSAFE=0, then set OPENAI_MODEL on both surfaces

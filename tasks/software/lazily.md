@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a132ff-795c-7343-b9b7-11db2db32d87
+  codex: 01a14afe-0212-7da3-8343-b1f29934e5e0
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -577,19 +577,44 @@ choices:
 **Deferred:** dispatched to subagent:lzbetascope under an active claim; it is reconciling the promotion prerequisites and will return the concrete outcome or remaining gate.
 
 The artifact-purge worker is waiting on the plan choice above. The document exchange remains above its compaction threshold, but the active queue was not stalled for compaction. Preflight's two legacy gated-in-backlog items remain individually triaged rather than bulk-migrated past the review legibility target.
+
+### Re: CONTRIBUTING rollout and Beta scope approval — gpt-5 · 2026-10-17T19:01:08-04:00
+
+> **Queue prompt:** [#lzgenericreadmeincident]: Create a CONTRIBUTING.md file for each lazily repo. Extract anything in README.md belonging to CONTRIBUTING.md into CONTRIBUTING.md. README.md should link to CONTRIBUTING.md.
+
+> **Operator note:** Create a CONTRIBUTING.md file for each lazily repo. Extract anything in README.md belonging to CONTRIBUTING.md into CONTRIBUTING.md. README.md should link to CONTRIBUTING.md.
+
+Completed and integrated across all 13 Lazily repositories. Each repository now has CONTRIBUTING.md, contributor-focused material was moved out of README.md, and README.md links to the new guide. Only those two paths changed for the rollout.
+
+Main commits are: cpp 3bcc7af, cs 6ffe2ef, dart 97fb966, formal fb5fe00, gd defc87f, go 0a5477f, js abff01e, kt 2309624, py f5bc0d2, react 2cb6a85, rs d8621d0, spec 116a488, and zig 6159314. The spec documentation commit was cleanly replayed atop the previously integrated Phase 6 commit before its fast-forward.
+
+The full verification exposed genuine generated coverage-table drift in lazily-gd and lazily-formal. I ran the canonical generator, confirmed it changed only the previously documented honest Phase 2 marks, and pushed follow-up commits 3e8270d and 0b30973 to both their task branches and main. After that correction, lazily-spec make check passed completely with 420 pytest cases plus all profile, evidence, reachability, coverage, fixture, schema, and formal checks.
+
+Worker verification also passed git diff --check in all 13 repositories and make check in cpp, cs, formal, gd, go, js, kt, py, react, rs, and zig. The remaining lazily-dart check failure predates this documentation work: Dart 3.13.5 reports 134 tracked Dart files requiring formatting. That red baseline is captured as actionable follow-up #lzdartformatbaseline rather than waived. Current post-push CI is green for gd and react and queued or running elsewhere; formal has no Actions workflow.
+
+The README-only Transport & FFI deltas in the older dirty rs and kt worktrees match the intentional generated coverage corrections already documented in this session, so I preserved those worktrees and did not restore the files. #lzgenericreadmeincident is complete.
+
+> **Queue prompt:** [#lzbetascope]: approved
+
+> **Operator note:** approved
+
+The approval resolves #lzbetascope and its operator TODO. It does not prematurely execute Phase 7. #lzcorebeta1 remains gated because the profile is still candidate, no immutable cohort manifest exists, only one candidate cohort tag exists (v0.42.0 from 2026-10-15), neither two RC cohorts nor the four-week freeze has been satisfied, and Dart 0.34.0 remains unpublished on pub.dev. The reserved public promise remains: Lazily Core is Beta; Lazily Modules graduate independently.
+
+I also triaged the two legacy gated-in-backlog items. #lzcohortrelease is now a proper review gate because it waits on the explicit irreversible pub.dev decision. #gh249builddir is returned to actionable backlog because #lzcommitpresetresolve is complete and its commit/push blocker is stale.
+
+The previously recorded Dart-publication and artifact-purge choices remain open. No Dart publication or artifact deletion occurred. The exchange remains above its compaction threshold, but the active queue was not stalled for compaction.
 <!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- do [#lzcohortrelease]
-- ~~[#lzcoreciactivationfixes]: spec side~~
-- ~~[#lzcommitpresetresolve]: done: see .agent-doc/project.md~~
-- [#lzgenericreadmeincident]: Create a CONTRIBUTING.md file for each lazily repo. Extract anything in README.md belonging to CONTRIBUTING.md into CONTRIBUTING.md. README.md should link to CONTRIBUTING.md.
-- ~~[#lzrustpublish]: Use chromium-bridge to configure.~~
-- [#lzagentdocartifactpurge]: approved
-- [#lzbetascope]: approved
+- ~~do [#lzcohortrelease]~~
+- ~~[#lzgenericreadmeincident]: Create a CONTRIBUTING.md file for each lazily repo. Extract anything in README.md belonging to CONTRIBUTING.md into CONTRIBUTING.md. README.md should link to CONTRIBUTING.md.~~
+- 🚧 [#lzagentdocartifactpurge]: approved
+- ~~[#lzbetascope]: approved~~
+- do [#lzdartformatbaseline]
+- do [#gh249builddir]
 <!-- /agent:queue -->
 
 ## Todo
@@ -598,33 +623,32 @@ The artifact-purge worker is waiting on the plan choice above. The document exch
 - [ ] [#lzcohortrelease] Publish lazily-dart 0.34.0 to pub.dev under your login for [#lzcohortrelease]
 - [x] [#lzcoreciactivationfixes] Choose the spec-side or binding-side Phase 6 caller design for [#lzcoreciactivationfixes]
 - [x] [#lzcommitpresetresolve] Define or replace the queue-wide `#spec-test-commit-push` authorization for [#lzcommitpresetresolve]
-- [ ] [#lzgenericreadmeincident] Inspect the generated README rollups and decide whether to restore them for [#lzgenericreadmeincident]
+- [x] [#lzgenericreadmeincident] Inspect the generated README rollups and decide whether to restore them for [#lzgenericreadmeincident]
 - [x] [#lzrustpublish] Configure crates.io Trusted Publishing for future lazily-rs tag releases for [#lzrustpublish]
 - [ ] [#lzgithubbudget20] Add a valid payment method and set the GitHub Actions budget requested by [#lzgithubbudget20]
 - [ ] [#lzagentdocartifactpurge] Choose and explicitly authorize an artifact-purge plan after the refreshed handoff is integrated for [#lzagentdocartifactpurge]
-- [ ] [#lzbetascope] Approve or decline Lazily Core Beta promotion after its gates are green for [#lzbetascope]
+- [x] [#lzbetascope] Approve or decline Lazily Core Beta promotion after its gates are green for [#lzbetascope]
 <!-- /agent:todo -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#gh249builddir] [operator-decision, btakita/agent-doc] Integrate the issue-249 follow-up fix: /home/brian/worktrees/agent-doc-gh249-restore on branch fix/gh249-263-local-build-dir from origin/main 6ddc004207 (uncommitted; src/plugin.rs, agent-doc-reliable-sync-io/src/liveness.rs, editors/jetbrains/SPEC.md, scripts/jetbrains-custom-repository.py; exclude the untracked .gh249-*.log files). build_project_dir now maps JetBrains 263 to editors/jetbrains-262 so 'agent-doc plugin install jetbrains --local' cannot pick a stale classic 263 ZIP without frame isolation. make check exit 0 (10505 passed), and a mutation check shows 2 regression tests fail when the old mapping is restored. No plugin version bump needed. Blocked only on commit/push authorization (#lzcommitpresetresolve); then commit, push, and run the single coordinator make install. Old worktree /home/brian/worktrees/agent-doc-gh249-20261013 is superseded.
-- [/] [#lzcohortrelease] [operator-decision] Lazily Core cohort released 2026-10-15 (spec v0.42.0, rs 0.60.0, py 0.44.0, js 0.36.0, go v0.30.0, kt 0.45.0, cpp v0.32.0, cs 0.8.0, dart v0.34.0, zig v0.38.0; superproject pins f576f5b). Only remaining: run 'dart pub publish' for lazily-dart 0.34.0 under the operator's pub.dev login (tag v0.34.0 = e7b940b). Core Beta promotion stays with #lzbetascope.
+- [ ] [#lzdartformatbaseline] Reconcile the lazily-dart formatter baseline under Dart 3.13.5: make check reports 134 tracked Dart files requiring formatting; determine the pinned SDK and formatter intent, apply only the intended formatter version, rerun make check, commit, and push.
+- [ ] [#gh249builddir] [btakita/agent-doc] Integrate the verified issue-249 follow-up from /home/brian/worktrees/agent-doc-gh249-restore on branch fix/gh249-263-local-build-dir: commit and push the four tracked files, exclude .gh249-*.log, then run the single coordinator make install. Verification: make check passed 10505 tests and restoring the old mapping fails two regression tests.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcohortrelease] [operator-decision] Lazily Core cohort released 2026-10-15 (spec v0.42.0, rs 0.60.0, py 0.44.0, js 0.36.0, go v0.30.0, kt 0.45.0, cpp v0.32.0, cs 0.8.0, dart v0.34.0, zig v0.38.0; superproject pins f576f5b). Only remaining: run 'dart pub publish' for lazily-dart 0.34.0 under the operator's pub.dev login (tag v0.34.0 = e7b940b). Core Beta promotion stays with #lzbetascope.
 - [/] [#lzcorecireachaudit] After #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1-5 integration are complete, run the supplied per-binding post-integration CI audit matrix against settled commits; require every standalone Core target to have a named workflow step, exact reach mapping, mutation evidence, Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates before Phase 6 finalization.
 - [/] [#fixrunturn] Run Agent Doc route-race fix and deterministic coverage are complete and fully verified in /home/brian/worktrees/agent-doc-fixrunturn-stack-20261012/agent-doc on branch fix/run-agent-doc-turn-rejection-20261012 from base 06afd858eebc81440dbbebec6a51f0ec788391f1; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the six agent-doc-route-io files and run the single coordinator install.
 - [/] [#lzagentdocartifactrefresh] Fresh artifact-purge handoff and both dry-run modes are complete and verified in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 on branch task/lzagentdocartifactrefresh-20261012 from base 215dc9dc52339478da6cc90aa5c7d5808f3e54c5; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate the five tracked btakita/agent-doc audit/script files without the scratch .audit-work reports.
 - [/] [#lzcorecohort] Phase 6 immutable Core cohort/BOM schema, verifier, reusable read-only publish gate, documentation, Makefile integration, and negative tests are complete in isolated worktree /home/brian/worktrees/agent-loop-lzcorecohort-20261012 on branch task/lzcorecohort-20261012; blocked until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate from base 02c20e1a71cb971fd8ad82d12b73f77acebb49ba; truthful candidate manifests and cross-repo adoption remain gated on #lzreleasepins and #lzrustpublish.
-- [/] [#lzgenericreadmeincident] [operator-verify] Inspect accidental generated README rollup changes in /home/brian/worktrees/lazily-rs and /home/brian/worktrees/lazily-kt. Prior README cleanliness is unknown; restore only README.md if the two generated rollup changes were unintended, and preserve all unrelated dirty/untracked files.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Fresh read-only audit/handoff generated 2026-10-12T21:27:35Z in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 and verified with zero deletions. After integrating #lzagentdocartifactrefresh, two authorizable options remain: full plan deletes 565 artifacts totaling 9,879,236,243 bytes with 0 refused/skipped/failed in dry run; preferred durable-only plan deletes 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuses exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. 545 artifacts totaling 8,636,981,950 bytes remain withheld and are never deletable. The 7-day handoff expires 2026-10-19T21:27:35Z and becomes evidence_stale 24 hours earlier. Blocked solely on explicit destructive authorization after the refreshed handoff is integrated; no artifact has been deleted.
-- [/] [#lzbetascope] [operator-decision] Approve final promotion of the candidate Lazily Core profile to Beta under tasks/software/plan-lazily-core-beta.md after #lzcoreprofile, #lzcoreclaims, #lzcorefacades, #lzcorecompat, #lzcoreconsumers, #lzcorecohort, #lzreleasepins, and publication blockers are green. The public promise remains: Lazily Core is Beta; Lazily Modules graduate independently.
 <!-- /agent:review -->
 
 ## Icebox

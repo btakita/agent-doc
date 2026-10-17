@@ -35,6 +35,9 @@ The body contains named components delimited by HTML comment markers:
 <!-- agent:exchange -->
 <!-- /agent:exchange -->
 
+<!-- agent:queue priority subagents -->
+<!-- /agent:queue -->
+
 <!-- agent:backlog -->
 <!-- /agent:backlog -->
 

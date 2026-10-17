@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -54,17 +53,19 @@ Fixed and closed. Commit `a7f64f7699` (`fix(jetbrains): stop retrying plain mark
 Fixed and closed. Commit `bbc7a53bed` (`fix(jetbrains): preserve Remote Dev focus evidence`) carries Remote Dev controller-selection evidence through the generation-fenced publication gate, adds named INFO-level outcomes and Throwable logging, and covers both the classic/263 listener and the 262 backend fallback. The full worker suite and final affected reruns passed; the worker branch was pushed and issue #283 is closed.
 
 The two fixes were integrated serially as `0e597981a8` and `90e238ce69`, followed by the one batch generation commit `25f3bd933b` (classic `0.2.675`, JetBrains 262 `0.2.677`, JetBrains 263 `0.2.676`). The authoritative integrated `make check` passed with exit 0 and zero failures. The single `make install` passed and installed the binary/library, skills, and editor packages. Main CI run `39011286916` was red only in the pre-existing `queue_auto_clear_types_clear_between_items_into_the_same_harness` tmux case on base commit `f9cd1ad325`; the required local `make tmux-ci` reproduction passed with exit 0 and zero failures. The integration worktree is clean and the remote main tip is still its verified fast-forward base.
-<!-- agent:boundary:59f6e63f -->
+> **Chat prompt (#chatprompt):** published?
+
+### Re: Publication status — gpt-5 · 2026-10-17T13:40-04:00
+
+Not as a new release. The fixes are pushed to `main` at `25f3bd933b`, and CI run `39015481373` passed. The latest published release is still `v0.35.515`, whose tag (`4c4f32d596`) predates these fixes, so they are not yet in a GitHub/PyPI release.
+<!-- agent:boundary:f163b149 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Fix agent-doc causes of **Queue prompt:** sdk-dev.md issue:~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/282
-- #gh-fix https://github.com/btakita/agent-doc/issues/283
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Todo

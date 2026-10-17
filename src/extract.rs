@@ -155,7 +155,7 @@ pub(crate) fn render_target_scaffold(
     frontmatter::write(
         &fm,
         &format!(
-            "\n# {}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n\n## Notes\n\n<!-- agent:notes -->\n<!-- /agent:notes -->\n",
+            "\n# {}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n\n## Notes\n\n<!-- agent:notes -->\n<!-- /agent:notes -->\n",
             title
         ),
     )
@@ -1005,7 +1005,7 @@ mod tests {
     }
 
     #[test]
-    fn render_target_scaffold_includes_backlog_and_icebox_components() {
+    fn render_target_scaffold_includes_components_with_todo_below_queue() {
         let scaffold = render_target_scaffold(
             "Title",
             "codex",
@@ -1020,6 +1020,14 @@ mod tests {
         assert!(scaffold.contains("<!-- agent:review -->"));
         assert!(scaffold.contains("<!-- agent:done -->"));
         assert!(scaffold.contains("<!-- agent:notes -->"));
+        assert!(
+            scaffold.contains(concat!(
+                "<!-- /agent:queue -->\n\n## Todo\n\n",
+                "<!-- agent:todo -->\n<!-- /agent:todo -->\n\n## Backlog\n\n",
+                "<!-- agent:backlog -->"
+            )),
+            "agent:todo must sit below agent:queue and above agent:backlog"
+        );
     }
 
     #[test]

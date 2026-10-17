@@ -335,21 +335,22 @@ Every agent-side todo write (`--todo-add` or `patch:todo`) therefore creates the
 component when the document has none, instead of dropping the action or routing
 a `patch:todo` body into `exchange` as missing-component overflow. The binary
 inserts an empty `## Todo` section with `<!-- agent:todo -->` /
-`<!-- /agent:todo -->` markers at one deterministic, operator-facing location,
-below the backlog: directly after the last `agent:backlog` / legacy
-`agent:pending` component; else after the last `agent:queue`; else after the
-last `agent:exchange`; else at the end of the document. `agent:review` is never
-an anchor, so in the canonical layout the section lands between `## Backlog`
-and `## Review`, and a document without a backlog still gets Todo above any
-Review that follows its queue or exchange. Nothing outside the inserted section
-changes. A document that already has `agent:todo` is left structurally
-unchanged, wherever its Todo section sits.
+`<!-- /agent:todo -->` markers at one deterministic, operator-facing location:
+directly after the last `agent:queue`; else after the last `agent:backlog` /
+legacy `agent:pending`; else after the last `agent:exchange`; else at the end of
+the document. `agent:review` is never an anchor, so in the canonical layout
+`agent:todo` lands below `agent:queue` and above `agent:backlog`; a document
+without `agent:queue` still gets Todo above any Review that follows its backlog
+or exchange. Nothing outside the inserted section changes. A document that
+already has `agent:todo` is left structurally unchanged, wherever its Todo
+section sits.
 
 **Default template order.** The default template scaffold (Claim for Tmux Pane,
 Sync, and `claim` on an empty or component-less template document) emits the
-canonical components in this order: `## Status`, `## Exchange`, `## Queue`,
-`## Backlog`, `## Todo`, `## Review`, `## Icebox`, `## Done`, `## Notes`. Todo
-sits directly below Backlog, matching the auto-created placement.
+canonical managed components in this order: `agent:status`, `agent:exchange`,
+`agent:queue`, `agent:todo`, `agent:backlog`, `agent:review`, `agent:icebox`,
+`agent:done`, `agent:notes`. Thus `agent:todo` sits directly below
+`agent:queue` and above `agent:backlog`, matching the auto-created placement.
 
 **Operator-todo advisory.** When a closeout opens a human gate in
 `agent:review` (`--review-add`, `--backlog-add-gated`, or `--backlog-gate`) and

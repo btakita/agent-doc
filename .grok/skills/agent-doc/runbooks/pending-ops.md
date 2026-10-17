@@ -67,6 +67,8 @@ Combine any number of flags in one `agent-doc write` call:
 | `--todo-remove <id>` | Delete an `agent:todo` item that no longer applies (a finished one uses `--todo-done`). |
 | `--review-remove <id>` | Delete a review item by id, clearing **every** entry that shares the id — use for a stale or duplicate review entry (e.g. the identical `[/]` pair an interleaved finalize leaves behind, flagged as `preset_item_id_collision`). |
 
+When `--todo-add` creates a missing component, the default opener is `<!-- agent:todo priority -->`. Existing todo markers and their operator-authored attributes remain unchanged.
+
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.
 
 **Complete over gate — keep `agent:review` small (target < 10).** The default

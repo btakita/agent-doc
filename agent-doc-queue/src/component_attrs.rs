@@ -59,12 +59,15 @@ pub fn is_queue_bare_flag_attr(key: &str) -> bool {
 /// Whether a component (bare name, e.g. `review`) accepts the bare `priority`
 /// ordering attribute (`#backlog-priority-attribute`, `#reviewpriority`).
 ///
-/// Tracked-work lists (`backlog` / legacy `pending`, `icebox`, `review`)
-/// stable-sort their items by per-item `priority=<1..9>`; `queue` sorts its
-/// `do [#id]` prompts by source-item rank. Preflight's attribute warning and
-/// the lint adapter both consult this one vocabulary.
+/// Tracked-work lists (`backlog` / legacy `pending`, `icebox`, `review`) and
+/// operator todos accept priority ordering; `queue` sorts its `do [#id]`
+/// prompts by source-item rank. Preflight's attribute warning and the lint
+/// adapter both consult this one vocabulary.
 pub fn is_priority_component(name: &str) -> bool {
-    matches!(name, "backlog" | "icebox" | "pending" | "review" | "queue")
+    matches!(
+        name,
+        "backlog" | "icebox" | "pending" | "review" | "todo" | "queue"
+    )
 }
 
 /// Whether tagpath's generic missing-value finding is expected for this
@@ -285,6 +288,7 @@ mod tests {
             "<!-- agent:queue priority -->\n- do [#a]\n<!-- /agent:queue -->\n",
             "<!-- agent:icebox priority -->\n- [ ] [#a] x\n<!-- /agent:icebox -->\n",
             "<!-- agent:review priority -->\n- [/] [#a] x\n<!-- /agent:review -->\n",
+            "<!-- agent:todo priority -->\n- [ ] [#a] x\n<!-- /agent:todo -->\n",
         ] {
             assert!(
                 component_attr_warning(content).is_none(),

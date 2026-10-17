@@ -1,5 +1,7 @@
 # agent-doc Functional Specification
 
+- Newly scaffolded and auto-created todo components use `<!-- agent:todo priority -->`; existing todo markers remain operator-owned and unchanged.
+
 - systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming
   ownership (`#tmuxscopesteward`): Rust-test targets prevent new scope creation,
   scheduled and on-demand sweeps reset failed units, and a running orphan is

@@ -2474,7 +2474,7 @@ All green.
             todo.content(&result),
             "- [ ] Verify [#gate] in a live pane\n"
         );
-        assert_eq!(result.matches("<!-- agent:todo -->").count(), 1);
+        assert_eq!(result.matches("<!-- agent:todo priority -->").count(), 1);
         let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
         assert!(
             !exchange.content(&result).contains("Verify [#gate]"),
@@ -2482,14 +2482,14 @@ All green.
         );
         // `agent:todo` lands directly below `agent:queue` and above `agent:backlog`.
         let queue_end = result.find("<!-- /agent:queue -->").unwrap();
-        let todo_start = result.find("<!-- agent:todo -->").unwrap();
+        let todo_start = result.find("<!-- agent:todo priority -->").unwrap();
         let backlog_heading = result.find("## Backlog").unwrap();
         assert!(
             queue_end < todo_start && todo_start < backlog_heading,
             "agent:todo must sit below agent:queue and above agent:backlog:\n{result}"
         );
         assert!(
-            result.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n"),
+            result.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo priority -->\n"),
             "{result}"
         );
     }

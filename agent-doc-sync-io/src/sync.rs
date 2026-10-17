@@ -10673,9 +10673,25 @@ mod tests {
             Some("")
         );
         assert_eq!(components[2].attrs.len(), 2);
+        let todo = components
+            .iter()
+            .find(|component| component.name == "todo")
+            .expect("sync scaffold includes todo");
+        assert_eq!(todo.attrs.get("priority").map(String::as_str), Some(""));
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .expect("sync scaffold includes backlog");
+        assert_eq!(backlog.attrs.get("priority").map(String::as_str), Some(""));
+        assert_eq!(backlog.attrs.get("queue").map(String::as_str), Some(""));
         assert!(
-            components[3..]
+            components
                 .iter()
+                .filter(|component| {
+                    component.name != "queue"
+                        && component.name != "todo"
+                        && component.name != "backlog"
+                })
                 .all(|component| component.attrs.is_empty())
         );
     }

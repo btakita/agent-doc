@@ -13,7 +13,7 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "<!-- agent:queue priority subagents -->\n",
     "<!-- /agent:queue -->\n",
     "\n## Todo\n\n",
-    "<!-- agent:todo -->\n",
+    "<!-- agent:todo priority -->\n",
     "<!-- /agent:todo -->\n",
     "\n## Backlog\n\n",
     "<!-- agent:backlog priority queue -->\n",
@@ -124,7 +124,7 @@ mod tests {
         assert!(
             scaffold.contains(concat!(
                 "<!-- /agent:queue -->\n",
-                "\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n",
+                "\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n",
                 "\n## Backlog\n\n<!-- agent:backlog priority queue -->\n"
             )),
             "agent:todo must sit below agent:queue and above agent:backlog"
@@ -161,10 +161,19 @@ mod tests {
             Some("")
         );
         assert_eq!(components[2].attrs.len(), 2);
+        let todo = components
+            .iter()
+            .find(|component| component.name == "todo")
+            .expect("default scaffold includes todo");
+        assert_eq!(todo.attrs.get("priority").map(String::as_str), Some(""));
         assert!(
             components
                 .iter()
-                .filter(|component| component.name != "queue" && component.name != "backlog")
+                .filter(|component| {
+                    component.name != "queue"
+                        && component.name != "todo"
+                        && component.name != "backlog"
+                })
                 .all(|component| component.attrs.is_empty())
         );
         assert!(

@@ -3661,7 +3661,7 @@ mod tests {
         assert_eq!(id, "aa11", "{after}");
         assert!(
             after.contains(&format!(
-                "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n- [ ] [#{id}] Verify [#aa11] in a live pane\n<!-- /agent:todo -->\n\n<!-- agent:review -->"
+                "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n- [ ] [#{id}] Verify [#aa11] in a live pane\n<!-- /agent:todo -->\n\n<!-- agent:review -->"
             )),
             "{after}"
         );

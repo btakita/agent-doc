@@ -1021,8 +1021,8 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n❯ Decide [#legal1]\n### Re: Legal\n\nDecision for #legal1.\n### Re: Dev\n\nUnrelated.\n",
         )
         .replace(
-            "<!-- agent:todo -->\n",
-            "<!-- agent:todo -->\n- [ ] [#legal1] Ask counsel\n- [ ] [#dev1] Ship SDK\n",
+            "<!-- agent:todo priority -->\n",
+            "<!-- agent:todo priority -->\n- [ ] [#legal1] Ask counsel\n- [ ] [#dev1] Ship SDK\n",
         )
         .replace(
             "<!-- agent:queue priority subagents -->\n",

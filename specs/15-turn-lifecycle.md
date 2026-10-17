@@ -366,8 +366,8 @@ an explicitly accepted realtime quick-fix produces a new source epoch.
 pane-scoped coordination lease in `state.db` (`coordination_leases`,
 `scope_kind = 'turn_active'`, `scope_id = <pane>`, `heartbeat_secs` = the time
 the turn went active). `TURN_ACTIVE_TTL_SECS` (3600s, owned by
-`agent_doc_turn::turn_status`) governs both how a lease is read and when it is
-deleted:
+`agent_doc_turn::turn_status`) bounds both the original lease and the newest
+timestamped activity in its bound harness transcript:
 
 The same hook projects a pane-border title from three display facts: the
 registry-bound document basename, the pane-scoped active lease, and the
@@ -376,32 +376,36 @@ active/stale combinations; lifecycle markers decorate that identity instead of
 replacing it. Registry lookup is display evidence only and never participates in
 turn admission, lease ownership, or recycle authority.
 
-- **Read.** A lease is fresh while `now - heartbeat_secs < TURN_ACTIVE_TTL_SECS`
-  (`turn_active_marker_is_fresh`). An expired lease reads as absent, so a missed
-  idle hook never wedges the session busy.
-- **Reclaim on read.** A read that observes an expired lease
+- **Read.** A lease is live while `now - heartbeat_secs <
+  TURN_ACTIVE_TTL_SECS` (`turn_active_marker_is_fresh`). After that base window,
+  the lease remains live when its bound transcript's newest conversation record
+  is ordinary activity with a readable timestamp no older than the lease and
+  `now - activity_at < TURN_ACTIVE_TTL_SECS`
+  (`turn_active_marker_is_live_with_transcript`). This covers a legitimate
+  tool-running turn that lasts longer than one hour without another lifecycle
+  hook. Unknown or untimestamped records never extend liveness.
+- **Reclaim on read.** A read that observes a lease with neither a fresh base
+  timestamp nor recent bound-transcript activity
   (`read_turn_active_marker_at`, and the pane-scoped read behind
   `turn_active_for_pane` / `turn_active_for_pane_for_file`) also deletes the
-  expired rows. Without this, any clear gated on a present, pane-matched marker
+  stale rows. Without this, any clear gated on a present, pane-matched marker
   (`clear_matching_turn_status_projection`) returns early on an expired row, so
   expiry would guarantee the row survives instead of retiring it.
-- **Age sweep.** Expired rows are swept by age at two GC boundaries: every
+- **Age sweep.** Stale rows are swept at two GC boundaries: every
   preflight (`run_preflight_auto_gc`, before the daily-gated full GC) and
   `agent-doc gc` (`--dry-run` only counts). The sweep
-  (`sweep_expired_turn_active_markers`) is keyed to heartbeat age only, never to
-  the pane that wrote the row, because a pane that died before its idle hook can
-  never clear its own lease.
+  (`sweep_expired_turn_active_markers`) considers every old lease, then consults
+  its exact-heartbeat transcript binding before deleting it. The sweep never
+  depends on the pane still existing, because a pane that died before its idle
+  hook can never clear its own lease.
 
-Every deletion is one bounded statement,
-`DELETE FROM coordination_leases WHERE scope_kind = 'turn_active' AND
-heartbeat_secs <= now - TURN_ACTIVE_TTL_SECS` (`turn_active_expiry_cutoff`), with
-no enclosing transaction. Because the `WHERE` clause re-checks the heartbeat, a
-fresh lease, including a live turn's lease refreshed between a read and the
-delete, is never removed. Inside the first TTL window (`now <
-TURN_ACTIVE_TTL_SECS`) nothing is expired and nothing is deleted. The per-pane
-idle clear (`clear_turn_active_marker`) remains the normal retirement path; the
-sweep and the read reclaim exist only for rows whose owner can no longer clear
-them.
+Every deletion re-checks the observed lease heartbeat, so a concurrent prompt
+that replaces either the turn row or its transcript binding survives. Inside
+the first base TTL window nothing is expired and nothing is deleted. The
+per-pane idle clear (`clear_turn_active_marker`) remains the normal retirement
+path; transcript activity is only a bounded extension for a turn that still
+produces harness records, and a genuinely orphaned row still expires one TTL
+after its last provable activity.
 
 ### Interrupted turns (`#staleharnessturnlive`)
 
@@ -420,8 +424,8 @@ for ~90s after "unwedge agent-doc" was interrupted).
   `holder = <path>`, `heartbeat_secs` = the lease heartbeat). A binding whose
   heartbeat differs from the lease belongs to another turn and is ignored. A
   lease written without a payload has no binding and keeps the `Stop`/TTL
-  contract unchanged. The idle clear, the age sweep, and the interrupt
-  retirement remove the binding with the lease.
+  contract unchanged. The idle clear, the transcript-aware stale sweep, and the
+  interrupt retirement remove the binding with the lease.
 - **Interrupt evidence.** Claude Code appends a `user` record whose text starts
   with `[Request interrupted by user` to the transcript. The probe reads at
   most `TRANSCRIPT_TAIL_PROBE_BYTES` from the end of the bound transcript and
@@ -448,8 +452,8 @@ for ~90s after "unwedge agent-doc" was interrupted).
   new Codex turn always writes `task_started`, `turn_context` and a
   `response_item` first, so they never hide newer turn activity. A screen
   scrape of Codex's "Conversation interrupted" banner is never evidence.
-- **Retirement.** A fresh lease is retired only when the newest conversation
-  record is an interrupt no older than the lease heartbeat that has settled for
+- **Retirement.** A lease is retired when the newest conversation record is an
+  interrupt no older than the lease heartbeat that has settled for
   `TURN_INTERRUPT_SETTLE_SECS` (`turn_lease_ended_by_interrupt`). The settle
   window lets a prompt submitted in the same second as the interrupt land its
   own record first. The delete is conditioned on the observed heartbeat

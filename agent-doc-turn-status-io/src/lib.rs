@@ -18,15 +18,15 @@
 use agent_doc_sqlite::state_store::{
     Connection, CoordinationLeaseRecord, clear_coordination_lease_if_heartbeat_at_or_before_in_db,
     clear_coordination_lease_if_holder_in_db, clear_coordination_lease_in_db,
-    clear_coordination_leases_heartbeat_at_or_before_in_db, load_coordination_lease_from_db,
-    load_coordination_leases_for_scope_kind_from_db, open_state_db,
-    upsert_coordination_lease_in_db,
+    load_coordination_lease_from_db, load_coordination_leases_for_scope_kind_from_db,
+    open_state_db, upsert_coordination_lease_in_db,
 };
 use agent_doc_turn::turn_status::{
     TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
     abandoned_prompt_settle_remaining_secs, classify_transcript_tail, pane_title_for_status,
-    stale_supervisor_marker_holder_is_live, transcript_turn_end_reason, turn_active_expiry_cutoff,
-    turn_active_marker_is_fresh, turn_active_marker_matches_pane, turn_lease_ended_by_interrupt,
+    stale_supervisor_marker_holder_is_live, transcript_turn_end_reason,
+    turn_active_marker_is_fresh, turn_active_marker_is_live_with_transcript,
+    turn_active_marker_matches_pane, turn_lease_ended_by_interrupt,
     turn_lease_ended_by_withdrawn_prompt,
 };
 use anyhow::Result;
@@ -247,16 +247,50 @@ fn marker_from_lease(lease: CoordinationLeaseRecord, now: u64) -> Option<TurnAct
     turn_active_marker_is_fresh(&marker, now).then_some(marker)
 }
 
-fn sweep_expired_turn_active_leases_in_db(conn: &Connection, now: u64) -> Result<usize> {
-    let Some(cutoff) = turn_active_expiry_cutoff(now) else {
-        return Ok(0);
+fn marker_from_lease_with_transcript(
+    conn: &Connection,
+    lease: CoordinationLeaseRecord,
+    now: u64,
+) -> Option<TurnActiveMarker> {
+    let marker = TurnActiveMarker {
+        pane: lease.holder,
+        written_at: lease.heartbeat_secs,
     };
-    clear_coordination_leases_heartbeat_at_or_before_in_db(
-        conn,
-        TURN_ACTIVE_TRANSCRIPT_SCOPE,
-        cutoff,
-    )?;
-    clear_coordination_leases_heartbeat_at_or_before_in_db(conn, TURN_ACTIVE_SCOPE, cutoff)
+    if turn_active_marker_is_fresh(&marker, now) {
+        return Some(marker);
+    }
+    let transcript = transcript_for_marker(conn, &marker)?;
+    let (tail, starts_mid_file) = read_transcript_tail(&transcript)?;
+    turn_active_marker_is_live_with_transcript(
+        &marker,
+        classify_transcript_tail(&tail, starts_mid_file),
+        now,
+    )
+    .then_some(marker)
+}
+
+fn sweep_expired_turn_active_leases_in_db(conn: &Connection, now: u64) -> Result<usize> {
+    let mut removed = 0;
+    for lease in load_coordination_leases_for_scope_kind_from_db(conn, TURN_ACTIVE_SCOPE)? {
+        if marker_from_lease_with_transcript(conn, lease.clone(), now).is_some() {
+            continue;
+        }
+        // Re-check the observed heartbeat in each DELETE. A concurrent prompt
+        // can replace both rows while the expired transcript is being read.
+        clear_coordination_lease_if_heartbeat_at_or_before_in_db(
+            conn,
+            TURN_ACTIVE_TRANSCRIPT_SCOPE,
+            &lease.holder,
+            lease.heartbeat_secs,
+        )?;
+        removed += usize::from(clear_coordination_lease_if_heartbeat_at_or_before_in_db(
+            conn,
+            TURN_ACTIVE_SCOPE,
+            &lease.scope_id,
+            lease.heartbeat_secs,
+        )?);
+    }
+    Ok(removed)
 }
 
 /// A turn-active lease the harness transcript proves was interrupted
@@ -413,7 +447,13 @@ pub fn reclaim_interrupted_turn_for_pane_at(
     let lease = load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, pane)
         .ok()
         .flatten()?;
-    let marker = marker_from_lease(lease, now)?;
+    // Read the raw marker: a long-running turn can cross the base lease TTL
+    // before its transcript records an interrupt. The transcript boundary,
+    // not the original hook age, decides whether that lease can be retired.
+    let marker = TurnActiveMarker {
+        pane: lease.holder,
+        written_at: lease.heartbeat_secs,
+    };
     retire_interrupted_turn_lease(&conn, &marker, now)
 }
 
@@ -550,7 +590,7 @@ pub fn count_expired_turn_active_markers_at(base: &Path, now: u64) -> Result<usi
     Ok(
         load_coordination_leases_for_scope_kind_from_db(&conn, TURN_ACTIVE_SCOPE)?
             .into_iter()
-            .filter(|lease| marker_from_lease(lease.clone(), now).is_none())
+            .filter(|lease| marker_from_lease_with_transcript(&conn, lease.clone(), now).is_none())
             .count(),
     )
 }
@@ -571,7 +611,7 @@ pub fn read_turn_active_marker_at(base: &Path, now: u64) -> Option<TurnActiveMar
     let lease_count = leases.len();
     let fresh: Vec<TurnActiveMarker> = leases
         .into_iter()
-        .filter_map(|lease| marker_from_lease(lease, now))
+        .filter_map(|lease| marker_from_lease_with_transcript(&conn, lease, now))
         .collect();
     if fresh.len() < lease_count {
         reclaim_expired_turn_active_leases_on_read(&conn, now);
@@ -600,7 +640,7 @@ fn read_turn_active_marker_for_pane_at(
             (legacy.holder == pane).then_some(legacy)?
         }
     };
-    let marker = marker_from_lease(lease, now);
+    let marker = marker_from_lease_with_transcript(&conn, lease, now);
     if marker.is_none() {
         reclaim_expired_turn_active_leases_on_read(&conn, now);
     }
@@ -1407,6 +1447,58 @@ mod tests {
             0
         );
         assert_eq!(turn_active_rows(early.path()), vec!["%1".to_string()]);
+    }
+
+    #[test]
+    fn sweep_keeps_expired_base_lease_while_bound_transcript_is_recent() {
+        let dir = agent_doc_base();
+        let base = dir.path();
+        let transcript = base.join("rollout.jsonl");
+        let started = 1_000;
+        let now = started + TURN_ACTIVE_TTL_SECS + 30;
+        let stamp = agent_doc_turn::turn_status::format_rfc3339_utc_secs;
+        std::fs::write(
+            &transcript,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "timestamp": stamp(now - 1),
+                    "type": "response_item",
+                    "payload": {"type": "function_call", "name": "exec_command"}
+                })
+            ),
+        )
+        .unwrap();
+        write_turn_active_marker_with_transcript_at(base, "%7", started, Some(&transcript))
+            .unwrap();
+
+        assert_eq!(count_expired_turn_active_markers_at(base, now).unwrap(), 0);
+        assert_eq!(sweep_expired_turn_active_markers_at(base, now).unwrap(), 0);
+        assert_eq!(
+            read_turn_active_marker_for_pane_at(base, "%7", now).map(|marker| marker.pane),
+            Some("%7".to_string())
+        );
+        assert_eq!(
+            read_turn_active_marker_at(base, now).map(|marker| marker.pane),
+            Some("%7".to_string())
+        );
+        assert_eq!(turn_active_rows(base), vec!["%7".to_string()]);
+
+        std::fs::write(
+            &transcript,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "timestamp": stamp(started + 1),
+                    "type": "response_item",
+                    "payload": {"type": "function_call", "name": "exec_command"}
+                })
+            ),
+        )
+        .unwrap();
+        assert_eq!(count_expired_turn_active_markers_at(base, now).unwrap(), 1);
+        assert_eq!(sweep_expired_turn_active_markers_at(base, now).unwrap(), 1);
+        assert!(turn_active_rows(base).is_empty());
     }
 
     /// `clear_matching_turn_status_projection` gates its clear on

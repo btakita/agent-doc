@@ -288,8 +288,10 @@ pub enum TranscriptTailEvidence {
     /// background-subagent sidechain records) follows the snapshot.
     AbandonedPrompt { at_secs: u64 },
     /// The newest conversation record is ordinary turn activity (a prompt, an
-    /// assistant message, a tool result).
-    Activity,
+    /// assistant message, a tool result). `at_secs` is the record timestamp
+    /// when the harness supplied one; only timestamped activity can extend an
+    /// otherwise-expired turn lease.
+    Activity { at_secs: Option<u64> },
     /// Nothing provable: no complete conversation record in the window, an
     /// unparseable or still-being-written record, a record without a readable
     /// timestamp, or a turn abort whose reason is not an operator interrupt.
@@ -407,6 +409,15 @@ fn record_timestamp_evidence(record: &serde_json::Value) -> TranscriptTailEviden
         })
 }
 
+fn record_activity_evidence(record: &serde_json::Value) -> TranscriptTailEvidence {
+    TranscriptTailEvidence::Activity {
+        at_secs: record
+            .get("timestamp")
+            .and_then(serde_json::Value::as_str)
+            .and_then(parse_rfc3339_utc_secs),
+    }
+}
+
 /// `#devclear`: what one Codex rollout `event_msg` record proves, or `None`
 /// when it is bookkeeping the scan skips.
 fn classify_codex_event(record: &serde_json::Value) -> Option<TranscriptTailEvidence> {
@@ -422,7 +433,7 @@ fn classify_codex_event(record: &serde_json::Value) -> Option<TranscriptTailEvid
     }
     CODEX_TURN_ACTIVITY_EVENTS
         .contains(&kind)
-        .then_some(TranscriptTailEvidence::Activity)
+        .then(|| record_activity_evidence(record))
 }
 
 /// Classify the newest conversation record in a transcript tail.
@@ -518,12 +529,12 @@ pub fn classify_transcript_tail(tail: &str, starts_mid_file: bool) -> Transcript
                 if content.is_some_and(record_text_is_interrupt) {
                     return record_timestamp_evidence(&record);
                 }
-                return TranscriptTailEvidence::Activity;
+                return record_activity_evidence(&record);
             }
-            Some("assistant") => return TranscriptTailEvidence::Activity,
+            Some("assistant") => return record_activity_evidence(&record),
             // Codex rollout records (`#devclear`).
             Some("response_item") | Some("turn_context") => {
-                return TranscriptTailEvidence::Activity;
+                return record_activity_evidence(&record);
             }
             Some("event_msg") => match classify_codex_event(&record) {
                 Some(evidence) => return evidence,
@@ -622,7 +633,7 @@ pub fn turn_lease_ended_by_interrupt(
             at_secs >= marker.written_at
                 && now.saturating_sub(at_secs) >= ABANDONED_PROMPT_SETTLE_SECS
         }
-        TranscriptTailEvidence::Activity | TranscriptTailEvidence::Unknown => false,
+        TranscriptTailEvidence::Activity { .. } | TranscriptTailEvidence::Unknown => false,
     }
 }
 
@@ -675,8 +686,34 @@ pub fn transcript_turn_end_reason(evidence: TranscriptTailEvidence) -> Option<&'
     match evidence {
         TranscriptTailEvidence::Interrupted { .. } => Some(TURN_END_REASON_INTERRUPT),
         TranscriptTailEvidence::AbandonedPrompt { .. } => Some(TURN_END_REASON_ABANDONED_PROMPT),
-        TranscriptTailEvidence::Activity | TranscriptTailEvidence::Unknown => None,
+        TranscriptTailEvidence::Activity { .. } | TranscriptTailEvidence::Unknown => None,
     }
+}
+
+/// A harness turn remains live while either its original lease is fresh or its
+/// bound transcript proves recent activity from that same turn.
+///
+/// Long-running Codex/Claude turns can exceed [`TURN_ACTIVE_TTL_SECS`] without
+/// another lifecycle hook. Treating the original hook timestamp as the only
+/// heartbeat abandons the open document cycle underneath a still-running turn.
+/// Timestamped transcript activity extends liveness by the same bounded TTL;
+/// unknown or untimestamped records never do, so a genuinely orphaned lease
+/// still self-expires.
+pub fn turn_active_marker_is_live_with_transcript(
+    marker: &TurnActiveMarker,
+    evidence: TranscriptTailEvidence,
+    now: u64,
+) -> bool {
+    if turn_active_marker_is_fresh(marker, now) {
+        return true;
+    }
+    matches!(
+        evidence,
+        TranscriptTailEvidence::Activity {
+            at_secs: Some(at_secs)
+        } if at_secs >= marker.written_at
+            && now.saturating_sub(at_secs) < TURN_ACTIVE_TTL_SECS
+    )
 }
 
 #[cfg(test)]
@@ -779,6 +816,46 @@ mod tests {
         assert!(!turn_active_marker_is_fresh(
             &marker,
             1000 + TURN_ACTIVE_TTL_SECS
+        ));
+    }
+
+    #[test]
+    fn recent_bound_transcript_activity_keeps_a_long_turn_live() {
+        let marker = TurnActiveMarker {
+            pane: "%7".to_string(),
+            written_at: 1_000,
+        };
+        let now = marker.written_at + TURN_ACTIVE_TTL_SECS + 30;
+        assert!(turn_active_marker_is_live_with_transcript(
+            &marker,
+            TranscriptTailEvidence::Activity {
+                at_secs: Some(now - 1),
+            },
+            now,
+        ));
+        assert!(!turn_active_marker_is_live_with_transcript(
+            &marker,
+            TranscriptTailEvidence::Activity {
+                at_secs: Some(now - TURN_ACTIVE_TTL_SECS),
+            },
+            now,
+        ));
+        assert!(!turn_active_marker_is_live_with_transcript(
+            &marker,
+            TranscriptTailEvidence::Activity {
+                at_secs: Some(marker.written_at - 1),
+            },
+            now,
+        ));
+        assert!(!turn_active_marker_is_live_with_transcript(
+            &marker,
+            TranscriptTailEvidence::Activity { at_secs: None },
+            now,
+        ));
+        assert!(!turn_active_marker_is_live_with_transcript(
+            &marker,
+            TranscriptTailEvidence::Interrupted { at_secs: now - 1 },
+            now,
         ));
     }
 
@@ -985,7 +1062,7 @@ mod tests {
             );
             assert_eq!(
                 classify_transcript_tail(&tail, false),
-                TranscriptTailEvidence::Activity
+                TranscriptTailEvidence::Activity { at_secs: Some(102) }
             );
         }
         // A subagent sidechain record after the interrupt is not main-turn activity.
@@ -1147,7 +1224,7 @@ mod tests {
             let tail = format!("{aborted}\n{newer}\n");
             assert_eq!(
                 classify_transcript_tail(&tail, false),
-                TranscriptTailEvidence::Activity,
+                TranscriptTailEvidence::Activity { at_secs: Some(101) },
                 "{newer}"
             );
         }
@@ -1159,7 +1236,7 @@ mod tests {
         );
         assert_eq!(
             classify_transcript_tail(&live, false),
-            TranscriptTailEvidence::Activity
+            TranscriptTailEvidence::Activity { at_secs: Some(100) }
         );
     }
 
@@ -1241,7 +1318,7 @@ mod tests {
         ] {
             assert_eq!(
                 classify_transcript_tail(&tail, false),
-                TranscriptTailEvidence::Activity,
+                TranscriptTailEvidence::Activity { at_secs: Some(80) },
                 "{tail}"
             );
         }
@@ -1274,10 +1351,10 @@ mod tests {
             sdk_incident_tail(),
             prompt_line("p9", "2026-10-11T04:30:25.000Z", "/agent-doc tasks/sdk.md")
         );
-        assert_eq!(
+        assert!(matches!(
             classify_transcript_tail(&tail, false),
-            TranscriptTailEvidence::Activity
-        );
+            TranscriptTailEvidence::Activity { at_secs: Some(_) }
+        ));
         // An orphaned snapshot after a turn that never reached a boundary
         // (input submitted while the turn runs) proves nothing; after an
         // interrupt record it is abandoned like after a completed turn.
@@ -1342,7 +1419,7 @@ mod tests {
             Some(TURN_END_REASON_ABANDONED_PROMPT)
         );
         assert_eq!(
-            transcript_turn_end_reason(TranscriptTailEvidence::Activity),
+            transcript_turn_end_reason(TranscriptTailEvidence::Activity { at_secs: Some(at) }),
             None
         );
     }
@@ -1391,7 +1468,9 @@ mod tests {
             None
         );
         for other in [
-            TranscriptTailEvidence::Activity,
+            TranscriptTailEvidence::Activity {
+                at_secs: Some(snapshot),
+            },
             TranscriptTailEvidence::Unknown,
             TranscriptTailEvidence::Interrupted { at_secs: snapshot },
         ] {
@@ -1488,7 +1567,9 @@ mod tests {
             TranscriptTailEvidence::Interrupted {
                 at_secs: snapshot_at,
             },
-            TranscriptTailEvidence::Activity,
+            TranscriptTailEvidence::Activity {
+                at_secs: Some(snapshot_at),
+            },
             TranscriptTailEvidence::Unknown,
         ] {
             assert!(!turn_lease_ended_by_withdrawn_prompt(&lease, evidence));
@@ -1558,7 +1639,9 @@ mod tests {
             5_000
         ));
         for evidence in [
-            TranscriptTailEvidence::Activity,
+            TranscriptTailEvidence::Activity {
+                at_secs: Some(marker.written_at),
+            },
             TranscriptTailEvidence::Unknown,
         ] {
             assert!(!turn_lease_ended_by_interrupt(&marker, evidence, 5_000));

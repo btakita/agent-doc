@@ -526,23 +526,43 @@ fn normalize_action_text(action: &str) -> String {
     action.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Make the tracked-work source of a layered todo visible in the checklist.
+/// Make the tracked-work source of a singly linked todo visible in the checklist.
 ///
-/// A leading todo id is identity, not explanatory text. When a caller selects
-/// tracked work with `id=<id>` but omits that id from the action, add an
-/// explicit component/id locator so the operator can find the decision packet
-/// without having to infer that the leading id is shared.
+/// A leading todo id and an unqualified `#id` citation are identity/reference
+/// tokens, not enough explanatory context. Every todo with exactly one open
+/// tracked-work source carries one canonical component/id locator. A legacy
+/// locator with the wrong component is replaced in place.
 fn action_with_source_reference(action: &str, id: &str, linked: Option<&str>) -> String {
     let Some(component) = linked else {
         return action.to_string();
     };
-    if cited_ids(action)
-        .iter()
-        .any(|cited| cited.eq_ignore_ascii_case(id))
-    {
+    let suffix = format!("(source: agent:{component} [#{id}])");
+    if action.ends_with(&suffix) {
         return action.to_string();
     }
-    format!("{action} (source: agent:{component} [#{id}])")
+    let base = strip_trailing_source_reference(action).unwrap_or(action).trim_end();
+    format!("{base} {suffix}")
+}
+
+/// Strip the canonical source-locator shape from the end of an action.
+///
+/// This intentionally recognizes only the binary-owned spelling. Free-form
+/// prose containing `source:` is operator text and must not be rewritten.
+fn strip_trailing_source_reference(action: &str) -> Option<&str> {
+    let marker = " (source: agent:";
+    let start = action.rfind(marker)?;
+    let tail = &action[start + marker.len()..];
+    let (component, id_tail) = tail.split_once(" [#")?;
+    let id = id_tail.strip_suffix("])")?;
+    if component.is_empty()
+        || !component
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        || !is_valid_todo_id(id)
+    {
+        return None;
+    }
+    Some(&action[..start])
 }
 
 /// Every `#id`-shaped token in `body`, lowercase.
@@ -591,9 +611,16 @@ pub fn add_todo_item_to_document(
     let explicit_linked = explicit_id
         .as_deref()
         .and_then(|id| links.linkable_component(id));
-    let contextual_action = explicit_id
+    let contextual_source = explicit_id
         .as_deref()
-        .map(|id| action_with_source_reference(&action, id, explicit_linked))
+        .zip(explicit_linked)
+        .map(|(id, component)| (normalize_link_id(id), component.to_string()))
+        .or_else(|| single_todo_source(None, &action, links));
+    let contextual_action = contextual_source
+        .as_ref()
+        .map(|(id, component)| {
+            action_with_source_reference(&action, id, Some(component.as_str()))
+        })
         .unwrap_or_else(|| action.clone());
     let wanted = normalize_action_text(&contextual_action);
     let wanted_legacy = normalize_action_text(&action);
@@ -612,7 +639,7 @@ pub fn add_todo_item_to_document(
             .map(str::to_string);
         if wanted != wanted_legacy
             && normalize_action_text(existing.action) == wanted_legacy
-            && id.as_deref() == explicit_id.as_deref()
+            && id.as_deref() == contextual_source.as_ref().map(|(id, _)| id.as_str())
         {
             let old_line = render_todo_line(
                 existing.prefix,
@@ -890,6 +917,129 @@ pub fn assign_missing_todo_ids(
     Ok(TodoIdAssignOutcome {
         content: todo.replace_content(content, &body.render()),
         assigned,
+    })
+}
+
+/// One legacy todo row whose single tracked-work source is not visibly
+/// component-qualified in its action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoSourceQualification {
+    /// Selector suitable for `--todo-*`: own id when present, else action text.
+    pub selector: String,
+    /// Canonical tracked-work id.
+    pub id: String,
+    /// Canonical source component (`review`, `backlog`, `pending`, or `icebox`).
+    pub component: String,
+    /// Action before qualification.
+    pub action: String,
+    /// Canonical action after qualification.
+    pub qualified_action: String,
+}
+
+/// Result of [`qualify_todo_source_references`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoSourceQualificationOutcome {
+    /// Document after admitted legacy rows were qualified.
+    pub content: String,
+    /// Every legacy singly linked row found, including rows held by `admit`.
+    pub findings: Vec<TodoSourceQualification>,
+    /// Selectors of findings actually rewritten in `content`.
+    pub qualified: Vec<String>,
+}
+
+/// Return the one open tracked-work source represented by a todo row.
+///
+/// The row may link explicitly by owning the tracked id or implicitly by
+/// citing it in its action. More than one distinct tracked id is ambiguous and
+/// intentionally has no canonical single source.
+fn single_todo_source(
+    own_id: Option<&str>,
+    action: &str,
+    links: &TodoLinkIndex,
+) -> Option<(String, String)> {
+    let mut candidates: Vec<(String, String)> = Vec::new();
+    if let Some(own) = own_id
+        && let Some(component) = links.linkable_component(own)
+    {
+        candidates.push((normalize_link_id(own), component.to_string()));
+    }
+    for id in cited_ids(action) {
+        let Some(component) = links.linkable_component(&id) else {
+            continue;
+        };
+        if !candidates.iter().any(|(seen, _)| seen == &id) {
+            candidates.push((id, component.to_string()));
+        }
+    }
+    match candidates.as_slice() {
+        [only] => Some(only.clone()),
+        _ => None,
+    }
+}
+
+/// Audit and canonically qualify every legacy singly linked `agent:todo` row.
+///
+/// Both explicit links (the todo owns an open tracked-work id) and implicit
+/// links (the action cites exactly one open tracked-work id) receive the same
+/// visible `(source: agent:<component> [#<id>])` suffix. Existing canonical
+/// rows are no-ops. `admit` is the typing gate: rejected rows remain unchanged
+/// but still appear in `findings`, so callers can surface an audit result and
+/// retry safely on a later pass.
+pub fn qualify_todo_source_references(
+    content: &str,
+    links: &TodoLinkIndex,
+    admit: &dyn Fn(&str) -> bool,
+) -> Result<TodoSourceQualificationOutcome> {
+    let unchanged = |content: &str| TodoSourceQualificationOutcome {
+        content: content.to_string(),
+        findings: Vec::new(),
+        qualified: Vec::new(),
+    };
+    let Some(todo) = find_todo_component(content)? else {
+        return Ok(unchanged(content));
+    };
+    let mut body = TodoBody::parse(todo.content(content));
+    let mut findings = Vec::new();
+    let mut qualified = Vec::new();
+    for item in body.items.clone() {
+        let Some((id, component)) =
+            single_todo_source(item.own_id.as_deref(), &item.action, links)
+        else {
+            continue;
+        };
+        let qualified_action =
+            action_with_source_reference(&item.action, &id, Some(&component));
+        if normalize_action_text(&qualified_action) == normalize_action_text(&item.action) {
+            continue;
+        }
+        let selector = item.own_id.clone().unwrap_or_else(|| item.action.clone());
+        findings.push(TodoSourceQualification {
+            selector: selector.clone(),
+            id,
+            component,
+            action: item.action.clone(),
+            qualified_action: qualified_action.clone(),
+        });
+        let line = body.lines[item.line].trim_end_matches(['\n', '\r']).trim();
+        if admit(line) {
+            body.rewrite_line(
+                item.line,
+                item.state,
+                item.own_id.as_deref(),
+                &qualified_action,
+            );
+            qualified.push(selector);
+        }
+    }
+    let updated = if qualified.is_empty() {
+        content.to_string()
+    } else {
+        todo.replace_content(content, &body.render())
+    };
+    Ok(TodoSourceQualificationOutcome {
+        content: updated,
+        findings,
+        qualified,
     })
 }
 
@@ -1562,6 +1712,9 @@ pub fn new_idless_todo_items(before: &str, after: &str) -> Vec<String> {
 /// What a todo's link to tracked work says should happen next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TodoLinkFindingKind {
+    /// A legacy singly linked todo does not visibly qualify its tracked-work
+    /// source with both component and id. Preflight maintenance migrates it.
+    LegacySourceUnqualified,
     /// The operator checked a todo whose own id is an OPEN `agent:review`
     /// gate: the agent resolves the gate (or records the follow-up) — the
     /// binary does not, because which outcome the operator chose is judgement.
@@ -1586,6 +1739,7 @@ impl TodoLinkFindingKind {
     /// Stable snake_case name for preflight JSON and ops.log.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::LegacySourceUnqualified => "legacy_source_unqualified",
             Self::OperatorDoneReviewOpen => "operator_done_review_open",
             Self::OperatorDoneBacklogOpen => "operator_done_backlog_open",
             Self::OperatorDoneIceboxOpen => "operator_done_icebox_open",
@@ -1605,6 +1759,8 @@ pub struct TodoLinkFinding {
     pub selector: String,
     /// `#id` or quoted action of the item, for receipts.
     pub label: String,
+    /// Source component for a source-qualification finding.
+    pub component: Option<String>,
 }
 
 /// `#todoids`: evaluate every `agent:todo` item against `links`.
@@ -1628,7 +1784,20 @@ pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<To
             ids,
             selector: selector.clone(),
             label: label.clone(),
+            component: None,
         };
+        if let Some((id, component)) = single_todo_source(own, &item.action, links) {
+            let qualified = action_with_source_reference(&item.action, &id, Some(&component));
+            if normalize_action_text(&qualified) != normalize_action_text(&item.action) {
+                out.push(TodoLinkFinding {
+                    kind: TodoLinkFindingKind::LegacySourceUnqualified,
+                    ids: vec![id],
+                    selector: selector.clone(),
+                    label: label.clone(),
+                    component: Some(component),
+                });
+            }
+        }
         if !item.state.is_open() {
             if let Some(own) = own {
                 match links.open_component(own) {
@@ -2309,7 +2478,7 @@ mod tests {
         assert_eq!(review.linked.as_deref(), Some("review"));
         assert_eq!(
             todo_body(&review.content),
-            "- [ ] [#gate1] Verify [#gate1] in a live pane\n"
+            "- [ ] [#gate1] Verify [#gate1] in a live pane (source: agent:review [#gate1])\n"
         );
         let backlog = add_linked(&wrap(""), "Grant CI access for (#work)", &index).unwrap();
         assert_eq!(backlog.id.as_deref(), Some("work"));
@@ -2379,6 +2548,42 @@ mod tests {
         assert!(err.to_string().contains("already resolved"), "{err}");
     }
 
+    #[test]
+    fn legacy_source_qualification_audits_and_migrates_explicit_and_implicit_links() {
+        let index = links(
+            &[("gate1", "review"), ("work", "backlog"), ("cold", "icebox")],
+            &[],
+        );
+        let content = wrap(concat!(
+            "- [ ] [#gate1] Decide the launcher policy\n",
+            "- [ ] [#todo2] Grant access for [#work]\n",
+            "- [ ] [#cold] Decide thawing (source: agent:review [#cold])\n",
+            "- [ ] [#many] Decide [#gate1] before [#work]\n",
+            "- [ ] [#done] Already canonical (source: agent:review [#gate1])\n",
+        ));
+        let outcome = qualify_todo_source_references(&content, &index, &|_| true).unwrap();
+        assert_eq!(outcome.findings.len(), 3, "{:?}", outcome.findings);
+        assert_eq!(outcome.qualified, vec!["gate1", "todo2", "cold"]);
+        assert_eq!(
+            todo_body(&outcome.content),
+            concat!(
+                "- [ ] [#gate1] Decide the launcher policy (source: agent:review [#gate1])\n",
+                "- [ ] [#todo2] Grant access for [#work] (source: agent:backlog [#work])\n",
+                "- [ ] [#cold] Decide thawing (source: agent:icebox [#cold])\n",
+                "- [ ] [#many] Decide [#gate1] before [#work]\n",
+                "- [ ] [#done] Already canonical (source: agent:review [#gate1])\n",
+            )
+        );
+        let again = qualify_todo_source_references(&outcome.content, &index, &|_| true).unwrap();
+        assert!(again.findings.is_empty());
+        assert_eq!(again.content, outcome.content);
+
+        let held = qualify_todo_source_references(&content, &index, &|_| false).unwrap();
+        assert_eq!(held.findings.len(), 3);
+        assert!(held.qualified.is_empty());
+        assert_eq!(held.content, content);
+    }
+
     /// `#todoidlayer`: a todo surfacing an operator decision on one parked
     /// icebox item layers on that item's id, like review and backlog items.
     #[test]
@@ -2389,7 +2594,10 @@ mod tests {
         assert_eq!(outcome.id.as_deref(), Some("cold"));
         assert_eq!(outcome.linked.as_deref(), Some("icebox"));
         assert_eq!(outcome.requested_id_unused, None);
-        assert_eq!(todo_body(&outcome.content), "- [ ] [#cold] Thaw or drop (#cold)?\n");
+        assert_eq!(
+            todo_body(&outcome.content),
+            "- [ ] [#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n"
+        );
         // An unknown id (a GitHub number) beside the one tracked id does not
         // count as a second tracked item.
         let gh = add_linked(&wrap(""), "Verify GH #267 against [#gate1]", &index).unwrap();
@@ -2426,7 +2634,7 @@ mod tests {
         assert_eq!(layered.requested_id_unused.as_deref(), Some("tdlauncher"));
         assert_eq!(
             todo_body(&layered.content),
-            "- [ ] [#jb262dynlauncherrecommen] Decide the launcher policy (#jb262dynlauncherrecommen)\n"
+            "- [ ] [#jb262dynlauncherrecommen] Decide the launcher policy (#jb262dynlauncherrecommen) (source: agent:review [#jb262dynlauncherrecommen])\n"
         );
         // The same request against an OPEN layered todo folds into it.
         let again = add_linked(
@@ -2467,18 +2675,25 @@ mod tests {
     #[test]
     fn todoidlayer_icebox_layer_joins_the_operator_done_and_auto_complete_paths() {
         let open = links(&[("cold", "icebox")], &[]);
-        let checked = wrap("- [x] [#cold] Thaw or drop (#cold)?\n");
+        let checked = wrap(
+            "- [x] [#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n",
+        );
         let findings = todo_link_findings(&checked, &open).unwrap();
         assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(findings[0].kind, TodoLinkFindingKind::OperatorDoneIceboxOpen);
         assert_eq!(findings[0].kind.as_str(), "operator_done_icebox_open");
         assert_eq!(findings[0].ids, vec!["cold".to_string()]);
-        let pending = wrap("- [ ] [#cold] Thaw or drop (#cold)?\n");
+        let pending = wrap(
+            "- [ ] [#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n",
+        );
         assert!(todo_link_findings(&pending, &open).unwrap().is_empty());
         let resolved = links(&[], &["cold"]);
         let done = auto_complete_linked_todos(&pending, &resolved).unwrap();
         assert_eq!(done.completed, vec!["cold".to_string()]);
-        assert_eq!(todo_body(&done.content), "- [x] [#cold] Thaw or drop (#cold)?\n");
+        assert_eq!(
+            todo_body(&done.content),
+            "- [x] [#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n"
+        );
     }
 
     /// `#todoidlayer`: id backfill layers an open id-less row on the one open
@@ -2566,10 +2781,14 @@ mod tests {
         assert_eq!(
             summary,
             vec![
+                ("legacy_source_unqualified", vec!["gate1".to_string()], "gate1".to_string()),
                 ("operator_done_review_open", vec!["gate1".to_string()], "gate1".to_string()),
+                ("legacy_source_unqualified", vec!["work".to_string()], "work".to_string()),
                 ("operator_done_backlog_open", vec!["work".to_string()], "work".to_string()),
                 ("linked_work_resolved", vec!["shipped".to_string()], "shipped".to_string()),
                 ("cited_work_resolved", vec!["gone".to_string()], "k3vd".to_string()),
+                ("legacy_source_unqualified", vec!["open2".to_string()], "k4vd".to_string()),
+                ("legacy_source_unqualified", vec!["open2".to_string()], "open2".to_string()),
             ]
         );
         assert!(todo_link_findings("no components", &index).unwrap().is_empty());

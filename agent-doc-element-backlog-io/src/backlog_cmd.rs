@@ -3679,7 +3679,14 @@ mod tests {
     fn todo_own_id(content: &str, action: &str) -> String {
         let line = content
             .lines()
-            .find(|line| line.ends_with(action) && line.starts_with("- [ ] [#"))
+            .find(|line| {
+                line.starts_with("- [ ] [#")
+                    && (line.ends_with(action)
+                        || line
+                            .strip_suffix(')')
+                            .and_then(|line| line.rsplit_once(" (source: agent:"))
+                            .is_some_and(|(before, _)| before.ends_with(action)))
+            })
             .unwrap_or_else(|| panic!("no id-carrying todo line for {action:?}:\n{content}"));
         let parsed = agent_doc_element::todo::parse_todo_line(line).unwrap();
         parsed.own_id.unwrap().to_string()
@@ -3702,7 +3709,7 @@ mod tests {
         assert_eq!(id, "aa11", "{after}");
         assert!(
             after.contains(&format!(
-                "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n- [ ] [#{id}] Verify [#aa11] in a live pane\n<!-- /agent:todo -->\n\n<!-- agent:review -->"
+                "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n- [ ] [#{id}] Verify [#aa11] in a live pane (source: agent:review [#aa11])\n<!-- /agent:todo -->\n\n<!-- agent:review -->"
             )),
             "{after}"
         );

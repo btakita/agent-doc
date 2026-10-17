@@ -189,10 +189,11 @@ made, `#tododupdone`).
 **Todo id discipline (`#todoids`, `#todoidlayer`).** Todo ids LAYER on
 tracked-work ids. A todo exists for visibility: it surfaces an operator
 decision on a backlog, review, or icebox item, so it carries that item's id
-rather than a new one. Because an own id is not explanatory context,
-`--todo-add` also makes the link visible in the action: if `id=<tracked-id>`
-selects open tracked work and the supplied action does not cite that id, the
-writer appends `(source: agent:<component> [#<tracked-id>])`. Every todo an
+rather than a new one. Because neither an own id nor an unqualified `#id`
+citation identifies the source component, `--todo-add` makes every single
+open tracked-work link visible in the action by appending
+`(source: agent:<component> [#<tracked-id>])`. This applies to both explicit
+`id=<tracked-id>` selection and implicit one-id citations. Every todo an
 agent adds with `--todo-add` carries an
 own id: it either REUSES the id of the one tracked item it is the operator
 prompt for, or gets a SURROGATE id (minted, or a caller-chosen `id=` that names
@@ -221,6 +222,16 @@ link. A `patch:todo` that adds an item without an own id prints a
 non-blocking `[todo] advisory (#todoids)`; the write does not mint ids into the
 patch, because the keyed merge keys an id-less item by its text and re-keying a
 line the operator may be editing would duplicate it.
+
+**Source qualification migration (`#todocontextmigration`).** Every preflight
+(except `--probe`) audits legacy todo rows against current open review, backlog,
+and icebox ids. A row whose own id and action identify exactly one such source
+is rewritten through the same live-editor/detached-disk authority path to carry
+the canonical component-qualified locator. Existing canonical rows are no-ops;
+rows with zero or several tracked sources are left untouched. The typing gate
+holds a row still being edited. Preflight emits a
+`legacy_source_unqualified` `todo_signals` finding for the audited legacy row,
+and stderr/ops.log record whether migration landed or was held for a later pass.
 
 **Id backfill (`#todoidbackfill`).** Every preflight (except `--probe`) gives
 each id-less todo row an own id, the way queue maintenance coins finished

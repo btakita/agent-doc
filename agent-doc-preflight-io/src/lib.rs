@@ -269,7 +269,7 @@ pub struct GateVerifyResult {
 /// preflight until the state changes (the check is idempotent, not an event).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TodoSignal {
-    /// `operator_done_review_open`, `operator_done_backlog_open`,
+    /// `legacy_source_unqualified`, `operator_done_review_open`, `operator_done_backlog_open`,
     /// `operator_done_icebox_open`,
     /// `linked_work_resolved`, or `cited_work_resolved`.
     pub kind: String,
@@ -296,6 +296,12 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
         finding.selector.clone()
     };
     let action = match finding.kind {
+        Kind::LegacySourceUnqualified => format!(
+            "Legacy todo {label} has one tracked-work source ({component} {ids}) but no canonical visible locator. Preflight maintenance qualifies it as (source: agent:{component} [#{id}]); if it remains unqualified, wait for the operator typing gate to settle and rerun preflight.",
+            label = finding.label,
+            component = finding.component.as_deref().unwrap_or("tracked-work"),
+            id = finding.ids.first().map(String::as_str).unwrap_or_default(),
+        ),
         Kind::OperatorDoneReviewOpen => format!(
             "The operator checked todo {label}, the operator prompt for review gate {ids}. Read any operator note, then resolve the gate this cycle (--review-resolve {id}) or record the follow-up; agent-doc never resolves a gate from a checkbox, because which outcome the operator chose is judgement.",
             label = finding.label,
@@ -330,18 +336,21 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
 
 /// `#todoidbackfill`: give every id-less `agent:todo` row an own id this
 /// preflight, the way queue maintenance coins free-text queue lines into
-/// backlog ids. A row typed by hand, written by an older binary, or added
-/// through `patch:todo` then has an id a closeout can complete (`--done <id>`,
-/// `--todo-done <id>`, or the `#todoids` own-id-resolved check).
+/// backlog ids. The same pass qualifies the visible tracked-work source of
+/// every legacy singly linked row (`#todocontextmigration`). A row typed by
+/// hand, written by an older binary, or added through `patch:todo` then has an
+/// id a closeout can complete and a component/id locator the operator can
+/// follow.
 ///
 /// Runs before queue maintenance, against the same editor/CP authority, behind
 /// the same typing gate (`coin_gate`): a row the operator is still typing keeps
-/// no id until a later pass. Rows that already own an id are never touched,
-/// and only the id token is inserted. The snapshot's todo body follows when it
-/// matched the pre-assignment body, so the ids do not read as an operator
-/// diff. Fail closed: unreadable tracked-work evidence, an editor head that is
-/// not current, or a refused write assigns nothing this pass. Returns the ids
-/// assigned.
+/// no id or source qualifier until a later pass. Existing ids are preserved;
+/// maintenance changes only a missing id token and/or the canonical trailing
+/// source locator. The snapshot's todo body follows when it matched the
+/// pre-maintenance body, so the repair does not read as an operator diff. Fail
+/// closed: unreadable tracked-work evidence, an editor head that is not
+/// current, or a refused write changes nothing this pass. Returns ids assigned
+/// during this pass.
 pub fn run_todo_id_maintenance(file: &Path, coin_gate: &FreeTextCoinGate) -> Result<Vec<String>> {
     let source = "preflight_todo_id_maintenance";
     let content = match current_text_via_preflight_authority_retrying(file, source)? {
@@ -377,20 +386,31 @@ pub fn run_todo_id_maintenance(file: &Path, coin_gate: &FreeTextCoinGate) -> Res
     let id_for = |action: &str, counter: u64| {
         agent_doc_element_backlog::backlog::generate_hash_n(action, &doc_id, counter, 4)
     };
-    let outcome = agent_doc_element::todo::assign_missing_todo_ids(
+    let id_outcome = agent_doc_element::todo::assign_missing_todo_ids(
         &content,
         &id_for,
         &reserved,
         &links,
         &|line| coin_gate.allows_coining(line),
     )?;
-    if outcome.assigned.is_empty() {
+    let source_outcome = agent_doc_element::todo::qualify_todo_source_references(
+        &id_outcome.content,
+        &links,
+        &|line| coin_gate.allows_coining(line),
+    )?;
+    if id_outcome.assigned.is_empty() && source_outcome.qualified.is_empty() {
+        for finding in &source_outcome.findings {
+            eprintln!(
+                "[preflight] todo: legacy source audit {} -> agent:{} #{} held by typing gate (#todocontextmigration)",
+                finding.selector, finding.component, finding.id
+            );
+        }
         return Ok(Vec::new());
     }
     let project_root = agent_doc_project_root_io::project_root_containing(file);
     let persisted = persist_queue_maintenance_doc(
         file,
-        &outcome.content,
+        &source_outcome.content,
         &content,
         project_root.as_deref(),
         source,
@@ -409,8 +429,8 @@ pub fn run_todo_id_maintenance(file: &Path, coin_gate: &FreeTextCoinGate) -> Res
     {
         eprintln!("[preflight] todo: snapshot sync warning: {err}");
     }
-    let mut ids = Vec::with_capacity(outcome.assigned.len());
-    for assignment in &outcome.assigned {
+    let mut ids = Vec::with_capacity(id_outcome.assigned.len());
+    for assignment in &id_outcome.assigned {
         let link = match assignment.linked.as_deref() {
             Some(component) => format!(" (reuses agent:{component} #{})", assignment.id),
             None => String::new(),
@@ -430,6 +450,27 @@ pub fn run_todo_id_maintenance(file: &Path, coin_gate: &FreeTextCoinGate) -> Res
             ),
         );
         ids.push(assignment.id.clone());
+    }
+    for finding in &source_outcome.findings {
+        let migrated = source_outcome
+            .qualified
+            .iter()
+            .any(|selector| selector == &finding.selector);
+        let status = if migrated { "migrated" } else { "held_by_typing_gate" };
+        eprintln!(
+            "[preflight] todo: legacy source audit {} -> agent:{} #{} {status} (#todocontextmigration)",
+            finding.selector, finding.component, finding.id
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "todo_source_qualification file={} todo={} id={} component={} status={status}",
+                file.display(),
+                finding.selector.replace(char::is_whitespace, "_"),
+                finding.id,
+                finding.component,
+            ),
+        );
     }
     Ok(ids)
 }

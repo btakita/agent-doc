@@ -566,7 +566,8 @@ id, and todo ids LAYER on tracked-work ids: a todo is the visibility layer for
 an operator decision on a backlog, review, or icebox item, so when the action
 cites exactly one open `agent:review`, `agent:backlog`, or `agent:icebox` id,
 the todo REUSES it — the example above becomes `- [ ] [#gate1] Verify [#gate1]
-in a live pane`, the actionable operator prompt for that gate. To surface a
+in a live pane (source: agent:review [#gate1])`, the actionable operator prompt
+and canonical source locator for that gate. To surface a
 decision on a tracked item, cite its id in the action and let the binary layer
 on it; do not coin a `td...` id for it. A second add for an id an open todo
 already owns is a no-op (edit it with `--todo-edit` instead). A surrogate id is
@@ -577,7 +578,11 @@ exactly one tracked item (otherwise the receipt prints `requested id=<id> not
 used` and the todo takes the tracked id), and is rejected when `<id>` is
 already resolved. Prefer
 `--todo-add` over `patch:todo` for new items: a patch line without an own id
-gets a `[todo] advisory (#todoids)`.
+gets a `[todo] advisory (#todoids)`. Preflight audits explicit and implicit
+legacy rows that identify exactly one open tracked source, reports them as
+`legacy_source_unqualified` in `todo_signals`, and appends the canonical source
+locator through the live-editor/detached-disk authority path behind the typing
+gate (`#todocontextmigration`).
 
 **The operator finishes a todo by checking its box.** `- [x]` in the editor is
 the done signal; no agent turn is needed and no agent write may undo it (a

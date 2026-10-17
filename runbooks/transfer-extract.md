@@ -55,6 +55,12 @@ The destination is initialized when absent. The operation records provenance in
 both documents, rejects collisions and unmatched selectors, and can resume a
 target-first interrupted apply without duplicating target content. Relative
 linked-resource paths are rebased when the destination directory differs.
+Preview's terminal notice names the exact destination and explicitly says that
+it was not created (or was left unchanged). If `--apply` is blocked by a live
+editor, the command prints the deterministic preview before failing and names
+the attached path(s), confirms that no documents changed, and says whether the
+destination was not created or left unchanged. A same-named Markdown file at a
+different path is not the extraction result.
 Apply is allowed only while both documents are detached from live editors; close their
 tabs before applying. This is required because independent live CRDT authorities
 cannot provide one atomic cross-document compare-and-swap.

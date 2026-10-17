@@ -295,6 +295,42 @@ fn source_pointer(operation_id: &str, target: &Path) -> String {
     )
 }
 
+fn unchanged_target_message(target: &Path, target_would_be_created: bool) -> String {
+    if target_would_be_created {
+        format!("destination {} was not created", target.display())
+    } else {
+        format!("destination {} was left unchanged", target.display())
+    }
+}
+
+fn attached_editor_refusal_message(
+    source: &Path,
+    target: &Path,
+    source_attached: bool,
+    target_attached: bool,
+    target_would_be_created: bool,
+    attached_during_preparation: bool,
+) -> String {
+    let mut attached = Vec::new();
+    if source_attached {
+        attached.push(format!("source {}", source.display()));
+    }
+    if target_attached {
+        attached.push(format!("target {}", target.display()));
+    }
+    let timing = if attached_during_preparation {
+        " An editor attached while the extraction plan was being prepared."
+    } else {
+        ""
+    };
+    format!(
+        "focused extract did not apply; no documents were changed and {}. Live editor authority is attached to: {}.{} Close the listed editor tab(s), then re-run the same command with --apply. Cross-document atomic compare-and-swap is unavailable across live CRDT authorities",
+        unchanged_target_message(target, target_would_be_created),
+        attached.join(", "),
+        timing,
+    )
+}
+
 fn exchange_selection(
     content: &str,
     ids: &BTreeSet<String>,
@@ -749,19 +785,6 @@ pub fn run(
     if source_canonical == target_identity {
         bail!("source and target must be different documents");
     }
-    if apply
-        && (agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(source)
-            || (target.exists()
-                && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(target)))
-    {
-        bail!(
-            "focused extract requires detached source and target documents; close their editor tabs and retry. Cross-document atomic compare-and-swap is unavailable across live CRDT authorities"
-        );
-    }
-    if apply && !bypass_claim {
-        super::extract::check_target_ownership(target)?;
-    }
-
     let source_content = std::fs::read_to_string(source)
         .with_context(|| format!("failed to read {}", source.display()))?;
     let (source_fm, _) =
@@ -798,21 +821,48 @@ pub fn run(
     println!("{}", serde_json::to_string_pretty(&prepared.preview)?);
     if !apply || prepared.preview.already_applied {
         if !apply {
-            eprintln!("[extract] preview only; re-run with --apply to write both documents");
+            eprintln!(
+                "[extract] preview only; no documents were changed and {}. Re-run the same command with --apply to write both documents",
+                unchanged_target_message(target, prepared.preview.target_would_be_created)
+            );
         }
         return Ok(());
+    }
+
+    let source_attached =
+        agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(source);
+    let target_attached = target.exists()
+        && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(target);
+    if source_attached || target_attached {
+        bail!(attached_editor_refusal_message(
+            source,
+            target,
+            source_attached,
+            target_attached,
+            prepared.preview.target_would_be_created,
+            false,
+        ));
+    }
+    if !bypass_claim {
+        super::extract::check_target_ownership(target)?;
     }
 
     // Recheck at the mutation boundary as well as command admission. Planning,
     // security review, or operator inspection must not leave a stale detached
     // observation authorizing writes after an editor has attached.
-    if agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(source)
-        || (target.exists()
-            && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(target))
-    {
-        bail!(
-            "focused extract requires detached source and target documents; an editor attached while the plan was being prepared"
-        );
+    let source_attached =
+        agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(source);
+    let target_attached = target.exists()
+        && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(target);
+    if source_attached || target_attached {
+        bail!(attached_editor_refusal_message(
+            source,
+            target,
+            source_attached,
+            target_attached,
+            prepared.preview.target_would_be_created,
+            true,
+        ));
     }
 
     if let Some(parent) = target.parent()
@@ -877,6 +927,23 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attached_editor_refusal_names_the_live_source_and_uncreated_destination() {
+        let error = attached_editor_refusal_message(
+            Path::new("tasks/sdk/sdk-dev.md"),
+            Path::new("tasks/sdk/sdk-demo.md"),
+            true,
+            false,
+            true,
+            false,
+        );
+
+        assert!(error.contains("focused extract did not apply; no documents were changed"));
+        assert!(error.contains("destination tasks/sdk/sdk-demo.md was not created"));
+        assert!(error.contains("source tasks/sdk/sdk-dev.md"));
+        assert!(error.contains("re-run the same command with --apply"));
+    }
 
     #[test]
     fn agent_selection_manifest_carries_semantic_intent_into_deterministic_request() {

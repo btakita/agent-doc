@@ -32,10 +32,19 @@ to resolve the coherent selection, inspect the deterministic preview, and run
 not ask for a second confirmation. Exploratory/question wording authorizes
 preview or advice only. If the concern, destination, or preview is ambiguous,
 ask a focused question before applying. An in-document request usually leaves
-the source editor-attached, so preview immediately but do not claim completion:
-present the exact already-authorized `--apply` retry command, ask the operator
-to close the source and target tabs, and retry after detachment. This safety
-handoff is not a second semantic confirmation.
+the source editor-attached. Preview immediately, then use the already-authorized
+coordinated path when the attached JetBrains endpoints support it:
+
+```bash
+agent-doc extract SOURCE TARGET --selection SELECTION.json --apply --coordinate-live-editors
+```
+
+The command persists each visible revision, freezes the affected tabs
+read-only, detaches their replicas, verifies the disk generations, applies, and
+then reloads and resumes the replicas. It requires no tab close or GUI
+automation. If an endpoint lacks `coordinated_extract_v1`, close the named tabs
+and retry the ordinary `--apply` command; this safety handoff is not a second
+semantic confirmation.
 
 For a commingled session, let the agent make the semantic selection without
 letting the mutation step become nondeterministic: inspect `agent-doc outline`,
@@ -61,9 +70,11 @@ editor, the command prints the deterministic preview before failing and names
 the attached path(s), confirms that no documents changed, and says whether the
 destination was not created or left unchanged. A same-named Markdown file at a
 different path is not the extraction result.
-Apply is allowed only while both documents are detached from live editors; close their
-tabs before applying. This is required because independent live CRDT authorities
-cannot provide one atomic cross-document compare-and-swap.
+Ordinary apply is allowed only while both documents are detached from live
+editors. `--coordinate-live-editors` creates that detached window for supported
+JetBrains tabs and resumes them after the transaction. This is required because
+independent live CRDT authorities cannot provide one atomic cross-document
+compare-and-swap.
 
 ## Transfer (move entire component)
 

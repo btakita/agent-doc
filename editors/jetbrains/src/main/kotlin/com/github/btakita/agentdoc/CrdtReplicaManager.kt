@@ -1214,6 +1214,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
     private val documentWorkers = DocumentReplicaWorkers()
     private val forwarders = ConcurrentHashMap<String, CrdtReplicaForwarder>()
+    /** Paths held detached by a receipt-bearing focused-extract transaction. */
+    private val extractFrozenPaths = ConcurrentHashMap.newKeySet<String>()
     // Every document ownership chart joins the manager's project-lifetime graph.
     // This keeps cross-thread projections composable instead of creating a
     // private reactive island per open editor.
@@ -1350,6 +1352,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         projectionRecoveryReregisterStartedAtMs.clear()
         forwarders.values.forEach { it.deregister() }
         forwarders.clear()
+        extractFrozenPaths.clear()
         shadows.clear()
         settledShadows.clear()
         templateValidation.clear()
@@ -1616,6 +1619,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // running, so the caller can answer "slow, still trying" instead of "refused".
         onAwaitTimeout: (() -> Unit)? = null,
     ): Boolean {
+        if (extractFrozenPaths.contains(filePath)) return false
         // TypingTracker reports the Lazily current-document projection after
         // each coalesced edit burst. Once this document already owns a live
         // replica, that observation must not enqueue another attach, normalize
@@ -1626,6 +1630,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return true
         }
         val attach = attach@{
+            if (extractFrozenPaths.contains(filePath)) return@attach false
             val started = System.nanoTime()
             var chars = -1
             try {
@@ -5471,6 +5476,60 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     forceRefresh = false,
                 )
             }
+        }
+
+        /**
+         * Fence automatic re-registration and synchronously relinquish this
+         * document's CRDT membership. The caller has already persisted the exact
+         * visible revision; a true result means detach was completed or admitted.
+         * The CLI independently waits for detached liveness before writing.
+         */
+        fun freezeOpenDocumentForExtract(project: Project, filePath: String): Boolean {
+            if (project.isDisposed) return false
+            val manager = instances[project] ?: return false
+            manager.extractFrozenPaths.add(filePath)
+            return try {
+                manager.documentWorkers.forDocument(filePath).submit<Boolean> {
+                    val forwarder = manager.forwarders.remove(filePath)
+                    forwarder?.deregister()
+                    forwarder == null || !forwarder.attached
+                }.get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            } catch (_: TimeoutException) {
+                // The serialized detach was admitted and is still running. Keep
+                // the tab read-only and the registration fence armed; the CLI
+                // independently waits for liveness to disappear before writing.
+                manager.log.warn(
+                    "[crdt-replica] focused-extract freeze still pending for $filePath",
+                )
+                true
+            } catch (error: Exception) {
+                manager.extractFrozenPaths.remove(filePath)
+                manager.log.warn("[crdt-replica] focused-extract freeze failed for $filePath", error)
+                false
+            }
+        }
+
+        /** Remove the registration fence and synchronously attach the reloaded
+         * editor document to current controller authority. */
+        fun resumeOpenDocumentAfterExtract(project: Project, filePath: String): Boolean {
+            if (project.isDisposed) return false
+            val manager = instances[project] ?: return false
+            manager.extractFrozenPaths.remove(filePath)
+            val documentRef = AtomicReference<Document?>()
+            val capture = {
+                val file = LocalFileSystem.getInstance().findFileByPath(filePath)
+                documentRef.set(file?.let { FileDocumentManager.getInstance().getDocument(it) })
+            }
+            if (SwingUtilities.isEventDispatchThread()) capture()
+            else ApplicationManager.getApplication().invokeAndWait { capture() }
+            val document = documentRef.get() ?: return false
+            return manager.ensureOpenDocumentReplica(
+                filePath,
+                document,
+                await = true,
+                forceRefresh = true,
+                requireFreshRegistration = true,
+            )
         }
 
         fun rebindOpenDocumentPath(

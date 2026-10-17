@@ -3554,7 +3554,10 @@ mod tests {
             "imperative extraction request itself authorizes `--apply` after a clean preview"
         ));
         assert!(SKILL_TEMPLATE.contains(
-            "if either is attached, preview now and record/present the concrete operator action"
+            "use `--apply --coordinate-live-editors` to persist, freeze, detach, apply, and resume"
+        ));
+        assert!(SKILL_TEMPLATE.contains(
+            "if an endpoint lacks the advertised capability, present the concrete fallback"
         ));
         assert!(SKILL_TEMPLATE.contains(
             "Exploratory wording such as `Can we extract ...?` authorizes only an answer or preview"

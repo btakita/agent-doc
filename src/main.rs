@@ -3293,6 +3293,9 @@ enum Commands {
         /// Bypass target pane ownership check; live editor attachment still refuses
         #[arg(long)]
         bypass_claim: bool,
+        /// Coordinate supported live editors through freeze, detached apply, and resume
+        #[arg(long, requires = "apply")]
+        coordinate_live_editors: bool,
     },
     /// Transfer entire component content from source to target document
     Transfer {
@@ -6350,13 +6353,15 @@ fn try_main() -> anyhow::Result<()> {
             selection,
             apply,
             bypass_claim,
+            coordinate_live_editors,
         } => {
             let focused = !ids.is_empty()
                 || !exchange_nodes.is_empty()
                 || !components.is_empty()
                 || selection.is_some()
                 || apply
-                || bypass_claim;
+                || bypass_claim
+                || coordinate_live_editors;
             if focused {
                 if component.is_some() {
                     anyhow::bail!(
@@ -6385,6 +6390,7 @@ fn try_main() -> anyhow::Result<()> {
                     request,
                     apply,
                     bypass_claim,
+                    coordinate_live_editors,
                 )
             } else {
                 extract::run(&source, &target, component.as_deref())
@@ -8192,6 +8198,7 @@ mod recycle_force_tests {
             "notes,review",
             "--apply",
             "--bypass-claim",
+            "--coordinate-live-editors",
         ]);
         match cmd {
             Commands::Extract {
@@ -8204,6 +8211,7 @@ mod recycle_force_tests {
                 selection,
                 apply,
                 bypass_claim,
+                coordinate_live_editors,
             } => {
                 assert_eq!(source, PathBuf::from("tasks/sdk.md"));
                 assert_eq!(target, PathBuf::from("tasks/sdk/sdk-legal.md"));
@@ -8214,6 +8222,7 @@ mod recycle_force_tests {
                 assert_eq!(selection, None);
                 assert!(apply);
                 assert!(bypass_claim);
+                assert!(coordinate_live_editors);
             }
             _ => panic!("expected extract subcommand"),
         }
@@ -8229,6 +8238,31 @@ mod recycle_force_tests {
         assert!(
             split_is_absent,
             "focused extraction must not collide with tmux split terminology"
+        );
+    }
+
+    #[test]
+    fn coordinated_live_extract_requires_apply() {
+        let rejected = std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                Cli::try_parse_from([
+                    "agent-doc",
+                    "extract",
+                    "source.md",
+                    "target.md",
+                    "--ids",
+                    "legal1",
+                    "--coordinate-live-editors",
+                ])
+                .is_err()
+            })
+            .expect("spawn parse thread")
+            .join()
+            .expect("parse thread");
+        assert!(
+            rejected,
+            "live-editor coordination must never run for preview"
         );
     }
 

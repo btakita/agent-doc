@@ -39,6 +39,8 @@ private enum class EditorIntent(val token: String) {
     ObserveLazilyCurrent("observe_lazily_current"),
     PersistCurrent("persist_current"),
     DeliverCrdtRemote("deliver_crdt_remote"),
+    FreezeForExtract("freeze_for_extract"),
+    ResumeAfterExtract("resume_after_extract"),
     RefreshVcs("refresh_vcs"),
     ReloadLibrary("reload_library"),
 }
@@ -58,9 +60,11 @@ private enum class EditorIntent(val token: String) {
 class PatchWatcher(private val project: Project) : Disposable {
     private val operatorTextAuthorityCapability = "operator_text_authority_v1"
     private val lazilyTransportReceiptsCapability = "lazily_transport_receipts_v1"
+    private val coordinatedExtractCapability = "coordinated_extract_v1"
     private val editorCapabilities = buildList {
         add(operatorTextAuthorityCapability)
         add(lazilyTransportReceiptsCapability)
+        add(coordinatedExtractCapability)
         if (System.getProperty("os.name").lowercase().contains("linux")) {
             add("native_hot_reload_generation_v1")
         }
@@ -79,6 +83,8 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /** Dedup cache keyed by patch_id (globally unique). Shared across all roots. */
     private val appliedPatchIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private data class FrozenExtract(val operationId: String, val wasWritable: Boolean)
+    private val frozenExtracts = java.util.concurrent.ConcurrentHashMap<String, FrozenExtract>()
 
     /** Boundary reposition requests delayed after a stale proof/apply attempt. */
     private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -707,6 +713,16 @@ class PatchWatcher(private val project: Project) : Disposable {
                     APPLY_FAILED
                 }
             }
+            EditorIntent.FreezeForExtract.token -> {
+                val filePath = extractStringField(json, "file") ?: return APPLY_FAILED
+                val operationId = extractStringField(json, "operation_id") ?: return APPLY_FAILED
+                if (freezeForExtract(filePath, operationId)) APPLY_APPLIED else APPLY_FAILED
+            }
+            EditorIntent.ResumeAfterExtract.token -> {
+                val filePath = extractStringField(json, "file") ?: return APPLY_FAILED
+                val operationId = extractStringField(json, "operation_id") ?: return APPLY_FAILED
+                if (resumeAfterExtract(filePath, operationId)) APPLY_APPLIED else APPLY_FAILED
+            }
             EditorIntent.RefreshVcs.token -> {
                 recordProjectSurfaceOps("vcs_refresh", "refresh_vcs", "commit_vcs_refresh", "triggered")
                 refreshVcs(extractStringField(json, "file"))
@@ -726,6 +742,64 @@ class PatchWatcher(private val project: Project) : Disposable {
                 APPLY_FAILED
             }
         }
+    }
+
+    /**
+     * Make the live buffer immutable before relinquishing its CRDT membership.
+     * The frozen-path fence in [CrdtReplicaManager] prevents ordinary open-file
+     * observations from immediately registering the still-open tab again.
+     */
+    private fun freezeForExtract(filePath: String, operationId: String): Boolean {
+        val existing = frozenExtracts[filePath]
+        if (existing != null) return existing.operationId == operationId
+        val state = AtomicReference<FrozenExtract?>()
+        ApplicationManager.getApplication().invokeAndWait {
+            val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
+            val document = FileDocumentManager.getInstance().getDocument(file) ?: return@invokeAndWait
+            val frozen = FrozenExtract(operationId, document.isWritable)
+            document.setReadOnly(true)
+            state.set(frozen)
+        }
+        val frozen = state.get() ?: return false
+        frozenExtracts[filePath] = frozen
+        if (CrdtReplicaManager.freezeOpenDocumentForExtract(project, filePath)) return true
+        frozenExtracts.remove(filePath, frozen)
+        ApplicationManager.getApplication().invokeAndWait {
+            val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
+            FileDocumentManager.getInstance().getDocument(file)?.setReadOnly(!frozen.wasWritable)
+        }
+        return false
+    }
+
+    /** Reload the detached transaction result, synchronously re-register its
+     * replica, and only then restore the tab's prior writable state. */
+    private fun resumeAfterExtract(filePath: String, operationId: String): Boolean {
+        val frozen = frozenExtracts[filePath] ?: return false
+        if (frozen.operationId != operationId) return false
+        var reloaded = false
+        ApplicationManager.getApplication().invokeAndWait {
+            val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(filePath)
+                ?: return@invokeAndWait
+            val manager = FileDocumentManager.getInstance()
+            val document = manager.getDocument(file) ?: return@invokeAndWait
+            manager.reloadFromDisk(document)
+            reloaded = true
+        }
+        if (!reloaded) return false
+        if (!CrdtReplicaManager.resumeOpenDocumentAfterExtract(project, filePath)) {
+            CrdtReplicaManager.freezeOpenDocumentForExtract(project, filePath)
+            ApplicationManager.getApplication().invokeAndWait {
+                val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
+                FileDocumentManager.getInstance().getDocument(file)?.setReadOnly(true)
+            }
+            return false
+        }
+        ApplicationManager.getApplication().invokeAndWait {
+            val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
+            FileDocumentManager.getInstance().getDocument(file)?.setReadOnly(!frozen.wasWritable)
+        }
+        frozenExtracts.remove(filePath, frozen)
+        return true
     }
 
     /**

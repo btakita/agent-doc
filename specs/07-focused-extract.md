@@ -16,9 +16,12 @@ without making an agent manually copy managed document regions.
   source and checkpoint both; second write/checkpoint failure -> restore both;
   target-first crash marker -> resume by completing source removal without a
   second target append; already applied -> no-op; either document attached to a
-  live editor -> emit the deterministic preview, then refuse before mutation
-  with the exact attached path(s) and explicit confirmation that the target was
-  not created (or was left unchanged).
+  live editor without coordination -> emit the deterministic preview, then
+  refuse before mutation with the exact attached path(s) and explicit
+  confirmation that the target was not created (or was left unchanged); live
+  JetBrains editor plus `--coordinate-live-editors` -> persist the exact visible
+  revisions, freeze the tabs read-only, detach their replicas, recheck the disk
+  generations, apply, reload the result, restore editability, and re-register.
 - **Evidence inputs:** parsed agent components, tracked item IDs, stable exchange
   node IDs, source-content hash, destination operation marker, frontmatter
   collaboration/security metadata, pane ownership, and durable editor liveness.
@@ -38,7 +41,7 @@ without making an agent manually copy managed document regions.
   exchange adjacency, complete destination initialization, collision refusal,
   and operation-marker resume; CLI help and the full project check cover wiring.
 - **Out of scope:** semantic-topic inference inside the mutation binary,
-  cross-filesystem transactions, and live multi-document CRDT transactions.
+  cross-filesystem transactions, and simultaneous multi-document CRDT commits.
 
 ## Interface
 
@@ -50,6 +53,7 @@ agent-doc extract SOURCE TARGET --ids one-item-id
 agent-doc extract SOURCE TARGET --exchange-node r:abc123
 agent-doc extract SOURCE TARGET --components notes,status
 agent-doc extract SOURCE TARGET --selection legal-selection.json
+agent-doc extract SOURCE TARGET --selection legal-selection.json --apply --coordinate-live-editors
 ```
 
 The JSON preview names the deterministic operation ID, whether the destination
@@ -71,11 +75,13 @@ matches the request; no second confirmation is required. Exploratory or
 question wording (“Could this be extracted?”) authorizes preview/advice only.
 The agent asks a question instead of applying when the concern, destination,
 or preview is ambiguous. Because an in-document request normally leaves the
-source attached to its editor, the agent previews immediately but must not
-claim the extraction completed: it presents the exact already-authorized
-`--apply` retry command, asks the operator to close the source and target tabs,
-and retries after detachment. That safety handoff is not a second semantic
-confirmation.
+source attached to its editor, the agent previews immediately and then uses
+`--apply --coordinate-live-editors` when every attached endpoint advertises the
+coordination capability. The plugin saves the exact visible revisions, makes
+the affected tabs temporarily read-only, and fences automatic re-registration
+while the CLI owns detached disk authority. No tab close or GUI automation is
+required. An older or non-JetBrains endpoint fails closed and names the required
+capability; closing the tabs remains the compatibility fallback.
 
 For a commingled session, an agent first inspects the source (`outline`,
 `exchange list`, and the managed work components), decides which pieces form a
@@ -130,13 +136,17 @@ directory. The target records `agent-doc-extract` provenance; the source
 records an `agent-doc-extract-destination` pointer. These markers make recovery
 discoverable and prevent a target-first crash from duplicating content on retry.
 
-Apply refuses while either document has live editor authority. Cross-document
-atomic compare-and-swap does not exist across independent CRDT actors, so a live
-focused extraction must never degrade to direct disk writes. Close both tabs
-(or otherwise detach them), inspect the preview again, and apply.
+Apply refuses while either document has live editor authority unless
+`--coordinate-live-editors` is supplied. Cross-document atomic compare-and-swap
+does not exist across independent CRDT actors, so coordination first persists
+and freezes each capable editor, waits for detached authority, verifies that the
+previewed generations reached disk, and only then performs the existing
+target-first transaction. Every exit path attempts resume; a failed resume
+leaves the tab read-only and reports explicit plugin reload/restart recovery
+instructions rather than risking an editor overwrite.
 An attached-editor `--apply` attempt still prints the deterministic preview,
 then fails nonzero with the exact attached source/target path(s), states that no
 documents changed, and states whether the intended target was not created or
 left unchanged.
 `--bypass-claim` bypasses only the tmux pane-ownership check, never the
-editor-authority gate.
+editor-authority gate or the coordinated freeze capability check.

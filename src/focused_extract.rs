@@ -324,11 +324,143 @@ fn attached_editor_refusal_message(
         ""
     };
     format!(
-        "focused extract did not apply; no documents were changed and {}. Live editor authority is attached to: {}.{} Close the listed editor tab(s), then re-run the same command with --apply. Cross-document atomic compare-and-swap is unavailable across live CRDT authorities",
+        "focused extract did not apply; no documents were changed and {}. Live editor authority is attached to: {}.{} For supported JetBrains tabs, re-run the same command with --apply --coordinate-live-editors; otherwise close the listed editor tab(s), then re-run with --apply. Cross-document atomic compare-and-swap is unavailable across live CRDT authorities",
         unchanged_target_message(target, target_would_be_created),
         attached.join(", "),
         timing,
     )
+}
+
+const COORDINATED_EXTRACT_CAPABILITY: &str = "coordinated_extract_v1";
+
+#[derive(Debug, Clone)]
+struct FrozenEditor {
+    project_root: PathBuf,
+    file: PathBuf,
+    editor_pid: u64,
+    editor_id: String,
+}
+
+fn resume_frozen_editors(operation_id: &str, frozen: &[FrozenEditor]) -> Result<()> {
+    let mut failures = Vec::new();
+    for editor in frozen.iter().rev() {
+        let mut last_error = None;
+        for attempt in 0..3 {
+            match agent_doc_ipc_io::send_resume_after_extract_to_editor(
+                &editor.project_root,
+                editor.editor_pid,
+                &editor.editor_id,
+                &editor.file.to_string_lossy(),
+                operation_id,
+            ) {
+                Ok(_) => {
+                    last_error = None;
+                    break;
+                }
+                Err(error) => last_error = Some(error),
+            }
+            if attempt < 2 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        if let Some(error) = last_error {
+            failures.push(format!("{}: {error:#}", editor.file.display()));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "editor resume failed after three attempts: {}. The affected tabs remain read-only so recovery cannot overwrite the extracted result; reload or restart the editor plugin to re-register them",
+            failures.join("; ")
+        )
+    }
+}
+
+fn freeze_live_editors(
+    operation_id: &str,
+    source: &Path,
+    target: &Path,
+) -> Result<Vec<FrozenEditor>> {
+    let mut registrations = Vec::new();
+    for file in [source, target] {
+        if !file.exists() {
+            continue;
+        }
+        for registration in
+            agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file)?
+        {
+            anyhow::ensure!(
+                registration.editor_kind == "jetbrains"
+                    && registration
+                        .capabilities
+                        .iter()
+                        .any(|value| value == COORDINATED_EXTRACT_CAPABILITY),
+                "live focused extract requires a JetBrains editor advertising {COORDINATED_EXTRACT_CAPABILITY}; {} is attached through {} {}. Upgrade/reload that editor plugin or omit --coordinate-live-editors",
+                file.display(),
+                registration.editor_kind,
+                registration.editor_version,
+            );
+            registrations.push((file.to_path_buf(), registration));
+        }
+    }
+
+    let mut frozen = Vec::new();
+    let freeze_result = (|| -> Result<()> {
+        for (file, registration) in registrations {
+            let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                &file,
+                "focused_extract_freeze",
+            )?;
+            let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&file);
+            agent_doc_ipc_io::send_persist_current_to_editor(
+                &project_root,
+                registration.pid,
+                &registration.editor_id,
+                &file.to_string_lossy(),
+                &agent_doc_hash::content_hash(&current),
+                current.len(),
+            )?;
+            agent_doc_ipc_io::send_freeze_for_extract_to_editor(
+                &project_root,
+                registration.pid,
+                &registration.editor_id,
+                &file.to_string_lossy(),
+                operation_id,
+            )?;
+            frozen.push(FrozenEditor {
+                project_root,
+                file,
+                editor_pid: registration.pid,
+                editor_id: registration.editor_id,
+            });
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while [source, target].into_iter().any(|file| {
+            file.exists()
+                && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file)
+        }) {
+            anyhow::ensure!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for coordinated editor detach"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        Ok(())
+    })();
+    if let Err(error) = freeze_result {
+        let resume_error = resume_frozen_editors(operation_id, &frozen).err();
+        return match resume_error {
+            Some(resume_error) => Err(error.context(format!(
+                "coordinated editor freeze failed and rollback resume also failed: {resume_error:#}"
+            ))),
+            None => {
+                Err(error.context("coordinated editor freeze failed; frozen tabs were resumed"))
+            }
+        };
+    }
+    Ok(frozen)
 }
 
 fn exchange_selection(
@@ -774,6 +906,7 @@ pub fn run(
     request: FocusedExtractRequest,
     apply: bool,
     bypass_claim: bool,
+    coordinate_live_editors: bool,
 ) -> Result<()> {
     if !source.exists() {
         bail!("source file not found: {}", source.display());
@@ -785,14 +918,20 @@ pub fn run(
     if source_canonical == target_identity {
         bail!("source and target must be different documents");
     }
-    let source_content = std::fs::read_to_string(source)
-        .with_context(|| format!("failed to read {}", source.display()))?;
+    let source_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        source,
+        "focused_extract_prepare",
+    )
+    .with_context(|| format!("failed to read current {}", source.display()))?;
     let (source_fm, _) =
         agent_doc_frontmatter_io::session::parse_for_file(&source_content, source)?;
     let target_content = if target.exists() {
         Some(
-            std::fs::read_to_string(target)
-                .with_context(|| format!("failed to read {}", target.display()))?,
+            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                target,
+                "focused_extract_prepare",
+            )
+            .with_context(|| format!("failed to read current {}", target.display()))?,
         )
     } else {
         None
@@ -833,7 +972,7 @@ pub fn run(
         agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(source);
     let target_attached = target.exists()
         && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(target);
-    if source_attached || target_attached {
+    if (source_attached || target_attached) && !coordinate_live_editors {
         bail!(attached_editor_refusal_message(
             source,
             target,
@@ -843,85 +982,127 @@ pub fn run(
             false,
         ));
     }
-    if !bypass_claim {
-        super::extract::check_target_ownership(target)?;
-    }
+    let frozen = if source_attached || target_attached {
+        freeze_live_editors(&prepared.preview.operation_id, source, target)?
+    } else {
+        Vec::new()
+    };
+    let operation_id = prepared.preview.operation_id.clone();
+    let apply_result = (|| -> Result<()> {
+        if !bypass_claim {
+            super::extract::check_target_ownership(target)?;
+        }
 
-    // Recheck at the mutation boundary as well as command admission. Planning,
-    // security review, or operator inspection must not leave a stale detached
-    // observation authorizing writes after an editor has attached.
-    let source_attached =
-        agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(source);
-    let target_attached = target.exists()
-        && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(target);
-    if source_attached || target_attached {
-        bail!(attached_editor_refusal_message(
-            source,
+        // Recheck at the mutation boundary as well as command admission. A
+        // coordinated freeze must have released every live authority, and a
+        // newly attached editor must fail closed before either write.
+        let source_attached =
+            agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(source);
+        let target_attached = target.exists()
+            && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(target);
+        if source_attached || target_attached {
+            bail!(attached_editor_refusal_message(
+                source,
+                target,
+                source_attached,
+                target_attached,
+                prepared.preview.target_would_be_created,
+                true,
+            ));
+        }
+        if !frozen.is_empty() {
+            let source_disk = std::fs::read_to_string(source)?;
+            anyhow::ensure!(
+                source_disk == prepared.source_before,
+                "source changed between focused-extract preview and coordinated freeze"
+            );
+            let target_disk = if target.exists() {
+                Some(std::fs::read_to_string(target)?)
+            } else {
+                None
+            };
+            anyhow::ensure!(
+                target_disk == prepared.target_before,
+                "target changed between focused-extract preview and coordinated freeze"
+            );
+        }
+
+        if let Some(parent) = target.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+        agent_doc_document_realtime_io::atomic_write_through_authority(
             target,
-            source_attached,
-            target_attached,
-            prepared.preview.target_would_be_created,
-            true,
-        ));
-    }
-
-    if let Some(parent) = target.parent()
-        && !parent.exists()
-    {
-        std::fs::create_dir_all(parent)?;
-    }
-    agent_doc_document_realtime_io::atomic_write_through_authority(target, &prepared.target_after)
+            &prepared.target_after,
+        )
         .with_context(|| format!("failed to write target {}", target.display()))?;
-    if let Err(error) = agent_doc_document_realtime_io::atomic_write_through_authority(
-        source,
-        &prepared.source_after,
-    ) {
-        rollback(&prepared, source, target);
-        return Err(error)
-            .context("source write failed after target write; target rollback attempted");
-    }
-    if let Err(error) = agent_doc_snapshot_io::checkpoint_document_baseline(
-        target,
-        &prepared.target_after,
-        agent_doc_ops_log_io::log_op,
-    )
-    .and_then(|_| {
-        agent_doc_snapshot_io::checkpoint_document_baseline(
+        if let Err(error) = agent_doc_document_realtime_io::atomic_write_through_authority(
             source,
             &prepared.source_after,
+        ) {
+            rollback(&prepared, source, target);
+            return Err(error)
+                .context("source write failed after target write; target rollback attempted");
+        }
+        if let Err(error) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            target,
+            &prepared.target_after,
             agent_doc_ops_log_io::log_op,
         )
-    }) {
-        rollback(&prepared, source, target);
-        if let Err(snapshot_error) = agent_doc_snapshot_io::checkpoint_document_baseline(
-            source,
-            &prepared.source_before,
-            agent_doc_ops_log_io::log_op,
-        ) {
-            eprintln!("[extract] WARNING: failed to restore source snapshot: {snapshot_error:#}");
-        }
-        if let Some(target_before) = &prepared.target_before
-            && let Err(snapshot_error) = agent_doc_snapshot_io::checkpoint_document_baseline(
-                target,
-                target_before,
+        .and_then(|_| {
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                source,
+                &prepared.source_after,
                 agent_doc_ops_log_io::log_op,
             )
-        {
-            eprintln!("[extract] WARNING: failed to restore target snapshot: {snapshot_error:#}");
-        } else if prepared.target_before.is_none()
-            && let Err(snapshot_error) = agent_doc_snapshot_io::clear_document_baseline(target)
-        {
-            eprintln!("[extract] WARNING: failed to clear new-target snapshot: {snapshot_error:#}");
+        }) {
+            rollback(&prepared, source, target);
+            if let Err(snapshot_error) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                source,
+                &prepared.source_before,
+                agent_doc_ops_log_io::log_op,
+            ) {
+                eprintln!(
+                    "[extract] WARNING: failed to restore source snapshot: {snapshot_error:#}"
+                );
+            }
+            if let Some(target_before) = &prepared.target_before
+                && let Err(snapshot_error) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                    target,
+                    target_before,
+                    agent_doc_ops_log_io::log_op,
+                )
+            {
+                eprintln!(
+                    "[extract] WARNING: failed to restore target snapshot: {snapshot_error:#}"
+                );
+            } else if prepared.target_before.is_none()
+                && let Err(snapshot_error) = agent_doc_snapshot_io::clear_document_baseline(target)
+            {
+                eprintln!(
+                    "[extract] WARNING: failed to clear new-target snapshot: {snapshot_error:#}"
+                );
+            }
+            return Err(error).context("snapshot checkpoint failed; document rollback attempted");
         }
-        return Err(error).context("snapshot checkpoint failed; document rollback attempted");
+        eprintln!(
+            "[extract] applied {}: {} → {}",
+            operation_id,
+            source.display(),
+            target.display()
+        );
+        Ok(())
+    })();
+    let resume_result = resume_frozen_editors(&operation_id, &frozen);
+    match (apply_result, resume_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(error.context("focused extract applied")),
+        (Err(error), Err(resume_error)) => Err(error.context(format!(
+            "focused extract failed and editor resume also failed: {resume_error:#}"
+        ))),
     }
-    eprintln!(
-        "[extract] applied {}: {} → {}",
-        prepared.preview.operation_id,
-        source.display(),
-        target.display()
-    );
-    Ok(())
 }
 
 #[cfg(test)]
@@ -942,7 +1123,7 @@ mod tests {
         assert!(error.contains("focused extract did not apply; no documents were changed"));
         assert!(error.contains("destination tasks/sdk/sdk-demo.md was not created"));
         assert!(error.contains("source tasks/sdk/sdk-dev.md"));
-        assert!(error.contains("re-run the same command with --apply"));
+        assert!(error.contains("--apply --coordinate-live-editors"));
     }
 
     #[test]

@@ -9,6 +9,8 @@ export const EditorIntent = {
     ObserveLazilyCurrent: 'observe_lazily_current',
     PersistCurrent: 'persist_current',
     DeliverCrdtRemote: 'deliver_crdt_remote',
+    FreezeForExtract: 'freeze_for_extract',
+    ResumeAfterExtract: 'resume_after_extract',
     RefreshVcs: 'refresh_vcs',
     ReloadLibrary: 'reload_library',
 } as const;

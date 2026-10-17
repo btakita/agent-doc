@@ -277,7 +277,20 @@ TODO rendering now resolves a cited review/backlog id and includes its source co
 The two SDK routing heads are also resolved: `sdk-dev.md` has a valid session, space-indented frontmatter, and an active Codex turn in pane `%22`. The route/session recovery, visible error-cause, native-save ordering, and projection fixes are installed from `main` at `94a0ef8952`.
 
 Changed paths cover document scaffolding, TODO parsing/rendering, sync and extraction scaffolds, CLI integration, specifications, runbooks, generated harness mirrors, routing/session handling, and regressions. Verification passed: focused component/TODO tests, workspace build, authoritative `make check` (10,952 passed, 172 skipped for the TODO-link branch), `make tmux-ci`, and `git diff --check`. The combined installed `main` batch passed all 10,980 tests. Confidence is high; no escalation remains.
-<!-- agent:boundary:c41b1031 -->
+
+### Re: Subagent completed: `subagent:all_md_inactive_pane` returned work for queue item “Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=5aff9edde2cc8100c2df0f6339c765da30d6e795074e3bde7c13cf548de4fcb0 -->
+> **Queue prompt:** Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'
+
+### Re: retain cross-root route visibility through dispatch — gpt-5 · 2026-10-17T19:11-04:00
+
+Resolved on `main` by `dea6e24257`. A cross-root editor route previously released the main-window route-layout lease before the nested controller dispatched, allowing passive IDEA focus churn to restash `all.md`. The owner now retains that lease through dispatch and releases it by bounded RPC, with lazy expiry if the client disappears.
+
+Changed paths: `agent-doc-controller-io/src/project_controller.rs`, its RPC module, routing specification, and feature reference. Verification on current `origin/main`: the targeted cross-root regression passed, and `cargo test -p agent-doc-controller-io` passed 775 tests with 0 failures and 10 ignored. Confidence is high; no escalation remains for this item.
+
+A separate verification audit found that the TODO source-context fix is incomplete for legacy rows and implicit singly linked `[#id]` actions. I recorded that remaining migration/canonicalization work in the backlog rather than claiming it is finished.
+<!-- agent:boundary:77bcbba7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -291,7 +304,7 @@ Changed paths cover document scaffolding, TODO parsing/rendering, sync and extra
 - ~~By default, `agent:todo` should have `priority`.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~By default, `agent:backlog` should have `priority queue`.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.~~ — auto-struck: answered this cycle (#ftstrike)
-- Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'
+- ~~Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'~~
 - There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
 - #gh-fix https://github.com/btakita/agent-doc/issues/284
 - #gh-fix https://github.com/btakita/agent-doc/issues/285
@@ -307,6 +320,7 @@ Changed paths cover document scaffolding, TODO parsing/rendering, sync and extra
 - ~~Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#todocontextmigration]
 <!-- /agent:queue -->
 
 ## Todo
@@ -325,6 +339,7 @@ Changed paths cover document scaffolding, TODO parsing/rendering, sync and extra
 <!-- agent:backlog priority queue -->
 - [ ] [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
 - [ ] [#extractcompactselection] agent-doc extract: keep prepared extraction selections executable after exchange compaction. Persist semantic selectors/selection manifests against archive locators, and support selectively transferring completed/done items; today a saved operation can lose its live exchange-node selectors after compaction and --ids does not select done items.
+- [ ] [#todocontextmigration] Canonicalize visible source qualification for every singly linked agent:todo item (explicit and implicit), emit migration/audit findings for legacy rows, and migrate monsterrodholders.md through the supported agent-doc authority path.
 <!-- /agent:backlog -->
 
 ## Review

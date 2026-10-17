@@ -26,6 +26,7 @@ object TerminalUtil {
     private val LOG = Logger.getInstance(TerminalUtil::class.java)
     private val agentDocProjectRoots = ConcurrentHashMap<String, String>()
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
+    private const val ROUTE_FAILURE_INLINE_CAUSE_MAX_CHARS = 180
     private const val RESTART_TELEMETRY_OPS_LOG_MAX_LINES = 400
     private const val EDITOR_FAILURE_STATUS_SECONDS = 30L
     internal const val RUN_ROUTE_WAIT_FOR_READY_SECONDS = 120L
@@ -2916,6 +2917,70 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         return cleared
     }
 
+    internal fun routeFailureInlineCause(routeOutput: String): String {
+        val tabbedFrontmatterLine = Regex("""(?m)^[ ]*>[ ]*(\d+)[ ]*\|[ ]*\t""")
+            .find(routeOutput)
+            ?.groupValues
+            ?.get(1)
+        if (tabbedFrontmatterLine != null && routeOutput.contains("invalid YAML frontmatter", ignoreCase = true)) {
+            return "Invalid YAML frontmatter (line $tabbedFrontmatterLine): tab indentation is not allowed; use spaces."
+        }
+
+        val lines = routeOutput.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toList()
+        val selected = lines.firstOrNull { it.startsWith("Error:", ignoreCase = true) }
+            ?: lines.firstOrNull { !it.startsWith("[route]") && !it.startsWith("[agent-doc]") }
+            ?: lines.firstOrNull()
+            ?: return "No error details were returned."
+        var cause = selected.replaceFirst(Regex("""(?i)^error:\s*"""), "")
+
+        val frontmatterMarker = "invalid yaml frontmatter in "
+        val markerIndex = cause.lowercase().lastIndexOf(frontmatterMarker)
+        if (markerIndex >= 0) {
+            val detailStart = cause.indexOf(": ", markerIndex + frontmatterMarker.length)
+            if (detailStart >= 0 && detailStart + 2 < cause.length) {
+                val detail = cause.substring(detailStart + 2)
+                val location = Regex("""(?i)\bat line\s+(\d+)\s+column\s+(\d+)""").find(detail)
+                val problem = detail.substringBefore(", while ")
+                    .replace(Regex("""(?i)\s+at line\s+\d+\s+column\s+\d+.*$"""), "")
+                    .trim()
+                cause = if (location != null) {
+                    "Invalid YAML frontmatter (line ${location.groupValues[1]}, column ${location.groupValues[2]}): $problem"
+                } else {
+                    "Invalid YAML frontmatter: $detail"
+                }
+            }
+        }
+
+        cause = cause.replace(Regex("""\s+"""), " ").trim()
+        if (cause.length <= ROUTE_FAILURE_INLINE_CAUSE_MAX_CHARS) return cause
+        return cause.take(ROUTE_FAILURE_INLINE_CAUSE_MAX_CHARS - 1).trimEnd() + "…"
+    }
+
+    internal fun buildPersistentRouteFailureMessage(
+        cwd: String,
+        relativePath: String,
+        exitCode: Int,
+        elapsed: String,
+        routeOutput: String,
+        savedFile: File?,
+    ): String = buildString {
+        append("Run Agent Doc failed: ")
+        append(routeFailureInlineCause(routeOutput))
+        append("\n")
+        append(relativePath)
+        append(" · ")
+        append(elapsed)
+        append(" · exit ")
+        append(exitCode)
+        if (savedFile != null) {
+            append("\nFull route output: ")
+            append(savedFile.relativeToOrSelf(File(cwd)).path)
+        }
+    }
+
     internal fun notifyPersistentRouteFailure(
         project: Project,
         cwd: String,
@@ -2926,22 +2991,14 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
     ) {
         val savedFile = persistRouteFailureOutput(cwd, relativePath, routeOutput)
         refreshRouteFailureStatus(project, cwd, relativePath, "route-failure-persisted")
-        val summary = buildString {
-            append("editor_route failed for ")
-            append(relativePath)
-            append(" after ")
-            append(elapsed)
-            append(" (exit ")
-            append(exitCode)
-            append(").")
-            if (savedFile != null) {
-                append("\nSaved exact route output to ")
-                append(savedFile.relativeToOrSelf(File(cwd)).path)
-            } else {
-                append("\n")
-                append(routeOutput)
-            }
-        }
+        val summary = buildPersistentRouteFailureMessage(
+            cwd = cwd,
+            relativePath = relativePath,
+            exitCode = exitCode,
+            elapsed = elapsed,
+            routeOutput = routeOutput,
+            savedFile = savedFile,
+        )
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")

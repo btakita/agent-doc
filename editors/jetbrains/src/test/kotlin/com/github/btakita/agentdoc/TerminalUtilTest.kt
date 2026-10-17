@@ -410,6 +410,57 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `persistent route failure leads with visible yaml tab cause`() {
+        val cwd = Files.createTempDirectory("agent-doc-jb-route-error-message").toFile()
+        val relativePath = "tasks/sdk/sdk-dev.md"
+        val output = """
+            Error: invalid YAML frontmatter in /repo/$relativePath: invalid YAML frontmatter in /repo/$relativePath: found character that cannot start any token at line 6 column 1, while scanning for the next token
+
+            Frontmatter excerpt:
+              5 | presets:
+            > 6 | ${'\t'}'#pr-aggregate': '#repo: Aggregate PR'
+                | ^
+              7 | ${'\t'}'#repo': 'haiven-dev/haiven-sdk'
+        """.trimIndent()
+        val saved = TerminalUtil.routeFailureDiagnosticsFile(cwd.path, relativePath)
+
+        val message = TerminalUtil.buildPersistentRouteFailureMessage(
+            cwd = cwd.path,
+            relativePath = relativePath,
+            exitCode = 1,
+            elapsed = "3.5s",
+            routeOutput = output,
+            savedFile = saved,
+        )
+
+        assertTrue(message.startsWith("Run Agent Doc failed: Invalid YAML frontmatter (line 6): tab indentation is not allowed; use spaces."))
+        assertTrue(message.contains("$relativePath · 3.5s · exit 1"))
+        assertTrue(message.contains("Full route output: .agent-doc/state/editor-route-errors/tasks__sdk__sdk-dev.md.txt"))
+        assertFalse(message.contains("found character that cannot start any token"))
+        assertTrue(message.length < 260)
+    }
+
+    @Test
+    fun `persistent route failure bounds generic cause before route metadata`() {
+        val detail = "controller rejected route because " + "x".repeat(300)
+        val message = TerminalUtil.buildPersistentRouteFailureMessage(
+            cwd = "/repo",
+            relativePath = "tasks/a.md",
+            exitCode = 1,
+            elapsed = "2.0s",
+            routeOutput = "[route] starting\nError: $detail\ntrailing diagnostics",
+            savedFile = null,
+        )
+        val firstLine = message.lineSequence().first()
+
+        assertTrue(firstLine.startsWith("Run Agent Doc failed: controller rejected route because "))
+        assertTrue(firstLine.endsWith("…"))
+        assertTrue(firstLine.length <= 202)
+        assertTrue(message.endsWith("tasks/a.md · 2.0s · exit 1"))
+        assertFalse(message.contains("trailing diagnostics"))
+    }
+
+    @Test
     fun `successful route or status clears persisted route failure for document`() {
         val cwd = Files.createTempDirectory("agent-doc-jb-route-error-clear").toFile()
         val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"

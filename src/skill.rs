@@ -3546,6 +3546,25 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn bundled_skill_routes_natural_language_focused_extract_requests() {
+        assert!(SKILL_TEMPLATE.contains("Focused extraction starts from document prose"));
+        assert!(SKILL_TEMPLATE.contains("load [runbooks/transfer-extract.md]"));
+        assert!(SKILL_TEMPLATE.contains(
+            "imperative extraction request itself authorizes `--apply` after a clean preview"
+        ));
+        assert!(SKILL_TEMPLATE.contains(
+            "if either is attached, preview now and record/present the concrete operator action"
+        ));
+        assert!(SKILL_TEMPLATE.contains(
+            "Exploratory wording such as `Can we extract ...?` authorizes only an answer or preview"
+        ));
+        assert!(SKILL_TEMPLATE.contains(
+            "never has to provide IDs, exchange-node handles, or a manifest"
+        ));
+        assert!(SKILL_TEMPLATE.contains("there is no `split` alias"));
+    }
+
     /// qsubattr4: the queue-level `subagents` attribute makes the in-session
     /// agent a coordinator. The hot path names the contract and links it; the
     /// respond and planning-dispatch runbooks own the full procedure.

@@ -170,7 +170,69 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 4. Submit the already-typed `agent-doc tasks/sdk/sdk-pr.md`.
 
 ❯ If the tools still do not appear after refresh, restart the Grok Build session, then run the command.
-<!-- agent:boundary:78058b56:agent-doc-bugs -->
+
+### Re: Subagent completed: `subagent:queue_runtime_state` returned work for queue item “The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=20954ec7fe35afc32a03ab4a5ddaf06b89f253297be1bc3c4ba4c3c954e261a7 -->
+> **Chat prompt (#chatprompt):** Can we unwedge sdk-demo.md now?
+
+> **Chat prompt (#chatprompt):** Sync failed: {"applied":false,"reason":"projection_effect_not_started","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md","/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md"],"layout_generation":39,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}
+
+> **Chat prompt (#chatprompt):** Unwedge sdk-dev.md
+
+> **Chat prompt (#chatprompt):** invalid YAML frontmatter in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md: invalid YAML frontmatter in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md: found character that cannot start any token at line 6 column 1, while scanning for the next token
+>
+> Frontmatter excerpt:
+>   5 | presets:
+> > 6 | 	'#pr-aggregate': '#repo: Aggregate PR'
+>     | ^
+>   7 | 	'#repo': 'haiven-dev/haiven-sdk'
+>
+> Fix the frontmatter between the opening and closing --- markers, then rerun the command. For an `agent_doc_write: crdt` document, frontmatter is read from CRDT state, so after fixing the file run `agent-doc reset /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md --from-current --preserve-session` to rebuild that state from the visible markdown (add `--force-disk` when no editor has the document open).
+>
+> Fix the frontmatter between the opening and closing --- markers, then rerun the command. For an `agent_doc_write: crdt` document, frontmatter is read from CRDT state, so after fixing the file run `agent-doc reset /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md --from-current --preserve-session` to rebuild that state from the visible markdown (add `--force-disk` when no editor has the document open).
+
+> **Chat prompt (#chatprompt):** Why is the yaml frontmatter messed up?
+
+> **Chat prompt (#chatprompt):** Idea keeps on auto-inserting tabs
+
+> **Chat prompt (#chatprompt):** Please configure my Idea to use spaces for the Yaml frontmatter.
+
+> **Chat prompt (#chatprompt):** In a subagent
+
+> **Queue prompt:** The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/290
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/291
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/292
+
+> **Queue prompt:** Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}
+
+> **Queue prompt:** The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)
+
+### Re: IDEA spaces and SDK session recovery — gpt-5 · 2026-10-17T19:00-04:00
+
+Completed through subagents and integrated into the installed build.
+
+The YAML broke because IDEA 2026.1's active `custom` code-style scheme explicitly enabled tabs for Markdown. Since `sdk-dev.md` is a Markdown file, IDEA applied that setting inside its YAML frontmatter too; YAML indentation cannot contain tabs.
+
+I added the project-scoped `.editorconfig` rule for `*.md` with `indent_style = space`, `indent_size = 2`, and `tab_width = 2` in commit `fc81ef3a7b`. The EditorConfig CLI now resolves those exact settings for `sdk-dev.md`, and the visible frontmatter contains two spaces before both `presets` entries.
+
+Session state:
+
+- `sdk-dev.md` is unwedgeed and currently executing an active Codex turn in pane `%22`; I did not reset, force disk, or disturb that live turn.
+- `sdk-demo.md` is healthy and ready in pane `%34`.
+- Grok Build's `sdk-pr.md` is healthy and ready in pane `%32`. The light-grey autosuggestion is now classified as ghost text rather than unsent operator input.
+- No restart is required. IntelliJ dynamically upgraded the plugin; idle supervisor/controller recycling is automatic.
+
+The integrated agent-doc fixes are installed and pushed to `main` at `94a0ef8952`. They include stale-focus rejection for `projection_effect_not_started`, separated in-flight timeout handling, native-save convergence for retained captures, the Grok ghost-suggestion classifier, route snapshot/native-save ordering, and a visible bounded error cause in IDEA notifications. The real-time queue projection implementation was already present in the integrated tree: claims and refreshes project `🚧` state synchronously through editor/CRDT authority, report-complete retains it through integration, and release/strike clears it.
+
+Verification: the authoritative integrated `make check` passed all 10,980 tests; the route regression passed 100/100 stress iterations; focused JetBrains/plugin suites passed; `make install` completed for the CLI/library, IntelliJ plugin `0.2.687` (plus split packages `0.2.688`/`0.2.689`), and VS Code extension `0.2.83`. The new `main` CI run is currently in progress, so local proof—not the earlier unrelated red run—is the completion evidence.
+
+Changed paths include the agent-doc Rust controller/session/queue paths, JetBrains integration and tests, specifications/runbooks, generated harness mirrors, and the root `.editorconfig`. Confidence is high. No operator escalation remains.
+<!-- agent:boundary:989e25a0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -178,29 +240,29 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.
-- 🚧 By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.
-- 🚧 By default, `agent:queue` should have `priority subagents`.
-- 🚧 By default, `agent:todo` should have `priority`.
-- 🚧 By default, `agent:backlog` should have `priority queue`.
-- 🚧 todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.
-- 🚧 Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'
-- 🚧 There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/284
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/285
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/286
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/287
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/288
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/289
-- #gh-fix https://github.com/btakita/agent-doc/issues/290
-- #gh-fix https://github.com/btakita/agent-doc/issues/291
-- #gh-fix https://github.com/btakita/agent-doc/issues/292
-- 🚧 do [#extractliveapply]
-- 🚧 do [#extractcompactselection]
+- ~~The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.~~
+- By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.
+- By default, `agent:queue` should have `priority subagents`.
+- By default, `agent:todo` should have `priority`.
+- By default, `agent:backlog` should have `priority queue`.
+- todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.
+- Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'
+- There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
+- #gh-fix https://github.com/btakita/agent-doc/issues/284
+- #gh-fix https://github.com/btakita/agent-doc/issues/285
+- #gh-fix https://github.com/btakita/agent-doc/issues/286
+- #gh-fix https://github.com/btakita/agent-doc/issues/287
+- #gh-fix https://github.com/btakita/agent-doc/issues/288
+- #gh-fix https://github.com/btakita/agent-doc/issues/289
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/290
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/291
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/292
+- do [#extractliveapply]
+- do [#extractcompactselection]
 - 🚧 Run Agent Doc on sdk-dev.md: agent-doc command failed (exit 1):
-- 🚧 Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session
-- Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}
-- The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)
+- Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session
+- 🚧 Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}
+- 🚧 The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)
 <!-- /agent:queue -->
 
 ## Todo
@@ -217,8 +279,8 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
-- [ ] 🚧 [#extractcompactselection] agent-doc extract: keep prepared extraction selections executable after exchange compaction. Persist semantic selectors/selection manifests against archive locators, and support selectively transferring completed/done items; today a saved operation can lose its live exchange-node selectors after compaction and --ids does not select done items.
+- [ ] [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
+- [ ] [#extractcompactselection] agent-doc extract: keep prepared extraction selections executable after exchange compaction. Persist semantic selectors/selection manifests against archive locators, and support selectively transferring completed/done items; today a saved operation can lose its live exchange-node selectors after compaction and --ids does not select done items.
 <!-- /agent:backlog -->
 
 ## Review

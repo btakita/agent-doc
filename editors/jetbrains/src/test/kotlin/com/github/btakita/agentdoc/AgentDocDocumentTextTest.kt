@@ -57,6 +57,19 @@ class AgentDocDocumentTextTest {
     }
 
     @Test
+    fun `plain markdown close is a no-op only when no replica is attached`() {
+        val plain = "# Notes\n\nOrdinary markdown.\n"
+        val session = "$plain\n<!-- agent:exchange -->\n"
+
+        assertFalse(closingDocumentCutRequiresReplicaUtil(plain, hasAttachedForwarder = false))
+        assertTrue(closingDocumentCutRequiresReplicaUtil(session, hasAttachedForwarder = false))
+        assertTrue(
+            "a former session document must publish marker removal through its attached replica",
+            closingDocumentCutRequiresReplicaUtil(plain, hasAttachedForwarder = true),
+        )
+    }
+
+    @Test
     fun `every registration entry point treats plain current text as terminal`() {
         val manager = managerSource()
         val localForward =
@@ -83,5 +96,16 @@ class AgentDocDocumentTextTest {
         assertTrue(terminal.contains("registerRetryTasks.remove(filePath)?.cancel(false)"))
         assertFalse(terminal.contains("scheduleRegisterRetry("))
         assertFalse(terminal.contains("recordRegisterFailure("))
+
+        val closingPublish =
+            manager.substringAfter("private fun publishClosingDocumentCut(")
+                .substringBefore("private fun settleUndurableLocalForward(")
+        val noReplicaGuard = closingPublish.indexOf("closingDocumentCutRequiresReplicaUtil")
+        val forwarderLookup = closingPublish.indexOf("forwarderFor(filePath, closingText)")
+        assertTrue("plain close must be classified before replica lookup", noReplicaGuard >= 0)
+        assertTrue("plain close must not reach replica registration", noReplicaGuard < forwarderLookup)
+        assertTrue(closingPublish.contains("recordNotAgentDocDocument(filePath)"))
+        assertTrue(closingPublish.contains("clearLocalPending(filePath)"))
+        assertTrue(closingPublish.contains("return@submit true"))
     }
 }

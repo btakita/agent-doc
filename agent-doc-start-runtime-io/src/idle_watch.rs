@@ -159,17 +159,25 @@ fn validate_supervisor_reexec_document(content: &str) -> Result<()> {
     agent_doc_frontmatter::frontmatter::parse(content).map(|_| ())
 }
 
-/// GH #279: a stale supervisor may be unable to resolve its editor-owned
-/// document precisely because the editor already runs the replacement build.
-/// In that case keeping the stale sender alive cannot make the validation
-/// succeed; replacing it is the recovery. Other resolution failures still
-/// defer, preserving the malformed-document guard above.
-fn supervisor_reexec_bypasses_document_failure(
-    refusal: Option<agent_doc_ipc_io::BuildMismatchRecoveryRefusal>,
-) -> bool {
+/// GH #279 / GH #285: a stale supervisor may be unable to resolve its
+/// editor-owned document precisely because the editor already runs the
+/// replacement build. The low-level build-mismatch refusal is consumed while
+/// resolving the replica and reaches this boundary as the typed attached-editor
+/// recovery decision, so inspect the error that this call site actually gets.
+/// Keeping the stale sender alive cannot make that validation succeed;
+/// replacing it is the recovery. Other resolution failures still defer,
+/// preserving the malformed-document guard above.
+fn supervisor_reexec_bypasses_document_failure(error: &anyhow::Error) -> bool {
     matches!(
-        refusal,
+        agent_doc_ipc_io::build_mismatch_recovery_refusal(error),
         Some(agent_doc_ipc_io::BuildMismatchRecoveryRefusal::SenderExecutableReplaced)
+    ) || agent_doc_document_realtime_io::attached_editor_disk_read_refusal(error).is_some_and(
+        |refusal| {
+            matches!(
+                refusal.recovery,
+                agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::WaitForSenderRecycle
+            )
+        },
     )
 }
 
@@ -4869,10 +4877,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 reexec_document_invalid_logged = false;
                                 reexec_document_validation_retry_at = None;
                             }
-                            Err(err)
-                                if supervisor_reexec_bypasses_document_failure(
-                                    agent_doc_ipc_io::build_mismatch_recovery_refusal(&err),
-                                ) =>
+                            Err(err) if supervisor_reexec_bypasses_document_failure(&err) =>
                             {
                                 reexec_document_invalid_logged = false;
                                 reexec_document_validation_retry_at = None;
@@ -6482,18 +6487,34 @@ mod tests {
     }
 
     #[test]
-    fn stale_supervisor_reexec_bypasses_only_replaced_sender_resolution_failure() {
-        use agent_doc_ipc_io::BuildMismatchRecoveryRefusal::{
-            ReloadAlreadyRequested, SenderExecutableReplaced,
+    fn stale_supervisor_reexec_bypasses_real_replaced_sender_resolve_error() {
+        use agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::{
+            ReloadEditor, WaitForSenderRecycle,
         };
 
-        assert!(supervisor_reexec_bypasses_document_failure(Some(
-            SenderExecutableReplaced
-        )));
-        assert!(!supervisor_reexec_bypasses_document_failure(Some(
-            ReloadAlreadyRequested
-        )));
-        assert!(!supervisor_reexec_bypasses_document_failure(None));
+        let resolve_error = anyhow::Error::new(
+            agent_doc_document_realtime_io::AttachedEditorDiskReadRefused {
+                file: std::path::PathBuf::from("sample-session.md"),
+                reason: "missing_replica".into(),
+                remedy: "wait for the route-owned supervisor recycle".into(),
+                recovery: WaitForSenderRecycle,
+            },
+        )
+        .context("failed to resolve current document");
+        assert!(supervisor_reexec_bypasses_document_failure(&resolve_error));
+
+        let reload_error = anyhow::Error::new(
+            agent_doc_document_realtime_io::AttachedEditorDiskReadRefused {
+                file: std::path::PathBuf::from("sample-session.md"),
+                reason: "missing_replica".into(),
+                remedy: "reload the editor".into(),
+                recovery: ReloadEditor,
+            },
+        );
+        assert!(!supervisor_reexec_bypasses_document_failure(&reload_error));
+        assert!(!supervisor_reexec_bypasses_document_failure(
+            &anyhow::anyhow!("unrelated")
+        ));
     }
 
     /// GH #98: foreground start owns the managed pane's tty. Diagnostics from

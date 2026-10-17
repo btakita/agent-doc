@@ -670,6 +670,28 @@ pub fn prepare_free_text_admission(
     queue_start_required: bool,
     document_id: &str,
 ) -> Result<Option<PreparedFreeTextAdmission>> {
+    prepare_free_text_admission_with_reserved(
+        content,
+        entries,
+        exchange_prompt,
+        queue_scope,
+        queue_start_required,
+        document_id,
+        &HashSet::new(),
+    )
+}
+
+/// Prepare free-text admission while reserving identities held outside the
+/// document bytes, such as a configured external `agent:done` archive.
+pub fn prepare_free_text_admission_with_reserved(
+    content: &str,
+    entries: &[crate::document_queue::QueueEntry],
+    exchange_prompt: Option<&str>,
+    queue_scope: &FreeTextAdmissionScope,
+    queue_start_required: bool,
+    document_id: &str,
+    externally_reserved: &HashSet<String>,
+) -> Result<Option<PreparedFreeTextAdmission>> {
     let prompts = collect_actionable_free_text_prompts(exchange_prompt, entries, queue_scope);
     if !prompts.has_work() {
         return Ok(None);
@@ -735,7 +757,9 @@ pub fn prepare_free_text_admission(
     }
     let mut warnings = Vec::new();
     if !texts_to_add.is_empty() {
-        let reserved = agent_doc_element_backlog::backlog::document_reserved_identity_ids(&current);
+        let mut reserved =
+            agent_doc_element_backlog::backlog::document_reserved_identity_ids(&current);
+        reserved.extend(externally_reserved.iter().cloned());
         let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes_reserved(
             &backlog_body,
             &texts_to_add,
@@ -1365,6 +1389,35 @@ mod tests {
             content,
             "verify [#existing] yourself"
         ));
+    }
+
+    /// GH #289: the I/O boundary supplies identities from the configured done
+    /// archive so free-text promotion cannot mint a historical id again.
+    #[test]
+    fn free_text_admission_dodges_externally_reserved_done_ids() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- Implement checkout setup\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        let externally_reserved = HashSet::from(["implementcheckoutsetup".to_string()]);
+
+        let prepared = prepare_free_text_admission_with_reserved(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            true,
+            "doc-id",
+            &externally_reserved,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(prepared.unique_ids.len(), 1);
+        assert_ne!(prepared.unique_ids[0], "implementcheckoutsetup");
+        assert!(prepared.unique_ids[0].starts_with("implementcheckoutsetup-"));
     }
 
     #[test]

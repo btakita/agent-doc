@@ -30,7 +30,7 @@ use agent_doc_queue::{
     free_text_admission::{
         FreeTextAdmissionExecution, FreeTextAdmissionScope, FreeTextCoinGate,
         append_empty_agent_component, collect_actionable_free_text_prompts,
-        gate_free_text_admission_scope, prepare_free_text_admission,
+        gate_free_text_admission_scope, prepare_free_text_admission_with_reserved,
         queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
     },
     queue_convergence::{
@@ -4688,7 +4688,23 @@ pub fn run_queue_maintenance_with_coin_gate(
     let exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&current_content);
     let document_id = agent_doc_hash::document_id_for_path(file);
-    if let Some(prepared_admission) = prepare_free_text_admission(
+    // Reading an external archive belongs only to a pass that may mint an id;
+    // unrelated preflight maintenance must not acquire a new archive failure.
+    let archived_identity_ids = if collect_actionable_free_text_prompts(
+        exchange_prompt.as_deref(),
+        &entries,
+        &queue_free_text_scope,
+    )
+    .has_work()
+    {
+        agent_doc_element_backlog_io::done_archive::external_done_archive_ids(
+            file,
+            &current_content,
+        )?
+    } else {
+        HashSet::new()
+    };
+    if let Some(prepared_admission) = prepare_free_text_admission_with_reserved(
         &current_content,
         &entries,
         exchange_prompt.as_deref(),
@@ -4697,6 +4713,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         // may still file the free text, but it must not start the queue.
         !queue_active_for_free_text && !queue_paused_by_operator,
         &document_id,
+        &archived_identity_ids,
     )? {
         queue_warnings.extend(
             prepared_admission

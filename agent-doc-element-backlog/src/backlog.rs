@@ -1336,8 +1336,12 @@ pub fn identity_collision_for_new_id(content: &str, candidate_id: &str) -> Optio
         .cloned()
 }
 
-/// Every id that already has an active meaning anywhere in the document —
-/// tracked-work components plus prompt presets.
+/// Every id that already has a current or historical meaning in the document.
+///
+/// Active tracked-work and prompt-preset ids come from
+/// [`document_active_identities`]. Completed rows still waiting in a tracked
+/// component and each inline `agent:done` entry are also reserved: dispatch may
+/// ignore completed work, but minting must not reuse its identity.
 ///
 /// `#idcollisionnamespace`: a DERIVED id must avoid these too. `assign_unique_id`
 /// only ever saw the one list being added to, so a slug derived from an item's
@@ -1345,11 +1349,25 @@ pub fn identity_collision_for_new_id(content: &str, candidate_id: &str) -> Optio
 /// `preset_item_id_collision` guard then blocked queue dispatch on an ambiguity
 /// nothing had a chance to prevent.
 pub fn document_reserved_identity_ids(content: &str) -> HashSet<String> {
-    document_active_identities(content)
+    let mut reserved: HashSet<String> = document_active_identities(content)
         .into_iter()
         .filter(|(_, sources)| !sources.is_empty())
         .map(|(id, _)| id)
-        .collect()
+        .collect();
+    if let Ok(components) = element::parse(content) {
+        for component in components {
+            if element::is_tracked_work_component(&component.name) {
+                let (_, items, _) = parse_items(component.content(content));
+                reserved.extend(items.into_iter().filter_map(|item| {
+                    let id = normalize_pending_id(&item.id);
+                    (!id.is_empty()).then_some(id)
+                }));
+            } else if element::is_backlog_done_component(&component.name) {
+                reserved.extend(extract_done_item_own_ids(component.content(content)));
+            }
+        }
+    }
+    reserved
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7174,6 +7192,38 @@ mod tests {
             outcome.id.starts_with("livepaneproof"),
             "readability is kept"
         );
+    }
+
+    /// GH #289: completed identities are historical names, not free names. A
+    /// second URL-led item (or any other text deriving the same slug) must not
+    /// reuse an id merely because the first item moved to `agent:done`.
+    #[test]
+    fn a_derived_id_dodges_completed_and_inline_done_ids() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [x] [#completedrow] Completed but not reaped\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:done -->\n",
+            "- 2026-10-17 [#livepaneproof] Live-pane proof for the first case; cites [#notowned]\n",
+            "<!-- /agent:done -->\n"
+        );
+        let reserved = document_reserved_identity_ids(doc);
+        assert!(reserved.contains("completedrow"));
+        assert!(reserved.contains("livepaneproof"));
+        assert!(
+            !reserved.contains("notowned"),
+            "a prose citation is not an archived item's identity"
+        );
+
+        let text = "Live-pane proof for the second case";
+        assert_eq!(
+            derive_representative_id(text).as_deref(),
+            Some("livepaneproof"),
+            "precondition: the new text derives the archived id"
+        );
+        let outcome = op_add_with_outcome_reserved("", text, DOC_ID, false, &reserved).unwrap();
+        assert_ne!(outcome.id, "livepaneproof");
+        assert!(outcome.id.starts_with("livepaneproof"));
     }
 
     /// Without the reserved set the old behavior is reproduced exactly — the

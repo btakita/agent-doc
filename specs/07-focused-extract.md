@@ -5,9 +5,12 @@ without making an agent manually copy managed document regions.
 
 ## Architecture contract
 
-- **Invariant:** every selected logical node is present in exactly one document
-  after a successful apply, while every unselected byte remains in its source
-  component and both documents have current baselines.
+- **Invariant:** every selected live logical node is present in exactly one
+  document after a successful apply, while every unselected byte remains in its
+  source component and both documents have current baselines. Compacted exchange
+  archives are immutable history: selecting an archived response copies that
+  bounded context into the destination with its canonical archive locator and
+  leaves the archive unchanged.
 - **Policy owner:** the focused-extract planner owns selector resolution,
   prompt/response adjacency, collision refusal, provenance, and idempotency.
 - **Transition table:** unmatched selector -> refuse; target identity collision
@@ -22,8 +25,9 @@ without making an agent manually copy managed document regions.
   JetBrains editor plus `--coordinate-live-editors` -> persist the exact visible
   revisions, freeze the tabs read-only, detach their replicas, recheck the disk
   generations, apply, reload the result, restore editability, and re-register.
-- **Evidence inputs:** parsed agent components, tracked item IDs, stable exchange
-  node IDs, source-content hash, destination operation marker, frontmatter
+- **Evidence inputs:** parsed agent components, tracked item IDs (including
+  `agent:done`), stable live exchange node IDs, compact archive locators,
+  source-content hash, destination operation marker, frontmatter
   collaboration/security metadata, pane ownership, and durable editor liveness.
 - **Reactive topology:** editor registrations remain in the existing
   document/process `Source -> Computed liveness -> write Effect -> receipt`
@@ -37,9 +41,10 @@ without making an agent manually copy managed document regions.
 - **Allowed edit surfaces:** the focused-extract module, CLI routing, target
   scaffold shared with transfer, this command spec, its runbook, and regression
   tests.
-- **Verification:** pure planner tests cover multi-surface ID selection,
-  exchange adjacency, complete destination initialization, collision refusal,
-  and operation-marker resume; CLI help and the full project check cover wiring.
+- **Verification:** pure planner tests cover multi-surface and completed-item ID
+  selection, exchange adjacency, archive-locator resolution after compaction,
+  complete destination initialization, collision refusal, and operation-marker
+  resume; CLI help and the full project check cover wiring.
 - **Out of scope:** semantic-topic inference inside the mutation binary,
   cross-filesystem transactions, and simultaneous multi-document CRDT commits.
 
@@ -51,6 +56,7 @@ Preview is the default:
 agent-doc extract SOURCE TARGET --ids id1,id2
 agent-doc extract SOURCE TARGET --ids one-item-id
 agent-doc extract SOURCE TARGET --exchange-node r:abc123
+agent-doc extract SOURCE TARGET --archive-locator archive:.agent-doc/archives/hash.md#2
 agent-doc extract SOURCE TARGET --components notes,status
 agent-doc extract SOURCE TARGET --selection legal-selection.json
 agent-doc extract SOURCE TARGET --selection legal-selection.json --apply --coordinate-live-editors
@@ -93,11 +99,14 @@ coherent concern, and writes a selection manifest:
   "rationale": "Keep counsel decisions with their originating turns and tracked work.",
   "ids": ["tdminorscompliance", "prelinkid2"],
   "exchange_node_ids": ["r:abc123"],
+  "archive_locators": ["archive:.agent-doc/archives/hash.md#2"],
   "components": []
 }
 ```
 
-`--selection` cannot be combined with direct selector flags. The semantic
+`--selection` cannot be combined with direct selector flags. `archive_locators`
+accepts the stable `archive:...#turn` values printed by `response-toc`; the
+alias `exchange_archive_locators` is also accepted. The semantic
 judgment therefore stays agent-assisted and reviewable, while the mutation is
 still a deterministic resolution of stable selectors. `focus` and `rationale`
 are included in the preview and its operation ID, so the operator can review
@@ -120,11 +129,23 @@ session. Use `agent-doc init TARGET` first, or use focused selectors when the
 command should initialize a new target.
 
 Tracked IDs are resolved across `agent:queue`, `agent:todo`, `agent:backlog`
-(including legacy `agent:pending`), `agent:review`, and `agent:icebox`. Exchange
-nodes that mention a selected ID move with it. Selecting one exchange prompt or
-response also carries its adjacent response or prompt so the extracted history
-does not become an orphaned half-turn. Whole-component selectors support
-`status`, `exchange`, `queue`, `backlog`, `todo`, `review`, `icebox`, and `notes`.
+(including legacy `agent:pending`), `agent:review`, `agent:icebox`, and inline
+`agent:done`. Dated done entries retain their archive date, text, and indented
+continuations. Exchange nodes that mention a selected ID move with it. Selecting
+one exchange prompt or response also carries its adjacent response or prompt so
+the extracted history does not become an orphaned half-turn. Whole-component
+selectors support `status`, `exchange`, `queue`, `backlog`, `todo`, `review`,
+`icebox`, `done`, and `notes`.
+
+When compaction removes a live exchange node after a selection was saved, the
+planner searches the source document's derived compact-archive index for the
+same content-stable node ID. The preview records the resolved archive locator
+and uses transfer mode `archived_context_copy`; an explicit `archive_locators`
+selector resolves the same way. Apply embeds the selected archived response in
+the target exchange between provenance markers, while the canonical compact
+archive remains immutable. A locator owned by another source document, a
+non-assistant turn, or a missing turn is rejected before either document is
+written.
 Selected tracked item blocks retain their stable ID, checkbox/gate state, text,
 and indented continuation bytes exactly.
 

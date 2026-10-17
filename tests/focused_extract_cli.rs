@@ -136,6 +136,10 @@ fn agent_selection_previews_applies_and_reruns_idempotently() {
             .current_dir(dir.path())
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
+            .env(
+                "AGENT_DOC_TEST_CONTROLLER_LAUNCH_REASON",
+                "focused extract live-editor authority check",
+            )
             .args([
                 "extract",
                 source.to_str().unwrap(),

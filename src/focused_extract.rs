@@ -7,7 +7,7 @@
 //! then checkpoints both baselines. A deterministic operation marker makes a
 //! target-first crash resumable without duplicating content.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use agent_doc_element::element;
@@ -18,9 +18,11 @@ use agent_doc_markdown_ast::exchange_tree::{
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-const SELECTIVE_LIST_COMPONENTS: [&str; 5] = ["queue", "todo", "backlog", "review", "icebox"];
-const ALLOWED_WHOLE_COMPONENTS: [&str; 9] = [
-    "status", "exchange", "queue", "backlog", "pending", "todo", "review", "icebox", "notes",
+const SELECTIVE_LIST_COMPONENTS: [&str; 6] =
+    ["queue", "todo", "backlog", "review", "icebox", "done"];
+const ALLOWED_WHOLE_COMPONENTS: [&str; 10] = [
+    "status", "exchange", "queue", "backlog", "pending", "todo", "review", "icebox", "done",
+    "notes",
 ];
 
 #[derive(Debug, Clone)]
@@ -29,6 +31,7 @@ pub struct FocusedExtractRequest {
     pub rationale: Option<String>,
     pub ids: Vec<String>,
     pub exchange_node_ids: Vec<String>,
+    pub archive_locators: Vec<String>,
     pub components: Vec<String>,
 }
 
@@ -42,6 +45,8 @@ struct SelectionManifest {
     ids: Vec<String>,
     #[serde(default, alias = "exchange_nodes")]
     exchange_node_ids: Vec<String>,
+    #[serde(default, alias = "exchange_archive_locators")]
+    archive_locators: Vec<String>,
     #[serde(default)]
     components: Vec<String>,
 }
@@ -63,6 +68,7 @@ pub fn request_from_selection_file(path: &Path) -> Result<FocusedExtractRequest>
             .filter(|value| !value.is_empty()),
         ids: manifest.ids,
         exchange_node_ids: manifest.exchange_node_ids,
+        archive_locators: manifest.archive_locators,
         components: manifest.components,
     })
 }
@@ -75,6 +81,8 @@ pub struct FocusedExtractTransfer {
     pub ids: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub node_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub archive_locators: Vec<String>,
     pub bytes: usize,
 }
 
@@ -94,6 +102,14 @@ pub struct FocusedExtractPreview {
     pub transfers: Vec<FocusedExtractTransfer>,
     pub unmatched_ids: Vec<String>,
     pub unmatched_exchange_node_ids: Vec<String>,
+    pub unmatched_archive_locators: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ArchivedExchangeSelection {
+    locator: String,
+    text: String,
+    node_ids: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -234,6 +250,155 @@ fn tracked_ids(content: &str) -> BTreeSet<String> {
     ids
 }
 
+fn done_entry_id(line: &str) -> Option<String> {
+    let line = line
+        .strip_prefix("- ")
+        .or_else(|| line.strip_prefix("* "))?;
+    let start = line.find("[#")? + 2;
+    let end = start + line[start..].find(']')?;
+    let id = normalize_id(&line[start..end]);
+    (!id.is_empty()
+        && id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '-'
+        }))
+    .then_some(id.to_ascii_lowercase())
+}
+
+/// Extract binary-owned `agent:done` archive entries without converting their
+/// dated archive shape into active checklist items. An entry owns all bytes up
+/// to the next flush-left archive entry, matching the done-archive reopen
+/// parser's boundary contract.
+fn extract_done_entries_by_id(body: &str, ids: &BTreeSet<String>) -> (String, String, Vec<String>) {
+    let mut headers = Vec::new();
+    let mut offset = 0usize;
+    for raw in body.split_inclusive('\n') {
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if let Some(id) = done_entry_id(line) {
+            headers.push((offset, id));
+        }
+        offset += raw.len();
+    }
+
+    let mut remaining = String::with_capacity(body.len());
+    let mut moved = String::new();
+    let mut found = Vec::new();
+    let mut cursor = 0usize;
+    for (index, (start, id)) in headers.iter().enumerate() {
+        let end = headers
+            .get(index + 1)
+            .map(|(next, _)| *next)
+            .unwrap_or(body.len());
+        remaining.push_str(&body[cursor..*start]);
+        if ids.contains(id) {
+            moved.push_str(&body[*start..end]);
+            found.push(id.clone());
+        } else {
+            remaining.push_str(&body[*start..end]);
+        }
+        cursor = end;
+    }
+    remaining.push_str(&body[cursor..]);
+    (remaining, moved, found)
+}
+
+fn normalized_archive_locator(archive_path: &str, turn_ordinal: i64) -> String {
+    format!("archive:{archive_path}#{turn_ordinal}")
+}
+
+fn resolve_archive_locator(source: &Path, locator: &str) -> Result<ArchivedExchangeSelection> {
+    let Some(locator_body) = locator.trim().strip_prefix("archive:") else {
+        bail!("focused-extract archive locator must start with 'archive:': {locator}");
+    };
+    let Some((archive_path, ordinal)) = locator_body.rsplit_once('#') else {
+        bail!("focused-extract archive locator must look like archive:<path>#<turn>");
+    };
+    let turn_ordinal: i64 = ordinal
+        .parse()
+        .with_context(|| format!("invalid archive turn '{ordinal}'"))?;
+    let mut turns = agent_doc_sqlite::archive_index::fetch_turn_window(
+        source,
+        archive_path,
+        turn_ordinal,
+        0,
+        0,
+    )?;
+    let turn = turns
+        .pop()
+        .with_context(|| format!("archive locator not found: {locator}"))?;
+    if turn.speaker != "assistant" {
+        bail!("focused-extract archive locator is not an assistant response: {locator}");
+    }
+
+    let expected_source = source
+        .canonicalize()
+        .unwrap_or_else(|_| lexical_absolute(source));
+    let project_root = agent_doc_fs::find_project_root(&expected_source)
+        .with_context(|| format!("project root not found for {}", source.display()))?;
+    let indexed_source = lexical_absolute(&project_root.join(&turn.document_path));
+    if indexed_source != expected_source {
+        bail!(
+            "focused-extract archive locator belongs to {}, not {}: {locator}",
+            turn.document_path,
+            source.display()
+        );
+    }
+
+    let node_ids = parse_exchange_nodes(&turn.text)
+        .into_iter()
+        .filter(|node| !matches!(node.kind, ExchangeNodeKind::Salient { .. }))
+        .map(|node| node.node_id())
+        .collect();
+    Ok(ArchivedExchangeSelection {
+        locator: locator.trim().to_string(),
+        text: turn.text,
+        node_ids,
+    })
+}
+
+fn archived_node_selections(
+    source: &Path,
+    node_ids: &BTreeSet<String>,
+) -> Result<(Vec<ArchivedExchangeSelection>, BTreeSet<String>)> {
+    if node_ids.is_empty() {
+        return Ok((Vec::new(), BTreeSet::new()));
+    }
+    let turns = agent_doc_sqlite::archive_index::list_recent_turns(source, None, None, usize::MAX)?;
+    let mut selections = Vec::new();
+    let mut matched = BTreeSet::new();
+    for turn in turns {
+        let (remaining, moved, selected_ids, _, selected_explicit) =
+            exchange_selection(&turn.text, &BTreeSet::new(), node_ids);
+        let _ = remaining;
+        if moved.trim().is_empty() {
+            continue;
+        }
+        matched.extend(selected_explicit);
+        selections.push(ArchivedExchangeSelection {
+            locator: normalized_archive_locator(&turn.archive_path, turn.turn_ordinal),
+            text: moved,
+            node_ids: selected_ids,
+        });
+        if matched == *node_ids {
+            break;
+        }
+    }
+    Ok((selections, matched))
+}
+
+fn archive_selection_marker(locator: &str) -> String {
+    let escaped = locator.replace('&', "&amp;").replace('"', "&quot;");
+    format!("<!-- agent-doc-extract-archive locator=\"{escaped}\" -->")
+}
+
+fn render_archived_exchange(selection: &ArchivedExchangeSelection) -> String {
+    format!(
+        "{}\n{}\n<!-- /agent-doc-extract-archive -->",
+        archive_selection_marker(&selection.locator),
+        selection.text.trim_matches('\n')
+    )
+}
+
 fn find_component(doc: &str, name: &str) -> Result<Option<element::Component>> {
     let components = element::parse(doc).context("failed to parse agent components")?;
     Ok(components.into_iter().find(|component| {
@@ -253,6 +418,7 @@ fn ensure_component(mut doc: String, name: &str) -> Result<String> {
         "todo" => "Todo",
         "review" => "Review",
         "icebox" => "Icebox",
+        "done" => "Completed / Reaped",
         "notes" => "Notes",
         _ => bail!("unsupported focused-extract component '{name}'"),
     };
@@ -539,8 +705,9 @@ fn target_covers_selectors(
     target: &str,
     ids: &BTreeSet<String>,
     explicit_nodes: &BTreeSet<String>,
+    archive_locators: &BTreeSet<String>,
 ) -> Result<bool> {
-    if ids.is_empty() && explicit_nodes.is_empty() {
+    if ids.is_empty() && explicit_nodes.is_empty() && archive_locators.is_empty() {
         return Ok(false);
     }
     let mut covered_ids = BTreeSet::new();
@@ -549,7 +716,15 @@ fn target_covers_selectors(
             continue;
         };
         for id in ids {
-            if content_mentions_id(component.content(target), id) {
+            let matches = if component_name == "done" {
+                agent_doc_element_backlog::backlog::extract_done_item_own_ids(
+                    component.content(target),
+                )
+                .contains(id)
+            } else {
+                content_mentions_id(component.content(target), id)
+            };
+            if matches {
                 covered_ids.insert(id.clone());
             }
         }
@@ -569,7 +744,14 @@ fn target_covers_selectors(
             }
         }
     }
-    Ok(covered_ids == *ids && covered_nodes == *explicit_nodes)
+    let covered_archive_locators = archive_locators
+        .iter()
+        .filter(|locator| target.contains(&archive_selection_marker(locator)))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    Ok(covered_ids == *ids
+        && covered_nodes == *explicit_nodes
+        && covered_archive_locators == *archive_locators)
 }
 
 fn prepare(
@@ -592,15 +774,25 @@ fn prepare(
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
         .collect();
+    let archive_locators: BTreeSet<String> = request
+        .archive_locators
+        .iter()
+        .map(|locator| locator.trim().to_string())
+        .filter(|locator| !locator.is_empty())
+        .collect();
     let whole_components: BTreeSet<String> = request
         .components
         .iter()
         .map(|name| canonical_component(name))
         .filter(|name| !name.is_empty())
         .collect();
-    if ids.is_empty() && explicit_nodes.is_empty() && whole_components.is_empty() {
+    if ids.is_empty()
+        && explicit_nodes.is_empty()
+        && archive_locators.is_empty()
+        && whole_components.is_empty()
+    {
         bail!(
-            "focused extract requires at least one --ids, --exchange-node, or --components selector"
+            "focused extract requires at least one --ids, --exchange-node, --archive-locator, or --components selector"
         );
     }
     for component in &whole_components {
@@ -616,13 +808,18 @@ fn prepare(
         .canonicalize()
         .unwrap_or_else(|_| lexical_absolute(target));
     let operation_seed = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         source_identity.display(),
         target_identity.display(),
         request.focus.as_deref().unwrap_or_default(),
         request.rationale.as_deref().unwrap_or_default(),
         ids.iter().cloned().collect::<Vec<_>>().join(","),
         explicit_nodes.iter().cloned().collect::<Vec<_>>().join(","),
+        archive_locators
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(","),
         whole_components
             .iter()
             .cloned()
@@ -648,6 +845,7 @@ fn prepare(
     let mut transfers = Vec::new();
     let mut matched_ids = BTreeSet::new();
     let mut matched_explicit = BTreeSet::new();
+    let mut matched_archive_locators = BTreeSet::new();
 
     for component_name in &whole_components {
         let Some(source_component) = find_component(&source_after, component_name)? else {
@@ -710,6 +908,7 @@ fn prepare(
             mode: "whole_component".to_string(),
             ids: Vec::new(),
             node_ids: Vec::new(),
+            archive_locators: Vec::new(),
             bytes: moved.len(),
         });
     }
@@ -745,7 +944,67 @@ fn prepare(
                 mode: "selected_nodes".to_string(),
                 ids: Vec::new(),
                 node_ids,
+                archive_locators: Vec::new(),
                 bytes: moved.len(),
+            });
+        }
+    }
+
+    if !whole_components.contains("exchange")
+        && (!archive_locators.is_empty() || matched_explicit != explicit_nodes)
+    {
+        let mut archived = BTreeMap::<String, ArchivedExchangeSelection>::new();
+        for locator in &archive_locators {
+            let selection = resolve_archive_locator(source, locator)?;
+            let selection_node_ids = selection.node_ids.iter().cloned().collect::<BTreeSet<_>>();
+            matched_explicit.extend(explicit_nodes.intersection(&selection_node_ids).cloned());
+            matched_archive_locators.insert(locator.clone());
+            archived.insert(selection.locator.clone(), selection);
+        }
+
+        let unresolved_nodes = explicit_nodes
+            .difference(&matched_explicit)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let (fallbacks, fallback_matches) = archived_node_selections(source, &unresolved_nodes)?;
+        matched_explicit.extend(fallback_matches);
+        for selection in fallbacks {
+            archived
+                .entry(selection.locator.clone())
+                .or_insert(selection);
+        }
+
+        for selection in archived.into_values() {
+            let marker = archive_selection_marker(&selection.locator);
+            if target_after.contains(&marker) {
+                continue;
+            }
+            let rendered = render_archived_exchange(&selection);
+            if !already_marked {
+                target_after = ensure_component(target_after, "exchange")?;
+                let target_exchange = find_component(&target_after, "exchange")?.unwrap();
+                let target_ids = parse_exchange_nodes(target_exchange.content(&target_after))
+                    .into_iter()
+                    .map(|node| node.node_id())
+                    .collect::<HashSet<_>>();
+                if let Some(collision) = selection
+                    .node_ids
+                    .iter()
+                    .find(|node_id| target_ids.contains(*node_id))
+                {
+                    bail!(
+                        "target exchange already contains archived node {collision}; refusing to duplicate it"
+                    );
+                }
+                target_after = append_to_component(&target_after, "exchange", &rendered)?;
+            }
+            transfers.push(FocusedExtractTransfer {
+                component: "exchange".to_string(),
+                mode: "archived_context_copy".to_string(),
+                ids: Vec::new(),
+                node_ids: selection.node_ids,
+                archive_locators: vec![selection.locator],
+                bytes: rendered.len(),
             });
         }
     }
@@ -758,10 +1017,14 @@ fn prepare(
             continue;
         };
         let requested: Vec<String> = ids.iter().cloned().collect();
-        let (remaining, moved, found) = agent_doc_element_backlog::backlog::extract_items_by_id(
-            source_component.content(&source_after),
-            &requested,
-        )?;
+        let (remaining, moved, found) = if component_name == "done" {
+            extract_done_entries_by_id(source_component.content(&source_after), &ids)
+        } else {
+            agent_doc_element_backlog::backlog::extract_items_by_id(
+                source_component.content(&source_after),
+                &requested,
+            )?
+        };
         if found.is_empty() {
             continue;
         }
@@ -777,10 +1040,18 @@ fn prepare(
         if !already_marked {
             target_after = ensure_component(target_after, component_name)?;
             let target_component = find_component(&target_after, component_name)?.unwrap();
-            let (_, _, target_found) = agent_doc_element_backlog::backlog::extract_items_by_id(
-                target_component.content(&target_after),
-                &found,
-            )?;
+            let target_found = if component_name == "done" {
+                let found = found.iter().cloned().collect::<BTreeSet<_>>();
+                let (_, _, target_found) =
+                    extract_done_entries_by_id(target_component.content(&target_after), &found);
+                target_found
+            } else {
+                let (_, _, target_found) = agent_doc_element_backlog::backlog::extract_items_by_id(
+                    target_component.content(&target_after),
+                    &found,
+                )?;
+                target_found
+            };
             if !target_found.is_empty() {
                 bail!(
                     "target component '{component_name}' already contains selected id(s): {}",
@@ -794,6 +1065,7 @@ fn prepare(
             mode: "selected_items".to_string(),
             ids: found,
             node_ids: Vec::new(),
+            archive_locators: Vec::new(),
             bytes: moved.len(),
         });
     }
@@ -803,8 +1075,12 @@ fn prepare(
         .difference(&matched_explicit)
         .cloned()
         .collect();
+    let unmatched_archive_locators: Vec<String> = archive_locators
+        .difference(&matched_archive_locators)
+        .cloned()
+        .collect();
     let target_already_covers_selectors =
-        target_covers_selectors(&target_after, &ids, &explicit_nodes)?;
+        target_covers_selectors(&target_after, &ids, &explicit_nodes, &archive_locators)?;
     if !unmatched_ids.is_empty() && !(transfers.is_empty() && target_already_covers_selectors) {
         bail!(
             "focused-extract selector id(s) not found: {}",
@@ -817,6 +1093,14 @@ fn prepare(
         bail!(
             "focused-extract exchange node id(s) not found: {}",
             unmatched_exchange_node_ids.join(", ")
+        );
+    }
+    if !unmatched_archive_locators.is_empty()
+        && !(transfers.is_empty() && target_already_covers_selectors)
+    {
+        bail!(
+            "focused-extract archive locator(s) not found: {}",
+            unmatched_archive_locators.join(", ")
         );
     }
     if transfers.is_empty() {
@@ -834,6 +1118,7 @@ fn prepare(
                     transfers,
                     unmatched_ids,
                     unmatched_exchange_node_ids,
+                    unmatched_archive_locators,
                 },
                 source_before: source_content.clone(),
                 target_before,
@@ -867,6 +1152,7 @@ fn prepare(
             transfers,
             unmatched_ids,
             unmatched_exchange_node_ids,
+            unmatched_archive_locators,
         },
         source_before: source_content,
         target_before,
@@ -1137,6 +1423,7 @@ mod tests {
   "rationale": "Keep counsel decisions with the legal backlog and their originating turns.",
   "ids": ["legal1"],
   "exchange_node_ids": ["r:abc123"],
+  "archive_locators": ["archive:.agent-doc/archives/legal.md#2"],
   "components": ["notes"]
 }"#,
         )
@@ -1147,6 +1434,10 @@ mod tests {
         assert!(request.rationale.unwrap().contains("counsel decisions"));
         assert_eq!(request.ids, ["legal1"]);
         assert_eq!(request.exchange_node_ids, ["r:abc123"]);
+        assert_eq!(
+            request.archive_locators,
+            ["archive:.agent-doc/archives/legal.md#2"]
+        );
         assert_eq!(request.components, ["notes"]);
     }
 
@@ -1220,6 +1511,147 @@ mod tests {
     }
 
     #[test]
+    fn ids_select_completed_entries_from_done_without_rewriting_archive_shape() {
+        let source_content = source_doc().replace(
+            "<!-- agent:done -->\n",
+            concat!(
+                "<!-- agent:done -->\n",
+                "- 2026-10-16 [#donelegal] Completed legal review\n",
+                "  - evidence remains attached\n",
+                "- 2026-10-17 [#doneother] Completed unrelated work\n",
+            ),
+        );
+        let prepared = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            source_content,
+            None,
+            &frontmatter::Frontmatter::default(),
+            &FocusedExtractRequest {
+                focus: None,
+                rationale: None,
+                ids: vec!["donelegal".into()],
+                exchange_node_ids: Vec::new(),
+                archive_locators: Vec::new(),
+                components: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        assert!(
+            prepared
+                .target_after
+                .contains("- 2026-10-16 [#donelegal] Completed legal review")
+        );
+        assert!(prepared.target_after.contains("evidence remains attached"));
+        assert!(!prepared.source_after.contains("[#donelegal]"));
+        assert!(prepared.source_after.contains("[#doneother]"));
+        let done_transfer = prepared
+            .preview
+            .transfers
+            .iter()
+            .find(|transfer| transfer.component == "done")
+            .unwrap();
+        assert_eq!(done_transfer.ids, ["donelegal"]);
+    }
+
+    #[test]
+    fn compacted_exchange_node_selector_falls_back_to_its_archive_locator() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = dir.path().join("source.md");
+        let target = dir.path().join("target.md");
+        let archive_dir = dir.path().join(".agent-doc/archives");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        let archived_response = "### Re: Archived legal decision\n\nCounsel approved [#archlegal].";
+        let archived_node_id = parse_exchange_nodes(archived_response)[0].node_id();
+        let archive = archive_dir.join("legal.md");
+        std::fs::write(
+            &archive,
+            format!(
+                "---\narchived_from: compact\narchived_at: 20261017-120000\ncomponent: exchange\ndocument: source.md\n---\n\n## User\n\n❯ Request archived legal decision\n\n## Assistant\n\n{archived_response}\n"
+            ),
+        )
+        .unwrap();
+        let source_content = source_doc().replace(
+            "❯ Decide [#legal1]\n### Re: Legal\n\nDecision for #legal1.\n### Re: Dev\n\nUnrelated.\n",
+            "### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/legal.md`*\n",
+        );
+        std::fs::write(&source, &source_content).unwrap();
+
+        let prepared = prepare(
+            &source,
+            &target,
+            source_content,
+            None,
+            &frontmatter::Frontmatter::default(),
+            &FocusedExtractRequest {
+                focus: None,
+                rationale: None,
+                ids: Vec::new(),
+                exchange_node_ids: vec![archived_node_id.clone()],
+                archive_locators: Vec::new(),
+                components: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        assert!(prepared.target_after.contains(archived_response));
+        assert!(prepared.target_after.contains(
+            "agent-doc-extract-archive locator=\"archive:.agent-doc/archives/legal.md#2\""
+        ));
+        let transfer = prepared
+            .preview
+            .transfers
+            .iter()
+            .find(|transfer| transfer.mode == "archived_context_copy")
+            .unwrap();
+        assert_eq!(transfer.node_ids, [archived_node_id]);
+        assert_eq!(
+            transfer.archive_locators,
+            ["archive:.agent-doc/archives/legal.md#2"]
+        );
+    }
+
+    #[test]
+    fn selection_manifest_archive_locator_resolves_after_compaction() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = dir.path().join("source.md");
+        let target = dir.path().join("target.md");
+        let archive_dir = dir.path().join(".agent-doc/archives");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        let archived_response = "### Re: Archived compliance\n\nRetained semantic context.";
+        std::fs::write(
+            archive_dir.join("compliance.md"),
+            format!(
+                "---\narchived_from: compact\narchived_at: 20261017-120001\ncomponent: exchange\ndocument: source.md\n---\n\n## User\n\n❯ Request archived compliance context\n\n## Assistant\n\n{archived_response}\n"
+            ),
+        )
+        .unwrap();
+        let source_content = source_doc();
+        std::fs::write(&source, &source_content).unwrap();
+
+        let prepared = prepare(
+            &source,
+            &target,
+            source_content,
+            None,
+            &frontmatter::Frontmatter::default(),
+            &FocusedExtractRequest {
+                focus: Some("compliance".into()),
+                rationale: None,
+                ids: Vec::new(),
+                exchange_node_ids: Vec::new(),
+                archive_locators: vec!["archive:.agent-doc/archives/compliance.md#2".into()],
+                components: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        assert!(prepared.target_after.contains(archived_response));
+        assert!(prepared.preview.unmatched_archive_locators.is_empty());
+    }
+
+    #[test]
     fn focused_plan_moves_linked_surfaces_and_exchange_pair() {
         let source = Path::new("source.md");
         let target = Path::new("legal.md");
@@ -1235,6 +1667,7 @@ mod tests {
                 rationale: None,
                 ids: vec!["legal1".into()],
                 exchange_node_ids: Vec::new(),
+                archive_locators: Vec::new(),
                 components: Vec::new(),
             },
         )
@@ -1298,6 +1731,7 @@ mod tests {
                 rationale: None,
                 ids: Vec::new(),
                 exchange_node_ids: vec![response_id],
+                archive_locators: Vec::new(),
                 components: Vec::new(),
             },
         )
@@ -1319,6 +1753,7 @@ mod tests {
                 rationale: None,
                 ids: Vec::new(),
                 exchange_node_ids: Vec::new(),
+                archive_locators: Vec::new(),
                 components: vec!["notes".into()],
             },
         );
@@ -1357,6 +1792,7 @@ mod tests {
                 rationale: None,
                 ids: vec!["legal1".into()],
                 exchange_node_ids: vec![response_id],
+                archive_locators: Vec::new(),
                 components: vec!["exchange".into()],
             },
         )
@@ -1391,6 +1827,7 @@ mod tests {
                 rationale: None,
                 ids: Vec::new(),
                 exchange_node_ids: Vec::new(),
+                archive_locators: Vec::new(),
                 components: vec!["backlog".into()],
             },
         )
@@ -1414,6 +1851,7 @@ mod tests {
                 rationale: None,
                 ids: vec!["legal1".into()],
                 exchange_node_ids: Vec::new(),
+                archive_locators: Vec::new(),
                 components: Vec::new(),
             },
         )
@@ -1434,6 +1872,7 @@ mod tests {
                 rationale: None,
                 ids: vec!["legal1".into()],
                 exchange_node_ids: Vec::new(),
+                archive_locators: Vec::new(),
                 components: Vec::new(),
             },
         )
@@ -1449,6 +1888,7 @@ mod tests {
                 rationale: None,
                 ids: vec!["legal1".into()],
                 exchange_node_ids: Vec::new(),
+                archive_locators: Vec::new(),
                 components: Vec::new(),
             },
         )
@@ -1465,6 +1905,7 @@ mod tests {
             rationale: Some("separate legal work".into()),
             ids: vec!["legal1".into()],
             exchange_node_ids: Vec::new(),
+            archive_locators: Vec::new(),
             components: Vec::new(),
         };
         let first = prepare(

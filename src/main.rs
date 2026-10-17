@@ -3281,6 +3281,9 @@ enum Commands {
         /// Stable exchange node IDs from `agent-doc exchange list` (repeatable or comma-separated)
         #[arg(long = "exchange-node", value_delimiter = ',')]
         exchange_nodes: Vec<String>,
+        /// Stable compacted-response locators from `agent-doc response-toc`
+        #[arg(long = "archive-locator", value_delimiter = ',')]
+        archive_locators: Vec<String>,
         /// Whole managed components to move (repeatable or comma-separated)
         #[arg(long = "components", value_delimiter = ',')]
         components: Vec<String>,
@@ -6349,6 +6352,7 @@ fn try_main() -> anyhow::Result<()> {
             component,
             ids,
             exchange_nodes,
+            archive_locators,
             components,
             selection,
             apply,
@@ -6357,6 +6361,7 @@ fn try_main() -> anyhow::Result<()> {
         } => {
             let focused = !ids.is_empty()
                 || !exchange_nodes.is_empty()
+                || !archive_locators.is_empty()
                 || !components.is_empty()
                 || selection.is_some()
                 || apply
@@ -6369,9 +6374,13 @@ fn try_main() -> anyhow::Result<()> {
                     );
                 }
                 let request = if let Some(selection) = selection {
-                    if !ids.is_empty() || !exchange_nodes.is_empty() || !components.is_empty() {
+                    if !ids.is_empty()
+                        || !exchange_nodes.is_empty()
+                        || !archive_locators.is_empty()
+                        || !components.is_empty()
+                    {
                         anyhow::bail!(
-                            "--selection cannot be combined with --ids, --exchange-node, or --components"
+                            "--selection cannot be combined with --ids, --exchange-node, --archive-locator, or --components"
                         );
                     }
                     focused_extract::request_from_selection_file(&selection)?
@@ -6381,6 +6390,7 @@ fn try_main() -> anyhow::Result<()> {
                         rationale: None,
                         ids,
                         exchange_node_ids: exchange_nodes,
+                        archive_locators,
                         components,
                     }
                 };
@@ -8194,6 +8204,8 @@ mod recycle_force_tests {
             "legal1,legal2",
             "--exchange-node",
             "r:abc123",
+            "--archive-locator",
+            "archive:.agent-doc/archives/turns.md#2",
             "--components",
             "notes,review",
             "--apply",
@@ -8207,6 +8219,7 @@ mod recycle_force_tests {
                 component,
                 ids,
                 exchange_nodes,
+                archive_locators,
                 components,
                 selection,
                 apply,
@@ -8218,6 +8231,7 @@ mod recycle_force_tests {
                 assert_eq!(component, None);
                 assert_eq!(ids, ["legal1", "legal2"]);
                 assert_eq!(exchange_nodes, ["r:abc123"]);
+                assert_eq!(archive_locators, ["archive:.agent-doc/archives/turns.md#2"]);
                 assert_eq!(components, ["notes", "review"]);
                 assert_eq!(selection, None);
                 assert!(apply);
@@ -8281,6 +8295,7 @@ mod recycle_force_tests {
                 component,
                 ids,
                 exchange_nodes,
+                archive_locators,
                 components,
                 apply,
                 bypass_claim,
@@ -8289,6 +8304,7 @@ mod recycle_force_tests {
                 assert_eq!(component.as_deref(), Some("exchange"));
                 assert!(ids.is_empty());
                 assert!(exchange_nodes.is_empty());
+                assert!(archive_locators.is_empty());
                 assert!(components.is_empty());
                 assert!(!apply);
                 assert!(!bypass_claim);

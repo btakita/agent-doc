@@ -100,6 +100,14 @@ legacy singular flag. A separate top-level `split` command is intentionally not
 added: `extract` matches extract-method refactoring terminology, while “split”
 already names tmux/layout concepts such as `layout --split`.
 
+The legacy no-selector form requires `TARGET` to exist and already be an agent
+document, proven by `agent_doc_session` / `agent_doc_format` /
+`agent_doc_write` frontmatter or at least one managed `agent:*` component. It
+refuses a plain Markdown target before mutating `SOURCE`; this prevents an
+unrelated plan with a matching basename from being mistaken for the extracted
+session. Use `agent-doc init TARGET` first, or use focused selectors when the
+command should initialize a new target.
+
 Tracked IDs are resolved across `agent:queue`, `agent:todo`, `agent:backlog`
 (including legacy `agent:pending`), `agent:review`, and `agent:icebox`. Exchange
 nodes that mention a selected ID move with it. Selecting one exchange prompt or

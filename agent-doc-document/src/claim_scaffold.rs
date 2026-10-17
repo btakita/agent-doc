@@ -167,12 +167,10 @@ mod tests {
             .expect("default scaffold includes todo");
         assert_eq!(todo.attrs.get("priority").map(String::as_str), Some(""));
         assert!(
-            components
+            components[3..]
                 .iter()
                 .filter(|component| {
-                    component.name != "queue"
-                        && component.name != "todo"
-                        && component.name != "backlog"
+                    component.name != "todo" && component.name != "backlog"
                 })
                 .all(|component| component.attrs.is_empty())
         );

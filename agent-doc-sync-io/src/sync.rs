@@ -10685,12 +10685,10 @@ mod tests {
         assert_eq!(backlog.attrs.get("priority").map(String::as_str), Some(""));
         assert_eq!(backlog.attrs.get("queue").map(String::as_str), Some(""));
         assert!(
-            components
+            components[3..]
                 .iter()
                 .filter(|component| {
-                    component.name != "queue"
-                        && component.name != "todo"
-                        && component.name != "backlog"
+                    component.name != "todo" && component.name != "backlog"
                 })
                 .all(|component| component.attrs.is_empty())
         );

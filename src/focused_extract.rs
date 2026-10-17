@@ -1029,8 +1029,8 @@ mod tests {
             "<!-- agent:queue priority subagents -->\n- [#legal1]: Draft request\n- do [#dev1]\n",
         )
         .replace(
-            "<!-- agent:backlog -->\n",
-            "<!-- agent:backlog -->\n- [/] [#legal1] Privacy decision\n- [ ] [#dev1] Build client\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "<!-- agent:backlog priority queue -->\n- [/] [#legal1] Privacy decision\n- [ ] [#dev1] Build client\n",
         )
         .replace(
             "<!-- agent:review -->\n",
@@ -1196,8 +1196,8 @@ mod tests {
             &frontmatter::Frontmatter::default(),
         )
         .replace(
-            "<!-- agent:backlog -->\n",
-            "<!-- agent:backlog -->\n- [ ] [#legal1] Existing target item\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "<!-- agent:backlog priority queue -->\n- [ ] [#legal1] Existing target item\n",
         );
         let error = prepare(
             Path::new("source.md"),

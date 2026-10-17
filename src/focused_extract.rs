@@ -83,6 +83,8 @@ pub struct FocusedExtractPreview {
     pub operation_id: String,
     pub source: PathBuf,
     pub target: PathBuf,
+    /// Focused extraction is a move: apply removes every listed transfer from the source.
+    pub source_action: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -656,6 +658,7 @@ fn prepare(
                     operation_id,
                     source: source.to_path_buf(),
                     target: target.to_path_buf(),
+                    source_action: "remove_on_apply",
                     focus: request.focus.clone(),
                     rationale: request.rationale.clone(),
                     target_would_be_created,
@@ -688,6 +691,7 @@ fn prepare(
             operation_id,
             source: source.to_path_buf(),
             target: target.to_path_buf(),
+            source_action: "remove_on_apply",
             focus: request.focus.clone(),
             rationale: request.rationale.clone(),
             target_would_be_created,
@@ -1007,7 +1011,17 @@ mod tests {
         assert!(prepared.target_after.contains("### Re: Legal"));
         assert!(!prepared.target_after.contains("### Re: Dev"));
         assert!(!prepared.source_after.contains("Ask counsel"));
+        assert!(!prepared.source_after.contains("Draft request"));
+        assert!(!prepared.source_after.contains("Privacy decision"));
+        assert!(!prepared.source_after.contains("Await approval"));
+        assert!(!prepared.source_after.contains("❯ Decide [#legal1]"));
+        assert!(!prepared.source_after.contains("### Re: Legal"));
         assert!(prepared.source_after.contains("- [ ] [#dev1] Ship SDK"));
+        assert_eq!(prepared.preview.source_action, "remove_on_apply");
+        assert_eq!(
+            serde_json::to_value(&prepared.preview).unwrap()["source_action"],
+            "remove_on_apply"
+        );
         assert!(
             prepared
                 .source_after

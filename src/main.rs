@@ -3266,7 +3266,7 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Extract content from source into a focused target document
+    /// Move content from source into a focused target document
     Extract {
         /// Source document
         source: PathBuf,
@@ -3287,7 +3287,7 @@ enum Commands {
         /// Agent-authored JSON selection manifest with a focus, rationale, and stable selectors
         #[arg(long)]
         selection: Option<PathBuf>,
-        /// Apply a focused extraction plan; selector-bearing extracts preview by default
+        /// Apply the move, removing previewed content from source after writing target
         #[arg(long)]
         apply: bool,
         /// Bypass target pane ownership check; live editor attachment still refuses

@@ -14,9 +14,12 @@ agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --exchange-node r:abc123 -
 agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --selection legal-selection.json
 ```
 
-Inspect the JSON plan, then add `--apply`. IDs select matching queue, todo,
-backlog, review, and icebox item blocks plus exchange turns that cite those IDs.
-Each moved item keeps its stable ID, checkbox/gate state, text, and indented
+Inspect the JSON plan, then add `--apply`. The preview's
+`"source_action": "remove_on_apply"` makes the move semantics explicit:
+preview changes nothing; apply writes the target first and then removes the
+listed material from the source. IDs select matching queue, todo, backlog,
+review, and icebox item blocks plus exchange turns that cite those IDs. Each
+moved item keeps its stable ID, checkbox/gate state, text, and indented
 continuations exactly.
 Use `agent-doc exchange list SOURCE` to obtain stable exchange node IDs. A whole
 component can be selected with repeatable/comma-separated `--components`.

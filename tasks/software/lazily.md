@@ -18,6 +18,7 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish any lazily packages that have pending work'
+queue: go
 ---
 
 ## Status
@@ -505,13 +506,104 @@ I did not migrate the historical release-handling checkbox from the exchange: th
 No repository code changed and no tests were needed. The unresolved `#spec-test-commit-push` preset still withholds commit, push, install, release, and publication authority; this TODO-only document closeout performs none of those actions.
 
 Preflight still reports two legacy gated items in `agent:backlog`; migrating both now would take `agent:review` from 13 to 15 items, so they need individual triage first. The exchange is also above its compaction threshold, but the active queue was drained without stalling and auto-compaction is not enabled.
+
+### Re: queue dispatch, completed gates, and operator choices — gpt-5 · 2026-10-17T14:00:32-04:00
+
+The managed TODO component remains populated with the eight tracked operator actions; completed tracked actions below are checked off by their #id.
+
+> **Queue prompt:** [#lzcommitpresetresolve]: done: see .agent-doc/project.md
+
+> **Operator note:** done: see .agent-doc/project.md
+
+Verified. .agent-doc/project.md defines #spec-test-commit-push as "update spec + tests. commit + push", and the live queue resolver returned that exact effective value. The file is intentionally ignored, so no repository commit was appropriate. #lzcommitpresetresolve is complete.
+
+> **Queue prompt:** [#lzcoreciactivationfixes]: spec side
+
+> **Operator note:** spec side
+
+The spec-side Phase 6 implementation is complete. Commit 42858f410857103f46f1734c60c1c7ff3a6e79c5 was fast-forwarded to lazily-spec/main. It replaces the impossible binding-side future-Spec callers with a dispatch-only Spec-tag qualification workflow using one manifest path plus nine exact vVERSION@SHA binding pins. It validates pins, tags, and commits; checks out all ten revisions; regenerates Core evidence; runs the five aggregate gates; and uploads one immutable bundle.
+
+Verification passed: actionlint and ShellCheck; 420 targeted tests; 10 CI-reach gates; 16 rejected mutations; git diff --check. The full make check reached only the pre-existing Rust/Kotlin generated-README coverage drift now owned by the #lzgenericreadmeincident worker. GitHub CI for main commit 42858f4 is queued at run 39056147935; local targeted proof is complete. #lzcoreciactivationfixes is complete.
+
+> **Queue prompt:** [#lzrustpublish]: Use chromium-bridge to configure.
+
+> **Operator note:** Use chromium-bridge to configure.
+
+Completed through the operator's active crates.io browser session. The lazily crate now has a GitHub Trusted Publisher for repository lazily-hub/lazily-rs, workflow release.yml, with no environment restriction. crates.io showed the success alert and persisted publisher row. The workflow already has id-token: write, uses rust-lang/crates-io-auth-action@v1, and publishes the root crate. The separate "Require trusted publishing for all new versions" restriction remains disabled because it was outside this request. #lzrustpublish is complete.
+
+> **Queue prompt:** do [#lzcohortrelease]
+
+**Deferred:** the clean-tag audit is complete, but the irreversible publication remains under its active claim pending the exact authorization below. Tag v0.34.0 resolves to e7b940bd2995c482a12fc87e9caeb0cbdb25158f; dart pub publish --dry-run exited 0 with one non-fatal warning about the top-level tests/ directory; pub.dev currently stops at 0.31.0. No publish occurred.
+
+~~~text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: permission
+blocking: true
+request: Authorize the outward \`dart pub publish\` of \`lazily\` 0.34.0 from tag \`v0.34.0\` (\`e7b940bd2995c482a12fc87e9caeb0cbdb25158f\`) under the operator's pub.dev login.
+context: The release tag is present on origin, the clean-tag dry run exits 0 with one non-fatal package-layout warning, and pub.dev still tops out at 0.31.0. The queue preset \`#spec-test-commit-push\` is undefined, so the dispatched authorization explicitly forbids publishing without a fresh operator grant. Publishing is irreversible and will make 0.34.0 publicly available.
+choices:
+- Authorize publish: Grant the exact outward \`dart pub publish\` action for lazily 0.34.0 under the operator's active pub.dev login.
+- Keep pending: Do not publish; retain \`#lzcohortrelease\` as blocked on operator authorization/login.
+~~~
+
+> **Queue prompt:** [#lzagentdocartifactpurge]: approved
+
+> **Operator note:** approved
+
+**Deferred:** "approved" does not identify one of the two materially different destructive scopes, and the refreshed handoff is still uncommitted. No artifact was deleted.
+
+~~~text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question
+blocking: true
+request: Which artifact-purge plan do you explicitly authorize after #lzagentdocartifactrefresh is integrated?
+context: The refreshed btakita/agent-doc handoff is still uncommitted in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012, so the review item's integration precondition is not yet met and no deletion has been attempted. The handoff was generated 2026-10-12T21:27:35Z, expires 2026-10-19T21:27:35Z, and becomes evidence_stale 24 hours earlier. Its preferred durable-only plan deletes 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes while refusing all 535 PyPI-backed candidates; its full plan deletes all 565 candidates totaling 9,879,236,243 bytes. Both plans permanently delete GitHub Actions artifacts; 545 withheld artifacts totaling 8,636,981,950 bytes remain undeletable in either plan.
+choices:
+- Durable-only: After integration, permanently delete only the 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuse all PyPI-backed candidates.
+- Full plan: After integration, permanently delete all 565 verified candidates totaling 9,879,236,243 bytes, including 535 candidates backed by perishable PyPI files.
+- Keep pending: Delete nothing and leave #lzagentdocartifactpurge open.
+~~~
+
+> **Queue prompt:** [#lzgenericreadmeincident]: Create a CONTRIBUTING.md file for each lazily repo. Extract anything in README.md belonging to CONTRIBUTING.md into CONTRIBUTING.md. README.md should link to CONTRIBUTING.md.
+
+> **Operator note:** Create a CONTRIBUTING.md file for each lazily repo. Extract anything in README.md belonging to CONTRIBUTING.md into CONTRIBUTING.md. README.md should link to CONTRIBUTING.md.
+
+**Deferred:** dispatched to subagent:lzcontributing under an active claim; it is working in isolated repository worktrees with commit/push authorization.
+
+> **Queue prompt:** [#lzbetascope]: approved
+
+> **Operator note:** approved
+
+**Deferred:** dispatched to subagent:lzbetascope under an active claim; it is reconciling the promotion prerequisites and will return the concrete outcome or remaining gate.
+
+The artifact-purge worker is waiting on the plan choice above. The document exchange remains above its compaction threshold, but the active queue was not stalled for compaction. Preflight's two legacy gated-in-backlog items remain individually triaged rather than bulk-migrated past the review legibility target.
 <!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
+- do [#lzcohortrelease]
+- ~~[#lzcoreciactivationfixes]: spec side~~
+- ~~[#lzcommitpresetresolve]: done: see .agent-doc/project.md~~
+- [#lzgenericreadmeincident]: Create a CONTRIBUTING.md file for each lazily repo. Extract anything in README.md belonging to CONTRIBUTING.md into CONTRIBUTING.md. README.md should link to CONTRIBUTING.md.
+- ~~[#lzrustpublish]: Use chromium-bridge to configure.~~
+- [#lzagentdocartifactpurge]: approved
+- [#lzbetascope]: approved
 <!-- /agent:queue -->
+
+## Todo
+
+<!-- agent:todo -->
+- [ ] [#lzcohortrelease] Publish lazily-dart 0.34.0 to pub.dev under your login for [#lzcohortrelease]
+- [x] [#lzcoreciactivationfixes] Choose the spec-side or binding-side Phase 6 caller design for [#lzcoreciactivationfixes]
+- [x] [#lzcommitpresetresolve] Define or replace the queue-wide `#spec-test-commit-push` authorization for [#lzcommitpresetresolve]
+- [ ] [#lzgenericreadmeincident] Inspect the generated README rollups and decide whether to restore them for [#lzgenericreadmeincident]
+- [x] [#lzrustpublish] Configure crates.io Trusted Publishing for future lazily-rs tag releases for [#lzrustpublish]
+- [ ] [#lzgithubbudget20] Add a valid payment method and set the GitHub Actions budget requested by [#lzgithubbudget20]
+- [ ] [#lzagentdocartifactpurge] Choose and explicitly authorize an artifact-purge plan after the refreshed handoff is integrated for [#lzagentdocartifactpurge]
+- [ ] [#lzbetascope] Approve or decline Lazily Core Beta promotion after its gates are green for [#lzbetascope]
+<!-- /agent:todo -->
 
 ## Backlog
 
@@ -523,16 +615,13 @@ Preflight still reports two legacy gated items in `agent:backlog`; migrating bot
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzcoreciactivationfixes] [operator-decision] Core Phase 1-5 CI activation is integrated and released (all nine bindings plus lazily-spec, 2026-10-15). Only the Phase 6 release-workflow callers remain, blocked on the caller-design question in the exchange: recommended is a spec-side workflow_dispatch/tag job that takes the nine binding tags and SHAs as inputs, instead of binding-side callers that can never pin a later spec commit.
 - [/] [#lzcorecireachaudit] After #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1-5 integration are complete, run the supplied per-binding post-integration CI audit matrix against settled commits; require every standalone Core target to have a named workflow step, exact reach mapping, mutation evidence, Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates before Phase 6 finalization.
-- [/] [#lzcommitpresetresolve] [inline] [operator-decision] Define the queue-wide #spec-test-commit-push authorization explicitly in tasks/software/lazily.md, or replace the queue preset with an already defined, intentionally equivalent authorization. Do not infer commit/push authority from the unresolved name; this is the first dependency for every completed-but-uncommitted review item.
 - [/] [#fixrunturn] Run Agent Doc route-race fix and deterministic coverage are complete and fully verified in /home/brian/worktrees/agent-doc-fixrunturn-stack-20261012/agent-doc on branch fix/run-agent-doc-turn-rejection-20261012 from base 06afd858eebc81440dbbebec6a51f0ec788391f1; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the six agent-doc-route-io files and run the single coordinator install.
 - [/] [#lzagentdocartifactrefresh] Fresh artifact-purge handoff and both dry-run modes are complete and verified in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 on branch task/lzagentdocartifactrefresh-20261012 from base 215dc9dc52339478da6cc90aa5c7d5808f3e54c5; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate the five tracked btakita/agent-doc audit/script files without the scratch .audit-work reports.
 - [/] [#lzcorecohort] Phase 6 immutable Core cohort/BOM schema, verifier, reusable read-only publish gate, documentation, Makefile integration, and negative tests are complete in isolated worktree /home/brian/worktrees/agent-loop-lzcorecohort-20261012 on branch task/lzcorecohort-20261012; blocked until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate from base 02c20e1a71cb971fd8ad82d12b73f77acebb49ba; truthful candidate manifests and cross-repo adoption remain gated on #lzreleasepins and #lzrustpublish.
 - [/] [#lzgenericreadmeincident] [operator-verify] Inspect accidental generated README rollup changes in /home/brian/worktrees/lazily-rs and /home/brian/worktrees/lazily-kt. Prior README cleanliness is unknown; restore only README.md if the two generated rollup changes were unintended, and preserve all unrelated dirty/untracked files.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
-- [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for future lazily-rs tag-workflow releases. lazily v0.59.0 and lazily-macros v0.23.1 are already live; v0.59.0 came from descendant release commit a0f0f5327910, so the prior instruction to publish ea2910d is stale. Blocked solely on publisher configuration; no agent-executable publication remains for v0.59.0.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Fresh read-only audit/handoff generated 2026-10-12T21:27:35Z in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 and verified with zero deletions. After integrating #lzagentdocartifactrefresh, two authorizable options remain: full plan deletes 565 artifacts totaling 9,879,236,243 bytes with 0 refused/skipped/failed in dry run; preferred durable-only plan deletes 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuses exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. 545 artifacts totaling 8,636,981,950 bytes remain withheld and are never deletable. The 7-day handoff expires 2026-10-19T21:27:35Z and becomes evidence_stale 24 hours earlier. Blocked solely on explicit destructive authorization after the refreshed handoff is integrated; no artifact has been deleted.
 - [/] [#lzbetascope] [operator-decision] Approve final promotion of the candidate Lazily Core profile to Beta under tasks/software/plan-lazily-core-beta.md after #lzcoreprofile, #lzcoreclaims, #lzcorefacades, #lzcorecompat, #lzcoreconsumers, #lzcorecohort, #lzreleasepins, and publication blockers are green. The public promise remains: Lazily Core is Beta; Lazily Modules graduate independently.

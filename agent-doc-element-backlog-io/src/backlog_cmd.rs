@@ -587,6 +587,15 @@ fn satisfied_add(file: &Path, full_content: &str, surface: &str, item: &str) -> 
     Some(satisfied.id)
 }
 
+/// Ids a newly minted tracked-work identity must not reuse. The pure document
+/// registry includes active rows, completed rows, presets, and inline done
+/// history; this I/O adapter adds the configured external done archive.
+fn reserved_identity_ids(file: &Path, content: &str) -> Result<HashSet<String>> {
+    let mut reserved = backlog::document_reserved_identity_ids(content);
+    reserved.extend(external_done_archive_ids(file, content)?);
+    Ok(reserved)
+}
+
 /// Add a new item to the pending component (assigns a stable hash id + `[ ]`
 /// or `[/]`) at the beginning of the list. Supports canonical `id=<custom> `
 /// syntax and compatibility `[#custom] ` input to preserve a custom id. Prints
@@ -599,7 +608,7 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
-    let reserved = backlog::document_reserved_identity_ids(&full_content);
+    let reserved = reserved_identity_ids(file, &full_content)?;
     let outcome = backlog::op_add_with_outcome_reserved(existing, item, &doc_id, gated, &reserved)?;
     let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
@@ -851,7 +860,7 @@ fn add_many_to_list(
     }
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
-    let reserved = backlog::document_reserved_identity_ids(&full_content);
+    let reserved = reserved_identity_ids(file, &full_content)?;
     let outcome = backlog::op_prepend_many_with_outcomes_reserved(
         existing,
         items,
@@ -1501,7 +1510,7 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let (full_content, comp) = ensure_review_component_in_document(&full_content)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
-    let reserved = backlog::document_reserved_identity_ids(&full_content);
+    let reserved = reserved_identity_ids(file, &full_content)?;
     let outcome = backlog::op_add_with_outcome_reserved(existing, item, &doc_id, true, &reserved)?;
     let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
@@ -2678,6 +2687,38 @@ mod tests {
         // Document is unchanged — the colliding id was never written.
         let content = fs::read_to_string(&doc).unwrap();
         assert_eq!(content.matches("next-steps").count(), 1, "{content}");
+    }
+
+    /// GH #289: archive history participates in minting even though it is not
+    /// an active dispatch identity. Otherwise the new row aliases completed
+    /// work and preflight repeatedly reports a done-mirror id collision.
+    #[test]
+    fn add_suffixes_a_derived_id_reserved_by_the_external_done_archive() {
+        let (tmp, doc) = setup_test_dir();
+        fs::create_dir(tmp.path().join(".agent-doc")).unwrap();
+        fs::write(
+            tmp.path().join("test.done.md"),
+            "- 2026-10-17 [#livepaneproof] First case; cites [#notowned]\n",
+        )
+        .unwrap();
+        fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:pending -->\n<!-- /agent:pending -->\n\n",
+                "<!-- agent:done archive=test.done.md -->\n<!-- /agent:done -->\n",
+            ),
+        )
+        .unwrap();
+
+        force_pending(|| add(&doc, "Live-pane proof for the second case", false));
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("[#livepaneproof] Live-pane proof for the second case"));
+        assert!(
+            content.contains("[#livepaneproof-"),
+            "the readable slug should be hash-suffixed:\n{content}"
+        );
     }
 
     #[test]

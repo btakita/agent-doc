@@ -129,9 +129,7 @@ pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<S
                     .with_context(|| format!("failed to read done archive {}", target.display()));
             }
         };
-        ids.extend(
-            agent_doc_element_backlog::backlog::extract_pending_ids_from_text(&archive_content),
-        );
+        ids.extend(agent_doc_element_backlog::backlog::extract_done_item_own_ids(&archive_content));
     }
     Ok(ids)
 }

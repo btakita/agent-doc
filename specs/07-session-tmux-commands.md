@@ -1218,6 +1218,10 @@ pin and returns the project to auto-detect mode.
 The same `session` namespace now also exposes the operator-facing
 single-owner actor controls:
 
+- Every actor command that accepts `FILE` must resolve both document content and
+  `agent_doc_session` through the realtime read-authority boundary. When an open
+  editor's converged CRDT projection is newer than disk, the command uses that
+  projection; it must not report a missing session from a stale disk snapshot.
 - `agent-doc session status <FILE>` prints the authoritative actor record,
   registry projection, supervisor runtime state, startup-miss marker, and
   latest session-log summary for the document. It must fetch the actor record,

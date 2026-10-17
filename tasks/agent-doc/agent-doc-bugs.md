@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a148af-f3c1-78c0-92b7-988ce7453d7c
+  codex: 01a14af4-508a-7dd0-a2ff-a345ee1e7dfb
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -10,14 +10,9 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 presets:
-  '#actionable-review': Add actionable review items into backlog + queue
   '#agent-doc-causes': Fix agent-doc causes
-  '#do-backlog': /goal do backlog items
-  '#gh-fix': fix then close
-  '#release': release + publish
   '#self': agent-doc-bugs.md
-  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
-  '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -58,6 +53,34 @@ The two fixes were integrated serially as `0e597981a8` and `90e238ce69`, followe
 ### Re: Publication status — gpt-5 · 2026-10-17T13:40-04:00
 
 Not as a new release. The fixes are pushed to `main` at `25f3bd933b`, and CI run `39015481373` passed. The latest published release is still `v0.35.515`, whose tag (`4c4f32d596`) predates these fixes, so they are not yet in a GitHub/PyPI release.
+
+### Re: release + publish. — gpt-5 · 2026-10-17T15:14:09-04:00
+
+> **Queue prompt:** release + publish.
+
+Released and published agent-doc v0.35.516.
+
+- Release commit: `2b12f44203d455383f92d73ce9fdfaefdb23dde2`
+- Tag: `v0.35.516`
+- Pre-release audit: exact candidate SHA passed local `make check` and exact-SHA CI.
+- Release gates: full `make check`, tmux CI, local full install, every platform build, editor package publication, GitHub Release publication, PyPI publish, and clean PyPI install verification all passed.
+- Public artifact: `agent_doc-0.35.516-py3-none-any.whl`
+- GitHub Actions: release run `39058278509`; PyPI run `39060829631`.
+
+### Re: SDK demo extraction result — gpt-5 · 2026-10-17T15:14:09-04:00
+
+> **Queue prompt:** In sdk-dev.md, I attempted to extract a sdk-demo.md from the sdk-dev.md. The cli was called, but I only see a
+
+> **Queue prompt:** sdk-demo.md which is not an agent document. It's a regular plan md file instead.
+
+The focused extraction did not create `tasks/sdk/sdk-demo.md`: its preview correctly planned that exact new agent document, but apply refused because `tasks/sdk/sdk-dev.md` was still editor-attached. The visible `tasks/plans/sdk-demo.md` is an unrelated historical plan with the same basename.
+
+Two fixes are now on `main`:
+
+- `1a9a4eac92` makes focused apply print its deterministic plan before an attached-editor refusal, names the exact source and destination, states that no documents changed, and explicitly says whether the destination was not created or left unchanged. Preview output provides the same destination clarity.
+- `0ab4a26cce` makes legacy no-selector extraction reject plain Markdown targets before mutating the source, with guidance to initialize an agent document or use focused selectors.
+
+The combined changes merged cleanly, passed `git diff --check` and the authoritative full `make check` with zero failures, installed successfully across the CLI/library and editor surfaces, and were pushed to `main` at `0ab4a26cce`.
 <!-- agent:boundary:f163b149 -->
 <!-- /agent:exchange -->
 
@@ -65,7 +88,10 @@ Not as a new release. The fixes are pushed to `main` at `25f3bd933b`, and CI run
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~release + publish.~~
+- In sdk-dev.md, I attempted to extract a sdk-demo.md from the sdk-dev.md. The cli was called, but I only see a 
+- sdk-demo.md which is not an agent document. It's a regular plan md file instead.
 - By default, make the agent:todo below the queue.
 <!-- /agent:queue -->
 

@@ -3811,15 +3811,14 @@ fn build_context(file: &Path) -> Result<SessionContext> {
     let canonical_file = file
         .canonicalize()
         .unwrap_or_else(|_| agent_doc_git_io::dirs::resolve_absolute_file_path(file));
-    let content = std::fs::read_to_string(&canonical_file)
-        .with_context(|| format!("failed to read {}", canonical_file.display()))?;
-    let session_id = agent_doc_frontmatter_io::session::read_session_id(&canonical_file)
-        .or_else(|| {
-            agent_doc_frontmatter::frontmatter::parse(&content)
-                .ok()
-                .and_then(|(fm, _)| fm.session)
-        })
-        .with_context(|| format!("{} has no agent_doc_session", canonical_file.display()))?;
+    // Session commands can run while an editor-owned CRDT projection is newer
+    // than disk. Reading the file directly here made `session clear/status/...`
+    // falsely report a missing `agent_doc_session` during that convergence gap.
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        &canonical_file,
+        "session_actor_build_context",
+    )?;
+    let session_id = session_id_from_current_content(&canonical_file, &content)?;
     let base_dir = agent_doc_fs::find_project_root(&canonical_file).with_context(|| {
         format!(
             "failed to locate project root for {}",
@@ -3878,6 +3877,11 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         supervisor_socket,
         live_pane_window,
     })
+}
+
+fn session_id_from_current_content(file: &Path, content: &str) -> Result<String> {
+    agent_doc_frontmatter::frontmatter::session_id_from_content(content)
+        .with_context(|| format!("{} has no agent_doc_session", file.display()))
 }
 
 /// Report the same harness authority that owns the document actor. An explicit
@@ -5147,6 +5151,28 @@ fn timestamp_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn session_id_comes_from_current_content_when_disk_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        let current = "---\nagent_doc_session: live-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n";
+
+        assert_eq!(
+            super::session_id_from_current_content(&doc, current).unwrap(),
+            "live-session"
+        );
+        assert_eq!(
+            agent_doc_frontmatter_io::session::read_session_id(&doc),
+            None,
+            "the regression requires disk to remain stale"
+        );
+    }
+
     #[test]
     fn status_harness_prefers_document_then_actor_over_ambient_detection() {
         assert_eq!(

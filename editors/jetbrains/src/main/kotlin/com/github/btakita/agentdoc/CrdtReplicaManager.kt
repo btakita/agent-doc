@@ -1968,7 +1968,19 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val closingText = tryReadDocumentText(document) ?: return false
         return try {
             documentWorkers.forDocument(filePath).submit<Boolean> {
-                val forwarder = forwarderFor(filePath, closingText) ?: return@submit false
+                val attachedForwarder = forwarders[filePath]?.takeIf { it.attached }
+                if (!closingDocumentCutRequiresReplicaUtil(closingText, attachedForwarder != null)) {
+                    // GH #287: plain markdown never acquired editor authority, so
+                    // there is no final cut to publish. Treat that expected absence
+                    // as a successful no-op and let TypingTracker emit the ordinary
+                    // close hint and forget any unsynced-local-edit bookkeeping.
+                    recordNotAgentDocDocument(filePath)
+                    clearLocalPending(filePath)
+                    templateValidation.remove(filePath)
+                    fileCacheConflicts.remove(filePath)
+                    return@submit true
+                }
+                val forwarder = attachedForwarder ?: forwarderFor(filePath, closingText) ?: return@submit false
                 forwarder.ensureEditorText(closingText)
                 shadows[filePath] = closingText
                 clearLocalPending(filePath)
@@ -5927,6 +5939,12 @@ internal fun isAgentDocDocumentTextUtil(text: CharSequence): Boolean =
         text.contains("agent_doc_format") ||
         text.contains("agent_doc_write") ||
         text.contains("<!-- agent:")
+
+/** Whether a closing editor has a replica-backed final cut that must settle. */
+internal fun closingDocumentCutRequiresReplicaUtil(
+    closingText: CharSequence,
+    hasAttachedForwarder: Boolean,
+): Boolean = hasAttachedForwarder || isAgentDocDocumentTextUtil(closingText)
 
 /**
  * Whether adopting a retained controller canonical projection would destroy

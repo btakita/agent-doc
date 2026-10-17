@@ -287,10 +287,10 @@ Changed paths cover document scaffolding, TODO parsing/rendering, sync and extra
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.~~
-- 🚧 By default, `agent:queue` should have `priority subagents`.
-- 🚧 By default, `agent:todo` should have `priority`.
-- 🚧 By default, `agent:backlog` should have `priority queue`.
-- 🚧 todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.
+- ~~By default, `agent:queue` should have `priority subagents`.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~By default, `agent:todo` should have `priority`.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~By default, `agent:backlog` should have `priority queue`.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.~~ — auto-struck: answered this cycle (#ftstrike)
 - Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'
 - There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
 - #gh-fix https://github.com/btakita/agent-doc/issues/284
@@ -304,8 +304,7 @@ Changed paths cover document scaffolding, TODO parsing/rendering, sync and extra
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/292~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#extractliveapply]
 - do [#extractcompactselection]
-- 🚧 Run Agent Doc on sdk-dev.md: agent-doc command failed (exit 1):
-- Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session
+- ~~Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->

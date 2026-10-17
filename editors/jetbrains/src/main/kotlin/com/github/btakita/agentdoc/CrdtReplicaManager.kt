@@ -1650,7 +1650,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     // Recorded so an operator-facing command can say WHY, but
                     // deliberately NOT through `recordRegisterFailure`: that arms a
                     // retry, and there is nothing here to converge on.
-                    attachFailureReasons[filePath] = "not_agent_doc_document"
+                    recordNotAgentDocDocument(filePath)
                     return@attach false
                 }
                 // Registration always opens the controller bootstrap. An existing
@@ -2127,6 +2127,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return LocalEditorForwardResult.Fenced
         }
         val editorText = batch.resultingText
+        // GH #282: TypingTracker can reach the splice worker before the ordinary
+        // open-document attach observes this file. A plain markdown buffer has no
+        // replica to converge, so retaining this batch as Retry would run both the
+        // local worker and controller registration forever. Advance the local
+        // shadow and finish this event terminally. A later edit that adds an
+        // agent-doc marker is reclassified from its current text and can attach.
+        if (forwarders[filePath]?.attached != true && !isAgentDocDocumentTextUtil(editorText)) {
+            recordNotAgentDocDocument(filePath)
+            shadows[filePath] = editorText
+            return LocalEditorForwardResult.Fenced
+        }
         val forwarder =
             forwarderFor(
                 filePath = filePath,
@@ -3840,6 +3851,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         bypassRetainedProjectionHold: Boolean = false,
     ): CrdtReplicaForwarder? {
         val cached = forwarders[filePath]
+        // GH #282: every registration entry point must share the open-document
+        // eligibility guard. In particular, local-edit forwarding reaches this
+        // helper directly. A controller refusal for plain markdown is terminal for
+        // the current text and must never arm registration backoff.
+        if (
+            cached?.attached != true &&
+            initialEditorText != null &&
+            !isAgentDocDocumentTextUtil(initialEditorText)
+        ) {
+            recordNotAgentDocDocument(filePath)
+            return null
+        }
         // A three-generation reconciliation hold is a real registration
         // failure, even when a controller event asks for a forced refresh.
         // Honor its exponential backoff so missing-replica notifications do
@@ -4388,6 +4411,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return
         }
         scheduleRegisterRetry(filePath, projection.backoffMs)
+    }
+
+    /** Record a text-terminal classification without leaving either retry loop armed. */
+    private fun recordNotAgentDocDocument(filePath: String) {
+        retainedProjectionHoldPaths.remove(filePath)
+        registerFailureCounts.remove(filePath)
+        registerRetryAfterMs.remove(filePath)
+        registerRetryProjections.remove(filePath)
+        registerRetryTasks.remove(filePath)?.cancel(false)
+        attachFailureReasons[filePath] = "not_agent_doc_document"
     }
 
     /** Persist and surface a fail-closed attach hold without waiting for an editor action. */

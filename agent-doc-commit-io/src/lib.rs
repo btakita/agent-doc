@@ -225,10 +225,18 @@ fn late_answered_free_text_strike_capture(
     current_content: &str,
 ) -> Result<Option<LateAnsweredFreeTextStrike>> {
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
-    if state
-        .as_ref()
-        .is_some_and(|state| state.phase != agent_doc_turn::CyclePhase::Committed)
-    {
+    // `#lateftstrikewriteapplied`: Git can land the response before snapshot
+    // convergence advances the durable cycle to `Committed`. The asynchronous
+    // answered-free-text projection may then land while the cycle still reads
+    // `WriteApplied`; the exact capture/materialization checks below remain the
+    // ownership proof. Earlier phases have not established a visible response
+    // write and must still fail closed.
+    if state.as_ref().is_some_and(|state| {
+        !matches!(
+            state.phase,
+            agent_doc_turn::CyclePhase::WriteApplied | agent_doc_turn::CyclePhase::Committed
+        )
+    }) {
         return Ok(None);
     }
     let captured = if let Some(state) = state.as_ref() {

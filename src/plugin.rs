@@ -1678,9 +1678,13 @@ fn copy_jetbrains_package_for_upgrade_launcher(source: &Path, destination: &Path
 /// installs a ZIP rooted at `agent-doc-jetbrains/`; the 262 and 263 packages are
 /// Plugin Model v2 split-mode distributions (a descriptor-only
 /// `agent.doc-<v>.jar` plus `lib/modules/agent.doc.*.jar`, with a frontend half
-/// that may live in a separate JetBrains Client process), and they ship no
-/// upgrade launcher at all. That is a property of these package lines, not a
-/// legacy build, so it must never read as "predates restart-free support".
+/// that may live in a separate JetBrains Client process). The upgrader classes
+/// are present in `agent.doc.backend.jar`, but the package deliberately exposes
+/// no launcher: asynchronous classloader retirement supplies no synchronous
+/// success receipt, and a backend attach cannot atomically replace a frontend
+/// generation in another JVM (GH #290). That is a property of these package
+/// lines, not a legacy build, so it must never read as "predates restart-free
+/// support" or imply that adding a manifest entry would make the swap safe.
 const JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE: &str =
     "modular JetBrains package has no restart-free dynamic upgrade entry point";
 
@@ -1710,7 +1714,7 @@ fn jetbrains_zip_package_range(zip_path: &Path) -> Result<JetbrainsPackageRange>
 /// `#jbmodulardynupgrade`: why a live IDE cannot be upgraded restart-free from a
 /// package of `package_range`, or `None` when the package carries a usable
 /// upgrade launcher. `launcher_has_main` is consulted only for the classic line;
-/// the modular 262 and 263 packages have no launcher to inspect.
+/// the modular 262 and 263 packages have no safe launcher to inspect.
 fn jetbrains_dynamic_upgrade_entry_point_refusal(
     package_range: JetbrainsPackageRange,
     expected_version: &str,
@@ -1724,7 +1728,7 @@ fn jetbrains_dynamic_upgrade_entry_point_refusal(
                 JetbrainsPackageRange::Classic242To261 => unreachable!(),
             };
             Ok(Some(format!(
-                "the exact-{build} {JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} (v{expected_version} is a Plugin Model v2 split-mode package whose agent.doc-{expected_version}.jar carries no upgrade launcher), so a running {build} IDE keeps its current plugin generation until it restarts"
+                "the exact-{build} {JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} because no safe whole-package swap exists: this build retires plugin classloaders asynchronously without a synchronous success receipt, and v{expected_version} is a Plugin Model v2 split-mode package whose frontend may run in another JetBrains Client JVM; adding a Main-Class to agent.doc-{expected_version}.jar or invoking the upgrader classes already present in agent.doc.backend.jar would only reach those unsafe boundaries, so a running {build} IDE keeps its current plugin generation until it restarts"
             )))
         }
         JetbrainsPackageRange::Classic242To261 => {
@@ -2700,7 +2704,8 @@ fn agent_doc_declined_dynamic_upgrade(reason: &str) -> bool {
 /// GH #277: is the restart-free upgrade unavailable on this JetBrains build for
 /// every future install, not only for this attempt? Two causes qualify:
 /// agent-doc's own asynchronous-classloader decline (GH #108) and a modular
-/// package line that ships no upgrade entry point (`#jbmodulardynupgrade`).
+/// package line that deliberately exposes no upgrade entry point because no
+/// safe, atomic whole-package swap exists (`#jbmodulardynupgrade`, GH #290).
 /// Attribution stays separate ([`dynamic_upgrade_decliner`]): the modular case is
 /// `declined_by=modular_package`, never "agent-doc declined".
 fn restart_free_upgrade_permanently_unavailable(reason: &str) -> bool {
@@ -2731,11 +2736,12 @@ fn dynamic_upgrade_fallback_warning(reason: &str, fallback: &str) -> String {
         "agent-doc declined the restart-free upgrade: this JetBrains build retires plugin classloaders asynchronously, so there is no safe synchronous swap point"
     } else if reason.contains(JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE) {
         // `#jbmodulardynupgrade`: an expected property of the modular package
-        // lines, not a failure and not a legacy build.
+        // lines, not a failure and not a legacy build. GH #290: name the
+        // safety boundary, not only the intentionally absent entry point.
         if reason.contains("exact-263") {
-            "the exact-263 modular plugin package has no restart-free upgrade entry point, so the running IDE keeps its current plugin generation until restart"
+            "the exact-263 modular restart-free upgrade is unsafe because asynchronous classloader retirement and the separate split-mode frontend leave no whole-package swap point, so the running IDE keeps its current plugin generation until restart"
         } else {
-            "the exact-262 modular plugin package has no restart-free upgrade entry point, so the running IDE keeps its current plugin generation until restart"
+            "the exact-262 modular restart-free upgrade is unsafe because asynchronous classloader retirement and the separate split-mode frontend leave no whole-package swap point, so the running IDE keeps its current plugin generation until restart"
         }
     } else if reason.contains(JETBRAINS_DYNAMIC_UNLOAD_REFUSED) {
         "the IDE refused the restart-free upgrade"
@@ -2756,7 +2762,9 @@ fn permanent_dynamic_upgrade_loss_note(reason: &str) -> String {
             "exact-263"
         };
         (
-            format!("its {line} modular plugin package ships no upgrade entry point"),
+            format!(
+                "its {line} modular plugin package has no safe whole-package swap: classloader retirement is asynchronous and its split-mode frontend may run in another JVM"
+            ),
             "every future plugin install will replace the files and need an IDE restart the same way",
         )
     } else {
@@ -6148,6 +6156,11 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         assert!(refusal.contains("exact-263"), "{refusal}");
         assert!(refusal.contains("running 263 IDE"), "{refusal}");
+        assert!(refusal.contains("no safe whole-package swap"), "{refusal}");
+        assert!(refusal.contains("retires plugin classloaders asynchronously"), "{refusal}");
+        assert!(refusal.contains("frontend may run in another JetBrains Client JVM"), "{refusal}");
+        assert!(refusal.contains("already present in agent.doc.backend.jar"), "{refusal}");
+        assert!(refusal.contains("adding a Main-Class"), "{refusal}");
         assert!(!refusal.contains("predates"), "{refusal}");
         assert!(!refusal.contains("legacy"), "{refusal}");
         assert!(!refusal.contains("refusing to replace"), "{refusal}");
@@ -6335,15 +6348,17 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 .load(std::sync::atomic::Ordering::Relaxed)
         );
 
-        // The NOTE names the real cause and the between-restarts rule.
+        // GH #290: the NOTE names the deepest safety boundary and the
+        // between-restarts rule; a missing launcher is only a consequence.
         let note = super::permanent_dynamic_upgrade_loss_note(&reason);
         assert!(
             note.starts_with(
-                "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build (its exact-263 modular plugin package ships no upgrade entry point)"
+                "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build (its exact-263 modular plugin package has no safe whole-package swap: classloader retirement is asynchronous and its split-mode frontend may run in another JVM)"
             ),
             "{note}"
         );
-        assert!(!note.contains("asynchronously"), "{note}");
+        assert!(note.contains("asynchronous"), "{note}");
+        assert!(!note.contains("ships no upgrade entry point"), "{note}");
         assert!(note.contains(&super::between_restarts_guidance()), "{note}");
         let guidance = super::between_restarts_guidance();
         assert!(

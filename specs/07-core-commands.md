@@ -534,10 +534,15 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   `agent-doc-jetbrains-263-<version>.zip`, and an unprovable or unsupported
   target fails before any installed tree is replaced. `--local --all-installed`
   applies the same policy independently to every existing installation.
-  When a live IDE owns a 262 or 263 target, the modular package has no
-  restart-free dynamic upgrade entry point: the installer skips the attach,
-  replaces the files, and reports restart-required naming that reason
-  (`declined_by=modular_package`), not a legacy-package or upgrader failure.
+  When a live IDE owns a 262 or 263 target, the modular package exposes no safe
+  restart-free dynamic upgrade entry point: asynchronous classloader retirement
+  provides no synchronous success receipt, and a backend attach cannot
+  atomically replace the frontend in a separate JetBrains Client JVM (GH #290).
+  The upgrader classes already ship in `agent.doc.backend.jar`, so adding a root
+  manifest entry would not bypass either safety boundary. The installer skips
+  the attach, replaces the files, and reports restart-required naming those
+  deepest blockers (`declined_by=modular_package`), not a legacy-package or
+  upgrader failure.
   That loss is permanent on the build (GH #277), so it is reported like the
   GH #108 decline: the permanent-loss NOTE (once per process), the summary
   line "restart-free upgrade is unavailable on this build", and

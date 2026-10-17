@@ -282,6 +282,16 @@ Choose one:
 
 - Detach and retry: close this source tab and keep `tasks/software/freehold.md` closed; I will reopen the two archived items, preview all six IDs, verify it, and apply the extraction.
 - Defer migration: keep the source attached and leave the gated item for a later cycle.
+
+### Re: remaining operator gates — gpt-5 · 2026-10-17
+
+No operator decisions or billing change arrived for the remaining queue heads, so I gated them rather than claiming completion:
+
+- `#50fc` — choose the missing aggregation policy. Recommended: fail-closed consensus (all configured plugins run; unanimous approval required; any rejection rejects; abstention/error/timeout/disagreement escalates). Alternatives are strict majority, first decisive answer, or your intended continuation after “It will automatically …”.
+- `#j0ee` — all five benchmark candidates returned OpenAI 429 “no credits remaining.” Choose “add credits and retry” to preserve empirical model selection, or “stop blocked” and leave `OPENAI_MODEL` unchanged.
+- `#2amm` — Hermes is already 0.21.5 and the old response-read crash is gone, but the active Google key is invalid and this installation has no known updater. Choose “rotate Google key,” “switch provider,” or “stop with diagnosis.”
+
+Their existing TODOs remain the operator handoffs. No credentials, services, model settings, or moderation policy were changed.
 <!-- agent:boundary:5d323eb2 -->
 <!-- /agent:exchange -->
 
@@ -289,9 +299,9 @@ Choose one:
 
 <!-- agent:queue subagents priority go -->
 - ~~do [#fhmig]~~
-- do [#50fc]
-- do [#j0ee]
-- do [#2amm]
+- ~~do [#50fc]~~
+- ~~do [#j0ee]~~
+- ~~do [#2amm]~~
 - ~~do [#rappstackdevtypescript]~~
 <!-- /agent:queue -->
 
@@ -304,9 +314,6 @@ Choose one:
 
 <!-- agent:backlog priority queue -->
 - [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev. BLOCKED: the current local manifest versions are already published (ui--any 0.1.0, domain--server 0.1.2, domain--server--blog 0.1.1 while registry latest is 0.1.4), so publishable version bumps are required in addition to npm authentication/2FA. Suggested patch releases are 0.1.1, 0.1.3, and 0.1.5; after publication, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
-- [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #k0ye. Operator input required
-- [ ] [#j0ee] Pick the moderation model empirically once the key exists: `OPENAI_API_KEY=... bun scripts/guestbook-model-bench.ts gpt-4o-mini gpt-5-nano gpt-5.4-nano gpt-5.4-mini gpt-5.6-luna` and take the cheapest/fastest with UNSAFE=0, then set OPENAI_MODEL on both surfaces
-- [ ] [#2amm] `hermes -z` is broken in hermes-agent 0.18.2 — every one-shot run dies with an httpx ResponseNotRead inside the Gemini provider, so the local primary path always falls through. Try `hermes update` or file upstream
 <!-- /agent:backlog -->
 
 ## Todo
@@ -322,6 +329,9 @@ Choose one:
 ## Review
 
 <!-- agent:review -->
+- [/operator] [#2amm] Restore Hermes one-shot inference. Hermes is already 0.21.5 and the old ResponseNotRead crash is gone, but /opt/hermes-agent has no git/update method and the active GOOGLE_API_KEY is invalid; GATED on operator choosing key rotation, another provider, or stopping with the diagnosis
+- [/operator] [#j0ee] Pick the moderation model empirically after OpenAI billing is restored. All five authorized candidates currently return HTTP 429 no credits, so no UNSAFE/latency winner can be selected and OPENAI_MODEL remains unchanged on both surfaces; GATED on operator adding credits or choosing to stop blocked
+- [/operator] [#50fc] Choose the plugin aggregation policy for the truncated requirement ending at 'It will automatically'. The missing continuation is unrecoverable from every committed copy and blocks #k0ye; GATED on operator selection among fail-closed consensus, strict majority, first decisive answer, or supplied intended wording
 - [/operator] [#fhmig] Migrate the freehold-scoped items (#sbv9, #nd8n, #dj8c, #p0rw, #k0ye, #50fc) into tasks/software/freehold.md. GATED on operator choice: the former target owner is gone, but the source document remains editor-attached; #p0rw and #k0ye must be reopened from done before rerunning the six-ID extract. The verified four-item preview operation was 81cdbfc60caf
 - [/] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
 - [/] [#oidcnpm] Configure the npm Trusted Publisher on the rebuildjs package at npmjs.com (org rebuildjs, repo rebuildjs, workflow release.yml). Workflow is committed (bfe2707); this browser step needs 2FA ONCE and then no release needs it again. npm retires 2FA-bypass tokens for account ops early Aug 2026 and for direct publishing ~Jan 2027. Repeat for rhonojs/relysjs/ctx-core once their release workflows land; lazily-js's E404 publish failure was this same missing step. KEPT OPEN: operator-only — requires an authenticated npmjs.com browser session with 2FA

@@ -5616,11 +5616,12 @@ mod tests {
         assert!(!editor_delivery_endpoint_unregistered(dir.path(), &doc));
     }
 
-    /// `#gh131nonipc`: the unregister verdict is bounded in time — it expires
-    /// into a probe once the window since the last recorded failure elapses,
-    /// and a carried-over retention does not restart that window.
+    /// `#gh131nonipc`, GH #284: the unregister verdict is bounded in time. Once
+    /// the window since the last recorded failure elapses, the next observation
+    /// starts a fresh episode rather than inheriting degradation and recycle
+    /// votes from an idle document's prior endpoint generation.
     #[test]
-    fn an_unregistered_endpoint_expires_into_a_probe() {
+    fn an_unregistered_endpoint_expires_into_a_fresh_health_episode() {
         use agent_doc_ipc_protocol::{
             EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS,
             EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
@@ -5655,17 +5656,17 @@ mod tests {
             SocketDeliveryFailure::ProjectionUnconverged,
         )
         .unwrap();
-        assert_eq!(
-            gh131nonipc_health(dir.path(), &doc).updated_at_secs,
-            stale_at
-        );
+        let restarted = gh131nonipc_health(dir.path(), &doc);
+        assert!(restarted.updated_at_secs > stale_at);
+        assert_eq!(restarted.consecutive_timeouts, 1);
+        assert_eq!(restarted.consecutive_rejections, 0);
         assert!(
             !editor_delivery_endpoint_unregistered(dir.path(), &doc),
-            "the skip must expire into a probe"
+            "the expired endpoint generation must no longer be unregistered"
         );
         assert!(
-            editor_ipc_write_wedged(dir.path(), &doc),
-            "expiry re-admits a probe; it does not erase the degradation"
+            !editor_ipc_write_wedged(dir.path(), &doc),
+            "a fresh episode must not inherit degradation or recycle votes"
         );
     }
 

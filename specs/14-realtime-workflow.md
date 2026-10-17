@@ -276,7 +276,12 @@ trailing refusal run (`consecutive_rejections`, GH #131):
 | `Rejected` (`IPC receipt rejected`) | socket send error, `crdt_replica_notify`, or `native_editor_save_request` | +1 | extend |
 | `VisibleWriteDiverged` (receipt refused as divergent from canonical) | `socket_visible_write` adoption, after the ACK | +1 | extend |
 | `ProjectionUnconverged` (editor never projected the target, or a terminal `deferred` receipt reports a changed save projection) | `serialized_atomic_write` retention, `socket_already_applied` without a visible response receipt, or native-save compare-and-save drift | +1 | carry unchanged |
-| `Timeout` / `Unsupported` | socket send error | +1 | reset |
+| `Timeout` / `Unsupported` | socket send error or exhausted build-mismatch handoff | +1 | reset |
+
+An exhausted build-mismatch recovery remains a definitive answer for authority
+recovery (the old listener cannot serve the new controller), but it is recorded
+as `Unsupported` for transport health. An upgrade handoff therefore resets an
+older refusal run instead of pretending the endpoint refused this document.
 
 `#gh131nonipc`: the two middle rows never reached a socket error branch, so they
 used to record nothing and could not drive `degraded` or the one-shot
@@ -297,8 +302,10 @@ The fold happens once after the bounded send loop and adds no retry or wait.
 - A proven delivery is the success that clears the row: a proven
   `socket_visible_write` (`socket_visible_write_proven`), an editor-convergence
   writeback, or a `serialized_atomic_write` whose exact editor projection was
-  natively saved. A proven CRDT notification, native editor save, or
-  `socket_already_applied` visible response also clears the same episode.
+  natively saved. A successful replica re-registration that reports the
+  canonical projection (`crdt_replica_projection_observed projected=true`), a
+  proven CRDT notification, native editor save, or `socket_already_applied`
+  visible response also clears the same episode.
 - `#crosstransportclear`: the row is per document, not per transport, so a
   success only recovers a refusal run its OWN transport recorded. A
   `crdt_replica_notify` ACK while a `native_editor_save_request` refusal run is
@@ -336,10 +343,16 @@ The fold happens once after the bounded send loop and adds no retry or wait.
   endpoint that has already answered NO. The skip is bounded: once
   `EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS` (60) pass since the most recent
   run-moving failure, one probe delivery is admitted, which either proves
-  delivery (clearing the run) or refuses again (restarting the window). A
-  carried-over retention does not restart the window. The row does not store
-  the endpoint pid, so the window is what keeps a restarted editor from being
-  shut out by its predecessor's record.
+  delivery (clearing the run) or refuses again (restarting the window). Within
+  a live episode, a carried-over retention does not restart the window. The row
+  does not store the endpoint pid, so the window is what keeps a restarted
+  editor from being shut out by its predecessor's record.
+- A failure arriving after
+  `EDITOR_TRANSPORT_HEALTH_EPISODE_MAX_GAP_SECS` (the same 60-second horizon)
+  starts a new episode. It cannot inherit failure/refusal counts, degradation,
+  or the one-shot recycle latch from an idle document's prior upgrade. This age
+  boundary is evaluated by the pure transition from the durable receipt time;
+  no timer or polling loop owns it (GH #284).
 
 The pure transition preserves the one-shot `recycle_attempted` latch across
 every failure and makes `degraded` monotone inside an episode. Success deletes

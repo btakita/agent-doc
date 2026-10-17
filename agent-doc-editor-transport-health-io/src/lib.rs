@@ -64,12 +64,31 @@ pub fn failure_transition(
     now_secs: u64,
     degraded_after: impl FnOnce(u64) -> bool,
 ) -> EditorTransportFailureTransition {
-    let consecutive_failures = prior.consecutive_failures.saturating_add(1);
-    let consecutive_rejections = failure.next_refusal_run(prior.consecutive_rejections);
+    let episode_stale = prior.updated_at_secs.is_some_and(|prior_at| {
+        now_secs.saturating_sub(prior_at)
+            >= agent_doc_ipc_protocol::EDITOR_TRANSPORT_HEALTH_EPISODE_MAX_GAP_SECS
+    });
+    let prior_failures = if episode_stale {
+        0
+    } else {
+        prior.consecutive_failures
+    };
+    let prior_rejections = if episode_stale {
+        0
+    } else {
+        prior.consecutive_rejections
+    };
+    let consecutive_failures = prior_failures.saturating_add(1);
+    let consecutive_rejections = failure.next_refusal_run(prior_rejections);
     let endpoint_unregistered = consecutive_rejections
         >= agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD;
-    let degraded = prior.degraded || endpoint_unregistered || degraded_after(consecutive_failures);
-    let updated_at_secs = match (failure.refusal_run_effect(), prior.updated_at_secs) {
+    let degraded = (!episode_stale && prior.degraded)
+        || endpoint_unregistered
+        || degraded_after(consecutive_failures);
+    let updated_at_secs = match (
+        failure.refusal_run_effect(),
+        (!episode_stale).then_some(prior.updated_at_secs).flatten(),
+    ) {
         (agent_doc_ipc_protocol::RefusalRunEffect::Preserve, Some(prior_at))
             if consecutive_rejections > 0 =>
         {
@@ -81,7 +100,7 @@ pub fn failure_transition(
         consecutive_failures,
         consecutive_rejections,
         degraded,
-        recycle_attempted: prior.recycle_attempted,
+        recycle_attempted: !episode_stale && prior.recycle_attempted,
         updated_at_secs,
         endpoint_unregistered,
     }
@@ -376,11 +395,39 @@ mod tests {
             };
         }
 
-        let timed_out = failure_transition(state, SocketDeliveryFailure::Timeout, 99, |_| true);
+        let timed_out = failure_transition(
+            state,
+            SocketDeliveryFailure::Timeout,
+            agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD + 1,
+            |_| true,
+        );
         assert_eq!(timed_out.consecutive_rejections, 0);
         assert!(!timed_out.endpoint_unregistered);
         assert!(timed_out.degraded);
         assert!(timed_out.recycle_attempted);
+    }
+
+    #[test]
+    fn stale_failure_episode_restarts_instead_of_accumulating_across_upgrades() {
+        let stale = EditorTransportHealthState {
+            consecutive_failures: 2,
+            consecutive_rejections: 2,
+            degraded: true,
+            recycle_attempted: true,
+            updated_at_secs: Some(10),
+        };
+        let next = failure_transition(
+            stale,
+            SocketDeliveryFailure::Rejected,
+            10 + agent_doc_ipc_protocol::EDITOR_TRANSPORT_HEALTH_EPISODE_MAX_GAP_SECS,
+            |count| count >= agent_doc_ipc_protocol::EDITOR_TRANSPORT_DEGRADE_FAILURE_THRESHOLD,
+        );
+
+        assert_eq!(next.consecutive_failures, 1);
+        assert_eq!(next.consecutive_rejections, 1);
+        assert!(!next.degraded);
+        assert!(!next.recycle_attempted);
+        assert!(!next.endpoint_unregistered);
     }
 
     #[test]

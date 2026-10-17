@@ -836,6 +836,7 @@ fn try_ipc_inner(
                     reconcile_visible_write_snapshot_to_newer_operator_buffer(
                         file,
                         socket_editor_id.as_deref(),
+                        ipc_before_content.as_deref(),
                         &mut repair_decision,
                     );
                     let repaired_visible_write = repair_decision.disk_repair_reason.is_some();

@@ -956,6 +956,10 @@ pub enum OperatorReconcileStep {
     /// The operator is still editing (buffer changed since the previous read) —
     /// keep looping until it settles or the caller's bound is hit.
     Continue,
+    /// The stable canonical buffer is still exactly the pre-write cut, so it
+    /// has not ingested the acknowledged editor patch yet. This is lag, not
+    /// evidence that a newer operator buffer dropped the response.
+    CanonicalPending,
     /// The settled buffer no longer carries the response — fail closed; the
     /// existing point-in-time proof stays authoritative rather than committing a
     /// buffer that dropped the agent's turn.
@@ -965,10 +969,12 @@ pub enum OperatorReconcileStep {
 /// Decide one reconcile step. Given the proven response `reference` and two
 /// consecutive operator live-buffer reads (`prev`, `curr`): an unchanged buffer
 /// (`curr == prev`) that still presents the response is accepted; an unchanged
-/// buffer that dropped the response fails closed; a changed buffer means the
-/// operator is still editing, so continue the loop.
+/// buffer still equal to the pre-write cut is pending canonical catch-up; an
+/// unchanged newer buffer that dropped the response fails closed; a changed
+/// buffer means the operator is still editing, so continue the loop.
 pub fn operator_reconcile_step(
     reference: &str,
+    pre_write: Option<&str>,
     prev: Option<&str>,
     curr: &str,
 ) -> OperatorReconcileStep {
@@ -977,6 +983,8 @@ pub fn operator_reconcile_step(
     }
     if buffer_presents_reference_response(reference, curr) {
         OperatorReconcileStep::Accept(curr.to_string())
+    } else if pre_write == Some(curr) && curr != reference {
+        OperatorReconcileStep::CanonicalPending
     } else {
         OperatorReconcileStep::FailClosed
     }
@@ -3413,13 +3421,13 @@ Same content.
         let prev = doc_with_exchange("❯ p\n### Re: t — opus\n\nBod.\n", "");
         let curr = doc_with_exchange("❯ p\n### Re: t — opus\n\nBody edited.\n", "");
         assert_eq!(
-            operator_reconcile_step(&reference, Some(&prev), &curr),
+            operator_reconcile_step(&reference, None, Some(&prev), &curr),
             OperatorReconcileStep::Continue,
             "a changed buffer means the operator is still editing"
         );
         // First read (no prev) is never stable.
         assert_eq!(
-            operator_reconcile_step(&reference, None, &curr),
+            operator_reconcile_step(&reference, None, None, &curr),
             OperatorReconcileStep::Continue
         );
     }
@@ -3429,7 +3437,7 @@ Same content.
         let reference = doc_with_exchange("❯ p\n### Re: t — opus\n\nAgent body.\n", "");
         let settled = doc_with_exchange("❯ p\n### Re: t — opus\n\nOperator body, 4th.\n", "");
         assert_eq!(
-            operator_reconcile_step(&reference, Some(&settled), &settled),
+            operator_reconcile_step(&reference, None, Some(&settled), &settled),
             OperatorReconcileStep::Accept(settled.clone()),
             "a stable buffer still presenting the response is adopted"
         );
@@ -3440,9 +3448,20 @@ Same content.
         let reference = doc_with_exchange("❯ p\n### Re: t — opus\n\nAgent body.\n", "");
         let dropped = doc_with_exchange("❯ p\n", "");
         assert_eq!(
-            operator_reconcile_step(&reference, Some(&dropped), &dropped),
+            operator_reconcile_step(&reference, None, Some(&dropped), &dropped),
             OperatorReconcileStep::FailClosed,
             "a stable buffer that dropped the response must not be adopted"
+        );
+    }
+
+    #[test]
+    fn operator_reconcile_step_defers_when_canonical_is_still_pre_write() {
+        let pre_write = doc_with_exchange("❯ p\n", "");
+        let reference = doc_with_exchange("❯ p\n### Re: t — opus\n\nAgent body.\n", "");
+        assert_eq!(
+            operator_reconcile_step(&reference, Some(&pre_write), Some(&pre_write), &pre_write,),
+            OperatorReconcileStep::CanonicalPending,
+            "two equal stale reads do not prove that a newer buffer dropped the response"
         );
     }
 
@@ -5098,10 +5117,10 @@ fn rebase_residue_outside_every_component_is_detected() {
 
     // Text the operator typed outside components is in the cut, so it is kept.
     let operator = format!("{cut}## Notes typed by the operator\n");
-    assert!(!rebase_introduces_unscoped_text(&operator, &operator, target));
+        assert!(!rebase_introduces_unscoped_text(&operator, &operator, target));
     // Text the agent's own target adds outside components is intended.
     let agent_heading = format!("## Status\n{cut}");
-    assert!(!rebase_introduces_unscoped_text(&agent_heading, cut, &agent_heading));
+        assert!(!rebase_introduces_unscoped_text(&agent_heading, cut, &agent_heading));
     // Changes inside a component never count.
     let inside = cut.replace("- slow?\n", "- slow?\n- new item\n");
     assert!(!rebase_introduces_unscoped_text(&inside, cut, target));

@@ -2177,6 +2177,7 @@ const VISIBLE_WRITE_RECONCILE_MAX_ROUNDS: usize = 4;
 pub fn reconcile_visible_write_snapshot_to_newer_operator_buffer(
     file: &Path,
     editor_id: Option<&str>,
+    pre_write_content: Option<&str>,
     decision: &mut IpcRepairDecision,
 ) -> bool {
     let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
@@ -2187,7 +2188,12 @@ pub fn reconcile_visible_write_snapshot_to_newer_operator_buffer(
         let Some(curr) = newest_operator_authoritative_buffer(file, editor_id) else {
             return false;
         };
-        match operator_reconcile_step(&decision.snapshot_content, prev.as_deref(), &curr) {
+        match operator_reconcile_step(
+            &decision.snapshot_content,
+            pre_write_content,
+            prev.as_deref(),
+            &curr,
+        ) {
             OperatorReconcileStep::Accept(content) => {
                 if agent_doc_element::element::structural_corruption_reason(&content).is_some() {
                     return false;
@@ -2214,6 +2220,18 @@ pub fn reconcile_visible_write_snapshot_to_newer_operator_buffer(
             }
             OperatorReconcileStep::Continue => {
                 prev = Some(curr);
+            }
+            OperatorReconcileStep::CanonicalPending => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "visible_write_snapshot_reconcile_deferred file={} editor_id={} reason=canonical_pending_visible_write rounds={}",
+                        file.display(),
+                        editor_id,
+                        round + 1,
+                    ),
+                );
+                return false;
             }
             OperatorReconcileStep::FailClosed => {
                 agent_doc_ops_log_io::log_op(

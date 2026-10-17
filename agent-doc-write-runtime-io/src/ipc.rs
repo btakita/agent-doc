@@ -357,6 +357,7 @@ mod visible_write_content_snapshot_tests {
         let reconciled = reconcile_visible_write_snapshot_to_newer_operator_buffer(
             &doc,
             Some(editor_id),
+            Some("before\n"),
             &mut decision,
         );
 
@@ -400,6 +401,7 @@ mod visible_write_content_snapshot_tests {
         let reconciled = reconcile_visible_write_snapshot_to_newer_operator_buffer(
             &doc,
             Some(editor_id),
+            Some("before\n"),
             &mut decision,
         );
 
@@ -410,6 +412,42 @@ mod visible_write_content_snapshot_tests {
         assert_eq!(
             decision.snapshot_content, stale_ack,
             "snapshot unchanged on decline"
+        );
+    }
+
+    #[test]
+    fn reconcile_visible_write_snapshot_defers_while_canonical_is_still_pre_write() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("session.md");
+        let pre_write = "<!-- agent:exchange -->\n❯ fold it in\n<!-- /agent:exchange -->\n";
+        let visible = "<!-- agent:exchange -->\n❯ fold it in\n### Re: folded — opus\n\nAgent exact body.\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, pre_write).unwrap();
+        let editor_id = "jetbrains:test";
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(&doc, editor_id, pre_write);
+
+        let mut decision = IpcRepairDecision::lazily_visible_write(visible.to_string());
+        let reconciled = reconcile_visible_write_snapshot_to_newer_operator_buffer(
+            &doc,
+            Some(editor_id),
+            Some(pre_write),
+            &mut decision,
+        );
+
+        assert!(
+            !reconciled,
+            "stale canonical must defer to receipt catch-up"
+        );
+        assert_eq!(decision.snapshot_content, visible);
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=canonical_pending_visible_write"),
+            "canonical lag must have its own diagnostic:\n{log}"
+        );
+        assert!(
+            !log.contains("reason=settled_buffer_dropped_response"),
+            "pre-write canonical is not a dropped response:\n{log}"
         );
     }
 

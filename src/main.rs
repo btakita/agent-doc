@@ -65,6 +65,7 @@ mod exchange;
 mod extract;
 mod fleet_board_cmd;
 mod focus_effects;
+mod focused_extract;
 mod harness_switch_verify;
 mod history;
 mod hook_cmd;
@@ -3265,7 +3266,7 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Extract the last exchange entry from source to target document
+    /// Extract content from source into a focused target document
     Extract {
         /// Source document
         source: PathBuf,
@@ -3274,6 +3275,24 @@ enum Commands {
         /// Component name to extract from (default: exchange)
         #[arg(long)]
         component: Option<String>,
+        /// Stable tracked-work IDs to move across queue/todo/backlog/review/icebox and linked exchange turns
+        #[arg(long, value_delimiter = ',')]
+        ids: Vec<String>,
+        /// Stable exchange node IDs from `agent-doc exchange list` (repeatable or comma-separated)
+        #[arg(long = "exchange-node", value_delimiter = ',')]
+        exchange_nodes: Vec<String>,
+        /// Whole managed components to move (repeatable or comma-separated)
+        #[arg(long = "components", value_delimiter = ',')]
+        components: Vec<String>,
+        /// Agent-authored JSON selection manifest with a focus, rationale, and stable selectors
+        #[arg(long)]
+        selection: Option<PathBuf>,
+        /// Apply a focused extraction plan; selector-bearing extracts preview by default
+        #[arg(long)]
+        apply: bool,
+        /// Bypass target pane ownership check; live editor attachment still refuses
+        #[arg(long)]
+        bypass_claim: bool,
     },
     /// Transfer entire component content from source to target document
     Transfer {
@@ -6325,7 +6344,52 @@ fn try_main() -> anyhow::Result<()> {
             source,
             target,
             component,
-        } => extract::run(&source, &target, component.as_deref()),
+            ids,
+            exchange_nodes,
+            components,
+            selection,
+            apply,
+            bypass_claim,
+        } => {
+            let focused = !ids.is_empty()
+                || !exchange_nodes.is_empty()
+                || !components.is_empty()
+                || selection.is_some()
+                || apply
+                || bypass_claim;
+            if focused {
+                if component.is_some() {
+                    anyhow::bail!(
+                        "--component is the legacy last-entry selector; focused extraction uses --components"
+                    );
+                }
+                let request = if let Some(selection) = selection {
+                    if !ids.is_empty() || !exchange_nodes.is_empty() || !components.is_empty() {
+                        anyhow::bail!(
+                            "--selection cannot be combined with --ids, --exchange-node, or --components"
+                        );
+                    }
+                    focused_extract::request_from_selection_file(&selection)?
+                } else {
+                    focused_extract::FocusedExtractRequest {
+                        focus: None,
+                        rationale: None,
+                        ids,
+                        exchange_node_ids: exchange_nodes,
+                        components,
+                    }
+                };
+                focused_extract::run(
+                    &source,
+                    &target,
+                    request,
+                    apply,
+                    bypass_claim,
+                )
+            } else {
+                extract::run(&source, &target, component.as_deref())
+            }
+        }
         Commands::Transfer {
             source,
             target,
@@ -8090,6 +8154,92 @@ mod recycle_force_tests {
             parse(&["agent-doc", "version", "--json"]),
             Commands::Version { json: true }
         ));
+    }
+
+    #[test]
+    fn extract_accepts_focused_selectors_without_adding_a_split_command() {
+        let cmd = parse(&[
+            "agent-doc",
+            "extract",
+            "tasks/sdk.md",
+            "tasks/sdk/sdk-legal.md",
+            "--ids",
+            "legal1,legal2",
+            "--exchange-node",
+            "r:abc123",
+            "--components",
+            "notes,review",
+            "--apply",
+            "--bypass-claim",
+        ]);
+        match cmd {
+            Commands::Extract {
+                source,
+                target,
+                component,
+                ids,
+                exchange_nodes,
+                components,
+                selection,
+                apply,
+                bypass_claim,
+            } => {
+                assert_eq!(source, PathBuf::from("tasks/sdk.md"));
+                assert_eq!(target, PathBuf::from("tasks/sdk/sdk-legal.md"));
+                assert_eq!(component, None);
+                assert_eq!(ids, ["legal1", "legal2"]);
+                assert_eq!(exchange_nodes, ["r:abc123"]);
+                assert_eq!(components, ["notes", "review"]);
+                assert_eq!(selection, None);
+                assert!(apply);
+                assert!(bypass_claim);
+            }
+            _ => panic!("expected extract subcommand"),
+        }
+
+        let split_is_absent = std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                Cli::try_parse_from(["agent-doc", "split", "source.md", "target.md"]).is_err()
+            })
+            .expect("spawn parse thread")
+            .join()
+            .expect("parse thread");
+        assert!(
+            split_is_absent,
+            "focused extraction must not collide with tmux split terminology"
+        );
+    }
+
+    #[test]
+    fn extract_legacy_component_form_still_parses_without_focused_flags() {
+        let cmd = parse(&[
+            "agent-doc",
+            "extract",
+            "source.md",
+            "target.md",
+            "--component",
+            "exchange",
+        ]);
+        match cmd {
+            Commands::Extract {
+                component,
+                ids,
+                exchange_nodes,
+                components,
+                apply,
+                bypass_claim,
+                ..
+            } => {
+                assert_eq!(component.as_deref(), Some("exchange"));
+                assert!(ids.is_empty());
+                assert!(exchange_nodes.is_empty());
+                assert!(components.is_empty());
+                assert!(!apply);
+                assert!(!bypass_claim);
+            }
+            _ => panic!("expected extract subcommand"),
+        }
     }
 
     #[test]

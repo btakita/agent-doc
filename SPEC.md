@@ -565,6 +565,7 @@ new operator intent; an unanswered quoted tail remains actionable.
 
 Command sub-specs:
 - [Core Commands](specs/07-core-commands.md)
+- [Focused Document Extract](specs/07-focused-extract.md)
 - [Session And Tmux Commands](specs/07-session-tmux-commands.md)
 - [Closeout Commands](specs/07-closeout-commands.md)
 - [Orchestration Commands](specs/07-orchestration-commands.md)

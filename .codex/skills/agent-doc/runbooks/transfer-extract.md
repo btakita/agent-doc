@@ -2,6 +2,60 @@
 
 Move content between agent-doc session documents.
 
+## Focused extract (one concern across surfaces)
+
+Use focused `extract` when a large session mixes concerns and one focused document needs
+the matching exchange history and tracked work together. Preview is the default:
+
+```bash
+agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --ids tdminorscompliance,prelinkid2
+agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --ids tdminorscompliance
+agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --exchange-node r:abc123 --components notes
+agent-doc extract tasks/sdk.md tasks/sdk/sdk-legal.md --selection legal-selection.json
+```
+
+Inspect the JSON plan, then add `--apply`. IDs select matching queue, todo,
+backlog, review, and icebox item blocks plus exchange turns that cite those IDs.
+Each moved item keeps its stable ID, checkbox/gate state, text, and indented
+continuations exactly.
+Use `agent-doc exchange list SOURCE` to obtain stable exchange node IDs. A whole
+component can be selected with repeatable/comma-separated `--components`.
+
+The operator may ask naturally inside the source document, for example,
+“Extract the legal concern into `tasks/sdk/sdk-legal.md`.” They do not need to
+supply IDs or a manifest. An imperative extraction request authorizes the agent
+to resolve the coherent selection, inspect the deterministic preview, and run
+`--apply` when that preview cleanly and unambiguously matches the request; do
+not ask for a second confirmation. Exploratory/question wording authorizes
+preview or advice only. If the concern, destination, or preview is ambiguous,
+ask a focused question before applying. An in-document request usually leaves
+the source editor-attached, so preview immediately but do not claim completion:
+present the exact already-authorized `--apply` retry command, ask the operator
+to close the source and target tabs, and retry after detachment. This safety
+handoff is not a second semantic confirmation.
+
+For a commingled session, let the agent make the semantic selection without
+letting the mutation step become nondeterministic: inspect `agent-doc outline`,
+`agent-doc exchange list`, and the managed components, then author a JSON
+selection manifest with `focus`, optional `rationale`, and the explicit `ids`,
+`exchange_node_ids`, and `components` arrays. Preview it with `--selection`,
+refine until it contains one coherent concern, then add `--apply`. The focus and
+rationale appear in the preview and operation identity. Do not combine a
+manifest with direct selector flags.
+
+The no-selector form remains backward compatible: `agent-doc extract SOURCE
+TARGET [--component NAME]` immediately moves the last exchange entry. Focused
+selectors switch to preview-by-default mode. There is no top-level `split`
+command because tmux/layout already uses “split” terminology.
+
+The destination is initialized when absent. The operation records provenance in
+both documents, rejects collisions and unmatched selectors, and can resume a
+target-first interrupted apply without duplicating target content. Relative
+linked-resource paths are rebased when the destination directory differs.
+Apply is allowed only while both documents are detached from live editors; close their
+tabs before applying. This is required because independent live CRDT authorities
+cannot provide one atomic cross-document compare-and-swap.
+
 ## Transfer (move entire component)
 
 Moves all content from a component in the source document to the same component in the target document. Source component is cleared.

@@ -66,6 +66,7 @@ Not as a new release. The fixes are pushed to `main` at `25f3bd933b`, and CI run
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+- By default, make the agent:todo below the queue.
 <!-- /agent:queue -->
 
 ## Todo

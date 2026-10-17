@@ -3283,6 +3283,92 @@ Duplicate replay should stay live.
         );
     }
 
+    /// `#lateftstrikewriteapplied` (GitHub #288): Git can commit the response
+    /// before snapshot convergence advances the cycle from `WriteApplied` to
+    /// `Committed`. If the asynchronous answered-free-text projection lands in
+    /// that gap, the retry must recognize its exact annotated strike instead of
+    /// reporting the binary's own 53-byte suffix as an unanswered operator edit.
+    #[test]
+    fn commit_recovers_exact_late_free_text_strike_while_cycle_is_write_applied() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let response = concat!(
+            "### Re: finish the plan — gpt-5\n\n",
+            "> **Queue prompt:** finish the plan\n\n",
+            "Finished and verified.\n",
+        );
+        let committed = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: go\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n- finish the plan\n- later work\n<!-- /agent:queue -->\n",
+            ),
+            response,
+        );
+        commit_file(
+            root,
+            "session.md",
+            &committed,
+            "response before late strike",
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+            .unwrap();
+        let captured_response =
+            format!("<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n");
+        let capture = agent_doc_capture_io::capture_response(&doc, &captured_response).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied_before_git_commit_finished",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+
+        let struck = agent_doc_queue::queue_consume::project_answered_free_text_strike(
+            &committed, response, None,
+        )
+        .unwrap()
+        .expect("fixture response must own its free-text queue head")
+        .target_content;
+        assert_eq!(
+            struck.len() - committed.len(),
+            53,
+            "the production failure was the exact annotated #ftstrike delta"
+        );
+        fs::write(&doc, &struck).unwrap();
+
+        let did_commit = commit(&doc).expect("the exact late binary strike must commit forward");
+        assert!(did_commit);
+        let landed = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed document");
+        assert!(
+            landed
+                .contains("- ~~finish the plan~~ — auto-struck: answered this cycle (#ftstrike)\n")
+                && landed.contains("- later work\n"),
+            "HEAD must carry the exact late strike without losing later queue work:\n{landed}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_reconciled_late_answered_free_text_strike")
+                && log.contains(&capture.capture_id),
+            "recovery must record the capture-scoped exact proof:\n{log}"
+        );
+    }
+
     #[test]
     fn commit_recovers_terminal_free_text_drain_after_cycle_capture_is_cleared() {
         let dir = tempfile::TempDir::new().unwrap();

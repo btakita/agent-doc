@@ -234,6 +234,11 @@ Please answer these five requests. The npm login is the only time-sensitive one 
 
 ### Re: #rjrh — gpt-5 · 2026-10-17T15:23-04:00
 
+> **Queue prompt:**
+>
+> do [#rjrh]
+
+
 `#rjrh` remains blocked on the active npm web-login handoff. The worker is still holding its polling CLI session open; no completion or expiry output has arrived, so publishing the three packages or enabling the downstream workflow steps would be unsafe to claim.
 
 Complete npm login and 2FA at:
@@ -247,7 +252,7 @@ Then tell me to resume `#rjrh`. If you do not want to authenticate, tell me to c
 ## Queue
 
 <!-- agent:queue subagents priority go -->
-- do [#rjrh]
+- ~~do [#rjrh]~~
 - ~~do [#nm8q]~~
 - ~~do [#gbdeploy1]~~
 - ~~do [#mc4f]~~

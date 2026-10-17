@@ -461,6 +461,42 @@ Completed `#syncioredlivetmux` as a separate post-release fix. Package-scoped `a
 Landed commit `742c68d7e5` (`fix: cover package-scoped live tmux sync tests`) on `origin/main` and installed it locally. Verification was fully green: the new package-scoped ignored suite passed 123/123, `make tmux-ci` passed, and `make check` passed including 10,925 Rust tests, 202 VS Code tests, cross-editor/native harnesses, JetBrains builds, and bootstrap checks. Two targeted mutation checks also failed as expected before restoration, proving the fallback-socket and test-feature regressions are covered.
 
 This commit landed after v0.35.513, so it is on main and installed locally but is not claimed as part of the already-published v0.35.513 artifacts. The document exchange is large; queue auto-clear will reset agent context at the idle boundary.
+
+### Re: Response
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/279
+
+Completed, pushed, and closed. Commit `d1434b2ebf` makes stale-supervisor re-exec depend on the typed `SenderExecutableReplaced` outcome. `ReloadAlreadyRequested`, malformed/untyped outcomes, and ordinary resolution failures remain fail-closed and defer. The state path is now idle-watch → one-shot typed document-resolution receipt → exec/defer; the pre-exec validation stays imperative because it guards one irreversible boundary and has no shared derived consumers.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/280
+
+Completed and published on `main` as `73b1f128ac`; the issue was already auto-closed, and I added the verification record at https://github.com/btakita/agent-doc/issues/280#issuecomment-6226143929. Registry publication retry is process-scoped and reactive: idle ticks compute whether an attempt is due, the durable registry write emits a receipt, success retires the work, and recoverable failures use bounded exponential backoff. It does not block PTY admission or startup.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/281
+
+Completed, pushed, and closed in `933b978890`, with the transition-policy test strengthened in `20c25f130a`. At the serialized document-lane checkpoint, the currently attached live forwarder is authoritative; a live replacement is selected, while missing, removed, or detached forwarders fail closed. Tests cover unchanged, live replacement, detached, and removed rows.
+
+> **Queue prompt:** Claude + Codex keep on rejecting directives asking for the user to say "go ..."/"push ..." even though I typed in "go ..."/"push ..." or used #auth.
+
+Fixed in `445aa0ff3e`. Exact queue directives and resolved `go`/`push`/`#auth` presets now provide explicit task-scoped authorization. That authorization remains distinct from native harness permission prompts, and unresolved presets fail closed. The full check and tmux CI passed.
+
+> **Queue prompt:** In docs.md, I was instructed to "publish `docs/public-code-policy-adr`" in the exchange but there was no todo item. Since this task requires operator action, a todo item should have been created.
+
+Fixed in `c8f8f92883`. A blocking `#waypostrequest` handback must now create the operator action with `--todo-add`, and final completion must close it with `--todo-done`. The rule is present in preflight guidance, response/planning runbooks, the orchestration specification, and an executable regression test. I did not add a stale todo to docs.md because that publication was already completed.
+
+> **Queue prompt:** release + publish
+
+Released and published **agent-doc v0.35.514** from `a3a06419f3af37902002d41f84bb6aa998558cd0`. The release preparation is `4e1285383a`; the final editor-parity audit is `a3a06419f3`. `HEAD`, tag `v0.35.514`, and `origin/main` all resolve to that commit.
+
+Public proof:
+
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.514 — non-draft, non-prerelease, 15 assets.
+- PyPI: https://pypi.org/project/agent-doc/0.35.514/ — exact public wheel `agent_doc-0.35.514-py3-none-any.whl`.
+- Release workflow: https://github.com/btakita/agent-doc/actions/runs/38980894464 — all platform builds, plugins, release assembly, PyPI dispatch, and Homebrew handoff succeeded.
+- PyPI workflow: https://github.com/btakita/agent-doc/actions/runs/38984094625 — build, trusted publication, and clean-install verification succeeded.
+- The installed CLI reports `agent-doc 0.35.514`; the release worktree is clean.
+
+The final release bytes passed 10,929 Rust tests (172 skipped), 202 VS Code tests, the cross-editor simulation, all JetBrains package/build checks, Python bootstrap checks, documentation/version/editor-parity gates, TLA receipt verification, and `make tmux-ci`. This release contains the #279/#280/#281 fixes, authorization-directive handling, and operator-todo handback rule above.
 <!-- agent:boundary:59f6e63f -->
 <!-- /agent:exchange -->
 
@@ -469,8 +505,10 @@ This commit landed after v0.35.513, so it is on main and installed locally but i
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#syncioredlivetmux]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/279
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/279~~
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/280
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/281
+- Claude + Codex keep on rejecting directives asking for the user to say "go ..."/"push ..." even though I typed in "go ..."/"push ..." or used #auth.
 - In docs.md, I was instructed to "publish `docs/public-code-policy-adr`" in the exchange but there was no todo item. Since this task requires operator action, a todo item should have been created.
 - release + publish
 <!-- /agent:queue -->

@@ -6748,25 +6748,31 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
     let deadline = std::time::Instant::now() + PROJECTION_EDGE_GRACE;
     loop {
         match query_live_editor_authority(file, source)? {
-            agent_doc_crdt_relay_io::CurrentText::Detached
-            | agent_doc_crdt_relay_io::CurrentText::Current {
-                delivery_converged: true,
-                ..
-            } => return Ok(()),
-            agent_doc_crdt_relay_io::CurrentText::Current { .. }
-                if std::time::Instant::now() < deadline =>
-            {
-                // This is an observation edge, not a delivery request. It gives
-                // an already-running editor projection one scheduler turn to
-                // invalidate the derived frontier before the synchronous
-                // secondary-effect boundary decides whether to retain.
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
+            agent_doc_crdt_relay_io::CurrentText::Detached => return Ok(()),
             agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
                 delivery_version,
                 live_editors,
                 ..
             } => {
+                // `#strictvisibleguard`: `delivery_converged` is the bounded
+                // availability barrier, not a visible editor receipt. A silent
+                // or repeatedly pulling replica is eventually released from
+                // that barrier while its queued canonical update remains
+                // unacknowledged. Secondary snapshot/commit effects must wait
+                // for the stricter exact-target projection witness instead.
+                let target_hash = agent_doc_hash::content_hash(&text);
+                if visible_editor_projection_receipt_for_target(file, &target_hash)? {
+                    return Ok(());
+                }
+                if std::time::Instant::now() < deadline {
+                    // This is an observation edge, not a delivery request. It gives
+                    // an already-running editor projection one scheduler turn to
+                    // publish its strict receipt before the synchronous
+                    // secondary-effect boundary decides whether to retain.
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                    continue;
+                }
                 return defer_visible_delivery_projection(
                     file,
                     source,
@@ -13081,6 +13087,57 @@ mod tests {
             format!("{barrier_error:#}").contains("no secondary snapshot/commit"),
             "the operator-facing error must name the effects that were withheld: {barrier_error:#}"
         );
+    }
+
+    #[test]
+    fn visible_delivery_guard_rejects_released_but_unacknowledged_replica() {
+        let baseline = "# Session\n\nseed\n";
+        let target = "# Session\n\nseed\n\n### Re: retained\n\nPending projection.\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-strict-visible-guard";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let write = agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            &file,
+            baseline,
+            target,
+            "strict_visible_guard",
+        )
+        .unwrap()
+        .expect("target should enter canonical authority");
+        assert!(write.applied);
+
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            for _ in 0..=agent_doc_document_realtime::crdt_relay::MAX_REDELIVERIES_WITHOUT_ACK {
+                assert_eq!(hub.pending_updates(client_id).unwrap().len(), 1);
+            }
+            assert!(
+                hub.delivery_converged(),
+                "bounded non-convergence must release the availability barrier"
+            );
+            assert!(
+                !hub.visible_delivery_projected(),
+                "the queued target still has no visible editor receipt"
+            );
+        })
+        .unwrap();
+
+        let error = guard_visible_delivery_convergence(&file, "strict_visible_guard")
+            .expect_err("availability convergence must not authorize secondary effects");
+        assert!(
+            error
+                .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "the strict guard must preserve the typed retained-write refusal: {error:#}"
+        );
+        assert!(
+            format!("{error:#}").contains("no secondary snapshot/commit"),
+            "the refusal must say which effects remain withheld: {error:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
     }
 
     /// `#deliveryackcut`: a stalled ACK reconciles the replica cache against

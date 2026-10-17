@@ -10647,9 +10647,15 @@ mod tests {
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[1].patch_mode(), Some("append"));
+        let todo = components
+            .iter()
+            .find(|component| component.name == "todo")
+            .expect("sync scaffold includes todo");
+        assert_eq!(todo.attrs.get("priority").map(String::as_str), Some(""));
         assert!(
             components[2..]
                 .iter()
+                .filter(|component| component.name != "todo")
                 .all(|component| component.attrs.is_empty())
         );
     }

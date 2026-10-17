@@ -16,7 +16,7 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "<!-- agent:backlog -->\n",
     "<!-- /agent:backlog -->\n",
     "\n## Todo\n\n",
-    "<!-- agent:todo -->\n",
+    "<!-- agent:todo priority -->\n",
     "<!-- /agent:todo -->\n",
     "\n## Review\n\n",
     "<!-- agent:review -->\n",
@@ -123,7 +123,7 @@ mod tests {
         assert!(scaffold.contains("agent_doc_format: template"));
         assert!(scaffold.contains(concat!(
             "<!-- /agent:backlog -->\n",
-            "\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n",
+            "\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n",
             "\n## Review\n\n"
         )));
 
@@ -143,9 +143,15 @@ mod tests {
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[1].patch_mode(), Some("append"));
+        let todo = components
+            .iter()
+            .find(|component| component.name == "todo")
+            .expect("default scaffold includes todo");
+        assert_eq!(todo.attrs.get("priority").map(String::as_str), Some(""));
         assert!(
             components[2..]
                 .iter()
+                .filter(|component| component.name != "todo")
                 .all(|component| component.attrs.is_empty())
         );
         assert!(

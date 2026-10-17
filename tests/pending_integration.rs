@@ -53,12 +53,15 @@ fn setup_doc_with_icebox(backlog: &str, icebox: &str) -> (TempDir, PathBuf) {
 }
 
 fn component_body<'a>(content: &'a str, name: &str) -> &'a str {
-    let open = format!("<!-- agent:{} -->", name);
+    let open = format!("<!-- agent:{}", name);
     let close = format!("<!-- /agent:{} -->", name);
     let Some(open_start) = content.find(&open) else {
         return "";
     };
-    let mut body_start = open_start + open.len();
+    let Some(marker_end) = content[open_start..].find("-->") else {
+        return "";
+    };
+    let mut body_start = open_start + marker_end + 3;
     if content[body_start..].starts_with('\n') {
         body_start += 1;
     }
@@ -1317,7 +1320,7 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
     );
     let content = fs::read_to_string(&doc).unwrap();
     assert_eq!(
-        content.matches("<!-- agent:todo -->").count(),
+        content.matches("<!-- agent:todo priority -->").count(),
         1,
         "{content}"
     );
@@ -1334,7 +1337,9 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
         format!("- [ ] [#{id}] Verify [#rvw1] in a live pane")
     );
     let pending_close = content.find("<!-- /agent:pending -->").unwrap();
-    let todo_open = content.find("## Todo\n\n<!-- agent:todo -->").unwrap();
+    let todo_open = content
+        .find("## Todo\n\n<!-- agent:todo priority -->")
+        .unwrap();
     let review_open = content.find("<!-- agent:review -->").unwrap();
     assert!(
         pending_close < todo_open && todo_open < review_open,
@@ -1362,7 +1367,7 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
         .success();
     let content = fs::read_to_string(&doc).unwrap();
     assert_eq!(
-        content.matches("<!-- agent:todo -->").count(),
+        content.matches("<!-- agent:todo priority -->").count(),
         1,
         "{content}"
     );
@@ -2125,7 +2130,7 @@ fn write_patch_todo_creates_missing_todo_component() {
         "todo checklist must not spill into exchange:\n{content}"
     );
     let pending_close = content.find("<!-- /agent:pending -->").unwrap();
-    let todo_open = content.find("<!-- agent:todo -->").unwrap();
+    let todo_open = content.find("<!-- agent:todo priority -->").unwrap();
     assert!(pending_close < todo_open, "{content}");
 }
 

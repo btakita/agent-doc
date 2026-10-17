@@ -8191,7 +8191,11 @@ mod tests {
             ids.push(outcome.id.unwrap());
             doc = outcome.content;
         }
-        assert_eq!(doc.matches("<!-- agent:todo -->").count(), 1, "{doc}");
+        assert_eq!(
+            doc.matches("<!-- agent:todo priority -->").count(),
+            1,
+            "{doc}"
+        );
         for (id, action) in ids.iter().zip(actions) {
             assert!(doc.contains(&format!("- [ ] [#{id}] {action}\n")), "{doc}");
         }

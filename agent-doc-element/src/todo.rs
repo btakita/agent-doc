@@ -117,7 +117,8 @@ pub const TODO_COMPONENT: &str = "todo";
 
 /// Section inserted when a document has no `agent:todo` component. It matches
 /// the heading and markers of the default template scaffold.
-pub const TODO_SECTION: &str = "\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n";
+pub const TODO_SECTION: &str =
+    "\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n";
 
 /// Check whether a component name refers to the operator todo checklist.
 pub fn is_todo_component(name: &str) -> bool {
@@ -1704,14 +1705,14 @@ mod tests {
         assert!(created);
         assert_eq!(todo.content(&updated), "");
         let backlog_end = updated.find("<!-- /agent:backlog -->").unwrap();
-        let todo_start = updated.find("<!-- agent:todo -->").unwrap();
+        let todo_start = updated.find("<!-- agent:todo priority -->").unwrap();
         let review_heading = updated.find("## Review").unwrap();
         assert!(
             backlog_end < todo_start && todo_start < review_heading,
             "{updated}"
         );
         assert!(
-            updated.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n\n## Review\n\n<!-- agent:review -->"),
+            updated.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n\n## Review\n\n<!-- agent:review -->"),
             "{updated}"
         );
         // Everything outside the inserted section is byte-identical.
@@ -1730,7 +1731,7 @@ mod tests {
         );
         let (updated, _, _) = ensure_todo_component_in_document(content).unwrap();
         assert!(
-            updated.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n## Review"),
+            updated.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n## Review"),
             "{updated}"
         );
     }
@@ -1745,14 +1746,14 @@ mod tests {
         );
         let (updated, _, _) = ensure_todo_component_in_document(queue_and_review).unwrap();
         assert!(
-            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n## Review"),
+            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n## Review"),
             "{updated}"
         );
 
         let queue = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- do x\n<!-- /agent:queue -->\ntrailing prose\n";
         let (updated, _, _) = ensure_todo_component_in_document(queue).unwrap();
         assert!(
-            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\ntrailing prose\n"),
+            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\ntrailing prose\n"),
             "{updated}"
         );
 

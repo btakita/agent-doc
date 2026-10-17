@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a14af4-508a-7dd0-a2ff-a345ee1e7dfb
+  codex: 01a14b4d-7683-7ba1-9662-bd403fbe4a9c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -81,7 +81,96 @@ Two fixes are now on `main`:
 - `0ab4a26cce` makes legacy no-selector extraction reject plain Markdown targets before mutating the source, with guidance to initialize an agent document or use focused selectors.
 
 The combined changes merged cleanly, passed `git diff --check` and the authoritative full `make check` with zero failures, installed successfully across the CLI/library and editor surfaces, and were pushed to `main` at `0ab4a26cce`.
-<!-- agent:boundary:f163b149 -->
+
+### Re: Subagent completed: `subagent:todo_below_queue` returned work for queue item “By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=e075e02c053f636ed95c13e093af6c1623601315fab40138821ee92b2895516e -->
+
+### Re: Subagent completed: `subagent:backlog_priority_queue` returned work for queue item “By default, `agent:backlog` should have `priority queue`.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=a84e1d6531f7aec94f7b0d78eb6729987c807c321c3d8c9d6eb23bfaf9771b22 -->
+
+### Re: Subagent completed: `subagent:todo_priority` returned work for queue item “By default, `agent:todo` should have `priority`.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=1dc1d14be851c156ef444d6d08fb4a13cf973a780f89edb30028cd7ff947ccb4 -->
+### Re: Subagent completed: `subagent:pane_not_visible` returned work for queue item “Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=cdc8d4391f0181802e5dd862b832e82d3cc10825275a5e0392514546054ce217 -->
+### Re: Subagent completed: `subagent:todo_context_links` returned work for queue item “todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=06c92eb466902cecaf130dfcaf4a485ae365a47f06c0b7e66d4a90a6a25064c4 -->
+### Re: Subagent completed: `subagent:queue_runtime_state` returned work for queue item “The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=b9e94b6fd0fdb750348614749f38cf1f2b2ee846e6fa8be6c8e7b168dc082fca -->
+
+### Re: Subagent completed: `subagent:gh287` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/287” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=7073bfbe9cbf4fc3c27d9fae3ddde0fe93a9cd6aecc59a4672f8a7cf49414a8a -->
+
+### Re: Subagent completed: `subagent:gh285` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/285” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=70176666c5cb6eba41cdeed4745f3d5aa08cebd025f023b76e84303e894142ac -->
+
+### Re: Subagent completed: `subagent:extractliveapply` returned work for queue item “do [#extractliveapply]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=3f4997934180463d371aa321e8a46ca57f3ebc2afe6abe784fd205344935fa62 -->
+
+### Re: Subagent completed: `subagent:gh286` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/286” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=2780b1aef151660eda0c807feec8cc27153d949f0c136f4e0929b1cd63bcb4ed -->
+
+### Re: Subagent completed: `subagent:gh288` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/288” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=1b5815ea06600c8c25ce053cae4d81e0ab017b7f7ce40466a659f675f13133f3 -->
+
+### Re: Subagent completed: `subagent:gh284` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/284” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=7b9ca7c6fb41c496a66e318ebc6fad619aec80ced4372c3760fd717d3a03e68e -->
+
+### Re: Subagent completed: `subagent:gh289` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/289” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=f62527c8bf90f723ce951842a814e03a260bae35e7228b3b1bd18113f77a0f79 -->
+
+### Re: Subagent completed: `subagent:sdk_session_missing` returned work for queue item “Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=a3adca49d206a3c78b4afcd41ad60df0b51ea56db53f157f1957e037735f600f -->
+
+### Re: Subagent completed: `subagent:sdk_command_failed` returned work for queue item “Run Agent Doc on sdk-dev.md: agent-doc command failed (exit 1):” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=5d06326e1f630a9ef76044e43ff505f9a518af0c13f719b6713ed888d67a9bc2 -->
+
+### Re: Subagent completed: `subagent:extractcompactselection` returned work for queue item “do [#extractcompactselection]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=72b7ffa8d4e80f7341c255d6eb9d7d35cb21ef4cc81710ee5a1a8b91321f36d2 -->
+
+### Re: Subagent completed: `subagent:gh291` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/291” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=68769be5bda46716bdeb079116fbf657b36f166ef884ec912ca596a84f110e3a -->
+
+### Re: Subagent completed: `subagent:error_visibility` returned work for queue item “The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=cd7aeac33e040f93a901335d5338432cd70d00b3e987f27bb9eedd69a04afc02 -->
+
+### Re: Subagent completed: `subagent:gh290` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/290” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=d4892153b65d5eecb329d93e2f3574beddb72bff359366beb5e88f0dc613e4d5 -->
+
+### Re: Subagent completed: `subagent:gh292` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/292” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=82d4d1b6fa3035fd9aa710205c226680be0d924afd59a68bb3fb04289753a007 -->
+
+### Re: Subagent completed: `subagent:sync_projection_inflight` returned work for queue item “Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=b0026590f1b9e1f96db34a5c2d5a34567334e924405ca606bc806fc839c5b308 -->
+❯ No immediate restart is needed. In Grok Build:
+
+1. Open `/mcps`.
+2. Refresh and trust `agent-doc`.
+3. Confirm its six tools appear.
+4. Submit the already-typed `agent-doc tasks/sdk/sdk-pr.md`.
+
+❯ If the tools still do not appear after refresh, restart the Grok Build session, then run the command.
+<!-- agent:boundary:78058b56:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -89,10 +178,29 @@ The combined changes merged cleanly, passed `git diff --check` and the authorita
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish.~~
-- In sdk-dev.md, I attempted to extract a sdk-demo.md from the sdk-dev.md. The cli was called, but I only see a 
-- sdk-demo.md which is not an agent document. It's a regular plan md file instead.
-- By default, make the agent:todo below the queue.
+- 🚧 The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.
+- 🚧 By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.
+- 🚧 By default, `agent:queue` should have `priority subagents`.
+- 🚧 By default, `agent:todo` should have `priority`.
+- 🚧 By default, `agent:backlog` should have `priority queue`.
+- 🚧 todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.
+- 🚧 Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'
+- 🚧 There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/284
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/285
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/286
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/287
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/288
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/289
+- #gh-fix https://github.com/btakita/agent-doc/issues/290
+- #gh-fix https://github.com/btakita/agent-doc/issues/291
+- #gh-fix https://github.com/btakita/agent-doc/issues/292
+- 🚧 do [#extractliveapply]
+- 🚧 do [#extractcompactselection]
+- 🚧 Run Agent Doc on sdk-dev.md: agent-doc command failed (exit 1):
+- 🚧 Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session
+- Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}
+- The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)
 <!-- /agent:queue -->
 
 ## Todo
@@ -109,8 +217,8 @@ The combined changes merged cleanly, passed `git diff --check` and the authorita
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
-- [ ] [#extractcompactselection] agent-doc extract: keep prepared extraction selections executable after exchange compaction. Persist semantic selectors/selection manifests against archive locators, and support selectively transferring completed/done items; today a saved operation can lose its live exchange-node selectors after compaction and --ids does not select done items.
+- [ ] 🚧 [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
+- [ ] 🚧 [#extractcompactselection] agent-doc extract: keep prepared extraction selections executable after exchange compaction. Persist semantic selectors/selection manifests against archive locators, and support selectively transferring completed/done items; today a saved operation can lose its live exchange-node selectors after compaction and --ids does not select done items.
 <!-- /agent:backlog -->
 
 ## Review

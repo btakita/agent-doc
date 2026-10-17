@@ -16,7 +16,7 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "<!-- agent:todo -->\n",
     "<!-- /agent:todo -->\n",
     "\n## Backlog\n\n",
-    "<!-- agent:backlog -->\n",
+    "<!-- agent:backlog priority queue -->\n",
     "<!-- /agent:backlog -->\n",
     "\n## Review\n\n",
     "<!-- agent:review -->\n",
@@ -125,7 +125,7 @@ mod tests {
             scaffold.contains(concat!(
                 "<!-- /agent:queue -->\n",
                 "\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n",
-                "\n## Backlog\n\n"
+                "\n## Backlog\n\n<!-- agent:backlog priority queue -->\n"
             )),
             "agent:todo must sit below agent:queue and above agent:backlog"
         );
@@ -146,11 +146,12 @@ mod tests {
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[1].patch_mode(), Some("append"));
-        assert!(
-            components[2..]
-                .iter()
-                .all(|component| component.attrs.is_empty())
-        );
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .expect("default scaffold must contain backlog");
+        assert_eq!(backlog.attrs.get("priority").map(String::as_str), Some(""));
+        assert_eq!(backlog.attrs.get("queue").map(String::as_str), Some(""));
         assert!(
             components
                 .iter()

@@ -366,6 +366,9 @@ pub struct TodoAddOutcome {
     pub content: String,
     /// Whether a new checklist line was appended.
     pub inserted: bool,
+    /// Whether `inserted` means an existing linked row gained its visible
+    /// source locator rather than a new checklist line being appended.
+    pub source_reference_added: bool,
     /// Whether the `agent:todo` component had to be created.
     pub created_component: bool,
     /// The item's own id: the new id when inserted, or the matching existing
@@ -522,6 +525,25 @@ fn normalize_action_text(action: &str) -> String {
     action.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Make the tracked-work source of a layered todo visible in the checklist.
+///
+/// A leading todo id is identity, not explanatory text. When a caller selects
+/// tracked work with `id=<id>` but omits that id from the action, add an
+/// explicit component/id locator so the operator can find the decision packet
+/// without having to infer that the leading id is shared.
+fn action_with_source_reference(action: &str, id: &str, linked: Option<&str>) -> String {
+    let Some(component) = linked else {
+        return action.to_string();
+    };
+    if cited_ids(action)
+        .iter()
+        .any(|cited| cited.eq_ignore_ascii_case(id))
+    {
+        return action.to_string();
+    }
+    format!("{action} (source: agent:{component} [#{id}])")
+}
+
 /// Every `#id`-shaped token in `body`, lowercase.
 fn body_id_tokens(body: &str) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
@@ -565,20 +587,61 @@ pub fn add_todo_item_to_document(
     let (explicit_id, action) = parse_todo_input(text, "--todo-add")?;
     let (ensured, todo, created_component) = ensure_todo_component_in_document(content)?;
     let body = todo.content(&ensured);
-    let wanted = normalize_action_text(&action);
+    let explicit_linked = explicit_id
+        .as_deref()
+        .and_then(|id| links.linkable_component(id));
+    let contextual_action = explicit_id
+        .as_deref()
+        .map(|id| action_with_source_reference(&action, id, explicit_linked))
+        .unwrap_or_else(|| action.clone());
+    let wanted = normalize_action_text(&contextual_action);
+    let wanted_legacy = normalize_action_text(&action);
     let items: Vec<TodoLine<'_>> = body.lines().filter_map(parse_todo_line).collect();
     if let Some(existing) = items
         .iter()
-        .find(|item| normalize_action_text(item.action) == wanted)
+        .find(|item| {
+            let existing = normalize_action_text(item.action);
+            existing == wanted || existing == wanted_legacy
+        })
     {
         let id = existing.own_id.map(str::to_ascii_lowercase);
         let linked = id
             .as_deref()
             .and_then(|id| links.linkable_component(id))
             .map(str::to_string);
+        if wanted != wanted_legacy
+            && normalize_action_text(existing.action) == wanted_legacy
+            && id.as_deref() == explicit_id.as_deref()
+        {
+            let old_line = render_todo_line(
+                existing.prefix,
+                existing.state,
+                existing.own_id,
+                existing.own_id_bare,
+                existing.action,
+            );
+            let new_line = render_todo_line(
+                existing.prefix,
+                existing.state,
+                existing.own_id,
+                existing.own_id_bare,
+                &contextual_action,
+            );
+            let new_body = body.replacen(&old_line, &new_line, 1);
+            return Ok(TodoAddOutcome {
+                content: todo.replace_content(&ensured, &new_body),
+                inserted: true,
+                source_reference_added: true,
+                created_component,
+                id,
+                linked,
+                requested_id_unused: None,
+            });
+        }
         return Ok(TodoAddOutcome {
             content: ensured.clone(),
             inserted: false,
+            source_reference_added: false,
             created_component,
             id,
             linked,
@@ -626,6 +689,7 @@ pub fn add_todo_item_to_document(
                         return Ok(TodoAddOutcome {
                             content: ensured.clone(),
                             inserted: false,
+                            source_reference_added: false,
                             created_component,
                             id: Some(only.clone()),
                             linked: links.linkable_component(only).map(str::to_string),
@@ -669,6 +733,7 @@ pub fn add_todo_item_to_document(
         }
     };
     let requested_id_unused = explicit_id.filter(|requested| *requested != id);
+    let action = action_with_source_reference(&action, &id, linked.as_deref());
     let mut new_body = String::with_capacity(body.len() + action.len() + 16);
     new_body.push_str(body);
     if !new_body.is_empty() && !new_body.ends_with('\n') {
@@ -685,6 +750,7 @@ pub fn add_todo_item_to_document(
     Ok(TodoAddOutcome {
         content: todo.replace_content(&ensured, &new_body),
         inserted: true,
+        source_reference_added: false,
         created_component,
         id: Some(id),
         linked,
@@ -2294,7 +2360,17 @@ mod tests {
         let index = links(&[("gate1", "review")], &["shipped"]);
         let linked = add_linked(&wrap(""), "id=gate1 Verify live", &index).unwrap();
         assert_eq!(linked.linked.as_deref(), Some("review"));
-        assert_eq!(todo_body(&linked.content), "- [ ] [#gate1] Verify live\n");
+        assert_eq!(
+            todo_body(&linked.content),
+            "- [ ] [#gate1] Verify live (source: agent:review [#gate1])\n"
+        );
+        let repeated = add_linked(&linked.content, "id=gate1 Verify live", &index).unwrap();
+        assert!(!repeated.inserted);
+        assert_eq!(repeated.content, linked.content);
+        let legacy = wrap("- [ ] [#gate1] Verify live\n");
+        let upgraded = add_linked(&legacy, "id=gate1 Verify live", &index).unwrap();
+        assert!(upgraded.inserted && upgraded.source_reference_added);
+        assert_eq!(upgraded.content, linked.content);
         let custom = add_linked(&wrap(""), "id=rotate Rotate the key", &index).unwrap();
         assert_eq!(custom.linked, None);
         assert_eq!(custom.id.as_deref(), Some("rotate"));
@@ -2321,6 +2397,10 @@ mod tests {
         let explicit = add_linked(&wrap(""), "id=cold Decide whether to thaw", &index).unwrap();
         assert_eq!(explicit.linked.as_deref(), Some("icebox"));
         assert_eq!(explicit.requested_id_unused, None);
+        assert_eq!(
+            todo_body(&explicit.content),
+            "- [ ] [#cold] Decide whether to thaw (source: agent:icebox [#cold])\n"
+        );
     }
 
     /// `#todoidlayer`: a caller-chosen `id=` that names no tracked work is a

@@ -150,9 +150,14 @@ parse probe. `todo` is not runnable agent work: it has
 no scheduling role and is never promoted into `queue` or `backlog`. When a turn
 leaves a concrete operator action, the agent MUST add a brief, action-first
 Markdown checklist item to `todo` in the same cycle (`#operatortodo`). The item
-MAY refer to an existing `agent:review` or `agent:backlog` item by `#id`, or to a
-draft file path, instead of duplicating its details; publishing an unpublished
-draft is the canonical example. Such a reference does not transfer ownership or
+MAY refer to an existing `agent:review` or `agent:backlog` item (or an
+`agent:icebox` item)
+instead of duplicating its details, but that reference MUST visibly name the
+source component and `#id`; a leading todo own-id alone is identity, not enough
+decision context. The action itself must be understandable, and a compact
+`(source: agent:review [#gate1])` locator is sufficient when the tracked item
+holds the detailed choices. Publishing an unpublished draft may similarly name
+its concrete draft file path. Such a reference does not transfer ownership or
 scheduling out of the referenced component. The preferred write path is the
 granular `--todo-add "<action>"` closeout flag, which appends one
 `- [ ] [#<id>] <action>` line and never touches existing lines (an action already
@@ -184,7 +189,11 @@ made, `#tododupdone`).
 **Todo id discipline (`#todoids`, `#todoidlayer`).** Todo ids LAYER on
 tracked-work ids. A todo exists for visibility: it surfaces an operator
 decision on a backlog, review, or icebox item, so it carries that item's id
-rather than a new one. Every todo an agent adds with `--todo-add` carries an
+rather than a new one. Because an own id is not explanatory context,
+`--todo-add` also makes the link visible in the action: if `id=<tracked-id>`
+selects open tracked work and the supplied action does not cite that id, the
+writer appends `(source: agent:<component> [#<tracked-id>])`. Every todo an
+agent adds with `--todo-add` carries an
 own id: it either REUSES the id of the one tracked item it is the operator
 prompt for, or gets a SURROGATE id (minted, or a caller-chosen `id=` that names
 no tracked work) — only when the action cites several open tracked items or

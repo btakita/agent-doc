@@ -58049,6 +58049,82 @@ mod tests {
         assert!(resp.ack_through >= 1);
     }
 
+    /// A valid wire frame can still be permanently inadmissible against the
+    /// current canonical: concurrent CRDT ordering may splice operator bytes
+    /// into a binary-owned marker. Retrying that deterministic rejection at the
+    /// reliable-sync boundary wedges this frame and every later editor update.
+    #[test]
+    fn reliable_sync_structural_document_op_quarantine_advances_ack() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("structural-document-op.md");
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, base).unwrap();
+        agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&file).unwrap();
+        let (lineage, bootstrap) = agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            (hub.lineage().to_string(), hub.canonical_encoded_state())
+        })
+        .unwrap();
+        let editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(9127, &bootstrap).unwrap();
+        let frontier = editor.state_vector();
+        let marker = base.find("<!-- /agent:exchange -->").unwrap();
+        let stale_offset = base[..marker + "<!-- /ag".len()].chars().count() as u32;
+        editor.apply_local_edit(stale_offset, 0, "unsafe");
+        let delta = editor.diff(&frontier).unwrap();
+        let ops = agent_doc_merge::crdt_sync::decode_update_ops(&delta).unwrap();
+
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let channel = format!("{document_hash}:document-op");
+        let frame = agent_doc_reliable_sync_io::document_op::encode_document_op_frame_in_lineage(
+            Some(&lineage),
+            &ops,
+        )
+        .unwrap();
+        let envelope = agent_doc_reliable_sync_io::encode_envelope(&channel, &frame).unwrap();
+        let response = handle_reliable_sync(
+            dir.path(),
+            ControllerRequest {
+                command: "reliable_sync".to_string(),
+                file: Some(file.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(79),
+                state: None,
+                caller: Some("test".to_string()),
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(envelope.to_string()),
+                sequence: None,
+            },
+        )
+        .expect("structural quarantine is a terminal receive outcome");
+
+        assert_eq!(response.ack_through, 79);
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| assert_eq!(hub.canonical_text(), base))
+            .unwrap();
+        let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(
+            &agent_doc_sqlite::state_store::state_db_path(dir.path()),
+        )
+        .unwrap();
+        assert!(
+            snapshot
+                .cursors
+                .iter()
+                .any(|cursor| { cursor.document_hash == channel && cursor.ack_through == 79 })
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("outcome=StructuralQuarantined"));
+    }
+
     /// Build the three state events that record a visible-write receipt, the same
     /// way the observed/direct recording paths do.
     fn visible_write_receipt_events(

@@ -1418,6 +1418,22 @@ pub fn claim_identity(item: &str) -> QueueItemIdentity {
     queue_head_identity(item.trim())
 }
 
+/// Binary attestation key for one exact generated claim attempt and its
+/// immutable worker binding. Every producer and verifier uses this function so
+/// a receipt cannot become authoritative merely by carrying a nonempty token.
+pub fn completion_attestation_key(
+    identity: &QueueItemIdentity,
+    owner: &str,
+    generation: u64,
+    claimed_at_secs: u64,
+    worker_id: &str,
+) -> Result<String, serde_json::Error> {
+    let identity = serde_json::to_string(identity)?;
+    Ok(agent_doc_hash::content_hash(&format!(
+        "{identity}\n{owner}\n{generation}\n{claimed_at_secs}\n{worker_id}"
+    )))
+}
+
 /// The stable CLI handle for a queue claim. Only a structurally id-backed head
 /// collapses to `#id`; an id mentioned later in free text remains verbatim so
 /// dispatch, admission, and closeout agree on the line's identity (GH #182).

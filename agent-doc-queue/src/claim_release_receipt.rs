@@ -48,6 +48,22 @@ pub struct ClaimReleaseReceipt {
     pub item_text: String,
     /// The owner whose claim was released, e.g. `subagent:page-status-enum`.
     pub owner: String,
+    /// Exact claim generation that produced the report. Zero means a legacy
+    /// receipt that predates generation-fenced worker attestation.
+    #[serde(default)]
+    pub generation: u64,
+    /// Creation time of the exact claim attempt; part of its attestation key.
+    #[serde(default)]
+    pub claimed_at_secs: u64,
+    /// Concrete worker bound by `queue start`. Missing only on a legacy
+    /// receipt; such a receipt remains work evidence but is not exact strike
+    /// authority.
+    #[serde(default)]
+    pub worker_id: Option<String>,
+    /// Binary attestation for the exact identity/owner/generation/worker
+    /// attempt. Missing only on a legacy receipt.
+    #[serde(default)]
+    pub completion_key: Option<String>,
     pub released_at_secs: u64,
     pub expires_at_secs: u64,
 }
@@ -56,7 +72,52 @@ impl ClaimReleaseReceipt {
     pub fn is_expired(&self, now_secs: u64) -> bool {
         now_secs >= self.expires_at_secs
     }
+
+    /// Whether this receipt proves one exact started worker attempt. Legacy
+    /// owner-only receipts deliberately fail closed here: they still prevent a
+    /// worked row from becoming bare, but cannot authorize post-baseline
+    /// closeout of a possibly unrelated generation.
+    pub fn attests_exact_attempt(&self) -> bool {
+        let (Some(worker_id), Some(completion_key)) =
+            (self.worker_id.as_deref(), self.completion_key.as_deref())
+        else {
+            return false;
+        };
+        self.generation > 0
+            && !worker_id.is_empty()
+            && crate::queue_claim::completion_attestation_key(
+                &self.identity,
+                &self.owner,
+                self.generation,
+                self.claimed_at_secs,
+                worker_id,
+            )
+            .is_ok_and(|expected| expected == completion_key)
+    }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReceiptRecordRefused {
+    NotReported,
+    WorkerUnbound,
+    EmptyCompletionKey,
+    InvalidCompletionKey,
+}
+
+impl std::fmt::Display for ReceiptRecordRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotReported => write!(f, "claim is not in reported state"),
+            Self::WorkerUnbound => write!(f, "reported claim has no bound worker"),
+            Self::EmptyCompletionKey => write!(f, "completion attestation key is empty"),
+            Self::InvalidCompletionKey => {
+                write!(f, "completion attestation key does not match the claim attempt")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ReceiptRecordRefused {}
 
 /// The document's receipts.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,16 +129,47 @@ pub struct ClaimReleaseReceiptLedger {
 impl ClaimReleaseReceiptLedger {
     /// Record that `claim`'s worker reported and its claim was released. A
     /// newer receipt for the same line replaces an older one.
-    pub fn record(&mut self, claim: &QueueClaim, now_secs: u64, ttl_secs: u64) {
+    pub fn record(
+        &mut self,
+        claim: &QueueClaim,
+        completion_key: String,
+        now_secs: u64,
+        ttl_secs: u64,
+    ) -> Result<(), ReceiptRecordRefused> {
+        if claim.state != crate::queue_claim::QueueClaimState::Reported {
+            return Err(ReceiptRecordRefused::NotReported);
+        }
+        let Some(worker) = claim.worker.as_ref() else {
+            return Err(ReceiptRecordRefused::WorkerUnbound);
+        };
+        if completion_key.is_empty() {
+            return Err(ReceiptRecordRefused::EmptyCompletionKey);
+        }
+        let expected = crate::queue_claim::completion_attestation_key(
+            &claim.identity,
+            &claim.owner,
+            claim.generation,
+            claim.claimed_at_secs,
+            &worker.worker_id,
+        )
+        .map_err(|_| ReceiptRecordRefused::InvalidCompletionKey)?;
+        if completion_key != expected {
+            return Err(ReceiptRecordRefused::InvalidCompletionKey);
+        }
         self.receipts
             .retain(|receipt| receipt.identity != claim.identity);
         self.receipts.push(ClaimReleaseReceipt {
             identity: claim.identity.clone(),
             item_text: claim.item_text.clone(),
             owner: claim.owner.clone(),
+            generation: claim.generation,
+            claimed_at_secs: claim.claimed_at_secs,
+            worker_id: Some(worker.worker_id.clone()),
+            completion_key: Some(completion_key),
             released_at_secs: now_secs,
             expires_at_secs: now_secs.saturating_add(ttl_secs),
         });
+        Ok(())
     }
 
     /// Drop the receipt for `item` (`queue release --requeue`). Returns
@@ -141,6 +233,33 @@ impl ClaimReleaseReceiptLedger {
                 .map(|receipt| receipt.identity.clone()),
         )
     }
+
+    /// Every governing receipt that proves one exact started worker attempt.
+    /// This subset may authorize an exact-echo closeout for a row introduced
+    /// after the turn baseline; owner-only legacy receipts may not.
+    pub fn attested_reported_items(
+        &self,
+        now_secs: u64,
+        live: Option<&HashSet<QueueItemIdentity>>,
+        claimed: &ClaimedQueueItems,
+    ) -> ClaimedQueueItems {
+        let Some(live) = live else {
+            return ClaimedQueueItems::none();
+        };
+        ClaimedQueueItems::from_identities(
+            self.receipts
+                .iter()
+                .filter(|receipt| {
+                    receipt.attests_exact_attempt()
+                        && live.contains(&receipt.identity)
+                        && !claimed.claims(&receipt.item_text)
+                        && self
+                            .governing(now_secs, Some(live), claimed, &receipt.item_text)
+                            .is_some_and(|governing| governing == *receipt)
+                })
+                .map(|receipt| receipt.identity.clone()),
+        )
+    }
 }
 
 /// How a persisted answer closes queue line `item_text` (`#reportedrelease`):
@@ -196,11 +315,39 @@ mod tests {
         texts.iter().map(|text| claim_identity(text)).collect()
     }
 
+    fn record(
+        ledger: &mut ClaimReleaseReceiptLedger,
+        claim: &QueueClaim,
+        now_secs: u64,
+        ttl_secs: u64,
+    ) {
+        ledger
+            .record(
+                claim,
+                crate::queue_claim::completion_attestation_key(
+                    &claim.identity,
+                    &claim.owner,
+                    claim.generation,
+                    claim.claimed_at_secs,
+                    claim.worker.as_ref().unwrap().worker_id.as_str(),
+                )
+                .unwrap(),
+                now_secs,
+                ttl_secs,
+            )
+            .unwrap();
+    }
+
     #[test]
     fn a_receipt_governs_its_live_unclaimed_line_until_it_closes() {
         let question = "Does the page status enum have an archived value? What are the values?";
         let mut ledger = ClaimReleaseReceiptLedger::default();
-        ledger.record(&claim(question, "subagent:page-status-enum"), 10, 50);
+        record(
+            &mut ledger,
+            &claim(question, "subagent:page-status-enum"),
+            10,
+            50,
+        );
         let queued = live(&[question, "other line"]);
         let none = ClaimedQueueItems::none();
 
@@ -252,9 +399,9 @@ mod tests {
     #[test]
     fn requeue_forgets_and_prune_drops_only_closed_receipts() {
         let mut ledger = ClaimReleaseReceiptLedger::default();
-        ledger.record(&claim("a line", "subagent:a"), 10, 50);
-        ledger.record(&claim("b line", "subagent:b"), 10, 5);
-        ledger.record(&claim("a line", "subagent:a2"), 11, 50);
+        record(&mut ledger, &claim("a line", "subagent:a"), 10, 50);
+        record(&mut ledger, &claim("b line", "subagent:b"), 10, 5);
+        record(&mut ledger, &claim("a line", "subagent:a2"), 11, 50);
         assert_eq!(
             ledger.receipts.len(),
             2,
@@ -270,7 +417,7 @@ mod tests {
             "only struck a dropped"
         );
 
-        ledger.record(&claim("c line", "subagent:c"), 10, 50);
+        record(&mut ledger, &claim("c line", "subagent:c"), 10, 50);
         assert!(ledger.forget("c line"));
         assert!(!ledger.forget("c line"));
     }
@@ -288,5 +435,94 @@ mod tests {
         let id = persist_reported_instruction("tasks/docs.md", "do [#gh275]", "subagent:y");
         assert!(id.contains("--done gh275"), "{id}");
         assert!(!id.contains("Queue prompt"), "{id}");
+    }
+
+    /// Formal receipt-admission truth table. Only a Reported claim with one
+    /// concrete worker binding and a non-empty exact-attempt key may become
+    /// closeout authority. Every other row fails closed without mutating the
+    /// receipt ledger.
+    #[test]
+    fn receipt_record_truth_table_requires_exact_started_report() {
+        let cases = [
+            (
+                crate::queue_claim::QueueClaimState::Claimed,
+                true,
+                "key",
+                Some(ReceiptRecordRefused::NotReported),
+            ),
+            (
+                crate::queue_claim::QueueClaimState::Running,
+                true,
+                "key",
+                Some(ReceiptRecordRefused::NotReported),
+            ),
+            (
+                crate::queue_claim::QueueClaimState::Reported,
+                false,
+                "key",
+                Some(ReceiptRecordRefused::WorkerUnbound),
+            ),
+            (
+                crate::queue_claim::QueueClaimState::Reported,
+                true,
+                "",
+                Some(ReceiptRecordRefused::EmptyCompletionKey),
+            ),
+            (
+                crate::queue_claim::QueueClaimState::Reported,
+                true,
+                "invalid-key",
+                Some(ReceiptRecordRefused::InvalidCompletionKey),
+            ),
+            (
+                crate::queue_claim::QueueClaimState::Reported,
+                true,
+                "<exact>",
+                None,
+            ),
+        ];
+
+        for (index, (state, bound, key, expected)) in cases.into_iter().enumerate() {
+            let mut candidate = claim(&format!("row {index}"), "subagent:worker");
+            candidate.state = state;
+            if !bound {
+                candidate.worker = None;
+            }
+            let mut ledger = ClaimReleaseReceiptLedger::default();
+            let key = if key == "<exact>" {
+                crate::queue_claim::completion_attestation_key(
+                    &candidate.identity,
+                    &candidate.owner,
+                    candidate.generation,
+                    candidate.claimed_at_secs,
+                    &candidate.worker.as_ref().unwrap().worker_id,
+                )
+                .unwrap()
+            } else {
+                key.to_string()
+            };
+            let actual = ledger.record(&candidate, key, 10, 50).err();
+            assert_eq!(actual, expected, "case {index}");
+            assert_eq!(ledger.receipts.len(), usize::from(expected.is_none()));
+            if expected.is_none() {
+                assert!(ledger.receipts[0].attests_exact_attempt());
+            }
+        }
+
+        let legacy = ClaimReleaseReceipt {
+            identity: claim_identity("legacy row"),
+            item_text: "legacy row".to_string(),
+            owner: "subagent:legacy".to_string(),
+            generation: 0,
+            claimed_at_secs: 1,
+            worker_id: None,
+            completion_key: None,
+            released_at_secs: 1,
+            expires_at_secs: 2,
+        };
+        assert!(
+            !legacy.attests_exact_attempt(),
+            "owner-only legacy evidence must never authorize a post-baseline strike"
+        );
     }
 }

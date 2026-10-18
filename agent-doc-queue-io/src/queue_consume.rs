@@ -1070,7 +1070,19 @@ fn strike_free_text_queue_heads_with_proof(
     // `#queuesubagents` flow); a deferral next to the echo is what keeps a
     // quoted head queued. Read the claims now so the struck heads' claims are
     // released in this same closeout.
-    let claimed_heads = crate::queue_claim::claimed_live_head_texts_for_content(file, &content);
+    let mut claimed_heads = crate::queue_claim::claimed_live_head_texts_for_content(file, &content);
+    // A reported release removes the live claim by design. Preserve its exact
+    // attempt authority for this closeout from the durable receipt, otherwise
+    // a row added after the turn baseline races projection timing: 🚧 may
+    // strike before release while the same exact answer is refused once the
+    // row becomes 📥. Legacy owner-only receipts are intentionally excluded.
+    for head in
+        crate::claim_release_receipt::attested_reported_head_texts_for_content(file, &content)
+    {
+        if !claimed_heads.contains(&head) {
+            claimed_heads.push(head);
+        }
+    }
     // `#ftstrikeclaimedmention`: a claimed head strikes only on an exact
     // agent-authored echo, never on a mention or preset-body quote.
     let project = |doc: &str| match proof {
@@ -5202,10 +5214,10 @@ mod core_tests {
     }
 
     #[test]
-    fn answered_selected_marker_head_struck_when_absent_from_baseline() {
-        // A 🚧 head is already selected, so exact current-response evidence may
-        // consume it atomically even when it arrived after the pre-turn baseline.
-        // Unselected baseline-late operator drafts remain protected above.
+    fn answered_attested_worker_head_struck_when_absent_from_baseline() {
+        // Exact worker-attempt authority plus exact current-response evidence
+        // may consume a head atomically even when it arrived after the pre-turn
+        // baseline. The 🚧 projection alone is not authority.
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue go -->\n",
@@ -5218,12 +5230,24 @@ mod core_tests {
             "- some entirely different earlier queue line about another topic\n",
             "<!-- /agent:queue -->\n",
         );
-        let gated =
-            answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE, Some(baseline)).unwrap();
+        let head = "My free-text queue items are not immediately struck as if they are addressed.";
+        let gated = agent_doc_queue::queue_consume::answered_free_text_head_node_keys_with_claims(
+            content,
+            FTSTRIKE_RESPONSE,
+            Some(baseline),
+            &[head.to_string()],
+        )
+        .unwrap();
         assert_eq!(
             gated.len(),
             1,
-            "an exactly answered 🚧 head may close atomically despite a late baseline: {gated:?}"
+            "an exactly answered, attested worker head may close despite a late baseline: {gated:?}"
+        );
+        assert!(
+            answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE, Some(baseline))
+                .unwrap()
+                .is_empty(),
+            "the same cosmetic marker without durable attempt authority must fail closed"
         );
     }
 

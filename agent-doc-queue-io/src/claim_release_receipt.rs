@@ -190,10 +190,16 @@ fn apply_release_receipt(
                     .as_deref()
                     .and_then(live_queue_head_identities);
                 let now = now_secs();
-                mutate(file, |ledger| {
+                let completion_key = crate::queue_claim::completion_feedback_key(claim)?;
+                let refused = mutate(file, |ledger| {
                     ledger.prune(now, live.as_ref());
-                    ledger.record(claim, now, DEFAULT_RELEASE_RECEIPT_TTL_SECS);
+                    ledger
+                        .record(claim, completion_key, now, DEFAULT_RELEASE_RECEIPT_TTL_SECS)
+                        .err()
                 })?;
+                if let Some(refused) = refused {
+                    return Err(refused.into());
+                }
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -260,6 +266,32 @@ pub fn reported_items_for_content(file: &Path, content: &str) -> ClaimedQueueIte
     let live = live_queue_head_identities(content);
     let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
     ledger.reported_items(now_secs(), live.as_ref(), &claimed)
+}
+
+/// Lines whose durable release receipt proves the exact started claim
+/// generation and worker. These rows may be closed by an exact response echo
+/// even when they entered the queue after the turn baseline.
+pub fn attested_reported_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    let ledger = ledger_or_warn(file);
+    if ledger.receipts.is_empty() {
+        return ClaimedQueueItems::none();
+    }
+    let live = live_queue_head_identities(content);
+    let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
+    ledger.attested_reported_items(now_secs(), live.as_ref(), &claimed)
+}
+
+/// Exact live queue-head texts backed by an exact-attempt release receipt.
+pub fn attested_reported_head_texts_for_content(file: &Path, content: &str) -> Vec<String> {
+    let attested = attested_reported_items_for_content(file, content);
+    if attested.is_empty() {
+        return Vec::new();
+    }
+    agent_doc_queue::queue_continuation::live_queue_head_texts(content)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|head| attested.claims(head))
+        .collect()
 }
 
 /// Exact live queue-head texts governed by durable report receipts.
@@ -403,7 +435,22 @@ mod tests {
         assert_eq!(released.owner, "subagent:page-status-enum");
         let receipt = governing_receipt(&doc, &content, question).expect("receipt governs");
         assert_eq!(receipt.owner, "subagent:page-status-enum");
+        assert_eq!(receipt.generation, 1);
+        assert_eq!(
+            receipt.worker_id.as_deref(),
+            Some("worker:page-status-enum")
+        );
+        assert_eq!(
+            receipt.completion_key.as_deref(),
+            Some(
+                crate::queue_claim::completion_feedback_key(&prepared)
+                    .unwrap()
+                    .as_str()
+            )
+        );
+        assert!(receipt.attests_exact_attempt());
         assert!(reported_items_for_content(&doc, &content).claims(question));
+        assert!(attested_reported_items_for_content(&doc, &content).claims(question));
         assert!(!reported_items_for_content(&doc, &content).claims("other"));
 
         crate::queue_claim::claim(&doc, question, "subagent:again", 3600).unwrap();

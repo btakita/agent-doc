@@ -685,18 +685,28 @@ fn prepare_reported_release_inner(
     })
 }
 
-/// Stable binary attestation key for one exact worker attempt. Generation is
-/// part of every new key, so a completion from an older attempt cannot attest
-/// to a replacement attempt even when the queue text and worker label match.
+/// Stable binary attestation key for one exact worker attempt. Generation and
+/// the concrete `queue start` worker binding are part of every new key, so a
+/// completion from an older or foreign worker cannot attest to a replacement
+/// attempt even when queue text and owner label match.
 pub fn completion_feedback_key(claim: &QueueClaim) -> Result<String> {
     let identity = serde_json::to_string(&claim.identity).context("serialize claim identity")?;
     let material = if claim.generation == 0 {
         format!("{identity}\n{}\n{}", claim.owner, claim.claimed_at_secs)
     } else {
-        format!(
-            "{identity}\n{}\n{}\n{}",
-            claim.owner, claim.generation, claim.claimed_at_secs
+        let worker_id = claim
+            .worker
+            .as_ref()
+            .map(|worker| worker.worker_id.as_str())
+            .context("generated claim completion requires a bound worker")?;
+        return agent_doc_queue::queue_claim::completion_attestation_key(
+            &claim.identity,
+            &claim.owner,
+            claim.generation,
+            claim.claimed_at_secs,
+            worker_id,
         )
+        .context("serialize generated claim completion identity");
     };
     Ok(agent_doc_hash::content_hash(&material))
 }
@@ -709,7 +719,9 @@ pub fn reconcile_completion_evidence(file: &Path, content: &str) -> Result<usize
     let recovered = mutate_ledger(file, |ledger| {
         let mut recovered = 0;
         for claim in &mut ledger.claims {
-            if claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported {
+            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Running
+                || claim.worker.is_none()
+            {
                 continue;
             }
             let current =
@@ -1251,7 +1263,16 @@ mod tests {
     fn durable_completion_evidence_recovers_only_the_exact_generation() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(dir.path(), &["finish worker task"]);
-        let (_, claim) = claim(&doc, "finish worker task", "subagent:worker", 600).unwrap();
+        let (_, claimed) = claim(&doc, "finish worker task", "subagent:worker", 600).unwrap();
+        let claim = start_attempt(
+            &doc,
+            "finish worker task",
+            "subagent:worker",
+            "worker:exact",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
 
         let mut stale = claim.clone();
         stale.generation = 0;
@@ -1262,6 +1283,29 @@ mod tests {
             reconcile_completion_evidence(&doc, &stale_marker).unwrap(),
             0,
             "an unfenced historical result must not attest generation one"
+        );
+
+        let mut foreign = claim.clone();
+        foreign.worker.as_mut().unwrap().worker_id = "worker:foreign".to_string();
+        let foreign_marker = agent_doc_document::subagent_completion::marker(
+            &completion_feedback_key(&foreign).unwrap(),
+        );
+        assert_ne!(
+            completion_feedback_key(&claim).unwrap(),
+            completion_feedback_key(&foreign).unwrap(),
+            "the worker identity is part of exact-attempt attestation"
+        );
+        assert_eq!(
+            reconcile_completion_evidence(&doc, &foreign_marker).unwrap(),
+            0,
+            "a foreign worker bound to the same owner and generation cannot report"
+        );
+
+        let mut unstarted = claim.clone();
+        unstarted.worker = None;
+        assert!(
+            completion_feedback_key(&unstarted).is_err(),
+            "an unstarted generated claim cannot manufacture completion evidence"
         );
 
         let exact = agent_doc_document::subagent_completion::cell(

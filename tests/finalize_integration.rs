@@ -5307,6 +5307,22 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         "a reported release records its receipt"
     );
 
+    // Force the ordering that failed under the full release suite: closeout
+    // observes the pre-question turn baseline after the worker claim has been
+    // released. The exact-attempt receipt, not projection timing or the 📥
+    // marker, must authorize the exact echoed answer.
+    checkpoint_baseline(tmp.path(), &original);
+    let receipt = agent_doc_queue_io::claim_release_receipt::load(&doc)
+        .unwrap()
+        .receipts
+        .remove(0);
+    assert_eq!(receipt.generation, 1);
+    assert_eq!(
+        receipt.worker_id.as_deref(),
+        Some("worker:page-status-enum")
+    );
+    assert!(receipt.attests_exact_attempt());
+
     agent_doc()
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])

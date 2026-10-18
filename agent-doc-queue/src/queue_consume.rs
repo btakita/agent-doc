@@ -906,16 +906,20 @@ pub fn answered_free_text_head_node_keys_with_claims(
         if crate::queue_response::response_defers_free_text_head(response_body, text) {
             continue;
         }
+        // Formal post-baseline closeout rule:
+        //
+        //   strike(q) => echo(q) && !deferred(q)
+        //                && (baseline(q) || exact_worker_authority(q))
+        //
+        // `claimed` is the caller-supplied set of heads backed by current
+        // claim-attempt authority (a live claim or an exact-attempt release
+        // receipt). A cosmetic lifecycle prefix is never authority: accepting
+        // `🚧` here allowed a hand-edited/stale marker to consume new operator
+        // work, while rejecting `📥` made a real reported release race the
+        // baseline refresh.
         if let Some(baseline) = baseline
             && !crate::queue_response::free_text_head_present_in_baseline(baseline, text)
-            // A selected head may enter the live queue after the pre-turn
-            // baseline (for example, a subagent claim merged during the turn).
-            // The marker alone is not completion evidence, but together with
-            // an exact current-response echo it proves that the responder saw
-            // and answered this item. Consume it atomically so auto-queue does
-            // not reopen the already-completed preset on the next Stop hook.
-            && !(agent_doc_document::queue_projection::has_in_progress_marker(text)
-                && has_explicit_answer_evidence)
+            && !(claimed.claims(text) && has_explicit_answer_evidence)
         {
             continue;
         }
@@ -3476,14 +3480,28 @@ Old.
             response = response,
         );
 
-        let projected = project_answered_free_text_strike(&current, response, Some(baseline))
-            .unwrap()
-            .expect("selected and explicitly answered late head should be consumed");
+        let worker_authority =
+            ["#gh-fix https://github.com/btakita/agent-doc/issues/177".to_string()];
+        let projected = project_answered_free_text_strike_with_claims(
+            &current,
+            response,
+            Some(baseline),
+            &worker_authority,
+        )
+        .unwrap()
+        .expect("an attested and explicitly answered late head should be consumed");
         assert_eq!(projected.node_keys.len(), 1);
         assert!(projected.target_content.contains(
             "- ~~#gh-fix https://github.com/btakita/agent-doc/issues/177~~ — auto-struck: answered this cycle (#ftstrike)"
         ));
         assert!(projected.target_content.contains("- unrelated later work"));
+
+        assert!(
+            project_answered_free_text_strike(&current, response, Some(baseline))
+                .unwrap()
+                .is_none(),
+            "a lifecycle marker without claim-attempt authority cannot consume post-baseline work"
+        );
 
         let operator_draft = current.replacen("- 🚧 #gh-fix", "- #gh-fix", 1);
         assert!(

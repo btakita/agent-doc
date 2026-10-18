@@ -699,6 +699,14 @@ Completed and closed in `v0.35.518`.
 > **Queue prompt:** release + publish
 
 Released and publicly verified as `v0.35.518`.
+
+### Re: Response
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/294
+
+Completed and closed in agent-doc `v0.35.518`.
+
+The live dogfood cycle also detected that the next admission treated assistant-authored lines from the just-committed response as operator steering. Those projections are invalid because their recorded origin is the assistant closeout, not a post-baseline operator mutation. They were not dispatched. A dedicated subagent is implementing the lineage fix and regression test now.
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 
@@ -707,8 +715,9 @@ Released and publicly verified as `v0.35.518`.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#dogfood-assistant-response-lineage]
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/293~~
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/294
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/294~~
 - 📥 release + publish
 - release + publish
 <!-- /agent:queue -->
@@ -729,6 +738,7 @@ Released and publicly verified as `v0.35.518`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dogfood-assistant-response-lineage] Fix self-authored finalized exchange content being emitted as operator steering on the next admission; bind steering detection to post-baseline operator origin/lineage and fail closed.
 <!-- /agent:backlog -->
 
 ## Review

@@ -2017,19 +2017,35 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * deletion that was still waiting behind the debounce worker.
      */
     private fun publishClosingDocumentCut(filePath: String, document: Document): Boolean {
-        val closingText = tryReadDocumentText(document) ?: return false
         return try {
             documentWorkers.forDocument(filePath).submit<Boolean> {
                 val attachedForwarder = forwarders[filePath]?.takeIf { it.attached }
+                if (
+                    !closingDocumentCutRequiresTextUtil(
+                        hasAttachedForwarder = attachedForwarder != null,
+                        knownNotAgentDocDocument =
+                            attachFailureReasons[filePath] == "not_agent_doc_document",
+                    )
+                ) {
+                    // GH #298: a plain document was classified before close and
+                    // never acquired editor authority. Do not require another
+                    // IntelliJ read permit merely to prove that fact again.
+                    clearClosingDocumentState(filePath)
+                    return@submit true
+                }
+
+                // Closing is already running on a dedicated document worker and
+                // cannot safely abandon an agent-doc final cut because a write
+                // action happened to be pending. Wait for read access here instead
+                // of using the best-effort reader used by routine observations.
+                val closingText = ReadAction.compute<String, RuntimeException> { document.text }
                 if (!closingDocumentCutRequiresReplicaUtil(closingText, attachedForwarder != null)) {
                     // GH #287: plain markdown never acquired editor authority, so
                     // there is no final cut to publish. Treat that expected absence
                     // as a successful no-op and let TypingTracker emit the ordinary
                     // close hint and forget any unsynced-local-edit bookkeeping.
                     recordNotAgentDocDocument(filePath)
-                    clearLocalPending(filePath)
-                    templateValidation.remove(filePath)
-                    fileCacheConflicts.remove(filePath)
+                    clearClosingDocumentState(filePath)
                     return@submit true
                 }
                 val forwarder = attachedForwarder ?: forwarderFor(filePath, closingText) ?: return@submit false
@@ -2054,6 +2070,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             log.warn("[crdt-replica] closing editor cut publish failed for $filePath: ${e.message}")
             false
         }
+    }
+
+    private fun clearClosingDocumentState(filePath: String) {
+        clearLocalPending(filePath)
+        templateValidation.remove(filePath)
+        fileCacheConflicts.remove(filePath)
     }
 
     /**
@@ -5891,7 +5913,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
 
         fun publishClosingDocumentCut(filePath: String, document: Document): Boolean {
-            val manager = managerForFilePath(filePath) ?: return false
+            // GH #298: a path outside every open project cannot have acquired a
+            // project-owned replica. Its absent final cut is therefore a successful
+            // no-op, not a reason for TypingTracker to retain imaginary authority.
+            val manager = managerForFilePath(filePath) ?: return true
             return manager.publishClosingDocumentCut(filePath, document)
         }
 
@@ -6103,6 +6128,18 @@ internal fun closingDocumentCutRequiresReplicaUtil(
     closingText: CharSequence,
     hasAttachedForwarder: Boolean,
 ): Boolean = hasAttachedForwarder || isAgentDocDocumentTextUtil(closingText)
+
+/**
+ * Whether close settlement must read the current editor buffer.
+ *
+ * An attached replica always needs its exact final cut. Without one, a path already
+ * classified terminally as plain markdown never acquired editor authority, so close
+ * can succeed without contending for an IntelliJ read permit (GH #298).
+ */
+internal fun closingDocumentCutRequiresTextUtil(
+    hasAttachedForwarder: Boolean,
+    knownNotAgentDocDocument: Boolean,
+): Boolean = hasAttachedForwarder || !knownNotAgentDocDocument
 
 /**
  * Whether adopting a retained controller canonical projection would destroy

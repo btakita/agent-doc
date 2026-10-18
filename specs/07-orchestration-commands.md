@@ -584,6 +584,53 @@ Before emitting queue state, preflight may:
   converges, preserves disk byte-for-byte throughout, and refuses to start a
   response if the retry budget expires.
 
+#### Duplicate queue-effect identity (`#queueeffectidentity`)
+
+Invariant: every lawful repeated live free-text occurrence is a separately
+addressable effect. Two rows may have the same operator-authored work text, but
+they MUST NOT inherit one shared claim, lifecycle marker, report receipt, or
+closeout merely because that text normalizes equally. Conversely, an annotation
+MUST NOT increase the snapshot-authored multiplicity and thereby turn a replay
+artifact into new work.
+
+The pure policy owner is
+`document_queue::annotate_duplicate_queue_effects`, invoked by the existing
+`converge_queue_via_lifecycle` preflight projection. Its transition table is:
+
+| Observed live single-line free-text family | Successor |
+| --- | --- |
+| One bare row | Unchanged |
+| Two or more lawful bare rows | Append `⟦effect:1⟧`, `⟦effect:2⟧`, ... in queue order |
+| Existing unique positive effect ids plus bare rows | Preserve existing ids; assign each bare row the lowest unused positive id in queue order |
+| A repeated or zero effect id | Preserve the first valid occurrence; deterministically reassign later/missing occurrences |
+| One annotated survivor | Preserve its id; never compact or renumber |
+| Id-backed or multiline row | Unchanged |
+
+Lifecycle convergence strips only the effect suffix when computing the
+free-text multiplicity family, then annotates the lawful survivors. Claim and
+receipt identity retain the suffix. Therefore convergence remains replay-safe,
+while `release + publish ⟦effect:1⟧` and `release + publish ⟦effect:2⟧` are
+exactly different targets. A bare target against several annotated descendants
+is an ambiguity error listing the exact rows; claim resolution never chooses
+the first annotated effect. A legacy byte-identical claim retains its rolling-
+upgrade behavior (one claim anchors every copy) until preflight projects effect
+ids and deterministically migrates it to the first descendant.
+
+Evidence inputs are one immutable current queue cut plus the committed snapshot
+used by lifecycle convergence. No timestamp, claim-ledger ordering, release
+version guess, or later response text may mint the id. The projection is a
+one-shot pure transform with no long-lived Source/Computed/Effect lifetime; the
+existing preflight document effect persists its successor. Audit evidence is the
+visible suffix together with the existing queue claim/operation logs. Allowed
+mutation surfaces are only live queue-row text and the claim ledger's normal
+line-follow migration; operator prose, row order, non-prompt entries, tracked ids,
+and struck history are out of scope.
+
+Verification MUST cover deterministic assignment, idempotence, stable survivors,
+repeated-id repair, replay multiplicity, ambiguous bare-family lookup, distinct
+claim identities, legacy claim migration, and marker projection on only the exact
+claimed occurrence.
+
 ### Resolved directives are task authorization (`#directiveauthorization`)
 
 An imperative operator edit such as `go ...`, `push ...`, `commit + push`, or a

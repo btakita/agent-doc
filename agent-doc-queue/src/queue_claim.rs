@@ -138,8 +138,11 @@ pub struct QueueClaim {
     pub owner_session: Option<ClaimOwnerSession>,
     /// Where the claimed line sits in the queue (`#claimfollowedit`): the
     /// queue's heads when the claim was made or last followed, and which of
-    /// them the claim holds. An operator edit of a claimed line carries the
-    /// claim to the edited line by aligning this snapshot with the live heads
+    /// them the claim holds. Modern repeated free-text effects have distinct
+    /// visible `⟦effect:N⟧` identities; a legacy unannotated claim can still
+    /// hold several identical slots until preflight migrates it. An operator
+    /// edit of a claimed line carries the claim to the edited line by aligning
+    /// this snapshot with the live heads
     /// (the same edit rule mid-turn steering reports). `None` for a claim
     /// stored before the field existed; it is anchored on the next read that
     /// sees its line.
@@ -289,9 +292,10 @@ pub struct ClaimAnchor {
     /// The queue's live heads, normalized
     /// ([`crate::queue_head_alignment::normalize_queue_head_text`]), in order.
     pub heads: Vec<String>,
-    /// Indexes into `heads` of the lines the claim holds: every line with the
-    /// claim's identity (two identical lines are one claim) plus every line
-    /// edited from one of them since the claim was made.
+    /// Indexes into `heads` of the lines the claim holds: the exact effect line,
+    /// plus every line edited from it since the claim was made. A legacy claim
+    /// made before effect annotations can temporarily contain every identical
+    /// slot so migration deterministically follows the first descendant.
     pub slots: Vec<usize>,
 }
 
@@ -1139,7 +1143,9 @@ impl QueueClaimLedger {
     /// never re-offered as new dispatch work. Two identical claimed lines are
     /// one claim: it holds while either line (or a line edited from either)
     /// is live, and when several descendants differ it follows the first in
-    /// queue order rather than being dropped. A descendant whose identity
+    /// queue order rather than being dropped. This multi-copy case is legacy
+    /// migration only: new duplicate effects have distinct annotated identities.
+    /// A descendant whose identity
     /// another live claim holds is never taken over. A claim with no anchor
     /// (stored before anchors existed) falls back to the word-boundary
     /// annotation rule ([`is_edit_continuation`]).
@@ -1696,8 +1702,16 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
         .iter()
         .filter(|head| is_edit_continuation(&identity, &claim_identity(head)))
         .collect();
-    if let [only] = continuing.as_slice() {
-        return Ok((*only).clone());
+    match continuing.as_slice() {
+        [only] => return Ok((*only).clone()),
+        [] => {}
+        _ => {
+            return Err(QueueClaimMiss {
+                item: item.trim().to_string(),
+                live_heads: live_heads.to_vec(),
+                ambiguous: continuing.into_iter().cloned().collect(),
+            });
+        }
     }
     if let QueueItemIdentity::Id(id) = &identity {
         let referencing: Vec<String> = live_heads
@@ -2779,6 +2793,23 @@ mod tests {
             resolve_claim_target("#gh-fix https://x.test/issues/126", &heads).unwrap(),
             heads[0]
         );
+    }
+
+    /// `#queueeffectidentity`: a bare family name cannot silently select the
+    /// first of several effects, while either exact annotation is claimable.
+    #[test]
+    fn duplicate_effect_annotations_are_exact_claim_targets() {
+        let heads = vec![
+            "release + publish ⟦effect:1⟧".to_string(),
+            "release + publish ⟦effect:2⟧".to_string(),
+        ];
+        let miss = resolve_claim_target("release + publish", &heads).unwrap_err();
+        assert_eq!(miss.ambiguous, heads);
+        assert_eq!(
+            resolve_claim_target("release + publish ⟦effect:2⟧", &heads).unwrap(),
+            heads[1]
+        );
+        assert_ne!(claim_identity(&heads[0]), claim_identity(&heads[1]));
     }
 
     /// `#multilinequeuehead`: `queue claim` / `queue brief --item` name a

@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a14cf4-3e67-79a1-938a-ebb6b9d9f142
+  codex: 01a14fb9-7c96-7ef0-80cd-37aa1509b0cd
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -874,19 +874,42 @@ Applied live:
 `id=issues` changed atomically from `interval="1 hour"` to `interval=1h`, leaving `id=main` untouched. Status now reports the issues queue independently with `interval_secs=3600`, unbounded loop, zero failures, and no held heads; main is absent from the scheduled set and remains immediate. Lint reports no blocking findings. The obsolete administrative pause was resumed with observed generation 189.
 
 Verification passed on the exact commit: full `make check` with 11,046/11,046 Rust tests, 202/202 VS Code tests, cross-editor simulation, JetBrains classic/262/263 builds, bootstrap, TLA, focused exact-ID/CAS/refusal tests, and the coordinator's single `make install`. The earlier dedicated-watcher-document workaround is superseded and resolved because independent same-document schedules now provide the intended behavior directly.
-<!-- agent:boundary:4ad75070 -->
+
+### Re: Subagent completed: `subagent:github_issue_watcher` returned work for queue item “There are 3 new issues on github. But the loop did not detect the issues.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=6b0637c6387358c611a933a7a83152977c9fdef1c0e76e5d19d196f52a358697 -->
+> **Queue prompt:** There are 3 new issues on github. But the loop did not detect the issues.
+
+### Re: GitHub issue watcher detection — gpt-5 · 2026-10-18T12:33-04:00
+
+Fixed the watcher failure and reconciled the missed issues.
+
+The hourly `issues` queue was firing, but every tick returned `skipped_busy`. When this document was split into `id=main` and `id=issues`, the rolling-upgrade bridge ambiguously migrated the old document-global scheduler row into `issues`. Its open roster still contained old `main` work, so unrelated sibling work kept the watcher permanently busy and could later restore main-queue entries into the issues queue.
+
+Agent-doc main commit `3e175ff9ad` adds queue-owner provenance to durable schedule state. Legacy state is adopted only for an unambiguous single-queue rename; multi-queue documents discard ambiguous global state and reset already-keyed pre-provenance or mismatched-owner state before observing the queue. The specifications and regressions cover both a fresh multi-queue split and this document's already-corrupted `queue_schedule:issues` shape.
+
+The eligible open issues are #299, #301, and #302. #299 is already tracked by gated item `#gh299-live-263-proof`, so I did not duplicate it. I added #301 and #302 to the backlog and priority queue for the normal subagent drain. #40 and #45 remain excluded as requested.
+
+Verification passed on the integrated commit: focused scheduler suites passed 15/15 and 36/36; focused Clippy passed; `make check-fast` passed 9,215/9,215 nextest cases; the authoritative `make check` passed 11,046/11,046 Rust tests, 202/202 VS Code tests, cross-editor simulation, JetBrains classic/262/263 builds, bootstrap, document audit, and TLA validation/reuse. The single coordinator `make install` completed and updated the CLI/native library and editor packages; the active editor's native reload is deferred safely to the idle boundary. `origin/main` now points to `3e175ff9ad`.
+
+The prior GitHub CI run on base `78084d0bd9` failed in its main check before the tmux step began; the exact integrated local suite is green.
+<!-- agent:boundary:ba44fc3d -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Queue: Main
-<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~There are 3 new issues on github. But the loop did not detect the issues.~~
+- do [#gh301]
+- do [#gh302]
 <!-- /agent:queue -->
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
 - Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
+- If an issue was added, also add `- release + publish`
 <!-- /agent:queue -->
 
 ## Todo
@@ -904,6 +927,8 @@ Verification passed on the exact commit: full `make check` with 11,046/11,046 Ru
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#gh301] [agent-doc] Fix GH #301: a claim without queue start stays dispatching with no operator-visible warning. https://github.com/btakita/agent-doc/issues/301
+- [ ] [#gh302] [agent-doc] Fix GH #302: Remote Dev pane order can be reversed by guessed-slot focus authority. https://github.com/btakita/agent-doc/issues/302
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 

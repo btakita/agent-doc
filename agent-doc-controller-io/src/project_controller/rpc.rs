@@ -49494,9 +49494,17 @@ mod tests {
         let dir = async_handoff_test_project();
         let runtime = test_controller_runtime(&test_bootstrap(&dir));
         let file = dir.path().join("tasks/one.md");
-        let channel = document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
-        let (request, _) = document_turn_authority_stream_request(&file, &channel, None).unwrap();
+        let client_channel =
+            document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
+        let (request, _) =
+            document_turn_authority_stream_request(&file, &client_channel, None).unwrap();
         std::fs::remove_file(&file).unwrap();
+        let server_channel =
+            document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
+        assert_ne!(
+            client_channel, server_channel,
+            "deletion must reproduce the stale client-channel mismatch"
+        );
 
         let should_stop = AtomicBool::new(true);
         let mut written = Vec::new();

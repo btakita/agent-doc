@@ -415,6 +415,19 @@ internal fun replicaRecoveryCaptureMissReasonUtil(
 }
 
 /**
+ * GH #297: whether a recovery capture miss is a terminal refusal.
+ *
+ * A live project can temporarily have no replica manager while the native reload
+ * coordinator swaps generations and rebuilds the managers. The editor still owns
+ * the open document in that interval, so answering `rejected` would falsely prove
+ * that the endpoint stopped serving it. Report that one shape as `deferred`; the
+ * controller's bounded retry loop remains the owner of the retry. Other capture
+ * misses are stable editor facts and remain terminal rejections.
+ */
+internal fun replicaRecoveryCaptureMissIsDeferredUtil(cause: String?): Boolean =
+    cause == "no_replica_manager"
+
+/**
  * #jbmanagerbyfile: which replica manager serves a file-scoped request. The manager
  * already holding the file's replica wins; then [preferred] (the requesting project's
  * own manager); otherwise null, and the caller falls back to project ownership.
@@ -5790,11 +5803,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
 
             val (manager, resolvedFilePath, document) = captured ?: run {
+                val cause = captureMiss ?: "capture_not_run"
+                val deferred = replicaRecoveryCaptureMissIsDeferredUtil(cause)
+                if (deferred) pendingOut?.set(true)
                 // #jbrejectlog: with no manager there is no manager log, so this
                 // miss used to return a bare rejected receipt and log nothing.
+                // GH #297: manager absence during a native generation handoff is
+                // retryable and must not manufacture a not-serving proof.
+                val receipt = if (deferred) "deferred" else "not_attached"
+                val disposition = if (deferred) "deferred" else "rejected"
                 com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java).warn(
-                    "[crdt-replica] recovery re-register rejected for $filePath reason=$reason " +
-                        "cause=${captureMiss ?: "capture_not_run"} receipt=not_attached",
+                    "[crdt-replica] recovery re-register $disposition for $filePath reason=$reason " +
+                        "cause=$cause receipt=$receipt",
                 )
                 return false
             }

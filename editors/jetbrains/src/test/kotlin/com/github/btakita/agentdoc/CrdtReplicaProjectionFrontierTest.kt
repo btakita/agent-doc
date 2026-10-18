@@ -208,6 +208,11 @@ class CrdtReplicaProjectionFrontierTest {
             "a re-register that did not attach must log before the rejected receipt",
             deliveryBranch.contains("cause=reregister_not_attached"),
         )
+        assertTrue(
+            "a missing manager must flow through pending to the deferred receipt",
+            deliveryBranch.contains("reregisterPending.get()") &&
+                deliveryBranch.contains("APPLY_DEFERRED"),
+        )
         assertFalse(
             "no silent editor_id early return may remain",
             deliveryBranch.contains("if (!targetsThisEditorId(editorId)) return APPLY_FAILED"),
@@ -258,6 +263,30 @@ class CrdtReplicaProjectionFrontierTest {
         assertEquals("file_not_found", replicaRecoveryCaptureMissReasonUtil(false, true, false, false))
         assertEquals("no_document", replicaRecoveryCaptureMissReasonUtil(false, true, true, false))
         assertEquals(null, replicaRecoveryCaptureMissReasonUtil(false, true, true, true))
+    }
+
+    /** GH #297: native reload temporarily removes the manager, not editor authority. */
+    @Test
+    fun `recovery capture without a replica manager is deferred not refused`() {
+        assertTrue(replicaRecoveryCaptureMissIsDeferredUtil("no_replica_manager"))
+        assertFalse(replicaRecoveryCaptureMissIsDeferredUtil("project_disposed"))
+        assertFalse(replicaRecoveryCaptureMissIsDeferredUtil("file_not_found"))
+        assertFalse(replicaRecoveryCaptureMissIsDeferredUtil("no_document"))
+        assertFalse(replicaRecoveryCaptureMissIsDeferredUtil("capture_not_run"))
+        assertFalse(replicaRecoveryCaptureMissIsDeferredUtil(null))
+
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val recoveryRefresh = Files.readString(managerPath)
+            .substringAfter("fun refreshOpenDocumentReplicaForRecoveryAndWait(")
+            .substringBefore("private fun runOnEdtNonBlocking(")
+        assertTrue(
+            "the retryable capture miss must set the pending output consumed by PatchWatcher",
+            recoveryRefresh.contains("replicaRecoveryCaptureMissIsDeferredUtil(cause)") &&
+                recoveryRefresh.contains("if (deferred) pendingOut?.set(true)"),
+        )
     }
 
     /**

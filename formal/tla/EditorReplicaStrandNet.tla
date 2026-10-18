@@ -17,7 +17,9 @@ waits for its receipt:
 
   serves  -> the editor re-registers (`Registered`): the replica is back,
              or answers `Deferred` (`{"status":"deferred"}`, #netadv5 R2): a
-             slow attach or a coalesced re-register, still trying
+             slow attach, a coalesced re-register, or the GH #297 interval in
+             which native reload has not republished the replica manager yet;
+             all are still-serving states, never refusals
   refuses -> `Refuse`  (a rejected receipt: definitive)
   accepts -> `Accept`  (answered YES; the replica never appears)
   silent  -> nothing

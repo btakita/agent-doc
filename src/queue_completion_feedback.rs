@@ -36,13 +36,15 @@ pub(crate) struct CompletionFeedbackRepairOutcome {
 pub(crate) fn report_complete(
     file: &Path,
     item: &str,
+    generation: Option<u64>,
 ) -> Result<Option<CompletionFeedbackOutcome>> {
-    report_complete_with_lock_wait(file, item, COMPLETION_LOCK_WAIT)
+    report_complete_with_lock_wait(file, item, generation, COMPLETION_LOCK_WAIT)
 }
 
 fn report_complete_with_lock_wait(
     file: &Path,
     item: &str,
+    generation: Option<u64>,
     lock_wait: Duration,
 ) -> Result<Option<CompletionFeedbackOutcome>> {
     // `#subagentcompletionfeedback`: unlike SESSION_ACTOR_WRITE_QUEUE, this
@@ -57,15 +59,35 @@ fn report_complete_with_lock_wait(
             file.display(),
         );
     };
-    let current =
+    let resolved =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
+    // A retained successor is the latest complete desired cut even while the
+    // attached editor has not materialized it. Compose concurrent reports on
+    // that cut so no accepted completion cell is lost.
+    let current = agent_doc_document_realtime_io::pending_document_write(file)
+        .map(|pending| pending.target_content)
+        .unwrap_or(resolved);
     let Some(claim) = observed_claim(file, item, &current)? else {
         return Ok(None);
     };
     if !claim.owner.starts_with("subagent:") {
         return Ok(None);
     }
-    let appended = append_completion_feedback(file, &current, &claim)?;
+    let claim =
+        agent_doc_queue_io::queue_claim::report_attempt(file, &claim.item_text, generation)?;
+    // Derive the reported marker and completion cell from one cut and publish
+    // one successor. Two separate retained editor writes can conflict while
+    // the first is still awaiting projection.
+    let projection = agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(
+        file, &current, None,
+    )?;
+    let appended = append_completion_feedback(
+        file,
+        &current,
+        &projection.target_content,
+        &claim,
+    )?;
+    agent_doc_queue_io::queue_cmd::record_claim_runtime_projection(file, &projection, None)?;
     Ok(Some(CompletionFeedbackOutcome { claim, appended }))
 }
 
@@ -76,10 +98,13 @@ fn observed_claim(file: &Path, item: &str, current: &str) -> Result<Option<Queue
     Ok(ledger.release(item))
 }
 
-fn append_completion_feedback(file: &Path, current: &str, claim: &QueueClaim) -> Result<bool> {
-    let identity = serde_json::to_string(&claim.identity).context("serialize claim identity")?;
-    let key_material = format!("{identity}\n{}\n{}", claim.owner, claim.claimed_at_secs);
-    let key = agent_doc_hash::content_hash(&key_material);
+fn append_completion_feedback(
+    file: &Path,
+    current: &str,
+    projected: &str,
+    claim: &QueueClaim,
+) -> Result<bool> {
+    let key = agent_doc_queue_io::queue_claim::completion_feedback_key(claim)?;
     let marker = agent_doc_document::subagent_completion::marker(&key);
     // Keep the heading, body, and marker contiguous. The existing N-1 diff
     // classifier treats a block beginning with `### Re:` as a recovery
@@ -93,20 +118,24 @@ fn append_completion_feedback(file: &Path, current: &str, claim: &QueueClaim) ->
     // The heading's topic names the worker and item (`### Re: topic —
     // agent-doc`), so several cells never collapse to one replay topic.
     let note = agent_doc_document::subagent_completion::cell(&claim.owner, &claim.item_text, &key);
-    let pending_target = agent_doc_document_realtime_io::pending_document_write(file)
-        .map(|pending| pending.target_content);
-    if current.contains(&marker)
-        || pending_target
-            .as_deref()
-            .is_some_and(|target| target.contains(&marker))
-    {
+    let appended = !projected.contains(&marker);
+    let updated = if appended {
+        agent_doc_element_exchange::insert_prompt_line_before_boundary(projected, &note)?
+    } else {
+        projected.to_string()
+    };
+    if updated == current {
         return Ok(false);
     }
-    let updated = agent_doc_element_exchange::insert_prompt_line_before_boundary(current, &note)?;
     let scope = changed_component_scope(current, &updated)
-        .context("subagent completion feedback must change only agent:exchange")?;
-    if !scope.contains("exchange", 0) || scope.components().len() != 1 {
-        bail!("subagent completion feedback escaped the first agent:exchange component");
+        .context("subagent completion feedback must change only agent:exchange/queue")?;
+    let scope_pairs = scope.to_pairs();
+    if (appended && !scope.contains("exchange", 0))
+        || scope_pairs
+            .iter()
+            .any(|(name, _)| name != "exchange" && name != "queue")
+    {
+        bail!("subagent completion feedback escaped agent:exchange/queue components");
     }
     // An attached editor owns disk projection. Hand the target to the durable
     // retained-intent graph and return as soon as the controller accepts it;
@@ -133,7 +162,7 @@ fn append_completion_feedback(file: &Path, current: &str, claim: &QueueClaim) ->
                 .unwrap_or_default(),
         ),
     );
-    Ok(true)
+    Ok(appended)
 }
 
 /// Repair the short-lived v0.34 rolling-upgrade artifact that put all visible
@@ -277,6 +306,8 @@ mod tests {
             identity: QueueItemIdentity::FreeText("finish-sdk".into()),
             item_text: "finish sdk.md\nwith deterministic tests".into(),
             owner: "subagent:sdk-feedback".into(),
+            generation: 1,
+            state: agent_doc_queue::queue_claim::QueueClaimState::Running,
             claimed_at_secs: 10,
             expires_at_secs: 20,
             owner_session: None,
@@ -297,11 +328,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         let claim = test_claim();
-        let identity = serde_json::to_string(&claim.identity).unwrap();
-        let key = agent_doc_hash::content_hash(&format!(
-            "{identity}\n{}\n{}",
-            claim.owner, claim.claimed_at_secs
-        ));
+        let key = agent_doc_queue_io::queue_claim::completion_feedback_key(&claim).unwrap();
         let marker = format!("<!-- agent-doc-subagent-completion key={key} -->");
         let note =
             agent_doc_document::subagent_completion::cell(&claim.owner, &claim.item_text, &key);
@@ -485,7 +512,7 @@ mod tests {
         )
         .unwrap();
 
-        let first = report_complete(&doc, "finish sdk.md with deterministic tests")
+        let first = report_complete(&doc, "finish sdk.md with deterministic tests", Some(1))
             .unwrap()
             .unwrap();
         assert!(first.appended);
@@ -505,7 +532,7 @@ mod tests {
         )
         .unwrap();
         assert_ne!(refreshed.expires_at_secs, first.claim.expires_at_secs);
-        let second = report_complete(&doc, "finish sdk.md with deterministic tests")
+        let second = report_complete(&doc, "finish sdk.md with deterministic tests", Some(1))
             .unwrap()
             .unwrap();
         assert!(
@@ -593,7 +620,7 @@ mod tests {
             .into_iter()
             .map(|item| {
                 let doc = doc.clone();
-                std::thread::spawn(move || report_complete(&doc, item).unwrap().unwrap())
+                std::thread::spawn(move || report_complete(&doc, item, Some(1)).unwrap().unwrap())
             })
             .collect::<Vec<_>>();
         let outcomes = threads
@@ -668,8 +695,9 @@ mod tests {
             panic!("fixture must acquire completion lock");
         };
         let started = std::time::Instant::now();
-        let error = report_complete_with_lock_wait(&doc, "finish sdk", Duration::from_millis(50))
-            .unwrap_err();
+        let error =
+            report_complete_with_lock_wait(&doc, "finish sdk", Some(1), Duration::from_millis(50))
+                .unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(error.to_string().contains("timed out after 50ms"));
         assert!(

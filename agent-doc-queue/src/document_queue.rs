@@ -39,8 +39,8 @@
 //! This module is I/O-free. Callers handle reading/writing files.
 
 use agent_doc_document::queue_projection::{
-    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKER, PRIORITIZED_MARKERS, apply_in_progress_marker,
-    strip_in_progress_marker, strip_in_progress_marker_for_display, strip_priority_markers,
+    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKER, PRIORITIZED_MARKERS, strip_in_progress_marker,
+    strip_in_progress_marker_for_display, strip_priority_markers,
 };
 use agent_doc_element_queue::QueueItemLifecycle;
 use agent_doc_markdown_ast::overlay::{queue_bare_fence_close, queue_fenced_title_block};
@@ -1432,13 +1432,41 @@ pub fn set_prompts_in_progress(
     entries: &[QueueEntry],
     target_texts: &[String],
 ) -> Option<Vec<QueueEntry>> {
-    let mut target_counts = std::collections::BTreeMap::<String, usize>::new();
-    for text in target_texts {
+    let targets = target_texts
+        .iter()
+        .cloned()
+        .map(|text| {
+            (
+                text,
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
+            )
+        })
+        .collect::<Vec<_>>();
+    set_prompt_lifecycle_markers(entries, &targets)
+}
+
+/// Project one binary-owned lifecycle marker per selected queue occurrence.
+/// Marker changes never alter queue identity or row structure.
+pub fn set_prompt_lifecycle_markers(
+    entries: &[QueueEntry],
+    targets: &[(
+        String,
+        agent_doc_document::queue_projection::QueueLifecycleMarker,
+    )],
+) -> Option<Vec<QueueEntry>> {
+    let mut target_counts = std::collections::BTreeMap::<
+        (
+            String,
+            agent_doc_document::queue_projection::QueueLifecycleMarker,
+        ),
+        usize,
+    >::new();
+    for (text, marker) in targets {
         let key = strip_priority_markers(text);
         if key.is_empty() {
             continue;
         }
-        *target_counts.entry(key).or_default() += 1;
+        *target_counts.entry((key, *marker)).or_default() += 1;
     }
     let mut changed = false;
     let out = entries
@@ -1451,12 +1479,19 @@ pub fn set_prompts_in_progress(
                     changed = true;
                 }
                 let key = strip_priority_markers(&next.text);
-                if let Some(remaining) = target_counts.get_mut(&key)
-                    && *remaining > 0
+                if let Some((marker, remaining)) =
+                    target_counts
+                        .iter_mut()
+                        .find_map(|((target_key, marker), remaining)| {
+                            (target_key == &key && *remaining > 0).then_some((*marker, remaining))
+                        })
                 {
                     *remaining -= 1;
                     if !crate::queue_command::is_slash_command(&next.text) {
-                        let marked_text = apply_in_progress_marker(&next.text);
+                        let marked_text =
+                            agent_doc_document::queue_projection::apply_lifecycle_marker(
+                                &next.text, marker,
+                            );
                         if marked_text != next.text {
                             next.text = marked_text;
                             changed = true;
@@ -1540,6 +1575,40 @@ pub fn project_prompts_in_progress(
     anyhow::ensure!(
         reparsed == marked_entries,
         "queue in-progress marker projection changed non-marker row structure"
+    );
+    Ok(Some((projected, reparsed)))
+}
+
+/// [`project_prompts_in_progress`] generalized to all claim lifecycle states.
+pub fn project_prompt_lifecycle_markers(
+    body: &str,
+    targets: &[(
+        String,
+        agent_doc_document::queue_projection::QueueLifecycleMarker,
+    )],
+) -> Result<Option<(String, Vec<QueueEntry>)>> {
+    let spans = parse_spans(body)?;
+    let entries = spans
+        .iter()
+        .map(|(entry, _)| entry.clone())
+        .collect::<Vec<_>>();
+    let Some(marked_entries) = set_prompt_lifecycle_markers(&entries, targets) else {
+        return Ok(None);
+    };
+    validate_in_progress_marker_projection(&entries, &marked_entries)?;
+
+    let mut projected = body.to_string();
+    for ((before, range), after) in spans.iter().zip(&marked_entries).rev() {
+        if before != after {
+            projected.replace_range(range.clone(), &render(std::slice::from_ref(after)));
+        }
+    }
+
+    let reparsed = parse(&projected)?;
+    validate_in_progress_marker_projection(&entries, &reparsed)?;
+    anyhow::ensure!(
+        reparsed == marked_entries,
+        "queue lifecycle marker projection changed non-marker row structure"
     );
     Ok(Some((projected, reparsed)))
 }
@@ -1634,7 +1703,17 @@ pub fn set_prompts_lifecycle_markers(
     let out = entries
         .iter()
         .map(|entry| match entry {
-            QueueEntry::Prompt(prompt) if !qp::has_in_progress_marker(&prompt.text) => {
+            QueueEntry::Prompt(prompt)
+                if !matches!(
+                    qp::lifecycle_marker(&prompt.text),
+                    Some(
+                        qp::QueueLifecycleMarker::Claimed
+                            | qp::QueueLifecycleMarker::Running
+                            | qp::QueueLifecycleMarker::Reported
+                            | qp::QueueLifecycleMarker::Lost
+                    )
+                ) =>
+            {
                 let mut next = prompt.clone();
                 let id = do_prompt_id(&next.text);
                 let awaiting = id.as_ref().is_some_and(|id| awaiting_ids.contains(id));
@@ -4153,6 +4232,23 @@ mod tests {
         assert_eq!(
             render(&marked),
             "- do [#old]\n- 🚧 do [#alpha]\n- 🚧 do [#beta]\n"
+        );
+    }
+
+    #[test]
+    fn typed_lifecycle_projection_replaces_state_without_retargeting_identity() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+
+        let entries = parse("- 🚧 do [#a]\n- do [#b]\n- 📥 do [#c]\n").unwrap();
+        let targets = vec![
+            ("do [#a]".to_string(), QueueLifecycleMarker::Reported),
+            ("do [#b]".to_string(), QueueLifecycleMarker::Lost),
+            ("do [#c]".to_string(), QueueLifecycleMarker::Claimed),
+        ];
+        let marked = set_prompt_lifecycle_markers(&entries, &targets).unwrap();
+        assert_eq!(
+            render(&marked),
+            "- 📥 do [#a]\n- ⚠️ do [#b]\n- 🟡 do [#c]\n"
         );
     }
 

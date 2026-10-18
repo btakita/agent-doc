@@ -3682,7 +3682,10 @@ fn text_is_bare_queue_directive_reference(text: &str) -> bool {
     for marker in [
         "📌",
         "📍",
+        "🟡",
         "🚧",
+        "📥",
+        "⚠️",
         "⏭️",
         "⏭",
         "⏳",

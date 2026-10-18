@@ -2422,7 +2422,14 @@ mod tests {
         );
 
         // The worker refreshes by the text it was handed.
-        agent_doc_queue_io::queue_claim::refresh(&file, foc, "subagent:gh272", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::refresh_attempt(
+            &file,
+            foc,
+            "subagent:gh272",
+            3600,
+            Some(claim.generation),
+        )
+        .unwrap();
 
         // Deleting the line releases the claim.
         let deleted = doc(&["current task", "release + publish"]);

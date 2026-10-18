@@ -3575,6 +3575,10 @@ mod tests {
     fn bundled_surfaces_carry_queue_subagents_coordinator_contract() {
         assert!(SKILL_TEMPLATE.contains("Under `<!-- agent:queue subagents -->`"));
         assert!(SKILL_TEMPLATE.contains("agent-doc queue claim ... --refresh"));
+        assert!(SKILL_TEMPLATE.contains("--refresh --generation <N>"));
+        assert!(SKILL_TEMPLATE.contains("queue report-complete ... --generation <N>"));
+        assert!(SKILL_TEMPLATE.contains("queue release ... --generation <N>"));
+        assert!(SKILL_TEMPLATE.contains("A fresh claim displays `🟡`"));
         assert!(SKILL_TEMPLATE.contains("ONE `make install` per batch"));
         assert!(SKILL_TEMPLATE.contains("agent-doc orchestrate <FILE> --mode parallel"));
         assert!(SKILL_TEMPLATE.contains("(`#queuesubagents`)"));
@@ -3594,10 +3598,13 @@ mod tests {
             "Queue subagents coordinator (`#queuesubagents`)",
             "`queue_subagent_dispatch` is the list to dispatch THIS cycle",
             "--owner subagent:<label> --refresh",
+            "--refresh --generation <N>",
+            "queue report-complete <FILE> --item <...> --generation <N>",
             "OUTSIDE the IDE-watched project",
             "never run two subagents in\n     one checkout",
             "ONE\n     `make install` per integrated batch",
             "agent-doc queue release <FILE> --item <...>",
+            "agent-doc queue release <FILE> --item <...> --generation <N>",
             "`agent-doc orchestrate <FILE> --mode parallel --task \"<item>\" ...`",
             "end the turn\n  quietly",
             "`authorization.subagent_prompt_preamble` VERBATIM",

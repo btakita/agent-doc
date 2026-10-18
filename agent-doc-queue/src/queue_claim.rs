@@ -111,6 +111,14 @@ pub struct QueueClaim {
     pub item_text: String,
     /// Who holds the claim, e.g. `subagent:gh109`.
     pub owner: String,
+    /// Monotonic attempt generation for this queue-item identity. Zero denotes
+    /// a legacy pre-generation claim and is accepted only by legacy-unfenced
+    /// transitions during rolling upgrades.
+    #[serde(default)]
+    pub generation: u64,
+    /// Typed lifecycle for this exact `(identity, owner, generation)` attempt.
+    #[serde(default)]
+    pub state: QueueClaimState,
     pub claimed_at_secs: u64,
     pub expires_at_secs: u64,
     /// The coordinator session that made (or last adopted) the claim
@@ -134,6 +142,38 @@ pub struct QueueClaim {
     pub followed_from: Vec<String>,
 }
 
+/// Lifecycle of one fenced worker attempt (`#queueclaimstate`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueClaimState {
+    /// Claimed/dispatching; no positive worker-liveness evidence yet.
+    #[default]
+    Claimed,
+    /// Positive dispatch or heartbeat evidence exists.
+    Running,
+    /// The worker reported; integration/verification is still pending.
+    Reported,
+    /// The attempt expired or was explicitly abandoned. It does not block a
+    /// new claim, but remains visible until reclaimed or the queue head closes.
+    Lost,
+}
+
+impl QueueClaimState {
+    pub fn blocks_dispatch(self) -> bool {
+        matches!(self, Self::Claimed | Self::Running | Self::Reported)
+    }
+
+    pub fn projection_marker(self) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+        match self {
+            Self::Claimed => QueueLifecycleMarker::Claimed,
+            Self::Running => QueueLifecycleMarker::Running,
+            Self::Reported => QueueLifecycleMarker::Reported,
+            Self::Lost => QueueLifecycleMarker::Lost,
+        }
+    }
+}
+
 /// A claim's position in its queue (`#claimfollowedit`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimAnchor {
@@ -151,7 +191,11 @@ const FOLLOWED_FROM_LIMIT: usize = 8;
 
 impl QueueClaim {
     pub fn is_expired(&self, now_secs: u64) -> bool {
-        now_secs >= self.expires_at_secs
+        self.state != QueueClaimState::Reported && now_secs >= self.expires_at_secs
+    }
+
+    pub fn blocks_dispatch(&self, now_secs: u64) -> bool {
+        self.state.blocks_dispatch() && !self.is_expired(now_secs)
     }
 }
 
@@ -313,8 +357,66 @@ pub enum ClaimOutcome {
     Created,
     /// The same owner re-claimed the item; its TTL was refreshed.
     Refreshed,
-    /// A different owner held a live claim; ownership moved to the new owner.
+    /// A lost/expired attempt was replaced by a new generation.
     Reassigned,
+    /// A different owner still holds a live attempt. No mutation occurred.
+    HeldByOther,
+}
+
+/// A stale or invalid attempt-scoped lifecycle transition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueueClaimTransitionRefused {
+    Missing,
+    MissingGeneration {
+        current: u64,
+    },
+    StaleGeneration {
+        expected: u64,
+        current: u64,
+    },
+    Terminal {
+        generation: u64,
+        state: QueueClaimState,
+    },
+}
+
+impl std::fmt::Display for QueueClaimTransitionRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing => write!(f, "queue claim attempt is missing"),
+            Self::MissingGeneration { current } => write!(
+                f,
+                "queue claim generation is required (current generation {current})"
+            ),
+            Self::StaleGeneration { expected, current } => write!(
+                f,
+                "stale queue claim generation {expected}; current generation is {current}"
+            ),
+            Self::Terminal { generation, state } => write!(
+                f,
+                "queue claim generation {generation} is terminal ({state:?})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QueueClaimTransitionRefused {}
+
+fn validate_generation(
+    claim: &QueueClaim,
+    expected_generation: Option<u64>,
+) -> Result<(), QueueClaimTransitionRefused> {
+    match expected_generation {
+        Some(expected) if expected == claim.generation => Ok(()),
+        Some(expected) => Err(QueueClaimTransitionRefused::StaleGeneration {
+            expected,
+            current: claim.generation,
+        }),
+        None if claim.generation == 0 => Ok(()),
+        None => Err(QueueClaimTransitionRefused::MissingGeneration {
+            current: claim.generation,
+        }),
+    }
 }
 
 /// `queue_document_state.state_kind` of the per-document claim ledger row.
@@ -327,6 +429,9 @@ impl QueueClaimLedger {
     pub fn from_state_payload(payload_json: &str) -> anyhow::Result<Self> {
         let mut ledger: QueueClaimLedger = serde_json::from_str(payload_json)
             .map_err(|err| anyhow::anyhow!("parse queue claim ledger: {err}"))?;
+        // Legacy rows predate generation/state. Keep generation zero so an
+        // in-flight rolling-upgrade transition can still identify that one
+        // legacy attempt; the next actual re-claim advances it to generation 1.
         // `#claimdispatchidentity`: claims stored under an older identity rule
         // are compared under the current one.
         ledger.rekey();
@@ -406,6 +511,8 @@ impl QueueClaimLedger {
             identity: identity.clone(),
             item_text: item.trim().to_string(),
             owner: owner.trim().to_string(),
+            generation: 1,
+            state: QueueClaimState::Claimed,
             claimed_at_secs: now_secs,
             expires_at_secs,
             owner_session,
@@ -417,14 +524,27 @@ impl QueueClaimLedger {
             .iter_mut()
             .find(|claim| claim.identity == identity)
         {
+            Some(existing)
+                if existing.owner == fresh.owner && existing.blocks_dispatch(now_secs) =>
+            {
+                // Idempotent same-owner claim. It is the same worker attempt;
+                // only explicit `--refresh` supplies running evidence.
+                existing.expires_at_secs = expires_at_secs;
+                if fresh.owner_session.is_some() {
+                    existing.owner_session = fresh.owner_session;
+                }
+                ClaimOutcome::Refreshed
+            }
+            Some(existing) if existing.blocks_dispatch(now_secs) => {
+                // Never steal a live attempt. Callers turn this typed outcome
+                // into a usage error naming the current generation/owner.
+                ClaimOutcome::HeldByOther
+            }
             Some(existing) => {
-                let outcome = if existing.owner == fresh.owner || existing.is_expired(now_secs) {
-                    ClaimOutcome::Refreshed
-                } else {
-                    ClaimOutcome::Reassigned
-                };
-                // The same line, re-claimed: it keeps its place in the queue
-                // and the texts it followed from.
+                let outcome = ClaimOutcome::Reassigned;
+                fresh.generation = existing.generation.saturating_add(1).max(1);
+                // Re-claim after lost/expired handling keeps line anchoring but
+                // starts a new fenced attempt.
                 fresh.anchor = existing.anchor.take();
                 fresh.followed_from = std::mem::take(&mut existing.followed_from);
                 *existing = fresh;
@@ -466,6 +586,39 @@ impl QueueClaimLedger {
         ttl_secs: u64,
         owner_session: Option<ClaimOwnerSession>,
     ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
+        self.refresh_fenced_in_session(item, owner, now_secs, ttl_secs, owner_session, None)
+    }
+
+    /// Attempt-fenced refresh used by command boundaries. Generated claims
+    /// require the exact generation; generation-zero legacy rows may omit it.
+    pub fn refresh_attempt_in_session(
+        &mut self,
+        item: &str,
+        owner: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+        owner_session: Option<ClaimOwnerSession>,
+        expected_generation: Option<u64>,
+    ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
+        self.refresh_fenced_in_session(
+            item,
+            owner,
+            now_secs,
+            ttl_secs,
+            owner_session,
+            Some(expected_generation),
+        )
+    }
+
+    fn refresh_fenced_in_session(
+        &mut self,
+        item: &str,
+        owner: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+        owner_session: Option<ClaimOwnerSession>,
+        generation_fence: Option<Option<u64>>,
+    ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
         let identity = claim_identity(item);
         let owner = owner.trim();
         let refused = |reason| QueueClaimRefreshRefused {
@@ -480,7 +633,7 @@ impl QueueClaimLedger {
         else {
             return Err(refused(RefreshRefusal::Unclaimed));
         };
-        if existing.is_expired(now_secs) {
+        if existing.is_expired(now_secs) || existing.state == QueueClaimState::Lost {
             return Err(refused(RefreshRefusal::Expired {
                 holder: existing.owner.clone(),
                 expired_at_secs: existing.expires_at_secs,
@@ -491,15 +644,68 @@ impl QueueClaimLedger {
                 holder: existing.owner.clone(),
             }));
         }
+        if let Some(expected_generation) = generation_fence
+            && let Err(reason) = validate_generation(existing, expected_generation)
+        {
+            return Err(refused(RefreshRefusal::StaleAttempt {
+                detail: reason.to_string(),
+            }));
+        }
         existing.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
+        if existing.state == QueueClaimState::Claimed {
+            existing.state = QueueClaimState::Running;
+        }
         if owner_session.is_some() {
             existing.owner_session = owner_session;
         }
         Ok(existing.clone())
     }
 
+    /// Mark the matching attempt reported. New generated claims require their
+    /// generation; legacy generation-zero claims accept an omitted fence.
+    pub fn report(
+        &mut self,
+        item: &str,
+        expected_generation: Option<u64>,
+    ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
+        let identity = claim_identity(item);
+        let Some(claim) = self
+            .claims
+            .iter_mut()
+            .find(|claim| claim.identity == identity)
+        else {
+            return Err(QueueClaimTransitionRefused::Missing);
+        };
+        validate_generation(claim, expected_generation)?;
+        if claim.state == QueueClaimState::Lost {
+            return Err(QueueClaimTransitionRefused::Terminal {
+                generation: claim.generation,
+                state: claim.state,
+            });
+        }
+        claim.state = QueueClaimState::Reported;
+        Ok(claim.clone())
+    }
+
     /// Release the claim on `item`. Returns the released claim, if any.
     pub fn release(&mut self, item: &str) -> Option<QueueClaim> {
+        self.release_attempt(item, None, false).ok().flatten()
+    }
+
+    pub fn release_fenced(
+        &mut self,
+        item: &str,
+        expected_generation: Option<u64>,
+    ) -> Result<Option<QueueClaim>, QueueClaimTransitionRefused> {
+        self.release_attempt(item, expected_generation, true)
+    }
+
+    fn release_attempt(
+        &mut self,
+        item: &str,
+        expected_generation: Option<u64>,
+        enforce_generation: bool,
+    ) -> Result<Option<QueueClaim>, QueueClaimTransitionRefused> {
         let identity = claim_identity(item);
         let index = match self
             .claims
@@ -523,12 +729,15 @@ impl QueueClaimLedger {
                         .collect();
                     match continuing.as_slice() {
                         [only] => *only,
-                        _ => return None,
+                        _ => return Ok(None),
                     }
                 }
             },
         };
-        Some(self.claims.remove(index))
+        if enforce_generation {
+            validate_generation(&self.claims[index], expected_generation)?;
+        }
+        Ok(Some(self.claims.remove(index)))
     }
 
     /// The one claim that followed an operator edit away from `item`
@@ -573,7 +782,7 @@ impl QueueClaimLedger {
     ) -> Vec<&QueueClaim> {
         self.claims
             .iter()
-            .filter(|claim| !claim.is_expired(now_secs))
+            .filter(|claim| claim.blocks_dispatch(now_secs))
             .filter(|claim| live_heads.is_none_or(|live| live.contains(&claim.identity)))
             .collect()
     }
@@ -616,7 +825,7 @@ impl QueueClaimLedger {
         let held: HashSet<QueueItemIdentity> = self
             .claims
             .iter()
-            .filter(|claim| !claim.is_expired(now_secs))
+            .filter(|claim| claim.blocks_dispatch(now_secs))
             .map(|claim| claim.identity.clone())
             .collect();
 
@@ -625,7 +834,7 @@ impl QueueClaimLedger {
         let mut descendants: Vec<Vec<usize>> = Vec::with_capacity(self.claims.len());
         for claim in &self.claims {
             let mut lines: Vec<usize> = Vec::new();
-            if claim.is_expired(now_secs) {
+            if !claim.blocks_dispatch(now_secs) {
                 descendants.push(lines);
                 continue;
             }
@@ -663,7 +872,7 @@ impl QueueClaimLedger {
 
         let mut proposals: Vec<(usize, usize)> = Vec::new();
         for (claim_idx, claim) in self.claims.iter().enumerate() {
-            if claim.is_expired(now_secs) || live.contains(&claim.identity) {
+            if !claim.blocks_dispatch(now_secs) || live.contains(&claim.identity) {
                 continue;
             }
             if let Some(&first) = descendants[claim_idx].first() {
@@ -761,7 +970,7 @@ impl QueueClaimLedger {
             let Some(source_claim) = self
                 .claims
                 .iter()
-                .find(|claim| claim.identity == source_identity && !claim.is_expired(now_secs))
+                .find(|claim| claim.identity == source_identity && claim.blocks_dispatch(now_secs))
                 .cloned()
             else {
                 continue;
@@ -777,12 +986,15 @@ impl QueueClaimLedger {
                 .find(|claim| claim.identity == target_identity)
             {
                 Some(existing)
-                    if !existing.is_expired(now_secs) && existing.owner != source_claim.owner =>
+                    if existing.blocks_dispatch(now_secs)
+                        && existing.owner != source_claim.owner =>
                 {
                     continue;
                 }
                 Some(existing) => {
                     existing.owner = source_claim.owner.clone();
+                    existing.generation = source_claim.generation;
+                    existing.state = source_claim.state;
                     existing.owner_session = source_claim.owner_session.clone();
                     existing.item_text = target_text;
                     existing.expires_at_secs =
@@ -792,6 +1004,8 @@ impl QueueClaimLedger {
                     identity: target_identity,
                     item_text: target_text,
                     owner: source_claim.owner.clone(),
+                    generation: source_claim.generation,
+                    state: source_claim.state,
                     claimed_at_secs: source_claim.claimed_at_secs,
                     expires_at_secs: source_claim.expires_at_secs,
                     owner_session: source_claim.owner_session.clone(),
@@ -834,9 +1048,11 @@ impl QueueClaimLedger {
     ) -> Vec<(QueueClaim, ClaimPruneCause)> {
         let mut pruned = Vec::new();
         let mut kept = Vec::with_capacity(self.claims.len());
-        for claim in std::mem::take(&mut self.claims) {
-            if claim.is_expired(now_secs) {
-                pruned.push((claim, ClaimPruneCause::Expired));
+        for mut claim in std::mem::take(&mut self.claims) {
+            if claim.state != QueueClaimState::Lost && claim.is_expired(now_secs) {
+                claim.state = QueueClaimState::Lost;
+                pruned.push((claim.clone(), ClaimPruneCause::Expired));
+                kept.push(claim);
             } else if live_heads.is_some_and(|live| !live.contains(&claim.identity)) {
                 pruned.push((claim, ClaimPruneCause::Closed));
             } else {
@@ -967,6 +1183,9 @@ pub enum RefreshRefusal {
     },
     /// A different owner holds the live claim.
     OtherOwner { holder: String },
+    /// The heartbeat belongs to an older attempt or omitted the required
+    /// generation fence.
+    StaleAttempt { detail: String },
 }
 
 impl RefreshRefusal {
@@ -976,6 +1195,7 @@ impl RefreshRefusal {
             Self::Unclaimed => "unclaimed",
             Self::Expired { .. } => "expired",
             Self::OtherOwner { .. } => "other_owner",
+            Self::StaleAttempt { .. } => "stale_attempt",
         }
     }
 }
@@ -1012,6 +1232,11 @@ impl std::fmt::Display for QueueClaimRefreshRefused {
             RefreshRefusal::OtherOwner { holder } => write!(
                 f,
                 "cannot refresh {:?} for {}: the live claim is held by {holder}.",
+                self.item, self.owner
+            ),
+            RefreshRefusal::StaleAttempt { detail } => write!(
+                f,
+                "cannot refresh {:?} for {}: {detail}.",
                 self.item, self.owner
             ),
         }
@@ -1502,7 +1727,7 @@ mod tests {
     }
 
     #[test]
-    fn claim_refresh_reassign_and_release() {
+    fn claim_refresh_fences_live_takeover_then_reclaims_lost_generation() {
         let mut ledger = QueueClaimLedger::default();
         assert_eq!(
             ledger.claim("do [#a]", "subagent:a", 100, 10),
@@ -1515,9 +1740,16 @@ mod tests {
         assert_eq!(ledger.claims[0].expires_at_secs, 115);
         assert_eq!(
             ledger.claim("[#a]", "subagent:b", 106, 10),
-            ClaimOutcome::Reassigned
+            ClaimOutcome::HeldByOther
         );
         assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].owner, "subagent:a");
+        assert_eq!(ledger.claims[0].generation, 1);
+        assert_eq!(
+            ledger.claim("[#a]", "subagent:b", 116, 10),
+            ClaimOutcome::Reassigned
+        );
+        assert_eq!(ledger.claims[0].generation, 2);
         assert_eq!(ledger.release("do [#a]").unwrap().owner, "subagent:b");
         assert!(ledger.release("do [#a]").is_none());
     }
@@ -1681,6 +1913,8 @@ mod tests {
                     identity: QueueItemIdentity::FreeText(format!("#subagents: {url}")),
                     item_text: format!("#subagents: {url}"),
                     owner: "subagent:a".into(),
+                    generation: 0,
+                    state: QueueClaimState::Claimed,
                     claimed_at_secs: 1,
                     expires_at_secs: 50,
                     owner_session: None,
@@ -1691,6 +1925,8 @@ mod tests {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
                     item_text: format!("#gh-fix {url}"),
                     owner: "subagent:b".into(),
+                    generation: 0,
+                    state: QueueClaimState::Claimed,
                     claimed_at_secs: 2,
                     expires_at_secs: 90,
                     owner_session: None,
@@ -1767,7 +2003,54 @@ mod tests {
             "a claim on an item no longer in the queue is closed"
         );
         assert_eq!(ledger.prune(110, Some(&live)), 2);
-        assert!(ledger.claims.is_empty());
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(ledger.claims[0].item_text, "do [#a]");
+    }
+
+    #[test]
+    fn generation_fences_late_heartbeat_report_and_release() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("work", "subagent:a", 100, 10);
+        assert_eq!(ledger.claims[0].generation, 1);
+        assert_eq!(
+            ledger
+                .refresh_attempt_in_session("work", "subagent:a", 101, 10, None, Some(1))
+                .unwrap()
+                .state,
+            QueueClaimState::Running
+        );
+        ledger.prune(111, Some(&[claim_identity("work")].into_iter().collect()));
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(
+            ledger.claim("work", "subagent:b", 112, 10),
+            ClaimOutcome::Reassigned
+        );
+        assert_eq!(ledger.claims[0].generation, 2);
+        assert!(matches!(
+            ledger.report("work", Some(1)),
+            Err(QueueClaimTransitionRefused::StaleGeneration { current: 2, .. })
+        ));
+        assert!(matches!(
+            ledger.release_fenced("work", Some(1)),
+            Err(QueueClaimTransitionRefused::StaleGeneration { current: 2, .. })
+        ));
+        assert_eq!(ledger.claims[0].owner, "subagent:b");
+        assert_eq!(
+            ledger.report("work", Some(2)).unwrap().state,
+            QueueClaimState::Reported
+        );
+        assert!(ledger.claims[0].blocks_dispatch(10_000));
+    }
+
+    #[test]
+    fn legacy_claim_json_defaults_to_generation_zero_claimed() {
+        let payload = r#"{"claims":[{"identity":{"kind":"free_text","key":"work"},"item_text":"work","owner":"subagent:a","claimed_at_secs":1,"expires_at_secs":50}]}"#;
+        let ledger = QueueClaimLedger::from_state_payload(payload).unwrap();
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].generation, 0);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Claimed);
+        assert!(ledger.claims[0].blocks_dispatch(2));
     }
 
     /// `#claimfollowsedit` (#steerworks): the 2026-10-04 agent-doc-bugs.md

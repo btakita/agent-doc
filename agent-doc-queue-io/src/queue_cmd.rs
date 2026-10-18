@@ -72,7 +72,137 @@ pub trait QueueCommandEffects {
     }
 }
 
-/// Reconcile the visible `🚧` queue projection immediately after a claim
+/// Pure document successor derived from the durable claim-state ledger.
+/// Callers that also publish another binary-owned document effect can compose
+/// that effect onto `target_content` and land one CAS successor instead of
+/// racing two retained editor writes.
+#[derive(Debug, Clone)]
+pub struct ClaimRuntimeProjection {
+    pub target_content: String,
+    pub persisted_heads: Vec<String>,
+    pub changed: bool,
+}
+
+pub fn derive_claim_runtime_projection(
+    file: &Path,
+    current: &str,
+    cleared_item: Option<&str>,
+) -> Result<ClaimRuntimeProjection> {
+    let components = agent_doc_element::element::parse(current)?;
+    let Some(queue_component) =
+        agent_doc_queue::queue_set::selected_component(current, &components)?
+    else {
+        return Ok(ClaimRuntimeProjection {
+            target_content: current.to_string(),
+            persisted_heads: Vec::new(),
+            changed: false,
+        });
+    };
+    let body = queue_component.content(current);
+    let entries = agent_doc_queue::document_queue::parse(body)?;
+    let claim_states = crate::queue_claim::claim_states_for_content(file, current)?
+        .into_iter()
+        .map(|claim| (claim.identity, claim.state.projection_marker()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let reported = crate::claim_release_receipt::reported_items_for_content(file, current);
+    let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
+
+    // Build one target per queue occurrence. This retains marker cardinality
+    // for duplicate heads while avoiding a union that could mark an unrelated
+    // duplicate twice.
+    let targets = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => {
+                let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+                let marker = claim_states
+                    .get(&identity)
+                    .copied()
+                    .or_else(|| {
+                        reported.claims(&prompt.text).then_some(
+                            agent_doc_document::queue_projection::QueueLifecycleMarker::Reported,
+                        )
+                    })
+                    .or_else(|| {
+                        (cleared_identity.as_ref() != Some(&identity))
+                            .then(|| {
+                                agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                            })
+                            .flatten()
+                    });
+                marker.map(|marker| {
+                    (
+                        agent_doc_document::queue_projection::strip_in_progress_marker(
+                            &prompt.text,
+                        ),
+                        marker,
+                    )
+                })
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let projection =
+        agent_doc_queue::document_queue::project_prompt_lifecycle_markers(body, &targets)?;
+    let target_content = projection
+        .as_ref()
+        .map(|(projected_body, _)| queue_component.replace_content(current, projected_body))
+        .unwrap_or_else(|| current.to_string());
+    let persisted_heads = targets
+        .iter()
+        .map(|(head, _)| agent_doc_document::queue_projection::strip_priority_markers(head))
+        .collect::<Vec<_>>();
+    Ok(ClaimRuntimeProjection {
+        target_content,
+        persisted_heads,
+        changed: projection.is_some(),
+    })
+}
+
+/// Record the non-document projections paired with a successfully accepted
+/// claim-marker document successor.
+pub fn record_claim_runtime_projection(
+    file: &Path,
+    projection: &ClaimRuntimeProjection,
+    cleared_item: Option<&str>,
+) -> Result<()> {
+    if projection.changed {
+        // Keep the recovery baseline aligned with this binary-owned cosmetic
+        // mutation. Otherwise a later exchange update can make the unrelated
+        // queue diff block the document-only auto-commit boundary.
+        if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file) {
+            let synced = agent_doc_document::queue_projection::sync_in_progress_marker_regions(
+                &snapshot,
+                &projection.target_content,
+            );
+            if synced != snapshot
+                && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                    file,
+                    &synced,
+                    agent_doc_ops_log_io::log_op,
+                )
+            {
+                eprintln!("[queue] claim marker snapshot sync warning: {err:#}");
+            }
+        }
+    }
+    agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
+        file,
+        &projection.persisted_heads,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_runtime_projection markers={} cleared={} (#claimmarker)",
+            projection.persisted_heads.len(),
+            cleared_item.is_some()
+        ),
+    );
+    Ok(())
+}
+
+/// Reconcile the visible typed queue projection immediately after a claim
 /// lifecycle mutation (`#claimmarker`).
 ///
 /// Claims live in `state.db`, but the queue marker is operator-facing runtime
@@ -88,83 +218,20 @@ pub fn project_claim_runtime_state_with_effects(
     cleared_item: Option<&str>,
 ) -> Result<bool> {
     let current = effects.current_document_content(file, "queue_claim_runtime_projection")?;
-    let components = agent_doc_element::element::parse(&current)?;
-    let Some(queue_component) =
-        agent_doc_queue::queue_set::selected_component(&current, &components)?
-    else {
-        return Ok(false);
-    };
-    let body = queue_component.content(&current);
-    let entries = agent_doc_queue::document_queue::parse(body)?;
-    let active_claim_identities = crate::queue_claim::active_claims_for_content(file, &current)?
-        .into_iter()
-        .map(|claim| claim.identity)
-        .collect::<std::collections::HashSet<_>>();
-    let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
-
-    // Build one target per queue occurrence. This retains marker cardinality
-    // for duplicate heads while avoiding a union that could mark an unrelated
-    // duplicate twice.
-    let targets = entries
-        .iter()
-        .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => {
-                let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
-                let keep_existing =
-                    agent_doc_document::queue_projection::has_in_progress_marker(&prompt.text)
-                        && cleared_identity.as_ref() != Some(&identity);
-                (keep_existing || active_claim_identities.contains(&identity)).then(|| {
-                    agent_doc_document::queue_projection::strip_in_progress_marker(&prompt.text)
-                })
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    let projection = agent_doc_queue::document_queue::project_prompts_in_progress(body, &targets)?;
-    if let Some((projected_body, _)) = projection.as_ref() {
-        let projected = queue_component.replace_content(&current, projected_body);
+    // A completion cell is durable attempt-scoped evidence. Reconcile it into
+    // the ledger before deriving markers, including after process restart.
+    crate::queue_claim::reconcile_completion_evidence(file, &current)?;
+    let projection = derive_claim_runtime_projection(file, &current, cleared_item)?;
+    if projection.changed {
         effects.converge_document_or_disk(
             file,
-            &projected,
+            &projection.target_content,
             &current,
             "queue_claim_runtime_projection",
         )?;
-        // Keep the recovery baseline aligned with this binary-owned cosmetic
-        // mutation. Otherwise the next preflight sees the marker alongside a
-        // real exchange update (for example `queue report-complete`) and the
-        // unrelated queue diff can prevent that binary feedback from reaching
-        // the document-only auto-commit boundary.
-        if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file) {
-            let synced = agent_doc_document::queue_projection::sync_in_progress_marker_regions(
-                &snapshot, &projected,
-            );
-            if synced != snapshot
-                && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
-                    file,
-                    &synced,
-                    agent_doc_ops_log_io::log_op,
-                )
-            {
-                eprintln!("[queue] claim marker snapshot sync warning: {err:#}");
-            }
-        }
     }
-
-    let persisted_heads = targets
-        .iter()
-        .map(|head| agent_doc_document::queue_projection::strip_priority_markers(head))
-        .collect::<Vec<_>>();
-    agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(file, &persisted_heads)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "queue_claim_runtime_projection markers={} cleared={} (#claimmarker)",
-            persisted_heads.len(),
-            cleared_item.is_some()
-        ),
-    );
-    Ok(projection.is_some())
+    record_claim_runtime_projection(file, &projection, cleared_item)?;
+    Ok(projection.changed)
 }
 
 /// Explicitly strike the leading `count` free-text queue head(s) — the agent
@@ -799,13 +866,33 @@ mod tests {
             claimed.contains("- 🚧 inline coordinator work"),
             "{claimed}"
         );
-        assert!(claimed.contains("- 🚧 dispatched worker work"), "{claimed}");
+        assert!(claimed.contains("- 🟡 dispatched worker work"), "{claimed}");
         let claimed_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
         assert!(
-            claimed_snapshot.contains("- 🚧 dispatched worker work"),
+            claimed_snapshot.contains("- 🟡 dispatched worker work"),
             "{claimed_snapshot}"
+        );
+
+        crate::queue_claim::refresh_attempt(
+            &doc,
+            "dispatched worker work",
+            "subagent:worker",
+            600,
+            Some(1),
+        )
+        .unwrap();
+        assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
+        let running = std::fs::read_to_string(&doc).unwrap();
+        assert!(running.contains("- 🚧 dispatched worker work"), "{running}");
+
+        crate::queue_claim::report_attempt(&doc, "dispatched worker work", Some(1)).unwrap();
+        assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
+        let reported = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            reported.contains("- 📥 dispatched worker work"),
+            "{reported}"
         );
 
         let released = crate::queue_claim::release(&doc, "dispatched worker work")
@@ -822,7 +909,7 @@ mod tests {
         );
         assert!(
             released_projection.contains("- dispatched worker work")
-                && !released_projection.contains("- 🚧 dispatched worker work"),
+                && !released_projection.contains("- 🟡 dispatched worker work"),
             "{released_projection}"
         );
         let released_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
@@ -831,7 +918,7 @@ mod tests {
         assert!(
             released_snapshot.contains("- 🚧 inline coordinator work")
                 && released_snapshot.contains("- dispatched worker work")
-                && !released_snapshot.contains("- 🚧 dispatched worker work"),
+                && !released_snapshot.contains("- 🟡 dispatched worker work"),
             "{released_snapshot}"
         );
     }
@@ -855,7 +942,7 @@ mod tests {
             "{projected}"
         );
         assert!(
-            projected.contains("- 🚧 dispatched worker work"),
+            projected.contains("- 🟡 dispatched worker work"),
             "{projected}"
         );
     }

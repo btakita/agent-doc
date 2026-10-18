@@ -1,7 +1,7 @@
 //! Pure queue projection helpers.
 //!
-//! The `🚧` marker is a visible projection of active queue heads. It is not
-//! queue identity and does not commit or admit a turn by itself.
+//! Queue lifecycle markers are visible projections of active queue heads. They
+//! are not queue identity and do not commit or admit a turn by themselves.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -33,6 +33,16 @@ pub const AGENT_PRIORITIZED_MARKERS: [&str; 6] = [
 pub const PRIORITIZED_MARKER: &str = "📌";
 pub const AGENT_PRIORITIZED_MARKER: &str = "📍";
 pub const IN_PROGRESS_MARKER: &str = "🚧";
+/// Claimed for dispatch, but no positive worker-liveness evidence exists yet.
+/// `⏳` already means "awaiting operator" in existing documents, so claims use
+/// a yellow state marker instead (`#queueclaimstate`).
+pub const CLAIMED_MARKER: &str = "🟡";
+/// The claimed worker has positive dispatch/liveness evidence.
+pub const RUNNING_MARKER: &str = IN_PROGRESS_MARKER;
+/// The worker reported and the result is awaiting coordinator integration.
+pub const REPORTED_MARKER: &str = "📥";
+/// The attempt was lost or expired and is eligible for recovery/re-dispatch.
+pub const LOST_MARKER: &str = "⚠️";
 /// Visible projection marker for a queue head the binary has SKIPPED: it was
 /// dispatched, came back unconsumed, and the queue advanced past it to a
 /// non-dependent drainable head (`#orphanqhead` / `#queueskip`). Like `🚧`, it is
@@ -52,8 +62,39 @@ pub const SKIP_MARKER: &str = "⏭\u{fe0f}";
 pub const AWAITING_OPERATOR_MARKER: &str = "⏳";
 
 /// Every leading lifecycle marker the binary projects onto a queue head.
-pub const LIFECYCLE_MARKERS: [&str; 3] =
-    [IN_PROGRESS_MARKER, SKIP_MARKER, AWAITING_OPERATOR_MARKER];
+pub const LIFECYCLE_MARKERS: [&str; 6] = [
+    CLAIMED_MARKER,
+    RUNNING_MARKER,
+    REPORTED_MARKER,
+    LOST_MARKER,
+    SKIP_MARKER,
+    AWAITING_OPERATOR_MARKER,
+];
+
+/// Binary-owned visible lifecycle states. These prefixes are projection only:
+/// every parser strips them before queue-item identity is computed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum QueueLifecycleMarker {
+    Claimed,
+    Running,
+    Reported,
+    Lost,
+    Skipped,
+    AwaitingOperator,
+}
+
+impl QueueLifecycleMarker {
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::Claimed => CLAIMED_MARKER,
+            Self::Running => RUNNING_MARKER,
+            Self::Reported => REPORTED_MARKER,
+            Self::Lost => LOST_MARKER,
+            Self::Skipped => SKIP_MARKER,
+            Self::AwaitingOperator => AWAITING_OPERATOR_MARKER,
+        }
+    }
+}
 
 fn strip_lifecycle_prefix(text: &str) -> Option<&str> {
     LIFECYCLE_MARKERS
@@ -128,9 +169,16 @@ pub fn strip_in_progress_marker(text: &str) -> String {
 }
 
 pub fn apply_in_progress_marker(text: &str) -> String {
+    apply_lifecycle_marker(text, QueueLifecycleMarker::Running)
+}
+
+/// Replace any existing lifecycle prefix with `marker`, preserving pins and
+/// trailing whitespace.
+pub fn apply_lifecycle_marker(text: &str, marker: QueueLifecycleMarker) -> String {
     let (content, trailing) = split_trailing_whitespace(text);
     format!(
-        "{IN_PROGRESS_MARKER} {}{trailing}",
+        "{} {}{trailing}",
+        marker.prefix(),
         strip_in_progress_marker(content)
     )
 }
@@ -139,21 +187,13 @@ pub fn apply_in_progress_marker(text: &str) -> String {
 /// dropping any existing in-progress/skip marker so exactly one lifecycle marker
 /// leads the line.
 pub fn apply_skip_marker(text: &str) -> String {
-    let (content, trailing) = split_trailing_whitespace(text);
-    format!(
-        "{SKIP_MARKER} {}{trailing}",
-        strip_in_progress_marker(content)
-    )
+    apply_lifecycle_marker(text, QueueLifecycleMarker::Skipped)
 }
 
 /// Prepend the awaiting-operator projection marker (`⏳`, `#queueawaitop`),
 /// preserving pins and replacing any existing lifecycle marker.
 pub fn apply_awaiting_operator_marker(text: &str) -> String {
-    let (content, trailing) = split_trailing_whitespace(text);
-    format!(
-        "{AWAITING_OPERATOR_MARKER} {}{trailing}",
-        strip_in_progress_marker(content)
-    )
+    apply_lifecycle_marker(text, QueueLifecycleMarker::AwaitingOperator)
 }
 
 fn split_trailing_whitespace(text: &str) -> (&str, &str) {
@@ -163,6 +203,19 @@ fn split_trailing_whitespace(text: &str) -> (&str, &str) {
 
 pub fn has_in_progress_marker(text: &str) -> bool {
     has_leading_lifecycle_marker(text, IN_PROGRESS_MARKER)
+}
+
+pub fn lifecycle_marker(text: &str) -> Option<QueueLifecycleMarker> {
+    [
+        QueueLifecycleMarker::Claimed,
+        QueueLifecycleMarker::Running,
+        QueueLifecycleMarker::Reported,
+        QueueLifecycleMarker::Lost,
+        QueueLifecycleMarker::Skipped,
+        QueueLifecycleMarker::AwaitingOperator,
+    ]
+    .into_iter()
+    .find(|marker| has_leading_lifecycle_marker(text, marker.prefix()))
 }
 
 /// True when the head carries a leading skip marker (`⏭️`), past any pins.
@@ -518,6 +571,29 @@ mod tests {
         assert_eq!(
             strip_priority_markers(":round_pushpin: 🚧 do [#alpha]"),
             "do [#alpha]"
+        );
+    }
+
+    #[test]
+    fn every_claim_lifecycle_marker_round_trips_without_changing_identity() {
+        let bare = "📌 do [#alpha]";
+        for (state, prefix) in [
+            (QueueLifecycleMarker::Claimed, CLAIMED_MARKER),
+            (QueueLifecycleMarker::Running, RUNNING_MARKER),
+            (QueueLifecycleMarker::Reported, REPORTED_MARKER),
+            (QueueLifecycleMarker::Lost, LOST_MARKER),
+        ] {
+            let projected = apply_lifecycle_marker(bare, state);
+            assert_eq!(projected, format!("{prefix} {bare}"));
+            assert_eq!(strip_in_progress_marker(&projected), bare);
+            assert_eq!(strip_priority_markers(&projected), "do [#alpha]");
+            assert_eq!(lifecycle_marker(&projected), Some(state));
+            assert_eq!(apply_lifecycle_marker(&projected, state), projected);
+        }
+        assert_eq!(
+            strip_in_progress_marker("🚧 do [#alpha]"),
+            "do [#alpha]",
+            "legacy running marker stays compatible"
         );
     }
 

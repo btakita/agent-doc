@@ -3831,14 +3831,16 @@ mod tests {
             .unwrap();
         assert!(
             release.starts_with("agent-doc queue release ")
-                && release.ends_with("--item '#runctrlclaude'"),
+                && release.ends_with("--item '#runctrlclaude' --generation 1"),
             "{release}"
         );
         assert!(
             fact["owner_session_ended"]["adopt_command"]
                 .as_str()
                 .unwrap()
-                .ends_with("--owner 'subagent:cligoshell-then-cligenport' --refresh"),
+                .ends_with(
+                    "--owner 'subagent:cligoshell-then-cligenport' --refresh --generation 1"
+                ),
             "{parsed:#}"
         );
 

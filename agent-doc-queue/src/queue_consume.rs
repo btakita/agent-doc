@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_doc_document::queue_projection::{
-    IN_PROGRESS_MARKER, strip_in_progress_marker, strip_priority_markers,
+    LIFECYCLE_MARKERS, strip_in_progress_marker, strip_priority_markers,
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
@@ -1682,17 +1682,21 @@ fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
         return content.to_string();
     };
     let body = queue.content(content);
-    let needle_with_space = format!("~~{} ", IN_PROGRESS_MARKER);
-    let needle_bare = format!("~~{}", IN_PROGRESS_MARKER);
-    // `#multilinequeuehead`: a multi-line head struck into a `~~~done` fence
-    // keeps its in-progress marker on the first body line, not after `~~`.
-    let fence_with_space = format!("~~~done\n{} ", IN_PROGRESS_MARKER);
-    let fence_bare = format!("~~~done\n{}", IN_PROGRESS_MARKER);
-    let updated_body = body
-        .replace(&fence_with_space, "~~~done\n")
-        .replace(&fence_bare, "~~~done\n")
-        .replace(&needle_with_space, "~~")
-        .replace(&needle_bare, "~~");
+    let mut updated_body = body.to_string();
+    for marker in LIFECYCLE_MARKERS {
+        let needle_with_space = format!("~~{marker} ");
+        let needle_bare = format!("~~{marker}");
+        // `#multilinequeuehead`: a multi-line head struck into a `~~~done`
+        // fence keeps its lifecycle marker on the first body line, not after
+        // `~~`.
+        let fence_with_space = format!("~~~done\n{marker} ");
+        let fence_bare = format!("~~~done\n{marker}");
+        updated_body = updated_body
+            .replace(&fence_with_space, "~~~done\n")
+            .replace(&fence_bare, "~~~done\n")
+            .replace(&needle_with_space, "~~")
+            .replace(&needle_bare, "~~");
+    }
     if updated_body == body {
         content.to_string()
     } else {
@@ -3106,21 +3110,23 @@ Old.
     }
 
     #[test]
-    fn consume_queue_nodes_by_key_strips_in_progress_marker_before_strike_text() {
-        let content = concat!(
-            "<!-- agent:queue -->\n",
-            "- 🚧 do [#head]\n",
-            "- do [#tail]\n",
-            "<!-- /agent:queue -->\n",
-        );
-        let mut keys = queue_prompt_node_keys_for_count(content, 1).unwrap().keys;
-        let key = keys.remove(0);
+    fn consume_queue_nodes_by_key_strips_every_lifecycle_marker_before_strike_text() {
+        for marker in agent_doc_document::queue_projection::LIFECYCLE_MARKERS {
+            let content = format!(
+                "<!-- agent:queue -->\n- {marker} do [#head]\n- do [#tail]\n<!-- /agent:queue -->\n"
+            );
+            let mut keys = queue_prompt_node_keys_for_count(&content, 1).unwrap().keys;
+            let key = keys.remove(0);
 
-        let updated = consume_queue_nodes_by_key(content, &[key]).unwrap();
+            let updated = consume_queue_nodes_by_key(&content, &[key]).unwrap();
 
-        assert!(updated.contains("- ~~do [#head]~~\n"), "{updated}");
-        assert!(!updated.contains("~~🚧"), "{updated}");
-        assert!(updated.contains("- do [#tail]\n"), "{updated}");
+            assert!(updated.contains("- ~~do [#head]~~\n"), "{marker}: {updated}");
+            assert!(
+                !updated.contains(&format!("~~{marker}")),
+                "{marker}: {updated}"
+            );
+            assert!(updated.contains("- do [#tail]\n"), "{marker}: {updated}");
+        }
     }
 
     #[test]

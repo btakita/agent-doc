@@ -26,7 +26,7 @@ the dynamic file that owns its details:
 - **agent-doc workflow:** See [`.claude/skills/agent-doc/SKILL.md`](.claude/skills/agent-doc/SKILL.md); load its linked runbooks only when that workflow branch is active.
 - **Code navigation:** See [`runbooks/code-navigation.md`](runbooks/code-navigation.md); use `tsift` envelopes instead of copying search, diff, log, or transcript content into prompts.
 - **Private name hygiene:** See [`runbooks/private-name-hygiene.md`](runbooks/private-name-hygiene.md) before editing public or shared subrepos from this private workspace.
-- **Dogfood watch:** See [`runbooks/dogfood-watch.md`](runbooks/dogfood-watch.md) — `bin/agent-doc-dogfood-watch` turns issues in the live agent-doc sessions into backlog + queue items in `tasks/agent-doc/agent-doc-bugs2.md`.
+- **Dogfood watch:** See [`runbooks/dogfood-watch.md`](runbooks/dogfood-watch.md) — `bin/agent-doc-dogfood-watch` routes typed issues from opted-in live agent-doc sessions to their resolved dogfood backlog target; queue activation requires explicit `dogfood.auto: true`.
 - **Task-specific procedures:** Use the referenced file under [`runbooks/`](runbooks/) rather than expanding procedures inline.
 - **Operator memory (all harnesses):** Curated cross-session memories live in [`memory/`](memory/) (index: [`memory/MEMORY.md`](memory/MEMORY.md)); retrieve via `tsift --envelope search '<query>'` or `tsift graph-db --path . --json related '<query>'`. Session-event memory lives in `.tsift/memory.db` (query via `tsift memory status` / `graph-db related`). Claude Code's memory dir symlinks to `memory/`, so treat `memory/` as the single source of truth; other harnesses read it the same way.
 

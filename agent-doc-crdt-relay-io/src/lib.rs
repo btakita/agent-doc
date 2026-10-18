@@ -1218,6 +1218,134 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
     Ok(result)
 }
 
+/// Re-derive the binary-owned queue-attempt markers from their durable ledger.
+///
+/// A controller replacement cannot inherit the predecessor's in-memory relay.
+/// Its cold canonical therefore starts from disk, a retained editor replica, or
+/// another recovery cut. Those are document projections, not authority for the
+/// state of a durable queue attempt. Overlaying only the matching queue rows at
+/// the hydration boundary prevents an older cut from regressing
+/// `Claimed`/`Running`/`Reported` to a bare (or otherwise stale) prefix while
+/// preserving every unrelated byte. Applying the overlay twice is a no-op.
+fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String> {
+    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(current.to_string());
+    };
+    let document_hash = agent_doc_hash::path_hash(file)
+        .with_context(|| format!("canonicalize queue-attempt document: {}", file.display()))?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let Some(record) = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+        &conn,
+        &document_hash,
+        agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+    )?
+    else {
+        return Ok(current.to_string());
+    };
+    let mut ledger =
+        agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(&record.payload_json)?;
+    if ledger.claims.is_empty() {
+        return Ok(current.to_string());
+    }
+
+    let components = agent_doc_element::element::parse(current)?;
+    let Some(queue_component) =
+        agent_doc_queue::queue_set::selected_component(current, &components)?
+    else {
+        return Ok(current.to_string());
+    };
+    let body = queue_component.content(current);
+    let entries = agent_doc_queue::document_queue::parse(body)?;
+    let live_heads = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                Some(prompt.text.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    ledger.follow_edits(now_secs, &live_heads);
+    let live_identities = live_heads
+        .iter()
+        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
+        .collect::<HashSet<_>>();
+    let claim_states = ledger
+        .claims
+        .into_iter()
+        .filter(|claim| live_identities.contains(&claim.identity))
+        .map(|mut claim| {
+            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
+                && claim.is_expired(now_secs)
+            {
+                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            }
+            (claim.identity.clone(), claim.state.projection_marker())
+        })
+        .collect::<HashMap<_, _>>();
+    if claim_states.is_empty() {
+        return Ok(current.to_string());
+    }
+    let targets = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+                claim_states
+                    .get(&identity)
+                    .copied()
+                    .or_else(|| {
+                        agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                    })
+                    .map(|marker| {
+                        (
+                            agent_doc_document::queue_projection::strip_in_progress_marker(
+                                &prompt.text,
+                            ),
+                            marker,
+                        )
+                    })
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some((projected_body, _)) =
+        agent_doc_queue::document_queue::project_prompt_lifecycle_markers(body, &targets)?
+    else {
+        return Ok(current.to_string());
+    };
+    Ok(queue_component.replace_content(current, &projected_body))
+}
+
+/// Apply [`durable_queue_attempt_projection`] to one materialized relay cut.
+/// Returns `(changed, targets)` for the caller's wake/event boundary.
+fn reconcile_durable_queue_attempts_on_hub(
+    file: &Path,
+    hub: &mut RelayHub,
+) -> Result<(bool, usize)> {
+    let current = hub.canonical_text();
+    let target = durable_queue_attempt_projection(file, &current)?;
+    if target == current {
+        return Ok((false, 0));
+    }
+    let packet = hub.apply_canonical_replace(&current, &target)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_handoff_queue_attempt_projection_reconciled file={} before_hash={} after_hash={} targets={} (#claimmarker #controllerhandoff)",
+            file.display(),
+            agent_doc_hash::short_content_hash(&current),
+            agent_doc_hash::short_content_hash(&target),
+            packet.targets.len(),
+        ),
+    );
+    Ok((true, packet.targets.len()))
+}
+
 /// Run `f` against an already-allocated per-document hub. Unlike
 /// [`with_hub_seeded_from_file`], this never creates a hub from disk: callers use
 /// it when disk is a recovery projection and an absent hub means the live model is
@@ -1460,6 +1588,7 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
             )
         })?;
         recovered.reconcile_canonical_against_baseline(&on_disk)?;
+        reconcile_durable_queue_attempts_on_hub(file, &mut recovered)?;
         let handle = hub_handle_or_insert_with(&hash, || recovered);
         let mut hub = handle.lock();
         let result = f(&mut hub);
@@ -1471,9 +1600,9 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
     // racing allocator's hub wins (`or_insert_with` keeps the first).
     let seed_text = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to seed relay hub from {}: {e}", file.display()))?;
-    let handle = hub_handle_or_insert_with(&hash, || {
-        RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text)
-    });
+    let mut seeded = RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text);
+    reconcile_durable_queue_attempts_on_hub(file, &mut seeded)?;
+    let handle = hub_handle_or_insert_with(&hash, || seeded);
     let mut hub = handle.lock();
     let result = f(&mut hub);
     retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
@@ -3430,7 +3559,9 @@ pub fn relay_replica_update_for_file(
         corruption_restored,
         isolation_refused_lossy,
         isolation_regions_restored,
+        queue_attempt_projection,
     ) = with_hub_seeded_from_file(file, |hub| -> Result<_> {
+        let retained_reseed_was_pending = hub.retained_replica_reseed_pending();
         let registered = hub.is_registered(client_id);
         let decision = decide_cold_start_replica_update(
             registered,
@@ -3446,9 +3577,12 @@ pub fn relay_replica_update_for_file(
         let before_text = hub.canonical_text();
         let (packet, reattached, canonical_projection_pending, editor_reseed_requested) =
             match decision {
-                ColdStartReplicaUpdateDecision::Relay => {
-                    (Some(hub.relay_update(client_id, update)?), false, false, false)
-                }
+                ColdStartReplicaUpdateDecision::Relay => (
+                    Some(hub.relay_update(client_id, update)?),
+                    false,
+                    false,
+                    false,
+                ),
                 ColdStartReplicaUpdateDecision::ReprojectCanonical => {
                     if !registered {
                         hub.register(client_id)?;
@@ -3522,6 +3656,17 @@ pub fn relay_replica_update_for_file(
                 corruption_restored = Some(reason);
             }
         }
+        // A retained editor reseed is allowed to restore operator text, but its
+        // document cut is not authority for durable queue-attempt state. Repair
+        // the just-materialized canonical before any consumer can observe the
+        // handoff as complete. This is intentionally limited to the one
+        // pending->settled edge, not every editor keystroke.
+        let queue_attempt_projection =
+            if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {
+                reconcile_durable_queue_attempts_on_hub(file, hub)?
+            } else {
+                (false, 0)
+            };
         Ok((
             packet,
             reattached,
@@ -3530,6 +3675,7 @@ pub fn relay_replica_update_for_file(
             corruption_restored,
             isolation_refused_lossy,
             isolation_regions_restored,
+            queue_attempt_projection,
         ))
     })??;
     if editor_reseed_requested {
@@ -3644,6 +3790,21 @@ pub fn relay_replica_update_for_file(
                 ),
             );
         }
+    }
+    if queue_attempt_projection.0
+        && let Err(err) = signal_crdt_replica_event(
+            file,
+            CrdtReplicaEventReason::CanonicalProjection,
+            queue_attempt_projection.1,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=handoff_queue_attempt_projection error={err}",
+                file.display(),
+            ),
+        );
     }
     let canonical_len =
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
@@ -5169,7 +5330,14 @@ pub fn apply_document_op_delta_for_file_in_lineage(
     delta: &[u8],
 ) -> Result<Option<DocumentOpDeltaOutcome>> {
     let Some(result) = with_existing_hub(file, |hub| -> Result<_> {
+        let retained_reseed_was_pending = hub.retained_replica_reseed_pending();
         let outcome = hub.apply_document_op_delta_in_lineage(lineage, delta)?;
+        let queue_attempt_projection =
+            if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {
+                reconcile_durable_queue_attempts_on_hub(file, hub)?
+            } else {
+                (false, 0)
+            };
         let fence = if outcome.requires_origin_projection() {
             // A stale-lineage outcome is terminal even if its historical body is
             // unreadable. Preserve that ACK-safe behavior; a valid frame also
@@ -5188,12 +5356,12 @@ pub fn apply_document_op_delta_for_file_in_lineage(
         } else {
             DocumentOpOriginFence::default()
         };
-        Ok((outcome, fence))
+        Ok((outcome, fence, queue_attempt_projection))
     })?
     else {
         return Ok(None);
     };
-    let (outcome, fence) = result?;
+    let (outcome, fence, queue_attempt_projection) = result?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -5218,6 +5386,21 @@ pub fn apply_document_op_delta_for_file_in_lineage(
             file,
             &format!(
                 "crdt_replica_event_signal_failed file={} reason=stale_document_op_origin_projection error={err}",
+                file.display(),
+            ),
+        );
+    }
+    if queue_attempt_projection.0
+        && let Err(err) = signal_crdt_replica_event(
+            file,
+            CrdtReplicaEventReason::CanonicalProjection,
+            queue_attempt_projection.1,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=handoff_queue_attempt_projection error={err}",
                 file.display(),
             ),
         );
@@ -7982,6 +8165,124 @@ mod tests {
         (dir, path)
     }
 
+    fn persist_queue_claim_ledger(
+        project_root: &std::path::Path,
+        doc: &std::path::Path,
+        ledger: &agent_doc_queue::queue_claim::QueueClaimLedger,
+    ) {
+        let conn = agent_doc_sqlite::state_store::open_state_db(project_root).unwrap();
+        let document_hash = agent_doc_hash::path_hash(doc).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash,
+                state_kind: agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND.to_string(),
+                canonical_path: doc.canonicalize().unwrap().display().to_string(),
+                payload_json: serde_json::to_string(ledger).unwrap(),
+                updated_at_secs: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn controller_hydration_derives_exact_queue_attempt_markers_idempotently() {
+        let (dir, doc) = temp_doc("queue-attempt-hydration.md");
+        let stale = "<!-- agent:queue -->\n\
+- 🚧 claimed item\n\
+- running item\n\
+- 🟡 reported item\n\
+- ⏳ unrelated operator hold\n\
+<!-- /agent:queue -->\n";
+        std::fs::write(&doc, stale).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim("claimed item", "subagent:claimed", now, 3600);
+        ledger.claim("running item", "subagent:running", now, 3600);
+        ledger
+            .start(
+                "running item",
+                "subagent:running",
+                "worker-running",
+                now,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        ledger.claim("reported item", "subagent:reported", now, 3600);
+        ledger
+            .start(
+                "reported item",
+                "subagent:reported",
+                "worker-reported",
+                now,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        ledger
+            .claims
+            .iter_mut()
+            .find(|claim| claim.item_text == "reported item")
+            .unwrap()
+            .state = agent_doc_queue::queue_claim::QueueClaimState::Reported;
+        persist_queue_claim_ledger(dir.path(), &doc, &ledger);
+
+        let projected = durable_queue_attempt_projection(&doc, stale).unwrap();
+        assert!(projected.contains("- 🟡 claimed item\n"), "{projected}");
+        assert!(projected.contains("- 🚧 running item\n"), "{projected}");
+        assert!(projected.contains("- 📥 reported item\n"), "{projected}");
+        assert!(
+            projected.contains("- ⏳ unrelated operator hold\n"),
+            "an unrelated row must remain byte-identical:\n{projected}"
+        );
+        assert_eq!(
+            durable_queue_attempt_projection(&doc, &projected).unwrap(),
+            projected,
+            "hydrating the same durable attempts twice must be idempotent"
+        );
+    }
+
+    #[test]
+    fn cold_disk_seed_is_overlaid_by_the_durable_running_attempt() {
+        let (dir, doc) = temp_doc("cold-disk-running-claim.md");
+        let item = "#gh-issue https://github.com/btakita/agent-doc/issues/299";
+        let stale = format!(
+            "<!-- agent:queue -->\n- {item}\n- unrelated pending work\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &stale).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(item, "subagent:gh299", now, 3600);
+        ledger
+            .start(
+                item,
+                "subagent:gh299",
+                "/root/gh299",
+                now,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        persist_queue_claim_ledger(dir.path(), &doc, &ledger);
+
+        with_hub_seeded_from_file(&doc, |hub| {
+            let canonical = hub.canonical_text();
+            assert!(canonical.contains(&format!("- 🚧 {item}\n")), "{canonical}");
+            assert!(canonical.contains("- unrelated pending work\n"), "{canonical}");
+        })
+        .unwrap();
+        // Disk remains a stale recovery cut. The fix repairs canonical authority,
+        // not by bypass-writing behind an attached editor.
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), stale);
+    }
+
     /// `#relayhubperdoclock`: one busy document must not block another.
     ///
     /// This is the saturation fix's whole point, and it is a *structural* claim,
@@ -8902,6 +9203,79 @@ mod tests {
             assert_eq!(hub.canonical_text(), retained_text);
             assert!(!hub.retained_replica_reseed_pending());
             assert!(hub.commit_barrier_ready().unwrap());
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn retained_replica_handoff_cannot_regress_a_running_queue_attempt_to_bare() {
+        let (dir, doc) = temp_doc("retained-reseed-running-claim.md");
+        let stale = "<!-- agent:queue -->\n\
+- #gh-issue https://github.com/btakita/agent-doc/issues/299\n\
+- unrelated pending work\n\
+<!-- /agent:queue -->\n";
+        std::fs::write(&doc, stale).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let item = "#gh-issue https://github.com/btakita/agent-doc/issues/299";
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(item, "subagent:gh299", now, 3600);
+        ledger
+            .start(
+                item,
+                "subagent:gh299",
+                "/root/gh299",
+                now,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        persist_queue_claim_ledger(dir.path(), &doc, &ledger);
+
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        // The retained editor is deliberately stale too: neither disk nor the
+        // editor buffer carries the running marker, while state.db does.
+        let retained = agent_doc_merge::crdt_sync::ReplicaState::from_text(991, stale);
+        let identity = "intellij:retained-reseed-running-claim";
+        let registration =
+            register_replica_for_file_incremental(&doc, identity, Some(&retained.state_vector()))
+                .unwrap()
+                .expect("retained editor registration");
+        assert!(registration.retained_replica_reseed_pending);
+        let reseed = retained.diff(&registration.canonical_state_vector).unwrap();
+        relay_replica_update_for_file(&doc, identity, &reseed)
+            .unwrap()
+            .expect("retained editor reseed");
+
+        let canonical = with_hub(&doc, |hub| {
+            let canonical = hub.canonical_text();
+            assert!(
+                canonical.contains(&format!("- 🚧 {item}\n")),
+                "the durable Running attempt must dominate the stale retained cut:\n{canonical}"
+            );
+            assert!(canonical.contains("- unrelated pending work\n"), "{canonical}");
+            assert_eq!(canonical.matches('🚧').count(), 1, "{canonical}");
+            canonical
+        })
+        .unwrap();
+        let pull = pull_replica_updates_for_file(&doc, identity)
+            .unwrap()
+            .expect("the handoff repair must be delivered to the retained editor");
+        assert!(!pull.updates.is_empty());
+        assert!(pull.updates.iter().all(|update| {
+            update.expected_content_hash == agent_doc_hash::content_hash(&canonical)
+        }));
+
+        // Re-applying the handoff projection cannot accumulate markers or touch
+        // unrelated rows.
+        with_hub(&doc, |hub| {
+            assert_eq!(
+                reconcile_durable_queue_attempts_on_hub(&doc, hub).unwrap(),
+                (false, 0)
+            );
         })
         .unwrap();
     }

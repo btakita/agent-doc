@@ -893,6 +893,23 @@ The eligible open issues are #299, #301, and #302. #299 is already tracked by ga
 Verification passed on the integrated commit: focused scheduler suites passed 15/15 and 36/36; focused Clippy passed; `make check-fast` passed 9,215/9,215 nextest cases; the authoritative `make check` passed 11,046/11,046 Rust tests, 202/202 VS Code tests, cross-editor simulation, JetBrains classic/262/263 builds, bootstrap, document audit, and TLA validation/reuse. The single coordinator `make install` completed and updated the CLI/native library and editor packages; the active editor's native reload is deferred safely to the idle boundary. `origin/main` now points to `3e175ff9ad`.
 
 The prior GitHub CI run on base `78084d0bd9` failed in its main check before the tmux step began; the exact integrated local suite is green.
+
+### Re: GH #301 missing dispatch acknowledgement — gpt-5 · 2026-10-18T13:01-04:00
+
+Implemented, integrated, installed, and pushed as agent-doc main commit `627fef9efa`.
+
+A claim that remains in `Claimed` without a worker binding is now a typed overdue-dispatch obligation instead of generic healthy in-flight evidence. The same shared predicate drives:
+
+- operator-visible preflight warnings;
+- strict closeout refusal;
+- Claude Stop continuation;
+- claim CLI recovery guidance with exact generation-fenced `queue start` and `queue release --requeue` commands.
+
+This removes the prior failure mode where the row remained `🟡`, the only warning lived in `ops.log`, and Stop ended quietly.
+
+Verification passed: five focused regressions, `make check-fast` with 9,219/9,219 nextest cases, and the authoritative integrated `make check` with 11,050/11,050 Rust tests, 202/202 VS Code tests, cross-editor simulation, JetBrains builds, bootstrap, documentation audit, and TLA validation/reuse. The single coordinator `make install` completed. CI for the preceding watcher commit was still in progress when checked.
+
+The separately added dogfood-prompt request is running under its own claimed subagent and is not part of this completion.
 <!-- agent:boundary:ba44fc3d -->
 <!-- /agent:exchange -->
 
@@ -902,8 +919,9 @@ The prior GitHub CI run on base `78084d0bd9` failed in its main check before the
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~There are 3 new issues on github. But the loop did not detect the issues.~~
-- do [#gh301]
+- ~~do [#gh301]~~
 - do [#gh302]
+- 🚧 Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue. 
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -927,7 +945,6 @@ The prior GitHub CI run on base `78084d0bd9` failed in its main check before the
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gh301] [agent-doc] Fix GH #301: a claim without queue start stays dispatching with no operator-visible warning. https://github.com/btakita/agent-doc/issues/301
 - [ ] [#gh302] [agent-doc] Fix GH #302: Remote Dev pane order can be reversed by guessed-slot focus authority. https://github.com/btakita/agent-doc/issues/302
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->

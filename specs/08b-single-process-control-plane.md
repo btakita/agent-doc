@@ -103,6 +103,13 @@ The controller runs **one** queue scheduler per process for every scheduled
   retains the legacy `queue_schedule` state kind; identified queues use
   `queue_schedule:<queue_id>`. A tick only
   opens a pass window; the heads drain through the ordinary drain paths.
+  Every durable row records its proven owner queue id. The rolling-upgrade
+  bridge adopts a document-global legacy row only for a single-queue document;
+  a multi-queue split has no provable successor and discards it. Any older keyed
+  row without that proof in a multi-queue document is restarted from the keyed
+  queue's current heads before scheduling. Thus legacy sibling counters cannot
+  gate or exhaust the queue, and a sibling roster cannot make later ticks stay
+  `skipped_busy` or restore work into the wrong queue.
   Completed `loop` passes restore their items through the binary-owned queue
   write path (the live CRDT replica while an editor holds the document) via the
   `ProjectControllerRuntimeEffects::restore_queue_loop_items` port.

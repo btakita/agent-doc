@@ -552,6 +552,11 @@ pub enum ScheduleWindow {
 /// default queue, or `queue_schedule:<queue_id>` for an identified queue).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueScheduleState {
+    /// Queue identity that proved ownership of this state. Older document-wide
+    /// rows omit it; the controller binds them only when the successor queue is
+    /// unambiguous.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_queue_id: Option<String>,
     /// [`QueueScheduleSpec::cadence_fingerprint`] the anchor belongs to.
     pub cadence: String,
     /// When the current cadence was first observed. Interval ticks are
@@ -587,6 +592,7 @@ pub const QUEUE_SCHEDULE_STATE_KIND: &str = "queue_schedule";
 impl QueueScheduleState {
     pub fn new(spec: &QueueScheduleSpec, now: u64) -> Self {
         Self {
+            owner_queue_id: None,
             cadence: spec.cadence_fingerprint(),
             anchor_secs: now,
             last_fired_due_secs: None,

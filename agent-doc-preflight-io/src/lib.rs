@@ -861,6 +861,9 @@ pub struct QueueSubagentDispatch {
     pub item: String,
     /// The claim to run BEFORE dispatching.
     pub claim_command: String,
+    /// The acknowledgement to run AFTER successful dispatch, filling in the
+    /// printed generation and returned worker identity.
+    pub start_command: String,
     /// The command that re-prints [`Self::authorization`]'s preamble later
     /// (`agent-doc queue brief`), e.g. after the claim.
     pub brief_command: String,
@@ -888,6 +891,9 @@ pub fn queue_subagent_dispatch_entries(
                 claim_command: agent_doc_queue_io::subagent_dispatch::claim_command(
                     &document, item,
                 ),
+                start_command: agent_doc_queue_io::subagent_dispatch::start_command(
+                    &document, item,
+                ),
                 brief_command: agent_doc_queue_io::subagent_dispatch::brief_command(
                     &document, item,
                 ),
@@ -904,7 +910,10 @@ pub fn queue_subagent_dispatch_entries(
 pub const QUEUE_SUBAGENT_DISPATCH_GUIDANCE: &str = "The operator added these queue items with \
 subagent intent. For EACH: run its `claim_command` (fill in `<label>`), then dispatch it NOW to \
 its own background subagent (its own git worktree outside the IDE-watched project if it touches \
-a repository). Paste the entry's `authorization.subagent_prompt_preamble` VERBATIM at the top of \
+a repository). Only after the harness returns a worker identity, run its `start_command`, filling \
+in the claim's printed generation and that returned identity; this binary acknowledgement changes \
+🟡 dispatching to 🚧 running and is mandatory. Paste the entry's \
+`authorization.subagent_prompt_preamble` VERBATIM at the top of \
 the subagent prompt (`#waypostauthorization`): it quotes the operator's authorization (item, \
 backlog text, preset body) and the coordinator rules; never paraphrase it, and when its \
 `authorization.status` is `unresolved_preset` do not add authorization it lacks. Do NOT execute \
@@ -1113,7 +1122,8 @@ pub struct PreflightOutput {
     /// `#closeout-steering`: new queue lines with subagent intent (`#subagents`
     /// tag or a preset expanding to subagent work) that no worker has claimed.
     /// They are NOT in `selected_queue_prompts`: claim each with its
-    /// `claim_command`, then dispatch it to its own background subagent
+    /// `claim_command`, dispatch it to its own background subagent, then run
+    /// `start_command` with the returned worker identity
     /// instead of executing it inline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_subagent_dispatch: Vec<QueueSubagentDispatch>,
@@ -9872,6 +9882,19 @@ mod tests {
                 .contains("--item '#preflightdeadline'"),
             "{entries:?}"
         );
+        assert!(
+            entries[0].start_command.contains("queue start")
+                && entries[0]
+                    .start_command
+                    .contains("--item '#preflightdeadline'")
+                && entries[0]
+                    .start_command
+                    .contains("--generation <generation>")
+                && entries[0]
+                    .start_command
+                    .contains("--worker-id <worker-id>"),
+            "{entries:?}"
+        );
         // `#waypostauthorization`: every entry carries the operator's
         // authorization and the command that re-prints it.
         assert!(
@@ -9907,6 +9930,8 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--todo-add"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--todo-done"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Never treat a chat answer"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("run its `start_command`"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("🟡 dispatching to 🚧 running"));
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json["authorization"]["subagent_prompt_preamble"].is_string());
         let state = run_queue_maintenance(&doc, None).unwrap();

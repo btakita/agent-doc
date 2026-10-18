@@ -566,7 +566,7 @@ fn realtime_steering_closeout_guidance(file: &Path) -> String {
     // still recorded, because a three-plane split is worth seeing in the log.
     log_three_way_merge_steering_observation(file);
     format!(
-        "This is pending operator steering, not a failed closeout: your prior response is already committed in HEAD. Handle each item by its `dispatch`: `address_now` is the next cycle's prompt (`agent-doc {file}` admits it to continue), `drain_after_current` runs in operator queue order through the normal drain, and `subagent` goes to a new background subagent (claim it first with `agent-doc queue claim {file} --item <id-or-line> --owner subagent:<label>`). Do NOT re-run finalize on the prior response, do NOT use `--force-disk` (that clobbers the operator's live edits), and do NOT re-answer any prompt already committed in HEAD (the realtime replica reconciles your committed response back into the live buffer).",
+        "This is pending operator steering, not a failed closeout: your prior response is already committed in HEAD. Handle each item by its `dispatch`: `address_now` is the next cycle's prompt (`agent-doc {file}` admits it to continue), `drain_after_current` runs in operator queue order through the normal drain, and `subagent` goes to a new background subagent (claim it first with `agent-doc queue claim {file} --item <id-or-line> --owner subagent:<label>`, dispatch, then acknowledge the returned worker identity with `agent-doc queue start {file} --item <id-or-line> --owner subagent:<label> --generation <generation> --worker-id <worker-id>`). Do NOT re-run finalize on the prior response, do NOT use `--force-disk` (that clobbers the operator's live edits), and do NOT re-answer any prompt already committed in HEAD (the realtime replica reconciles your committed response back into the live buffer).",
         file = file.display()
     )
 }
@@ -5728,7 +5728,8 @@ mod settle_window_tests {
             || {
                 calls.set(calls.get() + 1);
                 anyhow::bail!(line.clone());
-            });
+            },
+        );
         assert_eq!(calls.get(), 1, "an operator-owned state is not resampled");
         assert!(format!("{:#}", outcome.unwrap_err()).contains("operator_action="));
     }

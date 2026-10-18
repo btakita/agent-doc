@@ -455,10 +455,75 @@ pub fn claim_with_session(
     Ok(result)
 }
 
+/// Positively acknowledge that the harness successfully dispatched one
+/// concrete worker for one exact claim generation (`#queueclaimworker`).
+/// This is the only transition from `Claimed`/🟡 to `Running`/🚧.
+pub fn start_attempt(
+    file: &Path,
+    item: &str,
+    owner: &str,
+    worker_id: &str,
+    ttl_secs: u64,
+    generation: u64,
+) -> Result<QueueClaim> {
+    if item.trim().is_empty() {
+        bail!("queue start needs a non-empty --item (`#id` or the queue line's text)");
+    }
+    if owner.trim().is_empty() {
+        bail!("queue start needs a non-empty --owner (the claim's holder)");
+    }
+    if worker_id.trim().is_empty() {
+        bail!("queue start needs a non-empty --worker-id from the successful harness dispatch");
+    }
+    let (target, _) = resolve_live_claim_target(file, item, "queue_claim_start")?;
+    let now = now_secs();
+    let owner_session = current_owner_session();
+    let outcome = mutate_ledger(file, |ledger| {
+        let mut claim = ledger
+            .start(&target, owner, worker_id, now, ttl_secs, Some(generation))
+            .map_err(anyhow::Error::from)?;
+        if owner_session.is_some()
+            && let Some(stored) = ledger
+                .claims
+                .iter_mut()
+                .find(|stored| stored.identity == claim.identity)
+        {
+            stored.owner_session = owner_session.clone();
+            claim.owner_session = owner_session.clone();
+        }
+        Ok(claim)
+    });
+    match &outcome {
+        Ok(claim) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_start outcome=running owner={} worker_id={} generation={} expires_at={} item_bytes={}",
+                claim.owner,
+                worker_id.trim(),
+                claim.generation,
+                claim.expires_at_secs,
+                item.trim().len(),
+            ),
+        ),
+        Err(error) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_start outcome=refused owner={} worker_id={} generation={} item_bytes={} error={error:#}",
+                owner.trim(),
+                worker_id.trim(),
+                generation,
+                item.trim().len(),
+            ),
+        ),
+    }
+    outcome
+}
+
 /// Extend `owner`'s live claim on `item` to `now + ttl_secs`
 /// (`queue claim --refresh`). Refuses, with a typed
-/// [`QueueClaimRefreshRefused`], when the item is unclaimed, the claim already
-/// expired, or another owner holds it; it never creates a claim.
+/// [`QueueClaimRefreshRefused`], when the item is unclaimed, has not been
+/// started, already expired, or another owner holds it; it never creates or
+/// promotes a claim.
 pub fn refresh(file: &Path, item: &str, owner: &str, ttl_secs: u64) -> Result<QueueClaim> {
     refresh_at(file, item, owner, ttl_secs, now_secs())
 }
@@ -1114,6 +1179,16 @@ mod tests {
         );
         // Adoption by the post-clear session.
         let adopted = mutate_ledger(&doc, |ledger| {
+            ledger
+                .start(
+                    "#cligenport",
+                    "subagent:cligoshell-then-cligenport",
+                    "worker:cligenport",
+                    now + 1,
+                    7200,
+                    Some(1),
+                )
+                .unwrap();
             Ok(ledger.refresh_in_session(
                 "#cligenport",
                 "subagent:cligoshell-then-cligenport",
@@ -1227,6 +1302,7 @@ mod tests {
         );
 
         let (_, claimed) = claim(&doc, "#a", "subagent:a", 60).unwrap();
+        start_attempt(&doc, "#a", "subagent:a", "worker:a", 60, claimed.generation).unwrap();
         let refreshed = refresh(&doc, "#a", "subagent:a", 7200).unwrap();
         assert!(
             refreshed.expires_at_secs >= claimed.expires_at_secs + 7000,
@@ -1261,6 +1337,78 @@ mod tests {
             ops.contains("queue_claim_refresh outcome=refused reason=other_owner"),
             "{ops}"
         );
+    }
+
+    #[test]
+    fn start_binds_exactly_one_worker_to_the_exact_generation() {
+        use agent_doc_queue::queue_claim::QueueClaimStartRefused;
+
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#a]", "do [#b]"]);
+        let (_, a) = claim(&doc, "#a", "subagent:a", 60).unwrap();
+        let (_, b) = claim(&doc, "#b", "subagent:b", 60).unwrap();
+
+        let stale = start_attempt(
+            &doc,
+            "#a",
+            "subagent:a",
+            "worker:one",
+            600,
+            a.generation + 1,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                stale.downcast_ref::<QueueClaimStartRefused>(),
+                Some(QueueClaimStartRefused::StaleAttempt { .. })
+            ),
+            "{stale:#}"
+        );
+
+        let running =
+            start_attempt(&doc, "#a", "subagent:a", "worker:one", 600, a.generation).unwrap();
+        assert_eq!(
+            running.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert_eq!(
+            running
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str()),
+            Some("worker:one")
+        );
+        assert_eq!(
+            start_attempt(&doc, "#a", "subagent:a", "worker:one", 600, a.generation,).unwrap(),
+            running
+        );
+
+        let rebound =
+            start_attempt(&doc, "#a", "subagent:a", "worker:two", 600, a.generation).unwrap_err();
+        assert!(matches!(
+            rebound.downcast_ref::<QueueClaimStartRefused>(),
+            Some(QueueClaimStartRefused::AttemptAlreadyBound { .. })
+        ));
+        let reused =
+            start_attempt(&doc, "#b", "subagent:b", "worker:one", 600, b.generation).unwrap_err();
+        assert!(matches!(
+            reused.downcast_ref::<QueueClaimStartRefused>(),
+            Some(QueueClaimStartRefused::WorkerAlreadyBound { .. })
+        ));
+
+        let stored = load_ledger(&doc).unwrap();
+        assert_eq!(
+            stored
+                .claims
+                .iter()
+                .filter(|claim| claim.worker.is_some())
+                .count(),
+            1
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(ops.contains("queue_claim_start outcome=running"), "{ops}");
+        assert!(ops.contains("queue_claim_start outcome=refused"), "{ops}");
     }
 
     #[test]

@@ -4365,11 +4365,11 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
-    /// Claim a live queue head for a worker outside the in-session loop
-    /// (`#queueclaim`), e.g. a dispatched subagent. A claimed head is in flight:
-    /// the in-session loop, preflight selection, and the Stop-hook continuation
-    /// skip it. The claim ends when the item leaves the queue, on `queue
-    /// release`, or when its TTL expires (`--refresh` extends a live claim).
+    /// Reserve a live queue head for dispatch to a worker outside the
+    /// in-session loop (`#queueclaim`). A claim blocks duplicate dispatch but
+    /// does not prove that a worker is running; `queue start` records that
+    /// proof after a successful spawn. The claim ends when the item leaves the
+    /// queue, on `queue release`, or when its TTL expires.
     Claim {
         /// Path to the session document
         file: PathBuf,
@@ -4383,17 +4383,39 @@ enum QueueAction {
         /// the new lifetime counted from now.
         #[arg(long, default_value_t = agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS)]
         ttl_secs: u64,
-        /// Extend the TTL of the live claim `--owner` already holds on
+        /// Extend the TTL of an already-started claim `--owner` holds on
         /// `--item` (a heartbeat for a long-running worker). Refuses, without
-        /// creating a claim, when the item is unclaimed, the claim expired, or
-        /// another owner holds it. Also adopts the claim into the calling
-        /// harness session, e.g. after the claiming coordinator `/clear`ed.
+        /// creating or promoting a claim, when the item is unclaimed,
+        /// unstarted, expired, or another owner holds it. Also adopts the claim
+        /// into the calling harness session after the coordinator `/clear`ed.
         #[arg(long)]
         refresh: bool,
         /// Exact generation printed by the original claim. Required with
         /// `--refresh` for generated claims.
         #[arg(long, requires = "refresh")]
         generation: Option<u64>,
+    },
+    /// Acknowledge that a successful harness dispatch bound one concrete
+    /// worker to one exact claim generation. This is the only transition from
+    /// 🟡 claimed/dispatching to 🚧 running (`#queueclaimworker`).
+    Start {
+        /// Path to the session document
+        file: PathBuf,
+        /// The claimed queue item: `#id` / `do [#id]`, or the queue line's text
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+        /// The owner printed by `queue claim`, e.g. `subagent:<label>`
+        #[arg(long)]
+        owner: String,
+        /// Stable identity returned by the successful harness spawn primitive
+        #[arg(long)]
+        worker_id: String,
+        /// Exact generation printed by `queue claim`
+        #[arg(long)]
+        generation: u64,
+        /// Claim lifetime in seconds, renewed from this acknowledgement
+        #[arg(long, default_value_t = agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS)]
+        ttl_secs: u64,
     },
     /// Publish immediate binary-owned `agent:exchange` feedback that a claimed
     /// background subagent reported back. The claim remains active while the
@@ -5027,6 +5049,7 @@ fn is_operator_usage_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause.is::<agent_doc_queue::queue_claim::QueueClaimMiss>()
             || cause.is::<agent_doc_queue::queue_claim::QueueClaimRefreshRefused>()
+            || cause.is::<agent_doc_queue::queue_claim::QueueClaimStartRefused>()
             || cause.is::<agent_doc_queue::queue_claim::QueueClaimTransitionRefused>()
             || cause.is::<read::UnknownReadComponent>()
     })
@@ -7664,6 +7687,33 @@ fn try_main() -> anyhow::Result<()> {
                     claim.generation,
                     claim.expires_at_secs,
                     outcome
+                );
+                Ok(())
+            }
+            QueueAction::Start {
+                file,
+                item,
+                owner,
+                worker_id,
+                generation,
+                ttl_secs,
+            } => {
+                let claim = agent_doc_queue_io::queue_claim::start_attempt(
+                    &file, &item, &owner, &worker_id, ttl_secs, generation,
+                )?;
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                    &queue_effects,
+                    &file,
+                    None,
+                )?;
+                eprintln!(
+                    "[queue] started {:?} for {} generation {} on worker {:?} until {} (running)",
+                    claim.item_text,
+                    claim.owner,
+                    claim.generation,
+                    worker_id,
+                    claim.expires_at_secs,
                 );
                 Ok(())
             }

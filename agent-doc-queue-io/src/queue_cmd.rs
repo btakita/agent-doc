@@ -908,12 +908,13 @@ mod tests {
             "{claimed_snapshot}"
         );
 
-        crate::queue_claim::refresh_attempt(
+        crate::queue_claim::start_attempt(
             &doc,
             "dispatched worker work",
             "subagent:worker",
+            "worker:runtime-projection",
             600,
-            Some(1),
+            1,
         )
         .unwrap();
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());

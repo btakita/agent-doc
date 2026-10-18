@@ -459,6 +459,35 @@ The queue display is:
 - `⚠️` — lost/expired, eligible for recovery
 
 So the other queue items are correctly bare. Their presence under `agent:queue` already means pending; prefixing all of them with `📥` would erase the distinction between work that has never been dispatched and completed worker output waiting to be integrated.
+
+### Re: bare versus completed queue state — gpt-5 · 2026-10-18T00:15:02-04:00
+
+> **Chat prompt (#chatprompt):** Why are the other queue items correctly bare? Should there be another state if the work is already done?
+
+They are not necessarily correctly bare. Bare means only “the durable queue authority currently has no active claim or completion receipt for this item.” It is correct for genuinely pending, never-dispatched work, but it can also be the conservative fallback after pre-upgrade claim lineage was pruned.
+
+The intended states are:
+
+- pending, never dispatched — bare
+- claimed/dispatching — `🟡`
+- confirmed running — `🚧`
+- worker reported, result not yet integrated — `📥`
+- attempt lost/expired — `⚠️`
+- result authoritatively integrated — close the tracked item and remove it from the live queue
+
+So there should not be a permanent “already done” marker on a live queue item. If completion is proven, the row should close. If there is only suggestive historical evidence but no authoritative receipt, a separate transient reconciliation state would be better than silently calling it pending; it must not auto-close from a heuristic match.
+
+`#extractliveapply` is a concrete stale-closure example. Commit `54b2e3a51a` already implemented the first-class `--coordinate-live-editors` freeze/detach/apply/resume path, and that commit is an ancestor of current `main`. The integrated descendant passed the authoritative `make check` earlier in this turn. No source change was needed now; this closeout repairs the missing tracked-work completion.
+
+Proof:
+
+- changed paths: none; implementation already exists in `54b2e3a51a`
+- commands: searched the focused-extract, IPC, JetBrains, spec, and runbook surfaces; verified `54b2e3a51a` is reachable from current `main`
+- verification: the current-main descendant passed `make check`; focused-extract coordination code, capability, plugin intents, tests, spec, and runbook are all present
+- confidence: high
+- escalation: none
+
+> **Queue prompt:** do [#extractliveapply]
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 
@@ -474,7 +503,7 @@ So the other queue items are correctly bare. Their presence under `agent:queue` 
 - #gh-fix https://github.com/btakita/agent-doc/issues/287
 - #gh-fix https://github.com/btakita/agent-doc/issues/288
 - #gh-fix https://github.com/btakita/agent-doc/issues/289
-- do [#extractliveapply]
+- ~~do [#extractliveapply]~~
 - The queue markers are out of sync with the document state?
 - The last turn was wedged. Fix agent-doc causes. I went afk for a while and came back. There was a Prompt to delete a directory, which I accepted. I did a clear. Added `- release + publish`. Run Agent Doc. Turn was wedged.
 - release + publish
@@ -496,7 +525,6 @@ So the other queue items are correctly bare. Their presence under `agent:queue` 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
 <!-- /agent:backlog -->
 
 ## Review

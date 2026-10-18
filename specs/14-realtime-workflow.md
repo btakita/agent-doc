@@ -1301,8 +1301,8 @@ response onto concurrent operator steering.
 A blocked commit leaves the baseline at the last **durably-projected** revision.
 The merge baseline is content-addressed, so re-asserting the same content is not a
 new revision: `checkpoint_document_baseline` compares the incoming content hash
-against the projected baseline and, on a match, rewrites only the write-only
-crash-state sidecar and logs `document_baseline_checkpoint_unchanged
+against the projected baseline and, on a match, leaves durable state unchanged
+and logs `document_baseline_checkpoint_unchanged
 … generation=<unchanged>` instead of appending a `DocumentBaselineCheckpointed`
 fact. The gate lives in the one function that owns the fact, so it holds for every
 call site rather than asking each of them to re-derive the same answer. Without it

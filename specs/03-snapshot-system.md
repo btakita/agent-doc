@@ -1,24 +1,33 @@
 > Extracted from SPEC.md — see [index](../SPEC.md)
 
-# Baseline and Crash-State Sidecars
+# Typed Document Baselines (No Filesystem Sidecars)
 
 ## Storage
 
 The typed state ledger in `.agent-doc/state.db` owns document baselines, undo
 checkpoints, and CRDT recovery checkpoints.
 
-Filesystem files under `.agent-doc/snapshots/` are write-only crash-state
-sidecars.
-Their path remains `sha256(canonical_path) + ".md"` so an operator can correlate
-evidence with a document identity, but no normal command may read, scan, or
-import those files as document, baseline, cycle, capture, or rename authority.
+No command writes, reads, scans, imports, or repairs a content-bearing
+`.agent-doc/snapshots/<hash>.md` file. Files left by an older version are inert
+legacy residue and may be garbage-collected. Copying a session document into a
+project-state path created a second document-shaped object which an editor could
+mistake for a session; the ledger stores the same recovery fact without creating
+another path capable of acquiring document authority.
+
+For this contract, a **sidecar** is a per-document filesystem object that mirrors
+mutable document/session state and can be consulted or projected by a later
+runtime. Those objects are forbidden. The remaining `.agent-doc/` filesystem
+classes are not document sidecars: `state.db` is the typed controller/Lazily
+ledger; locks, sockets, and transport envelopes are bounded coordination
+artifacts and never state authority; logs and `repair-blocked/` are diagnostic
+evidence and never replay authority; `archives/` are immutable operator-visible
+history; and `config.toml`, installed plugins, and `dashboard.md` are explicit
+project artifacts/projections. None may be admitted as a session document.
 
 ## Lifecycle
 
 - **Checkpoint**: After a successful run, the committed baseline is appended as
-  a typed ledger fact. Only after that commit succeeds, a filesystem effect
-  writes the same content as crash state. Sidecar-effect failure cannot make
-  the sidecar an input to, or a substitute for, typed state.
+  a typed ledger fact. There is no content-bearing filesystem effect.
 - **Pre-response undo checkpoint**: local write paths capture undo content from
   the live document while the advisory doc lock is held, so `undo` restores the
   exact state that existed immediately before the response write.
@@ -60,11 +69,11 @@ patchbacks/pending ops without turning plain user prompts into committed content
   editor's converging delivery projection it defers and reverts that resync
   too (`#retaineddeferisnotafailure`), so the CLI write reached the diff as
   `[user+]`.
-- **Reset**: `reset` appends typed clear facts and may remove associated crash
-  evidence. Deleting a crash file never decides or changes live authority.
+- **Reset**: `reset` appends typed clear facts. It does not need to locate or
+  remove a content copy beside the ledger.
 - **Missing**: Diff treats a missing ledger baseline as first submit. Git may
   supply that first-submit baseline when HEAD differs from the current
-  worktree; crash sidecars are not a fallback.
+  worktree; legacy snapshot files are not a fallback.
 
 ## Auto-Migration on Rename
 
@@ -79,8 +88,8 @@ document-keyed typed state rows. `ensure_initialized` (called from `start`,
 
 The typed event rows and their embedded fact hashes are rekeyed in one
 transaction. Stale editor acknowledgement cursors are retired and the session
-registry is updated. Crash sidecars remain untouched under their crash-time
-identity; migration neither reads nor moves them.
+registry is updated. Legacy snapshot files remain inert; migration neither
+reads nor moves them.
 
 Explicit preflight baseline ids are part of the active closeout contract. If a document is
 moved after preflight, `finalize` / `respond` / `write --commit` resolve the rekeyed baseline

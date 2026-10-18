@@ -49,7 +49,7 @@ Any match whose surrounding ±16-byte window contains the substring `passage ` i
 ### Call sites
 
 - `src/capture.rs::capture_response` and `checkpoint_partial_response_for_cycle` — redact `response_body` before it is appended to the cycle-scoped `state.db` capture/recovery ledger. The `response_sha256` retains the original in-memory hash so cycle-state correlation stays consistent.
-- `src/snapshot.rs::save_unlocked` and `save_pre_response` — redact the snapshot / pre-response body before atomic write to `.agent-doc/snapshots/<hash>.md` and `.agent-doc/pre-response/<hash>.md`.
+- typed baseline and pre-response checkpoint writers — redact document bodies before appending them to the transactional `state.db` ledger. No markdown snapshot or pre-response sidecar is written.
 - `src/stream.rs` — redact flush-error and thinking-flush-error messages before they hit stderr so a failed write that interpolates a streamed chunk cannot leak a token to the terminal.
 
 The streaming-safe variant `redact_streamed(carry, chunk)` holds the last ~128 chars across calls so a token split across a chunk boundary still matches once the second chunk arrives.

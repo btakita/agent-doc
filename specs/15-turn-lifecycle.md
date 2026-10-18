@@ -23,9 +23,9 @@ Hard invariants:
   turn to `InterruptedBlocked` instead of running surprise repair;
 - commit is optional when the selected turn policy is no-commit;
 - interrupted closeout must resume from durable lifecycle state or fail closed;
-- file snapshots are cold recovery/audit projections, never lifecycle or merge
-authority; CRDT recovery checkpoints live in `state.db` and likewise cannot
-override Lazily current text.
+- recovery baselines and CRDT checkpoints live only in `state.db`; no copied
+markdown document is emitted as a recovery sidecar, and typed recovery state
+cannot override Lazily current text.
 
 The persisted `CyclePhase` row in `state.db` is the durable projection of this
 larger state machine. It records `preflight_started`,

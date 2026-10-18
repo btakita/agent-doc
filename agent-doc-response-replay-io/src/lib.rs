@@ -3,7 +3,7 @@
 //! Pure replay/deduplication policy lives in `agent-doc-turn`. This crate owns
 //! the file-facing dedupe command flow: read the document, apply the focused
 //! response replay policy, write the deduped document through an injected writer,
-//! and update the injected cold snapshot projection.
+//! and checkpoint the injected typed document baseline.
 
 use agent_doc_turn::response_replay::dedupe_responses;
 use anyhow::Result;
@@ -88,11 +88,12 @@ pub fn run<E: DedupeEffects + ?Sized>(effects: &E, file: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     struct TestEffects {
         writes: Cell<u32>,
         snapshots: Cell<u32>,
+        checkpoint: RefCell<Option<String>>,
     }
 
     impl TestEffects {
@@ -100,6 +101,7 @@ mod tests {
             Self {
                 writes: Cell::new(0),
                 snapshots: Cell::new(0),
+                checkpoint: RefCell::new(None),
             }
         }
     }
@@ -116,13 +118,9 @@ mod tests {
             Ok(())
         }
 
-        fn save_snapshot(&self, file: &Path, deduped: &str) -> Result<()> {
+        fn save_snapshot(&self, _file: &Path, deduped: &str) -> Result<()> {
             self.snapshots.set(self.snapshots.get() + 1);
-            let path = agent_doc_fs::snapshot_path_for(file)?;
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(path, deduped)?;
+            self.checkpoint.replace(Some(deduped.to_string()));
             Ok(())
         }
     }
@@ -145,9 +143,7 @@ mod tests {
         assert_eq!(content.matches("### Re: topic").count(), 1);
         assert_eq!(effects.writes.get(), 1);
         assert_eq!(effects.snapshots.get(), 1);
-        let snapshot = std::fs::read_to_string(agent_doc_fs::snapshot_path_for(&file).unwrap())
-            .expect("snapshot should be updated");
-        assert_eq!(snapshot, content);
+        assert_eq!(effects.checkpoint.borrow().as_deref(), Some(content.as_str()));
     }
 
     /// `#dedupepresettle`: a write the delivery projection accepted but has not

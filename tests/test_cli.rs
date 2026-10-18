@@ -27316,9 +27316,6 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
     for required in [
         "pub fn load_document_baseline(",
         "pub fn checkpoint_document_baseline(",
-        "pub trait CrashStateEffects",
-        "pub fn checkpoint_document_baseline_with_effects(",
-        "effects.write_markdown_crash_state(doc, content)?;",
         "pub fn resolve(",
         "pub struct DiffBaselineStore",
         "impl agent_doc_diff_io::DocumentBaselineStore for DiffBaselineStore",
@@ -27351,6 +27348,10 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
         "merge_document_state_for_path_transition_in_db",
         "rekey_actor_document_path_in_db",
         "update_session_file_in",
+        "FilesystemCrashStateEffects",
+        "write_markdown_crash_state",
+        "clear_markdown_crash_state",
+        "snapshot_path_for(doc)",
     ] {
         assert!(
             !snapshot_io.contains(forbidden),
@@ -27520,6 +27521,42 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
         ) && !reset_source.contains("snapshot::delete(file)?"),
         "reset should clear the focused recovery projection and ledger baseline"
     );
+}
+
+#[test]
+fn test_project_internal_paths_are_rejected_before_replica_authority_lookup() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    let controller_rpc = controller
+        .split("fn handle_crdt_replica_rpc(")
+        .nth(1)
+        .expect("controller replica handler");
+    let controller_guard = controller_rpc
+        .find("if is_agent_doc_internal_path(&canonical)")
+        .expect("controller must reject .agent-doc paths");
+    let authority_lookup = controller_rpc
+        .find("let authority = crdt_authority_for_file(&file_arg);")
+        .expect("controller authority lookup");
+    assert!(controller_guard < authority_lookup);
+
+    let plugin = fs::read_to_string(manifest_dir.join(
+        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",
+    ))
+    .unwrap();
+    let ensure = plugin
+        .split("fun ensureOpenDocumentReplica(")
+        .nth(1)
+        .expect("open-document registration");
+    let path_guard = ensure
+        .find("!isAgentDocUserDocumentPathUtil(filePath)")
+        .expect("plugin path guard");
+    let attached_fast_path = ensure
+        .find("forwarders[filePath]?.attached == true")
+        .expect("attached fast path");
+    assert!(path_guard < attached_fast_path);
 }
 
 #[test]
@@ -28768,7 +28805,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/Cargo.toml")).unwrap();
     assert!(
         snapshot_io_manifest.contains("agent-doc-git-io ="),
-        "agent-doc-snapshot-io should compose snapshot sidecars with focused git revision/status IO"
+        "agent-doc-snapshot-io should compose typed baselines with focused git revision/status IO"
     );
     let snapshot_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
@@ -33528,7 +33565,8 @@ fn test_cli_init_creates_agent_doc_dir() {
     cmd.current_dir(tmp.path());
     cmd.arg("init");
     cmd.assert().success();
-    assert!(tmp.path().join(".agent-doc/snapshots").is_dir());
+    assert!(tmp.path().join(".agent-doc").is_dir());
+    assert!(!tmp.path().join(".agent-doc/snapshots").exists());
     assert!(!tmp.path().join(".agent-doc/patches").exists());
 }
 

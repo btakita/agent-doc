@@ -225,8 +225,10 @@ fn discover_session_docs() -> Result<Vec<PathBuf>> {
     let cwd = std::env::current_dir()?;
     let root = agent_doc_fs::find_project_root(&cwd).unwrap_or_else(|| cwd.clone());
 
-    let snapshots_dir = root.join(".agent-doc/snapshots");
-    if !snapshots_dir.is_dir() {
+    // Project discovery is keyed by the state root itself. Requiring the removed
+    // markdown snapshot sidecar directory made newly initialized projects look
+    // empty to migration even though their documents and typed ledger existed.
+    if !root.join(".agent-doc").is_dir() {
         return Ok(Vec::new());
     }
 

@@ -11012,7 +11012,18 @@ fn clear_replica_refusals(file: &Path) {
 /// once; the read is repeated only when the file actually changes.
 type AgentDocDocumentCache = BTreeMap<PathBuf, (Option<SystemTime>, bool)>;
 
+/// Project-internal state paths are never user documents, regardless of copied
+/// frontmatter or component markers. This path predicate precedes every relay
+/// authority lookup so an already-attached stale hub cannot bypass admission.
+pub(super) fn is_agent_doc_internal_path(file: &Path) -> bool {
+    file.components()
+        .any(|component| component.as_os_str() == ".agent-doc")
+}
+
 fn is_agent_doc_document(file: &Path) -> bool {
+    if is_agent_doc_internal_path(file) {
+        return false;
+    }
     static CACHE: OnceLock<Mutex<AgentDocDocumentCache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
     let mtime = std::fs::metadata(file)
@@ -11092,6 +11103,14 @@ fn handle_crdt_replica_rpc(
             "CRDT replica {method_name} refused: controller not authoritative (handoff_state={:?}); retry against the promoted generation",
             bootstrap.handoff_state
         );
+    }
+    // GH #300: `.agent-doc/snapshots/<hash>.md` copied the session document,
+    // passed content-only admission, acquired its own hub, then projected a
+    // stale canonical over the editor tab. Internal project state is never a
+    // session document. Reject it before consulting an existing authority so a
+    // stale attached hub cannot grandfather the path back in.
+    if is_agent_doc_internal_path(&canonical) {
+        return Ok(crdt_replica_refused_data("internal_agent_doc_path"));
     }
     let authority = crdt_authority_for_file(&file_arg);
     // `#replicarefusalstorm` / `#replicaendpointtakeover`: a non-agent-doc

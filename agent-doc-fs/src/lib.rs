@@ -117,10 +117,11 @@ pub fn document_state_hash_from_str(absolute_path: &str) -> String {
     agent_doc_hash::path_string_hash(absolute_path)
 }
 
-/// Compute `<project_root>/.agent-doc/snapshots/<hash>.md` for a document.
+/// Compute the path where an older release may have left a markdown snapshot.
 ///
-/// If no `.agent-doc` project root exists, this preserves the historical
-/// relative fallback `.agent-doc/snapshots/<hash>.md`.
+/// Production state must use the typed ledger. This helper remains only for
+/// legacy-residue cleanup and tests. If no `.agent-doc` project root exists, it
+/// preserves the historical relative fallback `.agent-doc/snapshots/<hash>.md`.
 pub fn snapshot_path_for(doc: &Path) -> Result<PathBuf> {
     let canonical = canonical_document_path(doc)?;
     let filename = format!(

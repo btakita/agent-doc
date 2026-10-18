@@ -29,18 +29,19 @@ flowchart LR
   end
 
   DISK[("markdown disk projection")]
-  SNAP[("cold snapshot / audit")]
+  BASE[("typed baseline / audit fact")]
 
   REP <-->|incremental CRDT + accepted/visible receipts| MODEL
   INTENT -->|PID-scoped socket| RPC
   SM -->|after ReplicaVisible| DISK
-  SM -.->|after verified convergence| SNAP
+  SM -->|same typed transaction| BASE
 ```
 
 Lazily canonical text is the sole attached-document authority. The editor owns
 operator-originated edits through its replica; the binary owns semantic agent
-intents. Disk is a projection, and snapshots are cold recovery/audit output.
-The only hot durable state is the transactional `state.db` ledger.
+intents. Disk is a projection, while recovery baselines and audit facts are
+typed rows in the transactional `state.db` ledger. No copied markdown document
+is emitted as recovery state.
 
 There is no live-buffer file, patch inbox, file IPC, file ACK, write-provenance
 marker, controller bootstrap JSON, layout JSON, capture JSON, cycle JSON, or

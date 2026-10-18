@@ -2555,12 +2555,7 @@ fn compact_archive_metadata(
 
 /// Save archive to `.agent-doc/archives/<hash>-<timestamp>.md`.
 fn save_archive(doc: &Path, content: &str) -> Result<std::path::PathBuf> {
-    let snap_path = agent_doc_fs::snapshot_path_for(doc)?;
-    // Extract the hash from snapshot path (filename without .md)
-    let hash = snap_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown");
+    let hash = agent_doc_fs::document_state_hash(doc)?;
 
     // Build archive dir relative to project root
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(doc)?;
@@ -2569,7 +2564,7 @@ fn save_archive(doc: &Path, content: &str) -> Result<std::path::PathBuf> {
         .with_context(|| format!("failed to create {}", archive_dir.display()))?;
 
     let timestamp = chrono_timestamp();
-    let archive_path = archive_dir.join(format!("{}-{}.md", hash, timestamp));
+    let archive_path = archive_dir.join(format!("{hash}-{timestamp}.md"));
 
     std::fs::write(&archive_path, content)
         .with_context(|| format!("failed to write {}", archive_path.display()))?;

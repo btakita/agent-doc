@@ -1682,6 +1682,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         onAwaitTimeout: (() -> Unit)? = null,
     ): Boolean {
         if (extractFrozenPaths.contains(filePath)) return false
+        // GH #300: project-internal state can contain a byte-for-byte copy of a
+        // session document. Path identity is the primary admission rule and must
+        // run before the attached-forwarder fast path, otherwise a stale hub can
+        // grandfather a sidecar back into authority after an IDE restart.
+        if (!isAgentDocUserDocumentPathUtil(filePath)) {
+            attachFailureReasons[filePath] = "internal_agent_doc_path"
+            return false
+        }
         // TypingTracker reports the Lazily current-document projection after
         // each coalesced edit burst. Once this document already owns a live
         // replica, that observation must not enqueue another attach, normalize
@@ -3951,6 +3959,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         deferCanonicalProjectionForPendingLocal: Boolean = false,
         bypassRetainedProjectionHold: Boolean = false,
     ): CrdtReplicaForwarder? {
+        if (!isAgentDocUserDocumentPathUtil(filePath)) {
+            attachFailureReasons[filePath] = "internal_agent_doc_path"
+            return null
+        }
         val cached = forwarders[filePath]
         // GH #282: every registration entry point must share the open-document
         // eligibility guard. In particular, local-edit forwarding reaches this
@@ -6167,6 +6179,14 @@ internal fun isAgentDocDocumentTextUtil(text: CharSequence): Boolean =
         text.contains("agent_doc_format") ||
         text.contains("agent_doc_write") ||
         text.contains("<!-- agent:")
+
+/** Project-internal `.agent-doc/` paths are state/artifacts, never user documents. */
+internal fun isAgentDocUserDocumentPathUtil(filePath: String): Boolean =
+    try {
+        File(filePath).toPath().normalize().none { component -> component.toString() == ".agent-doc" }
+    } catch (_: Exception) {
+        false
+    }
 
 /** Whether a closing editor has a replica-backed final cut that must settle. */
 internal fun closingDocumentCutRequiresReplicaUtil(

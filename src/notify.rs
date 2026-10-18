@@ -506,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_baseline_drives_crash_projection_after_notify() {
+    fn notify_checkpoints_typed_baseline_without_filesystem_projection() {
         let dir = setup_project();
         let doc = write_doc(
             dir.path(),
@@ -530,9 +530,10 @@ mod tests {
             .unwrap()
             .expect("typed baseline");
         assert!(baseline.contains("> Snapshot test"));
-        let crash_projection =
-            std::fs::read_to_string(agent_doc_fs::snapshot_path_for(&doc).unwrap()).unwrap();
-        assert_eq!(crash_projection, baseline);
+        assert!(
+            !dir.path().join(".agent-doc/snapshots").exists(),
+            "notify must not emit a content-bearing sidecar"
+        );
     }
 
     // --- Pending-add tests ---
@@ -693,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_only_typed_baseline_drives_crash_projection() {
+    fn pending_only_checkpoints_typed_baseline_without_filesystem_projection() {
         let dir = setup_project();
         let doc = write_doc(
             dir.path(),
@@ -708,9 +709,10 @@ mod tests {
             .unwrap()
             .expect("typed baseline");
         assert!(baseline.contains("snapshot item"));
-        let crash_projection =
-            std::fs::read_to_string(agent_doc_fs::snapshot_path_for(&doc).unwrap()).unwrap();
-        assert_eq!(crash_projection, baseline);
+        assert!(
+            !dir.path().join(".agent-doc/snapshots").exists(),
+            "pending-only notify must not emit a content-bearing sidecar"
+        );
     }
 
     #[test]

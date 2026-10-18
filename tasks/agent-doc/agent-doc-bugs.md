@@ -514,6 +514,37 @@ Proof:
 - escalation: none
 
 > **Queue prompt:** The queue markers are out of sync with the document state?
+
+### Re: wedged inbox recovery — gpt-5 · 2026-10-18T00:16:38-04:00
+
+> The last turn was wedged. Fix agent-doc causes. I went afk for a while and came back. There was a Prompt to delete a directory, which I accepted. I did a clear. Added `- release + publish`. Run Agent Doc. Turn was wedged.
+
+The wedge combined three failure modes:
+
+1. A coordinator session was interrupted across a permission prompt and `/clear`, but the queue claim had no attempt generation or trustworthy worker-state distinction.
+2. Expiry/pruning erased claim lineage and its marker, allowing the same work to look fresh again.
+3. A retained document projection from the old semantic intent could still race recovery and reapply after the current document had moved on.
+
+Those causes are now fixed on `main`:
+
+- claim attempts are one-to-one `(work identity, owner, generation)` records;
+- late refresh/report/release calls are rejected after redispatch;
+- expiry becomes visible nonblocking `⚠️ Lost` rather than deleting lineage;
+- reported work becomes `📥` and remains integration work, not redispatchable work;
+- markers auto-project from ledger state;
+- recovery and retained workers share a per-document semantic fence, and recovery durably retires the observed stale lineage before canonicalization.
+
+A permission prompt may still pause the harness—that is expected—but accepting it, going AFK, or clearing the session no longer authorizes an old worker/projection to mutate a newer attempt. A lost attempt can be reclaimed at a new generation, and already-integrated work is reaped from the live queue.
+
+Proof:
+
+- changed paths: implemented across the retained-write controller/state projection and queue claim/projection/CLI/test surfaces in `0f5be1adf5` and `f0dec845d4`
+- commands: integrated both isolated subagent commits, exercised a real generation-0 migration, and reconciled the live queue
+- verification: `make check-fast`, authoritative `make check`, and `make audit-docs` passed; agent-doc `0.35.516` was installed once
+- confidence: high
+- escalation: none
+
+> **Queue prompt:** The last turn was wedged. Fix agent-doc causes. I went afk for a while and came back. There was a Prompt to delete a directory, which I accepted. I did a clear. Added `- release + publish`. Run Agent Doc. Turn was wedged.
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 

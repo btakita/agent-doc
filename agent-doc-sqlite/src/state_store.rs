@@ -2438,6 +2438,34 @@ pub fn list_queue_document_state_from_db(
         .context("list queue document state")
 }
 
+/// List a state family: the exact legacy kind plus queue-ID-addressed children
+/// (`<prefix>:<queue-id>`). This keeps hydration compatible with the original
+/// single-queue row while allowing independent per-queue durable state.
+pub fn list_queue_document_state_family_from_db(
+    conn: &Connection,
+    state_kind_prefix: &str,
+) -> Result<Vec<QueueDocumentStateRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT document_hash, state_kind, canonical_path, payload_json, updated_at_secs \
+         FROM queue_document_state \
+         WHERE state_kind = ?1 \
+            OR substr(state_kind, 1, length(?1) + 1) = (?1 || ':') \
+         ORDER BY document_hash, state_kind",
+    )?;
+    let rows = stmt.query_map(params![state_kind_prefix], |row| {
+        let updated_at_secs: i64 = row.get(4)?;
+        Ok(QueueDocumentStateRecord {
+            document_hash: row.get(0)?,
+            state_kind: row.get(1)?,
+            canonical_path: row.get(2)?,
+            payload_json: row.get(3)?,
+            updated_at_secs: u64::try_from(updated_at_secs).unwrap_or_default(),
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .context("list queue document state family")
+}
+
 pub fn clear_queue_document_state_in_db(
     conn: &Connection,
     document_hash: &str,

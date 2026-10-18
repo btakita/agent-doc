@@ -17,15 +17,16 @@
 //! whose earliest-wake `Computed` re-parks the loop.
 //!
 //! A due tick never runs work itself: it opens a pass window in the durable
-//! `queue_schedule` row, and the ordinary drain (supervisor idle watch,
-//! in-session loop, subagent fan-out) — which treats every head of a closed
-//! window as held — dispatches the heads through its existing paths.
+//! row for that `(document, queue_id)`, and the ordinary drain (supervisor idle
+//! watch, in-session loop, subagent fan-out) — which treats every head of a
+//! closed window as held — dispatches the heads through its existing paths.
 //!
 //! Durability: every transition is a `BEGIN IMMEDIATE` read-modify-write of
-//! the row, re-applying the pure transition to the freshly loaded state, so a
-//! restarted, hot-updated, or hand-over controller neither refires a tick nor
-//! double-counts a pass.
+//! that queue's row, re-applying the pure transition to the freshly loaded
+//! state, so a restarted, hot-updated, or hand-over controller neither refires
+//! a tick nor double-counts a pass.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender};
@@ -48,7 +49,7 @@ pub trait QueueScheduleIo: Send + Sync + 'static {
     fn current_text(&self, file: &Path) -> Result<String>;
     /// Put a completed `loop` pass's items back into the queue. Returns how
     /// many items were restored.
-    fn restore_loop_items(&self, file: &Path, roster: &[String]) -> Result<usize>;
+    fn restore_loop_items(&self, file: &Path, queue_id: &str, roster: &[String]) -> Result<usize>;
     fn now_secs(&self) -> u64;
     fn log(&self, file: &Path, line: &str) {
         agent_doc_ops_log_io::log_op(file, line);
@@ -91,8 +92,9 @@ impl QueueScheduleIo for ProductionIo {
         }
     }
 
-    fn restore_loop_items(&self, file: &Path, roster: &[String]) -> Result<usize> {
-        crate::project_controller::runtime_effects()?.restore_queue_loop_items(file, roster)
+    fn restore_loop_items(&self, file: &Path, queue_id: &str, roster: &[String]) -> Result<usize> {
+        crate::project_controller::runtime_effects()?
+            .restore_queue_loop_items(file, queue_id, roster)
     }
 
     fn now_secs(&self) -> u64 {
@@ -100,7 +102,7 @@ impl QueueScheduleIo for ProductionIo {
     }
 }
 
-// ----- durable state (`queue_document_state`, kind `queue_schedule`) -----
+// ----- durable state (`queue_document_state`, queue-ID-addressed kind) -----
 
 fn state_identity(file: &Path) -> Result<Option<(PathBuf, String, String)>> {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
@@ -112,33 +114,115 @@ fn state_identity(file: &Path) -> Result<Option<(PathBuf, String, String)>> {
     Ok(Some((root, hash, canonical.to_string_lossy().into_owned())))
 }
 
-/// The graph/state key of a document (the same hash its claims use).
-pub fn schedule_key(file: &Path) -> Result<String> {
-    agent_doc_hash::path_hash(file)
-        .with_context(|| format!("canonicalize document path for hash: {}", file.display()))
+/// The graph/state key of a `(document, queue_id)` schedule.
+pub fn schedule_key(file: &Path, queue_id: &str) -> Result<String> {
+    Ok(format!(
+        "{}:{queue_id}",
+        agent_doc_hash::path_hash(file)
+            .with_context(|| format!("canonicalize document path for hash: {}", file.display()))?
+    ))
+}
+
+fn state_kind(queue_id: &str) -> String {
+    if queue_id == agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID {
+        QUEUE_SCHEDULE_STATE_KIND.to_string()
+    } else {
+        format!("{QUEUE_SCHEDULE_STATE_KIND}:{queue_id}")
+    }
 }
 
 /// The document's durable schedule state (`None` when it has never been
 /// admitted, or is outside an agent-doc project).
 pub fn load_schedule_state(file: &Path) -> Result<Option<QueueScheduleState>> {
+    let text = std::fs::read_to_string(file)
+        .with_context(|| format!("read schedule document {}", file.display()))?;
+    let Some(schedule) = queue_schedule::identified_queue_schedules(&text)?
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    load_schedule_state_for_queue(file, &schedule.queue_id)
+}
+
+pub fn load_schedule_state_for_queue(
+    file: &Path,
+    queue_id: &str,
+) -> Result<Option<QueueScheduleState>> {
     let Some((root, document_hash, _)) = state_identity(file)? else {
         return Ok(None);
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-    load_from_conn(&conn, &document_hash)
+    load_from_conn(&conn, &document_hash, queue_id)
 }
 
 fn load_from_conn(
     conn: &agent_doc_sqlite::state_store::Connection,
     document_hash: &str,
+    queue_id: &str,
 ) -> Result<Option<QueueScheduleState>> {
     agent_doc_sqlite::state_store::load_queue_document_state_from_db(
         conn,
         document_hash,
-        QUEUE_SCHEDULE_STATE_KIND,
+        &state_kind(queue_id),
     )?
     .map(|record| serde_json::from_str(&record.payload_json).context("decode queue schedule state"))
     .transpose()
+}
+
+/// Rolling-upgrade bridge: the document-global scheduler stored the first
+/// schedule under the legacy `queue_schedule` kind even when its queue had an
+/// explicit ID. Move that row atomically to the first identified schedule so
+/// an upgrade cannot refire a tick or reset a pass count.
+fn migrate_legacy_state(file: &Path, queue_id: &str, now: u64) -> Result<()> {
+    if queue_id == agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID {
+        return Ok(());
+    }
+    let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
+        return Ok(());
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .context("begin queue schedule migration")?;
+    let result = (|| {
+        if load_from_conn(&conn, &document_hash, queue_id)?.is_some() {
+            return Ok(());
+        }
+        let Some(legacy) = load_from_conn(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID,
+        )? else {
+            return Ok(());
+        };
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: document_hash.clone(),
+                state_kind: state_kind(queue_id),
+                canonical_path,
+                payload_json: serde_json::to_string(&legacy)
+                    .context("serialize migrated queue schedule state")?,
+                updated_at_secs: now,
+            },
+        )?;
+        agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+            &conn,
+            &document_hash,
+            QUEUE_SCHEDULE_STATE_KIND,
+        )?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(err)
+        }
+    }
 }
 
 /// Apply `mutate` to the freshly loaded row in one immediate transaction and
@@ -146,6 +230,7 @@ fn load_from_conn(
 /// rewritten.
 fn mutate_schedule_state<T>(
     file: &Path,
+    queue_id: &str,
     now: u64,
     mutate: impl FnOnce(Option<QueueScheduleState>) -> (Option<QueueScheduleState>, T),
 ) -> Result<T> {
@@ -159,21 +244,22 @@ fn mutate_schedule_state<T>(
     conn.execute_batch("BEGIN IMMEDIATE")
         .context("begin queue schedule transaction")?;
     let result = (|| {
-        let before = load_from_conn(&conn, &document_hash)?;
+        let kind = state_kind(queue_id);
+        let before = load_from_conn(&conn, &document_hash, queue_id)?;
         let (after, value) = mutate(before.clone());
         if after != before {
             match &after {
                 None => agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
                     &conn,
                     &document_hash,
-                    QUEUE_SCHEDULE_STATE_KIND,
+                    &kind,
                 )
                 .map(|_| ())?,
                 Some(state) => agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
                     &conn,
                     &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
                         document_hash: document_hash.clone(),
-                        state_kind: QUEUE_SCHEDULE_STATE_KIND.to_string(),
+                        state_kind: kind,
                         canonical_path,
                         payload_json: serde_json::to_string(state)
                             .context("serialize queue schedule state")?,
@@ -202,13 +288,40 @@ fn mutate_schedule_state<T>(
 /// Every document with a durable schedule row under `project_root`.
 pub fn scheduled_documents(project_root: &Path) -> Result<Vec<PathBuf>> {
     let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let mut files = agent_doc_sqlite::state_store::list_queue_document_state_family_from_db(
+        &conn,
+        QUEUE_SCHEDULE_STATE_KIND,
+    )?
+    .into_iter()
+    .map(|record| PathBuf::from(record.canonical_path))
+    .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn stored_queue_ids(file: &Path) -> Result<Vec<String>> {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
+        return Ok(Vec::new());
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
     Ok(
-        agent_doc_sqlite::state_store::list_queue_document_state_from_db(
+        agent_doc_sqlite::state_store::list_queue_document_state_family_from_db(
             &conn,
             QUEUE_SCHEDULE_STATE_KIND,
         )?
         .into_iter()
-        .map(|record| PathBuf::from(record.canonical_path))
+        .filter(|record| record.document_hash == document_hash)
+        .filter_map(|record| {
+            if record.state_kind == QUEUE_SCHEDULE_STATE_KIND {
+                Some(agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID.to_string())
+            } else {
+                record
+                    .state_kind
+                    .strip_prefix(&format!("{QUEUE_SCHEDULE_STATE_KIND}:"))
+                    .map(str::to_string)
+            }
+        })
         .collect(),
     )
 }
@@ -247,66 +360,102 @@ impl QueueScheduleWorker {
     }
 
     fn try_refresh(&self, file: &Path) -> Result<()> {
-        let key = schedule_key(file)?;
         let text = self.io.current_text(file)?;
-        let Some(spec) = queue_schedule::queue_schedule_spec(&text) else {
-            if self.graph.document(&key).is_some()
-                || self.graph.state(&key).is_some()
-                || load_schedule_state(file)?.is_some()
+        let schedules = queue_schedule::identified_queue_schedules(&text)?;
+        let now = self.io.now_secs();
+        if let Some(first) = schedules.first() {
+            migrate_legacy_state(file, &first.queue_id, now)?;
+        }
+        let declared = schedules
+            .iter()
+            .map(|schedule| schedule.queue_id.clone())
+            .collect::<HashSet<_>>();
+
+        let mut known = stored_queue_ids(file)?.into_iter().collect::<HashSet<_>>();
+        for key in self.graph.scheduled_keys() {
+            if let Some(document) = self.graph.document(&key)
+                && document.file == file
             {
-                mutate_schedule_state(file, self.io.now_secs(), |_| (None, ()))?;
+                known.insert(document.queue_id);
+            }
+        }
+        for queue_id in known.difference(&declared) {
+            let key = schedule_key(file, queue_id)?;
+            mutate_schedule_state(file, queue_id, now, |_| (None, ()))?;
+            self.graph.set_document(&key, None);
+            self.graph.set_state(&key, None);
+            self.io
+                .log(file, &format!("queue_schedule_removed queue_id={queue_id}"));
+        }
+
+        for schedule in schedules {
+            let queue_id = schedule.queue_id.clone();
+            let key = schedule_key(file, &queue_id)?;
+            if !schedule.is_valid() {
                 self.graph.set_document(&key, None);
                 self.graph.set_state(&key, None);
-                self.io.log(file, "queue_schedule_removed");
+                self.io.log(
+                    file,
+                    &format!(
+                        "queue_schedule_invalid queue_id={queue_id} issues={}",
+                        schedule
+                            .issues
+                            .iter()
+                            .map(|issue| format!("{}:{}", issue.attr, issue.message))
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                );
+                continue;
             }
-            return Ok(());
-        };
-        let now = self.io.now_secs();
-        let live = queue_schedule::live_heads(&text);
-        let (state, outcome, admitted) = mutate_schedule_state(file, now, |prev| {
-            let admitted = prev.is_none();
-            let state = queue_schedule::reconcile(prev, &spec, now);
-            let (state, outcome) = queue_schedule::observe(state, &spec, &live, now);
-            (Some(state.clone()), (state, outcome, admitted))
-        })?;
-        if admitted {
-            self.io.log(
-                file,
-                &format!(
-                    "queue_schedule_admitted cadence={} loop={:?}",
-                    spec.cadence_fingerprint(),
-                    spec.loop_limit
-                ),
+            let spec = schedule.spec.expect("valid schedule has a spec");
+            let live = queue_schedule::live_heads_for_queue(&text, &queue_id)?;
+            let (state, outcome, admitted) = mutate_schedule_state(file, &queue_id, now, |prev| {
+                let admitted = prev.is_none();
+                let state = queue_schedule::reconcile(prev, &spec, now);
+                let (state, outcome) = queue_schedule::observe(state, &spec, &live, now);
+                (Some(state.clone()), (state, outcome, admitted))
+            })?;
+            if admitted {
+                self.io.log(
+                    file,
+                    &format!(
+                        "queue_schedule_admitted queue_id={queue_id} cadence={} loop={:?}",
+                        spec.cadence_fingerprint(),
+                        spec.loop_limit
+                    ),
+                );
+            }
+            self.graph.set_state(&key, Some(state));
+            self.graph.set_document(
+                &key,
+                Some(ScheduledDocument {
+                    file: file.to_path_buf(),
+                    queue_id: queue_id.clone(),
+                    spec,
+                }),
             );
-        }
-        self.graph.set_state(&key, Some(state));
-        self.graph.set_document(
-            &key,
-            Some(ScheduledDocument {
-                file: file.to_path_buf(),
-                spec,
-            }),
-        );
-        if let ObserveOutcome::Completed { pass, restore } = outcome {
-            self.io.log(
-                file,
-                &format!(
-                    "queue_schedule_pass_completed pass={pass} restore_items={}",
-                    restore.len()
-                ),
-            );
-            if !restore.is_empty() {
-                self.restore(&key, file, &restore);
+            if let ObserveOutcome::Completed { pass, restore } = outcome {
+                self.io.log(
+                    file,
+                    &format!(
+                        "queue_schedule_pass_completed queue_id={queue_id} pass={pass} restore_items={}",
+                        restore.len()
+                    ),
+                );
+                if !restore.is_empty() {
+                    self.restore(&key, file, &queue_id, &restore);
+                }
             }
         }
         Ok(())
     }
 
-    fn restore(&self, key: &str, file: &Path, roster: &[String]) {
-        let restored = self.io.restore_loop_items(file, roster);
+    fn restore(&self, key: &str, file: &Path, queue_id: &str, roster: &[String]) {
+        let restored = self.io.restore_loop_items(file, queue_id, roster);
         let now = self.io.now_secs();
         let applied = restored.is_ok();
-        let committed = mutate_schedule_state(file, now, |prev| {
+        let committed = mutate_schedule_state(file, queue_id, now, |prev| {
             let next = prev.map(|state| {
                 if applied {
                     queue_schedule::restore_applied(state)
@@ -318,15 +467,17 @@ impl QueueScheduleWorker {
         });
         match (&restored, committed) {
             (Ok(count), Ok(state)) => {
-                self.io
-                    .log(file, &format!("queue_schedule_loop_restored items={count}"));
+                self.io.log(
+                    file,
+                    &format!("queue_schedule_loop_restored queue_id={queue_id} items={count}"),
+                );
                 self.graph.set_state(key, state);
             }
             (Err(err), Ok(state)) => {
                 self.io.log(
                     file,
                     &format!(
-                        "queue_schedule_loop_restore_failed backoff_until={:?} error={err:#}",
+                        "queue_schedule_loop_restore_failed queue_id={queue_id} backoff_until={:?} error={err:#}",
                         state.as_ref().and_then(|state| state.backoff_until_secs)
                     ),
                 );
@@ -334,7 +485,7 @@ impl QueueScheduleWorker {
             }
             (_, Err(err)) => self.io.log(
                 file,
-                &format!("queue_schedule_state_write_failed error={err:#}"),
+                &format!("queue_schedule_state_write_failed queue_id={queue_id} error={err:#}"),
             ),
         }
     }
@@ -345,20 +496,26 @@ impl QueueScheduleWorker {
             Ok(state) => state,
             Err(err) => {
                 let now = self.io.now_secs();
-                let state = mutate_schedule_state(&due.file, now, |prev| {
+                let state = mutate_schedule_state(&due.file, &due.queue_id, now, |prev| {
                     let next = prev.map(|state| queue_schedule::record_failure(state, now));
                     (next.clone(), next)
                 });
                 self.io.log(
                     &due.file,
-                    &format!("queue_schedule_tick_failed error={err:#}"),
+                    &format!(
+                        "queue_schedule_tick_failed queue_id={} error={err:#}",
+                        due.queue_id
+                    ),
                 );
                 match state {
                     Ok(state) => state,
                     Err(write_err) => {
                         self.io.log(
                             &due.file,
-                            &format!("queue_schedule_state_write_failed error={write_err:#}"),
+                            &format!(
+                                "queue_schedule_state_write_failed queue_id={} error={write_err:#}",
+                                due.queue_id
+                            ),
                         );
                         // Keep the in-memory state but back it off so the loop
                         // cannot redispatch immediately.
@@ -374,25 +531,39 @@ impl QueueScheduleWorker {
 
     fn try_run_due(&self, due: &DueSchedule) -> Result<Option<QueueScheduleState>> {
         let text = self.io.current_text(&due.file)?;
-        let Some(spec) = queue_schedule::queue_schedule_spec(&text) else {
-            mutate_schedule_state(&due.file, self.io.now_secs(), |_| (None, ()))?;
+        let schedule = queue_schedule::identified_queue_schedules(&text)?
+            .into_iter()
+            .find(|schedule| schedule.queue_id == due.queue_id);
+        let Some(schedule) = schedule else {
             self.graph.set_document(&due.key, None);
-            self.io.log(&due.file, "queue_schedule_removed");
+            self.io.log(
+                &due.file,
+                &format!("queue_schedule_removed queue_id={}", due.queue_id),
+            );
             return Ok(None);
         };
-        if let Some(state) = load_schedule_state(&due.file)?
+        if !schedule.is_valid() {
+            self.graph.set_document(&due.key, None);
+            self.io.log(
+                &due.file,
+                &format!("queue_schedule_invalid queue_id={}", due.queue_id),
+            );
+            return Ok(None);
+        }
+        let spec = schedule.spec.expect("valid schedule has a spec");
+        if let Some(state) = load_schedule_state_for_queue(&due.file, &due.queue_id)?
             && let Some(roster) = state.restore_pending.clone()
         {
-            self.restore(&due.key, &due.file, &roster);
+            self.restore(&due.key, &due.file, &due.queue_id, &roster);
             return Ok(self.graph.state(&due.key));
         }
         let now = self.io.now_secs();
         let facts = FireFacts {
-            live_heads: queue_schedule::live_heads(&text),
-            paused: queue_schedule::queue_held_by_control(&text),
+            live_heads: queue_schedule::live_heads_for_queue(&text, &due.queue_id)?,
+            paused: queue_schedule::queue_held_by_control_for_queue(&text, &due.queue_id)?,
         };
         let tz = self.graph.tz();
-        let (state, decision) = mutate_schedule_state(&due.file, now, |prev| {
+        let (state, decision) = mutate_schedule_state(&due.file, &due.queue_id, now, |prev| {
             let state = queue_schedule::reconcile(prev, &spec, now);
             let (state, decision) = queue_schedule::fire(state, &spec, now, &facts, tz);
             let state = if decision == FireDecision::NotDue {
@@ -407,7 +578,8 @@ impl QueueScheduleWorker {
             self.io.log(
                 &due.file,
                 &format!(
-                    "queue_schedule_tick decision={} pass={} passes_completed={} live_heads={} coalesced_ticks={} next_run={}",
+                    "queue_schedule_tick queue_id={} decision={} pass={} passes_completed={} live_heads={} coalesced_ticks={} next_run={}",
+                    due.queue_id,
                     serde_json::to_string(&decision)
                         .unwrap_or_default()
                         .trim_matches('"'),
@@ -514,7 +686,8 @@ fn spawn_scheduler(io: Arc<dyn QueueScheduleIo>) -> RunningScheduler {
     }
 }
 
-/// The worker loop: due ticks first, refreshes coalesced per document.
+/// The worker loop: due ticks first, refreshes coalesced per document. A
+/// refresh reconciles every queue schedule in that document independently.
 fn run_worker(worker: &QueueScheduleWorker, receiver: &Receiver<Job>) {
     while let Ok(job) = receiver.recv() {
         let mut refreshes: Vec<PathBuf> = Vec::new();
@@ -619,13 +792,20 @@ mod tests {
         fn current_text(&self, _file: &Path) -> Result<String> {
             Ok(self.text.lock().clone())
         }
-        fn restore_loop_items(&self, _file: &Path, roster: &[String]) -> Result<usize> {
+        fn restore_loop_items(
+            &self,
+            _file: &Path,
+            queue_id: &str,
+            roster: &[String],
+        ) -> Result<usize> {
             if self.fail_restore.load(std::sync::atomic::Ordering::SeqCst) {
                 anyhow::bail!("editor unavailable");
             }
             self.restores.lock().push(roster.to_vec());
             let mut text = self.text.lock();
-            if let Some(updated) = queue_schedule::plan_loop_restore(&text, roster)? {
+            if let Some(updated) =
+                queue_schedule::plan_loop_restore_for_queue(&text, queue_id, roster)?
+            {
                 *text = updated;
             }
             Ok(roster.len())
@@ -658,10 +838,204 @@ mod tests {
     }
 
     fn due(file: &Path) -> DueSchedule {
+        due_for(file, agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID)
+    }
+
+    fn due_for(file: &Path, queue_id: &str) -> DueSchedule {
         DueSchedule {
-            key: schedule_key(file).unwrap(),
+            key: schedule_key(file, queue_id).unwrap(),
             file: file.to_path_buf(),
+            queue_id: queue_id.to_string(),
         }
+    }
+
+    #[test]
+    fn immediate_and_hourly_queues_have_independent_state_and_passes() {
+        let content = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue id=main go -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues interval=1h loop -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, file) = project(content);
+        let io = FakeIo::new(content);
+        let worker = worker(&io);
+        worker.refresh(&file);
+
+        assert!(
+            load_schedule_state_for_queue(&file, "main")
+                .unwrap()
+                .is_none()
+        );
+        let issues = load_schedule_state_for_queue(&file, "issues")
+            .unwrap()
+            .expect("issues schedule admitted");
+        assert!(!issues.window_open());
+        assert_eq!(
+            worker.graph().scheduled_keys(),
+            vec![schedule_key(&file, "issues").unwrap()]
+        );
+
+        worker.run_due(&due_for(&file, "issues"));
+        assert!(
+            load_schedule_state_for_queue(&file, "issues")
+                .unwrap()
+                .unwrap()
+                .window_open()
+        );
+        assert!(
+            load_schedule_state_for_queue(&file, "main")
+                .unwrap()
+                .is_none()
+        );
+
+        *io.text.lock() = content.replace("- poll issues", "- ~~poll issues~~");
+        worker.refresh(&file);
+        let issues = load_schedule_state_for_queue(&file, "issues")
+            .unwrap()
+            .unwrap();
+        assert_eq!(issues.passes_completed, 1);
+        assert!(io.text.lock().contains("id=main go -->\n- ship now\n"));
+        assert!(
+            io.text
+                .lock()
+                .contains("id=issues interval=1h loop -->\n- poll issues\n")
+        );
+    }
+
+    #[test]
+    fn two_scheduled_queues_keep_independent_deadlines_and_passes() {
+        let content = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue id=main interval=5m loop -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues interval=1h loop -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, file) = project(content);
+        let io = FakeIo::new(content);
+        let worker = worker(&io);
+        worker.refresh(&file);
+
+        worker.run_due(&due_for(&file, "main"));
+        assert!(
+            load_schedule_state_for_queue(&file, "main")
+                .unwrap()
+                .unwrap()
+                .window_open()
+        );
+        assert!(
+            !load_schedule_state_for_queue(&file, "issues")
+                .unwrap()
+                .unwrap()
+                .window_open()
+        );
+        assert_eq!(worker.graph().earliest_wake(), Some(1_000));
+
+        worker.run_due(&due_for(&file, "issues"));
+        assert!(
+            load_schedule_state_for_queue(&file, "issues")
+                .unwrap()
+                .unwrap()
+                .window_open()
+        );
+        assert_eq!(worker.graph().earliest_wake(), Some(1_300));
+
+        *io.text.lock() = content.replace("- ship now", "- ~~ship now~~");
+        worker.refresh(&file);
+        assert_eq!(
+            load_schedule_state_for_queue(&file, "main")
+                .unwrap()
+                .unwrap()
+                .passes_completed,
+            1
+        );
+        assert_eq!(
+            load_schedule_state_for_queue(&file, "issues")
+                .unwrap()
+                .unwrap()
+                .passes_completed,
+            0
+        );
+        assert!(io.text.lock().contains("id=main interval=5m loop -->\n- ship now\n"));
+        assert!(io.text.lock().contains("id=issues interval=1h loop -->\n- poll issues\n"));
+    }
+
+    #[test]
+    fn explicit_queue_adopts_legacy_state_without_resetting_progress() {
+        let content = doc("id=issues interval=1h loop", "- poll issues\n");
+        let (_dir, file) = project(&content);
+        let spec = queue_schedule::queue_schedule_spec(&content).unwrap();
+        let mut legacy = queue_schedule::reconcile(None, &spec, 900);
+        legacy.passes_completed = 2;
+        mutate_schedule_state(
+            &file,
+            agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID,
+            900,
+            |_| (Some(legacy), ()),
+        )
+        .unwrap();
+
+        let io = FakeIo::new(&content);
+        worker(&io).refresh(&file);
+
+        assert!(
+            load_schedule_state_for_queue(
+                &file,
+                agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(
+            load_schedule_state_for_queue(&file, "issues")
+                .unwrap()
+                .unwrap()
+                .passes_completed,
+            2
+        );
+    }
+
+    #[test]
+    fn invalid_edit_holds_only_that_queue_and_preserves_its_progress() {
+        let valid = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue id=main go -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues interval=1h loop -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, file) = project(valid);
+        let io = FakeIo::new(valid);
+        let worker = worker(&io);
+        worker.refresh(&file);
+        worker.run_due(&due_for(&file, "issues"));
+        let before = load_schedule_state_for_queue(&file, "issues")
+            .unwrap()
+            .unwrap();
+
+        *io.text.lock() = valid.replace("interval=1h", "interval='1 hour'");
+        worker.refresh(&file);
+
+        assert_eq!(
+            load_schedule_state_for_queue(&file, "issues")
+                .unwrap()
+                .unwrap(),
+            before
+        );
+        assert!(worker.graph().scheduled_keys().is_empty());
+        assert!(
+            load_schedule_state_for_queue(&file, "main")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

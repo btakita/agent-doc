@@ -589,10 +589,16 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         agent_dashboard::refresh_if_armed(project_root)
     }
 
-    fn restore_queue_loop_items(&self, file: &Path, roster: &[String]) -> anyhow::Result<usize> {
-        agent_doc_queue_io::queue_schedule::restore_loop_items_with_effects(
+    fn restore_queue_loop_items(
+        &self,
+        file: &Path,
+        queue_id: &str,
+        roster: &[String],
+    ) -> anyhow::Result<usize> {
+        agent_doc_queue_io::queue_schedule::restore_loop_items_for_queue_with_effects(
             &CliQueueCommandEffects,
             file,
+            queue_id,
             roster,
         )
     }

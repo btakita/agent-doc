@@ -2,9 +2,10 @@
 //! injected clock.
 //!
 //! One [`QueueScheduleGraph`] per controller process holds every scheduled
-//! document. Its inputs are three Lazily `Source` maps (the parsed
-//! [`QueueScheduleSpec`] per document, the durable [`QueueScheduleState`] per
-//! document, and which documents have a tick in flight); one `Computed`
+//! `(document, queue_id)` schedule. Its inputs are three Lazily `Source` maps
+//! (the parsed [`QueueScheduleSpec`] per schedule, the durable
+//! [`QueueScheduleState`] per schedule, and which schedules have a tick in
+//! flight); one `Computed`
 //! derives the earliest wake across all of them; one `Effect` on that
 //! `Computed` bumps the [`ScheduleWaker`] whenever the earliest wake changes.
 //! That Effect is the realtime path: an operator edit of `interval=`/`time=`
@@ -12,15 +13,15 @@
 //! wakes and re-parks against the new deadline — no polling.
 //!
 //! [`run_scheduler_loop`] is the one loop. Each turn it takes every due
-//! document (marking it in flight, so it drops out of the earliest wake until
+//! schedule (marking it in flight, so it drops out of the earliest wake until
 //! its worker reports back), hands each to `dispatch` — the caller's background
 //! worker, never work on this thread — then parks until the earliest wake, a
 //! graph change, or [`MAX_SCHEDULER_PARK_SECS`]. The park is the only wait, so:
 //!
-//! - wakeups track deadlines, not documents (one wake serves every document
+//! - wakeups track deadlines, not schedules (one wake serves every schedule
 //!   due at that instant);
-//! - a due document already in flight cannot spin the loop, because in-flight
-//!   documents are excluded from the earliest wake;
+//! - a due schedule already in flight cannot spin the loop, because in-flight
+//!   schedules are excluded from the earliest wake;
 //! - a wake that dispatched nothing parks at least [`MIN_SCHEDULER_IDLE_PARK_SECS`].
 //!
 //! No IO happens here: the caller supplies the clock, the zone, and the
@@ -42,18 +43,20 @@ pub const MAX_SCHEDULER_PARK_SECS: u64 = 300;
 /// Shortest park after a wake that dispatched nothing.
 pub const MIN_SCHEDULER_IDLE_PARK_SECS: u64 = 1;
 
-/// A scheduled document as the graph sees it.
+/// One `(document, queue_id)` schedule as the graph sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduledDocument {
     pub file: PathBuf,
+    pub queue_id: String,
     pub spec: QueueScheduleSpec,
 }
 
-/// A document whose tick is due, handed to the background worker.
+/// A `(document, queue_id)` schedule whose tick is due.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DueSchedule {
     pub key: String,
     pub file: PathBuf,
+    pub queue_id: String,
 }
 
 /// Wakes the parked loop. `generation` changes on every notify, so a notify
@@ -113,7 +116,7 @@ impl ScheduleClock for SystemScheduleClock {
     }
 }
 
-/// The Lazily graph of every scheduled document in one controller.
+/// The Lazily graph of every `(document, queue_id)` schedule in one controller.
 pub struct QueueScheduleGraph {
     ctx: ThreadSafeContext,
     documents: ThreadSafeSourceMap<String, Option<ScheduledDocument>>,
@@ -123,7 +126,7 @@ pub struct QueueScheduleGraph {
     wake_effect: Effect,
     waker: Arc<ScheduleWaker>,
     tz: Arc<dyn LocalOffset + Send + Sync>,
-    /// The second each document was last dispatched. A document is dispatched
+    /// The second each schedule was last dispatched. A schedule is dispatched
     /// at most once per second even if a worker reports back a state that is
     /// still due, so no worker bug can turn the loop into a busy loop.
     dispatched_at: Mutex<std::collections::HashMap<String, u64>>,
@@ -195,7 +198,7 @@ impl QueueScheduleGraph {
         self.tz.as_ref()
     }
 
-    /// Mint every per-document cell before the document becomes visible.
+    /// Mint every per-schedule cell before the schedule becomes visible.
     ///
     /// A non-minting `observe` of an absent key is not a dependency, so a cell
     /// minted *after* the earliest-wake `Computed` read it would never
@@ -295,6 +298,7 @@ impl QueueScheduleGraph {
                 Some(DueSchedule {
                     key,
                     file: document.file,
+                    queue_id: document.queue_id,
                 })
             })
             .collect();
@@ -420,6 +424,7 @@ mod tests {
     fn document(name: &str, spec: QueueScheduleSpec) -> ScheduledDocument {
         ScheduledDocument {
             file: PathBuf::from(format!("/project/{name}.md")),
+            queue_id: "default".to_string(),
             spec,
         }
     }

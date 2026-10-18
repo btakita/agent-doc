@@ -89,32 +89,37 @@ The controller runs **one** queue scheduler per process for every scheduled
 
 - **One loop, deadline-sleeping.** A single thread
   (`agent-doc-queue-scheduler`) parks on a condvar until the earliest wake
-  across every scheduled document, a graph change, or a 300 s ceiling. There is
-  no per-document timer and no busy polling: wakeups track distinct deadlines,
-  not documents. A wake that dispatched nothing parks at least 1 s; a document
-  is dispatched at most once per second, and a document whose tick is in
+  across every `(document, queue_id)` schedule, a graph change, or a 300 s
+  ceiling. There is no per-schedule timer and no busy polling: wakeups track
+  distinct deadlines, not schedules. A wake that dispatched nothing parks at
+  least 1 s; a schedule is dispatched at most once per second, and a schedule whose tick is in
   flight is excluded from the earliest wake, so a wedged or buggy worker cannot
   spin the loop.
 - **Background worker.** The loop never reads a document, touches `state.db`,
-  or writes the queue. It hands each due document to one worker thread
+  or writes the queue. It hands each due schedule to one worker thread
   (`agent-doc-queue-schedule-worker`), which loads the document, applies the
   pure transition (`agent_doc_queue::queue_schedule`), and commits it in a
-  `BEGIN IMMEDIATE` read-modify-write of the `queue_schedule` row. A tick only
+  `BEGIN IMMEDIATE` read-modify-write of that queue's row. The default queue
+  retains the legacy `queue_schedule` state kind; identified queues use
+  `queue_schedule:<queue_id>`. A tick only
   opens a pass window; the heads drain through the ordinary drain paths.
   Completed `loop` passes restore their items through the binary-owned queue
   write path (the live CRDT replica while an editor holds the document) via the
   `ProjectControllerRuntimeEffects::restore_queue_loop_items` port.
 - **Lazily state.** Scheduler state lives in a Lazily graph
-  (`QueueScheduleGraph`): `Source` maps for each document's parsed spec,
-  durable state, and in-flight mark; one `Computed` for the earliest wake; one
-  `Effect` on that `Computed` that notifies the parked loop. No observers.
+  (`QueueScheduleGraph`): `Source` maps for each `(document, queue_id)` parsed
+  spec, durable state, and in-flight mark; one `Computed` for the earliest wake;
+  one `Effect` on that `Computed` that notifies the parked loop. No observers.
 - **Realtime ingress.** Every relay-hub operation publishes a per-document
   queue-region change key (a hash of the `agent:queue` region, plus a schedule
   hint) into a Lazily `Source`; an `Effect` enqueues a worker refresh when a
   region changes, so typing outside the queue never reaches the scheduler. The
   commit frontier and watch-daemon disk signals enqueue refreshes for detached
   documents. On start the controller hydrates every document with a durable
-  `queue_schedule` row.
+  schedule-state row. A document refresh reconciles all of its queues; invalid
+  schedule syntax removes only that queue from the runnable graph and holds it
+  fail-closed. Therefore transitions for `(D, Q1)` neither gate nor replay
+  `(D, Q2)` when `Q1 != Q2`.
 - **Exactly-once across controllers.** The durable row is the authority: a
   deadline at or before `last_fired_due_secs` is never fired again, and a pass
   completion sets `passes_completed = max(passes_completed, pass)`. A handoff

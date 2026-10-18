@@ -109,10 +109,17 @@ const KNOWN_COMPONENT_ATTRS: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentAttrWarning {
     pub issues: Vec<String>,
+    pub has_fatal_schedule_issue: bool,
 }
 
 impl ComponentAttrWarning {
     pub fn message_body(&self) -> String {
+        if self.has_fatal_schedule_issue {
+            return format!(
+                "{}. Invalid schedule syntax is fail-closed: only the affected queue is held until corrected; sibling queues remain independent. Other invalid attributes are ignored (no mutation).",
+                self.issues.join("; ")
+            );
+        }
         format!(
             "{}. The attribute is ignored (no mutation); the auto-loop triggers from `queue: start` (alias `go`) in frontmatter, the `start`/`go` marker control, or the legacy `<!-- agent:queue auto -->`.",
             self.issues.join("; ")
@@ -123,12 +130,14 @@ impl ComponentAttrWarning {
 pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
     let components = element::parse(content).ok()?;
     let mut issues: Vec<String> = Vec::new();
+    let mut has_fatal_schedule_issue = false;
     for component in &components {
         if component.name == "queue" {
             // `#queueschedule`: invalid `interval`/`time`/`loop` values are
-            // dropped (never hold the queue) and reported here.
+            // reported here and hold only the queue that declares them.
             let (_, schedule_issues) =
                 crate::queue_schedule::queue_schedule_spec_for_attrs(&component.attrs);
+            has_fatal_schedule_issue |= schedule_issues.iter().any(|issue| issue.fatal);
             issues.extend(
                 schedule_issues
                     .into_iter()
@@ -191,7 +200,10 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
         return None;
     }
     issues.sort();
-    Some(ComponentAttrWarning { issues })
+    Some(ComponentAttrWarning {
+        issues,
+        has_fatal_schedule_issue,
+    })
 }
 
 #[cfg(test)]
@@ -224,6 +236,8 @@ mod tests {
         let bad = "<!-- agent:queue interval=soon time=25:00 -->\n- a\n<!-- /agent:queue -->\n";
         let warning = component_attr_warning(bad).expect("bad schedule values warn");
         assert_eq!(warning.issues.len(), 2, "{:?}", warning.issues);
+        assert!(warning.has_fatal_schedule_issue);
+        assert!(warning.message_body().contains("fail-closed"));
         let misplaced = "<!-- agent:backlog interval=5m -->\n- [ ] [#x1] a\n<!-- /agent:backlog -->\n";
         assert!(
             component_attr_warning(misplaced)

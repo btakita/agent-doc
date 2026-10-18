@@ -26,19 +26,40 @@ use agent_doc_queue::queue_schedule;
 /// operator restriction, so the failure direction is "wait for the
 /// controller", never "drain off-schedule".
 pub fn schedule_held_heads(file: &Path, content: &str) -> Vec<String> {
-    if !queue_schedule::content_is_scheduled(content) {
-        return Vec::new();
-    }
-    match agent_doc_controller_io::queue_scheduler::load_schedule_state(file) {
-        Ok(state) => queue_schedule::held_heads(content, state.as_ref()),
+    let schedules = match queue_schedule::identified_queue_schedules(content) {
+        Ok(schedules) => schedules,
         Err(err) => {
             eprintln!(
-                "[queue-schedule] WARNING: could not read the queue schedule for {}; holding its heads: {err:#}",
+                "[queue-schedule] WARNING: could not identify queue schedules for {}: {err:#}",
                 file.display()
             );
-            queue_schedule::live_heads(content)
+            return Vec::new();
+        }
+    };
+    let mut held = Vec::new();
+    for schedule in schedules {
+        match agent_doc_controller_io::queue_scheduler::load_schedule_state_for_queue(
+            file,
+            &schedule.queue_id,
+        ) {
+            Ok(state) => held.extend(
+                queue_schedule::held_heads_for_queue(content, &schedule, state.as_ref())
+                    .unwrap_or_default(),
+            ),
+            Err(err) => {
+                eprintln!(
+                    "[queue-schedule] WARNING: could not read queue schedule id={} for {}; holding only that queue's heads: {err:#}",
+                    schedule.queue_id,
+                    file.display()
+                );
+                held.extend(
+                    queue_schedule::live_heads_for_queue(content, &schedule.queue_id)
+                        .unwrap_or_default(),
+                );
+            }
         }
     }
+    held
 }
 
 /// Put `roster` back into `file`'s selected `agent:queue` through the
@@ -50,21 +71,37 @@ pub fn restore_loop_items_with_effects(
     file: &Path,
     roster: &[String],
 ) -> Result<usize> {
+    let schedule = queue_schedule::identified_queue_schedules(
+        &effects.current_document_content(file, "queue_schedule_loop_restore_lookup")?,
+    )?
+    .into_iter()
+    .next()
+    .ok_or_else(|| anyhow::anyhow!("no scheduled queue to restore"))?;
+    restore_loop_items_for_queue_with_effects(effects, file, &schedule.queue_id, roster)
+}
+
+pub fn restore_loop_items_for_queue_with_effects(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    queue_id: &str,
+    roster: &[String],
+) -> Result<usize> {
     // `#sqedit-race`: one queue writer at a time.
     let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let current = effects.current_document_content(file, "queue_schedule_loop_restore")?;
-    let Some(updated) = queue_schedule::plan_loop_restore(&current, roster)? else {
+    let Some(updated) = queue_schedule::plan_loop_restore_for_queue(&current, queue_id, roster)?
+    else {
         return Ok(0);
     };
-    let before = queue_schedule::live_heads(&current).len();
+    let before = queue_schedule::live_heads_for_queue(&current, queue_id)?.len();
     effects.converge_document_or_disk(file, &updated, &current, "queue_schedule_loop_restore")?;
-    let restored = queue_schedule::live_heads(&updated)
+    let restored = queue_schedule::live_heads_for_queue(&updated, queue_id)?
         .len()
         .saturating_sub(before);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_schedule_loop_restore_write roster={} restored={restored}",
+            "queue_schedule_loop_restore_write queue_id={queue_id} roster={} restored={restored}",
             roster.len()
         ),
     );
@@ -79,30 +116,82 @@ pub enum ScheduleReport {
     Unscheduled,
     #[serde(rename = "true")]
     Scheduled {
+        /// Backward-compatible flat fields for a single valid schedule.
         #[serde(flatten)]
-        status: queue_schedule::QueueScheduleStatus,
-        held_heads: usize,
+        legacy: Option<LegacyScheduleReport>,
+        queues: Vec<QueueScheduleReport>,
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LegacyScheduleReport {
+    #[serde(flatten)]
+    pub status: queue_schedule::QueueScheduleStatus,
+    pub held_heads: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct QueueScheduleReport {
+    pub queue_id: String,
+    pub occurrence: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<queue_schedule::QueueScheduleStatus>,
+    pub held_heads: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
 pub fn schedule_status(file: &Path, content: &str) -> Result<ScheduleReport> {
-    let Some(spec) = queue_schedule::queue_schedule_spec(content) else {
+    let schedules = queue_schedule::identified_queue_schedules(content)?;
+    if schedules.is_empty() {
         return Ok(ScheduleReport::Unscheduled);
-    };
-    let state = agent_doc_controller_io::queue_scheduler::load_schedule_state(file)?;
-    Ok(ScheduleReport::Scheduled {
-        status: queue_schedule::status(
-            &spec,
-            state.as_ref(),
-            &agent_doc_controller_io::queue_scheduler::SystemLocalOffset,
-        ),
-        held_heads: queue_schedule::held_heads(content, state.as_ref()).len(),
-    })
+    }
+    let mut queues = Vec::new();
+    for schedule in schedules {
+        let state = agent_doc_controller_io::queue_scheduler::load_schedule_state_for_queue(
+            file,
+            &schedule.queue_id,
+        )?;
+        let held_heads =
+            queue_schedule::held_heads_for_queue(content, &schedule, state.as_ref())?.len();
+        let status = schedule
+            .spec
+            .as_ref()
+            .filter(|_| schedule.is_valid())
+            .map(|spec| {
+                queue_schedule::status(
+                    spec,
+                    state.as_ref(),
+                    &agent_doc_controller_io::queue_scheduler::SystemLocalOffset,
+                )
+            });
+        queues.push(QueueScheduleReport {
+            queue_id: schedule.queue_id,
+            occurrence: schedule.occurrence,
+            status,
+            held_heads,
+            errors: schedule
+                .issues
+                .iter()
+                .filter(|issue| issue.fatal)
+                .map(|issue| format!("{}: {}", issue.attr, issue.message))
+                .collect(),
+        });
+    }
+    let legacy = queues.as_slice().first().and_then(|queue| {
+        (queues.len() == 1).then(|| {
+            queue.status.clone().map(|status| LegacyScheduleReport {
+                status,
+                held_heads: queue.held_heads,
+            })
+        })?
+    });
+    Ok(ScheduleReport::Scheduled { legacy, queues })
 }
 
 /// Render [`ScheduleReport`] for a terminal.
 pub fn render_schedule_report(file: &Path, report: &ScheduleReport) -> String {
-    let ScheduleReport::Scheduled { status, held_heads } = report else {
+    let ScheduleReport::Scheduled { queues, .. } = report else {
         return format!(
             "{}: agent:queue is not scheduled (no interval/time/loop attribute)",
             file.display()
@@ -111,45 +200,65 @@ pub fn render_schedule_report(file: &Path, report: &ScheduleReport) -> String {
     let when = |secs: Option<u64>| {
         secs.map_or_else(|| "-".to_string(), agent_doc_log_time::format_log_timestamp)
     };
-    let cadence = match (status.interval_secs, status.times.is_empty()) {
-        (Some(interval), true) => format!("every {interval}s"),
-        (Some(interval), false) => format!("every {interval}s and at {}", status.times.join(",")),
-        (None, false) => format!("at {}", status.times.join(",")),
-        (None, true) => "after each pass".to_string(),
-    };
-    let passes = match status.loop_limit {
-        queue_schedule::LoopLimit::Off => format!("{} passes run", status.passes_completed),
-        queue_schedule::LoopLimit::Unbounded => {
-            format!("loop {} passes run (unbounded)", status.passes_completed)
+    let mut lines = vec![format!(
+        "{}: {} scheduled queue(s)",
+        file.display(),
+        queues.len()
+    )];
+    for queue in queues {
+        let Some(status) = &queue.status else {
+            lines.push(format!(
+                "  [{}] invalid; {} head(s) held: {}",
+                queue.queue_id,
+                queue.held_heads,
+                queue.errors.join("; ")
+            ));
+            continue;
+        };
+        let cadence = match (status.interval_secs, status.times.is_empty()) {
+            (Some(interval), true) => format!("every {interval}s"),
+            (Some(interval), false) => {
+                format!("every {interval}s and at {}", status.times.join(","))
+            }
+            (None, false) => format!("at {}", status.times.join(",")),
+            (None, true) => "after each pass".to_string(),
+        };
+        let passes = match status.loop_limit {
+            queue_schedule::LoopLimit::Off => {
+                format!("{} passes run", status.passes_completed)
+            }
+            queue_schedule::LoopLimit::Unbounded => {
+                format!("loop {} passes run (unbounded)", status.passes_completed)
+            }
+            queue_schedule::LoopLimit::Passes(limit) => {
+                format!("loop {}/{limit} passes run", status.passes_completed)
+            }
+        };
+        let window = match status.current_pass {
+            Some(pass) => format!("pass {pass} running"),
+            None if status.pending_admission => "waiting for the project controller".to_string(),
+            None if status.exhausted => "loop finished; items held".to_string(),
+            None => format!("idle, {} head(s) held", queue.held_heads),
+        };
+        lines.extend([
+            format!("  [{}] scheduled queue ({cadence})", queue.queue_id),
+            format!("    state: {window}; {passes}"),
+            format!(
+                "    next run: {}; last tick: {}",
+                when(status.next_run_secs),
+                when(status.last_fired_at_secs)
+            ),
+        ]);
+        if status.failures > 0 {
+            lines.push(format!(
+                "    backing off after {} failure(s) until {}",
+                status.failures,
+                when(status.backoff_until_secs)
+            ));
         }
-        queue_schedule::LoopLimit::Passes(limit) => {
-            format!("loop {}/{limit} passes run", status.passes_completed)
+        if status.restore_pending {
+            lines.push("    loop items waiting to be restored".to_string());
         }
-    };
-    let window = match status.current_pass {
-        Some(pass) => format!("pass {pass} running"),
-        None if status.pending_admission => "waiting for the project controller".to_string(),
-        None if status.exhausted => "loop finished; items held".to_string(),
-        None => format!("idle, {held_heads} head(s) held"),
-    };
-    let mut lines = vec![
-        format!("{}: scheduled queue ({cadence})", file.display()),
-        format!("  state: {window}; {passes}"),
-        format!(
-            "  next run: {}; last tick: {}",
-            when(status.next_run_secs),
-            when(status.last_fired_at_secs)
-        ),
-    ];
-    if status.failures > 0 {
-        lines.push(format!(
-            "  backing off after {} failure(s) until {}",
-            status.failures,
-            when(status.backoff_until_secs)
-        ));
-    }
-    if status.restore_pending {
-        lines.push("  loop items waiting to be restored".to_string());
     }
     lines.join("\n")
 }
@@ -249,6 +358,79 @@ mod tests {
     }
 
     #[test]
+    fn hourly_issues_queue_does_not_hold_immediate_main_queue() {
+        let content = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue id=main go -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues interval=1h loop -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, file) = project(content);
+        assert_eq!(schedule_held_heads(&file, content), vec!["poll issues"]);
+        let excluded = crate::queue_claim::claimed_items_for_content(&file, content);
+        assert!(!excluded.claims("ship now"));
+        assert!(excluded.claims("poll issues"));
+        assert_eq!(
+            agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+                content,
+                agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+                &excluded,
+            ),
+            Some("ship now".to_string())
+        );
+        let report = schedule_status(&file, content).unwrap();
+        let json = serde_json::to_value(report).unwrap();
+        assert_eq!(json["queues"].as_array().unwrap().len(), 1);
+        assert_eq!(json["queues"][0]["queue_id"], "issues");
+        assert_eq!(json["queues"][0]["status"]["interval_secs"], 3_600);
+    }
+
+    #[test]
+    fn status_identifies_each_scheduled_queue() {
+        let content = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue id=main loop -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues interval=1h loop -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, file) = project(content);
+        let json = serde_json::to_value(schedule_status(&file, content).unwrap()).unwrap();
+        assert_eq!(json["queues"].as_array().unwrap().len(), 2);
+        assert_eq!(json["queues"][0]["queue_id"], "main");
+        assert_eq!(json["queues"][1]["queue_id"], "issues");
+        assert_eq!(
+            json["queues"][0]["status"]["interval_secs"],
+            serde_json::Value::Null
+        );
+        assert_eq!(json["queues"][1]["status"]["interval_secs"], 3_600);
+    }
+
+    #[test]
+    fn invalid_hourly_syntax_holds_only_the_issues_queue() {
+        let content = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue id=main go -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues interval='1 hour' -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, file) = project(content);
+        assert_eq!(schedule_held_heads(&file, content), vec!["poll issues"]);
+        let json = serde_json::to_value(schedule_status(&file, content).unwrap()).unwrap();
+        assert_eq!(json["queues"][0]["queue_id"], "issues");
+        assert!(json["queues"][0]["status"].is_null());
+        assert_eq!(json["queues"][0]["held_heads"], 1);
+    }
+
+    #[test]
     fn restore_writes_the_items_back_once() {
         let content = doc("loop", "- ~~a~~\n");
         let (_dir, file) = project(&content);
@@ -281,6 +463,8 @@ mod tests {
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["scheduled"], "true");
         assert_eq!(json["pending_admission"], true);
+        assert_eq!(json["queues"][0]["queue_id"], "default");
+        assert_eq!(json["queues"][0]["status"]["pending_admission"], true);
         let unscheduled = schedule_status(&file, &doc("go", "- a\n")).unwrap();
         assert_eq!(
             serde_json::to_value(&unscheduled).unwrap()["scheduled"],

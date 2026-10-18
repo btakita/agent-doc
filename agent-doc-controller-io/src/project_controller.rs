@@ -3347,7 +3347,12 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     /// (live CRDT replica while an editor holds the document). The writer lives
     /// in `agent-doc-queue-io`, which depends on this crate, hence the port.
     /// Returns how many items were restored.
-    fn restore_queue_loop_items(&self, file: &Path, _roster: &[String]) -> Result<usize> {
+    fn restore_queue_loop_items(
+        &self,
+        file: &Path,
+        _queue_id: &str,
+        _roster: &[String],
+    ) -> Result<usize> {
         anyhow::bail!(
             "queue loop restore is not wired in this binary ({})",
             file.display()

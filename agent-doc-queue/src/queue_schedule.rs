@@ -1,7 +1,9 @@
 //! Pure queue schedule policy (`interval=`, `time=`, `loop`).
 //!
 //! `<!-- agent:queue interval=30m time=09:00,17:30 loop=3 -->` turns an
-//! `agent:queue` into a *scheduled* queue. A scheduled queue does not drain the
+//! `agent:queue` into a *scheduled* queue. Each queue's schedule is independent:
+//! its identity, durable state, open window, and loop roster are keyed by the
+//! canonical `(document, queue_id)` pair. A scheduled queue does not drain the
 //! moment it has a live head; it drains only inside a **window** the project
 //! controller's single scheduler loop opens at each due tick. The drain itself
 //! is the ordinary one (supervisor idle watch, in-session loop, subagent
@@ -44,6 +46,7 @@ use agent_doc_element_queue::QueueItemIdentity;
 use serde::{Deserialize, Serialize};
 
 use crate::document_queue::{self, QueueEntry};
+use crate::queue_graph::QueueGraph;
 
 /// Queue-marker attribute: the poll interval.
 pub const QUEUE_INTERVAL_ATTR: &str = "interval";
@@ -165,6 +168,9 @@ impl QueueScheduleSpec {
 pub struct QueueScheduleAttrIssue {
     pub attr: &'static str,
     pub message: String,
+    /// Invalid syntax is fail-closed for this queue. A clamped-but-valid value
+    /// is only advisory and therefore leaves the schedule runnable.
+    pub fatal: bool,
 }
 
 /// Parse a duration: a bare number of seconds, or `<n>d`, `<n>h`, `<n>m`,
@@ -218,9 +224,10 @@ fn attr_value(raw: &str) -> &str {
 /// The schedule declared by an `agent:queue` marker's attributes, plus every
 /// attribute problem found. `None` when no schedule attribute is present.
 ///
-/// Invalid values are dropped (and reported) rather than failing the whole
-/// schedule; a schedule whose only attributes are invalid parses to `None`, so
-/// a half-typed `interval=` never holds the queue.
+/// Invalid values are omitted from the partial spec and reported as fatal.
+/// Queue-level callers use those fatal issues to hold that queue fail-closed;
+/// valid sibling queues remain runnable. A below-floor interval is clamped and
+/// reported as a non-fatal advisory.
 pub fn queue_schedule_spec_for_attrs(
     attrs: &HashMap<String, String>,
 ) -> (Option<QueueScheduleSpec>, Vec<QueueScheduleAttrIssue>) {
@@ -231,6 +238,7 @@ pub fn queue_schedule_spec_for_attrs(
             Ok(0) => issues.push(QueueScheduleAttrIssue {
                 attr: QUEUE_INTERVAL_ATTR,
                 message: "`interval` must be positive".to_string(),
+                fatal: true,
             }),
             Ok(secs) if secs < MIN_SCHEDULE_INTERVAL_SECS => {
                 issues.push(QueueScheduleAttrIssue {
@@ -239,6 +247,7 @@ pub fn queue_schedule_spec_for_attrs(
                         "`interval={}` is below the {MIN_SCHEDULE_INTERVAL_SECS}s floor; using {MIN_SCHEDULE_INTERVAL_SECS}s",
                         attr_value(raw)
                     ),
+                    fatal: false,
                 });
                 interval_secs = Some(MIN_SCHEDULE_INTERVAL_SECS);
             }
@@ -246,6 +255,7 @@ pub fn queue_schedule_spec_for_attrs(
             Err(message) => issues.push(QueueScheduleAttrIssue {
                 attr: QUEUE_INTERVAL_ATTR,
                 message,
+                fatal: true,
             }),
         }
     }
@@ -256,6 +266,7 @@ pub fn queue_schedule_spec_for_attrs(
             issues.push(QueueScheduleAttrIssue {
                 attr: QUEUE_TIME_ATTR,
                 message: "`time` needs HH:MM[,HH:MM...]".to_string(),
+                fatal: true,
             });
         }
         for part in raw.split(',').filter(|part| !part.trim().is_empty()) {
@@ -264,6 +275,7 @@ pub fn queue_schedule_spec_for_attrs(
                 Err(message) => issues.push(QueueScheduleAttrIssue {
                     attr: QUEUE_TIME_ATTR,
                     message,
+                    fatal: true,
                 }),
             }
         }
@@ -282,6 +294,7 @@ pub fn queue_schedule_spec_for_attrs(
                     message: format!(
                         "`loop={raw}` is not a positive pass count (use a bare `loop` to repeat without limit)"
                     ),
+                    fatal: true,
                 }),
                 Ok(passes) => loop_limit = LoopLimit::Passes(passes),
             }
@@ -305,6 +318,94 @@ fn declares_schedule(attrs: &HashMap<String, String>) -> bool {
         .any(|attr| attrs.contains_key(*attr))
 }
 
+/// One queue-local schedule declaration. `spec == None` with non-empty issues
+/// is an invalid declaration: that queue is held fail-closed, without affecting
+/// any sibling queue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentifiedQueueSchedule {
+    pub queue_id: String,
+    pub occurrence: usize,
+    pub spec: Option<QueueScheduleSpec>,
+    pub issues: Vec<QueueScheduleAttrIssue>,
+}
+
+impl IdentifiedQueueSchedule {
+    pub fn is_valid(&self) -> bool {
+        self.spec.is_some() && !self.issues.iter().any(|issue| issue.fatal)
+    }
+}
+
+/// Every schedule declaration in document order, identified by the same
+/// canonical queue IDs used by dependency scheduling. Multiple queues must
+/// therefore already have explicit or binary-backfilled IDs.
+pub fn identified_queue_schedules(content: &str) -> anyhow::Result<Vec<IdentifiedQueueSchedule>> {
+    if !content.contains("agent:queue") {
+        return Ok(Vec::new());
+    }
+    let components = element::parse(content)?;
+    let graph = QueueGraph::parse(content, &components).map_err(anyhow::Error::new)?;
+    Ok(graph
+        .blocks()
+        .iter()
+        .filter(|block| declares_schedule(&block.component.attrs))
+        .map(|block| {
+            let (spec, issues) = queue_schedule_spec_for_attrs(&block.component.attrs);
+            IdentifiedQueueSchedule {
+                queue_id: block.id.clone(),
+                occurrence: block.occurrence,
+                spec,
+                issues,
+            }
+        })
+        .collect())
+}
+
+fn queue_block<'a>(
+    content: &str,
+    components: &'a [element::Component],
+    queue_id: &str,
+) -> anyhow::Result<&'a element::Component> {
+    QueueGraph::parse(content, components)
+        .map_err(anyhow::Error::new)?
+        .block(queue_id)
+        .map(|block| block.component)
+        .ok_or_else(|| anyhow::anyhow!("agent:queue id `{queue_id}` not found"))
+}
+
+pub fn live_heads_for_queue(content: &str, queue_id: &str) -> anyhow::Result<Vec<String>> {
+    let components = element::parse(content)?;
+    let graph = QueueGraph::parse(content, &components).map_err(anyhow::Error::new)?;
+    let block = graph
+        .block(queue_id)
+        .ok_or_else(|| anyhow::anyhow!("agent:queue id `{queue_id}` not found"))?;
+    Ok(block
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => Some(prompt.text.clone()),
+            QueueEntry::Freeform(line) if !document_queue::is_noise_freeform_line(line) => {
+                Some(line.clone())
+            }
+            _ => None,
+        })
+        .collect())
+}
+
+pub fn queue_held_by_control_for_queue(content: &str, queue_id: &str) -> anyhow::Result<bool> {
+    let components = element::parse(content)?;
+    let queue = queue_block(content, &components, queue_id)?;
+    let frontmatter = agent_doc_frontmatter::frontmatter::parse(content)
+        .ok()
+        .map(|(frontmatter, _)| frontmatter);
+    let control = frontmatter
+        .as_ref()
+        .and_then(crate::control_binding::frontmatter_queue_control);
+    Ok(!crate::control_binding::queue_control_activation(
+        &queue.attrs,
+        control,
+    ))
+}
+
 /// The `agent:queue` block that carries the document's schedule: the first
 /// queue block (document order) declaring `interval`, `time`, or `loop`, else
 /// the first queue block.
@@ -326,47 +427,41 @@ pub fn scheduled_queue_component(components: &[element::Component]) -> Option<&e
     )
 }
 
-/// The schedule-carrying queue block's attributes, when the document has a
-/// queue.
-fn scheduled_queue_attrs(content: &str) -> Option<HashMap<String, String>> {
-    let components = element::parse(content).ok()?;
-    Some(scheduled_queue_component(&components)?.attrs.clone())
-}
-
 /// The schedule of the document's `agent:queue`, if any (see
 /// [`scheduled_queue_component`]).
 pub fn queue_schedule_spec(content: &str) -> Option<QueueScheduleSpec> {
-    // Fast path: the attribute names cannot appear without these bytes.
-    if !content.contains("agent:queue") {
-        return None;
-    }
-    queue_schedule_spec_for_attrs(&scheduled_queue_attrs(content)?).0
+    identified_queue_schedules(content)
+        .ok()?
+        .into_iter()
+        .next()
+        .filter(IdentifiedQueueSchedule::is_valid)?
+        .spec
 }
 
 /// Whether the document's queue is scheduled.
 pub fn content_is_scheduled(content: &str) -> bool {
-    queue_schedule_spec(content).is_some()
+    identified_queue_schedules(content).is_ok_and(|schedules| !schedules.is_empty())
 }
 
 /// Whether the queue's control holds it (`pause`, legacy `stop`, or a legacy
 /// inert `queue_active:` flag): a scheduled tick then skips instead of
 /// opening a window. No control at all is `go` (`#queuegodefault`).
 pub fn queue_held_by_control(content: &str) -> bool {
-    let Some(attrs) = scheduled_queue_attrs(content) else {
-        return true;
-    };
-    let frontmatter = agent_doc_frontmatter::frontmatter::parse(content)
+    identified_queue_schedules(content)
         .ok()
-        .map(|(frontmatter, _)| frontmatter);
-    let control = frontmatter
-        .as_ref()
-        .and_then(crate::control_binding::frontmatter_queue_control);
-    !crate::control_binding::queue_control_activation(&attrs, control)
+        .and_then(|schedules| schedules.into_iter().next())
+        .is_none_or(|schedule| {
+            queue_held_by_control_for_queue(content, &schedule.queue_id).unwrap_or(true)
+        })
 }
 
 /// Live (unstruck, executable) head texts of the selected queue, in order.
 pub fn live_heads(content: &str) -> Vec<String> {
-    crate::queue_continuation::live_queue_head_texts(content).unwrap_or_default()
+    identified_queue_schedules(content)
+        .ok()
+        .and_then(|schedules| schedules.into_iter().next())
+        .and_then(|schedule| live_heads_for_queue(content, &schedule.queue_id).ok())
+        .unwrap_or_default()
 }
 
 fn identity(text: &str) -> QueueItemIdentity {
@@ -452,8 +547,9 @@ pub enum ScheduleWindow {
     },
 }
 
-/// Durable per-document schedule progress (`queue_document_state` kind
-/// [`QUEUE_SCHEDULE_STATE_KIND`]).
+/// Durable per-`(document, queue_id)` schedule progress
+/// (`queue_document_state` kind [`QUEUE_SCHEDULE_STATE_KIND`] for the legacy
+/// default queue, or `queue_schedule:<queue_id>` for an identified queue).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueScheduleState {
     /// [`QueueScheduleSpec::cadence_fingerprint`] the anchor belongs to.
@@ -820,11 +916,26 @@ pub fn holds_heads(spec: Option<&QueueScheduleSpec>, state: Option<&QueueSchedul
 /// The heads of `content` a closed schedule window holds back (empty when the
 /// queue is unscheduled or its window is open).
 pub fn held_heads(content: &str, state: Option<&QueueScheduleState>) -> Vec<String> {
-    let spec = queue_schedule_spec(content);
-    if holds_heads(spec.as_ref(), state) {
-        live_heads(content)
+    let Some(schedule) = identified_queue_schedules(content)
+        .ok()
+        .and_then(|schedules| schedules.into_iter().next())
+    else {
+        return Vec::new();
+    };
+    held_heads_for_queue(content, &schedule, state).unwrap_or_default()
+}
+
+/// Queue-local drain gate. Invalid declared syntax is held fail-closed; valid
+/// siblings remain governed solely by their own state.
+pub fn held_heads_for_queue(
+    content: &str,
+    schedule: &IdentifiedQueueSchedule,
+    state: Option<&QueueScheduleState>,
+) -> anyhow::Result<Vec<String>> {
+    if !schedule.is_valid() || holds_heads(schedule.spec.as_ref(), state) {
+        live_heads_for_queue(content, &schedule.queue_id)
     } else {
-        Vec::new()
+        Ok(Vec::new())
     }
 }
 
@@ -895,10 +1006,21 @@ pub fn status(
 /// roster order, before the closing marker. Every other byte of the queue is
 /// preserved. `None` when every roster item is already live.
 pub fn plan_loop_restore(content: &str, roster: &[String]) -> anyhow::Result<Option<String>> {
-    let components = element::parse(content)?;
-    let Some(queue) = scheduled_queue_component(&components) else {
+    let Some(schedule) = identified_queue_schedules(content)?.into_iter().next() else {
         anyhow::bail!("no agent:queue component to restore loop items into");
     };
+    plan_loop_restore_for_queue(content, &schedule.queue_id, roster)
+}
+
+/// Queue-ID-addressed loop restore. Sibling queue bytes are never candidates
+/// for roster removal or insertion.
+pub fn plan_loop_restore_for_queue(
+    content: &str,
+    queue_id: &str,
+    roster: &[String],
+) -> anyhow::Result<Option<String>> {
+    let components = element::parse(content)?;
+    let queue = queue_block(content, &components, queue_id)?;
     let body = &content[queue.open_end..queue.close_start];
     let spans = document_queue::parse_spans(body)?;
     let live: std::collections::HashSet<QueueItemIdentity> = spans
@@ -1023,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_values_are_reported_and_never_hold_the_queue() {
+    fn invalid_values_are_reported_as_fatal() {
         let (spec, issues) =
             queue_schedule_spec_for_attrs(&attrs(&[("interval", "soon"), ("time", "25:00")]));
         assert!(
@@ -1031,9 +1153,11 @@ mod tests {
             "an all-invalid schedule must not schedule the queue"
         );
         assert_eq!(issues.len(), 2, "{issues:?}");
+        assert!(issues.iter().all(|issue| issue.fatal));
         let (spec, issues) = queue_schedule_spec_for_attrs(&attrs(&[("loop", "0")]));
         assert!(spec.is_none());
         assert!(issues[0].message.contains("positive pass count"));
+        assert!(issues[0].fatal);
     }
 
     #[test]
@@ -1044,6 +1168,7 @@ mod tests {
             Some(MIN_SCHEDULE_INTERVAL_SECS)
         );
         assert!(issues[0].message.contains("floor"), "{issues:?}");
+        assert!(!issues[0].fatal);
     }
 
     #[test]
@@ -1394,6 +1519,59 @@ mod tests {
         assert_eq!(
             plan_loop_restore(&restored, &heads(&["a", "b"])).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn identified_schedules_are_queue_local_and_restore_cannot_touch_a_sibling() {
+        let content = concat!(
+            "<!-- agent:queue id=main go -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=issues interval=1h loop -->\n",
+            "- ~~poll issues~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let schedules = identified_queue_schedules(content).unwrap();
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(schedules[0].queue_id, "issues");
+        assert_eq!(
+            schedules[0].spec.as_ref().unwrap().interval_secs,
+            Some(3_600)
+        );
+        assert_eq!(
+            live_heads_for_queue(content, "main").unwrap(),
+            heads(&["ship now"])
+        );
+        assert!(live_heads_for_queue(content, "issues").unwrap().is_empty());
+
+        let restored = plan_loop_restore_for_queue(content, "issues", &heads(&["poll issues"]))
+            .unwrap()
+            .unwrap();
+        assert!(restored.contains("id=main go -->\n- ship now\n"));
+        assert!(restored.contains("id=issues interval=1h loop -->\n- poll issues\n"));
+    }
+
+    #[test]
+    fn invalid_schedule_is_fatal_only_for_its_queue() {
+        let content = concat!(
+            "<!-- agent:queue id=main go -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=issues interval='1 hour' -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let schedules = identified_queue_schedules(content).unwrap();
+        assert_eq!(schedules.len(), 1);
+        assert!(!schedules[0].is_valid());
+        assert_eq!(
+            held_heads_for_queue(content, &schedules[0], None).unwrap(),
+            heads(&["poll issues"])
+        );
+        assert_eq!(
+            live_heads_for_queue(content, "main").unwrap(),
+            heads(&["ship now"])
         );
     }
 

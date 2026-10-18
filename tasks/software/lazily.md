@@ -624,13 +624,26 @@ Verification:
 - GitHub CI run 39093272407 for that main commit is queued; the preceding main run was green.
 
 Confidence: high. The failure was reproduced before dependency resolution, eliminated without source reformatting after resolution, and locked down by target-order tests plus the full green gate. Escalation: none.
+
+### Re: artifact-purge approval scope — gpt-5 · 2026-10-17T23:22:10-04:00
+
+> **Queue prompt:** [#lzagentdocartifactpurge]: approved
+
+No deletion was performed. The word “approved” still does not distinguish the two materially different irreversible plans, and the refreshed handoff must be integrated before either can run.
+
+The existing operator decision remains:
+- **Durable-only (recommended):** after handoff integration, permanently delete 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuse all 535 PyPI-backed candidates.
+- **Full plan:** after handoff integration, permanently delete all 565 verified candidates totaling 9,879,236,243 bytes, including the 535 candidates backed only by perishable PyPI files.
+- **Keep pending:** delete nothing.
+
+Changed paths: none. Commands: no destructive command was run. Verification: the existing `#lzagentdocartifactpurge` review gate and operator TODO remain open, and `#lzagentdocartifactrefresh` remains the integration prerequisite. Confidence: high that proceeding without one of the named choices would exceed the supplied authorization. Escalation: an explicit plan choice is required before deletion.
 <!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- 🚧 [#lzagentdocartifactpurge]: approved
+- ~~[#lzagentdocartifactpurge]: approved~~
 - ~~do [#lzdartformatbaseline]~~
 - do [#gh249builddir]
 <!-- /agent:queue -->

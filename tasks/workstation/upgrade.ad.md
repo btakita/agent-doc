@@ -6,7 +6,6 @@ agent: codex
 resume:
   claude: 80050dae-ffc1-48f6-bb8c-17c794ecb6ac
   codex: 01a14d5c-352b-7781-b889-76815eb85c88
-queue: go
 ---
 
 ## Status
@@ -50,14 +49,39 @@ A useful symptom split: UPS alarm or loss of all UPS-backed outputs points towar
 For a precise recommendation, provide the PSU make/model/age, UPS make/model with both VA and W ratings, exact 5090 and CPU models, overclock settings, UPS alarms/logs, and whether the entire UPS output or only the PC dies.
 
 Session accretion is elevated, but I kept the active queue draining rather than interrupting it for compaction.
-<!-- agent:boundary:93b0af9d -->
+
+### Re: Subagent completed: `subagent:circuit_limit` returned work for queue item “🚧 The room I'm in runs on a 15A circuit. I have tripped the circuit breaker at times. Is there a way to avoid this? Perhaps a batter that stores energy that can have higher power draw in bursts?” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=eced2b08f06e20b8a5f39b1bf7930189fac1d03051634c6a0f001fd7429a8201 -->
+> **Queue prompt:** 🚧 The room I'm in runs on a 15A circuit. I have tripped the circuit breaker at times. Is there a way to avoid this? Perhaps a batter that stores energy that can have higher power draw in bursts?
+
+### Re: 15 A circuit and battery buffering — gpt-5 · 2026-10-18T01:05-04:00
+
+A normal desktop UPS will not prevent branch-circuit overload. While utility power is available, it draws the computer's power from that same 15 A circuit and adds conversion losses and, after an outage, battery-recharging demand. Its battery normally takes over when input power fails; it does not blend battery power into utility power merely to cover GPU bursts.
+
+Specialized commercial UPS/BESS equipment can provide *peak shaving* or an input-current limit, but only when that feature is explicitly documented and the complete system is properly sized, listed, and installed. It is not safe to assume a consumer UPS or portable power station does this, and deliberately cycling a normal UPS onto battery only postpones the energy draw until recharge while aging the battery.
+
+At 120 V, a 15 A circuit has a nominal 1,800 VA limit. For a load expected to run at maximum for three hours or more, NEC-style branch sizing uses 125% of the continuous load—effectively about 12 A or 1,440 VA on an ordinary 15 A branch. That is VA rather than guaranteed usable PC watts, and every light, display, heater, printer, or other receptacle on the breaker shares it. [NFPA NEC development material](https://docinfofiles.nfpa.org/files/AboutTheCodes/70/70_A2022_NEC_P18_FD_PIReport_rev.pdf)
+
+Repeated breaker trips are a safety signal, not normal GPU behavior. Do not repeatedly reset and stress it. If an outlet, plug, receptacle, or cable is hot, loose, discolored, buzzing, or smells burnt, stop using it and have a licensed electrician inspect it. Consumer electrical-safety guidance recommends investigation of frequent trips rather than simply resetting the breaker. [Electrical Safety Foundation guidance](https://www.esfi.org/fuse-and-breaker-breakdown/)
+
+Practical options, in order:
+
+1. Identify everything sharing that breaker; another room or receptacle may still be on the same branch. Move high-draw devices such as heaters, air conditioners, laser printers, and vacuums off it. Verify the destination is genuinely another circuit.
+2. Measure actual UPS input/load watts, VA, and current during the workload and during battery recharge. UPS telemetry is useful; an electrician can verify the entire branch and its receptacles/connections.
+3. As a temporary mitigation, reduce the RTX 5090 power limit and CPU package-power limit/Eco mode, and avoid simultaneous high-draw appliances. This reduces demand but does not repair a wiring or breaker problem.
+4. Have a licensed electrician assess a dedicated circuit—often 20 A/120 V, or a compatible 240 V circuit for equipment designed for it. Do **not** replace the 15 A breaker with a 20 A breaker unless the electrician verifies the entire wiring and receptacle path is rated for it.
+5. Select the UPS only after the circuit plan: correct input plug and voltage, pure-sine output, and both VA and watt capacity above measured demand with headroom. APC recommends UPS watt capacity about 20–25% above attached load. [APC sizing guidance](https://www.apc.com/us/en/support/product-support/ups-buying-guide-for-selecting-a-battery-backup-system.jsp)
+
+For the planned RTX 5090 plus RTX PRO 6000 system, the estimated 1.4–1.5 kW DC component load becomes still higher at the wall after PSU and UPS losses. A shared 15 A/120 V branch is not an appropriate sustained-compute setup; a dedicated higher-capacity circuit, likely 240 V if the selected PSU/UPS supports it, should be part of the upgrade.
+
+If the *panel breaker* opens, investigate the branch load/wiring first. If the breaker stays on but only the PC crashes, continue diagnosing the UPS output limit, GPU connector, PSU protection, thermals, and system stability separately.
+<!-- agent:boundary:9d5f5ead -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority subagents go -->
-- ~~When I run heavy GPU load on my 5090 with my 1200W PSU, my machine hard crashes. Do I need a bigger PSU? My UPS is rates <1200W as well. I have not been able to definitively identify what the cause is.~~
-- The room I'm in runs on a 15A circuit.
 <!-- /agent:queue -->
 
 ## Todo

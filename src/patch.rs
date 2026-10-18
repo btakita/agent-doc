@@ -323,11 +323,10 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// Create a temp dir with `.agent-doc/snapshots/` so `find_project_root` and
-    /// focused snapshot IO work without `set_current_dir`.
+    /// Create a project root without the retired content-bearing snapshot dir.
     fn setup_project() -> TempDir {
         let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         dir
     }
 

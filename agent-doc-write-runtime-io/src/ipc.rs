@@ -460,12 +460,12 @@ mod visible_write_content_snapshot_tests {
     fn guard_refuses_structurally_corrupt_content_ours() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
-        // The live #dupcontent corruption: two agent:queue blocks ingested from
-        // a bad CRDT merge — must never become the snapshot base.
+        // A duplicate singleton ingested from a bad CRDT merge must never
+        // become the snapshot base. Multiple queue blocks are valid and gain
+        // surrogate IDs, so use duplicate exchange blocks as the corruption.
         let corrupt_ours = "<!-- agent:status -->\nC\n<!-- /agent:status -->\n\
 <!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n\
-<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n\
-<!-- agent:queue -->\n- b\n<!-- /agent:queue -->\n";
+<!-- agent:exchange -->\nsecond\n<!-- /agent:exchange -->\n";
         let mut decision = IpcRepairDecision::file_read(DC_CANDIDATE.to_string());
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
@@ -1331,7 +1331,7 @@ mod visible_write_content_snapshot_tests {
 
     #[test]
     fn smconv_declines_on_structurally_corrupt_ours_falls_through() {
-        // A structurally-corrupt operator buffer (duplicate singleton queue
+        // A structurally-corrupt operator buffer (duplicate singleton exchange
         // component) must make the semantic merge decline AND the existing
         // content_ours structural-refusal guard run — the corrupt buffer never
         // becomes the snapshot, the clean candidate is kept.
@@ -1346,9 +1346,9 @@ mod visible_write_content_snapshot_tests {
             "<!-- agent:queue -->\n",
             "- do [#cf-txn-email]\n",
             "<!-- /agent:queue -->\n\n",
-            "<!-- agent:queue -->\n",
-            "- do [#dup]\n",
-            "<!-- /agent:queue -->\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "second exchange\n",
+            "<!-- /agent:exchange -->\n",
         );
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");

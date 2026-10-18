@@ -319,7 +319,7 @@ mod tests {
 
     fn setup_project() -> TempDir {
         let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         dir
     }
 

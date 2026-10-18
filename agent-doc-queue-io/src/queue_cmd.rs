@@ -1101,6 +1101,57 @@ mod tests {
     }
 
     #[test]
+    fn worked_live_row_is_marked_but_struck_terminal_row_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = "#gh-issue https://github.com/example/project/issues/299";
+        let doc = write_claim_projection_doc(dir.path(), &format!("- {item}\n"));
+        crate::queue_claim::claim(&doc, item, "subagent:gh299", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:gh299",
+            "/root/gh299",
+            600,
+            1,
+        )
+        .unwrap();
+
+        let live = std::fs::read_to_string(&doc).unwrap();
+        let live_projection = derive_claim_runtime_projection(&doc, &live, None).unwrap();
+        assert_eq!(
+            live_projection
+                .target_content
+                .matches(&format!("- 🚧 {item}\n"))
+                .count(),
+            1,
+            "a live worked row must project exactly one typed lifecycle marker: {}",
+            live_projection.target_content
+        );
+
+        // A completed row is no longer live. Its strike is explicit terminal
+        // evidence, so lifecycle projection must not decorate it as active work.
+        let terminal = live.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n"));
+        let terminal_projection = derive_claim_runtime_projection(&doc, &terminal, None).unwrap();
+        assert_eq!(terminal_projection.target_content, terminal);
+        assert!(
+            terminal_projection
+                .target_content
+                .contains(&format!("- ~~{item}~~\n")),
+            "{}",
+            terminal_projection.target_content
+        );
+        assert!(
+            !agent_doc_document::queue_projection::LIFECYCLE_MARKERS
+                .iter()
+                .any(|marker| terminal_projection
+                    .target_content
+                    .contains(&format!("- {marker} ~~{item}~~\n"))),
+            "terminal rows must not retain an active lifecycle projection: {}",
+            terminal_projection.target_content
+        );
+    }
+
+    #[test]
     fn claim_projection_rebases_on_editor_authority_cut() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_claim_projection_doc(dir.path(), "- dispatched worker work\n");

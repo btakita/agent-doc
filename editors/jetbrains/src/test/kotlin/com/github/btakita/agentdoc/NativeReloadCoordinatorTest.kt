@@ -79,6 +79,30 @@ class NativeReloadCoordinatorTest {
         )
     }
 
+    /** GH #294: a transient false await result may never become an unowned gap. */
+    @Test
+    fun `native reload not-attached decision is total and retry ownership is explicit`() {
+        for (attached in listOf(false, true)) {
+            for (eligible in listOf(false, true)) {
+                for (inFlight in listOf(false, true)) {
+                    for (scheduled in listOf(false, true)) {
+                        val expected = when {
+                            attached -> NativeReloadRegistrationState.Attached
+                            !eligible -> NativeReloadRegistrationState.Terminal
+                            inFlight || scheduled -> NativeReloadRegistrationState.Converging
+                            else -> NativeReloadRegistrationState.RetryRequired
+                        }
+                        assertEquals(
+                            "A=$attached E=$eligible I=$inFlight R=$scheduled",
+                            expected,
+                            nativeReloadRegistrationStateUtil(attached, eligible, inFlight, scheduled),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     fun `native handoff checkpoints before disposal and awaits replacement registration`() {
         val manager = Files.readString(
@@ -120,7 +144,9 @@ class NativeReloadCoordinatorTest {
         assertTrue(
             "native restart must retain the exact handoff set and retry unresolved targets",
             restart.contains("handoff.projectDocuments[project].orEmpty()") &&
-                restart.contains("native-reload-document-unavailable"),
+                restart.contains("native-reload-document-unavailable") &&
+                restart.contains("NativeReloadRegistrationState.RetryRequired") &&
+                restart.contains("manager.recordRegisterFailure(filePath, reason)"),
         )
         assertTrue(
             "the coordinator must inspect convergence before releasing the reload gate",

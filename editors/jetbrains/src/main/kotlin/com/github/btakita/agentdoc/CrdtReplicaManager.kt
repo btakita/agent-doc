@@ -73,6 +73,40 @@ private const val NATIVE_RELOAD_WORKER_TIMEOUT_MS = 5_000L
 internal const val NATIVE_RELOAD_REPLICA_SETTLE_MS = 3_000L
 internal const val NATIVE_RELOAD_REPLICA_SETTLE_POLL_MS = 25L
 
+/**
+ * GH #294: total state machine for an awaited native-reload registration.
+ *
+ * Let A mean attached, E mean eligible for automatic retry, and C mean an attach
+ * is in flight or a retry timer is armed. Exactly one result holds:
+ *
+ *   Attached      = A
+ *   Converging    = !A && E && C
+ *   RetryRequired = !A && E && !C
+ *   Terminal      = !A && !E
+ *
+ * Keeping this decision pure makes it impossible for a `not_attached` log line
+ * to claim a retry that the state machine neither observes nor requests.
+ */
+internal enum class NativeReloadRegistrationState {
+    Attached,
+    Converging,
+    RetryRequired,
+    Terminal,
+}
+
+internal fun nativeReloadRegistrationStateUtil(
+    attached: Boolean,
+    retryEligible: Boolean,
+    attachInFlight: Boolean,
+    retryScheduled: Boolean,
+): NativeReloadRegistrationState =
+    when {
+        attached -> NativeReloadRegistrationState.Attached
+        !retryEligible -> NativeReloadRegistrationState.Terminal
+        attachInFlight || retryScheduled -> NativeReloadRegistrationState.Converging
+        else -> NativeReloadRegistrationState.RetryRequired
+    }
+
 internal fun nativeReloadRemainingWaitMillis(deadlineNanos: Long, nowNanos: Long): Long? {
     val remainingNanos = deadlineNanos - nowNanos
     if (remainingNanos <= 0L) return null
@@ -4395,7 +4429,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return false
     }
 
-    private fun recordRegisterFailure(filePath: String, reason: String = "controller-register") {
+    private fun recordRegisterFailure(filePath: String, reason: String = "controller-register"): Boolean {
         // Registration is the source of truth for operator-facing attach
         // diagnostics. Retry state used to remember the backoff but discard the
         // cause, so Compact Exchange could only say "could not be attached".
@@ -4415,7 +4449,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // `#rundocdispatchrobust`: a retired generation's retry loop re-registered
         // src/haiven-dev documents every 30s under its retired identity after the
         // 2026-09-29 18:12:38 reload. Only the live generation retries.
-        if (PluginGeneration.retired) return
+        if (PluginGeneration.retired) return false
         if (projection.failureCount == 1 && retainedProjectionHoldNeedsOperatorSurfaceUtil(reason)) {
             recordRetainedProjectionHold(filePath, reason)
         }
@@ -4424,10 +4458,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // still names another generation as the live endpoint. Republish, then retry
             // promptly instead of waiting out a backoff that cannot change the answer.
             ReliableSyncLivenessListener.republishDocument(project, filePath)
-            scheduleRegisterRetry(filePath, minOf(projection.backoffMs, STALE_ENDPOINT_REGISTER_RETRY_MS))
-            return
+            return scheduleRegisterRetry(filePath, minOf(projection.backoffMs, STALE_ENDPOINT_REGISTER_RETRY_MS))
         }
-        scheduleRegisterRetry(filePath, projection.backoffMs)
+        return scheduleRegisterRetry(filePath, projection.backoffMs)
     }
 
     /** Record a text-terminal classification without leaving either retry loop armed. */
@@ -4490,9 +4523,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * races. The VFS event is only the observation edge; this keyed retry owns
      * convergence until the open document has an attached replica.
      */
-    private fun scheduleRegisterRetry(filePath: String, delayMs: Long) {
-        if (disposed.get() || PluginGeneration.retired) return
-        registerRetryTasks.compute(filePath) { _, existing ->
+    private fun scheduleRegisterRetry(filePath: String, delayMs: Long): Boolean {
+        if (disposed.get() || PluginGeneration.retired) return false
+        val scheduled = registerRetryTasks.compute(filePath) { _, existing ->
             if (existing != null && !existing.isDone) {
                 existing
             } else {
@@ -4536,6 +4569,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
             }
         }
+        return scheduled != null && !scheduled.isDone
     }
 
     /**
@@ -5137,11 +5171,44 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "[crdt-replica] native-generation re-register outcome=attached file=$filePath",
                     )
                 } else {
-                    awaitedNotAttached.add(filePath)
-                    manager.log.warn(
-                        "[crdt-replica] native-generation re-register outcome=not_attached " +
-                            "file=$filePath retry=scheduled",
-                    )
+                    when (manager.nativeReloadRegistrationState(filePath)) {
+                        NativeReloadRegistrationState.Attached -> {
+                            manager.log.info(
+                                "[crdt-replica] native-generation re-register " +
+                                    "outcome=attached_after_wait file=$filePath",
+                            )
+                        }
+
+                        NativeReloadRegistrationState.Converging -> {
+                            awaitedNotAttached.add(filePath)
+                            manager.log.warn(
+                                "[crdt-replica] native-generation re-register outcome=not_attached " +
+                                    "file=$filePath retry=already_converging",
+                            )
+                        }
+
+                        NativeReloadRegistrationState.RetryRequired -> {
+                            awaitedNotAttached.add(filePath)
+                            val reason = manager.attachFailureReasons[filePath]
+                                ?: "native-reload-not-attached"
+                            val retryScheduled = manager.recordRegisterFailure(filePath, reason)
+                            manager.log.warn(
+                                "[crdt-replica] native-generation re-register outcome=not_attached " +
+                                    "file=$filePath retry=${if (retryScheduled) "scheduled" else "not_scheduled"} " +
+                                    "reason=$reason",
+                            )
+                        }
+
+                        NativeReloadRegistrationState.Terminal -> {
+                            awaitedNotAttached.add(filePath)
+                            val reason = manager.attachFailureReasons[filePath]
+                                ?: "native-reload-terminal"
+                            manager.log.warn(
+                                "[crdt-replica] native-generation re-register outcome=not_attached " +
+                                    "file=$filePath retry=not_scheduled reason=$reason",
+                            )
+                        }
+                    }
                 }
             }
             // GH #276: report the replicas' state now, not each awaited attach's bounded
@@ -5972,6 +6039,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if ((inFlightAttaches[filePath]?.get() ?: 0) > 0) return true
         return registerRetryTasks[filePath]?.isDone == false
     }
+
+    private fun nativeReloadRegistrationState(filePath: String): NativeReloadRegistrationState =
+        nativeReloadRegistrationStateUtil(
+            attached = forwarders[filePath]?.attached == true,
+            retryEligible =
+                !disposed.get() &&
+                    !PluginGeneration.retired &&
+                    !extractFrozenPaths.contains(filePath) &&
+                    attachFailureReasons[filePath] != "not_agent_doc_document",
+            attachInFlight = (inFlightAttaches[filePath]?.get() ?: 0) > 0,
+            retryScheduled = registerRetryTasks[filePath]?.isDone == false,
+        )
 
     private fun ownsFilePath(filePath: String): Boolean {
         val base = project.basePath ?: return false

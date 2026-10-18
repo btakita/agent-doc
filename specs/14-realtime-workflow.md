@@ -214,6 +214,16 @@ editor state as the new replica baseline without consulting disk as authority.
 It never installs or saves a Lazily-retained whole-document target first.
 Retained agent intents replay afterward through the ordered document-cell/CRDT
 delivery path over that published operator cut.
+After a native-generation handoff tears down replicas, every expected open
+agent-doc follows one total registration transition. With `A` = attached, `E` =
+eligible for automatic retry, and `C` = attach in flight or retry timer armed:
+`A` is attached; `!A && E && C` is converging; `!A && E && !C` must arm the
+ordinary registration retry; and only `!A && !E` is terminal. A transient editor
+read refusal, swap race, or worker failure therefore cannot leave an open
+document with neither membership nor a retry owner. Diagnostics may say
+`retry=scheduled` only after the timer was actually armed; an existing in-flight
+attach is reported as already converging and an ineligible state as not
+scheduled.
 If a cached client reaches `replica_pull` after the controller generation has
 already changed, the attached controller returns the typed
 `{ "refused": true, "reason": "missing_replica" }` projection. JetBrains and VS

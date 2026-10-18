@@ -603,17 +603,35 @@ The approval resolves #lzbetascope and its operator TODO. It does not prematurel
 I also triaged the two legacy gated-in-backlog items. #lzcohortrelease is now a proper review gate because it waits on the explicit irreversible pub.dev decision. #gh249builddir is returned to actionable backlog because #lzcommitpresetresolve is complete and its commit/push blocker is stale.
 
 The previously recorded Dart-publication and artifact-purge choices remain open. No Dart publication or artifact deletion occurred. The exchange remains above its compaction threshold, but the active queue was not stalled for compaction.
+
+### Re: Dart formatter baseline — gpt-5 · 2026-10-17T23:20:43-04:00
+
+> **Queue prompt:** do [#lzdartformatbaseline]
+
+Completed and integrated. The 134-file formatter report was false drift from running Dart 3.13.5 without the package language-version metadata in `.dart_tool/package_config.json`. After dependency resolution, the same formatter reports 157 files checked and 0 changed; no tracked Dart source was reformatted.
+
+Changed paths in lazily-dart:
+- `Makefile`: both `fmt` and `fmt-fix` now run `dart pub get` before `dart format`.
+- `test/make_format_order_test.dart`: regression coverage proves both targets resolve package metadata before formatting.
+- `CONTRIBUTING.md`: documents `make check` as the canonical local gate and explains the package-config requirement.
+
+Verification:
+- `/opt/flutter/bin/dart --version`: Dart SDK 3.13.5 stable.
+- Focused formatter-order tests: 2 passed.
+- `PATH=/opt/flutter/bin:/usr/local/bin:/usr/bin:/bin make check`: passed completely; formatting changed 0 files, analysis reported no issues, the Dart suite and every aggregate gate passed.
+- `git diff --check`: passed.
+- Commit `566622f8f526c637578bb995311a0565c4e478ac` was pushed to the task branch and fast-forwarded to `lazily-dart/main`; remote `main` resolves to the same SHA and the worktree is clean.
+- GitHub CI run 39093272407 for that main commit is queued; the preceding main run was green.
+
+Confidence: high. The failure was reproduced before dependency resolution, eliminated without source reformatting after resolution, and locked down by target-order tests plus the full green gate. Escalation: none.
 <!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzcohortrelease]~~
-- ~~[#lzgenericreadmeincident]: Create a CONTRIBUTING.md file for each lazily repo. Extract anything in README.md belonging to CONTRIBUTING.md into CONTRIBUTING.md. README.md should link to CONTRIBUTING.md.~~
 - 🚧 [#lzagentdocartifactpurge]: approved
-- ~~[#lzbetascope]: approved~~
-- do [#lzdartformatbaseline]
+- ~~do [#lzdartformatbaseline]~~
 - do [#gh249builddir]
 <!-- /agent:queue -->
 
@@ -633,7 +651,6 @@ The previously recorded Dart-publication and artifact-purge choices remain open.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdartformatbaseline] Reconcile the lazily-dart formatter baseline under Dart 3.13.5: make check reports 134 tracked Dart files requiring formatting; determine the pinned SDK and formatter intent, apply only the intended formatter version, rerun make check, commit, and push.
 - [ ] [#gh249builddir] [btakita/agent-doc] Integrate the verified issue-249 follow-up from /home/brian/worktrees/agent-doc-gh249-restore on branch fix/gh249-263-local-build-dir: commit and push the four tracked files, exclude .gh249-*.log, then run the single coordinator make install. Verification: make check passed 10505 tests and restoring the old mapping fails two regression tests.
 <!-- /agent:backlog -->
 
@@ -648,7 +665,7 @@ The previously recorded Dart-publication and artifact-purge choices remain open.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
-- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Fresh read-only audit/handoff generated 2026-10-12T21:27:35Z in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 and verified with zero deletions. After integrating #lzagentdocartifactrefresh, two authorizable options remain: full plan deletes 565 artifacts totaling 9,879,236,243 bytes with 0 refused/skipped/failed in dry run; preferred durable-only plan deletes 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuses exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. 545 artifacts totaling 8,636,981,950 bytes remain withheld and are never deletable. The 7-day handoff expires 2026-10-19T21:27:35Z and becomes evidence_stale 24 hours earlier. Blocked solely on explicit destructive authorization after the refreshed handoff is integrated; no artifact has been deleted.
+- [/] 🚧 [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Fresh read-only audit/handoff generated 2026-10-12T21:27:35Z in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 and verified with zero deletions. After integrating #lzagentdocartifactrefresh, two authorizable options remain: full plan deletes 565 artifacts totaling 9,879,236,243 bytes with 0 refused/skipped/failed in dry run; preferred durable-only plan deletes 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuses exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. 545 artifacts totaling 8,636,981,950 bytes remain withheld and are never deletable. The 7-day handoff expires 2026-10-19T21:27:35Z and becomes evidence_stale 24 hours earlier. Blocked solely on explicit destructive authorization after the refreshed handoff is integrated; no artifact has been deleted.
 <!-- /agent:review -->
 
 ## Icebox

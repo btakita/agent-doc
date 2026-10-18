@@ -666,6 +666,15 @@ Verification and commands:
 ### Re: issue-249 closeout recovery — gpt-5 · 2026-10-17T23:34:06-04:00
 
 The visible prompt markers before “Commit and push” and “Confidence” in the preceding section are delivery-projection artifacts inside that assistant-authored report, not operator prompts. The issue-249 result is complete: commit `7d554a102c95a71e5e3e8183d81cb881852cf6b5` is on `main`, the authorized four paths were the only committed files, verification and the single coordinator install passed, and `#gh249builddir` is resolved. No tracked-work mutation is being reapplied in this recovery response.
+
+### Re: authorized artifact purge and cohort publication — gpt-5 · 2026-10-18T04:05-04:00
+
+Completed both authorized queue items.
+
+- `#lzagentdocartifactpurge`: regenerated the live audit and executed the preferred durable-only purge. Deleted 18 GitHub-Release-backed Actions artifacts totaling 542,393,884 bytes with 0 skipped/failed; 533 PyPI-only candidates remain refused and 463 withheld artifacts remain untouched. Post-delete verification found 0 remaining deletable artifacts. Focused self-tests, `make artifact-purge-check`, `git diff --check`, JSON validation, and the authoritative `make check` all passed. Commit `63aae9a5682e3fe829a52bb2ce0e1a1865115f56` was fast-forwarded to `btakita/agent-doc` `main`. GitHub CI run `39110122101` is still in progress; local authoritative verification is green.
+- `#lzcohortrelease`: verified `lazily-dart` tag `v0.34.0` at `e7b940bd2995c482a12fc87e9caeb0cbdb25158f`, published it with the verified Dart SDK, and confirmed the public pub.dev API now reports `0.34.0` as latest. Publication carried the known package-layout warning for the top-level `tests` directory. No source change was made. The immutable tag's current formatter gate would rewrite 134 Dart files under the available SDKs, but the publication command itself succeeded and public availability is proven.
+
+Preflight also audited the legacy TODO source locators for `#lzcohortrelease`, `#lzgithubbudget20`, and `#lzagentdocartifactpurge`. The exchange remains large (637 lines at admission), but the active queue policy requires completing the item boundary without pausing for compaction.
 <!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  
@@ -677,13 +686,13 @@ The visible prompt markers before “Commit and push” and “Confidence” in 
 ## Todo
 
 <!-- agent:todo -->
-- [ ] [#lzcohortrelease] Publish lazily-dart 0.34.0 to pub.dev under your login for [#lzcohortrelease]
+- [x] [#lzcohortrelease] Publish lazily-dart 0.34.0 to pub.dev under your login for [#lzcohortrelease] (source: agent:review [#lzcohortrelease])
 - [x] [#lzcoreciactivationfixes] Choose the spec-side or binding-side Phase 6 caller design for [#lzcoreciactivationfixes]
 - [x] [#lzcommitpresetresolve] Define or replace the queue-wide `#spec-test-commit-push` authorization for [#lzcommitpresetresolve]
 - [x] [#lzgenericreadmeincident] Inspect the generated README rollups and decide whether to restore them for [#lzgenericreadmeincident]
 - [x] [#lzrustpublish] Configure crates.io Trusted Publishing for future lazily-rs tag releases for [#lzrustpublish]
-- [ ] [#lzgithubbudget20] Add a valid payment method and set the GitHub Actions budget requested by [#lzgithubbudget20]
-- [ ] [#lzagentdocartifactpurge] Choose and explicitly authorize an artifact-purge plan after the refreshed handoff is integrated for [#lzagentdocartifactpurge]
+- [ ] [#lzgithubbudget20] Add a valid payment method and set the GitHub Actions budget requested by [#lzgithubbudget20] (source: agent:review [#lzgithubbudget20])
+- [x] [#lzagentdocartifactpurge] Choose and explicitly authorize an artifact-purge plan after the refreshed handoff is integrated for [#lzagentdocartifactpurge] (source: agent:review [#lzagentdocartifactpurge])
 - [x] [#lzbetascope] Approve or decline Lazily Core Beta promotion after its gates are green for [#lzbetascope]
 <!-- /agent:todo -->
 
@@ -695,7 +704,6 @@ The visible prompt markers before “Commit and push” and “Confidence” in 
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzcohortrelease] [operator-decision] Lazily Core cohort released 2026-10-15 (spec v0.42.0, rs 0.60.0, py 0.44.0, js 0.36.0, go v0.30.0, kt 0.45.0, cpp v0.32.0, cs 0.8.0, dart v0.34.0, zig v0.38.0; superproject pins f576f5b). Only remaining: run 'dart pub publish' for lazily-dart 0.34.0 under the operator's pub.dev login (tag v0.34.0 = e7b940b). Core Beta promotion stays with #lzbetascope.
 - [/] [#lzcorecireachaudit] After #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1-5 integration are complete, run the supplied per-binding post-integration CI audit matrix against settled commits; require every standalone Core target to have a named workflow step, exact reach mapping, mutation evidence, Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates before Phase 6 finalization.
 - [/] [#fixrunturn] Run Agent Doc route-race fix and deterministic coverage are complete and fully verified in /home/brian/worktrees/agent-doc-fixrunturn-stack-20261012/agent-doc on branch fix/run-agent-doc-turn-rejection-20261012 from base 06afd858eebc81440dbbebec6a51f0ec788391f1; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the six agent-doc-route-io files and run the single coordinator install.
 - [/] [#lzagentdocartifactrefresh] Fresh artifact-purge handoff and both dry-run modes are complete and verified in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 on branch task/lzagentdocartifactrefresh-20261012 from base 215dc9dc52339478da6cc90aa5c7d5808f3e54c5; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate the five tracked btakita/agent-doc audit/script files without the scratch .audit-work reports.
@@ -703,7 +711,6 @@ The visible prompt markers before “Commit and push” and “Confidence” in 
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
-- [/] 🚧 [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Fresh read-only audit/handoff generated 2026-10-12T21:27:35Z in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 and verified with zero deletions. After integrating #lzagentdocartifactrefresh, two authorizable options remain: full plan deletes 565 artifacts totaling 9,879,236,243 bytes with 0 refused/skipped/failed in dry run; preferred durable-only plan deletes 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuses exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. 545 artifacts totaling 8,636,981,950 bytes remain withheld and are never deletable. The 7-day handoff expires 2026-10-19T21:27:35Z and becomes evidence_stale 24 hours earlier. Blocked solely on explicit destructive authorization after the refreshed handoff is integrated; no artifact has been deleted.
 <!-- /agent:review -->
 
 ## Icebox

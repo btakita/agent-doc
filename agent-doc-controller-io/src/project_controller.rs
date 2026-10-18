@@ -11239,6 +11239,37 @@ pub fn load_actor_store(
     load_actor_store_from_db(&conn)
 }
 
+/// Load the actor rows used by `admin list` and dashboard projections.
+///
+/// `supervisor_pid` is joined only through the lease for the actor's exact
+/// `(document_id, generation)`. The session registry deliberately does not
+/// participate in this projection: its process id identifies the registered
+/// pane/controller process and is not a supervisor identity.
+pub fn load_actor_list_records(
+    project_root: &Path,
+) -> Result<Vec<agent_doc_controller::fleet::ActorListRecord>> {
+    let conn = open_state_db(project_root)?;
+    let actors = load_actor_store_from_db(&conn)?;
+    actors
+        .values()
+        .map(|record| {
+            let supervisor_pid =
+                load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?
+                    .and_then(|lease| lease.supervisor_pid);
+            Ok(agent_doc_controller::fleet::ActorListRecord {
+                document_id: record.document_id.clone(),
+                session_id: record.session_id.clone(),
+                pane: record.pane_id.clone(),
+                window: record.window_id.clone(),
+                harness: record.harness.clone(),
+                generation: record.generation,
+                state: record.state.as_str().to_string(),
+                supervisor_pid,
+            })
+        })
+        .collect()
+}
+
 pub fn load_actor_record(
     project_root: &Path,
     document_id: &str,
@@ -15348,6 +15379,54 @@ mod tests {
             },
         }
     }
+
+    #[test]
+    fn admin_list_pid_matches_generation_fenced_inspect_lease() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/admin-list-supervisor.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let record = actor_record(&document_id, "%41", "@1");
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let mut other_generation = record.clone();
+        other_generation.generation = record.generation + 1;
+        state_store::upsert_supervisor_lease_in_db(
+            &conn,
+            &other_generation,
+            Some(9_999),
+            Some("/tmp/wrong-generation.sock"),
+            "ready",
+        )
+        .unwrap();
+        state_store::upsert_supervisor_lease_in_db(
+            &conn,
+            &record,
+            Some(4_242),
+            Some("/tmp/current-generation.sock"),
+            "ready",
+        )
+        .unwrap();
+        drop(conn);
+
+        let row = load_actor_list_records(dir.path())
+            .unwrap()
+            .into_iter()
+            .find(|row| row.document_id == document_id)
+            .unwrap();
+        let inspection = inspect_actor(dir.path(), Some(&doc), None, None).unwrap();
+        let inspected_pid = inspection
+            .supervisor_lease
+            .and_then(|lease| lease.supervisor_pid);
+
+        assert_eq!(row.generation, record.generation);
+        assert_eq!(row.supervisor_pid, Some(4_242));
+        assert_eq!(row.supervisor_pid, inspected_pid);
+        assert_ne!(row.supervisor_pid, Some(9_999));
+    }
+
     fn closed_actor_record(
         document_id: &str,
         timestamp: u64,

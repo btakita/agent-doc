@@ -783,6 +783,14 @@ without direct sidecar edits:
 - list actors by project, document, state, harness, pane, generation, and age;
 - inspect one actor with current lifecycle state, supervisor lease, queue head,
   dispatch receipts, projection lag, and last transition;
+- `admin list`, both dashboard projections, and `admin inspect` expose a
+  `supervisor_pid` only from the supervisor lease whose document and generation
+  match the actor row. A session-registry pane/controller PID is never labeled
+  as a supervisor PID; for a stable actor generation all three views agree on
+  the lease PID (or all omit it when no matching lease exists). Formally, for
+  actor key `(d, g)`, `ListPid(d,g) = DashboardPid(d,g) =
+  InspectLease(d,g).supervisor_pid`, and every term is derived from the lease
+  selected by `document_id = d AND generation = g`;
 - list and inspect supervisor adapters, child PIDs, sockets, readiness evidence,
   proof gates, and recent restart/clear attempts;
 - pause/resume queue draining for a document or project;

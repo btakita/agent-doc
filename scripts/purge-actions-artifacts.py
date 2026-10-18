@@ -1145,18 +1145,31 @@ def self_test() -> int:
     # 24. The committed handoff itself loads and structurally validates. The two
     # counts are a deliberate tripwire: the reviewed handoff is the authorization
     # basis, so a regenerated one must be re-reviewed rather than silently adopted.
-    # Regenerating the audit is expected to trip this; update both pins in the same
-    # commit that lands the new handoff.
+    # Pin the durability split too because the operator may authorize only the
+    # durable subset. Regenerating the audit is expected to trip this; update all
+    # pins in the same commit that lands the new handoff.
     if (DEFAULT_HANDOFF_DIR / SUMMARY_JSON).is_file():
         committed = load_handoff(DEFAULT_HANDOFF_DIR, audit=audit, max_age_days=None)
-        pinned = (2666, 571)
-        observed = (len(committed.candidates), len(committed.withheld))
+        pinned = (551, 463, 18, 533)
+        observed = (
+            len(committed.candidates),
+            len(committed.withheld),
+            sum(
+                row.counterpart_durability == "durable"
+                for row in committed.candidates.values()
+            ),
+            sum(
+                row.counterpart_durability == "perishable"
+                for row in committed.candidates.values()
+            ),
+        )
         assert observed == pinned, (
             f"committed handoff {DEFAULT_HANDOFF_DIR.name} has "
-            f"{observed[0]} candidates / {observed[1]} withheld, but this self-test pins "
-            f"{pinned[0]} / {pinned[1]}. If the audit was just regenerated, restate the new "
-            "counts in the operator authorization and update these pins; otherwise the "
-            "committed handoff was replaced without review."
+            f"{observed[0]} candidates / {observed[1]} withheld / "
+            f"{observed[2]} durable / {observed[3]} perishable, but this self-test pins "
+            f"{pinned[0]} / {pinned[1]} / {pinned[2]} / {pinned[3]}. If the audit was "
+            "just regenerated, restate the new counts in the operator authorization and "
+            "update these pins; otherwise the committed handoff was replaced without review."
         )
         assert not (set(committed.candidates) & set(committed.withheld))
 

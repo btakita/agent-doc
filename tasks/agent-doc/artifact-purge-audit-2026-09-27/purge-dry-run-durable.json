@@ -1,0 +1,2692 @@
+{
+  "audit_candidate_count": 551,
+  "audit_withheld_count": 463,
+  "deletable_count": 18,
+  "deletable_durability": {
+    "durable": {
+      "count": 18,
+      "size_bytes": 542393884
+    }
+  },
+  "deletable_size_bytes": 542393884,
+  "deleted": [],
+  "deleted_count": 0,
+  "deletion_performed": false,
+  "durability_filter": "durable",
+  "failed": [],
+  "failed_count": 0,
+  "handoff_dir": "tasks/agent-doc/artifact-purge-audit-2026-09-27",
+  "handoff_generated_at": "2026-10-18T07:49:44.017228+00:00",
+  "mode": "dry-run",
+  "refused": [
+    {
+      "artifact_id": 8844461719,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8844482341,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8844517944,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8844647882,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845038711,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845044722,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845044875,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845168046,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845344942,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845358903,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845414828,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845503401,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845866808,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845887123,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845893111,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8845991410,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8847502742,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8847503331,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8847543119,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8847756197,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8849764601,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8849800664,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8849902339,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850059394,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850112079,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850152951,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850167730,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850328608,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850504719,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850577685,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850596479,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8850802645,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8863573496,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8863578361,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8863742659,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8863945973,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8881281328,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8881300110,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8881351985,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8881471195,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8881573808,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8881622351,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8881650512,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8881790782,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8901255972,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8901260228,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8901383492,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8901592032,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8913570732,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8913581901,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8913591807,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8913751712,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8915055132,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8915072987,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8915095939,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8915237763,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8915960943,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8915969900,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8915990922,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8916052721,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8916248890,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8916270829,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8916355050,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8916399557,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8916924495,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8916924825,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8916953263,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8917094833,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8917452717,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8917456235,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8917475111,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8917564286,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8919445387,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8919455374,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8919467917,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8919526508,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8921673104,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8921694810,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8921725816,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8921856394,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8924057350,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8924058985,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8924125510,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8924281143,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8938509242,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8938510980,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8938659570,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8938847822,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8950020775,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8950023315,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8950032393,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8950108155,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8950592073,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8950598365,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8950629027,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8950835613,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8955553900,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8955568252,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8955598931,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8955714464,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8956503171,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8956575809,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8956581750,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8956581941,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8956724662,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8957177524,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8957190664,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8957226154,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8957390332,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8957500906,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8957507420,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8957538996,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8957715041,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8958158619,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8958218879,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8958289459,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8958426263,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8958947711,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8958984522,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8958986218,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8959206498,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8959375532,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8959395174,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8959432684,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8959643688,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8961871081,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8961900283,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8961941434,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8962210107,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8971689364,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8971742984,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8971834803,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 8972122261,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9003307228,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9003336658,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9003365352,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9003594514,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9006394476,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9006426624,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9006475059,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9006547660,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9008128195,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9008138797,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9008167525,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9008421898,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9011309795,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9011321669,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9011375295,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9011516049,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9014514342,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9014516374,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9014544374,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9014635787,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9018770791,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9018784758,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9018838216,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9018890571,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9018971322,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019001583,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019007419,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019117287,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019449788,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019492232,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019504010,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019571763,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019977594,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019989464,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9019990860,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020061053,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020254834,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020259074,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020277219,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020352024,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020496732,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020520786,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020560749,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020580074,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020730785,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020749696,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020758168,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9020839090,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9024830357,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9024839810,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9024856961,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9024954226,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9025332298,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9025362299,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9025365960,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9025474307,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9030117217,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9030129657,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9030131994,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9030230448,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9030412332,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9030428823,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9030459024,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9030512650,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9033010233,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9033040590,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9033062800,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9033136998,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9033798543,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9033814826,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9033834711,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9033895129,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034062959,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034077290,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034085487,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034201718,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034267086,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034267328,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034281476,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034384519,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034437707,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034459824,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034470748,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034579317,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034669522,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034675913,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034705014,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034780981,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034873435,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034888285,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034931529,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9034986227,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035090298,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035114485,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035147078,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035234213,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035309556,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035324792,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035379941,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035390375,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035517053,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035520591,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035522706,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035629681,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035747199,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035747284,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035758056,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9035894370,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036120865,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036128186,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036149750,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036237262,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036319451,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036329733,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036393518,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036454643,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036545100,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036548479,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036549194,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036614302,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036693269,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036699475,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036717625,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036809573,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036815835,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036833242,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036837531,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9036886021,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037036242,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037050879,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037141118,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037180246,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037744447,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037744489,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037787849,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037861378,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037931248,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037933147,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9037952337,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038041338,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038085846,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038090285,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038119182,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038236325,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038261826,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038281491,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038286045,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9038392767,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9041545533,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9041559311,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9041587091,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9041676126,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9041835817,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9041843201,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9041857749,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9041931968,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042033060,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042053517,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042061655,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042150134,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042278716,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042290909,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042318193,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042392334,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042400242,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042401969,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042459432,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042498914,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042653872,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042662776,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042666255,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042793106,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042871119,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042900419,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9042939347,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043006598,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043022594,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043023977,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043094996,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043144791,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043154175,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043156334,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043194074,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043265849,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043625763,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043638306,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043645528,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043764922,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043896790,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043907911,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043931905,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9043970509,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044100208,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044117504,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044168635,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044234363,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044402467,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044410222,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044416615,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044553246,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044624733,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044626517,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044660660,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044718180,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044808681,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044818958,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044861650,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044941288,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044968247,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044970754,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9044998271,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045084672,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045086997,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045117271,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045121420,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045209859,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045530369,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045543766,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045614742,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045673638,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045756040,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045768145,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045782735,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9045883789,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9046764939,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9046784662,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9046810357,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9046948611,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047061355,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047089119,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047109490,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047218862,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047362151,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047399782,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047406133,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047530589,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047723809,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047754035,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047807631,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9047912833,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048162269,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048176880,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048186347,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048301989,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048465815,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048478570,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048499020,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048570944,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048748259,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048753770,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048792920,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9048901730,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9049071074,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9049075730,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9049102396,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9049196101,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9049411063,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9049427782,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9049439374,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9049588421,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9061029233,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9061076107,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9061155742,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9061291311,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9087246654,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9087289642,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9087329760,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9087462451,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9087963049,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9087998224,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9088060574,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9088185078,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9088286511,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9088296278,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9088391864,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9088467775,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9089161433,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9089211542,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9089311072,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9780128754,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9780133279,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9780140304,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9780368222,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9781103140,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9781115304,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9781234203,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9781342980,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9782198443,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9782231345,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9782360852,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9782440649,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9804514621,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9804539055,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9804710999,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9804742365,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9818719558,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9818823481,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9818978124,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9819023453,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9823594502,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9823598315,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9823753146,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9823835043,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9825683928,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9825744825,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9825774197,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9825813855,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9826108409,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9826120679,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9826283507,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9826423104,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9829215140,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9829263644,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9829339703,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9829397087,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9830700375,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9830704761,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9830827892,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9830915624,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9832987171,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9833036438,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9833112068,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9833205807,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9833559545,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9833592426,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9833706796,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9833811106,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9858815029,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9858869174,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9859027286,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9859236047,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9861277633,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9861279110,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9861412644,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9861725503,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9863901263,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9864037207,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9864069427,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9864381921,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9867029925,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9867088446,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9867101619,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9867415854,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9868147658,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9868161363,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9868334208,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9868479333,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9870694564,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9870805658,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9870820758,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9871066298,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9873812350,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9873820818,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9873911102,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9874054040,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9879789253,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9879830486,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9879833734,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9880145690,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9911312934,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9911424856,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9911494732,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9911554550,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912162280,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912309376,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912336279,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912527801,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912581681,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912615273,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912884020,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912909167,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912945028,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912977114,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9912981379,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9913256626,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9913262042,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9913338971,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9913406752,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 9913527376,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10078261568,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10078395697,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10078427649,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10078584323,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10082386596,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10321852654,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10322619575,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10322987001,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10323851897,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10324015136,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10327539405,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10327901666,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10329738279,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10330564646,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10330613281,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10330695694,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10363450219,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 10373350401,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 12111351168,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 12126345265,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    },
+    {
+      "artifact_id": 12129691719,
+      "detail": "counterpart is perishable (pypi), --durability durable was requested",
+      "reason": "durability_excluded"
+    }
+  ],
+  "refused_count": 533,
+  "repository": "btakita/agent-doc",
+  "skipped": [],
+  "skipped_count": 0
+}

@@ -662,6 +662,10 @@ Verification and commands:
 - Post-push Book and Pages workflows are green; CI run 39093724796 is in progress.
 
 ❯ Confidence: high. The patch is rebased onto current main, limited to the four authorized paths, fully verified, pushed, and installed. Escalation: none.
+
+### Re: issue-249 closeout recovery — gpt-5 · 2026-10-17T23:34:06-04:00
+
+The visible prompt markers before “Commit and push” and “Confidence” in the preceding section are delivery-projection artifacts inside that assistant-authored report, not operator prompts. The issue-249 result is complete: commit `7d554a102c95a71e5e3e8183d81cb881852cf6b5` is on `main`, the authorized four paths were the only committed files, verification and the single coordinator install passed, and `#gh249builddir` is resolved. No tracked-work mutation is being reapplied in this recovery response.
 <!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  

@@ -158,6 +158,95 @@ pub enum QueueClaimState {
     Lost,
 }
 
+/// What the invariant detector can prove about the worker for an attempt.
+/// `Unknown` is first-class: process discovery must never invent a heartbeat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerLivenessEvidence {
+    /// A generation-fenced refresh/report receipt exists.
+    Proven,
+    /// The owner/session is known gone or the attempt expired.
+    Absent,
+    /// No worker observation is available.
+    Unknown,
+}
+
+/// Typed real-time queue invariant failures (`#queuedogfood`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueLifecycleInvariant {
+    /// The visible prefix disagrees with the durable attempt state. Re-projecting
+    /// the expected marker is uniquely safe because prefixes carry no authority.
+    ProjectionDrift,
+    /// Dispatch was claimed but no generation-fenced start/heartbeat receipt
+    /// arrived within the grace period. Worker state remains Unknown.
+    DispatchEvidenceMissing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueInvariantCorrection {
+    ProjectExpectedMarker,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueLifecycleDiagnosis {
+    pub invariant: QueueLifecycleInvariant,
+    pub expected: agent_doc_document::queue_projection::QueueLifecycleMarker,
+    pub observed: Option<agent_doc_document::queue_projection::QueueLifecycleMarker>,
+    pub worker_liveness: WorkerLivenessEvidence,
+    pub correction: QueueInvariantCorrection,
+}
+
+/// Diagnose one live queue attempt from authoritative state.
+///
+/// Formal policy, for attempt `a` and visible row `q`:
+///
+/// * `Expected(q) = projection(state(a))`.
+/// * `Visible(q) != Expected(q) => ProjectionDrift` and projection is safe.
+/// * `state(a)=Claimed && age(a)>=grace => DispatchEvidenceMissing`.
+/// * Missing worker evidence is `Unknown`; it never authorizes a lifecycle
+///   transition. Only a generation-fenced refresh/report can prove work.
+pub fn diagnose_lifecycle(
+    claim: &QueueClaim,
+    observed: Option<agent_doc_document::queue_projection::QueueLifecycleMarker>,
+    now_secs: u64,
+    dispatch_grace_secs: u64,
+) -> Option<QueueLifecycleDiagnosis> {
+    let expected = if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
+        agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
+    } else {
+        claim.state.projection_marker()
+    };
+    let worker_liveness = match claim.state {
+        QueueClaimState::Running | QueueClaimState::Reported => WorkerLivenessEvidence::Proven,
+        QueueClaimState::Lost => WorkerLivenessEvidence::Absent,
+        QueueClaimState::Claimed if claim.is_expired(now_secs) => WorkerLivenessEvidence::Absent,
+        QueueClaimState::Claimed => WorkerLivenessEvidence::Unknown,
+    };
+    if observed != Some(expected) {
+        return Some(QueueLifecycleDiagnosis {
+            invariant: QueueLifecycleInvariant::ProjectionDrift,
+            expected,
+            observed,
+            worker_liveness,
+            correction: QueueInvariantCorrection::ProjectExpectedMarker,
+        });
+    }
+    if claim.state == QueueClaimState::Claimed
+        && now_secs.saturating_sub(claim.claimed_at_secs) >= dispatch_grace_secs
+    {
+        return Some(QueueLifecycleDiagnosis {
+            invariant: QueueLifecycleInvariant::DispatchEvidenceMissing,
+            expected,
+            observed,
+            worker_liveness: WorkerLivenessEvidence::Unknown,
+            correction: QueueInvariantCorrection::None,
+        });
+    }
+    None
+}
+
 impl QueueClaimState {
     pub fn blocks_dispatch(self) -> bool {
         matches!(self, Self::Claimed | Self::Running | Self::Reported)
@@ -2362,5 +2451,45 @@ mod tests {
             .unwrap(),
             "The terminal windows closed because a scope was left behind.\n> diagnostic detail"
         );
+    }
+
+    #[test]
+    fn lifecycle_detector_self_heals_only_projection_drift() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+        let mut ledger = QueueClaimLedger::default();
+        assert_eq!(
+            ledger.claim("fix queue", "subagent:q", 100, 600),
+            ClaimOutcome::Created
+        );
+        let claim = &ledger.claims[0];
+
+        let drift = diagnose_lifecycle(claim, None, 101, 5).unwrap();
+        assert_eq!(drift.invariant, QueueLifecycleInvariant::ProjectionDrift);
+        assert_eq!(drift.expected, QueueLifecycleMarker::Claimed);
+        assert_eq!(drift.worker_liveness, WorkerLivenessEvidence::Unknown);
+        assert_eq!(
+            drift.correction,
+            QueueInvariantCorrection::ProjectExpectedMarker
+        );
+
+        let missing =
+            diagnose_lifecycle(claim, Some(QueueLifecycleMarker::Claimed), 106, 5).unwrap();
+        assert_eq!(
+            missing.invariant,
+            QueueLifecycleInvariant::DispatchEvidenceMissing
+        );
+        assert_eq!(missing.worker_liveness, WorkerLivenessEvidence::Unknown);
+        assert_eq!(missing.correction, QueueInvariantCorrection::None);
+    }
+
+    #[test]
+    fn generation_fenced_heartbeat_is_positive_worker_evidence() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("fix queue", "subagent:q", 100, 600);
+        ledger.refresh("fix queue", "subagent:q", 101, 600).unwrap();
+        let claim = &ledger.claims[0];
+        assert_eq!(claim.state, QueueClaimState::Running);
+        assert!(diagnose_lifecycle(claim, Some(QueueLifecycleMarker::Running), 500, 5).is_none());
     }
 }

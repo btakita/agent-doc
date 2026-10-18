@@ -144,17 +144,31 @@ when both are required.
 
 `claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude. `codex_args` is ignored when the active harness is not Codex. `opencode_args` is ignored when the active harness is not OpenCode.
 
-## agent_doc_dogfood
+## dogfood / agent_doc_dogfood
 
-`agent_doc_dogfood: true` in document frontmatter opts that session into
-actionable Agent Doc terminal-failure notifications. Any command failure that
-prevents a successful turn boundary emits an `ACTIONABLE_AGENT_DOC_FIX_PROMPT`
-with a stable document + failure-class key; the prompt directs the active agent
-to fix the underlying Agent Doc defect while preserving retained-capture
-no-resubmit/no-recycle constraints. `false` explicitly disables the mode.
-When absent, legacy agent-doc source/task path inference remains for backward
-compatibility. `dogfood_mode` is accepted as a read-only alias; serialization
-uses `agent_doc_dogfood`.
+Dogfood routing is document-local and off by default. The session value wins;
+when absent, the nearest explicit value in `.agent-doc/project.md` is inherited.
+Absence at both layers is disabled. Accepted forms are:
+
+```yaml
+dogfood: false                         # disabled
+dogfood: true                          # current document; manual queueing
+dogfood: tasks/agent-doc/bugs.md       # project-relative target; manual queueing
+dogfood:
+  path: tasks/agent-doc/bugs.md        # optional; absent = current document
+  auto: true                           # optional; default false
+```
+
+`auto: true` applies only to generated, stable-keyed dogfood findings; ordinary
+backlog work is never activated. A self-target is legal because stable keys
+deduplicate it and routing never invokes agent-doc recursively. The canonical
+serialized key remains `agent_doc_dogfood`; `dogfood` and `dogfood_mode` are
+read aliases.
+
+This switch gates feedback routing, not diagnosis. Queue lifecycle invariants
+are checked for every session. Cosmetic projection drift has the single safe
+repair of re-projecting the durable claim state; an unconfirmed worker remains
+typed `Unknown` and produces a diagnostic instead of an invented `🚧` state.
 
 ## agent_doc_scratch
 

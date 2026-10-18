@@ -809,6 +809,7 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
             | OpsLogEvent::AgentDocCycleMarker,
         ) => "cross-harness correlation marker".to_string(),
         Some(OpsLogEvent::ConvergenceGateBlocked) => "convergence gate blocked".to_string(),
+        Some(OpsLogEvent::QueueLifecycleInvariant) => "queue lifecycle invariant".to_string(),
         Some(OpsLogEvent::RecursiveDirectInvocationBlocked) => {
             "recursive direct invocation blocked".to_string()
         }
@@ -1034,6 +1035,14 @@ fn cluster_seed(event: &ClassifiedEvent) -> Option<ClusterSeed> {
             family: "project controller deadline pressure",
             severity: "high",
             recommendation: "inspect the grouped record kinds and controller ingress slow-holder diagnostics; state-event publications retry once, while repeated expiries require controller recovery",
+        });
+    }
+
+    if category == "queue lifecycle invariant" {
+        return Some(ClusterSeed {
+            family: "queue lifecycle invariant",
+            severity: "high",
+            recommendation: "preserve the exact claim generation, repair only cosmetic projection drift automatically, and require a generation-fenced worker heartbeat before projecting running",
         });
     }
 
@@ -1675,6 +1684,22 @@ mod tests {
                 .iter()
                 .any(|sample| { sample.contains("controller_orphan_drain_worker_failed") })
         );
+    }
+
+    #[test]
+    fn queue_lifecycle_invariant_is_a_stable_high_severity_cluster() {
+        let root = Path::new("/repo");
+        let log = "[300] queue_lifecycle_invariant file=/repo/tasks/a.md key=qinv123 invariant=DispatchEvidenceMissing generation=2 worker_liveness=Unknown correction=None\n";
+        let report =
+            summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
+        let cluster = report
+            .bug_clusters
+            .iter()
+            .find(|cluster| cluster.family == "queue lifecycle invariant")
+            .expect("typed queue invariant cluster");
+        assert_eq!(cluster.severity, "high");
+        assert_eq!(cluster.count, 1);
+        assert_eq!(report.buckets[0].category, "queue lifecycle invariant");
     }
 
     #[test]

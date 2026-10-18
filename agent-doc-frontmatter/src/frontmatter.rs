@@ -455,6 +455,51 @@ fn canonical_resume_harness(raw: &str) -> &'static str {
     }
 }
 
+/// Per-session dogfood routing policy. A boolean is retained for compatibility;
+/// a path opts in and names the markdown document that receives deduplicated
+/// findings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DogfoodConfig {
+    Enabled(bool),
+    Target(String),
+    Options(DogfoodOptions),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DogfoodOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub auto: bool,
+}
+
+impl DogfoodConfig {
+    pub fn enabled(&self) -> bool {
+        match self {
+            Self::Enabled(enabled) => *enabled,
+            Self::Target(target) => !target.trim().is_empty(),
+            Self::Options(_) => true,
+        }
+    }
+
+    pub fn target(&self) -> Option<&str> {
+        match self {
+            Self::Target(target) if !target.trim().is_empty() => Some(target.trim()),
+            Self::Options(options) => options
+                .path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty()),
+            _ => None,
+        }
+    }
+
+    pub fn auto(&self) -> bool {
+        matches!(self, Self::Options(DogfoodOptions { auto: true, .. }))
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Document/routing UUID — permanent identifier for tmux pane routing.
@@ -735,9 +780,10 @@ pub struct Frontmatter {
         default,
         skip_serializing_if = "Option::is_none",
         rename = "agent_doc_dogfood",
-        alias = "dogfood_mode"
+        alias = "dogfood_mode",
+        alias = "dogfood"
     )]
-    pub dogfood_mode: Option<bool>,
+    pub dogfood_mode: Option<DogfoodConfig>,
     /// Required model tier for this document. When set, preflight emits this as
     /// `required_tier`, which the skill uses as a hard gate: if the running model's
     /// tier is below this value, the skill writes a switch prompt and stops.
@@ -3133,7 +3179,10 @@ mod tests {
         let claimed = set_session_id(content, "sample-session").unwrap();
         let (claimed_fm, claimed_body) = parse(&claimed).unwrap();
         assert_eq!(claimed_fm.session.as_deref(), Some("sample-session"));
-        assert_eq!(claimed_body, body, "claim must not duplicate the body:\n{claimed}");
+        assert_eq!(
+            claimed_body, body,
+            "claim must not duplicate the body:\n{claimed}"
+        );
     }
 
     /// `#netadv7` fuzz crasher (minimized): a bare `\r` inside a value is a YAML
@@ -3175,7 +3224,11 @@ mod tests {
         let (reparsed, rebody) = parse(&written).unwrap();
         assert_eq!(rebody, body);
         assert_eq!(preset(&reparsed), preset(&fm), "{written:?}");
-        assert_eq!(write(&reparsed, rebody).unwrap(), written, "write is a fixed point");
+        assert_eq!(
+            write(&reparsed, rebody).unwrap(),
+            written,
+            "write is a fixed point"
+        );
 
         let preserved = write_preserving(content, &fm, body).unwrap();
         let (reparsed, _) = parse(&preserved).unwrap();
@@ -5514,13 +5567,32 @@ mod tests {
     fn dogfood_mode_round_trips_and_accepts_short_alias() {
         let canonical = "---\nagent_doc_dogfood: true\n---\n\nBody\n";
         let (frontmatter, body) = parse(canonical).unwrap();
-        assert_eq!(frontmatter.dogfood_mode, Some(true));
+        assert_eq!(frontmatter.dogfood_mode, Some(DogfoodConfig::Enabled(true)));
         let rewritten = write(&frontmatter, body).unwrap();
         assert!(rewritten.contains("agent_doc_dogfood: true"));
         assert!(!rewritten.contains("dogfood_mode:"));
 
         let (aliased, _) = parse("---\ndogfood_mode: false\n---\n").unwrap();
-        assert_eq!(aliased.dogfood_mode, Some(false));
+        assert_eq!(aliased.dogfood_mode, Some(DogfoodConfig::Enabled(false)));
+
+        let (targeted, _) =
+            parse("---\ndogfood: tasks/agent-doc/agent-doc-bugs.md\n---\n").unwrap();
+        assert_eq!(
+            targeted.dogfood_mode,
+            Some(DogfoodConfig::Target(
+                "tasks/agent-doc/agent-doc-bugs.md".to_string()
+            ))
+        );
+        let (options, _) =
+            parse("---\ndogfood:\n  path: tasks/agent-doc/agent-doc-bugs.md\n  auto: true\n---\n")
+                .unwrap();
+        assert_eq!(
+            options.dogfood_mode,
+            Some(DogfoodConfig::Options(DogfoodOptions {
+                path: Some("tasks/agent-doc/agent-doc-bugs.md".to_string()),
+                auto: true,
+            }))
+        );
     }
 
     /// `#presetsalias`: `presets:` parses exactly like `prompt_presets:`.

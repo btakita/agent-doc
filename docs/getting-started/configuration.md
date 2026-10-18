@@ -79,18 +79,21 @@ The tmux executable uses project `tmux_bin`, then global `tmux_bin`, then `PATH`
 See the [Coder workspace terminal runbook](../../runbooks/coder-workspace.md) for
 remote IDE setup and headless failure behavior.
 
-To dogfood Agent Doc itself, opt a document into actionable failure prompts:
+To dogfood Agent Doc itself, opt a document into typed, deduplicated findings:
 
 ```yaml
 ---
-agent_doc_dogfood: true
+dogfood:
+  path: tasks/agent-doc/agent-doc-bugs.md
+  auto: true
 ---
 ```
 
-When an Agent Doc command for that document fails to reach a successful
-terminal boundary, the error includes a stable `ACTIONABLE_AGENT_DOC_FIX_PROMPT`
-issue key and asks the active agent to fix the underlying product defect.
-`agent_doc_dogfood: false` disables legacy path-inferred dogfood behavior.
+`path` is project-relative and defaults to the current document. `auto` defaults
+to false; when true, only generated stable-keyed findings are queued. The same
+typed value may be set in `.agent-doc/project.md`, while session frontmatter
+wins. `dogfood: false` disables inheritance and absence everywhere is off.
+Invariant diagnosis and uniquely-safe projection repair remain on regardless.
 
 To opt a document into retained-write-owned terminal convergence:
 

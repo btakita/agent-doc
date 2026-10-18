@@ -833,6 +833,17 @@ The accumulated release obligations are complete. Agent Doc `0.35.519` / `v0.35.
 > **Queue prompt:** Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
 >
 > **Deferred:** The current pass found and processed new GH #300, but this recurring head is intentionally left live while the document queue is paused. Move it to the dedicated hourly watcher document with `interval=1h loop`; then remove the second queue block here and resume the main queue. This avoids document-wide replay while preserving the recurring obligation.
+
+### Re: #299 queue marker invariant — gpt-5 · 2026-10-18T07:38:57-04:00
+
+> **Chat prompt (#chatprompt):** subagent: `- #gh-issue https://github.com/btakita/agent-doc/issues/299` does not have a marker
+
+The subagent confirmed two distinct states:
+
+- A live #299 row with durable work evidence must project exactly one typed lifecycle marker. The earlier bare active row was a controller-handoff regression already fixed and released in v0.35.519; current main restores `🚧` from the durable running claim after a stale handoff.
+- The row currently visible in this document is struck through. That strike is its explicit terminal-completion evidence, so it intentionally has no active lifecycle emoji. Adding `🟡`, `🚧`, or `📥` to a completed row would falsely present it as live work.
+
+The formal contract is now explicit: `Bare(q) <=> !A(q) && !R(q) && !F(q)` applies only to live rows; `Completed(q)` is outside that domain and is represented by strikethrough. The subagent added a deterministic regression for the exact issue-299 shape proving one `🚧` while live and no lifecycle emoji once struck. Focused tests and `make check-fast` passed. The proof/spec commit is integrated on agent-doc `main` at `b57ddd8b544a677d581371f19021d2eb1053904c`; no runtime reinstall or release is needed because the runtime fix was already in v0.35.519.
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 
@@ -844,7 +855,7 @@ The accumulated release obligations are complete. Agent Doc `0.35.519` / `v0.35.
 - ~~do [#duplicatedqueuedue]~~
 - ~~do [#dogfood-assistant-response-lineage]~~
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- 📥 release + publish
+- ~~release + publish~~
 - ~~#gh-issue https://github.com/btakita/agent-doc/issues/295~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-issue https://github.com/btakita/agent-doc/issues/296~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-issue https://github.com/btakita/agent-doc/issues/297~~ — auto-struck: answered this cycle (#ftstrike)
@@ -854,7 +865,7 @@ The accumulated release obligations are complete. Agent Doc `0.35.519` / `v0.35.
 - ~~do [#dogfood-admin-list-supervisor-pid]~~
 - ~~do [#dogfood-authority-channel-retry-loop]~~
 - ~~do [#dogfood-runtime-audit]~~
-- do [#hourly-issue-watcher-doc]
+- 📥 do [#hourly-issue-watcher-doc]
 - do [#per-queue-schedules]
 <!-- /agent:queue -->
 

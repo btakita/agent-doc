@@ -86,7 +86,6 @@ pub struct ClaimRuntimeProjection {
     pub changed: bool,
 }
 
-const DISPATCH_EVIDENCE_GRACE_SECS: u64 = 10;
 static QUEUE_INVARIANT_LOG_DEDUPE: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
@@ -171,7 +170,7 @@ pub fn derive_claim_runtime_projection(
                         claim,
                         observed,
                         agent_doc_log_time::current_epoch_secs(),
-                        DISPATCH_EVIDENCE_GRACE_SECS,
+                        agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
                     )
                 {
                     log_queue_invariant_once(file, claim, diagnosis);

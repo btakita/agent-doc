@@ -206,6 +206,22 @@ pub enum QueueLifecycleInvariant {
     DispatchEvidenceMissing,
 }
 
+/// How long a newly-created claim may remain unbound while its coordinator is
+/// completing the harness spawn boundary. After this grace, `Claimed` is a
+/// coordinator obligation rather than evidence that work is in flight.
+pub const DISPATCH_EVIDENCE_GRACE_SECS: u64 = 10;
+
+/// Whether this exact attempt has missed its required `queue start`
+/// acknowledgement. This predicate is independent of the visible lifecycle
+/// marker: projection drift and a missing worker binding can coexist, and the
+/// latter must remain visible at preflight/closeout boundaries.
+pub fn dispatch_evidence_missing(claim: &QueueClaim, now_secs: u64, grace_secs: u64) -> bool {
+    claim.state == QueueClaimState::Claimed
+        && claim.worker.is_none()
+        && !claim.is_expired(now_secs)
+        && now_secs.saturating_sub(claim.claimed_at_secs) >= grace_secs
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueInvariantCorrection {
     ProjectExpectedMarker,
@@ -256,9 +272,7 @@ pub fn diagnose_lifecycle(
             correction: QueueInvariantCorrection::ProjectExpectedMarker,
         });
     }
-    if claim.state == QueueClaimState::Claimed
-        && now_secs.saturating_sub(claim.claimed_at_secs) >= dispatch_grace_secs
-    {
+    if dispatch_evidence_missing(claim, now_secs, dispatch_grace_secs) {
         return Some(QueueLifecycleDiagnosis {
             invariant: QueueLifecycleInvariant::DispatchEvidenceMissing,
             expected,
@@ -2883,6 +2897,12 @@ mod tests {
         );
         assert_eq!(missing.worker_liveness, WorkerLivenessEvidence::Unknown);
         assert_eq!(missing.correction, QueueInvariantCorrection::None);
+        assert!(!dispatch_evidence_missing(claim, 104, 5));
+        assert!(dispatch_evidence_missing(claim, 105, 5));
+        assert!(
+            dispatch_evidence_missing(claim, 106, 5),
+            "projection drift must not hide the independent coordinator obligation"
+        );
     }
 
     #[test]

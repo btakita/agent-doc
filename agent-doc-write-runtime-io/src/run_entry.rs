@@ -29,6 +29,45 @@ use agent_doc_turn::op_log::OpsLogEvent;
 // `content_ours_drops_operator_text` and `agent_doc_fs::preserve_dropped_operator_buffer`
 // remain available for diagnostics.
 
+fn enforce_dispatch_acknowledgements_from(
+    obligations: Vec<agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation>,
+) -> Result<()> {
+    if obligations.is_empty() {
+        return Ok(());
+    }
+    let remedies = obligations
+        .iter()
+        .map(|obligation| obligation.message())
+        .collect::<Vec<_>>()
+        .join(" ");
+    anyhow::bail!(
+        "[finalize] pre-write gate: a claimed queue dispatch has no worker acknowledgement. \
+         Resolve the coordinator obligation before closeout. {remedies}"
+    );
+}
+
+fn enforce_dispatch_acknowledgements(file: &Path, current: &str) -> Result<()> {
+    enforce_dispatch_acknowledgements_from(
+        agent_doc_queue_io::queue_claim::dispatch_acknowledgement_obligations_for_content(
+            file, current,
+        )?,
+    )
+}
+
+#[cfg(test)]
+fn enforce_dispatch_acknowledgements_at(
+    file: &Path,
+    current: &str,
+    now_secs: u64,
+    grace_secs: u64,
+) -> Result<()> {
+    enforce_dispatch_acknowledgements_from(
+        agent_doc_queue_io::queue_claim::dispatch_acknowledgement_obligations_for_content_at(
+            file, current, now_secs, grace_secs,
+        )?,
+    )
+}
+
 fn enforce_selected_queue_response_contract(
     file: Option<&Path>,
     baseline: Option<&str>,
@@ -38,6 +77,9 @@ fn enforce_selected_queue_response_contract(
 ) -> Result<()> {
     if !flags.strict_closeout {
         return Ok(());
+    }
+    if let Some(file) = file {
+        enforce_dispatch_acknowledgements(file, current)?;
     }
     enforce_queue_head_annotation_response_contract(current, response, flags)?;
     let explicit_id_completion = !flags.queue_completion_ids.is_empty();
@@ -3378,6 +3420,43 @@ mod tests {
             &flags,
         )
         .expect("a claimed head is owned by its worker, not by this cycle");
+    }
+
+    #[test]
+    fn strict_closeout_blocks_an_overdue_unstarted_claim_with_both_remedies() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let current = concat!(
+            "<!-- agent:queue go -->\n",
+            "- #subagents do [#gh301]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "#gh301", "subagent:gh301", 600).unwrap();
+
+        let error =
+            enforce_dispatch_acknowledgements_at(&doc, current, claim.claimed_at_secs + 10, 10)
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("coordinator obligation"), "{error}");
+        assert!(error.contains("queue start"), "{error}");
+        assert!(error.contains("--worker-id <worker-id>"), "{error}");
+        assert!(error.contains("queue release"), "{error}");
+        assert!(error.contains("--requeue"), "{error}");
+
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#gh301",
+            "subagent:gh301",
+            "worker:gh301",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        enforce_dispatch_acknowledgements_at(&doc, current, claim.claimed_at_secs + 100, 10)
+            .expect("a worker-bound Running claim may close out normally");
     }
 
     /// A fresh exchange/chat prompt preempts an active queue drain for this

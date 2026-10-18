@@ -108,6 +108,7 @@ pub fn content_and_staleness_warnings(
     {
         warnings.push(warning);
     }
+    warnings.extend(dispatch_acknowledgement_warnings(file, content));
     warnings.extend(stale_plugin_warnings(file));
     warnings.extend(plugin_byte_identity_warnings(file));
     warnings.extend(jetbrains_staged_install_failure_warnings());
@@ -127,6 +128,60 @@ pub fn content_and_staleness_warnings(
         ));
     }
     warnings
+}
+
+fn dispatch_acknowledgement_warnings_from(
+    file: &Path,
+    obligations: anyhow::Result<
+        Vec<agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation>,
+    >,
+) -> Vec<PreflightWarning> {
+    match obligations {
+        Ok(obligations) => obligations
+            .into_iter()
+            .map(|obligation| PreflightWarning {
+                code: "queue_dispatch_acknowledgement_missing".to_string(),
+                message: format!("{}: {}", file.display(), obligation.message(),),
+                document_agent: None,
+                active_harness: None,
+            })
+            .collect(),
+        Err(err) => vec![PreflightWarning {
+            code: "queue_dispatch_acknowledgement_check_failed".to_string(),
+            message: format!(
+                "{}: could not inspect queue dispatch acknowledgements: {err:#}",
+                file.display(),
+            ),
+            document_agent: None,
+            active_harness: None,
+        }],
+    }
+}
+
+/// Every preflight re-evaluates the durable claim ledger so an overdue
+/// dispatch cannot remain an ops-log-only diagnosis (GH #301).
+fn dispatch_acknowledgement_warnings(file: &Path, content: &str) -> Vec<PreflightWarning> {
+    dispatch_acknowledgement_warnings_from(
+        file,
+        agent_doc_queue_io::queue_claim::dispatch_acknowledgement_obligations_for_content(
+            file, content,
+        ),
+    )
+}
+
+#[cfg(test)]
+fn dispatch_acknowledgement_warnings_at(
+    file: &Path,
+    content: &str,
+    now_secs: u64,
+    grace_secs: u64,
+) -> Vec<PreflightWarning> {
+    dispatch_acknowledgement_warnings_from(
+        file,
+        agent_doc_queue_io::queue_claim::dispatch_acknowledgement_obligations_for_content_at(
+            file, content, now_secs, grace_secs,
+        ),
+    )
 }
 
 /// `#supdrainyieldfalsifiable` (GH #73 §3): a queue head that was handed to the
@@ -919,6 +974,35 @@ mod tests {
         MappedPluginJar, classify_mapped_plugin_jar, plugin_byte_identity_warnings_from,
         plugin_install_state_for_mapped_jar, plugin_jar_stems, prefer_mapped_plugin_jar,
     };
+
+    #[test]
+    fn preflight_warns_when_claim_never_reaches_queue_start() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nsession: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- #subagents do [#gh301]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "#gh301", "subagent:gh301", 600).unwrap();
+
+        let warnings = super::dispatch_acknowledgement_warnings_at(
+            &doc,
+            content,
+            claim.claimed_at_secs + 10,
+            10,
+        );
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].code, "queue_dispatch_acknowledgement_missing");
+        assert!(warnings[0].message.contains("queue start"));
+        assert!(warnings[0].message.contains("--worker-id <worker-id>"));
+        assert!(warnings[0].message.contains("release"));
+        assert!(warnings[0].message.contains("--requeue"));
+    }
 
     /// `#pluginbyteidentity`: the kernel's `" (deleted)"` suffix is the only
     /// evidence that survives an install unlinking the jar we are executing.

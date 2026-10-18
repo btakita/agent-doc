@@ -907,6 +907,87 @@ pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<Queue
         .collect())
 }
 
+/// A claimed queue attempt whose harness spawn was never acknowledged with
+/// `queue start`. This is an actionable coordinator obligation, not evidence
+/// that a worker is running (`#queueclaimworker`, GH #301).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchAcknowledgementObligation {
+    pub item: String,
+    pub owner: String,
+    pub generation: u64,
+    pub start_command: String,
+    pub release_command: String,
+}
+
+impl DispatchAcknowledgementObligation {
+    pub fn message(&self) -> String {
+        format!(
+            "queue item {:?} is still claimed/dispatching by {} at generation {} but no worker \
+             acknowledgement was recorded. If the harness spawn succeeded, bind its worker now: \
+             `{}`. Otherwise abandon this attempt for redispatch: `{}`.",
+            self.item, self.owner, self.generation, self.start_command, self.release_command,
+        )
+    }
+}
+
+fn shell_single_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+pub fn dispatch_acknowledgement_obligation(
+    file: &Path,
+    claim: &QueueClaim,
+) -> DispatchAcknowledgementObligation {
+    let item_handle = agent_doc_queue::queue_claim::claim_item_handle(&claim.item_text);
+    let document = shell_single_quote(&file.display().to_string());
+    let item = shell_single_quote(&item_handle);
+    let owner = shell_single_quote(&claim.owner);
+    DispatchAcknowledgementObligation {
+        item: claim.item_text.clone(),
+        owner: claim.owner.clone(),
+        generation: claim.generation,
+        start_command: format!(
+            "agent-doc queue start {document} --item {item} --owner {owner} --generation {} --worker-id <worker-id>",
+            claim.generation,
+        ),
+        release_command: format!(
+            "agent-doc queue release {document} --item {item} --generation {} --requeue",
+            claim.generation,
+        ),
+    }
+}
+
+/// Derive every overdue dispatch acknowledgement from the current queue and
+/// durable claim ledger. Callers supply time/grace so boundary tests stay
+/// deterministic without sleeping.
+pub fn dispatch_acknowledgement_obligations_for_content_at(
+    file: &Path,
+    content: &str,
+    now_secs: u64,
+    grace_secs: u64,
+) -> Result<Vec<DispatchAcknowledgementObligation>> {
+    Ok(active_claims_for_content(file, content)?
+        .into_iter()
+        .filter(|claim| {
+            agent_doc_queue::queue_claim::dispatch_evidence_missing(claim, now_secs, grace_secs)
+        })
+        .map(|claim| dispatch_acknowledgement_obligation(file, &claim))
+        .collect())
+}
+
+/// Production projection of overdue dispatch acknowledgements.
+pub fn dispatch_acknowledgement_obligations_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<Vec<DispatchAcknowledgementObligation>> {
+    dispatch_acknowledgement_obligations_for_content_at(
+        file,
+        content,
+        now_secs(),
+        agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
+    )
+}
+
 /// Every live queue-head claim record, including lost and reported states, for
 /// the visible runtime projection. Expired active attempts are presented as
 /// lost even before the next durable prune pass.
@@ -1470,6 +1551,70 @@ mod tests {
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(ops.contains("queue_claim_start outcome=running"), "{ops}");
         assert!(ops.contains("queue_claim_start outcome=refused"), "{ops}");
+    }
+
+    #[test]
+    fn overdue_unstarted_claim_is_an_actionable_dispatch_obligation() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["#subagents do [#gh301]"]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (_, claim) = claim(&doc, "#gh301", "subagent:gh301", 600).unwrap();
+
+        assert!(
+            dispatch_acknowledgement_obligations_for_content_at(
+                &doc,
+                &content,
+                claim.claimed_at_secs + 9,
+                10,
+            )
+            .unwrap()
+            .is_empty()
+        );
+        let obligations = dispatch_acknowledgement_obligations_for_content_at(
+            &doc,
+            &content,
+            claim.claimed_at_secs + 10,
+            10,
+        )
+        .unwrap();
+        assert_eq!(obligations.len(), 1);
+        let obligation = &obligations[0];
+        assert_eq!(obligation.item, "#subagents do [#gh301]");
+        assert!(
+            obligation.start_command.contains(
+                "--item '#gh301' --owner 'subagent:gh301' --generation 1 --worker-id <worker-id>"
+            ),
+            "{}",
+            obligation.start_command,
+        );
+        assert!(
+            obligation
+                .release_command
+                .contains("--item '#gh301' --generation 1 --requeue"),
+            "{}",
+            obligation.release_command,
+        );
+
+        start_attempt(
+            &doc,
+            "#gh301",
+            "subagent:gh301",
+            "worker:gh301",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        assert!(
+            dispatch_acknowledgement_obligations_for_content_at(
+                &doc,
+                &content,
+                claim.claimed_at_secs + 100,
+                10,
+            )
+            .unwrap()
+            .is_empty(),
+            "a worker-bound Running attempt is genuinely in flight"
+        );
     }
 
     #[test]

@@ -655,8 +655,7 @@ fn claude_queue_continuation(
         return Ok(None);
     }
     let Some(prompt) = active_auto_queue_prompt(&file)? else {
-        log_claimed_heads_waiting(&file);
-        return Ok(None);
+        return claimed_heads_stop_continuation(&file);
     };
 
     // `#stopneedsclosedcycle`, second half: `stop_hook_active` only breaks
@@ -904,11 +903,23 @@ pub fn claude_stop_steering_reason(file_display: &str, verbatim: &str) -> String
     )
 }
 
-/// `#queueclaim`: when no drainable head remains but live heads are claimed by
-/// workers outside the in-session loop (dispatched subagents), the turn ends
-/// quietly and the document is waiting on that in-flight work. Record the
-/// waiting state so the quiet stop is explainable from ops.log.
-fn log_claimed_heads_waiting(file: &Path) {
+/// `#queueclaim`: when no drainable head remains, distinguish worker-bound
+/// claims from an overdue `Claimed` attempt. The latter is a coordinator
+/// obligation and must block Stop with the exact start/requeue commands instead
+/// of being mislabeled as in-flight work (GH #301).
+fn claimed_heads_stop_continuation(file: &Path) -> Result<Option<ClaudeStopContinuation>> {
+    claimed_heads_stop_continuation_at(
+        file,
+        now_secs(),
+        agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
+    )
+}
+
+fn claimed_heads_stop_continuation_at(
+    file: &Path,
+    now_secs: u64,
+    grace_secs: u64,
+) -> Result<Option<ClaudeStopContinuation>> {
     let content = match current_document_content(file, "claude_stop_claimed_heads_check") {
         Ok(content) => content,
         Err(err) => {
@@ -916,9 +927,34 @@ fn log_claimed_heads_waiting(file: &Path) {
                 "[agent-doc] Claude Stop hook could not read {} to report claimed queue heads: {err:#}",
                 file.display()
             );
-            return;
+            return Ok(None);
         }
     };
+    let obligations =
+        agent_doc_queue_io::queue_claim::dispatch_acknowledgement_obligations_for_content_at(
+            file, &content, now_secs, grace_secs,
+        )?;
+    if !obligations.is_empty() {
+        let remedies = obligations
+            .iter()
+            .map(|obligation| obligation.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "claude_stop_queue_dispatch_acknowledgement_missing obligations={} action=block_and_repair",
+                obligations.len(),
+            ),
+        );
+        return Ok(Some(ClaudeStopContinuation {
+            reason: format!(
+                "agent-doc cannot end this turn because a claimed queue dispatch has no worker \
+                 acknowledgement. Resolve the coordinator obligation, then finish closeout. \
+                 {remedies}"
+            ),
+        }));
+    }
     let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content);
     let claimed_heads = agent_doc_queue::queue_continuation::claimed_head_count(&content, &claimed);
     if claimed_heads > 0 {
@@ -930,6 +966,7 @@ fn log_claimed_heads_waiting(file: &Path) {
             ),
         );
     }
+    Ok(None)
 }
 
 /// `#loopreentrynoop`: the Claude Code Stop-hook continuation instruction.
@@ -7281,6 +7318,51 @@ Reviewed the gated items.\n\
             .unwrap()
             .expect("a released head is drainable again");
         assert!(resumed.reason.contains("issues/109"), "{}", resumed.reason);
+    }
+
+    #[test]
+    fn claude_stop_blocks_an_overdue_claim_without_worker_acknowledgement() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["#subagents do [#gh301]"]);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "#gh301", "subagent:gh301", 600).unwrap();
+
+        let blocked = claimed_heads_stop_continuation_at(&doc, claim.claimed_at_secs + 10, 10)
+            .unwrap()
+            .expect("an overdue unstarted claim must block Stop");
+        assert!(
+            blocked.reason.contains("coordinator obligation"),
+            "{}",
+            blocked.reason
+        );
+        assert!(blocked.reason.contains("queue start"), "{}", blocked.reason);
+        assert!(
+            blocked.reason.contains("--worker-id <worker-id>"),
+            "{}",
+            blocked.reason,
+        );
+        assert!(
+            blocked.reason.contains("queue release"),
+            "{}",
+            blocked.reason
+        );
+        assert!(blocked.reason.contains("--requeue"), "{}", blocked.reason);
+
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#gh301",
+            "subagent:gh301",
+            "worker:gh301",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        assert!(
+            claimed_heads_stop_continuation_at(&doc, claim.claimed_at_secs + 100, 10)
+                .unwrap()
+                .is_none(),
+            "a worker-bound claim remains a quiet in-flight wait"
+        );
     }
 
     /// `#stopneedsclosedcycle`: the marker is document-level and outlives the

@@ -552,6 +552,13 @@ escalation for a document already present in that pending split must not overwri
 split. Releasing the route projects the editor observation, so an accepted structural-sync
 observation remains the next authoritative layout rather than disappearing behind an escalation
 reconstructed from retained columns.
+The slot chosen when that escalation replaces an uncovered document is a guess, not order
+authority (GH #302). The desired generation carries the last positively observed columns as a
+provisional order basis. If the next structural publication still includes a document displaced
+by the guess, its `unknown` order is resolved against that pre-escalation basis; a structural
+publication that confirms the guessed membership retires the provisional basis. Read-only clients
+that anchor layout memory receive the same positive basis while the guess is outstanding, including
+after a client restart, so the guessed order cannot become a durable pane reversal.
 - Realising a column is audited after tmux-router runs (GH #109). A column pane
 that moved windows (a stash → layout promotion), runs another document, or
 whose route-owned supervisor maps a superseded binary gets one

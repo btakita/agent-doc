@@ -462,6 +462,48 @@ pub(crate) struct PaneLayoutDesired {
     pub provenance: PaneLayoutProvenance,
 }
 
+impl PaneLayoutDesired {
+    /// Columns that may authoritatively seed an editor surface's order memory.
+    pub(crate) fn order_authority_columns(&self) -> &[String] {
+        self.provenance
+            .provisional_order_basis
+            .as_deref()
+            .unwrap_or(&self.invocation.columns)
+    }
+
+    /// Order basis for an editor publication whose own order is unknown.
+    ///
+    /// A focus escalation can only guess which retained slot a newly focused
+    /// document replaced. If the next structural observation revives a document
+    /// displaced by that guess, fold it against the last positively observed
+    /// order instead of allowing the guessed slot to reverse the panes (GH #302).
+    pub(crate) fn order_basis_for(&self, incoming: &[String]) -> &[String] {
+        let Some(basis) = self.provenance.provisional_order_basis.as_deref() else {
+            return &self.invocation.columns;
+        };
+        let contains = |columns: &[String], document: &str| {
+            columns
+                .iter()
+                .flat_map(|column| column.split(','))
+                .map(str::trim)
+                .any(|candidate| candidate == document)
+        };
+        if basis.iter().any(|column| {
+            column
+                .split(',')
+                .map(str::trim)
+                .any(|document| {
+                    !contains(&self.invocation.columns, document)
+                        && contains(incoming, document)
+                })
+        }) {
+            basis
+        } else {
+            &self.invocation.columns
+        }
+    }
+}
+
 /// The publisher that produced a desired pane-layout generation (GH #111).
 ///
 /// Several independent planes publish the one retained desired layout: an
@@ -533,6 +575,9 @@ pub(crate) struct PaneLayoutProvenance {
     /// inside the structure they derived from, so they inherit it; a plugin
     /// publication and an `exact` route own the structure they publish.
     pub structure_owner: PaneLayoutPublisher,
+    /// Last positively observed order while this generation contains a slot
+    /// placement guessed by focus escalation (GH #302).
+    pub provisional_order_basis: Option<Vec<String>>,
 }
 
 impl PaneLayoutProvenance {
@@ -555,7 +600,7 @@ pub(crate) enum PaneLayoutRouteClaim {
 
 /// What a publication claims, beyond its invocation, when it is arbitrated
 /// against the generation it would replace (`layoutpublisherarbiter`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaneLayoutClaim {
     pub publisher: PaneLayoutPublisher,
     /// Set for `PaneLayoutPublisher::Route` only.
@@ -571,6 +616,9 @@ pub(crate) struct PaneLayoutClaim {
     /// columns. The layout graph rebases an escalation when another publisher
     /// advances the retained generation before the escalation is committed.
     pub derived_from_generation: Option<u64>,
+    /// Positive order retained while an escalation's replacement slot is only
+    /// a guess. Structural editor publication clears this provenance.
+    pub provisional_order_basis: Option<Vec<String>>,
 }
 
 impl From<PaneLayoutPublisher> for PaneLayoutClaim {
@@ -581,6 +629,7 @@ impl From<PaneLayoutPublisher> for PaneLayoutClaim {
             plane_basis: None,
             asserted_columns: None,
             derived_from_generation: None,
+            provisional_order_basis: None,
         }
     }
 }
@@ -593,6 +642,7 @@ impl PaneLayoutClaim {
             plane_basis,
             asserted_columns: None,
             derived_from_generation: None,
+            provisional_order_basis: None,
         }
     }
 
@@ -606,6 +656,11 @@ impl PaneLayoutClaim {
     /// Fence a derived publication to the retained generation it read.
     pub(crate) fn derived_from(mut self, generation: Option<u64>) -> Self {
         self.derived_from_generation = generation;
+        self
+    }
+
+    pub(crate) fn with_provisional_order_basis(mut self, basis: Option<Vec<String>>) -> Self {
+        self.provisional_order_basis = basis;
         self
     }
 
@@ -1013,7 +1068,7 @@ pub(crate) fn latest_layout_focus(
 /// accepted editor split from being replaced by that stale read (GH #224).
 fn rebase_stale_focus_escalation(
     mut invocation: ControllerTmuxLayoutSyncInvocation,
-    claim: PaneLayoutClaim,
+    claim: &mut PaneLayoutClaim,
     current: Option<&PaneLayoutDesired>,
     focus_outcome: Option<&PaneLayoutFocusOutcome>,
 ) -> ControllerTmuxLayoutSyncInvocation {
@@ -1034,6 +1089,13 @@ fn rebase_stale_focus_escalation(
         return invocation;
     }
     if !invocation_columns_contain_document(&current.invocation, &document) {
+        claim.provisional_order_basis = Some(
+            current
+                .provenance
+                .provisional_order_basis
+                .clone()
+                .unwrap_or_else(|| current.invocation.columns.clone()),
+        );
         // GH #278 Ask 3: the latest applied focus, not only the published one.
         let latest_focus = latest_layout_focus(current, focus_outcome);
         let replace_index = latest_focus
@@ -1048,6 +1110,8 @@ fn rebase_stale_focus_escalation(
             })
             .unwrap_or(columns.len() - 1);
         columns[replace_index] = document;
+    } else {
+        claim.provisional_order_basis = current.provenance.provisional_order_basis.clone();
     }
     invocation.columns = columns;
     invocation.column_order = current.invocation.column_order;
@@ -1900,7 +1964,8 @@ impl ControllerPaneLayoutGraph {
         publication: PaneLayoutPublication,
         claim: impl Into<PaneLayoutClaim>,
     ) -> PaneLayoutDesired {
-        let claim = claim.into();
+        let mut claim = claim.into();
+        let publisher = claim.publisher;
         if invocation.caller_kind.is_empty() {
             invocation.caller_kind = "projection".to_string();
         }
@@ -1918,7 +1983,7 @@ impl ControllerPaneLayoutGraph {
         let focus_outcome = self.focus_outcome.lock().clone();
         invocation = rebase_stale_focus_escalation(
             invocation,
-            claim,
+            &mut claim,
             current.as_ref(),
             focus_outcome.as_ref(),
         );
@@ -1941,7 +2006,7 @@ impl ControllerPaneLayoutGraph {
                     let incoming = PendingPaneLayoutPublication {
                         invocation,
                         source_plane_version,
-                        claim,
+                        claim: claim.clone(),
                     };
                     if !publication_state
                         .pending_passive
@@ -1975,7 +2040,7 @@ impl ControllerPaneLayoutGraph {
         if matches!(
             publication,
             PaneLayoutPublication::FreshRouteIntent | PaneLayoutPublication::FreshCommandIntent
-        ) && desired.provenance.publisher == claim.publisher
+        ) && desired.provenance.publisher == publisher
             && let Some(document) = desired.invocation.focus.clone().or_else(|| {
                 (publication == PaneLayoutPublication::FreshCommandIntent)
                     .then(|| desired.invocation.columns.first())
@@ -2002,6 +2067,7 @@ impl ControllerPaneLayoutGraph {
         claim: PaneLayoutClaim,
     ) -> PaneLayoutDesired {
         let publisher = claim.publisher;
+        let provisional_order_basis = claim.provisional_order_basis.clone();
         let editor_publication = current_pane_layout_editor_publication();
         if publication == PaneLayoutPublication::CoalesceIdentical
             && let Some(mut current) = self.ctx.get(&self.desired)
@@ -2016,6 +2082,13 @@ impl ControllerPaneLayoutGraph {
                 .retired(current.generation)
                 .is_some_and(|retired| retired.rearms_on_identical_republication())
         {
+            if current.provenance.provisional_order_basis.is_some()
+                && claim.provisional_order_basis.is_none()
+                && claim.width_authority()
+                    == agent_doc_controller::pane_layout::LayoutWidthAuthority::EditorSplitObservation
+            {
+                current.provenance.provisional_order_basis = None;
+            }
             self.attempt_ledger.lock().note_published(
                 current.generation,
                 pane_layout_publication_now_ms(),
@@ -2039,7 +2112,7 @@ impl ControllerPaneLayoutGraph {
             current.as_ref(),
             &invocation.columns,
             source_plane_version,
-            claim,
+            claim.clone(),
         ) {
             PaneLayoutArbitration::Refuse(refused) => {
                 self.supersessions.lock().push(refused);
@@ -2076,6 +2149,7 @@ impl ControllerPaneLayoutGraph {
                 .map(|observation| observation.report.panes.len()),
             plane_basis,
             structure_owner,
+            provisional_order_basis,
         };
         let desired = PaneLayoutDesired {
             generation,
@@ -14558,6 +14632,34 @@ mod tests {
     }
 
     #[test]
+    fn gh302_identical_structural_observation_retires_provisional_order_basis() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
+        let invocation = pane_layout_desired_for_test(1).invocation;
+        let guessed = graph.set_desired_attributed(
+            invocation.clone(),
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutClaim::from(PaneLayoutPublisher::Escalation)
+                .with_provisional_order_basis(Some(vec!["tasks/old.md".to_string()])),
+        );
+        assert_eq!(
+            guessed.provenance.provisional_order_basis,
+            Some(vec!["tasks/old.md".to_string()])
+        );
+
+        let confirmed = graph.set_desired_attributed(
+            invocation,
+            Some(1),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::PluginPublication,
+        );
+        assert_eq!(confirmed.generation, guessed.generation);
+        assert_eq!(confirmed.provenance.provisional_order_basis, None);
+    }
+
+    #[test]
     fn foreground_pane_layout_intent_reopens_an_operator_owned_generation() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
@@ -25148,10 +25250,11 @@ mod gh278_latest_focus_tests {
     #[test]
     fn a_stale_escalation_rebases_into_the_latest_focus_column() {
         let current = desired(9, &["c.md", "b.md"], "c.md");
-        let claim = PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).derived_from(Some(8));
+        let mut claim =
+            PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).derived_from(Some(8));
         let rebased = rebase_stale_focus_escalation(
             invocation(&["d.md", "b.md"], Some("d.md")),
-            claim,
+            &mut claim,
             Some(&current),
             Some(&outcome("b.md", 9)),
         );
@@ -25161,7 +25264,7 @@ mod gh278_latest_focus_tests {
         );
         let without_outcome = rebase_stale_focus_escalation(
             invocation(&["d.md", "b.md"], Some("d.md")),
-            claim,
+            &mut claim,
             Some(&current),
             None,
         );

@@ -288,6 +288,16 @@ trailing refusal run (`consecutive_rejections`, GH #131):
 | `ProjectionUnconverged` (editor never projected the target, or a terminal `deferred` receipt reports a changed save projection) | `serialized_atomic_write` retention, `socket_already_applied` without a visible response receipt, or native-save compare-and-save drift | +1 | carry unchanged |
 | `Timeout` / `Unsupported` | socket send error or exhausted build-mismatch handoff | +1 | reset |
 
+A recovery re-register received while the JetBrains native reload coordinator
+has temporarily removed the CRDT replica manager is not a `Rejected` outcome.
+The live project still owns the open document, and replacement managers are
+being published, so `cause=no_replica_manager` returns `deferred`. The
+controller may retry within its bounded re-observation loop, but the receipt
+does not create a definitive not-serving witness, extend the transport refusal
+run, degrade the endpoint, or authorize disk fallback for the open editor (GH
+#297). Stable capture failures such as a disposed project, missing file, or
+missing document remain rejected.
+
 An exhausted build-mismatch recovery remains a definitive answer for authority
 recovery (the old listener cannot serve the new controller), but it is recorded
 as `Unsupported` for transport health. An upgrade handoff therefore resets an

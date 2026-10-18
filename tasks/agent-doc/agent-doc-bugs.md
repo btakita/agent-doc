@@ -844,6 +844,20 @@ The subagent confirmed two distinct states:
 - The row currently visible in this document is struck through. That strike is its explicit terminal-completion evidence, so it intentionally has no active lifecycle emoji. Adding `🟡`, `🚧`, or `📥` to a completed row would falsely present it as live work.
 
 The formal contract is now explicit: `Bare(q) <=> !A(q) && !R(q) && !F(q)` applies only to live rows; `Completed(q)` is outside that domain and is represented by strikethrough. The subagent added a deterministic regression for the exact issue-299 shape proving one `🚧` while live and no lifecycle emoji once struck. Focused tests and `make check-fast` passed. The proof/spec commit is integrated on agent-doc `main` at `b57ddd8b544a677d581371f19021d2eb1053904c`; no runtime reinstall or release is needed because the runtime fix was already in v0.35.519.
+
+### Re: Independent per-queue schedules — gpt-5 · 2026-10-18T08:18:47-04:00
+
+> **Queue prompt:** do [#per-queue-schedules]
+
+Implemented, integrated, pushed, and installed from agent-doc main commit `3f6152bec007a144f7da65a957866c2a2f927ecb`.
+
+Schedule identity is now canonical `(document, queue_id)` across parsing, the Lazily scheduler graph, state.db persistence, pass/roster state, head holding, loop restore, controller dispatch, logs, and CLI status. Existing single-queue documents retain their flat JSON/status and legacy-state compatibility. Invalid schedule syntax is queue-local and fail-closed instead of disabling or replaying sibling queues.
+
+The formal non-interference rule is now enforced: schedule/pass state for `(d,q1)` cannot open, hold, restore, increment, or replay `(d,q2)`. Tests cover an immediate `id=main` alongside an hourly looping `id=issues`, independent progress/restore, legacy migration, queue-local invalid syntax, and single-queue compatibility.
+
+Verification passed on the exact commit: `make check` with 11,037 Rust tests and zero failures, 202 VS Code tests, cross-editor simulation, all JetBrains variants, bootstrap, and TLA; `make clippy`; focused queue/controller/SQLite suites; and the coordinator's single `make install`. `origin/main` points to the same SHA.
+
+The installed CLI now reports this document's `id=issues` queue separately and holds only that queue because `interval="1 hour"` is invalid. `id=main` is no longer scheduled or gated by it. The earlier dedicated-watcher-document workaround is therefore superseded. The remaining exact live edit—changing only `id=issues` to `interval=1h`—is tracked as `#queue-id-attr-edit`, because the current binary still lacks an exact-ID queue-attribute mutation primitive; direct or ambiguous whole-component editing is intentionally refused.
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 
@@ -852,6 +866,7 @@ The formal contract is now explicit: `Bare(q) <=> !A(q) && !R(q) && !F(q)` appli
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#queue-id-attr-edit]
 - ~~do [#duplicatedqueuedue]~~
 - ~~do [#dogfood-assistant-response-lineage]~~
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
@@ -865,8 +880,8 @@ The formal contract is now explicit: `Bare(q) <=> !A(q) && !R(q) && !F(q)` appli
 - ~~do [#dogfood-admin-list-supervisor-pid]~~
 - ~~do [#dogfood-authority-channel-retry-loop]~~
 - ~~do [#dogfood-runtime-audit]~~
-- 📥 do [#hourly-issue-watcher-doc]
-- do [#per-queue-schedules]
+- ~~do [#hourly-issue-watcher-doc]~~
+- ~~do [#per-queue-schedules]~~
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -889,14 +904,14 @@ The formal contract is now explicit: `Bare(q) <=> !A(q) && !R(q) && !F(q)` appli
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#queue-id-attr-edit] Implement a generation/CAS-fenced binary command that targets one agent:queue by exact queue id and atomically sets/removes marker attributes through live editor/CRDT authority without affecting sibling queues; recognize valid queue id/interval attributes in lint; then use it to change id=issues from interval="1 hour" to interval=1h, prove id=main remains immediate while id=issues is hourly, and complete #hourly-issue-watcher-doc.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
-- [ ] [#hourly-issue-watcher-doc] Move the hourly GitHub issue watcher out of agent-doc-bugs.md into a dedicated session document with `interval=1h loop`; remove the second queue block, verify the main queue is no longer scheduled, then resume this document queue.
-- [ ] [#per-queue-schedules] Design and implement independent per-queue-id schedules so an hourly `id=issues` queue can run alongside an immediate `id=main` queue; key durable schedule/pass/roster state by `(document, queue_id)` and prove non-interference.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#hourly-issue-watcher-doc] Move the hourly GitHub issue watcher out of agent-doc-bugs.md into a dedicated session document with `interval=1h loop`; remove the second queue block, verify the main queue is no longer scheduled, then resume this document queue.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 <!-- /agent:review -->

@@ -1,8 +1,9 @@
 //! Identified multi-queue parsing and dependency-aware scheduling.
 //!
 //! Queue blocks are independent scheduling nodes. The legacy single unkeyed
-//! block is retained as the `default` queue; multiple blocks require explicit
-//! unique `id=` values and may wait for all predecessors with `after=a,b`.
+//! block is retained as the `default` queue; preflight gives omitted ids in a
+//! multi-queue document stable persisted surrogates before this graph is read.
+//! Identified blocks may wait for all predecessors with `after=a,b`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,6 +13,7 @@ use anyhow::Result;
 use crate::document_queue::{self, QueueEntry};
 
 pub const DEFAULT_QUEUE_ID: &str = "default";
+pub const SURROGATE_QUEUE_ID_PREFIX: &str = "queue";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct QueueId(String);
@@ -312,6 +314,103 @@ impl<'a> QueueGraph<'a> {
     pub fn live_prompt_count(&self) -> usize {
         self.blocks.iter().map(QueueBlock::live_prompt_count).sum()
     }
+}
+
+/// Backfill omitted queue ids before a multi-queue document enters the queue
+/// graph. A lone omitted id remains the legacy `default` queue.
+///
+/// Surrogates are based on one-based document order (`queue-1`, `queue-2`, …).
+/// If that name is already explicit or was generated earlier in the same pass,
+/// deterministic `-2`, `-3`, … suffix probing finds the first unused name.
+/// Once this returned document is persisted, later insertions and reorderings
+/// preserve every existing id because normalization only touches markers whose
+/// `id` attribute is absent.
+///
+/// Bare (`id`) and empty (`id=`) attributes are explicit malformed ids, not
+/// omissions. They continue to fail closed, as do invalid and duplicate
+/// explicit ids.
+pub fn backfill_missing_queue_ids(
+    content: &str,
+    components: &[Component],
+) -> std::result::Result<Option<String>, QueueGraphError> {
+    let queue_components = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .collect::<Vec<_>>();
+    if queue_components.len() <= 1 {
+        return Ok(None);
+    }
+
+    let mut used = HashMap::<String, usize>::new();
+    let mut missing = Vec::new();
+    for (occurrence, component) in queue_components.iter().enumerate() {
+        let Some(raw_id) = component.attrs.get("id") else {
+            missing.push((occurrence, *component));
+            continue;
+        };
+        let id = raw_id.trim();
+        if id.is_empty() || id == "true" {
+            return Err(QueueGraphError::InvalidId {
+                value: raw_id.clone(),
+            });
+        }
+        validate_id(id)?;
+        if let Some(first) = used.insert(id.to_string(), occurrence) {
+            return Err(QueueGraphError::DuplicateId {
+                id: id.to_string(),
+                occurrences: vec![first, occurrence],
+            });
+        }
+    }
+    if missing.is_empty() {
+        return Ok(None);
+    }
+
+    let mut generated = HashMap::<usize, String>::new();
+    for (occurrence, component) in missing {
+        let base = format!("{SURROGATE_QUEUE_ID_PREFIX}-{}", occurrence + 1);
+        let mut candidate = base.clone();
+        let mut probe = 2usize;
+        while used.contains_key(&candidate) {
+            candidate = format!("{base}-{probe}");
+            probe += 1;
+        }
+        used.insert(candidate.clone(), occurrence);
+        generated.insert(component.open_start, candidate);
+    }
+
+    let mut normalized = String::with_capacity(content.len() + generated.len() * 16);
+    let mut cursor = 0usize;
+    for component in queue_components {
+        let Some(id) = generated.get(&component.open_start) else {
+            continue;
+        };
+        normalized.push_str(&content[cursor..component.open_start]);
+        normalized.push_str(&insert_marker_attribute_preserving_bytes(
+            &content[component.open_start..component.open_end],
+            "id",
+            id,
+        ));
+        cursor = component.open_end;
+    }
+    normalized.push_str(&content[cursor..]);
+    Ok(Some(normalized))
+}
+
+fn insert_marker_attribute_preserving_bytes(marker: &str, key: &str, value: &str) -> String {
+    let Some(close) = marker.rfind("-->") else {
+        return marker.to_string();
+    };
+    let before_close = &marker[..close];
+    let separator = if before_close.chars().last().is_some_and(char::is_whitespace) {
+        ""
+    } else {
+        " "
+    };
+    format!(
+        "{before_close}{separator}{key}={value} {}",
+        &marker[close..]
+    )
 }
 
 pub fn parse_document(content: &str) -> Result<(Vec<Component>, Option<usize>)> {
@@ -812,6 +911,102 @@ mod tests {
                 QueueGraph::parse(doc, &components),
                 Err(QueueGraphError::MissingId { occurrence: 1 })
             ));
+        }
+    }
+
+    #[test]
+    fn missing_multi_queue_ids_are_backfilled_without_touching_explicit_markers() {
+        let doc = concat!(
+            "<!-- agent:queue   subagents -->\n- first\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=queue-1 preset=#keep-byte-exact -->\n- second\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=queue-1-2 -->\n- third\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- fourth\n<!-- /agent:queue -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let normalized = backfill_missing_queue_ids(doc, &components)
+            .unwrap()
+            .expect("multi-queue omissions need persisted ids");
+
+        assert!(normalized.contains("<!-- agent:queue   subagents id=queue-1-3 -->"));
+        assert!(normalized.contains("<!-- agent:queue id=queue-1 preset=#keep-byte-exact -->"));
+        assert!(normalized.contains("<!-- agent:queue id=queue-1-2 -->"));
+        assert!(normalized.contains("<!-- agent:queue id=queue-4 -->"));
+
+        let normalized_components = element::parse(&normalized).unwrap();
+        let graph = QueueGraph::parse(&normalized, &normalized_components).unwrap();
+        assert_eq!(
+            graph
+                .blocks()
+                .iter()
+                .map(|block| block.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["queue-1-3", "queue-1", "queue-1-2", "queue-4"]
+        );
+        assert_eq!(
+            backfill_missing_queue_ids(&normalized, &normalized_components).unwrap(),
+            None,
+            "normalization must be a fixed point"
+        );
+    }
+
+    #[test]
+    fn persisted_surrogates_survive_reordering_and_new_queue_insertion() {
+        let initial = concat!(
+            "<!-- agent:queue -->\n- A\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- B\n<!-- /agent:queue -->\n",
+        );
+        let components = element::parse(initial).unwrap();
+        let normalized = backfill_missing_queue_ids(initial, &components)
+            .unwrap()
+            .unwrap();
+        assert!(normalized.contains("id=queue-1"));
+        assert!(normalized.contains("id=queue-2"));
+
+        let edited = concat!(
+            "<!-- agent:queue -->\n- new\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=queue-2 -->\n- B\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=queue-1 -->\n- A\n<!-- /agent:queue -->\n",
+        );
+        let edited_components = element::parse(edited).unwrap();
+        let renormalized = backfill_missing_queue_ids(edited, &edited_components)
+            .unwrap()
+            .unwrap();
+        assert!(renormalized.starts_with("<!-- agent:queue id=queue-1-2 -->"));
+        assert!(renormalized.contains("<!-- agent:queue id=queue-2 -->\n- B"));
+        assert!(renormalized.contains("<!-- agent:queue id=queue-1 -->\n- A"));
+    }
+
+    #[test]
+    fn malformed_and_duplicate_explicit_ids_still_fail_closed_during_backfill() {
+        for (doc, expected) in [
+            (
+                concat!(
+                    "<!-- agent:queue id -->\n- A\n<!-- /agent:queue -->\n",
+                    "<!-- agent:queue -->\n- B\n<!-- /agent:queue -->\n",
+                ),
+                "invalid agent:queue id",
+            ),
+            (
+                concat!(
+                    "<!-- agent:queue id=bad! -->\n- A\n<!-- /agent:queue -->\n",
+                    "<!-- agent:queue -->\n- B\n<!-- /agent:queue -->\n",
+                ),
+                "invalid agent:queue id",
+            ),
+            (
+                concat!(
+                    "<!-- agent:queue id=same -->\n- A\n<!-- /agent:queue -->\n",
+                    "<!-- agent:queue id=same -->\n- B\n<!-- /agent:queue -->\n",
+                    "<!-- agent:queue -->\n- C\n<!-- /agent:queue -->\n",
+                ),
+                "duplicate agent:queue id",
+            ),
+        ] {
+            let components = element::parse(doc).unwrap();
+            let error = backfill_missing_queue_ids(doc, &components)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(expected), "{error}");
         }
     }
 

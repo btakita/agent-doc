@@ -1473,7 +1473,6 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
 const SINGLETON_COMPONENT_NAMES: &[&str] = &[
     EXCHANGE_COMPONENT,
     "status",
-    "queue",
     BACKLOG_COMPONENT,
     REVIEW_COMPONENT,
     ICEBOX_COMPONENT,
@@ -4227,17 +4226,14 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
     }
 
     #[test]
-    fn structural_corruption_flags_duplicate_singleton_queue() {
-        // The live #dupcontent corruption: two agent:queue blocks ingested from
-        // a bad content_ours CRDT merge.
+    fn structural_corruption_allows_multiple_queue_components_for_id_normalization() {
+        // Queue topology owns queue multiplicity. The structural gate must admit
+        // even the pre-normalized form so preflight can persist surrogate ids;
+        // invalid/duplicate explicit ids fail closed in QueueGraph instead.
         let doc = "<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n\
 <!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n\
-<!-- agent:queue preset=\"#spec-test-commit-push\" priority go -->\n- b\n<!-- /agent:queue -->\n";
-        let reason = structural_corruption_reason(doc).expect("two queue blocks must be flagged");
-        assert!(
-            reason.contains("duplicate_singleton_component") && reason.contains("queue=2"),
-            "reason was: {reason}"
-        );
+<!-- agent:queue id=release preset=\"#spec-test-commit-push\" priority go -->\n- b\n<!-- /agent:queue -->\n";
+        assert_eq!(structural_corruption_reason(doc), None);
     }
 
     #[test]

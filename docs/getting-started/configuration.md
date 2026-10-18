@@ -96,6 +96,18 @@ wins. `dogfood: false` disables inheritance and absence everywhere is off.
 `agent-doc dogfood policy <FILE> --json` shows the effective destination and
 auto-queue setting after applying that precedence. Watchers use this typed query
 instead of parsing either document themselves.
+Set a document-local policy without editing live frontmatter directly:
+
+```sh
+agent-doc dogfood set tasks/session.md
+agent-doc dogfood set tasks/session.md \
+  --path tasks/agent-doc/agent-doc-bugs.md --auto true
+```
+
+The first form targets the current document with `auto: false`. The second path
+is relative to the project root. The command changes only the public `dogfood:`
+frontmatter field through editor-aware document authority and preserves all
+other frontmatter and body bytes.
 Invariant diagnosis and uniquely-safe projection repair remain on regardless.
 
 To opt a document into retained-write-owned terminal convergence:

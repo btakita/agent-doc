@@ -779,9 +779,9 @@ pub struct Frontmatter {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        rename = "agent_doc_dogfood",
-        alias = "dogfood_mode",
-        alias = "dogfood"
+        rename = "dogfood",
+        alias = "agent_doc_dogfood",
+        alias = "dogfood_mode"
     )]
     pub dogfood_mode: Option<DogfoodConfig>,
     /// Required model tier for this document. When set, preflight emits this as
@@ -5564,12 +5564,13 @@ mod tests {
     }
 
     #[test]
-    fn dogfood_mode_round_trips_and_accepts_short_alias() {
-        let canonical = "---\nagent_doc_dogfood: true\n---\n\nBody\n";
-        let (frontmatter, body) = parse(canonical).unwrap();
+    fn dogfood_mode_round_trips_with_public_spelling_and_accepts_legacy_aliases() {
+        let legacy = "---\nagent_doc_dogfood: true\n---\n\nBody\n";
+        let (frontmatter, body) = parse(legacy).unwrap();
         assert_eq!(frontmatter.dogfood_mode, Some(DogfoodConfig::Enabled(true)));
         let rewritten = write(&frontmatter, body).unwrap();
-        assert!(rewritten.contains("agent_doc_dogfood: true"));
+        assert!(rewritten.contains("dogfood: true"));
+        assert!(!rewritten.contains("agent_doc_dogfood:"));
         assert!(!rewritten.contains("dogfood_mode:"));
 
         let (aliased, _) = parse("---\ndogfood_mode: false\n---\n").unwrap();

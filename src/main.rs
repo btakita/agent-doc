@@ -3987,6 +3987,17 @@ enum DogfoodAction {
         #[arg(long)]
         json: bool,
     },
+    /// Enable dogfood filing for a document using editor-authoritative mutation
+    Set {
+        /// Session or project document whose local dogfood policy should change
+        file: PathBuf,
+        /// Project-relative destination; omitted means the current document
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Queue/activate generated findings; defaults to false
+        #[arg(long)]
+        auto: Option<bool>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -5307,6 +5318,9 @@ fn try_main() -> anyhow::Result<()> {
         },
         Commands::Dogfood { action } => match action {
             DogfoodAction::Policy { file, json } => dogfood_cmd::run(&file, json),
+            DogfoodAction::Set { file, path, auto } => {
+                dogfood_cmd::set(&file, path.as_deref(), auto)
+            }
         },
         Commands::VerifyOpCapture {
             file,
@@ -8310,6 +8324,42 @@ mod recycle_force_tests {
                 assert!(json);
             }
             _ => panic!("expected dogfood policy query"),
+        }
+    }
+
+    #[test]
+    fn dogfood_set_subcommand_parses_typed_policy() {
+        match parse(&[
+            "agent-doc",
+            "dogfood",
+            "set",
+            "tasks/session.md",
+            "--path",
+            "tasks/agent-doc/agent-doc-bugs.md",
+            "--auto",
+            "true",
+        ]) {
+            Commands::Dogfood {
+                action: DogfoodAction::Set { file, path, auto },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert_eq!(
+                    path,
+                    Some(PathBuf::from("tasks/agent-doc/agent-doc-bugs.md"))
+                );
+                assert_eq!(auto, Some(true));
+            }
+            _ => panic!("expected dogfood set mutation"),
+        }
+
+        match parse(&["agent-doc", "dogfood", "set", "tasks/session.md"]) {
+            Commands::Dogfood {
+                action: DogfoodAction::Set { path, auto, .. },
+            } => {
+                assert_eq!(path, None);
+                assert_eq!(auto, None);
+            }
+            _ => panic!("expected current-document dogfood set mutation"),
         }
     }
 

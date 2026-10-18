@@ -73,6 +73,20 @@ agent-doc reset --from-current <FILE>
 
 Clear the session ID from frontmatter and delete the snapshot/CRDT sidecars. Use `--from-current` after manually cleaning a corrupted document; it rebuilds the snapshot and CRDT state from the visible markdown so old sidecars cannot resurrect stale content.
 
+## dogfood
+
+```
+agent-doc dogfood policy <FILE> [--json]
+agent-doc dogfood set <FILE> [--path <PROJECT_RELATIVE.md>] [--auto <BOOL>]
+```
+
+`policy` reports the typed effective policy after session-over-project
+precedence. `set` enables a document-local policy through editor-aware document
+authority; an omitted path means the current document and omitted `auto` means
+false. It updates only the public `dogfood:` frontmatter field and preserves the
+rest of the document. `--path` rejects absolute paths, parent traversal, and
+non-Markdown destinations.
+
 ## clean
 
 ```

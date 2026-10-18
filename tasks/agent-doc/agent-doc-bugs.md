@@ -530,7 +530,7 @@ Proof:
 - #gh-fix https://github.com/btakita/agent-doc/issues/288
 - #gh-fix https://github.com/btakita/agent-doc/issues/289
 - ~~do [#extractliveapply]~~
-- The queue markers are out of sync with the document state?
+- ~~The queue markers are out of sync with the document state?~~ — auto-struck: answered this cycle (#ftstrike)
 - The last turn was wedged. Fix agent-doc causes. I went afk for a while and came back. There was a Prompt to delete a directory, which I accepted. I did a clear. Added `- release + publish`. Run Agent Doc. Turn was wedged.
 - release + publish
 <!-- /agent:queue -->

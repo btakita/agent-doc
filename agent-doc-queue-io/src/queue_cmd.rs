@@ -105,6 +105,10 @@ pub fn derive_claim_runtime_projection(
         .map(|claim| (claim.identity, claim.state.projection_marker()))
         .collect::<std::collections::HashMap<_, _>>();
     let reported = crate::claim_release_receipt::reported_items_for_content(file, current);
+    let completion_evidence = crate::queue_claim::completion_evidence_head_texts(current)
+        .into_iter()
+        .map(|head| agent_doc_queue::queue_claim::claim_identity(&head))
+        .collect::<std::collections::HashSet<_>>();
     let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
 
     // Build one target per queue occurrence. This retains marker cardinality
@@ -115,21 +119,15 @@ pub fn derive_claim_runtime_projection(
         .filter_map(|entry| match entry {
             QueueEntry::Prompt(prompt) => {
                 let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
-                let marker = claim_states
-                    .get(&identity)
-                    .copied()
-                    .or_else(|| {
-                        reported.claims(&prompt.text).then_some(
-                            agent_doc_document::queue_projection::QueueLifecycleMarker::Reported,
-                        )
-                    })
-                    .or_else(|| {
-                        (cleared_identity.as_ref() != Some(&identity))
-                            .then(|| {
-                                agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
-                            })
-                            .flatten()
-                    });
+                let prior = (cleared_identity.as_ref() != Some(&identity))
+                    .then(|| agent_doc_document::queue_projection::lifecycle_marker(&prompt.text))
+                    .flatten();
+                let marker = agent_doc_document::queue_projection::worker_evidence_marker(
+                    claim_states.get(&identity).copied(),
+                    reported.claims(&prompt.text),
+                    completion_evidence.contains(&identity),
+                )
+                .or(prior);
                 marker.map(|marker| {
                     (
                         agent_doc_document::queue_projection::strip_in_progress_marker(
@@ -496,6 +494,41 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn orphaned_completion_never_regresses_to_bare() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let item = "#gh-fix https://github.com/example/project/issues/284";
+        let completion =
+            agent_doc_document::subagent_completion::cell("subagent:gh284", item, "orphan-key");
+        let content = format!(
+            "<!-- agent:exchange -->\n{completion}\n<!-- /agent:exchange -->\n\n<!-- agent:queue subagents -->\n- {item}\n- 🚧 worked but ledger lost\n- never started\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+
+        let projection = derive_claim_runtime_projection(&doc, &content, None).unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 🔄 {item}\n"))
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("- 🚧 worked but ledger lost\n")
+        );
+        assert!(projection.target_content.contains("- never started\n"));
+        assert!(!projection.target_content.contains("- 🔄 never started\n"));
+        let unavailable = crate::queue_claim::claimed_items_for_content(&doc, &content);
+        assert!(unavailable.claims(item));
+        assert!(!unavailable.claims("worked but ledger lost"));
+        assert!(!unavailable.claims("never started"));
+
+        let closed = content.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n"));
+        assert!(crate::queue_claim::completion_evidence_head_texts(&closed).is_empty());
+    }
 
     #[derive(Default)]
     struct FakeEffects {

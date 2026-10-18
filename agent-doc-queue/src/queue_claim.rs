@@ -51,8 +51,8 @@
 //! * **expiry** — a TTL ([`DEFAULT_QUEUE_CLAIM_TTL_SECS`], overridable per
 //!   claim). A background subagent has no pid or heartbeat agent-doc can
 //!   observe, so a crashed worker can never release its claim. Without a TTL a
-//!   lost subagent would strand the head forever; with one, the queue degrades
-//!   back to ordinary drainability. `queue claim --refresh`
+//!   lost subagent would strand the head forever; with one, the attempt becomes
+//!   nonblocking `Lost` while its row remains visibly worked. `queue claim --refresh`
 //!   ([`QueueClaimLedger::refresh`]) extends the TTL of the owner's own live
 //!   claim, which lets a long-running owner keep its claim alive; it refuses an
 //!   expired, foreign, or missing claim rather than (re)creating one. Under the

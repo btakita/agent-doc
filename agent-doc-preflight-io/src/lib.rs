@@ -6638,8 +6638,21 @@ pub fn run_queue_maintenance_with_coin_gate(
     .context("queue maintenance: queue component vanished before in-progress marker")?
     .content(&current_content)
     .to_string();
+    let reported_queue_prompt_texts =
+        agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
+            file,
+            &current_content,
+        );
+    let reported_queue_prompt_identities = reported_queue_prompt_texts
+        .iter()
+        .map(|text| agent_doc_queue::queue_claim::claim_identity(text))
+        .collect::<std::collections::HashSet<_>>();
     let mut lifecycle_targets = active_queue_prompt_texts
         .iter()
+        .filter(|text| {
+            !reported_queue_prompt_identities
+                .contains(&agent_doc_queue::queue_claim::claim_identity(text))
+        })
         .cloned()
         .map(|text| {
             (
@@ -6652,6 +6665,25 @@ pub fn run_queue_maintenance_with_coin_gate(
         claim_states
             .iter()
             .map(|claim| (claim.item_text.clone(), claim.state.projection_marker())),
+    );
+    lifecycle_targets.extend(
+        reported_queue_prompt_texts.into_iter()
+        .map(|text| {
+            (
+                text,
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Reported,
+            )
+        }),
+    );
+    lifecycle_targets.extend(
+        agent_doc_queue_io::queue_claim::completion_evidence_head_texts(&current_content)
+            .into_iter()
+            .map(|text| {
+                (
+                    text,
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling,
+                )
+            }),
     );
     if let Some((new_body, marked_entries)) =
         agent_doc_queue::document_queue::project_prompt_lifecycle_markers(

@@ -22,9 +22,9 @@
 //! failed work) records no receipt, so the line is dispatchable again.
 //!
 //! A receipt is inert once its line leaves the queue, a live claim on the
-//! line takes precedence over it, and it expires after
-//! [`DEFAULT_RELEASE_RECEIPT_TTL_SECS`]. This module is pure: the caller
-//! supplies `now` and the live queue identities.
+//! line takes precedence over it, and explicit `--requeue` removes it. It does
+//! not age a worked-on live row back to bare: `expires_at_secs` remains only as
+//! rolling-upgrade metadata. This module is pure.
 
 use std::collections::HashSet;
 
@@ -36,9 +36,8 @@ use crate::queue_claim::{ClaimedQueueItems, QueueClaim, claim_identity};
 /// `queue_document_state.state_kind` of the receipt ledger.
 pub const CLAIM_RELEASE_RECEIPTS_STATE_KIND: &str = "queue_claim_release_receipts";
 
-/// How long a receipt holds its line out of new-worker dispatch: the claim
-/// TTL. A coordinator that never persists the result degrades back to
-/// ordinary queue behaviour after a bounded, visible interval.
+/// Legacy expiry metadata retained for payload compatibility. A live receipt
+/// is now monotonic work evidence and requires closure or explicit requeue.
 pub const DEFAULT_RELEASE_RECEIPT_TTL_SECS: u64 = crate::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS;
 
 /// One released claim whose worker reported back.
@@ -90,22 +89,21 @@ impl ClaimReleaseReceiptLedger {
         before != self.receipts.len()
     }
 
-    /// Drop expired receipts and receipts whose line is no longer a live
-    /// queue head. `live` of `None` (no queue component) closes every line.
-    pub fn prune(&mut self, now_secs: u64, live: Option<&HashSet<QueueItemIdentity>>) -> usize {
+    /// Drop receipts whose line is no longer a live queue head. `live` of
+    /// `None` (no queue component) closes every line. `now_secs` is accepted
+    /// for source compatibility but never erases work evidence from a live row.
+    pub fn prune(&mut self, _now_secs: u64, live: Option<&HashSet<QueueItemIdentity>>) -> usize {
         let before = self.receipts.len();
-        self.receipts.retain(|receipt| {
-            !receipt.is_expired(now_secs)
-                && live.is_some_and(|live| live.contains(&receipt.identity))
-        });
+        self.receipts
+            .retain(|receipt| live.is_some_and(|live| live.contains(&receipt.identity)));
         before - self.receipts.len()
     }
 
-    /// The receipt that governs the live line `text`: unexpired, still
-    /// queued, and not superseded by a live claim on the same line.
+    /// The receipt that governs the live line `text`: still queued and not
+    /// superseded by a live claim on the same line.
     pub fn governing(
         &self,
-        now_secs: u64,
+        _now_secs: u64,
         live: Option<&HashSet<QueueItemIdentity>>,
         claimed: &ClaimedQueueItems,
         text: &str,
@@ -120,14 +118,14 @@ impl ClaimReleaseReceiptLedger {
         }
         self.receipts
             .iter()
-            .find(|receipt| receipt.identity == identity && !receipt.is_expired(now_secs))
+            .find(|receipt| receipt.identity == identity)
     }
 
     /// Every governing receipt's line identity: the lines a new worker must
     /// not be offered.
     pub fn reported_items(
         &self,
-        now_secs: u64,
+        _now_secs: u64,
         live: Option<&HashSet<QueueItemIdentity>>,
         claimed: &ClaimedQueueItems,
     ) -> ClaimedQueueItems {
@@ -138,9 +136,7 @@ impl ClaimReleaseReceiptLedger {
             self.receipts
                 .iter()
                 .filter(|receipt| {
-                    !receipt.is_expired(now_secs)
-                        && live.contains(&receipt.identity)
-                        && !claimed.claims(&receipt.item_text)
+                    live.contains(&receipt.identity) && !claimed.claims(&receipt.item_text)
                 })
                 .map(|receipt| receipt.identity.clone()),
         )
@@ -197,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn a_receipt_governs_its_live_unclaimed_line_until_it_closes_or_expires() {
+    fn a_receipt_governs_its_live_unclaimed_line_until_it_closes() {
         let question = "Does the page status enum have an archived value? What are the values?";
         let mut ledger = ClaimReleaseReceiptLedger::default();
         ledger.record(&claim(question, "subagent:page-status-enum"), 10, 50);
@@ -233,7 +229,8 @@ mod tests {
                 .is_empty()
         );
 
-        // Closed (struck/removed) or expired lines are not governed.
+        // Closed (struck/removed) lines are not governed. Time alone cannot
+        // regress durable work evidence to bare pending state.
         let closed = live(&["other line"]);
         assert!(
             ledger
@@ -243,13 +240,13 @@ mod tests {
         assert!(
             ledger
                 .governing(60, Some(&queued), &none, question)
-                .is_none()
+                .is_some()
         );
         assert!(ledger.governing(20, None, &none, question).is_none());
     }
 
     #[test]
-    fn requeue_forgets_and_prune_drops_closed_or_expired_receipts() {
+    fn requeue_forgets_and_prune_drops_only_closed_receipts() {
         let mut ledger = ClaimReleaseReceiptLedger::default();
         ledger.record(&claim("a line", "subagent:a"), 10, 50);
         ledger.record(&claim("b line", "subagent:b"), 10, 5);
@@ -261,12 +258,12 @@ mod tests {
         );
         assert_eq!(ledger.receipts[1].owner, "subagent:a2");
 
-        assert_eq!(ledger.prune(20, Some(&live(&["a line", "b line"]))), 1);
-        assert_eq!(ledger.receipts.len(), 1, "expired b dropped");
+        assert_eq!(ledger.prune(20, Some(&live(&["a line", "b line"]))), 0);
+        assert_eq!(ledger.receipts.len(), 2, "live work evidence never expires");
         assert_eq!(
             ledger.prune(20, Some(&live(&["b line"]))),
             1,
-            "struck a dropped"
+            "only struck a dropped"
         );
 
         ledger.record(&claim("c line", "subagent:c"), 10, 50);

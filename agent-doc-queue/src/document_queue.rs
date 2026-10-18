@@ -1711,6 +1711,7 @@ pub fn set_prompts_lifecycle_markers(
                             | qp::QueueLifecycleMarker::Running
                             | qp::QueueLifecycleMarker::Reported
                             | qp::QueueLifecycleMarker::Lost
+                            | qp::QueueLifecycleMarker::Reconciling
                     )
                 ) =>
             {

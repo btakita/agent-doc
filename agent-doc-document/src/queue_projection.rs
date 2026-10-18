@@ -43,6 +43,10 @@ pub const RUNNING_MARKER: &str = IN_PROGRESS_MARKER;
 pub const REPORTED_MARKER: &str = "📥";
 /// The attempt was lost or expired and is eligible for recovery/re-dispatch.
 pub const LOST_MARKER: &str = "⚠️";
+/// Durable work evidence exists, but it cannot be bound to a current claim
+/// generation. The coordinator must reconcile/close the row; it is not fresh
+/// pending work (`#queueworkevidence`).
+pub const RECONCILING_MARKER: &str = "🔄";
 /// Visible projection marker for a queue head the binary has SKIPPED: it was
 /// dispatched, came back unconsumed, and the queue advanced past it to a
 /// non-dependent drainable head (`#orphanqhead` / `#queueskip`). Like `🚧`, it is
@@ -62,11 +66,12 @@ pub const SKIP_MARKER: &str = "⏭\u{fe0f}";
 pub const AWAITING_OPERATOR_MARKER: &str = "⏳";
 
 /// Every leading lifecycle marker the binary projects onto a queue head.
-pub const LIFECYCLE_MARKERS: [&str; 6] = [
+pub const LIFECYCLE_MARKERS: [&str; 7] = [
     CLAIMED_MARKER,
     RUNNING_MARKER,
     REPORTED_MARKER,
     LOST_MARKER,
+    RECONCILING_MARKER,
     SKIP_MARKER,
     AWAITING_OPERATOR_MARKER,
 ];
@@ -79,6 +84,7 @@ pub enum QueueLifecycleMarker {
     Running,
     Reported,
     Lost,
+    Reconciling,
     Skipped,
     AwaitingOperator,
 }
@@ -90,10 +96,35 @@ impl QueueLifecycleMarker {
             Self::Running => RUNNING_MARKER,
             Self::Reported => REPORTED_MARKER,
             Self::Lost => LOST_MARKER,
+            Self::Reconciling => RECONCILING_MARKER,
             Self::Skipped => SKIP_MARKER,
             Self::AwaitingOperator => AWAITING_OPERATOR_MARKER,
         }
     }
+}
+
+/// Formal worker-state projection (`#queueworkevidence`). For a live queue row
+/// `q`, let `A(q)` be a bound claim attempt, `R(q)` a durable reported-release
+/// receipt, and `F(q)` a binary-attested completion cell. Then:
+///
+/// `Bare(q) <=> !A(q) && !R(q) && !F(q)`.
+///
+/// A bound attempt has strongest authority; a report receipt means `Reported`;
+/// otherwise completion evidence is generation-ambiguous and means
+/// `Reconciling`. Closure removes the row, so this function applies only while
+/// `q` is live. A cosmetic marker alone is not authority.
+pub fn worker_evidence_marker(
+    bound_attempt: Option<QueueLifecycleMarker>,
+    reported_receipt: bool,
+    completion_feedback: bool,
+) -> Option<QueueLifecycleMarker> {
+    if let Some(bound) = bound_attempt {
+        return Some(bound);
+    }
+    if reported_receipt {
+        return Some(QueueLifecycleMarker::Reported);
+    }
+    completion_feedback.then_some(QueueLifecycleMarker::Reconciling)
 }
 
 fn strip_lifecycle_prefix(text: &str) -> Option<&str> {
@@ -211,6 +242,7 @@ pub fn lifecycle_marker(text: &str) -> Option<QueueLifecycleMarker> {
         QueueLifecycleMarker::Running,
         QueueLifecycleMarker::Reported,
         QueueLifecycleMarker::Lost,
+        QueueLifecycleMarker::Reconciling,
         QueueLifecycleMarker::Skipped,
         QueueLifecycleMarker::AwaitingOperator,
     ]
@@ -582,6 +614,7 @@ mod tests {
             (QueueLifecycleMarker::Running, RUNNING_MARKER),
             (QueueLifecycleMarker::Reported, REPORTED_MARKER),
             (QueueLifecycleMarker::Lost, LOST_MARKER),
+            (QueueLifecycleMarker::Reconciling, RECONCILING_MARKER),
         ] {
             let projected = apply_lifecycle_marker(bare, state);
             assert_eq!(projected, format!("{prefix} {bare}"));
@@ -595,6 +628,35 @@ mod tests {
             "do [#alpha]",
             "legacy running marker stays compatible"
         );
+    }
+
+    #[test]
+    fn worker_evidence_projection_obeys_bare_iff_no_evidence_truth_table() {
+        let bound_states = [
+            QueueLifecycleMarker::Claimed,
+            QueueLifecycleMarker::Running,
+            QueueLifecycleMarker::Reported,
+            QueueLifecycleMarker::Lost,
+        ];
+        for bound in bound_states {
+            for receipt in [false, true] {
+                for feedback in [false, true] {
+                    assert_eq!(
+                        worker_evidence_marker(Some(bound), receipt, feedback),
+                        Some(bound)
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            worker_evidence_marker(None, true, false),
+            Some(QueueLifecycleMarker::Reported)
+        );
+        assert_eq!(
+            worker_evidence_marker(None, false, true),
+            Some(QueueLifecycleMarker::Reconciling)
+        );
+        assert_eq!(worker_evidence_marker(None, false, false), None);
     }
 
     #[test]

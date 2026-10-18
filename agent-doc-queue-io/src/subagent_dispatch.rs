@@ -134,7 +134,8 @@ fn queue_attr_subagent_plan_with_presets(
     // `#queueschedule`: a closed schedule window dispatches nothing.
     let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
     let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content)
-        .with_heads(&schedule_held);
+        .with_heads(&schedule_held)
+        .with_heads(&crate::queue_claim::completion_evidence_head_texts(content));
     let after_deps = agent_doc_element::element::parse(content)
         .map(|components| agent_doc_queue::backlog_sync::collect_after_deps(&components, content))
         .unwrap_or_default();

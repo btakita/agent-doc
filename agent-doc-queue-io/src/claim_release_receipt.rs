@@ -7,7 +7,7 @@
 //! receipt and the other way round.
 //!
 //! `queue release` records a receipt for the claim it ends; `queue release
-//! --requeue` ends the claim and forgets any receipt. Readers (mid-turn
+//! --requeue` retains the attempt as `Lost` and forgets any receipt. Readers (mid-turn
 //! steering, the subagent dispatch plan, the Codex Stop hook) are actorless
 //! one-shot boundaries, like the claim readers: an unreadable receipt row is
 //! reported on stderr and treated as "no receipts", the pre-receipt behaviour.
@@ -55,7 +55,7 @@ fn load_from_conn(
     serde_json::from_str(&record.payload_json).context("parse queue claim release receipts")
 }
 
-/// The document's stored receipts, including closed/expired rows.
+/// The document's stored receipts, including rows awaiting closure pruning.
 pub fn load(file: &Path) -> Result<ClaimReleaseReceiptLedger> {
     let Some((root, document_hash, _)) = state_identity(file)? else {
         return Ok(ClaimReleaseReceiptLedger::default());
@@ -126,16 +126,31 @@ pub enum ReleaseKind {
     /// The worker reported back: record a receipt so the line is persisted by
     /// the coordinator and never offered to a new worker.
     Reported,
-    /// Abandoned, failed, or requeued work: no receipt, the line is
-    /// dispatchable again.
+    /// Abandoned, failed, or requeued work: no receipt; the retained `Lost`
+    /// attempt makes the line visibly reclaimable.
     Requeue,
 }
 
 /// `agent-doc queue release`: end the claim on `item` and record (or, for
-/// [`ReleaseKind::Requeue`], forget) its release receipt.
+/// [`ReleaseKind::Requeue`], forget) its release receipt. A reported release is
+/// deliberately three monotonic phases: mark the claim `Reported`, record the
+/// receipt, then remove the claim. Every crash cut therefore leaves either
+/// `A(q)` or `R(q)` true; the live row can never transiently regress to bare.
 pub fn release(file: &Path, item: &str, kind: ReleaseKind) -> Result<Option<QueueClaim>> {
-    let released = crate::queue_claim::release(file, item)?;
-    apply_release_receipt(file, item, kind, released)
+    match kind {
+        ReleaseKind::Reported => {
+            let prepared = crate::queue_claim::prepare_reported_release(file, item)?;
+            apply_release_receipt(file, item, kind, prepared.clone())?;
+            if prepared.is_some() {
+                crate::queue_claim::release(file, item)?;
+            }
+            Ok(prepared)
+        }
+        ReleaseKind::Requeue => {
+            let released = crate::queue_claim::abandon(file, item)?;
+            apply_release_receipt(file, item, kind, released)
+        }
+    }
 }
 
 pub fn release_attempt(
@@ -144,8 +159,21 @@ pub fn release_attempt(
     kind: ReleaseKind,
     generation: Option<u64>,
 ) -> Result<Option<QueueClaim>> {
-    let released = crate::queue_claim::release_attempt(file, item, generation)?;
-    apply_release_receipt(file, item, kind, released)
+    match kind {
+        ReleaseKind::Reported => {
+            let prepared =
+                crate::queue_claim::prepare_reported_release_attempt(file, item, generation)?;
+            apply_release_receipt(file, item, kind, prepared.clone())?;
+            if prepared.is_some() {
+                crate::queue_claim::release_attempt(file, item, generation)?;
+            }
+            Ok(prepared)
+        }
+        ReleaseKind::Requeue => {
+            let released = crate::queue_claim::abandon_attempt(file, item, generation)?;
+            apply_release_receipt(file, item, kind, released)
+        }
+    }
 }
 
 fn apply_release_receipt(
@@ -234,6 +262,19 @@ pub fn reported_items_for_content(file: &Path, content: &str) -> ClaimedQueueIte
     ledger.reported_items(now_secs(), live.as_ref(), &claimed)
 }
 
+/// Exact live queue-head texts governed by durable report receipts.
+pub fn reported_head_texts_for_content(file: &Path, content: &str) -> Vec<String> {
+    let reported = reported_items_for_content(file, content);
+    if reported.is_empty() {
+        return Vec::new();
+    }
+    agent_doc_queue::queue_continuation::live_queue_head_texts(content)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|head| reported.claims(head))
+        .collect()
+}
+
 /// Released owner of every governing receipt on a live line of `content`, by
 /// line identity (mid-turn steering's `persist_reported` routing).
 pub fn reported_owners_for_content(
@@ -259,8 +300,8 @@ pub fn reported_owners_for_content(
         .collect()
 }
 
-/// Durably drop receipts whose line closed or expired (closeout
-/// reconciliation, beside the claim prune).
+/// Durably drop receipts whose line closed (closeout reconciliation, beside
+/// the claim prune). Time never erases work evidence from a live row.
 pub fn prune_closed(file: &Path, content: &str) -> Result<usize> {
     if load(file)?.receipts.is_empty() {
         return Ok(0);
@@ -315,9 +356,41 @@ mod tests {
         assert!(governing_receipt(&doc, &content, question).is_none());
 
         crate::queue_claim::claim(&doc, question, "subagent:page-status-enum", 3600).unwrap();
-        let released = release(&doc, question, ReleaseKind::Reported)
+
+        // Every durable cut of the three-phase handoff carries work evidence:
+        // A(Reported), then A(Reported)+R, then R. A crash at either boundary
+        // therefore cannot make this live row look never-started.
+        let prepared = crate::queue_claim::prepare_reported_release(&doc, question)
             .unwrap()
-            .expect("claim released");
+            .expect("claim prepared");
+        let attempts = crate::queue_claim::claim_states_for_content(&doc, &content).unwrap();
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert!(governing_receipt(&doc, &content, question).is_none());
+
+        let _ = apply_release_receipt(
+            &doc,
+            question,
+            ReleaseKind::Reported,
+            Some(prepared.clone()),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::queue_claim::claim_states_for_content(&doc, &content)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            governing_receipt(&doc, &content, question).is_none(),
+            "the live claim has precedence"
+        );
+        let released = crate::queue_claim::release(&doc, question)
+            .unwrap()
+            .expect("claim released after receipt");
         assert_eq!(released.owner, "subagent:page-status-enum");
         let receipt = governing_receipt(&doc, &content, question).expect("receipt governs");
         assert_eq!(receipt.owner, "subagent:page-status-enum");
@@ -332,6 +405,13 @@ mod tests {
         release(&doc, question, ReleaseKind::Requeue).unwrap();
         assert!(governing_receipt(&doc, &content, question).is_none());
         assert!(load(&doc).unwrap().receipts.is_empty(), "requeue forgot it");
+        let attempts = crate::queue_claim::claim_states_for_content(&doc, &content).unwrap();
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Lost,
+            "requeue retains non-blocking work evidence"
+        );
 
         crate::queue_claim::claim(&doc, question, "subagent:third", 3600).unwrap();
         release(&doc, question, ReleaseKind::Reported).unwrap();

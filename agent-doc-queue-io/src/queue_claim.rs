@@ -561,6 +561,65 @@ pub fn report_attempt(file: &Path, item: &str, generation: Option<u64>) -> Resul
     Ok(claim)
 }
 
+/// First phase of a reported release. Persist `Reported` on the attempt before
+/// its claim can be removed, so a crash between the claim and receipt writes
+/// cannot expose the live row as bare. `None` preserves release's historical
+/// no-op behavior when no claim exists; every other transition refusal remains
+/// generation-fenced.
+pub fn prepare_reported_release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
+    prepare_reported_release_inner(file, item, None, false)
+}
+
+/// Generation-fenced [`prepare_reported_release`].
+pub fn prepare_reported_release_attempt(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+) -> Result<Option<QueueClaim>> {
+    prepare_reported_release_inner(file, item, generation, true)
+}
+
+fn prepare_reported_release_inner(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    enforce_generation: bool,
+) -> Result<Option<QueueClaim>> {
+    let target = resolve_live_claim_target(file, item, "queue_claim_reported_release")
+        .map(|(target, _)| target)
+        .unwrap_or_else(|_| item.to_string());
+    mutate_ledger(file, |ledger| {
+        let report = |ledger: &mut QueueClaimLedger, candidate: &str| {
+            let expected = if enforce_generation {
+                generation
+            } else {
+                ledger
+                    .claims
+                    .iter()
+                    .find(|claim| claim.identity == claim_identity(candidate))
+                    .map(|claim| claim.generation)
+            };
+            ledger.report(candidate, expected)
+        };
+        match report(ledger, &target) {
+            Ok(claim) => Ok(Some(claim)),
+            Err(agent_doc_queue::queue_claim::QueueClaimTransitionRefused::Missing)
+                if target != item =>
+            {
+                match report(ledger, item) {
+                    Ok(claim) => Ok(Some(claim)),
+                    Err(agent_doc_queue::queue_claim::QueueClaimTransitionRefused::Missing) => {
+                        Ok(None)
+                    }
+                    Err(refused) => Err(refused.into()),
+                }
+            }
+            Err(agent_doc_queue::queue_claim::QueueClaimTransitionRefused::Missing) => Ok(None),
+            Err(refused) => Err(refused.into()),
+        }
+    })
+}
+
 /// Stable binary attestation key for one exact worker attempt. Generation is
 /// part of every new key, so a completion from an older attempt cannot attest
 /// to a replacement attempt even when the queue text and worker label match.
@@ -673,6 +732,45 @@ pub fn release_attempt(
         ),
     );
     Ok(released)
+}
+
+/// End dispatch ownership without erasing the fact that this attempt started.
+/// The retained `Lost` attempt is non-blocking and can be reclaimed as the next
+/// generation, while its live queue row can never regress to bare.
+pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
+    let target = resolve_live_claim_target(file, item, "queue_claim_abandon")
+        .map(|(target, _)| target)
+        .unwrap_or_else(|_| item.to_string());
+    mutate_ledger(file, |ledger| {
+        let released = ledger.release(&target).or_else(|| ledger.release(item));
+        Ok(released.map(|mut claim| {
+            claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            ledger.claims.push(claim.clone());
+            claim
+        }))
+    })
+}
+
+/// Generation-fenced [`abandon`].
+pub fn abandon_attempt(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+) -> Result<Option<QueueClaim>> {
+    let target = resolve_live_claim_target(file, item, "queue_claim_abandon")
+        .map(|(target, _)| target)
+        .unwrap_or_else(|_| item.to_string());
+    mutate_ledger(file, |ledger| {
+        let released = match ledger.release_fenced(&target, generation)? {
+            Some(claim) => Some(claim),
+            None => ledger.release_fenced(item, generation)?,
+        };
+        Ok(released.map(|mut claim| {
+            claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            ledger.claims.push(claim.clone());
+            claim
+        }))
+    })
 }
 
 /// Release the claim on a head the binary itself just closed (`#claimstrike`:
@@ -797,7 +895,8 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
 /// failure direction is the pre-claim behaviour (the head stays drainable),
 /// never a stranded queue.
 pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
-    let claimed = ledger_claimed_items_for_content(file, content);
+    let claimed = ledger_claimed_items_for_content(file, content)
+        .with_heads(&completion_evidence_head_texts(content));
     // The queue-level subagents attribute holds heads back (cap full, or an
     // `after=` predecessor still queued). A held head is out of the in-session
     // loop exactly like a claimed one: never drained inline, never counted.
@@ -814,6 +913,25 @@ pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItem
     } else {
         claimed.with_heads(&schedule_held)
     }
+}
+
+/// Live queue rows for which the document contains a structurally
+/// binary-attested subagent completion cell. This is durable work evidence even
+/// when an older claim was pruned and its generation can no longer be proven.
+/// Such a row is held out of fresh dispatch/drain and projected as reconciling.
+pub fn completion_evidence_head_texts(content: &str) -> Vec<String> {
+    let evidence = agent_doc_document::subagent_completion::completion_evidence(content)
+        .into_iter()
+        .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
+        .collect::<std::collections::HashSet<_>>();
+    if evidence.is_empty() {
+        return Vec::new();
+    }
+    live_queue_head_texts(content)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|head| evidence.contains(&agent_doc_queue::queue_claim::claim_identity(head)))
+        .collect()
 }
 
 /// Live queue-head texts of `content` held by an active worker claim

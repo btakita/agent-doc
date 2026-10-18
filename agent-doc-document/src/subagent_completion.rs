@@ -32,6 +32,16 @@
 
 use std::ops::Range;
 
+/// Binary-attested evidence that a worker returned work for one queue item.
+/// The key attests the cell, but does not by itself prove which current claim
+/// generation produced it; callers reconcile that lineage separately.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionEvidence {
+    pub owner: String,
+    pub item: String,
+    pub key: String,
+}
+
 /// Current completion heading prefix; the topic continues with the owner/item.
 pub const HEADING_PREFIX: &str = "### Re: Subagent completed: ";
 /// The attribution that closes a current completion heading.
@@ -123,6 +133,47 @@ pub fn completion_cell_line_ranges(text: &str) -> Vec<Range<usize>> {
         }
     }
     ranges
+}
+
+/// Parse every structurally binary-attested completion cell whose heading
+/// carries an owner and exact queue-item text. A heading-shaped prose line is
+/// never evidence: it must be part of a range accepted by
+/// [`completion_cell_line_ranges`].
+pub fn completion_evidence(text: &str) -> Vec<CompletionEvidence> {
+    let lines: Vec<&str> = text.lines().collect();
+    completion_cell_line_ranges(text)
+        .into_iter()
+        .filter_map(|range| {
+            let heading = lines.get(range.start)?.trim();
+            let marker = lines.get(range.end.checked_sub(1)?)?.trim();
+            let key = marker
+                .strip_prefix(MARKER_PREFIX)?
+                .strip_suffix(" -->")?
+                .to_string();
+            let detail = if let Some(detail) = heading
+                .strip_prefix(HEADING_PREFIX)
+                .and_then(|rest| rest.strip_suffix(HEADING_ATTRIBUTION_SUFFIX))
+            {
+                detail
+            } else {
+                heading.strip_prefix(LEGACY_HEADING_PREFIX)?
+            };
+            let detail = detail.trim();
+            let owner_end = detail.strip_prefix('`')?.find('`')? + 1;
+            let owner = detail.get(1..owner_end)?.to_string();
+            let rest = detail.get(owner_end + 1..)?.trim_start();
+            let item = rest
+                .strip_prefix("returned work for queue item “")?
+                .split_once('”')?
+                .0
+                .to_string();
+            (!owner.is_empty() && !item.is_empty()).then_some(CompletionEvidence {
+                owner,
+                item,
+                key,
+            })
+        })
+        .collect()
 }
 
 /// 0-based line indices of the headings that open a binary-attested cell.
@@ -247,5 +298,24 @@ mod tests {
             "a model-attributed heading is not the legacy binary grammar"
         );
         assert_eq!(strip_completion_cells(forged), forged);
+    }
+
+    #[test]
+    fn parses_current_and_legacy_attested_completion_evidence() {
+        let current = format!("{}\n", cell("subagent:a", "finish a", "k1"));
+        assert_eq!(
+            completion_evidence(&current),
+            vec![CompletionEvidence {
+                owner: "subagent:a".into(),
+                item: "finish a".into(),
+                key: "k1".into(),
+            }]
+        );
+        assert_eq!(completion_evidence(LEGACY_FOUR).len(), 4);
+        assert_eq!(
+            completion_evidence(LEGACY_FOUR)[0].item,
+            "#gh-fix https://github.com/example/project/issues/262"
+        );
+        assert!(completion_evidence("### Re: Subagent completed: `subagent:a` returned work for queue item “a” — agent-doc\nnot binary\n").is_empty());
     }
 }

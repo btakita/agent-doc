@@ -162,9 +162,12 @@ Apply refuses while either document has live editor authority unless
 does not exist across independent CRDT actors, so coordination first persists
 and freezes each capable editor, waits for detached authority, verifies that the
 previewed generations reached disk, and only then performs the existing
-target-first transaction. Every exit path attempts resume; a failed resume
-leaves the tab read-only and reports explicit plugin reload/restart recovery
-instructions rather than risking an editor overwrite.
+target-first transaction. IPC freeze/resume requests use the exact document path
+advertised by each editor registration (after verifying that it resolves to the
+requested source or target), so relative CLI paths and editor-absolute paths
+cannot miss one another at the plugin boundary. Every exit path attempts resume;
+a failed resume leaves the tab read-only and reports explicit plugin
+reload/restart recovery instructions rather than risking an editor overwrite.
 An attached-editor `--apply` attempt still prints the deterministic preview,
 then fails nonzero with the exact attached source/target path(s), states that no
 documents changed, and states whether the intended target was not created or

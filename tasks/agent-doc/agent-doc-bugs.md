@@ -443,6 +443,22 @@ Verification completed on the integrated branch:
 - `main` was fast-forwarded through `1970fbf21b`.
 
 > **Queue prompt:** There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
+
+### Re: queue inbox prefix — gpt-5 · 2026-10-18T00:11:45-04:00
+
+> **Chat prompt (#chatprompt):** Why do the other queue items not have the inbox prefix?
+
+Because `📥` is not a generic “in the inbox” marker. It specifically means a claimed subagent attempt has reported its result and is waiting for coordinator integration.
+
+The queue display is:
+
+- no prefix — pending and unclaimed
+- `🟡` — claimed/dispatching
+- `🚧` — positively confirmed running
+- `📥` — reported, awaiting integration
+- `⚠️` — lost/expired, eligible for recovery
+
+So the other queue items are correctly bare. Their presence under `agent:queue` already means pending; prefixing all of them with `📥` would erase the distinction between work that has never been dispatched and completed worker output waiting to be integrated.
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 

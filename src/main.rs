@@ -3990,6 +3990,9 @@ enum DogfoodAction {
         /// Queue/activate generated findings; defaults to false
         #[arg(long)]
         auto: Option<bool>,
+        /// Replace the default dogfood action instruction
+        #[arg(long)]
+        prompt: Option<String>,
     },
 }
 
@@ -5100,28 +5103,42 @@ fn print_terminal_error_report(err: &anyhow::Error) {
         // `#steerinterruptexit`: pending operator steering is not a defect.
         && agent_doc_workflow::preflight_policy::is_dogfood_terminal_issue(&diagnostic)
         && let Some(file) = dogfood_document_argument()
-        && agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(&file)
-            .is_some()
+        && let Some((prompt, document_id, custom_prompt)) =
+            dogfood_terminal_issue_prompt(&file, &diagnostic)
     {
-        let document_id = agent_doc_hash::document_id_for_path(&file);
-        let prompt = agent_doc_workflow::preflight_policy::format_dogfood_terminal_issue_prompt(
-            &document_id,
-            &diagnostic,
-        );
         report.push('\n');
         report.push_str(&prompt);
         agent_doc_ops_log_io::log_op(
             &file,
             &format!(
-                "dogfood_terminal_issue_notified file={} class={} document_id={}",
+                "dogfood_terminal_issue_notified file={} class={} document_id={} custom_prompt={}",
                 file.display(),
                 agent_doc_workflow::preflight_policy::dogfood_terminal_issue_class(&diagnostic),
                 document_id,
+                custom_prompt,
             ),
         );
     }
     let mut stderr = std::io::stderr().lock();
     let _ = write_terminal_error_report(&mut stderr, &report);
+}
+
+fn dogfood_terminal_issue_prompt(
+    file: &Path,
+    diagnostic: &str,
+) -> Option<(String, String, bool)> {
+    agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(file)?;
+    let document_id = agent_doc_hash::document_id_for_path(file);
+    let custom_action = dogfood_cmd::resolve(file)
+        .ok()
+        .and_then(|policy| policy.prompt);
+    let prompt =
+        agent_doc_workflow::preflight_policy::format_dogfood_terminal_issue_prompt_with_action(
+            &document_id,
+            diagnostic,
+            custom_action.as_deref(),
+        );
+    Some((prompt, document_id, custom_action.is_some()))
 }
 
 fn dogfood_document_argument() -> Option<PathBuf> {
@@ -5327,8 +5344,13 @@ fn try_main() -> anyhow::Result<()> {
         },
         Commands::Dogfood { action } => match action {
             DogfoodAction::Policy { file, json } => dogfood_cmd::run(&file, json),
-            DogfoodAction::Set { file, path, auto } => {
-                dogfood_cmd::set(&file, path.as_deref(), auto)
+            DogfoodAction::Set {
+                file,
+                path,
+                auto,
+                prompt,
+            } => {
+                dogfood_cmd::set(&file, path.as_deref(), auto, prompt.as_deref())
             }
         },
         Commands::VerifyOpCapture {
@@ -8305,6 +8327,34 @@ mod terminal_error_report_tests {
     }
 
     #[test]
+    fn terminal_dogfood_notification_uses_the_effective_custom_action() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("tasks")).unwrap();
+        std::fs::write(tmp.path().join(".agent-doc/config.toml"), "").unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"agent-doc\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        let document = tmp.path().join("tasks/session.md");
+        std::fs::write(
+            &document,
+            "---\ndogfood:\n  prompt: File a GitHub issue; do not change code.\n---\n",
+        )
+        .unwrap();
+
+        let (prompt, _, custom_prompt) =
+            dogfood_terminal_issue_prompt(&document, "open_cycle retained").unwrap();
+
+        assert!(custom_prompt);
+        assert!(prompt.contains("File a GitHub issue; do not change code."));
+        assert!(!prompt.contains("Diagnose and fix the underlying Agent Doc defect"));
+        assert!(prompt.contains("ACTIONABLE_AGENT_DOC_FIX_PROMPT"));
+        assert!(prompt.contains("obey no-resubmit/no-recycle guidance"));
+    }
+
+    #[test]
     fn top_level_error_report_trims_terminal_reset_carriage_return() {
         let mut rendered = Vec::new();
 
@@ -8414,9 +8464,17 @@ mod recycle_force_tests {
             "tasks/agent-doc/agent-doc-bugs.md",
             "--auto",
             "true",
+            "--prompt",
+            "File a GitHub issue instead of fixing the defect.",
         ]) {
             Commands::Dogfood {
-                action: DogfoodAction::Set { file, path, auto },
+                action:
+                    DogfoodAction::Set {
+                        file,
+                        path,
+                        auto,
+                        prompt,
+                    },
             } => {
                 assert_eq!(file, PathBuf::from("tasks/session.md"));
                 assert_eq!(
@@ -8424,16 +8482,27 @@ mod recycle_force_tests {
                     Some(PathBuf::from("tasks/agent-doc/agent-doc-bugs.md"))
                 );
                 assert_eq!(auto, Some(true));
+                assert_eq!(
+                    prompt.as_deref(),
+                    Some("File a GitHub issue instead of fixing the defect.")
+                );
             }
             _ => panic!("expected dogfood set mutation"),
         }
 
         match parse(&["agent-doc", "dogfood", "set", "tasks/session.md"]) {
             Commands::Dogfood {
-                action: DogfoodAction::Set { path, auto, .. },
+                action:
+                    DogfoodAction::Set {
+                        path,
+                        auto,
+                        prompt,
+                        ..
+                    },
             } => {
                 assert_eq!(path, None);
                 assert_eq!(auto, None);
+                assert_eq!(prompt, None);
             }
             _ => panic!("expected current-document dogfood set mutation"),
         }

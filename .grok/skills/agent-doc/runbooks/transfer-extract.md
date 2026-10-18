@@ -27,8 +27,10 @@ component can be selected with repeatable/comma-separated `--components`.
 If that node has since been compacted, extraction resolves its content-stable ID
 through the source archive index and records the resulting `archive:...#turn`
 locator in the preview. `--archive-locator` selects such archived context
-directly. Archived context is copied with provenance because compact archives
-are immutable canonical history; selected live content is still moved.
+directly. Prompt-node and response-node selectors both resolve through the
+assistant response locator and retain the adjacent prompt/response pair.
+Archived context is copied with provenance because compact archives are
+immutable canonical history; selected live content is still moved.
 
 The operator may ask naturally inside the source document, for example,
 “Extract the legal concern into `tasks/sdk/sdk-legal.md`.” They do not need to

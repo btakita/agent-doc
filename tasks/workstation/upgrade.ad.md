@@ -6,6 +6,7 @@ agent: codex
 resume:
   claude: 80050dae-ffc1-48f6-bb8c-17c794ecb6ac
   codex: 01a14d5c-352b-7781-b889-76815eb85c88
+queue: go
 ---
 
 ## Status
@@ -76,13 +77,44 @@ Practical options, in order:
 For the planned RTX 5090 plus RTX PRO 6000 system, the estimated 1.4–1.5 kW DC component load becomes still higher at the wall after PSU and UPS losses. A shared 15 A/120 V branch is not an appropriate sustained-compute setup; a dedicated higher-capacity circuit, likely 240 V if the selected PSU/UPS supports it, should be part of the upgrade.
 
 If the *panel breaker* opens, investigate the branch load/wiring first. If the breaker stays on but only the PC crashes, continue diagnosing the UPS output limit, GPU connector, PSU protection, thermals, and system stability separately.
-<!-- agent:boundary:9d5f5ead -->
+
+### Re: Subagent completed: `subagent:heater_load` returned work for queue item “My GPU does not cause the circuit to trip. It is caused when I'm also running an electric heater.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=da88ea7045a4d3951936637759c268e62f92dd2c0f002ad84329e4f765e5ba47 -->
+
+### Re: Subagent completed: `subagent:load_manager` returned work for queue item “Is there a device that can act as a circuit breaker and load manager so my circuit does not trip? Can it decrease power to a heater if my computer needs the power?” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=c86702501d48925bbb6d5d834a033dba238877b2779647ac165944a849d33acd -->
+> **Queue prompt:** My GPU does not cause the circuit to trip. It is caused when I'm also running an electric heater.
+
+> **Queue prompt:** Is there a device that can act as a circuit breaker and load manager so my circuit does not trip? Can it decrease power to a heater if my computer needs the power?
+
+### Re: Heater overload and automatic load shedding — gpt-5 · 2026-10-18T01:12-04:00
+
+That clarification separates two problems:
+
+- The **heater plus PC** explains the branch-circuit trips.
+- A **GPU-load hard crash while the heater is off and the panel breaker remains on** is a separate PC/UPS/power-path fault and still needs the earlier UPS-log, connector, PSU, temperature, driver, and reduced-power-limit checks.
+
+A typical 1,500 W space heater draws about 12.5 A at 120 V. That leaves only 2.5 A—roughly 300 W—before a 15 A circuit reaches its nameplate limit. A loaded RTX 5090 workstation can readily add several hundred watts, so the combined demand can reach roughly 18–21 A or more. A thermal breaker may tolerate that briefly and then trip as it heats; that is expected protection behavior, not evidence that the GPU or 1,200 W PSU alone is defective.
+
+The safest fix is to run the heater on a genuinely different branch circuit, verified at the panel, or have an electrician install a dedicated circuit. Plug the heater directly into a wall receptacle—never an extension cord, power strip, UPS, or ordinary smart plug. If it has a manufacturer-provided 750 W low setting, that draws about 6.25 A and may provide enough margin after measuring the branch's complete load. [U.S. Fire Administration heater guidance](https://www.usfa.fema.gov/downloads/pdf/publications/heater_fire_safety_card.pdf) [CPSC heater guidance](https://www.cpsc.gov/Newsroom/News-Releases/2023/CPSC-Warns-Consumers-to-be-Cautious-When-Using-Space-Heaters-Furnaces-and-Fireplaces-This-Winter)
+
+A device can perform automatic **load shedding**, but it does not replace the circuit breaker. A listed, electrician-installed controller can measure current and completely disconnect a lower-priority heater circuit or controlled receptacle when the workstation needs the available capacity, then reconnect it after demand falls. It generally cannot safely or smoothly “dim” a generic plug-in heater; variable heat should come from the heater's own listed low-power/staged controls.
+
+For an installation relied upon to prevent conductor overload, ask the electrician and local authority about equipment specifically listed as a power-control or overload-control system—not merely a Wi-Fi relay or generic energy monitor. UL distinguishes ordinary UL 916 energy-management equipment from UL 3141 power-control systems used for overload control, and the controller should fail with the heater de-energized. The normal breaker remains independent overcurrent protection. [UL energy-management guidance](https://www.ul.com/thecodeauthority/knowledge/article-130-energy-management-systems)
+
+Practically, selective shedding also requires the heater to be on a separately controllable conductor/receptacle. A panel controller cannot selectively turn off one appliance when the heater and PC are inseparably mixed on the same branch without additional wiring. Given the planned dual-GPU workstation, paying an electrician for an appropriate dedicated workstation circuit—and keeping the heater elsewhere—is safer, simpler, and more useful than engineering automation around an undersized shared branch.
+
+The exchange is large, but I kept the active queue draining rather than interrupting it for compaction.
+<!-- agent:boundary:3b832163 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority subagents go -->
-- My GPU does not cause the circuit to trip. It is caused when I'm also running an electric heater.
+- ~~My GPU does not cause the circuit to trip. It is caused when I'm also running an electric heater.~~
+- 📥 Is there a device that can act as a circuit breaker and load manager so my circuit does not trip? Can it decrease power to a heater if my computer needs the power?
 <!-- /agent:queue -->
 
 ## Todo

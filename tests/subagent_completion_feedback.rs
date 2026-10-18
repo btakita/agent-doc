@@ -37,6 +37,8 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
     .unwrap();
     let binary = env!("CARGO_BIN_EXE_agent-doc");
     for item in items {
+        let owner = format!("subagent:{}", item.replace(' ', "-"));
+        let worker = format!("worker:{}", item.replace(' ', "-"));
         let status = Command::new(binary)
             .env(
                 agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
@@ -50,13 +52,37 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
                 "--item",
                 item,
                 "--owner",
-                &format!("subagent:{}", item.replace(' ', "-")),
+                &owner,
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .unwrap();
         assert!(status.success(), "claim failed for {item}: {status}");
+        let status = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args([
+                "queue",
+                "start",
+                doc.to_str().unwrap(),
+                "--item",
+                item,
+                "--owner",
+                &owner,
+                "--generation",
+                "1",
+                "--worker-id",
+                &worker,
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "start failed for {item}: {status}");
     }
 
     let started = Instant::now();
@@ -376,6 +402,28 @@ fn several_reports_then_preflight_admits_the_next_turn() {
             claim.status.success(),
             "claim failed: {}",
             String::from_utf8_lossy(&claim.stderr)
+        );
+        let worker = format!("worker:gh26{index}");
+        let start = run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "start",
+                doc.to_str().unwrap(),
+                "--item",
+                item,
+                "--owner",
+                &owner,
+                "--generation",
+                "1",
+                "--worker-id",
+                &worker,
+            ],
+        );
+        assert!(
+            start.status.success(),
+            "start failed: {}",
+            String::from_utf8_lossy(&start.stderr)
         );
     }
     for item in items {

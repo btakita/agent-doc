@@ -356,6 +356,15 @@ mod tests {
         assert!(governing_receipt(&doc, &content, question).is_none());
 
         crate::queue_claim::claim(&doc, question, "subagent:page-status-enum", 3600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            question,
+            "subagent:page-status-enum",
+            "worker:page-status-enum",
+            3600,
+            1,
+        )
+        .unwrap();
 
         // Every durable cut of the three-phase handoff carries work evidence:
         // A(Reported), then A(Reported)+R, then R. A crash at either boundary
@@ -413,7 +422,16 @@ mod tests {
             "requeue retains non-blocking work evidence"
         );
 
-        crate::queue_claim::claim(&doc, question, "subagent:third", 3600).unwrap();
+        let (_, third) = crate::queue_claim::claim(&doc, question, "subagent:third", 3600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            question,
+            "subagent:third",
+            "worker:third",
+            3600,
+            third.generation,
+        )
+        .unwrap();
         release(&doc, question, ReleaseKind::Reported).unwrap();
         let struck = content.replace(&format!("- {question}\n"), "");
         assert_eq!(prune_closed(&doc, &content).unwrap(), 0);

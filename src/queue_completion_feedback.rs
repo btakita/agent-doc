@@ -308,6 +308,10 @@ mod tests {
             owner: "subagent:sdk-feedback".into(),
             generation: 1,
             state: agent_doc_queue::queue_claim::QueueClaimState::Running,
+            worker: Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
+                worker_id: "worker:sdk-feedback".into(),
+                started_at_secs: 10,
+            }),
             claimed_at_secs: 10,
             expires_at_secs: 20,
             owner_session: None,
@@ -511,6 +515,15 @@ mod tests {
             600,
         )
         .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "finish sdk.md with deterministic tests",
+            "subagent:sdk-feedback",
+            "worker:sdk-feedback",
+            600,
+            1,
+        )
+        .unwrap();
 
         let first = report_complete(&doc, "finish sdk.md with deterministic tests", Some(1))
             .unwrap()
@@ -590,11 +603,21 @@ mod tests {
         )
         .unwrap();
         for item in items {
+            let owner = format!("subagent:{}", item.replace(' ', "-"));
             agent_doc_queue_io::queue_claim::claim(
                 &doc,
                 item,
-                &format!("subagent:{}", item.replace(' ', "-")),
+                &owner,
                 600,
+            )
+            .unwrap();
+            agent_doc_queue_io::queue_claim::start_attempt(
+                &doc,
+                item,
+                &owner,
+                &format!("worker:{}", item.replace(' ', "-")),
+                600,
+                1,
             )
             .unwrap();
         }

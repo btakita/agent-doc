@@ -170,7 +170,8 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   dispatch-now directive with its claim command; handle it before ending the
   turn or scheduling the next re-entry. The next preflight lists new
   subagent-intent queue items under `queue_subagent_dispatch` (never in
-  `selected_queue_prompts`): run each `claim_command`, then dispatch it.
+  `selected_queue_prompts`): run each `claim_command`, dispatch it, then run
+  its `start_command` with the returned worker identity and printed generation.
 - **Exchange subagents coordinator.** Under `<!-- agent:exchange subagents -->`
   (alias `fan-out`), preflight lists each new exchange prompt under
   `exchange_subagent_dispatch`. Dispatch every listed prompt immediately, one
@@ -190,9 +191,8 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   `[operator-verify]` drain in queue order as usual. For each dispatch item:
   1. Run its `claim_command` (`agent-doc queue claim <FILE> --item <...> --owner subagent:<label>`).
      Dispatch only after the command succeeds: success includes projecting the
-     claimed row's visible `🚧` marker through the current editor/CRDT authority,
-     so the queue shows the worker as in progress immediately rather than waiting
-     for another preflight.
+     claimed row's visible `🟡` marker through the current editor/CRDT authority.
+     This means reserved/dispatching, not running.
   2. Paste the entry's `authorization.subagent_prompt_preamble` VERBATIM at the
      top of the subagent's Agent prompt (`#waypostauthorization`). The binary
      resolved it from the document: the verbatim item, the backlog text a
@@ -212,6 +212,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      one checkout. Heads that `agent-doc plan` gives the same repo
      `write_scope` still get separate worktrees, but they are integrated one at a
      time. A head marked `parallelizable: false` runs alone.
+     After the spawn succeeds and returns its concrete worker identity, run the
+     entry's `start_command` (`agent-doc queue start <FILE> --item <...>
+     --owner subagent:<label> --generation <N> --worker-id <WORKER>`). This
+     generation-fenced acknowledgement is the only `🟡` → `🚧` transition.
+     Never infer running from a label, claim, process poll, or intended spawn;
+     if spawn fails, leave the attempt `🟡` and release/requeue it. A claim
+     generation binds to at most one worker and one worker binds to at most one
+     live claim in the document; a stale generation or conflicting binding is
+     refused without mutation.
   4. Treat `[agent-doc] subagent operator request (#waypostrequest)` as a
      blocking handback, not worker completion. Copy the entire packet verbatim
      into `agent:exchange` so the exact request, why it is needed, target/scope,
@@ -247,9 +256,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
        session ID when available. Child permissions remain independent.
   5. While a subagent runs past a cycle, keep its claim alive with
      `agent-doc queue claim <FILE> --item <...> --owner subagent:<label> --refresh --generation <N>`
-     using the generation printed by the original claim. This explicit receipt
-     is the positive dispatch/heartbeat evidence that changes `🟡` claimed to
-     `🚧` running; never infer running from a label or process poll. Under the
+     using the generation printed by the original claim. Refresh is only a
+     heartbeat for an already bound `🚧` worker; it never starts a `🟡` attempt.
+     Under the
      attribute, an expired attempt becomes `⚠️` lost and is offered for dispatch
      again with a new generation, never drained inline.
   6. A subagent commits and pushes its branch (fast-forward only, never force).

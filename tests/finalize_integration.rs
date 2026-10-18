@@ -5181,11 +5181,28 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         ])
         .assert()
         .success();
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "queue",
+            "start",
+            doc.to_str().unwrap(),
+            "--item",
+            question,
+            "--owner",
+            "subagent:page-status-enum",
+            "--generation",
+            "1",
+            "--worker-id",
+            "worker:page-status-enum",
+        ])
+        .assert()
+        .success();
     let claimed_projection = fs::read_to_string(&doc).unwrap();
     assert!(
         claimed_projection.contains(&format!("- 🟡 {setup}\n"))
-            && claimed_projection.contains(&format!("- 🟡 {question}\n")),
-        "claim must immediately project every active worker row:\n{claimed_projection}"
+            && claimed_projection.contains(&format!("- 🚧 {question}\n")),
+        "claim and start must project dispatching and worker-bound rows distinctly:\n{claimed_projection}"
     );
     let released = agent_doc()
         .current_dir(tmp.path())

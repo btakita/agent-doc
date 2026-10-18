@@ -2377,6 +2377,15 @@ mod tests {
             Some(2),
             "one claim binds both identical lines"
         );
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            foc,
+            "subagent:gh272",
+            "worker:gh272",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
 
         // The operator corrects the first copy in place.
         let one_fixed = doc(&["current task", fixed, "release + publish", foc]);

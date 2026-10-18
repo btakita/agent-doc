@@ -1589,6 +1589,17 @@ pub fn claim_command_for(document: &str, verbatim: &str) -> String {
     )
 }
 
+/// The exact post-dispatch acknowledgement command. The coordinator fills in
+/// the generation printed by [`claim_command_for`] and the identity returned
+/// by the successful harness spawn.
+pub fn start_command_for(document: &str, verbatim: &str) -> String {
+    format!(
+        "agent-doc queue start {} --item {} --owner subagent:<label> --generation <generation> --worker-id <worker-id>",
+        shell_single_quote(document),
+        shell_single_quote(&claim_item_handle(verbatim))
+    )
+}
+
 /// The command that prints the operator-authorization preamble for a
 /// subagent dispatch of `verbatim` in `document` (`#waypostauthorization`).
 pub fn brief_command_for(document: &str, verbatim: &str) -> String {
@@ -1665,12 +1676,15 @@ pub fn render_closeout_steering_context(
             }
             (SteeringDispatch::Subagent, SteeringSource::Queue) => format!(
                 "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
-                 `{}` so the loop and Stop hook do not drain it inline, then dispatch; if it \
+                 `{}` so the loop and Stop hook do not drain it inline, then dispatch. Only \
+                 after the harness returns a worker identity, acknowledge that exact generation \
+                 with `{}`; this changes 🟡 dispatching to 🚧 running and is not optional. If it \
                  touches a repository, give the subagent its own git worktree outside the \
                  IDE-watched project. Paste the output of `{}` verbatim at the top of the \
                  subagent prompt: it carries the operator's authorization for the item \
                  (`#waypostauthorization`). {}",
                 claim_command_for(document, &item.verbatim),
+                start_command_for(document, &item.verbatim),
                 brief_command_for(document, &item.verbatim),
                 REPORTED_WORKER_CLOSEOUT,
             ),
@@ -2963,6 +2977,12 @@ mod tests {
                 "`agent-doc queue claim 'tasks/bugs.md' --item '#preflightdeadline' --owner subagent:<label>`"
             ),
             "{text}"
+        );
+        assert!(
+            text.contains(
+                "`agent-doc queue start 'tasks/bugs.md' --item '#preflightdeadline' --owner subagent:<label> --generation <generation> --worker-id <worker-id>`"
+            ),
+            "the dispatch directive names the worker acknowledgement: {text}"
         );
         assert!(
             text.contains("`agent-doc queue brief 'tasks/bugs.md' --item '#preflightdeadline'`"),

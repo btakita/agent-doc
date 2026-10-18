@@ -9650,6 +9650,15 @@ Reviewed the gated items.\n\
         fs::write(&doc, &current).unwrap();
         agent_doc_queue_io::queue_claim::claim(&doc, prompt, "subagent:page-status-enum", 3600)
             .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            prompt,
+            "subagent:page-status-enum",
+            "worker:page-status-enum",
+            3600,
+            1,
+        )
+        .unwrap();
         agent_doc_queue_io::claim_release_receipt::release(
             &doc,
             prompt,

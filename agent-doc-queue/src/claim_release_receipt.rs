@@ -180,6 +180,10 @@ mod tests {
             owner: owner.to_string(),
             generation: 1,
             state: crate::queue_claim::QueueClaimState::Reported,
+            worker: Some(crate::queue_claim::QueueWorkerBinding {
+                worker_id: format!("worker:{owner}"),
+                started_at_secs: 1,
+            }),
             claimed_at_secs: 1,
             expires_at_secs: 100,
             owner_session: None,

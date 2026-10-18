@@ -1,9 +1,11 @@
 //! Pure queue-item claim policy (`#queueclaim`).
 //!
-//! A queue head that has been handed to a worker outside the in-session loop —
-//! a background subagent under a `#subagents` preset, for example — is
-//! **claimed**: the work is already in flight elsewhere, so it is not drainable
-//! by the in-session loop. Without a claim, the Stop hook saw the dispatched
+//! A queue head reserved for a worker outside the in-session loop — a
+//! background subagent under a `#subagents` preset, for example — is
+//! **claimed** and therefore not drainable by the in-session loop. A claim is
+//! dispatch intent, not evidence that a worker is running. After a successful
+//! harness spawn, `queue start` binds that claim generation to the concrete
+//! worker identity and advances it to `Running`. Without a claim, the Stop hook saw the dispatched
 //! head as the next "drainable head" and forced a `/loop` re-entry while the
 //! parent turn was only waiting on its subagents. The re-entry then either
 //! churned a no-op cycle or consumed the queue item before the work landed.
@@ -49,13 +51,14 @@
 //! * **explicit release** — `agent-doc queue release` when the worker reports
 //!   back, so the in-session loop can take the item again and close it;
 //! * **expiry** — a TTL ([`DEFAULT_QUEUE_CLAIM_TTL_SECS`], overridable per
-//!   claim). A background subagent has no pid or heartbeat agent-doc can
-//!   observe, so a crashed worker can never release its claim. Without a TTL a
-//!   lost subagent would strand the head forever; with one, the attempt becomes
+//!   claim). Agent-doc receives the worker identity at `queue start`, but has
+//!   no native heartbeat it can observe after dispatch. Without a TTL a lost
+//!   subagent would strand the head forever; with one, the attempt becomes
 //!   nonblocking `Lost` while its row remains visibly worked. `queue claim --refresh`
-//!   ([`QueueClaimLedger::refresh`]) extends the TTL of the owner's own live
-//!   claim, which lets a long-running owner keep its claim alive; it refuses an
-//!   expired, foreign, or missing claim rather than (re)creating one. Under the
+//!   ([`QueueClaimLedger::refresh`]) extends only an already-started attempt,
+//!   which lets a long-running owner keep its claim alive; it refuses an
+//!   unstarted, expired, foreign, or missing claim rather than promoting or
+//!   (re)creating one. Under the
 //!   queue-level `subagents` attribute an expired claim returns the head to the
 //!   dispatch set, never to inline drainage.
 //!
@@ -87,13 +90,15 @@
 //! keeps holding the head out of inline drainage until its TTL. What changes is
 //! what agent-doc asserts: the claim is reported as `owner_session_ended` —
 //! unverifiable, not "in flight" — with the two concrete exits for the new
-//! coordinator: **adopt** it (`queue claim --refresh` under the same `--owner`
-//! rebinds the claim to the caller's session, for a subagent it still hears
-//! from) or **release** it (`queue release`, so the head is dispatched again).
+//! coordinator: for an already-started worker, **adopt** it (`queue claim
+//! --refresh` under the same `--owner` rebinds the claim to the caller's
+//! session, for a subagent it still hears from); for an unstarted claim, run
+//! `queue start` with the worker identity returned by the successful spawn; or
+//! **release** it (`queue release`, so the head is dispatched again).
 //!
 //! This module is pure: no clock, no storage. The caller supplies `now`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use agent_doc_element_queue::{QueueItemIdentity, queue_head_identity};
 use serde::{Deserialize, Serialize};
@@ -119,6 +124,11 @@ pub struct QueueClaim {
     /// Typed lifecycle for this exact `(identity, owner, generation)` attempt.
     #[serde(default)]
     pub state: QueueClaimState,
+    /// The concrete harness worker that accepted this exact attempt. A claim
+    /// is merely dispatching until `queue start` binds this field; labels in
+    /// `owner` are coordinator-chosen and are not worker-liveness evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker: Option<QueueWorkerBinding>,
     pub claimed_at_secs: u64,
     pub expires_at_secs: u64,
     /// The coordinator session that made (or last adopted) the claim
@@ -142,6 +152,16 @@ pub struct QueueClaim {
     pub followed_from: Vec<String>,
 }
 
+/// Positive acknowledgement that one concrete harness worker accepted one
+/// fenced queue attempt (`#queueclaimworker`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueWorkerBinding {
+    /// Stable worker/session identity returned by the harness spawn primitive.
+    pub worker_id: String,
+    /// When the coordinator acknowledged successful dispatch.
+    pub started_at_secs: u64,
+}
+
 /// Lifecycle of one fenced worker attempt (`#queueclaimstate`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -149,7 +169,7 @@ pub enum QueueClaimState {
     /// Claimed/dispatching; no positive worker-liveness evidence yet.
     #[default]
     Claimed,
-    /// Positive dispatch or heartbeat evidence exists.
+    /// A concrete harness worker is durably bound to this attempt.
     Running,
     /// The worker reported; integration/verification is still pending.
     Reported,
@@ -374,6 +394,9 @@ pub enum QueueClaimTransitionRefused {
         expected: u64,
         current: u64,
     },
+    NotRunning {
+        generation: u64,
+    },
     Terminal {
         generation: u64,
         state: QueueClaimState,
@@ -392,6 +415,10 @@ impl std::fmt::Display for QueueClaimTransitionRefused {
                 f,
                 "stale queue claim generation {expected}; current generation is {current}"
             ),
+            Self::NotRunning { generation } => write!(
+                f,
+                "queue claim generation {generation} has no acknowledged worker; run `queue start` after a successful dispatch"
+            ),
             Self::Terminal { generation, state } => write!(
                 f,
                 "queue claim generation {generation} is terminal ({state:?})"
@@ -401,6 +428,88 @@ impl std::fmt::Display for QueueClaimTransitionRefused {
 }
 
 impl std::error::Error for QueueClaimTransitionRefused {}
+
+/// Why a concrete worker could not be bound to a claim attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueueClaimStartRefused {
+    Missing,
+    EmptyWorker,
+    Expired {
+        holder: String,
+        expired_at_secs: u64,
+    },
+    OtherOwner {
+        holder: String,
+    },
+    StaleAttempt {
+        detail: String,
+    },
+    Terminal {
+        generation: u64,
+        state: QueueClaimState,
+    },
+    AttemptAlreadyBound {
+        worker_id: String,
+    },
+    WorkerAlreadyBound {
+        worker_id: String,
+        item_text: String,
+        generation: u64,
+    },
+}
+
+impl QueueClaimStartRefused {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::EmptyWorker => "empty_worker",
+            Self::Expired { .. } => "expired",
+            Self::OtherOwner { .. } => "other_owner",
+            Self::StaleAttempt { .. } => "stale_attempt",
+            Self::Terminal { .. } => "terminal",
+            Self::AttemptAlreadyBound { .. } => "attempt_already_bound",
+            Self::WorkerAlreadyBound { .. } => "worker_already_bound",
+        }
+    }
+}
+
+impl std::fmt::Display for QueueClaimStartRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing => write!(f, "queue claim attempt is missing"),
+            Self::EmptyWorker => write!(f, "queue worker identity must not be empty"),
+            Self::Expired {
+                holder,
+                expired_at_secs,
+            } => write!(
+                f,
+                "queue claim held by {holder} expired at {expired_at_secs}"
+            ),
+            Self::OtherOwner { holder } => {
+                write!(f, "queue claim is held by another owner ({holder})")
+            }
+            Self::StaleAttempt { detail } => write!(f, "{detail}"),
+            Self::Terminal { generation, state } => write!(
+                f,
+                "queue claim generation {generation} is terminal ({state:?})"
+            ),
+            Self::AttemptAlreadyBound { worker_id } => write!(
+                f,
+                "queue claim attempt is already bound to worker {worker_id:?}"
+            ),
+            Self::WorkerAlreadyBound {
+                worker_id,
+                item_text,
+                generation,
+            } => write!(
+                f,
+                "worker {worker_id:?} is already bound to queue item {item_text:?} generation {generation}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QueueClaimStartRefused {}
 
 fn validate_generation(
     claim: &QueueClaim,
@@ -435,6 +544,42 @@ impl QueueClaimLedger {
         // `#claimdispatchidentity`: claims stored under an older identity rule
         // are compared under the current one.
         ledger.rekey();
+        // A pre-`queue start` binary used `--refresh` as implicit running
+        // evidence and therefore persisted no concrete worker binding. Do not
+        // keep projecting that ambiguous state as 🚧: fail closed to 🟡 until
+        // the coordinator binds the worker explicitly. Conversely, a durable
+        // binding is sufficient evidence to repair a stale Claimed label.
+        for claim in &mut ledger.claims {
+            match (claim.state, claim.worker.is_some()) {
+                (QueueClaimState::Running, false) => claim.state = QueueClaimState::Claimed,
+                (QueueClaimState::Claimed, true) => claim.state = QueueClaimState::Running,
+                _ => {}
+            }
+        }
+        // Within one document queue the worker binding is injective. Refuse a
+        // corrupted/stale projection rather than choosing which attempt owns a
+        // worker and advancing both.
+        let mut workers: HashMap<&str, (&str, u64)> = HashMap::new();
+        for claim in &ledger.claims {
+            let Some(binding) = claim.worker.as_ref() else {
+                continue;
+            };
+            if claim.state == QueueClaimState::Lost {
+                continue;
+            }
+            if let Some((item_text, generation)) =
+                workers.insert(&binding.worker_id, (&claim.item_text, claim.generation))
+            {
+                anyhow::bail!(
+                    "queue worker {:?} is bound to both {:?} generation {} and {:?} generation {}",
+                    binding.worker_id,
+                    item_text,
+                    generation,
+                    claim.item_text,
+                    claim.generation,
+                );
+            }
+        }
         Ok(ledger)
     }
 
@@ -513,6 +658,7 @@ impl QueueClaimLedger {
             owner: owner.trim().to_string(),
             generation: 1,
             state: QueueClaimState::Claimed,
+            worker: None,
             claimed_at_secs: now_secs,
             expires_at_secs,
             owner_session,
@@ -555,6 +701,102 @@ impl QueueClaimLedger {
                 ClaimOutcome::Created
             }
         }
+    }
+
+    /// Bind one concrete harness worker to one exact live claim generation.
+    ///
+    /// Formal contract for live attempts `a` and workers `w`:
+    ///
+    /// * `Running(a) => exists exactly one w: worker(a) = Some(w)`; only this
+    ///   transition can create `Running`, and loading downgrades an unbound
+    ///   legacy `Running` row to `Claimed`;
+    /// * `worker(a) = worker(b) => a = b` (injective binding);
+    /// * only `Claimed -> Running` is permitted, apart from an idempotent
+    ///   replay carrying the same `(owner, generation, worker)` tuple;
+    /// * a stale generation can never acknowledge a replacement attempt.
+    pub fn start(
+        &mut self,
+        item: &str,
+        owner: &str,
+        worker_id: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+        expected_generation: Option<u64>,
+    ) -> Result<QueueClaim, QueueClaimStartRefused> {
+        let worker_id = worker_id.trim();
+        if worker_id.is_empty() {
+            return Err(QueueClaimStartRefused::EmptyWorker);
+        }
+        let identity = claim_identity(item);
+        let Some(index) = self
+            .claims
+            .iter()
+            .position(|claim| claim.identity == identity)
+        else {
+            return Err(QueueClaimStartRefused::Missing);
+        };
+        let claim = &self.claims[index];
+        if claim.is_expired(now_secs) || claim.state == QueueClaimState::Lost {
+            return Err(QueueClaimStartRefused::Expired {
+                holder: claim.owner.clone(),
+                expired_at_secs: claim.expires_at_secs,
+            });
+        }
+        if claim.owner != owner.trim() {
+            return Err(QueueClaimStartRefused::OtherOwner {
+                holder: claim.owner.clone(),
+            });
+        }
+        validate_generation(claim, expected_generation).map_err(|reason| {
+            QueueClaimStartRefused::StaleAttempt {
+                detail: reason.to_string(),
+            }
+        })?;
+        if matches!(
+            claim.state,
+            QueueClaimState::Reported | QueueClaimState::Lost
+        ) {
+            return Err(QueueClaimStartRefused::Terminal {
+                generation: claim.generation,
+                state: claim.state,
+            });
+        }
+        if let Some(binding) = &claim.worker {
+            if binding.worker_id == worker_id {
+                return Ok(claim.clone());
+            }
+            return Err(QueueClaimStartRefused::AttemptAlreadyBound {
+                worker_id: binding.worker_id.clone(),
+            });
+        }
+        if let Some(other) = self
+            .claims
+            .iter()
+            .enumerate()
+            .find_map(|(other_index, other)| {
+                (other_index != index
+                    && other.blocks_dispatch(now_secs)
+                    && other
+                        .worker
+                        .as_ref()
+                        .is_some_and(|binding| binding.worker_id == worker_id))
+                .then_some(other)
+            })
+        {
+            return Err(QueueClaimStartRefused::WorkerAlreadyBound {
+                worker_id: worker_id.to_string(),
+                item_text: other.item_text.clone(),
+                generation: other.generation,
+            });
+        }
+        let claim = &mut self.claims[index];
+        claim.worker = Some(QueueWorkerBinding {
+            worker_id: worker_id.to_string(),
+            started_at_secs: now_secs,
+        });
+        claim.state = QueueClaimState::Running;
+        claim.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
+        Ok(claim.clone())
     }
 
     /// Extend the TTL of `owner`'s live claim on `item` to `now_secs + ttl_secs`
@@ -651,10 +893,10 @@ impl QueueClaimLedger {
                 detail: reason.to_string(),
             }));
         }
-        existing.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
-        if existing.state == QueueClaimState::Claimed {
-            existing.state = QueueClaimState::Running;
+        if existing.state == QueueClaimState::Claimed || existing.worker.is_none() {
+            return Err(refused(RefreshRefusal::NotRunning));
         }
+        existing.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         if owner_session.is_some() {
             existing.owner_session = owner_session;
         }
@@ -681,6 +923,11 @@ impl QueueClaimLedger {
             return Err(QueueClaimTransitionRefused::Terminal {
                 generation: claim.generation,
                 state: claim.state,
+            });
+        }
+        if claim.state == QueueClaimState::Claimed || claim.worker.is_none() {
+            return Err(QueueClaimTransitionRefused::NotRunning {
+                generation: claim.generation,
             });
         }
         claim.state = QueueClaimState::Reported;
@@ -948,12 +1195,13 @@ impl QueueClaimLedger {
     /// `(source_head, id)` pair is an exact promotion receipt: free-text
     /// admission minted backlog `#id` from `source_head` and replaced the head
     /// with `do [#id]`. A live claim whose identity is exactly
-    /// `claim_identity(source_head)` gains a copy keyed on the `#id` head (same
-    /// owner, same expiry), so the promoted head stays claimed instead of
-    /// resurfacing as unclaimed dispatch work. The source claim is kept (it is
-    /// pruned as closed once the free-text head is gone), which keeps the
-    /// transfer idempotent and safe if the promotion write is retried. An `#id`
-    /// head another owner already holds is never taken over. Returns
+    /// `claim_identity(source_head)` is re-keyed onto the `#id` head (same
+    /// owner, generation, worker and expiry), so the promoted head stays claimed
+    /// instead of resurfacing as unclaimed dispatch work. Moving rather than
+    /// copying preserves the one-attempt/one-worker invariant; a retried exact
+    /// promotion is an idempotent no-op. An `#id` head with any distinct live
+    /// attempt is never taken over, even when its owner label happens to match.
+    /// Returns
     /// `(source_head, id, owner)` per transferred claim.
     pub fn transfer_promoted(
         &mut self,
@@ -967,51 +1215,46 @@ impl QueueClaimLedger {
                 continue;
             }
             let source_identity = claim_identity(source);
-            let Some(source_claim) = self
-                .claims
-                .iter()
-                .find(|claim| claim.identity == source_identity && claim.blocks_dispatch(now_secs))
-                .cloned()
-            else {
+            let Some(source_index) = self.claims.iter().position(|claim| {
+                claim.identity == source_identity && claim.blocks_dispatch(now_secs)
+            }) else {
                 continue;
             };
+            let source_claim = self.claims[source_index].clone();
             let target_text = format!("do [#{id}]");
             let target_identity = claim_identity(&target_text);
             if target_identity == source_identity {
                 continue;
             }
-            match self
+            let target_index = self
                 .claims
-                .iter_mut()
-                .find(|claim| claim.identity == target_identity)
-            {
-                Some(existing)
-                    if existing.blocks_dispatch(now_secs)
-                        && existing.owner != source_claim.owner =>
-                {
+                .iter()
+                .position(|claim| claim.identity == target_identity);
+            match target_index {
+                Some(index) if self.claims[index].blocks_dispatch(now_secs) => {
                     continue;
                 }
-                Some(existing) => {
+                Some(index) => {
+                    let existing = &mut self.claims[index];
                     existing.owner = source_claim.owner.clone();
                     existing.generation = source_claim.generation;
                     existing.state = source_claim.state;
+                    existing.worker = source_claim.worker.clone();
                     existing.owner_session = source_claim.owner_session.clone();
                     existing.item_text = target_text;
                     existing.expires_at_secs =
                         existing.expires_at_secs.max(source_claim.expires_at_secs);
+                    self.claims.remove(source_index);
                 }
-                None => self.claims.push(QueueClaim {
-                    identity: target_identity,
-                    item_text: target_text,
-                    owner: source_claim.owner.clone(),
-                    generation: source_claim.generation,
-                    state: source_claim.state,
-                    claimed_at_secs: source_claim.claimed_at_secs,
-                    expires_at_secs: source_claim.expires_at_secs,
-                    owner_session: source_claim.owner_session.clone(),
-                    anchor: None,
-                    followed_from: Vec::new(),
-                }),
+                None => {
+                    let source = &mut self.claims[source_index];
+                    if !source.followed_from.contains(&source.item_text) {
+                        source.followed_from.push(source.item_text.clone());
+                    }
+                    source.identity = target_identity;
+                    source.item_text = target_text;
+                    source.anchor = None;
+                }
             }
             transferred.push((source.clone(), id, source_claim.owner));
         }
@@ -1186,6 +1429,8 @@ pub enum RefreshRefusal {
     /// The heartbeat belongs to an older attempt or omitted the required
     /// generation fence.
     StaleAttempt { detail: String },
+    /// Dispatch has not been positively acknowledged with `queue start`.
+    NotRunning,
 }
 
 impl RefreshRefusal {
@@ -1196,6 +1441,7 @@ impl RefreshRefusal {
             Self::Expired { .. } => "expired",
             Self::OtherOwner { .. } => "other_owner",
             Self::StaleAttempt { .. } => "stale_attempt",
+            Self::NotRunning => "not_running",
         }
     }
 }
@@ -1237,6 +1483,11 @@ impl std::fmt::Display for QueueClaimRefreshRefused {
             RefreshRefusal::StaleAttempt { detail } => write!(
                 f,
                 "cannot refresh {:?} for {}: {detail}.",
+                self.item, self.owner
+            ),
+            RefreshRefusal::NotRunning => write!(
+                f,
+                "cannot refresh {:?} for {}: no concrete worker has acknowledged the attempt. Run `queue start` after a successful dispatch.",
                 self.item, self.owner
             ),
         }
@@ -1592,6 +1843,9 @@ mod tests {
             600,
             Some(session("claude", "pre-clear", "%180", 1)),
         );
+        ledger
+            .start("#a", "subagent:a", "worker:a", 101, 600, Some(1))
+            .unwrap();
         let after_clear = session("claude", "post-clear", "%180", 1);
         let adopted = ledger
             .refresh_in_session("#a", "subagent:a", 200, 600, Some(after_clear.clone()))
@@ -1694,7 +1948,7 @@ mod tests {
     }
 
     #[test]
-    fn transfer_promoted_never_takes_over_another_owners_live_id_claim() {
+    fn transfer_promoted_never_takes_over_a_distinct_live_id_attempt() {
         let head = "Run Agent Doc on frontend.md crashed with a panic in the route";
         let mut ledger = QueueClaimLedger::default();
         ledger.claim(head, "subagent:a", 100, 600);
@@ -1711,6 +1965,17 @@ mod tests {
                 .get(&claim_identity("do [#x]")),
             Some(&"subagent:b".to_string())
         );
+
+        let mut same_owner = QueueClaimLedger::default();
+        same_owner.claim(head, "subagent:a", 100, 600);
+        same_owner.claim("do [#x]", "subagent:a", 100, 600);
+        assert!(
+            same_owner
+                .transfer_promoted(200, &[(head.to_string(), "x".to_string())])
+                .is_empty(),
+            "an owner label is not proof that two live attempts share lineage"
+        );
+        assert_eq!(same_owner.claims.len(), 2);
     }
 
     #[test]
@@ -1758,6 +2023,9 @@ mod tests {
     fn refresh_extends_only_the_same_owners_live_claim() {
         let mut ledger = QueueClaimLedger::default();
         ledger.claim("do [#a]", "subagent:a", 100, 10);
+        ledger
+            .start("#a", "subagent:a", "worker:a", 101, 10, Some(1))
+            .unwrap();
 
         // Same owner, live claim: the TTL moves, claimed_at does not.
         let refreshed = ledger.refresh("🚧 [#a]", "subagent:a", 105, 50).unwrap();
@@ -1915,6 +2183,7 @@ mod tests {
                     owner: "subagent:a".into(),
                     generation: 0,
                     state: QueueClaimState::Claimed,
+                    worker: None,
                     claimed_at_secs: 1,
                     expires_at_secs: 50,
                     owner_session: None,
@@ -1927,6 +2196,7 @@ mod tests {
                     owner: "subagent:b".into(),
                     generation: 0,
                     state: QueueClaimState::Claimed,
+                    worker: None,
                     claimed_at_secs: 2,
                     expires_at_secs: 90,
                     owner_session: None,
@@ -2013,6 +2283,9 @@ mod tests {
         let mut ledger = QueueClaimLedger::default();
         ledger.claim("work", "subagent:a", 100, 10);
         assert_eq!(ledger.claims[0].generation, 1);
+        ledger
+            .start("work", "subagent:a", "worker:a", 100, 10, Some(1))
+            .unwrap();
         assert_eq!(
             ledger
                 .refresh_attempt_in_session("work", "subagent:a", 101, 10, None, Some(1))
@@ -2027,6 +2300,9 @@ mod tests {
             ClaimOutcome::Reassigned
         );
         assert_eq!(ledger.claims[0].generation, 2);
+        ledger
+            .start("work", "subagent:b", "worker:b", 112, 10, Some(2))
+            .unwrap();
         assert!(matches!(
             ledger.report("work", Some(1)),
             Err(QueueClaimTransitionRefused::StaleGeneration { current: 2, .. })
@@ -2041,6 +2317,90 @@ mod tests {
             QueueClaimState::Reported
         );
         assert!(ledger.claims[0].blocks_dispatch(10_000));
+    }
+
+    #[test]
+    fn worker_acknowledgement_is_injective_generation_fenced_and_fail_closed() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("work a", "subagent:a", 100, 10);
+        ledger.claim("work b", "subagent:b", 100, 10);
+
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Claimed);
+        assert!(ledger.claims[0].worker.is_none());
+        assert!(matches!(
+            ledger.refresh_attempt_in_session("work a", "subagent:a", 101, 10, None, Some(1)),
+            Err(QueueClaimRefreshRefused {
+                reason: RefreshRefusal::NotRunning,
+                ..
+            })
+        ));
+        assert!(matches!(
+            ledger.report("work a", Some(1)),
+            Err(QueueClaimTransitionRefused::NotRunning { generation: 1 })
+        ));
+
+        let running = ledger
+            .start("work a", "subagent:a", "worker:one", 101, 10, Some(1))
+            .unwrap();
+        assert_eq!(running.state, QueueClaimState::Running);
+        assert_eq!(
+            running
+                .worker
+                .as_ref()
+                .map(|binding| binding.worker_id.as_str()),
+            Some("worker:one")
+        );
+        assert_eq!(
+            ledger
+                .start("work a", "subagent:a", "worker:one", 102, 10, Some(1))
+                .unwrap(),
+            running,
+            "the exact acknowledgement replay is idempotent"
+        );
+        assert!(matches!(
+            ledger.start("work a", "subagent:a", "worker:two", 102, 10, Some(1)),
+            Err(QueueClaimStartRefused::AttemptAlreadyBound { .. })
+        ));
+        assert!(matches!(
+            ledger.start("work b", "subagent:b", "worker:one", 102, 10, Some(1)),
+            Err(QueueClaimStartRefused::WorkerAlreadyBound { .. })
+        ));
+
+        ledger.prune(
+            111,
+            Some(
+                &[claim_identity("work a"), claim_identity("work b")]
+                    .into_iter()
+                    .collect(),
+            ),
+        );
+        assert_eq!(
+            ledger.claim("work a", "subagent:new", 112, 10),
+            ClaimOutcome::Reassigned
+        );
+        assert!(matches!(
+            ledger.start("work a", "subagent:a", "worker:late", 112, 10, Some(1)),
+            Err(QueueClaimStartRefused::OtherOwner { .. })
+                | Err(QueueClaimStartRefused::StaleAttempt { .. })
+        ));
+        let replacement = ledger
+            .claims
+            .iter()
+            .find(|claim| claim.item_text == "work a")
+            .unwrap();
+        assert_eq!(replacement.generation, 2);
+        assert_eq!(replacement.state, QueueClaimState::Claimed);
+        assert!(replacement.worker.is_none());
+    }
+
+    #[test]
+    fn stored_running_without_worker_downgrades_and_duplicate_worker_fails_closed() {
+        let legacy_running = r#"{"claims":[{"identity":{"kind":"free_text","key":"work"},"item_text":"work","owner":"subagent:a","generation":1,"state":"running","claimed_at_secs":1,"expires_at_secs":50}]}"#;
+        let ledger = QueueClaimLedger::from_state_payload(legacy_running).unwrap();
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Claimed);
+
+        let duplicate = r#"{"claims":[{"identity":{"kind":"free_text","key":"a"},"item_text":"a","owner":"subagent:a","generation":1,"state":"running","worker":{"worker_id":"worker:same","started_at_secs":2},"claimed_at_secs":1,"expires_at_secs":50},{"identity":{"kind":"free_text","key":"b"},"item_text":"b","owner":"subagent:b","generation":1,"state":"running","worker":{"worker_id":"worker:same","started_at_secs":2},"claimed_at_secs":1,"expires_at_secs":50}]}"#;
+        assert!(QueueClaimLedger::from_state_payload(duplicate).is_err());
     }
 
     #[test]

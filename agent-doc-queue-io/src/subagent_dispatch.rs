@@ -179,6 +179,12 @@ pub fn claim_command(document: &str, item: &str) -> String {
     core::claim_command_for(document, item)
 }
 
+/// The `agent-doc queue start` template run immediately after a successful
+/// harness spawn binds its returned worker identity to the claim generation.
+pub fn start_command(document: &str, item: &str) -> String {
+    core::start_command_for(document, item)
+}
+
 /// The `agent-doc queue brief` command that prints `item`'s subagent
 /// authorization preamble (`#waypostauthorization`).
 pub fn brief_command(document: &str, item: &str) -> String {
@@ -446,6 +452,8 @@ mod tests {
             "only the inline head is drainable while the subagent works"
         );
         // The subagent can still refresh/release by the text it was handed.
+        crate::queue_claim::start_attempt(&file, &handle, "subagent:gh120", "worker:gh120", 600, 1)
+            .unwrap();
         crate::queue_claim::refresh(&file, &handle, "subagent:gh120", 600).unwrap();
 
         // `#claimfollowedit`: an in-place edit of the claimed line's URL is
@@ -663,6 +671,15 @@ mod tests {
         );
 
         crate::queue_claim::claim(&file, question, "subagent:page-status-enum", 3600).unwrap();
+        crate::queue_claim::start_attempt(
+            &file,
+            question,
+            "subagent:page-status-enum",
+            "worker:page-status-enum",
+            3600,
+            1,
+        )
+        .unwrap();
         release(&file, question, ReleaseKind::Reported).unwrap();
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),

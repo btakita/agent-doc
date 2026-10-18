@@ -730,6 +730,18 @@ fn prepare_with_gate(
             }
         }
     }
+    if boundary {
+        // `#assistantsteeringlineage`: the boundary diff starts at preflight so
+        // operator edits absorbed by closeout survive. Subtract only the exact
+        // response body attested by this cycle's capture lineage. If that
+        // lineage is incomplete, fail without advancing the watermark; agent
+        // prose must never be dispatched as operator intent.
+        crate::absorbed_steering::retain_operator_lineage(
+            file,
+            &watermark.cycle_id,
+            &mut observation.ready,
+        )?;
+    }
     let gate = crate::steering_gate_log::GateObservation {
         document,
         consumer: consumer.to_string(),
@@ -1103,11 +1115,10 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
         None,
         Vec::new(),
     );
-    let owned = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+    let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)
         .ok()
-        .flatten()
-        .map(|cycle| binary_owned_ids(&cycle))
-        .unwrap_or_default();
+        .flatten();
+    let owned = cycle.as_ref().map(binary_owned_ids).unwrap_or_default();
     let deterministic = agent_doc_debounce::edit_settle::DeterministicOnly;
     let ctx = ObserveContext {
         now_ms: now_ms(),
@@ -1134,6 +1145,23 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
         &prompt_presets,
     )
     .ready;
+    if let Some(cycle) = cycle
+        && let Err(err) =
+            crate::absorbed_steering::retain_operator_lineage(file, &cycle.cycle_id, &mut ready)
+    {
+        // This compatibility wrapper cannot return a diagnostic result. Keep
+        // the contract fail-closed: surface nothing and leave a durable reason
+        // for the next repair/session-check path. Stateless callers do not
+        // advance a watermark, so later observations can retry.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "pending_steering_lineage_ambiguous file={} error={err:#} (#assistantsteeringlineage)",
+                file.display(),
+            ),
+        );
+        ready.clear();
+    }
     route_claimed_items(file, current, &mut ready);
     crate::absorbed_steering::drop_consumed(file, &mut ready);
     ready
@@ -1554,6 +1582,183 @@ mod tests {
     fn close_cycle(file: &Path, content: &str) {
         agent_doc_cycle_state_io::mark_committed(file, "test_commit", Some(content), Some(content))
             .unwrap();
+    }
+
+    fn capture_response_body(file: &Path, response_body: &str, baseline: &str) {
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+            .unwrap()
+            .expect("fixture should have a live cycle");
+        let response_sha256 = agent_doc_hash::content_hash(response_body);
+        let capture_id = state
+            .capture_id
+            .as_deref()
+            .unwrap_or("assistant-lineage-test-capture");
+        agent_doc_cycle_state_io::append_response_captured_body(
+            file,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &state.cycle_id,
+                capture_id,
+                response_sha256: &response_sha256,
+                response_body,
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: Some(baseline),
+            },
+        )
+        .unwrap();
+    }
+
+    fn assistant_lineage_fixture() -> (&'static str, &'static str, String) {
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:exchange -->\nOperator request.\n<!-- /agent:exchange -->\n";
+        let response = concat!(
+            "<!-- patch:exchange mode=\"append\" -->\n",
+            "Implemented, dogfooded, and released.\n\n",
+            "The resolved policy reports enabled=true.\n\n",
+            "> **Queue prompt:** release + publish\n\n",
+            "Released and publicly verified.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let applied = baseline.replace(
+            "<!-- /agent:exchange -->",
+            concat!(
+                "\nImplemented, dogfooded, and released.\n\n",
+                "The resolved policy reports enabled=true.\n\n",
+                "> **Queue prompt:** release + publish\n\n",
+                "Released and publicly verified.\n",
+                "<!-- /agent:exchange -->",
+            ),
+        );
+        (baseline, response, applied)
+    }
+
+    /// Live v0.35.518 dogfood failure: finalize committed the response, then
+    /// the boundary diff classified each response paragraph as a fresh exchange
+    /// addition and persisted it for the next admission. Exact capture lineage
+    /// must remove every assistant-authored item before report/ledger effects.
+    #[test]
+    fn committed_captured_response_is_not_replayed_as_operator_steering() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let (baseline, response, applied) = assistant_lineage_fixture();
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, None, Vec::new()).unwrap();
+        std::fs::write(&file, &applied).unwrap();
+        capture_response_body(&file, response, baseline);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &applied,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &applied);
+
+        let mut out = Vec::new();
+        emit_closeout_steering(&file, &mut out);
+        assert!(out.is_empty(), "{}", String::from_utf8_lossy(&out));
+        assert!(
+            crate::absorbed_steering::unanswered_prompts(&file)
+                .unwrap()
+                .is_empty(),
+            "assistant response must not enter the absorbed-steering ledger"
+        );
+        assert!(pending_steering_items(&file, &applied).is_empty());
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("midturn_steering_binary_response_suppressed"),
+            "{ops}"
+        );
+    }
+
+    #[test]
+    fn captured_response_filter_preserves_adjacent_operator_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let (baseline, response, applied) = assistant_lineage_fixture();
+        let operator_prompt = "Also verify that the queue stayed synchronized.";
+        let applied = applied.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{operator_prompt}\n<!-- /agent:exchange -->"),
+        );
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, None, Vec::new()).unwrap();
+        std::fs::write(&file, &applied).unwrap();
+        capture_response_body(&file, response, baseline);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &applied,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &applied);
+
+        let prepared = prepare_closeout(&file)
+            .unwrap()
+            .expect("operator edit should produce a boundary observation");
+        let report = prepared.report.as_ref().expect("operator report");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert_eq!(report.items[0].verbatim, operator_prompt);
+        prepared.acknowledge(&file).unwrap();
+        assert_eq!(
+            crate::absorbed_steering::unanswered_prompts(&file).unwrap(),
+            vec![operator_prompt.to_string()]
+        );
+    }
+
+    #[test]
+    fn missing_captured_response_body_fails_closed_without_advancing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let (baseline, response, applied) = assistant_lineage_fixture();
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, None, Vec::new()).unwrap();
+        std::fs::write(&file, &applied).unwrap();
+        let response_sha256 = agent_doc_hash::content_hash(response);
+        agent_doc_cycle_state_io::mark_response_captured(
+            &file,
+            "assistant-lineage-test-capture",
+            Some(&applied),
+            Some(&applied),
+            &response_sha256,
+            Some(&cycle.cycle_id),
+        )
+        .unwrap();
+        close_cycle(&file, &applied);
+
+        let err = prepare_closeout(&file).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("missing captured-response body"),
+            "{err:#}"
+        );
+
+        // Repairing the exact lineage lets the same unadvanced observation be
+        // retried and then suppressed normally.
+        capture_response_body(&file, response, baseline);
+        let prepared = prepare_closeout(&file)
+            .unwrap()
+            .expect("watermark must remain retryable");
+        assert!(
+            prepared
+                .report
+                .as_ref()
+                .is_none_or(|report| report.items.is_empty()),
+            "{:?}",
+            prepared.report
+        );
     }
 
     /// The operator report: a `#subagents` queue addition made after the seed,
@@ -2612,15 +2817,11 @@ mod tests {
             "### Re: testing to see — opus\n\nYes, picked up.\n<!-- /agent:exchange -->",
         );
         std::fs::write(&file, &answered).unwrap();
-        agent_doc_cycle_state_io::mark_response_captured(
+        capture_response_body(
             &file,
-            "test_capture",
-            Some(&answered),
-            Some(&answered),
-            "sha-answer",
-            Some(&second.cycle_id),
-        )
-        .unwrap();
+            "<!-- patch:exchange -->\n### Re: testing to see — opus\n\nYes, picked up.\n<!-- /patch:exchange -->\n",
+            &absorbed,
+        );
         close_cycle(&file, &answered);
         backdate(&file);
 

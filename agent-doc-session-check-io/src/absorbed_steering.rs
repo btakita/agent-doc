@@ -31,7 +31,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use agent_doc_document_realtime::midturn_steering::{SteeringChange, SteeringItem, SteeringSource};
@@ -165,6 +165,105 @@ fn is_absorbable(item: &SteeringItem) -> bool {
     item.source == SteeringSource::Exchange
         && item.change != SteeringChange::Deleted
         && !is_tracked_work_rows(&item.verbatim)
+}
+
+/// Remove exchange changes that are provably part of the exact response this
+/// cycle captured, before they can be reported or persisted as operator
+/// steering (`#assistantsteeringlineage`).
+///
+/// The boundary observer intentionally compares the committed document with
+/// the cycle's preflight watermark: that is how it preserves an operator edit
+/// absorbed by the same commit. The comparison alone cannot distinguish that
+/// edit from the response the binary appended. The captured-response fact is
+/// the authority for that distinction.
+///
+/// Formally, for a non-deleted exchange item `i` and cycle `c`:
+///
+/// `operator_candidate(i, c) = observed_after_preflight(i, c)
+///                             && !captured_response(c).contains(i)`
+///
+/// If `c` claims a captured response but its body cannot be proven from the
+/// same `(cycle_id, capture_id, response_sha256)` lineage, this returns an
+/// error. Callers must not surface or acknowledge the ambiguous items. Missing
+/// provenance cannot turn agent output into an operator instruction.
+pub(crate) fn retain_operator_lineage(
+    file: &Path,
+    cycle_id: &str,
+    items: &mut Vec<SteeringItem>,
+) -> Result<usize> {
+    let exchange_candidate_count = items
+        .iter()
+        .filter(|item| {
+            item.source == SteeringSource::Exchange && item.change != SteeringChange::Deleted
+        })
+        .count();
+    if exchange_candidate_count == 0 {
+        return Ok(0);
+    }
+
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(0);
+    };
+    let has_response_lineage = state.capture_id.is_some() || state.response_sha256.is_some();
+    if !has_response_lineage {
+        return Ok(0);
+    }
+    // A consumer watermark can legitimately lag behind a later response cycle.
+    // The current response lineage still proves which observed text is binary-
+    // authored; `cycle_id` remains the steering lineage recorded in diagnostics.
+    let response_cycle_id = state.cycle_id.as_str();
+    let (Some(capture_id), Some(response_sha256)) = (
+        state.capture_id.as_deref(),
+        state.response_sha256.as_deref(),
+    ) else {
+        bail!(
+            "incomplete captured-response lineage for {} cycle {} (#assistantsteeringlineage)",
+            file.display(),
+            cycle_id,
+        );
+    };
+    let Some(capture) =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+    else {
+        bail!(
+            "missing captured-response body for {} cycle {} capture {} (#assistantsteeringlineage)",
+            file.display(),
+            cycle_id,
+            capture_id,
+        );
+    };
+    if capture.cycle_id != response_cycle_id || capture.response_sha256 != response_sha256 {
+        bail!(
+            "mismatched captured-response lineage for {} cycle {} capture {} (#assistantsteeringlineage)",
+            file.display(),
+            cycle_id,
+            capture_id,
+        );
+    }
+
+    let before = items.len();
+    items.retain(|item| {
+        if item.source != SteeringSource::Exchange || item.change == SteeringChange::Deleted {
+            return true;
+        }
+        let text = item.verbatim.trim();
+        text.is_empty() || !capture.response_body.contains(text)
+    });
+    let suppressed = before.saturating_sub(items.len());
+    if suppressed > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "midturn_steering_binary_response_suppressed file={} steering_cycle={} response_cycle={} capture={} count={} (#assistantsteeringlineage)",
+                file.display(),
+                cycle_id,
+                response_cycle_id,
+                capture_id,
+                suppressed,
+            ),
+        );
+    }
+    Ok(suppressed)
 }
 
 impl AbsorbedSteeringLedger {
@@ -352,7 +451,9 @@ fn committed_baseline(file: &Path) -> Option<String> {
 /// (`#steerbaselineabsorb`). Called where steering is reported as pending at
 /// or after closeout. Returns the newly recorded texts.
 pub fn record_reported(file: &Path, items: &[SteeringItem], cycle_id: &str) -> Result<Vec<String>> {
-    if !items.iter().any(is_absorbable) {
+    let mut operator_items = items.to_vec();
+    retain_operator_lineage(file, cycle_id, &mut operator_items)?;
+    if !operator_items.iter().any(is_absorbable) {
         return Ok(Vec::new());
     }
     let Some(baseline) = committed_baseline(file) else {
@@ -362,7 +463,7 @@ pub fn record_reported(file: &Path, items: &[SteeringItem], cycle_id: &str) -> R
         return Ok(Vec::new());
     };
     let mut ledger = load_pruned(&conn, file)?;
-    let added = ledger.record(items, &baseline, cycle_id, now_secs());
+    let added = ledger.record(&operator_items, &baseline, cycle_id, now_secs());
     if !added.is_empty() {
         store(&conn, file, &ledger)?;
         agent_doc_ops_log_io::log_op(

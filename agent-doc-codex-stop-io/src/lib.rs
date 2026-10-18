@@ -7344,13 +7344,10 @@ Reviewed the gated items.\n\
     fn complete_run(doc: &std::path::Path) -> String {
         let content = std::fs::read_to_string(doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(doc, Some(&content), Some(&content)).unwrap();
-        agent_doc_cycle_state_io::mark_response_captured(
+        agent_doc_capture_io::capture_response_with_current_content(
             doc,
-            "response_captured",
-            Some(&content),
-            Some(&content),
-            "response-sha",
-            None,
+            "fixture response",
+            &content,
         )
         .unwrap();
         agent_doc_cycle_state_io::mark_committed(

@@ -133,7 +133,12 @@ metadata in `editors/jetbrains-263`. The presentation adapter remains guarded
 to exact 262, while frontend frame snapshots are compiled and verified against
 both platform branches.
 All three update versions, artifact names, repository listings, and ranges are
-distinct. `agent-doc plugin install|update
+distinct. A new agent-doc release retains a package's update version when its
+recorded `pluginSourceDigest` still matches its source tree, while updating the
+package's `pluginReleaseVersion` ownership metadata; this keeps the binary paired
+with the already-running generation and makes installed-plugin reconciliation a
+no-op without a restart (GH #295). A changed digest allocates a fresh version
+above every compatibility line. `agent-doc plugin install|update
 jetbrains`, the `agent-doc upgrade` installed-plugin reconciliation, and `plugin install jetbrains --local
 --all-installed` derive each target's platform build from its versioned IDE data
 directory (`IntelliJIdea2026.3` -> 263) and select only that range's asset or

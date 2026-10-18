@@ -534,6 +534,13 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   `agent-doc-jetbrains-263-<version>.zip`, and an unprovable or unsupported
   target fails before any installed tree is replaced. `--local --all-installed`
   applies the same policy independently to every existing installation.
+  Release-version projection compares each package's recorded
+  `pluginSourceDigest`. When a new agent-doc release has byte-identical plugin
+  sources, it retains that package's `pluginVersion`, updates only the
+  `pluginReleaseVersion` ownership metadata, and reconciliation reports the
+  already-running generation as unchanged without replacing files or requiring
+  a restart (GH #295). Only a changed source digest receives a fresh update
+  version.
   When a live IDE owns a 262 or 263 target, the modular package exposes no safe
   restart-free dynamic upgrade entry point: asynchronous classloader retirement
   provides no synchronous success receipt, and a backend attach cannot

@@ -194,6 +194,31 @@ pub fn preserve_route_layout() -> bool {
     background_existing_pane_only() || cross_document_existing_pane_only()
 }
 
+/// Facts proving that a route is a background re-entry from its own parked
+/// owner pane, rather than a foreground operator route.
+///
+/// The predicate is deliberately conjunctive and fail-closed:
+///
+/// `background_owner_reentry = current_pane_present ∧ owner_matches ∧ pane_is_stashed ∧ ¬controller_layout_owned`
+///
+/// Missing pane provenance, missing owner proof, or missing stash proof can
+/// never manufacture background authority. The independent focus fence in
+/// `route_focus` still refuses to select a pane observed in stash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackgroundOwnerReentryFacts {
+    pub current_pane_present: bool,
+    pub owner_matches: bool,
+    pub pane_is_stashed: bool,
+    pub controller_layout_owned: bool,
+}
+
+pub const fn background_owner_reentry(facts: BackgroundOwnerReentryFacts) -> bool {
+    facts.current_pane_present
+        && facts.owner_matches
+        && facts.pane_is_stashed
+        && !facts.controller_layout_owned
+}
+
 /// Whether the controller layout projection owns tmux topology for this route
 /// (`#routelaterescue`). See [`LayoutOwnedByControllerGuard`].
 pub fn layout_owned_by_controller() -> bool {
@@ -447,6 +472,34 @@ pub fn run_with_tmux_with_options(
     // back to tmux's ambient active pane would misclassify IDE/plugin routes as
     // cross-document whenever an unrelated managed pane happened to be active.
     let current_pane = agent_doc_tmux_io::current_live_pane_id_from_env_or_override(tmux);
+    let background_owner_reentry = background_owner_reentry(BackgroundOwnerReentryFacts {
+        current_pane_present: current_pane.is_some(),
+        owner_matches: current_pane.as_deref().is_some_and(|pane| {
+            agent_doc_sync_io::sync::pane_process_tree_owns_document(tmux, pane, file)
+        }),
+        pane_is_stashed: current_pane
+            .as_deref()
+            .is_some_and(|pane| agent_doc_sync_io::sync::pane_in_stash_window(tmux, pane)),
+        controller_layout_owned: layout_owned_by_controller(),
+    });
+    // `#stashbackgroundreentry`: a supervisor/hook route launched from a
+    // document's own pane while that pane is parked in stash is background
+    // delivery. It may inject into the proven pane, but it cannot rescue the
+    // pane, select its window, or otherwise overwrite the foreground editor
+    // layout. Preserve an explicit outer background guard as well.
+    let _background_owner_reentry_guard = BackgroundExistingPaneOnlyGuard::set(
+        background_existing_pane_only() || background_owner_reentry,
+    );
+    if background_owner_reentry {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_background_owner_reentry file={} pane={} authority=background_existing_pane_only focus_effect=none pane_effect=none (#stashbackgroundreentry)",
+                file.display(),
+                current_pane.as_deref().unwrap_or("none"),
+            ),
+        );
+    }
     let foreign_owner = current_pane.as_deref().and_then(|current_pane| {
         agent_doc_sync_io::sync::pane_owned_document_other_than(tmux, current_pane, file)
     });
@@ -483,7 +536,35 @@ pub fn run_with_tmux_with_options(
 
 #[cfg(test)]
 mod tests {
-    use super::automatic_cross_document_route;
+    use super::{
+        BackgroundOwnerReentryFacts, automatic_cross_document_route, background_owner_reentry,
+    };
+
+    #[test]
+    fn background_owner_reentry_requires_all_authority_facts() {
+        for current_pane_present in [false, true] {
+            for owner_matches in [false, true] {
+                for pane_is_stashed in [false, true] {
+                    for controller_layout_owned in [false, true] {
+                        let facts = BackgroundOwnerReentryFacts {
+                            current_pane_present,
+                            owner_matches,
+                            pane_is_stashed,
+                            controller_layout_owned,
+                        };
+                        assert_eq!(
+                            background_owner_reentry(facts),
+                            current_pane_present
+                                && owner_matches
+                                && pane_is_stashed
+                                && !controller_layout_owned,
+                            "truth-table row: {facts:?}",
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn automatic_cross_document_route_requires_foreign_owner_without_layout_columns() {

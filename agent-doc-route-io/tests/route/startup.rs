@@ -3767,6 +3767,79 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
         assert!(iso.pane_alive(&stashed));
     }
+
+    /// `#stashbackgroundreentry` (2026-10-18 upgrade.md/%44): an unattended
+    /// queue/supervisor reopen ran inside the document's own pane after the
+    /// editor layout had parked that pane in `1:stash`. The reopen may deliver
+    /// to the existing pane, but its route-level topology and focus effects are
+    /// both forbidden: it must neither rescue the pane nor select its window.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn background_owner_reopen_keeps_stashed_pane_and_foreground_focus_unchanged() {
+        use agent_doc_route_io::invocation::BackgroundExistingPaneOnlyGuard;
+        use agent_doc_route_io::pane_resolution::rescue_from_stash;
+        use agent_doc_route_io::route_focus::{RouteFocusDecision, focus_route_pane};
+
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-stash-background-reentry");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("upgrade.md");
+        std::fs::write(&file, "# upgrade\n").unwrap();
+
+        let foreground = iso.auto_start(session, &cwd).unwrap();
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
+            .status();
+        let background = iso.auto_start(session, &cwd).unwrap();
+        iso.stash_pane(&background, session).unwrap();
+        iso.select_pane(&foreground).unwrap();
+
+        let foreground_window = iso.pane_window(&foreground).unwrap();
+        let stash_window = iso.pane_window(&background).unwrap();
+        let visible_before = iso.list_window_panes(&foreground_window).unwrap();
+
+        let (rescued, focus) = {
+            let _guard = BackgroundExistingPaneOnlyGuard::set(true);
+            let rescued = rescue_from_stash(
+                &iso,
+                &background,
+                "upgrade-session",
+                file.to_str().unwrap(),
+                session,
+                false,
+            );
+            let focus = focus_route_pane(
+                &iso,
+                &file,
+                &background,
+                "background_managed_or_dispatch_only_reopen",
+            );
+            (rescued, focus)
+        };
+
+        assert!(!rescued, "background reopen has no layout-rescue effect");
+        assert_eq!(focus, RouteFocusDecision::SkipPreserveLayout);
+        assert_eq!(
+            iso.list_window_panes(&foreground_window).unwrap(),
+            visible_before
+        );
+        assert_eq!(iso.pane_window(&background).unwrap(), stash_window);
+        assert_eq!(
+            iso.active_window(session).as_deref(),
+            Some(foreground_window.as_str())
+        );
+        assert_eq!(
+            iso.active_pane(session).as_deref(),
+            Some(foreground.as_str())
+        );
+        assert!(
+            iso.pane_alive(&background),
+            "pane remains available for delivery"
+        );
+    }
+
     /// `#routelaterescue` (2026-10-09 three-pane window): a controller
     /// `editor_route` converged a two-column layout, then -- during the route's
     /// ready wait -- another project root's controller published a newer layout
@@ -3865,6 +3938,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn controller_owned_layout_route_submit_does_not_focus_pane_stashed_by_newer_selection() {
         use agent_doc_route_io::direct_pane_dispatch::send_command_once_unchecked;
         use agent_doc_route_io::invocation::LayoutOwnedByControllerGuard;
+        use agent_doc_route_io::pane_resolution::rescue_from_stash;
         use agent_doc_route_io::route_focus::{RouteFocusDecision, focus_route_pane};
 
         let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-controller-layout-late-focus");
@@ -3930,8 +4004,16 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "rpg stays parked"
         );
 
-        // Control: a standalone route still owns focus, so the guard is what
-        // kept the client on sdk.md above.
+        // Control: a standalone route may rescue the target into foreground,
+        // then owns focus there. It may not focus a still-stashed target.
+        assert!(rescue_from_stash(
+            &iso,
+            &rpg_pane,
+            "rpg-session",
+            rpg.to_str().unwrap(),
+            session,
+            false,
+        ));
         assert_eq!(
             focus_route_pane(&iso, &rpg, &rpg_pane, "test_control"),
             RouteFocusDecision::Apply

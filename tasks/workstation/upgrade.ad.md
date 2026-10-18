@@ -170,7 +170,7 @@ The existing landlord-notification TODO remains the right path for a durable loa
 
 ## Queue
 
-<!-- agent:queue priority subagents go -->
+<!-- agent:queue priority subagents -->
 <!-- /agent:queue -->
 
 ## Todo

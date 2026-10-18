@@ -638,7 +638,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                         )
                         return APPLY_FAILED
                     }
-                    val scheduled =
+                    val result =
                         CrdtReplicaManager.rollVisibleBufferForward(
                             project,
                             file,
@@ -647,10 +647,14 @@ class PatchWatcher(private val project: Project) : Disposable {
                         )
                     LOG.info(
                         "[crdt-replica] visible roll-forward request " +
-                            "outcome=${if (scheduled) "scheduled" else "no_replica_manager"} " +
+                            "outcome=${result.name.lowercase()} " +
                             "file=$file content_hash=$expectedHash",
                     )
-                    return if (scheduled) APPLY_APPLIED else APPLY_FAILED
+                    return when (result) {
+                        VisibleRollForwardResult.Applied -> APPLY_APPLIED
+                        VisibleRollForwardResult.Deferred -> APPLY_PROJECTION_CHANGED
+                        VisibleRollForwardResult.Rejected -> APPLY_FAILED
+                    }
                 }
                 // #editorreplicareregister: a reliable editor can outlive its relay
                 // membership. Only this typed recovery event republishes the current

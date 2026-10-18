@@ -477,6 +477,21 @@ internal enum class VisibleRollForwardDecision(val token: String) {
 }
 
 /**
+ * What the synchronous socket receipt may claim about a visible roll-forward.
+ *
+ * `Applied` means the serialized document lane either published the exact
+ * visible cut or proved it was already canonical. `Deferred` means the request
+ * was safe to retry but did not cross that boundary. In particular, merely
+ * scheduling work is never `Applied`: the controller spends its bounded
+ * per-content attempt only after the editor has completed the decision.
+ */
+internal enum class VisibleRollForwardResult {
+    Applied,
+    Deferred,
+    Rejected,
+}
+
+/**
  * `#jetbrainsreplicaloops`: the in-place roll-forward is safe only for the exact
  * canonical the controller named (a stale request describes a state that has
  * moved), only from a replica that holds that canonical (the single splice is
@@ -4738,19 +4753,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * controller's retained transition re-applies the pending write on top of
      * it. Nothing here writes controller text into the buffer.
      */
-    internal fun scheduleVisibleRollForward(filePath: String, expectedCanonicalHash: String, reason: String) {
-        try {
-            documentWorkers.forDocument(filePath).execute {
-                if (!disposed.get()) rollVisibleBufferForward(filePath, expectedCanonicalHash, reason)
-            }
-        } catch (error: RejectedExecutionException) {
-            if (!disposed.get()) {
-                log.warn("[crdt-replica] visible roll-forward scheduling rejected for $filePath", error)
-            }
-        }
-    }
-
-    private fun rollVisibleBufferForward(filePath: String, expectedCanonicalHash: String, reason: String) {
+    private fun rollVisibleBufferForward(filePath: String, expectedCanonicalHash: String, reason: String): Boolean {
         val name = File(filePath).name
         val forwarder = forwarders[filePath]
         val root = resolveProjectRoot(filePath)
@@ -4759,7 +4762,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "[crdt-replica] visible roll-forward declined for $name; decision=no_attached_replica " +
                     "expected_canonical_hash=$expectedCanonicalHash reason=$reason (#jetbrainsreplicaloops)",
             )
-            return
+            return false
         }
         val canonical = CpSocketReplicaTransport(root).currentCanonicalText(filePath)
         val replica = forwarder.replicaText()
@@ -4789,7 +4792,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "reason=$reason (#jetbrainsreplicaloops)",
                 )
                 requestUrgentRemoteDrain(filePath, "visible-roll-forward-converged")
-                return
+                return true
             }
             else -> {
                 log.warn(
@@ -4803,7 +4806,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (decision == VisibleRollForwardDecision.ReplicaBehind) {
                     requestUrgentRemoteDrain(filePath, "visible-roll-forward-replica-behind")
                 }
-                return
+                return false
             }
         }
         val visibleText = visible!!
@@ -4819,7 +4822,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "and the controller's next request retries; reason=$reason (#jetbrainsreplicaloops)",
             )
             requestRemoteDrain(filePath, "visible-roll-forward-retry")
-            return
+            return false
         }
         // The replica now holds exactly the visible cut. Re-base local
         // bookkeeping on it: the quarantined stale-baseline batch is subsumed,
@@ -4846,6 +4849,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "canonical_hash=${canonicalAfter?.let(::contentHash) ?: "unavailable"} published=$published " +
                 "settled=$settled reason=$reason recovery=editor_visible_roll_forward (#jetbrainsreplicaloops)",
         )
+        return true
     }
 
     /**
@@ -5279,19 +5283,60 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
 
         /**
-         * `#jetbrainsreplicaloops`: schedule the controller-licensed in-place
-         * visible roll-forward on the document's serialized worker. False only
-         * when no replica manager serves [filePath].
+         * `#jetbrainsreplicaloops`: run the controller-licensed in-place
+         * visible roll-forward on the document's serialized worker and return
+         * only after the editor has decided it. Scheduling alone is not an
+         * acknowledgement: a retryable decline returns [VisibleRollForwardResult.Deferred]
+         * so the controller refunds this bounded attempt.
          */
-        fun rollVisibleBufferForward(
+        internal fun rollVisibleBufferForward(
             project: Project,
             filePath: String,
             expectedCanonicalHash: String,
             reason: String,
-        ): Boolean {
-            val manager = managerForFile(project, filePath) ?: return false
-            manager.scheduleVisibleRollForward(filePath, expectedCanonicalHash, reason)
-            return true
+        ): VisibleRollForwardResult {
+            val manager = managerForFile(project, filePath) ?: return VisibleRollForwardResult.Rejected
+            if (SwingUtilities.isEventDispatchThread()) {
+                manager.log.warn(
+                    "[crdt-replica] visible roll-forward rejected reason=edt_cannot_wait_for_document_lane " +
+                        "file=$filePath expected_hash=$expectedCanonicalHash",
+                )
+                return VisibleRollForwardResult.Rejected
+            }
+            return try {
+                val applied = manager.documentWorkers.forDocument(filePath).submit<Boolean> {
+                    !manager.disposed.get() &&
+                        manager.rollVisibleBufferForward(filePath, expectedCanonicalHash, reason)
+                }.get(CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                if (applied) VisibleRollForwardResult.Applied else VisibleRollForwardResult.Deferred
+            } catch (_: TimeoutException) {
+                manager.log.warn(
+                    "[crdt-replica] visible roll-forward deferred reason=document_lane_timeout " +
+                        "file=$filePath expected_hash=$expectedCanonicalHash " +
+                        "timeout_ms=$CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS",
+                )
+                VisibleRollForwardResult.Deferred
+            } catch (_: RejectedExecutionException) {
+                manager.log.warn(
+                    "[crdt-replica] visible roll-forward rejected reason=document_lane_unavailable " +
+                        "file=$filePath expected_hash=$expectedCanonicalHash",
+                )
+                VisibleRollForwardResult.Rejected
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                manager.log.warn(
+                    "[crdt-replica] visible roll-forward deferred reason=document_lane_interrupted " +
+                        "file=$filePath expected_hash=$expectedCanonicalHash",
+                )
+                VisibleRollForwardResult.Deferred
+            } catch (failure: RuntimeException) {
+                manager.log.warn(
+                    "[crdt-replica] visible roll-forward rejected reason=document_lane_failure " +
+                        "file=$filePath expected_hash=$expectedCanonicalHash",
+                    failure,
+                )
+                VisibleRollForwardResult.Rejected
+            }
         }
 
         /**

@@ -1810,19 +1810,148 @@ mod th {
             last_err.unwrap_or_else(|| "unknown error".to_string())
         );
     }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum PaneLivenessEvidence {
+        Alive,
+        RetainedDead,
+        Unknown,
+    }
+
+    #[derive(Debug)]
+    struct MockAgentReadinessEvidence {
+        pane_liveness: PaneLivenessEvidence,
+        current_command: Option<String>,
+        capture: Result<String, String>,
+        live_owner: Option<String>,
+    }
+
+    impl MockAgentReadinessEvidence {
+        fn prompt_visible(&self) -> bool {
+            self.capture
+                .as_ref()
+                .is_ok_and(|content| mock_agent_prompt_visible(content))
+        }
+
+        fn shell_marker_visible(&self, marker: &str) -> bool {
+            self.capture
+                .as_ref()
+                .is_ok_and(|content| content.contains(marker))
+        }
+
+        fn shell_ready(&self, marker: &str) -> bool {
+            self.pane_liveness == PaneLivenessEvidence::Alive
+                && self.shell_marker_visible(marker)
+                && self.current_command.as_deref().is_some_and(|command| {
+                    matches!(
+                        pane_process_kind_from_current_command(command),
+                        TmuxPaneProcessKind::IdleShell(_)
+                    )
+                })
+        }
+
+        fn mock_agent_ready(&self, pane: &str) -> bool {
+            self.pane_liveness == PaneLivenessEvidence::Alive
+                && self.prompt_visible()
+                && self.live_owner.as_deref() == Some(pane)
+        }
+
+        fn diagnostic(&self) -> String {
+            let capture = match &self.capture {
+                Ok(content) => {
+                    let tail: String = content
+                        .chars()
+                        .rev()
+                        .take(400)
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect();
+                    format!("ok({:?})", tail)
+                }
+                Err(error) => format!("error({error})"),
+            };
+            format!(
+                "liveness={:?}, current_command={:?}, live_owner={:?}, capture={}",
+                self.pane_liveness, self.current_command, self.live_owner, capture
+            )
+        }
+    }
+
+    fn observe_mock_agent_readiness(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        file: &std::path::Path,
+    ) -> MockAgentReadinessEvidence {
+        let pane_liveness = if tmux.pane_alive(pane) {
+            PaneLivenessEvidence::Alive
+        } else if tmux.pane_dead(pane) {
+            PaneLivenessEvidence::RetainedDead
+        } else {
+            PaneLivenessEvidence::Unknown
+        };
+        let current_command = agent_doc_tmux_io::target_current_command(tmux, pane);
+        let capture =
+            agent_doc_tmux_io::capture_pane(tmux, pane).map_err(|error| error.to_string());
+        let live_owner = capture
+            .as_ref()
+            .is_ok_and(|content| mock_agent_prompt_visible(content))
+            .then(|| crate::sync::find_alive_pane_for_file(tmux, &file.to_string_lossy()))
+            .flatten();
+
+        MockAgentReadinessEvidence {
+            pane_liveness,
+            current_command,
+            capture,
+            live_owner,
+        }
+    }
+
+    fn wait_for_shell_readiness_probe(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        file: &std::path::Path,
+        marker: &str,
+        timeout: std::time::Duration,
+    ) -> Result<MockAgentReadinessEvidence, MockAgentReadinessEvidence> {
+        send_keys_with_retry(tmux, pane, &format!("printf '{}\\n'", marker));
+        let start = std::time::Instant::now();
+        let mut evidence = observe_mock_agent_readiness(tmux, pane, file);
+        while start.elapsed() < timeout {
+            if evidence.shell_ready(marker) {
+                return Ok(evidence);
+            }
+            if evidence.pane_liveness == PaneLivenessEvidence::RetainedDead {
+                return Err(evidence);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            evidence = observe_mock_agent_readiness(tmux, pane, file);
+        }
+        Err(evidence)
+    }
     pub(crate) fn launch_mock_agent_doc(
         tmux: &IsolatedTmux,
         pane: &str,
         script: &std::path::Path,
         file: &std::path::Path,
     ) {
+        const SHELL_READY_MARKER: &str = "__agent_doc_mock_shell_ready__";
         {
             let _tmux_guard = tmux_start_lock();
-            assert!(
-                wait_for_shell(tmux, pane, 5000),
-                "shell did not become ready before mock agent launch in {}",
-                pane
-            );
+            let shell_evidence = wait_for_shell_readiness_probe(
+                tmux,
+                pane,
+                file,
+                SHELL_READY_MARKER,
+                std::time::Duration::from_secs(5),
+            )
+            .unwrap_or_else(|evidence| {
+                panic!(
+                    "shell in {pane} did not accept the readiness probe: {}",
+                    evidence.diagnostic()
+                )
+            });
+            debug_assert!(shell_evidence.shell_ready(SHELL_READY_MARKER));
             send_keys_with_retry(
                 tmux,
                 pane,
@@ -1831,40 +1960,24 @@ mod th {
         }
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(8);
-        let poll = std::time::Duration::from_millis(300);
-        let mut content = String::new();
+        let poll = std::time::Duration::from_millis(50);
+        let mut evidence = observe_mock_agent_readiness(tmux, pane, file);
         while start.elapsed() < timeout {
-            content = agent_doc_tmux_io::capture_pane(tmux, pane).unwrap_or_default();
-            if mock_agent_prompt_visible(&content) {
-                break;
-            }
-            if let Some(cmd) = agent_doc_tmux_io::target_current_command(tmux, pane)
-                && matches!(
-                    pane_process_kind_from_current_command(&cmd),
-                    TmuxPaneProcessKind::IdleShell(_)
-                )
-            {
-                let _ = tmux.send_keys_raw(pane, "Enter");
-            }
-            std::thread::sleep(poll);
-        }
-        assert!(
-            mock_agent_prompt_visible(&content),
-            "mock agent should be ready, got: {content}"
-        );
-        let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_secs(3) {
-            if crate::sync::find_alive_pane_for_file(tmux, &file.to_string_lossy()).as_deref()
-                == Some(pane)
-            {
+            if evidence.mock_agent_ready(pane) {
                 return;
             }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            if evidence.pane_liveness == PaneLivenessEvidence::RetainedDead {
+                break;
+            }
+            std::thread::sleep(poll);
+            evidence = observe_mock_agent_readiness(tmux, pane, file);
         }
         panic!(
-            "mock agent pane {} never became the live owner for {}",
+            "mock agent pane {} did not become ready and own {} after {:.1}s: {}",
             pane,
-            file.display()
+            file.display(),
+            start.elapsed().as_secs_f64(),
+            evidence.diagnostic()
         );
     }
     pub(crate) fn wait_for_process_pid(pattern: &str, timeout: std::time::Duration) -> u32 {
@@ -1885,6 +1998,57 @@ mod th {
     }
     pub(crate) fn mock_agent_prompt_visible(content: &str) -> bool {
         content.lines().any(|line| line.trim() == ">")
+    }
+
+    #[cfg(test)]
+    mod readiness_tests {
+        use super::*;
+
+        fn evidence(
+            pane_liveness: PaneLivenessEvidence,
+            capture: Result<&str, &str>,
+            live_owner: Option<&str>,
+        ) -> MockAgentReadinessEvidence {
+            MockAgentReadinessEvidence {
+                pane_liveness,
+                current_command: Some("sh".to_string()),
+                capture: capture.map(str::to_string).map_err(str::to_string),
+                live_owner: live_owner.map(str::to_string),
+            }
+        }
+
+        #[test]
+        fn readiness_requires_live_prompt_and_exact_owner_evidence() {
+            let pane = "%7";
+            assert!(
+                !evidence(PaneLivenessEvidence::Unknown, Ok(">\n"), Some(pane))
+                    .mock_agent_ready(pane)
+            );
+            assert!(
+                !evidence(PaneLivenessEvidence::Alive, Ok(""), Some(pane)).mock_agent_ready(pane)
+            );
+            assert!(
+                !evidence(PaneLivenessEvidence::Alive, Ok(">\n"), Some("%8"))
+                    .mock_agent_ready(pane)
+            );
+            assert!(
+                evidence(PaneLivenessEvidence::Alive, Ok(">\n"), Some(pane)).mock_agent_ready(pane)
+            );
+        }
+
+        #[test]
+        fn capture_failure_remains_typed_diagnostic_evidence() {
+            let evidence = evidence(
+                PaneLivenessEvidence::Unknown,
+                Err("tmux target disappeared"),
+                None,
+            );
+            assert!(!evidence.mock_agent_ready("%7"));
+            assert_eq!(
+                evidence.diagnostic(),
+                "liveness=Unknown, current_command=Some(\"sh\"), live_owner=None, capture=error(tmux target disappeared)"
+            );
+        }
     }
 }
 #[cfg(test)]
@@ -1980,6 +2144,34 @@ mod tests {
             issues[0]
         );
     }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn mock_agent_launch_waits_for_shell_acceptance_not_process_name() {
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-test-delayed-shell-ready");
+        let cwd = test_cwd();
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_mock_agent_doc(dir.path());
+        let doc = dir.path().join("delayed-shell.md");
+        std::fs::write(&doc, "# Delayed shell\n").unwrap();
+        let pane = iso.auto_start("test", &cwd).unwrap();
+        assert!(wait_for_shell(&iso, &pane, 5000));
+
+        // The pane still reports a shell-shaped foreground process while the
+        // wrapper delays replacing itself with the shell that can accept the
+        // next command. Process identity alone was the old false readiness
+        // signal. The probe command remains queued until the new shell executes
+        // it and prints the marker.
+        iso.send_keys(&pane, "exec /bin/sh -c 'sleep 1; exec /bin/sh'")
+            .unwrap();
+
+        launch_mock_agent_doc(&iso, &pane, &script, &doc);
+        assert_eq!(
+            crate::sync::find_alive_pane_for_file(&iso, &doc.to_string_lossy()).as_deref(),
+            Some(pane.as_str())
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_wrong_process_pane() {

@@ -9098,6 +9098,58 @@ struct ControllerCrdtCpWritePayload {
     component_scope: Option<Vec<(String, usize)>>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ControllerRetainedLineageRetirePayload {
+    intent_ids: Vec<String>,
+    source: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ControllerRetainedLineageRetireResult {
+    retired: bool,
+}
+
+/// Establish the controller-owned semantic fence for a recovery-selected cut.
+///
+/// The caller must pass the exact journal it observed. The controller compares
+/// it with live Lazily state while holding the same per-document fence used by
+/// retained projection, and fails closed if another intent arrived first.
+pub fn retire_retained_write_lineage_via_controller_model_for_doc(
+    doc: &Path,
+    intent_ids: &[String],
+    source: &str,
+) -> Result<bool> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
+        .with_context(|| format!("no project root found for {}", canonical.display()))?;
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    let payload = ControllerRetainedLineageRetirePayload {
+        intent_ids: intent_ids.to_vec(),
+        source: source.to_string(),
+    };
+    let result: ControllerRetainedLineageRetireResult = request_controller_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: "retained_write_lineage_retire".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("document_canonicalization".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
+        },
+        CONTROLLER_CRDT_CP_WRITE_TIMEOUT,
+    )?;
+    Ok(result.retired)
+}
+
 pub fn apply_cp_write_via_controller_model_for_doc(
     doc: &Path,
     expected_current: &str,
@@ -10753,6 +10805,37 @@ fn handle_crdt_cp_write_rpc(
         scope.as_ref(),
     )?;
     Ok(ControllerCrdtCpWriteResult { write })
+}
+
+fn handle_retained_write_lineage_retire_rpc(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<ControllerRetainedLineageRetireResult> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: ControllerRetainedLineageRetirePayload = serde_json::from_str(&payload_json)
+        .context("failed to parse retained-write lineage retirement payload")?;
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let retired = runtime.retire_document_write_lineage_serialized(
+        &bootstrap.project_root,
+        &document_hash,
+        &payload.intent_ids,
+        &payload.source,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "retained_write_lineage_retired file={} document_hash={} intents={} retired={} source={} policy=semantic_fence",
+            canonical.display(),
+            document_hash,
+            payload.intent_ids.len(),
+            retired,
+            payload.source,
+        ),
+    );
+    Ok(ControllerRetainedLineageRetireResult { retired })
 }
 
 fn handle_response_cell_add_rpc(
@@ -20639,6 +20722,13 @@ pub(crate) fn handle_request_locked(
         }
         "crdt_cp_write" => {
             controller_envelope(handle_crdt_cp_write_rpc(&bootstrap_snapshot, request))
+        }
+        "retained_write_lineage_retire" => {
+            controller_envelope(handle_retained_write_lineage_retire_rpc(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
         }
         "response_cell_add" => {
             controller_envelope(handle_response_cell_add_rpc(&bootstrap_snapshot, request))

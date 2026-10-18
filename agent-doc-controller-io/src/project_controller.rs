@@ -52,7 +52,7 @@ use state_store::{
 };
 #[cfg(test)]
 use state_store::{ProjectionDiagnosticInsert, insert_projection_diagnostic_with_metadata};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -3847,6 +3847,15 @@ pub(crate) struct ControllerRuntime {
     /// This mutex preserves exact CAS ordering while allowing the projection
     /// lock to be dropped before durable I/O.
     state_event_ingress: Mutex<()>,
+    /// Per-document semantic fence shared by retained-transition projection and
+    /// recovery/canonicalization retirement.
+    ///
+    /// The CRDT expected-base CAS protects operator typing, but it cannot tell
+    /// whether a mechanically applicable retained intent was invalidated by a
+    /// newer recovery decision. Holding this fence across the worker's final
+    /// intent revalidation and CP write makes lineage retirement the ordering
+    /// boundary even when canonicalization's CP target is already live.
+    retained_intent_semantic_fences: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Bumped by every live apply of a state event (under `memory`). A
     /// `refresh_memory` whose unlocked durable load straddled a bump logs the
     /// race and re-reads the (tiny) actor store under `state_event_ingress`; the
@@ -6009,6 +6018,12 @@ impl RetainedWriteSettleSink {
         let Some(runtime) = self.runtime.upgrade() else {
             return false;
         };
+        // Recovery retires lineage under this same fence. The state re-read and
+        // final expected-base CAS are one semantic applicability decision: an
+        // effect derived before recovery can lose the fence and be rejected,
+        // but can never revalidate before retirement and apply afterward.
+        let semantic_fence = runtime.retained_intent_semantic_fence(document_hash);
+        let _semantic_guard = semantic_fence.lock();
         let Ok(Some(projection)) = runtime.document_state_projection(document_hash) else {
             return false;
         };
@@ -8778,6 +8793,7 @@ impl ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
             state_event_ingress: Mutex::new(()),
+            retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             actor_graph,
             document_authority_graph,
@@ -9306,6 +9322,75 @@ impl ControllerRuntime {
             waited: requested.elapsed(),
             acquired: Instant::now(),
         }
+    }
+
+    pub(crate) fn retained_intent_semantic_fence(&self, document_hash: &str) -> Arc<Mutex<()>> {
+        self.retained_intent_semantic_fences
+            .lock()
+            .entry(document_hash.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    /// Atomically verify and retire the exact retained-write lineage observed
+    /// by recovery. A changed lineage is ambiguous and therefore fails closed.
+    pub(crate) fn retire_document_write_lineage_serialized(
+        &self,
+        project_root: &Path,
+        document_hash: &str,
+        intent_ids: &[String],
+        source: &str,
+    ) -> Result<bool> {
+        let semantic_fence = self.retained_intent_semantic_fence(document_hash);
+        let _semantic_guard = semantic_fence.lock();
+        let _ingress = self.lock_state_event_ingress(
+            project_root,
+            "retire_document_write_lineage",
+            "document_write_lineage_retired",
+        );
+        let current = self
+            .document_state_projection(document_hash)?
+            .map(|projection| {
+                if projection.document.pending_write_journal.is_empty() {
+                    projection
+                        .document
+                        .pending_write
+                        .into_iter()
+                        .map(|intent| intent.intent_id)
+                        .collect::<Vec<_>>()
+                } else {
+                    projection
+                        .document
+                        .pending_write_journal
+                        .into_iter()
+                        .map(|intent| intent.intent_id)
+                        .collect::<Vec<_>>()
+                }
+            })
+            .unwrap_or_default();
+        anyhow::ensure!(
+            current == intent_ids,
+            "{source}: retained write lineage changed before canonicalization fence for document {document_hash}; observed={intent_ids:?} current={current:?}",
+        );
+        if intent_ids.is_empty() {
+            return Ok(false);
+        }
+        let event = agent_doc_state_backbone::StateEvent::new(
+            format!(
+                "document-write-lineage-retired-{document_hash}-{}",
+                agent_doc_hash::content_hash(&intent_ids.join("\n")),
+            ),
+            agent_doc_state_backbone::StateFact::DocumentWriteLineageRetired {
+                document_hash: document_hash.to_string(),
+                intent_ids: intent_ids.to_vec(),
+                source: source.to_string(),
+            },
+        );
+        let inserted = append_state_event(project_root, &event)?;
+        if inserted {
+            self.apply_state_event(&event)?;
+        }
+        Ok(inserted)
     }
 
     fn append_apply_state_event_serialized(
@@ -19009,6 +19094,7 @@ agent:queue\n\
                 map_backend: "std_btree_map",
             }),
             state_event_ingress: Mutex::new(()),
+            retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             actor_graph,
             document_authority_graph,
@@ -23284,6 +23370,124 @@ revised operator request
             "the retained adapter must release the reactive context while editor I/O is in flight"
         );
         gate.open();
+    }
+
+    /// Regression for the observed ordering: recovery selected bytes that were
+    /// already canonical while an older retained Base -> Target effect was
+    /// queued. Retirement must win before that queued effect reaches its final
+    /// state check, even though recovery's later CP write would be a no-op.
+    #[test]
+    fn canonicalization_retirement_fences_a_queued_stale_retained_projection() {
+        let _liveness = super::reliable_sync_test_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let file = dir.path().join("blocking-retained-transition.md");
+        let base = "# Queue\n";
+        let stale_target = "# Queue\n\n### Re: stale retained response\n";
+        std::fs::write(&file, base).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let _editor_open = seed_reliable_sync_editor_open(&canonical, "semantic-fence");
+        agent_doc_crdt_relay_io::register_replica_for_file(&canonical, "intellij:semantic-fence")
+            .unwrap()
+            .expect("live editor registration must allocate the canonical relay");
+
+        let deferred = agent_doc_state_backbone::StateEvent::new(
+            "semantic-fence-deferred",
+            agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.clone(),
+                intent_id: "intent-before-canonicalization".to_string(),
+                expected_hash: agent_doc_hash::content_hash(base),
+                expected_content: Some(base.to_string()),
+                target_hash: agent_doc_hash::content_hash(stale_target),
+                target_content: stale_target.to_string(),
+                source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
+                reason:
+                    agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+            },
+        );
+        append_state_event(dir.path(), &deferred).unwrap();
+        runtime.apply_state_event(&deferred).unwrap();
+
+        let gate = &blocking_effect_gate::RETAINED_TRANSITION;
+        gate.close();
+        runtime
+            .document_graphs
+            .observe_retained_delivery_with_change(
+                &document_hash,
+                Some(RetainedDeliveryObservation {
+                    file: canonical.clone(),
+                    content: Arc::from(base),
+                    content_hash: agent_doc_hash::content_hash(base),
+                    live_editors: 1,
+                    delivery_converged: true,
+                    delivery_version: 70,
+                }),
+            );
+        assert!(
+            gate.wait_entered() >= 1,
+            "the stale retained effect must be queued before recovery retires it",
+        );
+
+        let changed_lineage = runtime
+            .retire_document_write_lineage_serialized(
+                dir.path(),
+                &document_hash,
+                &["different-intent".to_string()],
+                "test_ambiguous_canonicalization",
+            )
+            .unwrap_err();
+        assert!(
+            changed_lineage
+                .to_string()
+                .contains("retained write lineage changed"),
+            "ambiguous lineage must fail closed: {changed_lineage:#}",
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("intent-before-canonicalization"),
+            "a failed retirement must preserve the current lineage",
+        );
+
+        runtime
+            .retire_document_write_lineage_serialized(
+                dir.path(),
+                &document_hash,
+                &["intent-before-canonicalization".to_string()],
+                "test_preflight_canonicalization",
+            )
+            .unwrap();
+        assert_eq!(pending_intent_id(&runtime, &document_hash), None);
+        let canonical_noop = agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            &canonical,
+            base,
+            base,
+            "test_preflight_canonicalization_noop",
+        )
+        .unwrap()
+        .expect("the live canonical relay remains attached");
+        assert!(
+            !canonical_noop.applied,
+            "the canonical write must be a no-op in this regression ordering",
+        );
+        gate.open();
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
+        while gate.passed() == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the retired transition worker did not leave its test gate",
+            );
+            std::thread::yield_now();
+        }
+
+        let current = agent_doc_crdt_relay_io::current_text_for_file(&canonical).unwrap();
+        assert!(
+            matches!(
+                current,
+                agent_doc_crdt_relay_io::CurrentText::Current { ref text, .. } if text == base
+            ),
+            "semantic retirement must reject the queued stale target: {current:?}",
+        );
     }
 
     #[test]

@@ -1993,6 +1993,71 @@ pub fn atomic_write_if_current_through_authority(
     atomic_write_rebased_through_authority(path, expected_current, content, source)
 }
 
+/// Canonicalize a recovery-selected document cut while retiring the exact
+/// retained-write lineage recovery observed.
+///
+/// The whole operation enters the per-document write actor before observing
+/// the journal. The controller then retires that exact lineage while holding
+/// the same semantic fence as retained projection's final state check + CRDT
+/// CAS. A changed journal fails closed; an older queued effect either finishes
+/// before the fence (and makes this CAS retry) or observes retirement and can
+/// never apply/rebase afterward. The fence is established even when `content`
+/// is already the live canonical and the CP write is an exact no-op.
+pub fn canonicalize_projection_if_current_through_authority(
+    path: &Path,
+    content: &str,
+    expected_current: &str,
+    source: &str,
+) -> Result<()> {
+    validate_canonical_document_target(path, content, source)?;
+    let visible_document = agent_doc_document_realtime::write_authority::is_visible_document(path);
+    if visible_document && !agent_doc_document_realtime::write_authority::within_owner_scope() {
+        let base_dir = agent_doc_project_root_io::project_root_containing(path)
+            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let file = path.to_string_lossy().to_string();
+        let projection_base = expected_current.to_string();
+        let queued_source = source.to_string();
+        return agent_doc_queue_io::write_queue::serialized_atomic_write_with(
+            &SESSION_ACTOR_WRITE_QUEUE,
+            &base_dir,
+            &file,
+            path,
+            content,
+            move |queued_path, queued_content| {
+                canonicalize_projection_if_current_in_owner(
+                    queued_path,
+                    queued_content,
+                    &projection_base,
+                    &queued_source,
+                )
+            },
+        );
+    }
+    canonicalize_projection_if_current_in_owner(path, content, expected_current, source)
+}
+
+fn canonicalize_projection_if_current_in_owner(
+    path: &Path,
+    content: &str,
+    expected_current: &str,
+    source: &str,
+) -> Result<()> {
+    guard_visible_write_expected_current_or_target(path, source, expected_current, Some(content))?;
+    let intent_ids = pending_document_write_journal(path)
+        .into_iter()
+        .map(|intent| intent.intent_id)
+        .collect::<Vec<_>>();
+    agent_doc_controller_io::project_controller::
+        retire_retained_write_lineage_via_controller_model_for_doc(path, &intent_ids, source)
+        .with_context(|| {
+            format!(
+                "{source}: failed to establish retained-write semantic fence for {}",
+                path.display(),
+            )
+        })?;
+    atomic_write_rebased_through_authority_inner(path, expected_current, content, source)
+}
+
 /// Settle a committed projection that is known to differ from the current
 /// document only by transient agent-doc markers.
 ///

@@ -2954,7 +2954,7 @@ fn retain_preflight_controller_projection(
     expected_current: &str,
     source: &str,
 ) -> Result<bool> {
-    match agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+    match agent_doc_document_realtime_io::canonicalize_projection_if_current_through_authority(
         file,
         target,
         expected_current,

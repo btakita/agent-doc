@@ -505,6 +505,18 @@ pub enum StateFact {
         #[serde(default)]
         intent_source: DocumentWriteSource,
     },
+    /// Recovery/canonicalization invalidated an exact retained-write lineage.
+    ///
+    /// This is deliberately distinct from [`Self::DocumentWriteConverged`]: a
+    /// semantically superseded intent did not reach its target, and recording
+    /// false convergence would let ordering-based settlement treat that stale
+    /// target as evidence for later closeout work. Intent ids make retirement
+    /// fail closed when the durable lineage changed after recovery observed it.
+    DocumentWriteLineageRetired {
+        document_hash: String,
+        intent_ids: Vec<String>,
+        source: String,
+    },
     /// Durable continuation for a compact projection whose editor-visible and
     /// disk projections have not converged yet.
     ///
@@ -1105,6 +1117,7 @@ impl StateFact {
             | Self::DocumentSessionIdentityObserved { document_hash, .. }
             | Self::DocumentWriteDeferred { document_hash, .. }
             | Self::DocumentWriteConverged { document_hash, .. }
+            | Self::DocumentWriteLineageRetired { document_hash, .. }
             | Self::DocumentCompactProjectionRetained { document_hash, .. }
             | Self::DocumentCompactProjectionSettled { document_hash, .. }
             | Self::DocumentCompactProjectionSuperseded { document_hash, .. }
@@ -1204,6 +1217,7 @@ impl StateFact {
             | Self::DocumentSessionIdentityObserved { .. }
             | Self::DocumentWriteDeferred { .. }
             | Self::DocumentWriteConverged { .. }
+            | Self::DocumentWriteLineageRetired { .. }
             | Self::DocumentCompactProjectionRetained { .. }
             | Self::DocumentCompactProjectionSettled { .. }
             | Self::DocumentCompactProjectionSuperseded { .. }
@@ -1273,6 +1287,7 @@ impl StateFact {
             Self::DocumentSessionIdentityObserved { .. } => "document_session_identity_observed",
             Self::DocumentWriteDeferred { .. } => "document_write_deferred",
             Self::DocumentWriteConverged { .. } => "document_write_converged",
+            Self::DocumentWriteLineageRetired { .. } => "document_write_lineage_retired",
             Self::DocumentCompactProjectionRetained { .. } => {
                 "document_compact_projection_retained"
             }
@@ -2089,6 +2104,16 @@ impl DocumentStateProjection {
                 {
                     self.document.pending_external_disk = None;
                 }
+            }
+            StateFact::DocumentWriteLineageRetired { intent_ids, .. } => {
+                self.document
+                    .seed_pending_write_journal_from_legacy_projection();
+                self.document.pending_write_journal.retain(|pending| {
+                    !intent_ids
+                        .iter()
+                        .any(|intent_id| intent_id == &pending.intent_id)
+                });
+                self.document.pending_write = self.document.pending_write_journal.last().cloned();
             }
             StateFact::DocumentCompactProjectionRetained {
                 continuation_id,
@@ -9534,6 +9559,50 @@ mod tests {
         let projected = ledger.project_document("doc-a").unwrap();
         assert!(projected.document.pending_write_journal.is_empty());
         assert!(projected.document.pending_write.is_none());
+    }
+
+    #[test]
+    fn semantic_retirement_removes_only_the_named_lineage_without_claiming_convergence() {
+        let mut ledger = EventLedger::new();
+        for intent in ["intent-before-recovery", "intent-after-recovery"] {
+            ledger.append(state_event(
+                format!("deferred-{intent}"),
+                StateFact::DocumentWriteDeferred {
+                    document_hash: "doc-a".into(),
+                    intent_id: intent.into(),
+                    expected_hash: "base".into(),
+                    expected_content: Some("editor base".into()),
+                    target_hash: format!("target-{intent}"),
+                    target_content: format!("content-{intent}"),
+                    source: "finalize".into(),
+                    reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                },
+            ));
+        }
+
+        ledger.append(state_event(
+            "retire-observed-lineage",
+            StateFact::DocumentWriteLineageRetired {
+                document_hash: "doc-a".into(),
+                intent_ids: vec!["intent-before-recovery".into()],
+                source: "preflight_recovery".into(),
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(projected.document.pending_write_journal.len(), 1);
+        assert_eq!(
+            projected
+                .document
+                .pending_write
+                .as_ref()
+                .map(|intent| intent.intent_id.as_str()),
+            Some("intent-after-recovery"),
+        );
+        assert!(
+            projected.document.latest_converged_write.is_none(),
+            "semantic invalidation is not evidence that the stale target converged",
+        );
     }
 
     #[test]

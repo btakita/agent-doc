@@ -49470,6 +49470,35 @@ mod tests {
         assert!(started.elapsed() < HANG_CEILING);
     }
 
+    /// `#dogfood-authority-channel-retry-loop`: an editor computes the
+    /// canonical-path channel while a file exists. If the file is deleted
+    /// before reconnect, `document_id_for_path` deliberately falls back to the
+    /// display path. The server must derive its own channel from the file
+    /// authority instead of rejecting a deterministic stale client key.
+    #[test]
+    fn a_deleted_document_cannot_wedge_authority_reconnect_on_its_old_channel() {
+        let dir = async_handoff_test_project();
+        let runtime = test_controller_runtime(&test_bootstrap(&dir));
+        let file = dir.path().join("tasks/one.md");
+        let client_channel =
+            document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
+        let (request, _) =
+            document_turn_authority_stream_request(&file, &client_channel, None).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        let server_channel =
+            document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
+        assert_ne!(
+            client_channel, server_channel,
+            "deletion must reproduce the stale client-channel mismatch"
+        );
+
+        let should_stop = AtomicBool::new(true);
+        let mut written = Vec::new();
+        serve_document_turn_authority_stream(&runtime, request, &should_stop, &mut written)
+            .expect("the server-derived channel must tolerate a file deleted after subscription");
+        assert!(written.is_empty());
+    }
+
     /// `#drainingpredecessor` (GH #261): a promoted predecessor ran the
     /// supervisor watchdog and orphan drain every interval for its whole drain,
     /// re-dispatching an orphan queue head every 90s from a frozen replica.

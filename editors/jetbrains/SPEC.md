@@ -437,6 +437,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `column_order=unknown`. Example: `[a | b]` → `[c | b]` → visible `{d,b,e}` → `[d | e | b]`
   → visible `{g,b}` → `[g | b]`, so a later `{a,b}` publishes `[a | b]`, not `[b | a]`. A
   retained publication is already resolved and passes through controller ordering unchanged.
+- A focus-only structural escalation may guess which retained slot a newly focused document
+  replaced, but that guess is provisional order, never geometry authority (GH #302). The
+  controller retains the pre-escalation positive order as provenance. If the next structural
+  publication revives a document displaced by the guess, an `unknown` publication is ordered
+  against that positive basis; otherwise the observation confirms the guessed membership and
+  becomes the new authority. The read-only retained-columns endpoint used to seed or re-anchor
+  Remote Dev memory likewise returns the positive basis while a guess is outstanding, so an IDE
+  restart cannot anchor the guessed order and make a reversal self-perpetuating.
 - Explicit layout publications (`Sync Tmux Pane`, claim, resync, and the Run Agent Doc route's
   `--col` list) name their order source as `column_order` (GH #112). Only locally detected
   multi-column geometry is `editor`; the undetected fallback lists `selectedFiles`, which IntelliJ

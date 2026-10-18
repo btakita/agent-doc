@@ -3352,13 +3352,16 @@ fn tmux_focus_state_with_caller(
     )
 }
 
-/// The shared lane's retained desired layout columns, in order
+/// The shared lane's last positively observed layout columns, in order
 /// (`#tmuxpanesreversed`).
 ///
 /// This is the left-to-right order tmux shows (or is converging on), and on a
 /// JetBrains Remote Dev backend, which reports no split geometry, it is the
-/// only order authority. The Remote Dev layout fold reads it to anchor a cold
-/// or unanchored memory instead of adopting the visible list's tab-open order.
+/// only order authority. While focus escalation has guessed a replacement
+/// slot, this returns the pre-escalation basis rather than that provisional
+/// desired order (GH #302). The Remote Dev layout fold reads it to anchor a
+/// cold or unanchored memory instead of adopting the visible list's tab-open
+/// order.
 /// Existing-controller only and read-only: no autostart, no SQLite, no tmux.
 pub fn pane_layout_retained_columns_existing(project_root: &Path) -> Result<Vec<String>> {
     request_existing_controller_with_timeout(
@@ -3366,6 +3369,13 @@ pub fn pane_layout_retained_columns_existing(project_root: &Path) -> Result<Vec<
         empty_controller_request("pane_layout_retained_columns"),
         CONTROLLER_RPC_TIMEOUT,
     )
+}
+
+fn pane_layout_order_authority(runtime: &ControllerRuntime) -> Vec<String> {
+    runtime
+        .pane_layout_desired()
+        .map(|desired| desired.order_authority_columns().to_vec())
+        .unwrap_or_default()
 }
 
 /// Read the controller's process-scoped projection of durable editor-view
@@ -20604,10 +20614,9 @@ pub(crate) fn handle_request_locked(
             request.caller.as_deref(),
         )),
         "main_layout_eligibility" => controller_envelope(Ok(runtime.main_layout_eligibility())),
-        "pane_layout_retained_columns" => controller_envelope(Ok(runtime
-            .pane_layout_desired()
-            .map(|desired| desired.invocation.columns)
-            .unwrap_or_default())),
+        "pane_layout_retained_columns" => {
+            controller_envelope(Ok(pane_layout_order_authority(runtime.as_ref())))
+        }
         "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -26990,6 +26999,7 @@ fn focus_escalation_columns(
             source: "editor_surface",
             replaced: None,
             basis_generation: None,
+            provisional_order_basis: None,
         });
     }
     let retained_desired = runtime.pane_layout_desired();
@@ -27002,10 +27012,14 @@ fn focus_escalation_columns(
     // GH #278 Ask 3: the column to replace is the LATEST focus, including a
     // `focus_only` outcome that published no generation, not the focus the
     // retained layout was published with.
-    let (mut retained, mut retained_focus) = retained_desired
+    let (mut retained, mut retained_focus, mut provisional_order_basis) = retained_desired
         .map(|desired| {
             let focus = runtime.pane_layout_graph().latest_focus(&desired);
-            (desired.invocation.columns, focus)
+            (
+                desired.invocation.columns,
+                focus,
+                desired.provenance.provisional_order_basis,
+            )
         })
         .unwrap_or_default();
     retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &retained);
@@ -27046,6 +27060,7 @@ fn focus_escalation_columns(
             return Err("no_main_layout_eligible_columns");
         }
         retained_focus = None;
+        provisional_order_basis = None;
         basis_source = "live_tmux_layout";
     }
     if retained
@@ -27057,6 +27072,7 @@ fn focus_escalation_columns(
             source: basis_source,
             replaced: None,
             basis_generation,
+            provisional_order_basis,
         });
     }
     let (merged, _, _) = merge_editor_route_columns_within(
@@ -27087,6 +27103,7 @@ fn focus_escalation_columns(
         },
         replaced,
         basis_generation,
+        provisional_order_basis: Some(provisional_order_basis.unwrap_or(retained)),
     })
 }
 
@@ -27102,6 +27119,9 @@ struct FocusEscalationColumns {
     /// Retained desired generation used to derive `columns`; zero means there
     /// was no desired generation and the live tmux observation was the basis.
     basis_generation: Option<u64>,
+    /// Last positively observed order before this escalation guessed which
+    /// retained slot the focused document replaced (GH #302).
+    provisional_order_basis: Option<Vec<String>>,
 }
 
 /// Hand a `Focus` intent the selection lane could not apply to the structural
@@ -27126,6 +27146,7 @@ fn escalate_focus_to_structural_layout(
         source,
         replaced,
         basis_generation,
+        provisional_order_basis,
     } = match focus_escalation_columns(bootstrap, runtime, document, columns) {
         Ok(escalation) => escalation,
         Err(cause) => {
@@ -27187,7 +27208,8 @@ fn escalate_focus_to_structural_layout(
         publication,
         PaneLayoutClaim::from(PaneLayoutPublisher::Escalation)
             .asserting(asserted_columns)
-            .derived_from(basis_generation),
+            .derived_from(basis_generation)
+            .with_provisional_order_basis(provisional_order_basis),
     );
     match published {
         Ok((desired, published_invocation)) => {
@@ -34388,6 +34410,7 @@ fn publish_pane_layout_desired_invocation_in_lane(
     claim: impl Into<PaneLayoutClaim>,
 ) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
     let claim = claim.into();
+    let publisher = claim.publisher;
     let graph = runtime.pane_layout_graph_for_lane(lane);
     let store_lane_layout_state = |columns: &[String]| -> Result<()> {
         if lane.is_shared() {
@@ -34438,11 +34461,18 @@ fn publish_pane_layout_desired_invocation_in_lane(
     // Dev `unknown`) lists documents focus-first, so its order is resolved
     // against the retained desired layout instead of being applied verbatim.
     let retained = graph.desired();
+    let order_basis = retained
+        .as_ref()
+        .map(|desired| {
+            if invocation.column_order == agent_doc_tmux::LayoutColumnOrder::Unknown {
+                desired.order_basis_for(&desired_columns)
+            } else {
+                desired.invocation.columns.as_slice()
+            }
+        })
+        .unwrap_or_default();
     let ordered = agent_doc_tmux::order_layout_columns(
-        retained
-            .as_ref()
-            .map(|desired| desired.invocation.columns.as_slice())
-            .unwrap_or_default(),
+        order_basis,
         &desired_columns,
         invocation.column_order,
     );
@@ -34469,7 +34499,7 @@ fn publish_pane_layout_desired_invocation_in_lane(
         graph.set_desired_attributed(invocation.clone(), source_plane_version, publication, claim);
     let supersessions = graph.drain_supersessions();
     let refused = supersessions.iter().any(|supersession| {
-        supersession.loser == claim.publisher
+        supersession.loser == publisher
             && supersession.loser_generation.is_none()
             && supersession.loser_columns == invocation.columns
     });
@@ -39846,6 +39876,88 @@ mod tests {
             runtime.pane_layout_desired().unwrap().invocation.columns,
             vec![c.clone(), b.clone()]
         );
+    }
+
+    /// GH #302: a focus escalation guesses the replacement slot, but that
+    /// guess must not become either the next unknown-order fold's basis or the
+    /// authority used to anchor a cold/restarted Remote Dev client.
+    #[test]
+    fn gh302_focus_escalation_guess_never_becomes_order_authority() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let path = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let (a, b, c) = (path("a.md"), path("b.md"), path("c.md"));
+
+        // Positive editor geometry establishes [a | b], focused on a.
+        assert!(escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &a,
+            &[
+                SurfaceColumn {
+                    files: vec![a.clone()],
+                },
+                SurfaceColumn {
+                    files: vec![b.clone()],
+                },
+            ],
+            "actor_pane_not_visible",
+        ));
+
+        // Focus-only c guesses that it replaced a, so desired becomes [c | b].
+        assert!(escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &c,
+            &[],
+            "actor_pane_not_visible",
+        ));
+        let guessed = runtime.pane_layout_desired().unwrap();
+        assert_eq!(guessed.invocation.columns, vec![c.clone(), b.clone()]);
+        assert_eq!(
+            guessed.provenance.provisional_order_basis,
+            Some(vec![a.clone(), b.clone()])
+        );
+
+        // A restarted plugin anchors to the positive basis, never the guess.
+        let authority = pane_layout_order_authority(runtime.as_ref());
+        assert_eq!(authority, vec![a.clone(), b.clone()]);
+        let authority_columns = authority
+            .iter()
+            .map(|document| SurfaceColumn {
+                files: vec![document.clone()],
+            })
+            .collect::<Vec<_>>();
+        let restarted = agent_doc_editor_surface::RemoteLayoutMemory::default()
+            .anchor(&authority_columns);
+        assert_eq!(restarted.columns, authority_columns);
+
+        // The next structural publication says a survived and c replaced b.
+        // Its order is unknown, so folding against the guessed [c | b] would
+        // reverse it to [c | a]. The positive basis keeps [a | c].
+        let mut observation = automatic_layout_sync_invocation(
+            vec![a.clone(), c.clone()],
+            &c,
+            false,
+        );
+        observation.column_order = agent_doc_tmux::LayoutColumnOrder::Unknown;
+        let (corrected, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            observation,
+            Some(1),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(corrected.invocation.columns, vec![a, c]);
+        assert_eq!(corrected.provenance.provisional_order_basis, None);
     }
 
     /// `#focusstashescalate` end to end at the observe boundary: a same-layout

@@ -6,6 +6,7 @@ agent: codex
 resume:
   claude: 80050dae-ffc1-48f6-bb8c-17c794ecb6ac
   codex: 01a14d5c-352b-7781-b889-76815eb85c88
+queue: go
 ---
 
 ## Status
@@ -22,12 +23,41 @@ resume:
 The document is now configured to use Codex (`agent: codex`). Its queue and backlog are empty, so there is no workstation-upgrade action to execute yet.
 
 Session-accretion is advisory-only: two recent no-op closeouts were detected. I left the exchange history intact because compaction requires your explicit approval.
-<!-- agent:boundary:2bf644f7 -->
+
+### Re: Subagent completed: `subagent:gpu_power` returned work for queue item “🚧 When I run heavy GPU load on my 5090 with my 1200W PSU, my machine hard crashes. Do I need a bigger PSU? My UPS is rates <1200W as well. I have not been able to definitively identify what the cause is.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=6a5385fee5c6ef58f70377fb1092c61b767f3670fd1e501e99f9b5c3a430b9db -->
+> **Queue prompt:** 🚧 When I run heavy GPU load on my 5090 with my 1200W PSU, my machine hard crashes. Do I need a bigger PSU? My UPS is rates <1200W as well. I have not been able to definitively identify what the cause is.
+
+### Re: RTX 5090 hard crashes under load — gpt-5 · 2026-10-18T01:03-04:00
+
+Probably not—a larger PSU should not be the first purchase. NVIDIA rates the reference RTX 5090 at 575 W and specifies a 1000 W minimum system PSU, although an overclocked partner card or unusually power-hungry CPU can raise the requirement. A good 1200 W ATX 3.x supply is ordinarily enough; its age, quality, transient response, and cabling matter as much as the wattage printed on it. [NVIDIA RTX 5090 specifications](https://www.nvidia.com/en-gb/geforce/graphics-cards/50-series/rtx-5090/) [NVIDIA user guide](https://www.nvidia.com/content/geforce-gtx/geforce-rtx-5090-user-guide-r2.pdf)
+
+The UPS is a leading *testable* suspect, but it is not proven. The PSU's 1200 W label is its maximum DC output, not the PC's constant wall draw. The UPS instead has hard AC watt and VA limits; if actual wall draw or a transient exceeds them, it can shut off its output. UPS guidance recommends sizing from measured load with roughly 20–30% headroom, and a strong overload can shut the UPS down. [Schneider Electric UPS sizing guide](https://www.se.com/us/en/work/support/product-support/ups-buying-guide-for-selecting-a-battery-backup-system/) [APC overload behavior](https://www.apc.com/ca/en/faqs/FA158830/)
+
+Use this sequence before buying anything:
+
+1. Stop repeated stress testing for now. Power down, switch off and unplug the PSU, and inspect both ends of the GPU power cable and the 16-pin socket. If you see discoloration, melting, deformation, looseness, or smell burning, stop using the system and contact the GPU/PSU vendor.
+2. Reseat the connector fully and flush, without tight bending or side load. With the Founders Edition adapter, NVIDIA calls for four independent dedicated PCIe 8-pin cables; otherwise follow the exact card manufacturer's manual. Never mix modular PSU cables from different models.
+3. Check the UPS display/software/event log immediately after a crash for overload, output-off, transfer, or abnormal input voltage. Record peak watts and load percentage, and remove nonessential devices from battery-backed outlets.
+4. With the PC shut down first, test it from a known-good grounded wall outlet on a suitable circuit—no daisy chain or questionable extension. If the crash disappears, the UPS or upstream power path is implicated. Choose any replacement by both its watt and VA ratings, measured peak wall draw plus headroom, and preferably pure-sine output for an active-PFC PSU.
+5. If it still crashes from the wall, return CPU, GPU, and RAM settings to stock for diagnosis, then try a 70–80% GPU power limit. Improved stability implicates the power path but does not by itself prove which component is faulty.
+6. Check the exact PSU model, age, ATX version, native 12V-2x6 cable, GPU model, CPU, and card vendor's PSU recommendation. Before buying 1500–1600 W blindly, test a known-good, high-quality 1200 W-or-larger ATX 3.x PSU with its own native cable.
+7. If power remains on while only video fails, investigate the GPU/driver, temperatures, PCIe seating, and CPU/RAM stability. Windows Kernel-Power 41 only confirms an unclean shutdown; it does not identify the cause.
+
+A useful symptom split: UPS alarm or loss of all UPS-backed outputs points toward the UPS; the PC alone instantly powering off and perhaps needing PSU cycling points toward PSU protection/cabling; a black screen with fans and system still running points more toward GPU/driver behavior.
+
+For a precise recommendation, provide the PSU make/model/age, UPS make/model with both VA and W ratings, exact 5090 and CPU models, overclock settings, UPS alarms/logs, and whether the entire UPS output or only the PC dies.
+
+Session accretion is elevated, but I kept the active queue draining rather than interrupting it for compaction.
+<!-- agent:boundary:93b0af9d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority subagents -->
+<!-- agent:queue priority subagents go -->
+- ~~When I run heavy GPU load on my 5090 with my 1200W PSU, my machine hard crashes. Do I need a bigger PSU? My UPS is rates <1200W as well. I have not been able to definitively identify what the cause is.~~
+- The room I'm in runs on a 15A circuit.
 <!-- /agent:queue -->
 
 ## Todo

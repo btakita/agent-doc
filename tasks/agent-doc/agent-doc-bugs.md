@@ -843,14 +843,14 @@ The accumulated release obligations are complete. Agent Doc `0.35.519` / `v0.35.
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#duplicatedqueuedue]~~
 - ~~do [#dogfood-assistant-response-lineage]~~
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 release + publish
-- 📥 release + publish
-- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/295
-- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/296
-- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/297
-- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/298
-- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/299
-- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/300: Why is there still a sidecar? Replace all sidecars with lazily state.
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/295~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/296~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/297~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/298~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/299~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/300: Why is there still a sidecar? Replace all sidecars with lazily state.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#dogfood-admin-list-supervisor-pid]~~
 - ~~do [#dogfood-authority-channel-retry-loop]~~
 - ~~do [#dogfood-runtime-audit]~~

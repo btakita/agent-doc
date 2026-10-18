@@ -1014,6 +1014,52 @@ mod tests {
     }
 
     #[test]
+    fn running_binding_projects_only_its_matching_bare_queue_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = "#gh-issue https://github.com/example/project/issues/299";
+        let unrelated = "#gh-issue https://github.com/example/project/issues/300";
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            &format!("- {item}\n- {unrelated}\n"),
+        );
+        crate::queue_claim::claim(&doc, item, "subagent:gh299", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:gh299",
+            "/root/gh299",
+            600,
+            1,
+        )
+        .unwrap();
+
+        // Model a stale visible cut after the durable worker binding survived a
+        // controller handoff: the exact running row is bare and its sibling is
+        // unrelated. Reprojection must repair only the bound attempt's row.
+        let stale = std::fs::read_to_string(&doc).unwrap();
+        let projection = derive_claim_runtime_projection(&doc, &stale, None).unwrap();
+
+        assert!(projection.changed);
+        assert!(
+            projection.target_content.contains(&format!("- 🚧 {item}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection.target_content.contains(&format!("- {unrelated}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection
+                .target_content
+                .contains(&format!("- 🚧 {unrelated}\n")),
+            "{}",
+            projection.target_content
+        );
+    }
+
+    #[test]
     fn claim_projection_rebases_on_editor_authority_cut() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_claim_projection_doc(dir.path(), "- dispatched worker work\n");

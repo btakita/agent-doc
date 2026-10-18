@@ -285,14 +285,23 @@ pub fn append_ops_log_at_project(
     message: &str,
     tracking: OpsLogTracking<'_>,
 ) -> Option<()> {
+    try_append_ops_log_at_project(project_root, message, tracking).ok()
+}
+
+/// Append an ops-log record while preserving the I/O failure for callers whose
+/// audit record is part of their operator-visible outcome.
+pub fn try_append_ops_log_at_project(
+    project_root: &Path,
+    message: &str,
+    tracking: OpsLogTracking<'_>,
+) -> std::io::Result<()> {
     let logs_dir = logs_dir(project_root);
-    std::fs::create_dir_all(&logs_dir).ok()?;
+    std::fs::create_dir_all(&logs_dir)?;
     let log_path = logs_dir.join("ops.log");
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&log_path)
-        .ok()?;
+        .open(&log_path)?;
     let suffix = agent_doc_log_time::format_ops_log_tracking_suffix(
         tracking.doc_stem,
         tracking.session_id,
@@ -303,7 +312,7 @@ pub fn append_ops_log_at_project(
         message,
         &suffix,
     );
-    write_append_record(&mut f, &line).ok()
+    write_append_record(&mut f, &line)
 }
 
 fn git_head_hash(file: &Path) -> Option<String> {

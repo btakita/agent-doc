@@ -560,6 +560,11 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   floor (GH #236), the new plugin's own changes load only at the restart, and a
   `plugin_bytes_superseded` route refusal is answered with
   `agent-doc admin reload-lib`, then a restart if that reload is refused.
+  Every dynamic-upgrade decision and non-empty reconciliation summary is an
+  auditable `ops.log` record when the command runs inside an agent-doc project.
+  Failure to resolve that project or append the record is never silent: the CLI
+  prints a `WARNING:` containing the complete verdict and the logging failure,
+  so a package replacement cannot leave no explanation of its outcome (GH #299).
 - A live IDE counts as owning a JetBrains install target only when it loads
   plugins from that target (GH #238). Ownership is decided from process
   evidence BEFORE any package-level refusal, strongest first: an agent-doc

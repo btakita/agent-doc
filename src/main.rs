@@ -7732,6 +7732,14 @@ fn try_main() -> anyhow::Result<()> {
                     claim.expires_at_secs,
                     outcome
                 );
+                let acknowledgement =
+                    agent_doc_queue_io::queue_claim::dispatch_acknowledgement_obligation(
+                        &file, &claim,
+                    );
+                eprintln!(
+                    "[queue] next: after the harness spawn returns its worker identity, run `{}`; if no worker was spawned, run `{}`",
+                    acknowledgement.start_command, acknowledgement.release_command,
+                );
                 Ok(())
             }
             QueueAction::Start {

@@ -6,7 +6,6 @@ agent: codex
 resume:
   claude: 80050dae-ffc1-48f6-bb8c-17c794ecb6ac
   codex: 01a14d5c-352b-7781-b889-76815eb85c88
-queue: go
 ---
 
 ## Status
@@ -107,14 +106,40 @@ For an installation relied upon to prevent conductor overload, ask the electrici
 Practically, selective shedding also requires the heater to be on a separately controllable conductor/receptacle. A panel controller cannot selectively turn off one appliance when the heater and PC are inseparably mixed on the same branch without additional wiring. Given the planned dual-GPU workstation, paying an electrician for an appropriate dedicated workstation circuit—and keeping the heater elsewhere—is safer, simpler, and more useful than engineering automation around an undersized shared branch.
 
 The exchange is large, but I kept the active queue draining rather than interrupting it for compaction.
-<!-- agent:boundary:3b832163 -->
+
+### Re: Subagent completed: `subagent:load_manager` returned work for queue item “📥 I don't have that option as I'm renting. Also, the circuit breakers is not in my residence, so I have to call someone to reset it. I want to avoid this issue. We have similar issues on other areas of the house. When running a heater.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=85b5b12a378f6b36a489839739343b9ce3424b264e8039729ae7050521c8037f -->
+> **Queue prompt:** 📥 I don't have that option as I'm renting. Also, the circuit breakers is not in my residence, so I have to call someone to reset it. I want to avoid this issue. We have similar issues on other areas of the house. When running a heater.
+
+### Re: Renter-safe response to repeated heater trips — gpt-5 · 2026-10-18T01:16-04:00
+
+Since you rent and cannot access the panel, drop the load-manager idea as a DIY solution. Any relay, controlled receptacle, panel equipment, or circuit change should be a landlord/property-manager project installed by a licensed electrician. A plug-in “smart breaker” would not safely add circuit capacity or replace the real breaker.
+
+The fact that trips occur in several areas specifically when heaters run still points strongly to load: a typical 1,500 W heater draws about 12.5 A at 120 V, nearly consuming a 15 A circuit by itself. Different rooms and outlets may share one branch circuit, and ceramic, infrared, and oil-filled 1,500 W heaters impose essentially the same full-power electrical load.
+
+Until management has it assessed:
+
+1. Do not run the heater with the workstation or another substantial load on any circuit that has tripped.
+2. If the heater provides a manufacturer-approved 750 W/low setting, use only that as an interim measure, plugged directly into a snug wall receptacle. Do not use an extension cord, power strip, UPS, or ordinary smart plug.
+3. Turn off and unplug the heater and other loads *before* asking someone to reset the breaker.
+4. Record the date, room/outlet, heater wattage and setting, and what else was operating for each trip.
+5. Notify the landlord/property manager in writing that heater use causes repeated trips in multiple areas and that occupants cannot access the panel. Ask for a licensed electrician to map the circuits, measure loads and voltage, inspect receptacles/connections and breaker condition, and recommend a code-compliant remedy or adequate fixed heating.
+6. If any outlet or plug becomes warm, loose, discolored, buzzing, sparking, shock-producing, or smells burnt, stop using it and request urgent electrical service.
+
+The U.S. Fire Administration advises plugging a space heater directly into the wall and putting nothing else on the same circuit; electrical-safety guidance treats recurring trips as an overload warning that should be investigated. [USFA heater safety](https://www.usfa.fema.gov/downloads/pdf/publications/heater_fire_safety_card.pdf) [ESFI overload guidance](https://www.esfi.org/dont-overload-your-home)
+
+If management does not respond, local tenant/housing or electrical-code authorities can explain the rules for your location. Panel-access requirements have building-management exceptions, so the panel's location alone is not enough to declare a violation without jurisdiction and building details.
+
+A lower-watt, listed personal warming product used exactly as directed may be more practical than a 1,500 W room heater, but the durable remedy is landlord-provided electrical/heating capacity—not suppressing the breaker trip.
+
+The exchange is large; I left it intact because compaction requires your explicit approval.
+<!-- agent:boundary:5478635c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority subagents go -->
-- ~~My GPU does not cause the circuit to trip. It is caused when I'm also running an electric heater.~~
-- 📥 Is there a device that can act as a circuit breaker and load manager so my circuit does not trip? Can it decrease power to a heater if my computer needs the power?
+<!-- agent:queue priority subagents -->
 <!-- /agent:queue -->
 
 ## Todo

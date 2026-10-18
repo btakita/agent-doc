@@ -11,6 +11,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 presets:
   '#agent-doc-causes': Fix agent-doc causes
+  '#audit': 'Audit agent-doc runtime for dogfooding. Add issues to the backlog + queue.'
   '#self': agent-doc-bugs.md
 queue: go
 dogfood:
@@ -707,21 +708,160 @@ Released and publicly verified as `v0.35.518`.
 Completed and closed in agent-doc `v0.35.518`.
 
 The live dogfood cycle also detected that the next admission treated assistant-authored lines from the just-committed response as operator steering. Those projections are invalid because their recorded origin is the assistant closeout, not a post-baseline operator mutation. They were not dispatched. A dedicated subagent is implementing the lineage fix and regression test now.
+
+### Re: Scheduled queue alongside the existing queue — Codex
+
+> **Chat prompt:** Is agent-doc able to process agent:queue loop interval="1 hour" alongside the existing agent:queue?
+
+Not independently in the same document today. Multiple queue blocks are supported, but the current scheduler owns one document-wide pass window; the first queue block declaring schedule attributes supplies that schedule, and the window gates all queues in the document.
+
+The current marker also does not mean one hour. `interval="1 hour"` is invalid and was dropped, while bare `loop` remained valid. The live scheduler therefore reported `interval_secs=null`, an unbounded loop, and an open pass; its fallback cadence is 60 seconds after a completed pass. Valid duration syntax is `interval=1h`.
+
+I paused this document's automatic queue dispatch before closeout so the malformed loop cannot restore and replay the completed main queue. I added two follow-ups:
+
+- `#hourly-issue-watcher-doc`: move the recurring issue watcher into a separate session document using `interval=1h loop`, remove this document's second queue block, verify the main queue is unscheduled, and resume it.
+- `#per-queue-schedules`: design true independent schedules keyed by `(document, queue_id)`, with non-interference between `id=main` and `id=issues`.
+
+### Re: Multiple queues and surrogate IDs — Codex
+
+> **Chat prompt (#chatprompt):** Subagent: multipale queues: Any queue that does not have an id should gain a unique surrogate id.
+
+Implemented and released. When a document has multiple queues, preflight now persists deterministic surrogate IDs such as `queue-N`, collision-probes without changing explicit valid IDs, and is idempotent. Duplicate or malformed explicit IDs still fail closed.
+
+The deeper cross-layer defect was also fixed: identified multiple queues are no longer rejected by editor/controller template normalization as `duplicate_singleton_component:queue=2`. The focused element, queue, and preflight suites passed 1,333 tests.
+
+### Re: Dogfood interrupted closeout — Codex
+
+> **Chat prompt (#chatprompt):** subagent: dogfood: • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
+>   └ Error: [session-check] INTERRUPTED: canonical editor authority and disk projection diverge for /home/brian/work/bta…
+>     [dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=interrupted_closeout issue_key=14d7145bc40c78b16ec8dd233ac93e…
+>     Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating…
+>     + 4 lines (^t to expand)
+
+Dogfooding caught a real defect. The controller sent two visible-buffer roll-forward requests, but JetBrains acknowledged each as `Applied` when it had only scheduled the work; the serialized editor lane later rejected both because it still treated two queues as invalid. The controller consequently spent both bounded attempts without a publication.
+
+The fix now waits for the serialized editor result. `Applied` means the publication actually completed or the buffer was already canonical; invalid, racing, or timed-out cuts defer and re-arm the bounded attempt. The formal contract is:
+
+`Applied ⇔ (C = V) ∨ (C = E ∧ R = C ∧ Valid(V) ∧ Pub(V))`
+
+No force-disk or response resubmission path was added.
+
+### Re: Missing #299 marker — Codex
+
+> **Chat prompt (#chatprompt):** subagent: `- #gh-issue https://github.com/btakita/agent-doc/issues/299` does not have a marker
+
+The item was correctly claimed and started: durable generation 1 was bound exactly to worker `/root/gh299`. Its `🚧` marker initially projected, then a controller handoff hydrated a stale disk cut and regressed the visible row to bare while leaving the durable running claim intact.
+
+The handoff boundary now re-derives `🟡`/`🚧`/`📥` from durable claims during cold hydration and retained-editor reseeding. Tests prove exact-row projection, idempotence, and preservation of unrelated rows. After installation and recycle, the live document showed every completed worker as `📥` and #300 as `🚧`, matching durable state.
+
+### Re: Runtime audit and reproducibility — Codex
+
+> **Chat prompt:** Are the bugs that the Coder instance is filing reproducable locally or are all of the bugs coder specific?
+
+They are not all Coder-specific.
+
+- The admin PID mislabel, multiple-queue singleton mismatch, retained roll-forward false acknowledgement, controller-handoff marker regression, and snapshot-sidecar admission reproduced locally.
+- The document-authority reconnect loop has a deterministic local deletion regression; its original live trigger depends on editor/deletion timing.
+- GH #299 still needs live JetBrains 263.7031 proof for the changed-source, restart-free upgrade path, so that issue remains open and is tracked by gated item `#gh299-live-263-proof`.
+
+> **Chat prompt:** Can we run a similar audit of the agent-doc runtime to dogfood?
+
+> **Chat prompt:** subagent
+
+> **Chat prompt:** Add backlog + queue items from the audit
+
+Done in subagents. The audit produced and completed:
+
+- generation-matched supervisor PID sourcing for admin list/dashboard;
+- server-derived authority-channel reconciliation after document deletion;
+- the retained roll-forward receipt fix;
+- multiple-queue normalization and surrogate IDs;
+- durable claim overlay on controller handoff.
+
+The audit's actionable backlog/queue rows were materialized, claimed one-to-one with workers, integrated, and closed through this turn.
+
+> **Chat prompt:** Are you dogfooding • Failed (exit 1) agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md --back…
+>   └ Error: visible document write for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md is retained…
+>     [dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=projection_failure issue_key=1fa46fd1ad84a564d13d16b971df69ad…
+>     Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating…
+>     + 3 lines (^t to expand)
+
+Yes. That signal was treated as evidence, not retried or bypassed. The earlier retained-then-converged write was a false terminal result already fixed on main; the later retained projection exposed the multiple-queue/editor-normalization defect and the false `Applied` acknowledgement fixed in this release.
+
+### Re: GitHub issue queue results — Codex
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/295
+
+Closed. Source-identical JetBrains plugin generations are preserved, so an unchanged plugin no longer creates a needless restart requirement.
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/296
+
+Closed. Queue claims now resolve live editor authority before disk, so an editor-deleted head cannot be claimed from a stale disk projection.
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/297
+
+Closed. `no_replica_manager` during native generation swap is deferred rather than treated as a definitive refusal.
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/298
+
+Closed. Plain/outside-project close paths are no-ops and the close watchdog uses the correct blocking read boundary.
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/299
+
+The release adds explicit upgrade-verdict logging/fallback, source-identical generation handling, and exact queue-row projection coverage. GH #299 remains open only for live changed-source proof on JetBrains 263.7031; that proof is retained as gated backlog item `#gh299-live-263-proof`.
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/300: Why is there still a sidecar? Replace all sidecars with lazily state.
+
+Fixed, released, and closed. Runtime reads already used typed `state.db`/Lazily document projections, but `FilesystemCrashStateEffects` still emitted an unused markdown snapshot copy. That writer and default snapshot-directory creation are removed. Controller and JetBrains now reject every path beneath `.agent-doc/` before authority lookup, preventing a state artifact from self-admitting as a session document. Ephemeral locks/starting records, diagnostic logs, and immutable/operator artifacts remain explicitly classified; no content-bearing mutable document sidecar remains authoritative.
+
+### Re: Release and publication — Codex
+
+> **Queue prompt:** release + publish
+
+> **Queue prompt:** release + publish
+
+The accumulated release obligations are complete. Agent Doc `0.35.519` / `v0.35.519` is published from `27e91076a45448098a1e8a774bc080c8ea8dc5aa`.
+
+- Exact committed-tree `make check`, `make release-check`, and the clean tmux-ci retry passed.
+- GitHub Release completed all 10 jobs and published 15 cross-platform/editor assets.
+- PyPI published `agent_doc-0.35.519-py3-none-any.whl`; a clean pinned install passed.
+- Local CLI/native and editor plugins were installed; the live JetBrains classic plugin upgraded dynamically.
+- `origin/main` advanced non-force, and the tag points to the same SHA.
+
+### Re: Recurring GitHub issue watcher — Codex
+
+> **Queue prompt:** Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
+>
+> **Deferred:** The current pass found and processed new GH #300, but this recurring head is intentionally left live while the document queue is paused. Move it to the dedicated hourly watcher document with `interval=1h loop`; then remove the second queue block here and resume the main queue. This avoids document-wide replay while preserving the recurring obligation.
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
-## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#dogfood-assistant-response-lineage]
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/293~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/294~~
+## Queue: Main
+<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#duplicatedqueuedue]~~
+- ~~do [#dogfood-assistant-response-lineage]~~
 - 📥 release + publish
-- release + publish
+- 📥 release + publish
+- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/295
+- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/296
+- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/297
+- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/298
+- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/299
+- 📥 #gh-issue https://github.com/btakita/agent-doc/issues/300: Why is there still a sidecar? Replace all sidecars with lazily state.
+- ~~do [#dogfood-admin-list-supervisor-pid]~~
+- ~~do [#dogfood-authority-channel-retry-loop]~~
+- ~~do [#dogfood-runtime-audit]~~
+- do [#hourly-issue-watcher-doc]
+- do [#per-queue-schedules]
 <!-- /agent:queue -->
---
+
+## Queue: Issues
+<!-- agent:queue id="issues" loop interval="1 hour" -->
+- Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
+<!-- /agent:queue -->
 
 ## Todo
 
@@ -738,7 +878,9 @@ The live dogfood cycle also detected that the next admission treated assistant-a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dogfood-assistant-response-lineage] Fix self-authored finalized exchange content being emitted as operator steering on the next admission; bind steering detection to post-baseline operator origin/lineage and fail closed.
+- [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
+- [ ] [#hourly-issue-watcher-doc] Move the hourly GitHub issue watcher out of agent-doc-bugs.md into a dedicated session document with `interval=1h loop`; remove the second queue block, verify the main queue is no longer scheduled, then resume this document queue.
+- [ ] [#per-queue-schedules] Design and implement independent per-queue-id schedules so an hourly `id=issues` queue can run alongside an immediate `id=main` queue; key durable schedule/pass/roster state by `(document, queue_id)` and prove non-interference.
 <!-- /agent:backlog -->
 
 ## Review

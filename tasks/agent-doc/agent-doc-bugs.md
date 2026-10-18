@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a14b4d-7683-7ba1-9662-bd403fbe4a9c
+  codex: 01a14cf4-3e67-79a1-938a-ebb6b9d9f142
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -378,6 +378,71 @@ The correct policy is therefore:
 5. Keep the final expected-base CAS as the last protection against edits arriving after derivation.
 
 So: **rebase transport-stale work from a current intent; completely reject semantically stale intent.** Content compatibility alone is insufficient evidence of semantic freshness.
+
+### Re: claim lineage, queue auto-sync, and stale retained writes — gpt-5 · 2026-10-18T00:10:31-04:00
+
+> implement the fix in a subagent
+
+Implemented through two isolated subagents and integrated serially. The semantic retained-write fence is commit `0f5be1adf5`; the generation-fenced queue lifecycle is `f0dec845d4`. Documentation/generator alignment is in `da64c776cc` and `1970fbf21b`. All four commits are pushed to `main`.
+
+> There was an in progress marker on 2 queue items, then they were removed, then 1 queue item regained the in progress marker.
+
+That sequence came from claim TTL pruning followed by a new claim. The old projection erased expired claims and therefore removed both `🚧` markers; the later claim projected one marker again. The new design retains expired attempts as visible, nonblocking `⚠️` records, so expiration no longer destroys their lineage.
+
+> So the in progress markers not being in sync with the workers is evidence of the lingeage bug?
+
+It is evidence of a lineage/liveness bug in the claim subsystem, but not the same bug as the stale retained-document projection. Previously `🚧` represented a claim record, not proof that a worker was currently running, and expiry deleted that record. The two bugs shared the missing-lineage pattern but occur in separate state machines.
+
+> Should we have a 1-1 binding between the claim and subagent if queue has the `subagents` attribute?
+
+Yes, at the attempt level. A claim is now bound to exactly one `(queue work identity, owner, generation)` attempt. It is intentionally not bound to an OS PID because subagents do not expose a stable observable process identity. Redispatch creates a new monotonic generation; late heartbeats, reports, or releases from an older generation are rejected.
+
+> Can we add differentiation between the different states in a subagent?
+
+Implemented:
+
+- `🟡` — claimed/dispatching
+- `🚧` — running, only after positive generation-matched start or heartbeat evidence
+- `📥` — worker reported; result awaits coordinator integration
+- `⚠️` — lost/expired; nonblocking and recovery-eligible
+
+> Can we use a different document marker for the prefix?
+
+Yes. Those four state-specific markers replace the overloaded in-progress prefix. They are stripped from semantic queue identity, so changing lifecycle state does not retarget the item.
+
+> Are the rest of the queue items pending?
+
+Yes. At diagnosis time this document had eleven live queue heads: the pane-diagnostics head was the sole claimed item and the other ten were pending/unclaimed. Closing this response removes the completed head; the remaining heads stay queued.
+
+> How to we recover from the wedged inbox for the queue items?
+
+The ledger now preserves lost attempts, makes them nonblocking, and permits a new generation to reclaim them. Reported attempts remain `📥` until their result is persisted. Generation fencing prevents an old worker from mutating a replacement attempt. Pre-upgrade attempts that were already pruned and left no durable completion evidence cannot be reconstructed unambiguously; those must be reclaimed rather than guessed.
+
+> Why not have the queue state auto-sync?
+
+It now does. The document marker is a projection of the durable claim ledger, and claim, refresh, report, expiry, reclaim, release, and queue closure all reconcile that projection. State changes no longer rely on a coordinator manually adding or removing a generic marker.
+
+> Is the subagent working on the "right design"?
+
+Yes. The implemented design keeps ownership in the durable ledger, treats document markers as derived UI, fences every mutable worker action by generation, and fails closed on ambiguous lineage. That is the right separation: marker state can be repaired from authority without pretending it is worker-process telemetry.
+
+> Do we still need the legacy tests?
+
+Yes, while generation-0 claims can exist across a rolling upgrade. This live session proved the case: its claim was created by the old binary, loaded by the new binary as generation `0`, and then idempotently transitioned to `reported` without duplicating feedback. The legacy tests should be removed only when generation-0 deserialization and unfenced transition support are deliberately removed—not merely because the new path exists.
+
+On the retained-projection issue, the controller now owns a per-document semantic mutex shared by recovery retirement and the retained worker's final lineage revalidation plus expected-base CRDT CAS. Recovery durably retires the exact observed intent lineage before canonicalization, including a canonical no-op. A changed, retired, or ambiguous lineage is rejected; a still-live compatible lineage may rebase over the current projection. This prevents a stale retained worker from landing after recovery while preserving valid concurrent scoped updates.
+
+Pane diagnostics found no durable one-pane desired projection. Runtime authority wanted two panes and subsequently converged, so manual tmux synchronization is safe now.
+
+Verification completed on the integrated branch:
+
+- `make check-fast` passed.
+- The single authoritative `make check` passed.
+- The generated-instruction `make audit-docs` gate passed.
+- One `make install` installed agent-doc `0.35.516` and scheduled idle-boundary runtime recycling.
+- `main` was fast-forwarded through `1970fbf21b`.
+
+> **Queue prompt:** There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 
@@ -386,14 +451,14 @@ So: **rebase transport-stale work from a current intent; completely reject seman
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
+- ~~There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/284
 - #gh-fix https://github.com/btakita/agent-doc/issues/285
 - #gh-fix https://github.com/btakita/agent-doc/issues/286
 - #gh-fix https://github.com/btakita/agent-doc/issues/287
 - #gh-fix https://github.com/btakita/agent-doc/issues/288
 - #gh-fix https://github.com/btakita/agent-doc/issues/289
-- 🚧 do [#extractliveapply]
+- do [#extractliveapply]
 - The queue markers are out of sync with the document state?
 - The last turn was wedged. Fix agent-doc causes. I went afk for a while and came back. There was a Prompt to delete a directory, which I accepted. I did a clear. Added `- release + publish`. Run Agent Doc. Turn was wedged.
 - release + publish
@@ -409,6 +474,7 @@ So: **rebase transport-stale work from a current intent; completely reject seman
 - [ ] [#n7kq] In the sdk.md session: restore the 7 todo ids the 23:30 --todo-edit dropped (#tdclireview, #tdcontracts162, #tdpromotioncallers, #tdinspectclones, #tdfpe202, #tdadr0033, #tdadr0030) with --todo-edit "<exact text>=#tdX <same text>", or accept the ids the preflight backfill assigns
 - [ ] [#8ph6] In the docs.md session: check off the Google Drive re-auth todo (--todo-done httpsdocsgoogle once backfilled, or --todo-done with its exact text)
 - [ ] [#t1v0] In the sdk.md pane, press Clear Session Context again: the 06:03 presses were held behind the open cycle and then dropped by the install restart. Check first that sdk.md's queue has not opened its tdue4cpuset cycle.
+- [ ] [#yvt3] Manually sync tmux now that the one-pane diagnostics are complete
 <!-- /agent:todo -->
 
 ## Backlog

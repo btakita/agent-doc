@@ -3293,7 +3293,8 @@ enum Commands {
         /// Apply the move, removing previewed content from source after writing target
         #[arg(long)]
         apply: bool,
-        /// Bypass target pane ownership check; live editor attachment still refuses
+        /// Bypass target pane ownership check; does not bypass the live editor
+        /// coordination gate
         #[arg(long)]
         bypass_claim: bool,
         /// Coordinate supported live editors through freeze, detached apply, and resume

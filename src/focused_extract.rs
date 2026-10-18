@@ -507,6 +507,34 @@ struct FrozenEditor {
     editor_id: String,
 }
 
+fn registered_editor_file(requested_file: &Path, registered_path: &str) -> Result<PathBuf> {
+    anyhow::ensure!(
+        !registered_path.trim().is_empty(),
+        "live editor registration for {} has no document path",
+        requested_file.display()
+    );
+    let registered_file = PathBuf::from(registered_path);
+    let requested_identity = requested_file.canonicalize().with_context(|| {
+        format!(
+            "failed to resolve focused-extract document {}",
+            requested_file.display()
+        )
+    })?;
+    let registered_identity = registered_file.canonicalize().with_context(|| {
+        format!(
+            "live editor registration names an unavailable document: {}",
+            registered_file.display()
+        )
+    })?;
+    anyhow::ensure!(
+        requested_identity == registered_identity,
+        "live editor registration path {} does not match focused-extract document {}",
+        registered_file.display(),
+        requested_file.display()
+    );
+    Ok(registered_file)
+}
+
 fn resume_frozen_editors(operation_id: &str, frozen: &[FrozenEditor]) -> Result<()> {
     let mut failures = Vec::new();
     for editor in frozen.iter().rev() {
@@ -567,7 +595,8 @@ fn freeze_live_editors(
                 registration.editor_kind,
                 registration.editor_version,
             );
-            registrations.push((file.to_path_buf(), registration));
+            let editor_file = registered_editor_file(file, &registration.path)?;
+            registrations.push((editor_file, registration));
         }
     }
 
@@ -1394,6 +1423,22 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coordinated_extract_uses_the_registered_editor_path_for_a_relative_cli_path() {
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::TempDir::new_in(&cwd).unwrap();
+        let document = dir.path().join("source.md");
+        std::fs::write(&document, "# source\n").unwrap();
+        let registered = document.canonicalize().unwrap();
+        let requested = document.strip_prefix(&cwd).unwrap();
+
+        assert!(!requested.is_absolute());
+        assert_eq!(
+            registered_editor_file(requested, &registered.to_string_lossy()).unwrap(),
+            registered
+        );
+    }
 
     #[test]
     fn attached_editor_refusal_names_the_live_source_and_uncreated_destination() {

@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.517
 
+- **Strict closeouts publish addressable TODO rows (GH #293).** After response
+  and same-cycle tracked-work projection converge, closeout runs the
+  authority-safe todo-id pass before commit and rejects any newly introduced
+  row that remains id-less. A `patch:todo` row therefore receives its `[#id]`
+  in the commit that introduces it instead of waiting for another preflight.
 - **Queue/subagent attempts now have durable, typed lineage.** Claims are fenced
   by monotonic generations, late workers cannot mutate replacement attempts,
   and the document projects distinct claimed (`🟡`), running (`🚧`), reported

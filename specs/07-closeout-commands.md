@@ -430,6 +430,8 @@ chain needed to diagnose the rejected envelope.
 
 ### Write-path invariants
 
+- **Todo-id publication invariant (`#todoidcloseout`, GH #293):** after response and same-cycle tracked-work projection converge, but before any strict closeout commit, the closeout runs the authority-safe todo-id maintenance pass. Let `NewTodoRows(b, d)` be the checklist rows present in authoritative publication cut `d` but absent from the pre-write cut `b`, and `OwnId(t)` mean that row has a valid leading todo id. Then `RequiredCloseoutSuccess(b, d) => forall t in NewTodoRows(b, d), OwnId(t)`. The closeout re-reads authority and rejects publication if any new row remains id-less, so a held typing-gate row, failed authority read, or failed projection cannot defer the invariant to another preflight. The patch is initially merged while id-less, so keyed merge still uses its text identity and cannot duplicate a concurrently edited row. `--todo-add` remains preferred because it declares identity directly.
+
 - Template/CRDT retries and IPC retry paths must adopt an already-visible response instead of appending or CRDT-merging a duplicate block, including when the user is concurrently typing new prompt text inside `agent:exchange`.
 - Template/CRDT disk writes and repair replays must prove the visible file still matches the just-merged current content immediately before saving snapshots or replacing the document. A late edit in an HTML scratch comment or exchange tail is a retry blocker, not merge input that may be overwritten by the stale write.
 - Final template reconciliation must run the duplicate-prompt repair before the visible document projection for direct disk, CRDT, and retained repair paths.

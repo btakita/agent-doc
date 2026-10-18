@@ -325,6 +325,73 @@ fn write_commit_requires_git_repo_before_mutating_session_document() {
     );
 }
 
+/// GH #293 / `#todoidcloseout`: a strict closeout must publish its todo patch
+/// with an own id. Depending on another preflight leaves the committed UI
+/// temporarily unaddressable and makes a later no-op closeout retain the gap.
+#[test]
+fn write_commit_backfills_patch_todo_id_before_commit() {
+    let (tmp, doc) = setup_session_template_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: todo id — gpt-5\nok\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] Say go to do the thing\n<!-- /patch:todo -->\n",
+        )
+        .assert()
+        .success();
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(head_blob.status.success());
+    let committed = String::from_utf8_lossy(&head_blob.stdout);
+    assert!(
+        committed.contains("- [ ] [#") && committed.contains("] Say go to do the thing"),
+        "strict closeout must commit an addressable todo row:\n{committed}"
+    );
+    assert!(
+        !committed.contains("- [ ] Say go to do the thing"),
+        "the id-less patch row must not survive in HEAD:\n{committed}"
+    );
+}
+
+/// The logical implication is enforced, not merely documented: if the typing
+/// gate cannot coin a newly introduced row, strict closeout cannot publish it.
+#[test]
+fn write_commit_refuses_new_patch_todo_that_remains_idless() {
+    let (tmp, doc) = setup_session_template_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: unfinished todo — gpt-5\nok\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] Should we publish the\n<!-- /patch:todo -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "strict closeout refused before commit",
+        ))
+        .stderr(predicates::str::contains("Use --todo-add"));
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(head_blob.status.success());
+    let committed = String::from_utf8_lossy(&head_blob.stdout);
+    assert!(
+        !committed.contains("Should we publish the"),
+        "an id-less new todo must not cross the commit boundary:\n{committed}"
+    );
+}
+
 /// GH #93: a backlog item quoting a component-marker *prefix* in backticks is
 /// prose, so the final lint gate must not report the backlog as unclosed.
 #[test]

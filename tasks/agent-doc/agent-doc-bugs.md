@@ -298,6 +298,41 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 ### Re: Subagent completed: `subagent:todo_context_migration` returned work for queue item “do [#todocontextmigration]” — agent-doc
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=c2a646a2d1069050cc9ffc5531e2923a339e965a4d2a41dd4c956357038fcff7 -->
+
+### Re: Response
+
+Both focused-extraction queue items are complete.
+
+For `#extractliveapply`, the coordinated live-editor persist/freeze/detach/apply/resume path now uses each editor registration’s verified document path, so relative CLI source/target paths reliably reach JetBrains IPC. The fix is on `main` via `108f0f6d10`.
+
+For `#extractcompactselection`, saved selectors now survive exchange compaction through archive locators, compacted prompt and response selectors resolve through the archived response while retaining prompt/response adjacency, explicit manifest replay is idempotent, and inline `agent:done` items can be selected and transferred. The initial patch also required refreshing every generated transfer-extract runbook mirror; that packaging gap is fixed.
+
+Changed paths for the compact-selection work:
+- `src/focused_extract.rs`
+- `specs/07-focused-extract.md`
+- `runbooks/transfer-extract.md`
+- generated Claude, Codex, Cursor, Grok, and OpenCode transfer-extract runbook mirrors
+
+Integrated and pushed:
+- worker commits: `84fe363c7151`, `5a69ac00e56a`
+- `main`: `b81436063c`
+
+Verification:
+- coordinator `make check-fast`: 1,879 passed, 23 skipped, 0 failed
+- Clippy with `-D warnings`: passed
+- documentation audit: passed with no blocking findings
+- focused extract suite: 16 passed
+- compacted selector regressions: 2 passed
+- `git diff --check`: passed
+- `make install`: passed; installed JetBrains bytes were already current, so no restart is required
+- CI for the pushed head is running
+
+Retained verifier results:
+- default queue `priority subagents`, todo `priority`, and backlog `priority queue` are implemented and focused-test verified
+- `sdk-dev.md` has valid space-indented YAML, a healthy committed CRDT session, and needs no reset, force-disk write, or restart
+- all 38 open TODOs in `monsterrodholders.md` now have canonical source links; its authoritative cycle is committed
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:77bcbba7 -->
 <!-- /agent:exchange -->
 
@@ -323,8 +358,8 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/290~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/291~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/292~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#extractliveapply]
-- do [#extractcompactselection]
+- 🚧 do [#extractliveapply]
+- ~~do [#extractcompactselection]~~
 - ~~Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)~~ — auto-struck: answered this cycle (#ftstrike)
@@ -346,7 +381,6 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 
 <!-- agent:backlog priority queue -->
 - [ ] [#extractliveapply] agent-doc extract: provide a first-class coordinated detach/freeze/apply/resume path for focused extraction when both source and target are attached to live CRDT editors. Current --apply correctly refuses cross-document CAS and tells the operator to close tabs, but JetBrains can immediately re-register those tabs, leaving no reliable CLI workflow; do not require GUI automation.
-- [ ] [#extractcompactselection] agent-doc extract: keep prepared extraction selections executable after exchange compaction. Persist semantic selectors/selection manifests against archive locators, and support selectively transferring completed/done items; today a saved operation can lose its live exchange-node selectors after compaction and --ids does not select done items.
 <!-- /agent:backlog -->
 
 ## Review

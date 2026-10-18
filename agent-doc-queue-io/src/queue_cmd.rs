@@ -1014,6 +1014,47 @@ mod tests {
     }
 
     #[test]
+    fn claim_projection_marks_only_the_exact_duplicate_effect() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            "- release + publish ⟦effect:1⟧\n- release + publish ⟦effect:2⟧\n",
+        );
+        crate::queue_claim::claim(
+            &doc,
+            "release + publish ⟦effect:2⟧",
+            "subagent:release-2",
+            600,
+        )
+        .unwrap();
+
+        let projection =
+            derive_claim_runtime_projection(&doc, &std::fs::read_to_string(&doc).unwrap(), None)
+                .unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains("- release + publish ⟦effect:1⟧\n"),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("- 🟡 release + publish ⟦effect:2⟧\n"),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection
+                .target_content
+                .contains("- 🟡 release + publish ⟦effect:1⟧\n"),
+            "{}",
+            projection.target_content
+        );
+    }
+
+    #[test]
     fn claim_projection_rebases_on_editor_authority_cut() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_claim_projection_doc(dir.path(), "- dispatched worker work\n");

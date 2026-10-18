@@ -412,8 +412,10 @@ pub fn claim_with_session(
     // the generic turn-failure notice.
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim")?;
     let identity = claim_identity(&target);
-    // `#claimfollowedit`: identical lines are one work identity, so one claim
-    // holds every copy; the log names how many it bound.
+    // `#queueeffectidentity`: preflight annotates intentional repeated effects,
+    // so an exact identity normally names one occurrence. Keep the count in the
+    // log as a rolling-upgrade diagnostic: a legacy unannotated claim still
+    // anchors every identical copy until preflight projects effect identities.
     let occurrences = heads
         .iter()
         .filter(|head| claim_identity(head) == identity)

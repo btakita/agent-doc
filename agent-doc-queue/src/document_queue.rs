@@ -3397,6 +3397,111 @@ fn head_shape(prompt: &QueuePrompt) -> HeadShape {
     }
 }
 
+/// Stable, binary-owned identity suffix for repeated live free-text effects.
+///
+/// The suffix is deliberately part of the queue head text (and therefore of
+/// claim / receipt identity), but [`queue_effect_family_identity`] removes it
+/// for lifecycle convergence so adding the suffix cannot turn a stale replay
+/// into newly-authored work.
+pub const QUEUE_EFFECT_ANNOTATION_PREFIX: &str = "⟦effect:";
+
+fn split_queue_effect_annotation(text: &str) -> (String, Option<usize>) {
+    let trimmed = text.trim_end();
+    let Some(before_close) = trimmed.strip_suffix('⟧') else {
+        return (text.to_string(), None);
+    };
+    let Some((base, raw)) = before_close.rsplit_once(" ⟦effect:") else {
+        return (text.to_string(), None);
+    };
+    let Ok(effect) = raw.parse::<usize>() else {
+        return (text.to_string(), None);
+    };
+    if base.trim().is_empty() {
+        return (text.to_string(), None);
+    }
+    (base.to_string(), Some(effect))
+}
+
+fn queue_effect_family_identity(
+    prompt: &QueuePrompt,
+) -> agent_doc_element_queue::QueueItemIdentity {
+    let (base, _) = split_queue_effect_annotation(&prompt.text);
+    agent_doc_element_queue::QueueItemIdentity::from_prompt(&base)
+}
+
+/// Give every lawful repeated live free-text queue effect a stable visible id.
+///
+/// Existing positive ids are retained. Missing ids (including a repeated or
+/// zero id) receive the lowest unused positive integer in queue order. A lone
+/// annotated survivor keeps its id, so consuming `effect:1` never silently
+/// renames `effect:2`. Id-backed heads and multiline heads are untouched.
+///
+/// This is a one-shot pure projection over one immutable queue cut; it owns no
+/// source or reactive lifetime. The preflight convergence effect persists its
+/// returned successor with the rest of queue maintenance.
+pub fn annotate_duplicate_queue_effects(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
+    use agent_doc_element_queue::QueueItemIdentity;
+
+    let mut families = std::collections::HashMap::<QueueItemIdentity, Vec<usize>>::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if prompt.multiline {
+            continue;
+        }
+        let identity = queue_effect_family_identity(prompt);
+        if matches!(identity, QueueItemIdentity::FreeText(_)) {
+            families.entry(identity).or_default().push(index);
+        }
+    }
+
+    let mut annotated = entries.to_vec();
+    let mut changed = false;
+    for indexes in families.values().filter(|indexes| indexes.len() > 1) {
+        let mut used = std::collections::HashSet::<usize>::new();
+        let mut assignments = Vec::with_capacity(indexes.len());
+        for &index in indexes {
+            let QueueEntry::Prompt(prompt) = &entries[index] else {
+                unreachable!("effect-family index must name a live prompt");
+            };
+            let (_, existing) = split_queue_effect_annotation(&prompt.text);
+            assignments.push(existing.filter(|effect| *effect > 0 && used.insert(*effect)));
+        }
+        let mut next = 1usize;
+        for assignment in &mut assignments {
+            if assignment.is_some() {
+                continue;
+            }
+            while used.contains(&next) {
+                next = next.saturating_add(1);
+            }
+            *assignment = Some(next);
+            used.insert(next);
+        }
+
+        for (&index, effect) in indexes.iter().zip(assignments) {
+            let QueueEntry::Prompt(prompt) = &entries[index] else {
+                unreachable!("effect-family index must name a live prompt");
+            };
+            let (base, _) = split_queue_effect_annotation(&prompt.text);
+            let effect = effect.expect("every duplicate effect receives an id");
+            let text = format!(
+                "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
+                base.trim_end()
+            );
+            if text != prompt.text {
+                changed = true;
+                let QueueEntry::Prompt(target) = &mut annotated[index] else {
+                    unreachable!("effect-family index must name a live prompt");
+                };
+                target.text = text;
+            }
+        }
+    }
+    changed.then_some(annotated)
+}
+
 /// Full convergence key: durable identity, head shape, and visible lifecycle.
 ///
 /// - **Identity** is exactly [`QueueItemIdentity::from_prompt`] (id-backed heads
@@ -3424,7 +3529,13 @@ fn convergence_identity(entry: &QueueEntry) -> Option<ConvergenceKey> {
         _ => return None,
     };
     let lifecycle = entry_lifecycle(entry)?;
-    let identity = agent_doc_element_queue::QueueItemIdentity::from_prompt(&prompt.text);
+    // Effect ids distinguish exact claim/receipt targets but not authored
+    // multiplicity. Otherwise a replay could append a fresh id and evade the
+    // snapshot allowance that guards intentional duplicates.
+    let identity = match head_shape(prompt) {
+        HeadShape::FreeText => queue_effect_family_identity(prompt),
+        _ => agent_doc_element_queue::QueueItemIdentity::from_prompt(&prompt.text),
+    };
     Some((identity, head_shape(prompt), lifecycle))
 }
 
@@ -3534,8 +3645,9 @@ fn strongest_pin_text<'a>(texts: &[&'a str]) -> &'a str {
 ///   `#qauthorder`): convergence never reorders. The survivor of each identity
 ///   group is kept at the group's **earliest** position, and every non-prompt
 ///   entry stays in place, so `sort_prompts_by_priority`'s later position-lock
-///   sees the same slots. This convergence is purely subtractive (plus the
-///   pin-text rewrite on the survivor); it is the `Authored` state's
+///   sees the same slots. This convergence never reorders: besides subtraction,
+///   it rewrites only a pin-variant survivor or appends a stable effect id to
+///   lawful repeated free text. It is the `Authored` state's
 ///   position property carried across the dedup.
 /// - **Intentional duplicates** (`#queue-dedup-destroys-intentional-duplicates`
 ///   / `#qdedup-directive-twin`): identical `do [#id]` directive twins survive
@@ -3756,8 +3868,9 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     }
 
     // First pass: group same-identity prompt indices to detect pin-variant
-    // `do [#id]` groups whose survivor needs a text rewrite. Free-text and bare
-    // reference identities never rewrite text; only id-backed directive groups do.
+    // `do [#id]` groups whose survivor needs a text rewrite. The later effect-id
+    // projection can annotate lawful repeated free text; this pass rewrites only
+    // id-backed directive groups.
     let mut id_groups: std::collections::HashMap<String, Vec<usize>> =
         std::collections::HashMap::new();
     for (idx, entry) in entries.iter().enumerate() {
@@ -3983,6 +4096,11 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
             }
             _ => converged.push(entry.clone()),
         }
+    }
+
+    if let Some(with_effects) = annotate_duplicate_queue_effects(&converged) {
+        converged = with_effects;
+        changed = true;
     }
 
     if changed { Some(converged) } else { None }
@@ -7409,6 +7527,67 @@ mod tests {
             .unwrap_or_else(|| entries.to_vec())
     }
 
+    /// `#queueeffectidentity`: two operator-authored copies are two effects,
+    /// not one claim/receipt identity rendered twice.
+    #[test]
+    fn converge_annotates_duplicate_free_text_effects_stably() {
+        let snapshot = vec![p("release + publish"), p("release + publish")];
+        let once = converge(&snapshot, &snapshot);
+        assert_eq!(
+            once,
+            vec![
+                p("release + publish ⟦effect:1⟧"),
+                p("release + publish ⟦effect:2⟧"),
+            ]
+        );
+        assert!(
+            converge_queue_via_lifecycle(&once, &snapshot, &Default::default()).is_none(),
+            "effect projection reaches a fixpoint"
+        );
+
+        let survivor = vec![p("release + publish ⟦effect:2⟧")];
+        assert_eq!(
+            converge(&survivor, &once),
+            survivor,
+            "removing effect 1 never renumbers effect 2"
+        );
+    }
+
+    #[test]
+    fn effect_annotation_repairs_missing_and_repeated_ids_in_queue_order() {
+        let entries = vec![
+            p("📥 release + publish ⟦effect:2⟧"),
+            p("release + publish"),
+            p("release + publish ⟦effect:2⟧"),
+        ];
+        assert_eq!(
+            annotate_duplicate_queue_effects(&entries).unwrap(),
+            vec![
+                p("📥 release + publish ⟦effect:2⟧"),
+                p("release + publish ⟦effect:1⟧"),
+                p("release + publish ⟦effect:3⟧"),
+            ]
+        );
+    }
+
+    #[test]
+    fn effect_ids_do_not_expand_snapshot_authored_multiplicity() {
+        let snapshot = vec![p("release + publish"), p("release + publish")];
+        let replay = vec![
+            p("release + publish ⟦effect:1⟧"),
+            p("release + publish ⟦effect:2⟧"),
+            p("release + publish ⟦effect:3⟧"),
+        ];
+        assert_eq!(
+            converge(&replay, &snapshot),
+            vec![
+                p("release + publish ⟦effect:1⟧"),
+                p("release + publish ⟦effect:2⟧"),
+            ],
+            "a replay cannot mint an extra effect identity"
+        );
+    }
+
     /// `#presetargdedup` (live loss, agent-doc-bugs.md 2026-09-30): three
     /// `#gh-fix <url>` preset invocations shared the identity `gh-fix`, so once
     /// the first was struck the two live siblings were dropped as stale
@@ -7548,9 +7727,13 @@ mod tests {
     fn converge_preserves_double_authored_free_text() {
         let snapshot = vec![p("run the smoke test"), p("run the smoke test")];
         let entries = snapshot.clone();
-        assert!(
-            converge_queue_via_lifecycle(&entries, &snapshot, &Default::default()).is_none(),
-            "double-authored free-text must survive at its authored multiplicity"
+        assert_eq!(
+            converge(&entries, &snapshot),
+            vec![
+                p("run the smoke test ⟦effect:1⟧"),
+                p("run the smoke test ⟦effect:2⟧"),
+            ],
+            "double-authored free text survives with distinct effect identities"
         );
     }
 

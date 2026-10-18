@@ -5465,8 +5465,9 @@ pub fn run_queue_maintenance_with_coin_gate(
     // collapse, snapshot-authored multiplicity) and as a thin migration shim
     // (the unit-tested individual functions remain `pub` so external callers and
     // their regression coverage do not break). Position-lock
-    // (#queue-operator-pin-position-lock) is preserved: convergence is purely
-    // subtractive at each identity's earliest slot.
+    // (#queue-operator-pin-position-lock) is preserved: convergence never
+    // reorders, and its only additive text projection is the stable
+    // `⟦effect:N⟧` identity on lawful repeated free-text rows.
     let snapshot_text = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
@@ -5512,7 +5513,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         activation.entries_after = converged_entries;
         mutated = true;
         eprintln!(
-            "[preflight] queue: converged {dropped} duplicate queue head(s) via per-item lifecycle SM (#cgfx)"
+            "[preflight] queue: converged lifecycle identities (dropped {dropped} replay head(s); annotated any repeated free-text effects) (#cgfx/#queueeffectidentity)"
         );
     }
 
@@ -15385,14 +15386,23 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
             state.queue_prompts,
-            vec!["do deploy".to_string(), "do deploy".to_string()],
-            "intentional duplicate free-text prompts should remain queued: {state:?}"
+            vec![
+                "do deploy ⟦effect:1⟧".to_string(),
+                "do deploy ⟦effect:2⟧".to_string()
+            ],
+            "intentional duplicate free-text prompts should remain separately queued: {state:?}"
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("do deploy ⟦effect:1⟧\n")
+                && updated.contains("do deploy ⟦effect:2⟧\n"),
+            "maintenance should expose distinct duplicate effect identities:\n{updated}"
+        );
+        let _ = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
-            updated.matches("do deploy").count(),
-            2,
-            "maintenance should preserve intentional duplicate free-text prompts:\n{updated}"
+            std::fs::read_to_string(&doc).unwrap(),
+            updated,
+            "effect annotations must be idempotent across preflight"
         );
     }
     #[test]

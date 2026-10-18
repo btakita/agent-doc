@@ -5752,32 +5752,22 @@ pub fn recycle_idle_grace() -> Duration {
 
 /// Resolve the agent-doc crate source root for a dogfood-mode document.
 ///
-/// `agent_doc_dogfood: true|false` is authoritative. When absent, the legacy
-/// agent-doc source/task path inference remains as a compatibility default. A
-/// superproject may contain `src/agent-doc` while also hosting unrelated project
-/// documents; those documents must not inherit dogfood behavior merely because
-/// the crate is nearby.
+/// Session `dogfood` is authoritative; when absent it inherits project.md and
+/// absence everywhere is off. A superproject may contain `src/agent-doc` while
+/// also hosting unrelated documents, so source paths never imply opt-in.
 pub fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
     let file = file.canonicalize().ok()?;
     let project_root = agent_doc_project_root_io::project_root_containing(&file)?;
-    let dogfood_override = std::fs::read_to_string(&file).ok().and_then(|content| {
-        agent_doc_frontmatter::frontmatter::parse(&content)
-            .ok()
-            .and_then(|(frontmatter, _)| frontmatter.dogfood_mode)
-    });
-    if dogfood_override == Some(false) {
+    let content = std::fs::read_to_string(&file).ok()?;
+    let dogfood = agent_doc_frontmatter_io::session::effective_dogfood_for_file(&content, &file)
+        .ok()?;
+    if !dogfood.enabled {
         return None;
     }
     for candidate in [project_root.clone(), project_root.join("src/agent-doc")] {
         let cargo = candidate.join("Cargo.toml");
         if let Ok(content) = std::fs::read_to_string(&cargo)
             && content.contains("name = \"agent-doc\"")
-            && (dogfood_override == Some(true)
-                || agent_doc_supervisor::config::is_agent_doc_dogfood_session(
-                    &file,
-                    &project_root,
-                    &candidate,
-                ))
         {
             return Some(candidate);
         }
@@ -57513,28 +57503,16 @@ mod tests {
         };
 
         let dogfood_doc = write_doc("tasks/agent-doc/agent-doc-bugs2.md");
-        assert_eq!(
-            dogfood_agent_doc_crate_root(&dogfood_doc),
-            Some(crate_root.clone())
-        );
+        assert!(dogfood_agent_doc_crate_root(&dogfood_doc).is_none());
 
         let legacy_root_doc = write_doc("tasks/agent-doc-bugs.md");
-        assert_eq!(
-            dogfood_agent_doc_crate_root(&legacy_root_doc),
-            Some(crate_root.clone())
-        );
+        assert!(dogfood_agent_doc_crate_root(&legacy_root_doc).is_none());
 
         let software_agent_doc = write_doc("tasks/software/agent-doc.md");
-        assert_eq!(
-            dogfood_agent_doc_crate_root(&software_agent_doc),
-            Some(crate_root.clone())
-        );
+        assert!(dogfood_agent_doc_crate_root(&software_agent_doc).is_none());
 
         let source_doc = write_doc("src/agent-doc/specs/supervisor.md");
-        assert_eq!(
-            dogfood_agent_doc_crate_root(&source_doc),
-            Some(crate_root.clone())
-        );
+        assert!(dogfood_agent_doc_crate_root(&source_doc).is_none());
 
         let efs_doc = write_doc("tasks/professional/sampleportal.md");
         assert!(

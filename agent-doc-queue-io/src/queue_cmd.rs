@@ -17,7 +17,10 @@
 //!   queue remained paused.
 
 use anyhow::{Result, bail};
+use parking_lot::Mutex;
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use crate::one_shot_sync::OneShotQueueSyncResult;
 use agent_doc_element_backlog::backlog;
@@ -83,6 +86,46 @@ pub struct ClaimRuntimeProjection {
     pub changed: bool,
 }
 
+const DISPATCH_EVIDENCE_GRACE_SECS: u64 = 10;
+static QUEUE_INVARIANT_LOG_DEDUPE: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn log_queue_invariant_once(
+    file: &Path,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    diagnosis: agent_doc_queue::queue_claim::QueueLifecycleDiagnosis,
+) {
+    let signature = format!(
+        "{}:{:?}:{}:{:?}",
+        agent_doc_hash::document_id_for_path(file),
+        claim.identity,
+        claim.generation,
+        diagnosis.invariant,
+    );
+    if !QUEUE_INVARIANT_LOG_DEDUPE.lock().insert(signature.clone()) {
+        return;
+    }
+    let key = format!("qinv{}", agent_doc_hash::short_content_hash(&signature));
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{} key={} invariant={:?} owner={} generation={} expected={} observed={} worker_liveness={:?} correction={:?}",
+            agent_doc_turn::op_log::OpsLogEvent::QueueLifecycleInvariant,
+            key,
+            diagnosis.invariant,
+            claim.owner,
+            claim.generation,
+            diagnosis.expected.prefix(),
+            diagnosis
+                .observed
+                .map(|marker| marker.prefix())
+                .unwrap_or("bare"),
+            diagnosis.worker_liveness,
+            diagnosis.correction,
+        ),
+    );
+}
+
 pub fn derive_claim_runtime_projection(
     file: &Path,
     current: &str,
@@ -102,7 +145,7 @@ pub fn derive_claim_runtime_projection(
     let entries = agent_doc_queue::document_queue::parse(body)?;
     let claim_states = crate::queue_claim::claim_states_for_content(file, current)?
         .into_iter()
-        .map(|claim| (claim.identity, claim.state.projection_marker()))
+        .map(|claim| (claim.identity.clone(), claim))
         .collect::<std::collections::HashMap<_, _>>();
     let reported = crate::claim_release_receipt::reported_items_for_content(file, current);
     let completion_evidence = crate::queue_claim::completion_evidence_head_texts(current)
@@ -122,8 +165,21 @@ pub fn derive_claim_runtime_projection(
                 let prior = (cleared_identity.as_ref() != Some(&identity))
                     .then(|| agent_doc_document::queue_projection::lifecycle_marker(&prompt.text))
                     .flatten();
+                let observed = agent_doc_document::queue_projection::lifecycle_marker(&prompt.text);
+                if let Some(claim) = claim_states.get(&identity)
+                    && let Some(diagnosis) = agent_doc_queue::queue_claim::diagnose_lifecycle(
+                        claim,
+                        observed,
+                        agent_doc_log_time::current_epoch_secs(),
+                        DISPATCH_EVIDENCE_GRACE_SECS,
+                    )
+                {
+                    log_queue_invariant_once(file, claim, diagnosis);
+                }
                 let marker = agent_doc_document::queue_projection::worker_evidence_marker(
-                    claim_states.get(&identity).copied(),
+                    claim_states
+                        .get(&identity)
+                        .map(|claim| claim.state.projection_marker()),
                     reported.claims(&prompt.text),
                     completion_evidence.contains(&identity),
                 )

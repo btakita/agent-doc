@@ -9,6 +9,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   authority-safe todo-id pass before commit and rejects any newly introduced
   row that remains id-less. A `patch:todo` row therefore receives its `[#id]`
   in the commit that introduces it instead of waiting for another preflight.
+- **Queue lifecycle invariants are diagnosed from typed evidence in real time.**
+  Visible-prefix drift is repaired from the durable claim generation; missing
+  worker evidence remains explicitly unknown and emits a stable-keyed ops
+  finding instead of being guessed running. Ops summaries rank the family for
+  dogfood capture.
+- **Dogfood routing is explicit and layered.** `dogfood` accepts false, true, a
+  project-relative target, or `{ path, auto }`; session frontmatter overrides
+  `.agent-doc/project.md`, absence everywhere is off, and `auto` is false unless
+  explicitly enabled. Self-targeting uses stable finding keys rather than
+  recursive invocation.
 - **Queue/subagent attempts now have durable, typed lineage.** Claims are fenced
   by monotonic generations, late workers cannot mutate replacement attempts,
   and the document projects distinct claimed (`🟡`), running (`🚧`), reported

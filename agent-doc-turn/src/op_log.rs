@@ -165,6 +165,7 @@ ops_log_events! {
     CrdtResponseCellAdd => "crdt_response_cell_add",
     CrdtDocumentOpDeltaIngested => "crdt_document_op_delta_ingested",
     CrdtCommitBarrier => "crdt_commit_barrier",
+    QueueLifecycleInvariant => "queue_lifecycle_invariant",
 }
 
 /// Event name prefix emitted by preflight when a cycle starts.

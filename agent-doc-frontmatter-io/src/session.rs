@@ -109,6 +109,105 @@ pub fn effective_prompt_presets_for_file(content: &str, file: &Path) -> Result<P
     Ok(local)
 }
 
+/// Resolve the document-local dogfood cycle switch.
+///
+/// Dogfood routing is deliberately opt-in: the session document wins when it
+/// declares `dogfood`/`agent_doc_dogfood`; otherwise the nearest explicit
+/// declaration in `.agent-doc/project.md` is inherited. Absence at every layer
+/// is false. This policy gates filing/feedback only; invariant diagnosis and
+/// uniquely-safe projection repair remain unconditional.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveDogfood {
+    pub enabled: bool,
+    pub target: Option<std::path::PathBuf>,
+    pub self_target: bool,
+    pub auto: bool,
+}
+
+pub fn effective_dogfood_for_file(content: &str, file: &Path) -> Result<EffectiveDogfood> {
+    let display = file.display().to_string();
+    let local = agent_doc_frontmatter::frontmatter::parse(content)
+        .map_err(|err| contextualize_parse_error(&display, err))?
+        .0
+        .dogfood_mode;
+    if let Some(local) = local {
+        return resolve_dogfood_value(file, &local);
+    }
+
+    if let Some(nearest_root) = agent_doc_project_config_io::project_root_for_doc(file) {
+        // `ancestors_within_root_ceiling` is nearest-first. Dogfood is a
+        // tri-state scalar, so the nearest explicit project declaration wins.
+        for root in agent_doc_fs::ancestors_within_root_ceiling(&nearest_root) {
+            let project_file = root.join(".agent-doc").join("project.md");
+            let project_content = match std::fs::read_to_string(&project_file) {
+                Ok(content) => content,
+                Err(err) if err.kind() == ErrorKind::NotFound => continue,
+                Err(err) => {
+                    anyhow::bail!(
+                        "failed to read project dogfood file {}: {err}",
+                        project_file.display()
+                    );
+                }
+            };
+            let project_display = project_file.display().to_string();
+            let project = agent_doc_frontmatter::frontmatter::parse(&project_content)
+                .map_err(|err| contextualize_parse_error(&project_display, err))?
+                .0
+                .dogfood_mode;
+            if let Some(project) = project {
+                return resolve_dogfood_value(file, &project);
+            }
+        }
+    }
+    Ok(EffectiveDogfood {
+        enabled: false,
+        target: None,
+        self_target: false,
+        auto: false,
+    })
+}
+
+fn resolve_dogfood_value(
+    file: &Path,
+    value: &agent_doc_frontmatter::frontmatter::DogfoodConfig,
+) -> Result<EffectiveDogfood> {
+    if !value.enabled() {
+        return Ok(EffectiveDogfood {
+            enabled: false,
+            target: None,
+            self_target: false,
+            auto: false,
+        });
+    }
+    let target = match value.target() {
+        Some(target) => {
+            let explicit_self = agent_doc_project_config_io::project_root_for_doc(file)
+                .map(|root| root.join(target))
+                .is_some_and(|target| {
+                    target.canonicalize().unwrap_or(target)
+                        == file.canonicalize().unwrap_or_else(|_| file.to_path_buf())
+                });
+            if explicit_self {
+                Some(file.to_path_buf())
+            } else {
+                agent_doc_fs::referenced_markdown_path_checked(file, target)?
+            }
+        }
+        None => agent_doc_project_config_io::agent_doc_bug_target_document_for_doc(file)?
+            .or_else(|| Some(file.to_path_buf())),
+    };
+    let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let self_target = target.as_ref().is_some_and(|target| {
+        target.canonicalize().unwrap_or_else(|_| target.clone()) == canonical_file
+    });
+    Ok(EffectiveDogfood {
+        enabled: true,
+        target,
+        self_target,
+        auto: value.auto(),
+    })
+}
+
 /// Ensure a document has a session id while preserving the target path in parse errors.
 pub fn ensure_session_for_file(content: &str, file: &Path) -> Result<(String, String)> {
     let display = file.display().to_string();
@@ -244,6 +343,64 @@ mod tests {
     fn setup_project(dir: &std::path::Path) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
         dir.join(".agent-doc").join("config.toml")
+    }
+
+    #[test]
+    fn dogfood_resolution_is_explicit_layered_and_defaults_off() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("tasks/work.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+
+        std::fs::write(&doc, "---\nagent_doc_format: template\n---\n").unwrap();
+        assert!(
+            !effective_dogfood_for_file(&std::fs::read_to_string(&doc).unwrap(), &doc)
+                .unwrap()
+                .enabled
+        );
+
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\ndogfood: tasks/project-bugs.md\n---\n",
+        )
+        .unwrap();
+        let inherited =
+            effective_dogfood_for_file(&std::fs::read_to_string(&doc).unwrap(), &doc).unwrap();
+        assert!(inherited.enabled);
+        assert!(inherited.target.unwrap().ends_with("tasks/project-bugs.md"));
+
+        let local_false = "---\nagent_doc_format: template\ndogfood: false\n---\n";
+        assert!(
+            !effective_dogfood_for_file(local_false, &doc)
+                .unwrap()
+                .enabled
+        );
+
+        let local_target = "---\nagent_doc_format: template\ndogfood: tasks/local-bugs.md\n---\n";
+        let resolved = effective_dogfood_for_file(local_target, &doc).unwrap();
+        assert!(resolved.enabled);
+        assert!(!resolved.auto);
+        assert!(resolved.target.unwrap().ends_with("tasks/local-bugs.md"));
+
+        let local_auto = "---\ndogfood:\n  path: tasks/auto-bugs.md\n  auto: true\n---\n";
+        let resolved = effective_dogfood_for_file(local_auto, &doc).unwrap();
+        assert!(resolved.enabled);
+        assert!(resolved.auto);
+        assert!(resolved.target.unwrap().ends_with("tasks/auto-bugs.md"));
+    }
+
+    #[test]
+    fn dogfood_self_target_is_typed_without_recursive_routing() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("tasks/bugs.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\ndogfood: tasks/bugs.md\n---\n").unwrap();
+
+        let resolved =
+            effective_dogfood_for_file(&std::fs::read_to_string(&doc).unwrap(), &doc).unwrap();
+        assert!(resolved.enabled);
+        assert!(resolved.self_target);
     }
 
     #[test]

@@ -858,6 +858,22 @@ The formal non-interference rule is now enforced: schedule/pass state for `(d,q1
 Verification passed on the exact commit: `make check` with 11,037 Rust tests and zero failures, 202 VS Code tests, cross-editor simulation, all JetBrains variants, bootstrap, and TLA; `make clippy`; focused queue/controller/SQLite suites; and the coordinator's single `make install`. `origin/main` points to the same SHA.
 
 The installed CLI now reports this document's `id=issues` queue separately and holds only that queue because `interval="1 hour"` is invalid. `id=main` is no longer scheduled or gated by it. The earlier dedicated-watcher-document workaround is therefore superseded. The remaining exact live edit—changing only `id=issues` to `interval=1h`—is tracked as `#queue-id-attr-edit`, because the current binary still lacks an exact-ID queue-attribute mutation primitive; direct or ambiguous whole-component editing is intentionally refused.
+
+### Re: Exact queue-ID attribute edit and hourly activation — gpt-5 · 2026-10-18T08:45:34-04:00
+
+> **Queue prompt:** do [#queue-id-attr-edit]
+
+Implemented, integrated, pushed, installed, and applied from agent-doc main commit `78084d0bd91643898dc4866b11df6ef27b9ececd`.
+
+The new command is `agent-doc queue attr <FILE> --id <QUEUE_ID> --set KEY[=VALUE] --remove KEY`. It resolves exactly one QueueGraph node, edits only that opening-marker span, validates the successor graph and schedule syntax, holds the queue edit guard, and converges through live editor/CRDT compare-and-swap authority. Missing, empty, repeated, malformed, or duplicate IDs; unknown/conflicting attributes; invalid schedules; and stale generations fail without mutation. Sibling queue bytes and items are preserved.
+
+The lint catalog now delegates valid queue attributes to the queue domain model, so `id`, `interval`, and the other supported schedule attributes no longer produce stale `unknown-attr` warnings.
+
+Applied live:
+
+`id=issues` changed atomically from `interval="1 hour"` to `interval=1h`, leaving `id=main` untouched. Status now reports the issues queue independently with `interval_secs=3600`, unbounded loop, zero failures, and no held heads; main is absent from the scheduled set and remains immediate. Lint reports no blocking findings. The obsolete administrative pause was resumed with observed generation 189.
+
+Verification passed on the exact commit: full `make check` with 11,046/11,046 Rust tests, 202/202 VS Code tests, cross-editor simulation, JetBrains classic/262/263 builds, bootstrap, TLA, focused exact-ID/CAS/refusal tests, and the coordinator's single `make install`. The earlier dedicated-watcher-document workaround is superseded and resolved because independent same-document schedules now provide the intended behavior directly.
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 
@@ -865,27 +881,11 @@ The installed CLI now reports this document's `id=issues` queue separately and h
 -->
 
 ## Queue: Main
-<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#queue-id-attr-edit]
-- ~~do [#duplicatedqueuedue]~~
-- ~~do [#dogfood-assistant-response-lineage]~~
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/295~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/296~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/297~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/298~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/299~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/300: Why is there still a sidecar? Replace all sidecars with lazily state.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#dogfood-admin-list-supervisor-pid]~~
-- ~~do [#dogfood-authority-channel-retry-loop]~~
-- ~~do [#dogfood-runtime-audit]~~
-- ~~do [#hourly-issue-watcher-doc]~~
-- ~~do [#per-queue-schedules]~~
+<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Queue: Issues
-<!-- agent:queue id="issues" loop interval="1 hour" -->
+<!-- agent:queue id=issues loop interval=1h -->
 - Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
 <!-- /agent:queue -->
 
@@ -904,14 +904,12 @@ The installed CLI now reports this document's `id=issues` queue separately and h
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#queue-id-attr-edit] Implement a generation/CAS-fenced binary command that targets one agent:queue by exact queue id and atomically sets/removes marker attributes through live editor/CRDT authority without affecting sibling queues; recognize valid queue id/interval attributes in lint; then use it to change id=issues from interval="1 hour" to interval=1h, prove id=main remains immediate while id=issues is hourly, and complete #hourly-issue-watcher-doc.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#hourly-issue-watcher-doc] Move the hourly GitHub issue watcher out of agent-doc-bugs.md into a dedicated session document with `interval=1h loop`; remove the second queue block, verify the main queue is no longer scheduled, then resume this document queue.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 <!-- /agent:review -->

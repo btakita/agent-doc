@@ -192,7 +192,7 @@ fn initialize_result(params: Option<&Value>) -> Value {
             "title": "agent-doc MCP Server",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use agent_doc_admit before answering a live session prompt, then agent_doc_finalize for binary-owned closeout; do not patch session documents directly. A successful finalize result is the terminal closeout report and includes any queue continuation, so do not follow it with agent_doc_session_check. That tool remains available for explicit diagnostics."
+        "instructions": "Use agent_doc_admit before answering a live session prompt, then agent_doc_finalize for binary-owned closeout; do not patch session documents directly. Never emit a terminal final answer before agent_doc_finalize succeeds: keep progress pre-closeout, because Codex Stop must otherwise continue the same turn to preserve the response. A successful finalize result is the terminal closeout report and includes any queue continuation, so do not follow it with agent_doc_session_check. That tool remains available for explicit diagnostics."
     })
 }
 
@@ -1085,6 +1085,11 @@ mod tests {
         assert_eq!(response["result"]["protocolVersion"], "2025-06-18");
         assert!(response["result"]["capabilities"]["tools"].is_object());
         let instructions = response["result"]["instructions"].as_str().unwrap();
+        assert!(
+            instructions
+                .contains("Never emit a terminal final answer before agent_doc_finalize succeeds")
+        );
+        assert!(instructions.contains("Codex Stop must otherwise continue the same turn"));
         assert!(instructions.contains("do not follow it with agent_doc_session_check"));
         assert!(instructions.contains("available for explicit diagnostics"));
     }

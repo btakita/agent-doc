@@ -45,6 +45,27 @@ host. The MCP server is a transport adapter only: its finalize tool must call
 the strict shared write/commit/session-check machinery, and a failed MCP tool
 call must leave the same recovery surface as the equivalent CLI closeout.
 
+The Codex Stop boundary has three typed outcomes. Let `D` mean exact-thread
+document write debt, `P` mean binary-owned persistence proof (a terminal
+document commit or a durable retained write owner), and `C` mean bounded
+same-turn recovery remains possible:
+
+| Predicate | Outcome | Codex wire shape |
+|---|---|---|
+| `P || !D` | `AllowExit` | `{"continue":true}` |
+| `D && !P && C` | `ContinueTurn(class)` | `{"decision":"block","reason":...}` |
+| `D && !P && !C` | `RefuseExit` | `{"continue":false,"stopReason":...}` |
+
+These outcomes are pairwise disjoint. Codex defines Stop `decision: "block"`
+as continuation rather than rejection, but currently renders it as `Blocked by
+hook`; agent-doc cannot replace that host label. Every continuation reason is
+therefore classed (`Queue`, `SessionWriteback`, or `Recovery`) and begins with
+explicit non-error/non-refusal text. Before selecting `ContinueTurn`, a
+replayable exact-thread response is offered to the binary-owned
+capture/write/commit closeout even when the current cycle is admitted, open, or
+abandoned. Successful closeout yields `AllowExit`, so the confusing host label
+is absent on the healthy path while `P` remains mandatory (`#stopwritebackfirst`).
+
 Do not standardize on the Claude Code slash command or Skill-tool path across
 all harnesses. That path is not available to Codex. Standardize on the
 harness-neutral closeout and document-mutation path instead: component patches

@@ -2,6 +2,41 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.517
+
+- **Queue/subagent attempts now have durable, typed lineage.** Claims are fenced
+  by monotonic generations, late workers cannot mutate replacement attempts,
+  and the document projects distinct claimed (`🟡`), running (`🚧`), reported
+  (`📥`), and lost (`⚠️`) states. Expiry preserves a nonblocking recovery record
+  instead of erasing the attempt, while completed integration closes the live
+  queue row.
+- **Recovery cannot resurrect a semantically retired retained write.** A
+  controller-owned per-document fence serializes recovery retirement with the
+  retained worker's final lineage validation and expected-base CRDT CAS.
+  Compatible live intent can still rebase; changed, retired, or ambiguous
+  lineage fails closed, including canonical no-op recovery.
+- **Focused extraction coordinates attached JetBrains editors.**
+  `--coordinate-live-editors` persists the exact visible revisions, freezes and
+  detaches capable replicas, applies the cross-document move, reloads both
+  results, and resumes registration without tab-closing GUI automation.
+  Archived prompt/response adjacency and selectors survive compaction.
+- **Editor delivery and closeout recovery are stricter and more observable.**
+  Retained native-save ownership, current canonical receipts, late queue
+  strikes, route-save snapshots, editor reconnects, and terminal owner verdicts
+  now converge without accepting stale or merely inferred delivery evidence.
+- **Pane layout and routing reject stale projections.** Manual sync deadlines,
+  focus publications, captured native-save ownership, default todo placement,
+  and cross-root routing are generation-aware and preserve the newest operator
+  layout rather than replaying an older projection.
+- **JetBrains modular builds and reload diagnostics are coherent.** Exact 262
+  and 263 packages select their modular build directories, name hot-swap
+  blockers, surface route failures, reconcile plugin generations, and capture
+  focus changes on the EDT.
+- **Tracked-work orchestration is safer across long sessions.** Default queues
+  favor priority subagents, archived IDs remain reserved, source-qualified
+  TODOs migrate cleanly, and already-resolved queue mirrors are reaped instead
+  of being redispatched after a clear or interrupted coordinator turn.
+
 ## 0.35.514
 
 - **The modular JetBrains restart decline names its real blockers (GH #290).**

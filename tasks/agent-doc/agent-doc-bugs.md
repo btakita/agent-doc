@@ -348,7 +348,37 @@ Changed paths: none in this verification cycle.
 Commands: source/history inspection, `agent-doc lint`, `agent-doc session-check`, session/doctor and CRDT convergence diagnostics.
 Verification: all six independent workers reported no functional gap.
 Confidence: high. Escalation: none.
-<!-- agent:boundary:77bcbba7 -->
+> **Chat prompt (#chatprompt):** Can the controller's guards reject semantically stale changes?
+
+> **Chat prompt (#chatprompt):** Can the semantically stale projection "rebase" on the current projection?
+
+> **Chat prompt (#chatprompt):** Should the stale projection be rebased or completely rejected?
+
+### Re: Semantic staleness and retained rebases — gpt-5 · 2026-10-17T23:17-04:00
+
+Yes, the implementation can rebase a retained projection onto the current editor projection—but it must do so only when the retained intent is still semantically current.
+
+There are two distinct kinds of staleness:
+
+- A **stale derived effect** belongs to a still-current intent, but the editor cut advanced after the effect was derived. That particular effect should fail its expected-base CAS. The controller may then derive a fresh rebase from the still-current intent and the newer editor cut.
+- A **semantically stale intent** was superseded by recovery, canonicalization, cancellation, or a newer write intent. Its entire lineage should be retired. It must not be rebased, even when its delta merges cleanly.
+
+The current guards only partially distinguish those cases. If the visible cut differs from the retained base, the controller can rebase `Base → Target` over that cut when it finds a stable base anchor, the component merge succeeds, the result is structurally valid, and no unscoped residue appears. It then uses the current cut as the expected base for the final CAS. Those checks establish structural compatibility and protect intervening operator text; they do not establish that the old intent is still wanted.
+
+The final intent check likewise verifies the intent id and expected/target hashes. It rejects an effect after the pending intent has actually been replaced, but it cannot reject a recovery-superseded intent that is still recorded as `pending_write`.
+
+In the observed incident, no rebase was needed: the recovered canonical cut `74b948…` exactly equaled the old intent's expected base, so the controller took the direct `ApplyTarget` path and applied `4f65e584…`. The old intent was not superseded until afterward.
+
+The correct policy is therefore:
+
+1. Recovery/canonicalization must atomically fence or retire every older retained intent before declaring its chosen cut current—even when writing that cut is a no-op.
+2. A retained transition must carry that semantic epoch/lineage and recheck it immediately before projection.
+3. Rebase is permitted only when the intent remains current and the newer cut is a causally compatible editor advance.
+4. Known supersession means reject and settle the old lineage; missing causal evidence means retain both candidates and return `needs_operator`.
+5. Keep the final expected-base CAS as the last protection against edits arriving after derivation.
+
+So: **rebase transport-stale work from a current intent; completely reject semantically stale intent.** Content compatibility alone is insufficient evidence of semantic freshness.
+<!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -356,13 +386,6 @@ Confidence: high. Escalation: none.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The `agent:queue` is not being updated with the current runtime state. Currently this `agent:queue` does not have any in progress indicators. It looks like nothing is being tracked. Queue tracking should be real-time and show the current state of agent-doc's processing of the queue items.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~By default, make the `agent:todo` below the `agent:queue` and above the `agent:backlog`.~~
-- ~~By default, `agent:queue` should have `priority subagents`.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~By default, `agent:todo` should have `priority`.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~By default, `agent:backlog` should have `priority queue`.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~todo items are not linking to the review or backlog item in monsterrodholders.md. There are todo items without any context. "Decide on ...", but "..." has no context so operator does not know what the decision is.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Newly claimed all.md had an Idea prompt error: [route] pane-not-visible: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev/all.md runs in pane %29 of inactive tmux window 'stash' (@6) in attached session '0'; its harness output is off-screen. Return editor focus to this document or show it with: tmux select-window -t @6 \; select-pane -t '%29'~~
 - 🚧 There is currently 1 tmux pane due to an auto-sync issue. Let me know when you compete diagnostics so I can manually sync tmux.
 - #gh-fix https://github.com/btakita/agent-doc/issues/284
 - #gh-fix https://github.com/btakita/agent-doc/issues/285
@@ -370,16 +393,12 @@ Confidence: high. Escalation: none.
 - #gh-fix https://github.com/btakita/agent-doc/issues/287
 - #gh-fix https://github.com/btakita/agent-doc/issues/288
 - #gh-fix https://github.com/btakita/agent-doc/issues/289
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/290~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/291~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/292~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 do [#extractliveapply]
-- ~~do [#extractcompactselection]~~
-- ~~Error: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md has no agent_doc_session~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Error: Sync failed: {"applied":false,"reason":"projection_effect_in_flight","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"],"layout_generation":17,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The Run Agent Doc sdk-dev.md error was not visible. I see an option to copy the error message, but the actual cause of the error should be visible to the operator, not truncated. ![img_6.png](img_6.png)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#todocontextmigration]~~
+- The queue markers are out of sync with the document state?
+- The last turn was wedged. Fix agent-doc causes. I went afk for a while and came back. There was a Prompt to delete a directory, which I accepted. I did a clear. Added `- release + publish`. Run Agent Doc. Turn was wedged.
+- release + publish
 <!-- /agent:queue -->
+--
 
 ## Todo
 

@@ -465,6 +465,22 @@ re-decided at a site:
   write path's retained refusal withholds `retained=delivery_projection_pending`
   and logs `recovery=editor_holds_unmerged_visible_text
   operator_action=reconcile_editor_buffer_with_retained_write`.
+  A socket notification is not completion: the editor acknowledges `applied`
+  only after its serialized document lane publishes the exact visible cut (or
+  proves that cut already canonical). A moved canonical, behind replica,
+  in-flight remote apply, unavailable/structurally invalid visible cut, or a
+  bounded lane timeout returns `deferred`; the controller refunds that attempt
+  and may request it again only on the existing every-third-refusal cadence.
+  Thus operator-visible text remains the base, the retained transition reapplies
+  once on top of the accepted cut, and the canonical-hash fence makes a stale
+  request a no-op rather than an overwrite.
+  Formally, for request fence `E`, canonical `C`, replica `R`, visible cut `V`,
+  structure predicate `Valid(V)`, and successful CRDT publication `Pub(V)`, the
+  editor may acknowledge `Applied` iff
+  `(C = V) ∨ (C = E ∧ R = C ∧ Valid(V) ∧ Pub(V))`. Every other non-terminal
+  observation acknowledges `Deferred`; therefore `Deferred ⇒ attempts' =
+  attempts`, while `Applied ⇒ attempts' = attempts + 1`. Replaying either edge
+  is idempotent because `E ≠ C` cannot publish and `C = V` is already fixed.
 - **A tracked-work repair is named only when it can complete
   (`#trackedrepairterminates`).** `tracked_work_repair_admission` asks the
   ownership exactly as the write path's own delivery refusal will

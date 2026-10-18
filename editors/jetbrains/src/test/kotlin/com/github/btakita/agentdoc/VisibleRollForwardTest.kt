@@ -131,6 +131,12 @@ class VisibleRollForwardTest {
                 branch.contains("cause=missing_content_hash") &&
                 branch.contains("CrdtReplicaManager.rollVisibleBufferForward("),
         )
+        assertTrue(
+            "only a completed editor decision may spend the controller attempt",
+            branch.contains("VisibleRollForwardResult.Applied -> APPLY_APPLIED") &&
+                branch.contains("VisibleRollForwardResult.Deferred -> APPLY_PROJECTION_CHANGED") &&
+                branch.contains("VisibleRollForwardResult.Rejected -> APPLY_FAILED"),
+        )
     }
 
     @Test
@@ -161,5 +167,18 @@ class VisibleRollForwardTest {
                 body.contains("replaceString(") ||
                 body.contains("prepareNonOperatorEditorMutationOnWorker"),
         )
+    }
+
+    @Test
+    fun `the socket waits for the serialized decision instead of acknowledging scheduling`() {
+        val body = source("CrdtReplicaManager.kt")
+            .substringAfter("fun rollVisibleBufferForward(\n            project: Project,")
+            .substringBefore("/**\n         * #jbmanagerbyfile")
+        assertTrue(body.contains("submit<Boolean>"))
+        assertTrue(body.contains(".get(CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)"))
+        assertTrue(body.contains("if (applied) VisibleRollForwardResult.Applied else VisibleRollForwardResult.Deferred"))
+        assertTrue(body.contains("TimeoutException"))
+        assertTrue(body.contains("VisibleRollForwardResult.Deferred"))
+        assertFalse(body.contains("scheduleVisibleRollForward"))
     }
 }

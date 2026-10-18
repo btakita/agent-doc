@@ -82,6 +82,7 @@ If the *panel breaker* opens, investigate the branch load/wiring first. If the b
 ## Queue
 
 <!-- agent:queue priority subagents go -->
+- My GPU does not cause the circuit to trip. It is caused when I'm also running an electric heater.
 <!-- /agent:queue -->
 
 ## Todo

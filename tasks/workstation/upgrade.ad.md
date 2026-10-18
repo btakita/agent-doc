@@ -134,17 +134,49 @@ If management does not respond, local tenant/housing or electrical-code authorit
 A lower-watt, listed personal warming product used exactly as directed may be more practical than a 1,500 W room heater, but the durable remedy is landlord-provided electrical/heating capacity—not suppressing the breaker trip.
 
 The exchange is large; I left it intact because compaction requires your explicit approval.
-<!-- agent:boundary:5478635c -->
+### Re: Subagent completed: `subagent:local_breaker` returned work for queue item “🚧 I'm not trying to add capacity. I'm trying to avoid tripping the breaker by having an in-room breaker. But it would be great to have load-shedding as well. Power strips have a breaker. Why can't I have an in room breaker for the circuit if I plug my devices into the breaker? Is there a power strip that I can use that has a ~15A breaker? Can I configure the powerstrip to load shed on certain outlets first?” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=906ff9ee4aac4b7c0a677e402b48979f06ec991ab8bb52036803ea5b068bd414 -->
+### Re: Subagent completed: `subagent:local_breaker` returned work for queue item “🚧 I'm not trying to add capacity. I'm trying to avoid tripping the breaker by having an in-room breaker. But it would be great to have load-shedding as well. Power strips have a breaker. Why can't I have an in room breaker for the circuit if I plug my devices into the breaker? Is there a power strip that I can use that has a ~15A breaker? Can I configure the powerstrip to load-shed on certain outlets first?” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=a0fab75f23e9d6ba5075bc743475c2da4424f7afa189b6139cf1237f6aa6cd04 -->
+> **Queue prompt:** 🚧 I'm not trying to add capacity. I'm trying to avoid tripping the breaker by having an in-room breaker. But it would be great to have load-shedding as well. Power strips have a breaker. Why can't I have an in room breaker for the circuit if I plug my devices into the breaker? Is there a power strip that I can use that has a ~15A breaker? Can I configure the powerstrip to load-shed on certain outlets first?
+
+### Re: In-room breaker and outlet-priority shedding — gpt-5 · 2026-10-18T01:24-04:00
+
+Yes—you can buy a listed 120 V power strip or rack PDU with a locally resettable 15 A breaker. Eaton's [TLM615NC](https://www.eaton.com/us/en-us/skuPage.TLM615NC.html) and [PDU1215](https://tripplite.eaton.com/support/owners-manual/754062) are examples. That can give you a convenient local reset for overloads caused by the equipment plugged into it.
+
+The catch is that it does **not reliably solve this heater-plus-PC scenario**:
+
+- The PDU sees only devices plugged into it. If the workstation is on the PDU and the heater remains directly in the wall, the PDU cannot see the heater current; the building breaker still sees their sum.
+- Putting the heater on the PDU would make it see the sum, but CPSC guidance says a portable heater must plug directly into a wall outlet—not a power strip or extension cord. [CPSC space-heater report](https://www.cpsc.gov/s3fs-public/pdfs/CPSC-I-15-0016.pdf)
+- A 15 A PDU breaker and a 15 A panel breaker are not guaranteed to open in a particular order. Which trips first depends on their time-current curves, temperature, and manufacturing tolerance. Equal handle ratings do not establish selective coordination. [Eaton coordination guidance](https://www.eaton.com/content/dam/eaton/products/electrical-circuit-protection/fuses/technical-literature/bus-ele-br-3002-spd-2017.pdf)
+- Many 15 A PDUs are rated for only 12 A continuous. A typical 1,500 W heater already draws about 12.5 A, before adding the PC.
+
+Managed 120 V/15 A PDUs also exist. CyberPower's [PDU41001](https://www.cyberpowersystems.com/product/pdus/switched/pdu41001/) has a local overload breaker and individually switchable outlets. However, its documented behavior is manual/remote or scheduled outlet control—not a safety-rated rule that detects high current and automatically sheds outlets in priority order. Eaton products advertised with automatic shedding commonly perform it after AC input is lost to extend UPS runtime, rather than to prevent an upstream breaker trip.
+
+You could build external software around a managed PDU's meter and API, but that would be convenience automation: network/software delays or failures mean it cannot be trusted as overload protection. It also does not solve the heater restriction.
+
+So the practical answer is:
+
+- A locally breakered, metered PDU is reasonable for the **workstation and ordinary peripherals** if you want local monitoring/reset capability.
+- It will **not guarantee** that the inaccessible panel breaker stays set when a wall-connected heater runs.
+- Safe automatic priority shedding of the heater requires a listed hardwired current sensor and contactor or controlled receptacle, installed with landlord approval by an electrician.
+- Without building work, use the heater's own low-wattage setting or turn it off during high workstation load. That prevents the overload instead of racing two breakers.
+
+The existing landlord-notification TODO remains the right path for a durable load-shedding installation. The exchange is large, but I kept the active queue draining rather than interrupting it for compaction.
+<!-- agent:boundary:74e3c564 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority subagents -->
+<!-- agent:queue priority subagents go -->
 <!-- /agent:queue -->
 
 ## Todo
 
 <!-- agent:todo priority -->
+- [ ] [#9n4h] Notify the landlord/property manager in writing about repeated heater-related breaker trips and request a licensed electrical inspection plus a safe breaker-reset procedure
 <!-- /agent:todo -->
 
 ## Backlog

@@ -19290,12 +19290,14 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
     assert!(
         cli_main.contains(
             "impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects"
-        ) && cli_main.contains("agent_doc_controller_io::project_controller::load_actor_store")
+        ) && cli_main
+            .contains("agent_doc_controller_io::project_controller::load_actor_list_records")
             && cli_main.contains("agent_doc_session_registry_io::load_in")
             && cli_main.contains("agent_doc_tmux_io::configured_tmux")
             && cli_main.contains("agent_doc_admin_io::inspect(")
+            && !cli_main.contains("supervisor_pid: entry.pid")
             && !cli_main.contains("agent_doc_orchestration::admin::"),
-        "CLI should adapt concrete admin effects and call agent-doc-admin-io directly"
+        "CLI should source list supervisor ids from generation-matched leases and call agent-doc-admin-io directly"
     );
     let reap_admin_start = cli_main
         .find("AdminAction::ReapStaleControllers")
@@ -19316,12 +19318,13 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
             && cli_dashboard.contains("ActorListRegistryBinding")
             && cli_dashboard.contains("DashboardActorDiagnostics")
             && cli_dashboard
-                .contains("agent_doc_controller_io::project_controller::load_actor_store")
+                .contains("agent_doc_controller_io::project_controller::load_actor_list_records")
             && cli_dashboard.contains("agent_doc_session_registry_io::load_in")
             && cli_dashboard.contains("agent_doc_tmux_io::configured_tmux().pane_alive")
             && cli_dashboard.contains("agent_doc_controller_io::project_controller::inspect_actor")
+            && !cli_dashboard.contains("supervisor_pid: entry.pid")
             && cli_dashboard.contains("agent_doc_controller_io::dashboard::dashboard(&EFFECTS"),
-        "CLI dashboard should only adapt concrete actor/session/tmux/controller effects"
+        "CLI dashboard should source supervisor ids from generation-matched leases and only adapt concrete actor/session/tmux/controller effects"
     );
 
     let controller_manifest =

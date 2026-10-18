@@ -79,13 +79,17 @@ pub struct ActorListRecord {
     pub harness: String,
     pub generation: u64,
     pub state: String,
+    /// PID from the supervisor lease for this exact actor generation.
+    ///
+    /// Session-registry process ids identify panes/controllers and must never
+    /// populate this field.
+    pub supervisor_pid: Option<u32>,
 }
 
 /// Registry metadata that enriches an actor row by session id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActorListRegistryBinding {
     pub session_id: String,
-    pub supervisor_pid: u32,
     pub cwd: String,
 }
 
@@ -179,7 +183,7 @@ pub fn build_admin_actor_list(
                 generation: record.generation,
                 state: record.state,
                 pane_alive: is_pane_alive,
-                supervisor_pid: reg.map(|entry| entry.supervisor_pid),
+                supervisor_pid: record.supervisor_pid,
                 cwd: reg.map(|entry| entry.cwd.clone()),
             }
         })
@@ -458,17 +462,13 @@ mod tests {
             harness: "codex".to_string(),
             generation: 1,
             state: state.to_string(),
+            supervisor_pid: None,
         }
     }
 
-    fn registry_binding(
-        session_id: &str,
-        supervisor_pid: u32,
-        cwd: &str,
-    ) -> ActorListRegistryBinding {
+    fn registry_binding(session_id: &str, cwd: &str) -> ActorListRegistryBinding {
         ActorListRegistryBinding {
             session_id: session_id.to_string(),
-            supervisor_pid,
             cwd: cwd.to_string(),
         }
     }
@@ -489,14 +489,15 @@ mod tests {
     }
 
     #[test]
-    fn build_admin_actor_list_enriches_with_registry_and_liveness() {
-        let actors = vec![
-            actor_list_record("tasks/a.md", "sid-a", "%1", "busy"),
-            actor_list_record("tasks/b.md", "sid-b", "%2", "ready"),
-        ];
+    fn build_admin_actor_list_keeps_lease_pid_separate_from_registry_metadata() {
+        let mut a = actor_list_record("tasks/a.md", "sid-a", "%1", "busy");
+        a.supervisor_pid = Some(1001);
+        let mut b = actor_list_record("tasks/b.md", "sid-b", "%2", "ready");
+        b.supervisor_pid = Some(1002);
+        let actors = vec![a, b];
         let registry = vec![
-            registry_binding("sid-a", 1001, "/proj"),
-            registry_binding("sid-b", 1002, "/proj"),
+            registry_binding("sid-a", "/proj"),
+            registry_binding("sid-b", "/proj"),
         ];
 
         let rows = build_admin_actor_list(actors, registry, |p| p == "%1");

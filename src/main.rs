@@ -1096,19 +1096,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         &self,
         root: &Path,
     ) -> anyhow::Result<Vec<agent_doc_controller::fleet::ActorListRecord>> {
-        let actors = agent_doc_controller_io::project_controller::load_actor_store(root)?;
-        Ok(actors
-            .values()
-            .map(|record| agent_doc_controller::fleet::ActorListRecord {
-                document_id: record.document_id.clone(),
-                session_id: record.session_id.clone(),
-                pane: record.pane_id.clone(),
-                window: record.window_id.clone(),
-                harness: record.harness.clone(),
-                generation: record.generation,
-                state: record.state.as_str().to_string(),
-            })
-            .collect())
+        agent_doc_controller_io::project_controller::load_actor_list_records(root)
     }
 
     fn load_registry_bindings(
@@ -1121,7 +1109,6 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
             .map(
                 |entry| agent_doc_controller::fleet::ActorListRegistryBinding {
                     session_id: entry.session_id.clone(),
-                    supervisor_pid: entry.pid,
                     cwd: entry.cwd.clone(),
                 },
             )

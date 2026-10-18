@@ -167,6 +167,7 @@ mod tests {
                     harness: "codex".to_string(),
                     generation: 1,
                     state: "running".to_string(),
+                    supervisor_pid: Some(42),
                 },
                 ActorListRecord {
                     document_id: "tasks/b.md".to_string(),
@@ -176,6 +177,7 @@ mod tests {
                     harness: "claude".to_string(),
                     generation: 2,
                     state: "running".to_string(),
+                    supervisor_pid: None,
                 },
             ])
         }
@@ -183,7 +185,6 @@ mod tests {
         fn registry_bindings(&self, _root: &Path) -> Result<Vec<ActorListRegistryBinding>> {
             Ok(vec![ActorListRegistryBinding {
                 session_id: "session-a".to_string(),
-                supervisor_pid: 42,
                 cwd: "/repo".to_string(),
             }])
         }

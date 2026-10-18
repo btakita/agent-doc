@@ -162,14 +162,23 @@ dogfood:
 `auto: true` applies only to generated, stable-keyed dogfood findings; ordinary
 backlog work is never activated. A self-target is legal because stable keys
 deduplicate it and routing never invokes agent-doc recursively. The canonical
-serialized key remains `agent_doc_dogfood`; `dogfood` and `dogfood_mode` are
-read aliases.
+serialized key is the public `dogfood`; `agent_doc_dogfood` and `dogfood_mode`
+remain read aliases.
 
 Integrations query the binary-owned resolver with
 `agent-doc dogfood policy <FILE> --json`. Its typed report distinguishes a
 disabled policy from an enabled destination and includes `auto` and
 `self_target`; watchers must not reimplement frontmatter parsing, inheritance,
 or project-relative path resolution.
+
+`agent-doc dogfood set <FILE> [--path <PATH>] [--auto <BOOL>]` is the
+binary-owned mutation boundary. It reads and writes through live document
+authority and changes only the local `dogfood:` field while preserving
+unrelated frontmatter and body bytes. An omitted path means the current
+document; omitted `auto` means false. Explicit paths must be project-relative
+Markdown paths without parent traversal, and the resolved policy is validated
+before the write crosses the authority boundary. The mutation remains visible
+to the ordinary session closeout rather than advancing its baseline out of band.
 
 This switch gates feedback routing, not diagnosis. Queue lifecycle invariants
 are checked for every session. Cosmetic projection drift has the single safe

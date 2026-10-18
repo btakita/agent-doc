@@ -13,7 +13,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   project-relative target, or `{ path, auto }`; session frontmatter overrides
   `.agent-doc/project.md`, absence everywhere is off, and `auto` is false unless
   explicitly enabled. `agent-doc dogfood policy <FILE> --json` exposes the
-  binary-resolved policy to watchers without duplicating YAML semantics.
+  binary-resolved policy to watchers without duplicating YAML semantics, while
+  `agent-doc dogfood set <FILE> [--path <PATH>] [--auto <BOOL>]` changes only
+  that local policy through editor-aware document authority.
   Self-targeting uses stable finding keys rather than recursive invocation.
 
 - **Queue/subagent attempts now have durable, typed lineage.** Claims are fenced

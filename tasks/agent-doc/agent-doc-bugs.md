@@ -910,7 +910,32 @@ This removes the prior failure mode where the row remained `🟡`, the only warn
 Verification passed: five focused regressions, `make check-fast` with 9,219/9,219 nextest cases, and the authoritative integrated `make check` with 11,050/11,050 Rust tests, 202/202 VS Code tests, cross-editor simulation, JetBrains builds, bootstrap, documentation audit, and TLA validation/reuse. The single coordinator `make install` completed. CI for the preceding watcher commit was still in progress when checked.
 
 The separately added dogfood-prompt request is running under its own claimed subagent and is not part of this completion.
-<!-- agent:boundary:ba44fc3d -->
+
+### Re: Subagent completed: `subagent:dogfood_prompt` returned work for queue item “Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=acfc060d16f6c230dce953875d67b51fc9936f0cc75ab93786b978ebfc09517e -->
+
+### Re: Subagent completed: `subagent:gh302` returned work for queue item “do [#gh302]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=8bb02656ed491ce94c37017ec131d153b78aec3a23f526251c7d4739b87b00e3 -->
+> **Queue prompt:** Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue.
+
+### Re: custom dogfood prompt — gpt-5 · 2026-10-18T13:36-04:00
+
+Implemented and published `dogfood.prompt` on `main` in commit `0ae53bd4f7`.
+
+The optional property works at both project and session precedence, trims surrounding whitespace, is exposed through policy JSON/CLI, and can be set with `--prompt`. It replaces only the default action sentence, so stable issue metadata and retained-write safety instructions remain binary-owned. Missing or blank values preserve the existing default behavior.
+
+This lets the Coder dogfood configuration direct the agent to file GitHub issues instead of fixing findings in place.
+
+### Re: #gh302 — gpt-5 · 2026-10-18T13:36-04:00
+
+Fixed and published the focus-order authority bug on `main` in commit `ec62c43207`.
+
+The controller now retains the last confirmed positive order as provisional provenance while folding unknown membership and anchoring Remote Dev restarts. That provenance is retired once structural membership confirms the guessed slot, preventing a transient focus guess from becoming authoritative ordering.
+
+The combined batch passed the authoritative suite: 11,052/11,052 Rust tests, 202/202 VS Code tests, cross-editor simulation, JetBrains classic/262/263 builds, bootstrap, docs audit, and the TLA proof. One `make install` completed successfully; one attached editor deferred its native-library reload until its next idle boundary.
+<!-- agent:boundary:e26e2a25 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -918,10 +943,8 @@ The separately added dogfood-prompt request is running under its own claimed sub
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~There are 3 new issues on github. But the loop did not detect the issues.~~
-- ~~do [#gh301]~~
-- do [#gh302]
-- 🚧 Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue. 
+- ~~do [#gh302]~~
+- 📥 Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue. 
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -945,7 +968,6 @@ The separately added dogfood-prompt request is running under its own claimed sub
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gh302] [agent-doc] Fix GH #302: Remote Dev pane order can be reversed by guessed-slot focus authority. https://github.com/btakita/agent-doc/issues/302
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 

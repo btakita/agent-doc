@@ -22,6 +22,9 @@ resume:
 The document is now configured to use Codex (`agent: codex`). Its queue and backlog are empty, so there is no workstation-upgrade action to execute yet.
 
 Session-accretion is advisory-only: two recent no-op closeouts were detected. I left the exchange history intact because compaction requires your explicit approval.
+
+> **[NOTIFY from codex-chat]** (2026-10-18T04:56:54Z)
+> Populate this document from tasks/workstation/.upgrade-session-context.md. It contains the verified current hardware, RTX PRO 6000 Blackwell specifications, PSU calculations and candidates, motherboard PCIe constraints, mechanical/electrical cautions, official source links, recommendation branches, and five questions for the next turn. This is the user's requested handoff from the current chat; preserve the facts and links in a concise durable response so they can continue here.
 <!-- agent:boundary:2bf644f7 -->
 <!-- /agent:exchange -->
 

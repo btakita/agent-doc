@@ -5754,7 +5754,13 @@ pub fn recycle_idle_grace() -> Duration {
 ///
 /// Session `dogfood` is authoritative; when absent it inherits project.md and
 /// absence everywhere is off. A superproject may contain `src/agent-doc` while
-/// also hosting unrelated documents, so source paths never imply opt-in.
+/// also hosting unrelated documents, so auto-install eligibility is the strict
+/// conjunction:
+///
+/// `effective_dogfood(file) && is_agent_doc_dogfood_session(file, project, crate)`.
+///
+/// The first term is operator intent; the second is source provenance. Neither
+/// term alone may authorize publishing and recycling the installed binary.
 pub fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
     let file = file.canonicalize().ok()?;
     let project_root = agent_doc_project_root_io::project_root_containing(&file)?;
@@ -5768,6 +5774,11 @@ pub fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
         let cargo = candidate.join("Cargo.toml");
         if let Ok(content) = std::fs::read_to_string(&cargo)
             && content.contains("name = \"agent-doc\"")
+            && agent_doc_supervisor::config::is_agent_doc_dogfood_session(
+                &file,
+                &project_root,
+                &candidate,
+            )
         {
             return Some(candidate);
         }
@@ -57531,10 +57542,20 @@ mod tests {
             "---\nagent_doc_format: template\nagent_doc_dogfood: true\n---\n",
         )
         .unwrap();
+        assert!(
+            dogfood_agent_doc_crate_root(&lazily_doc).is_none(),
+            "filing opt-in must not grant an unrelated session authority to publish agent-doc"
+        );
+
+        std::fs::write(
+            &dogfood_doc,
+            "---\nagent_doc_format: template\nagent_doc_dogfood: true\n---\n",
+        )
+        .unwrap();
         assert_eq!(
-            dogfood_agent_doc_crate_root(&lazily_doc),
+            dogfood_agent_doc_crate_root(&dogfood_doc),
             Some(crate_root.clone()),
-            "explicit document dogfood mode must opt a sibling session in"
+            "explicit dogfood plus agent-doc scope must authorize the dogfood source"
         );
 
         std::fs::write(

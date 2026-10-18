@@ -3,7 +3,7 @@
 
 JetBrains' simple custom-repository format permits a plugin ID only once per
 listing.  Agent Doc therefore publishes one listing for the classic update and
-one each for the classic, exact-262 modular, and 263 updates. The generator
+one each for the classic, exact-262 modular, and exact-263 modular updates. The generator
 reads the patched ``plugin.xml`` from every distribution ZIP and refuses to
 publish unless the artifacts have the shared ID, distinct versions, and the
 expected disjoint IDE ranges.
@@ -418,7 +418,7 @@ def self_test() -> None:
 
         # Range selection over the published listings: 242-261 receive only
         # the classic update, 262 receives only the modular update, 263 receives
-        # its classic-source update, and builds outside all ranges get nothing.
+        # its modular update, and builds outside all ranges get nothing.
         for build, expected in (
             ("241.19416.15", None),
             ("242", "1.2.3"),

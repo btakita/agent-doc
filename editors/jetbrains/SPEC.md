@@ -8,7 +8,7 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 - **Name:** Agent Doc
 - **Restart:** Required for every package upgrade on builds with asynchronous classloader retirement; compatible builds may upgrade dynamically
 - **Native upgrades:** Safe in-process generation handoff
-- **Distribution:** The 242-261 classic, exact-262 modular, and 263 classic-source updates share this ID but use distinct versions, disjoint compatibility ranges, and separate validated custom-repository listings; see [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md)
+- **Distribution:** The 242-261 classic and exact-262/exact-263 modular updates share this ID but use distinct versions, disjoint compatibility ranges, and separate validated custom-repository listings; see [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md)
 
 ## Implementation Details
 
@@ -126,11 +126,12 @@ compatible build.
 
 Package selection is per target IDE. The classic package
 (`agent-doc-jetbrains-<version>.zip`, `editors/jetbrains`) covers builds
-242-261; the modular package (`agent-doc-jetbrains-262-<version>.zip`,
-`editors/jetbrains-262`) covers exactly 262; and the 263 package
-(`agent-doc-jetbrains-263-<version>.zip`) reuses the classic source/build with
-metadata from `editors/jetbrains-263` and covers exactly 263. The exact-262
-source stays isolated because it relies on build-line-specific internal APIs.
+242-261; the modular source (`editors/jetbrains-262`) produces both
+`agent-doc-jetbrains-262-<version>.zip` for exactly 262 and
+`agent-doc-jetbrains-263-<version>.zip` for exactly 263, with the latter's
+metadata in `editors/jetbrains-263`. The presentation adapter remains guarded
+to exact 262, while frontend frame snapshots are compiled and verified against
+both platform branches.
 All three update versions, artifact names, repository listings, and ranges are
 distinct. `agent-doc plugin install|update
 jetbrains`, the `agent-doc upgrade` installed-plugin reconciliation, and `plugin install jetbrains --local
@@ -155,7 +156,7 @@ never has two on-disk roots. `make install-editor-plugins` builds all packages
 before the all-installed convergence.
 
 Restart-free dynamic upgrade is a classic-line capability
-(`#jb262dynupgrade`). Only the classic plugin jar carries the
+(`#jb262dynupgrade`). Only the classic 242-261 plugin jar carries the
 `JetBrainsPluginUpgradeBootstrap` `Main-Class`/`Agent-Class` launcher, and that
 launcher replaces one classic `agent-doc-jetbrains/` tree. The exact-262 and
 exact-263 packages are Plugin Model v2 split-mode distributions (descriptor-only

@@ -528,8 +528,10 @@ impl JetbrainsPackageRange {
 
     fn build_project_dir(self) -> &'static str {
         match self {
-            Self::Classic242To261 | Self::Modular263 => "editors/jetbrains",
-            Self::Modular262 => "editors/jetbrains-262",
+            Self::Classic242To261 => "editors/jetbrains",
+            // GH #249: `make jetbrains-263-check` builds the 263 ZIP from the
+            // frame-aware modular project, so its local artifact lives there.
+            Self::Modular262 | Self::Modular263 => "editors/jetbrains-262",
         }
     }
 
@@ -572,7 +574,7 @@ fn jetbrains_package_range(target_dir: &Path) -> Result<JetbrainsPackageRange> {
     let label = jetbrains_target_label(target_dir);
     let build = jetbrains_platform_build(target_dir).with_context(|| {
         format!(
-            "Cannot prove the JetBrains platform build for {}. Expected a versioned IDE data directory such as ~/.local/share/JetBrains/IntelliJIdea2026.3 or its plugins child; refusing to choose among the classic 242-261, modular 262, and classic-source 263 artifacts. Re-run with `--plugins-dir <versioned IDE data dir>/plugins`, or install the matching ZIP manually",
+            "Cannot prove the JetBrains platform build for {}. Expected a versioned IDE data directory such as ~/.local/share/JetBrains/IntelliJIdea2026.3 or its plugins child; refusing to choose among the classic 242-261 and modular 262/263 artifacts. Re-run with `--plugins-dir <versioned IDE data dir>/plugins`, or install the matching ZIP manually",
             target_dir.display()
         )
     })?;
@@ -4507,9 +4509,18 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
 
         let classic = classic_dist.join("agent-doc-jetbrains-0.2.91.zip");
         let modular = modular_dist.join("agent-doc-jetbrains-262-0.2.92.zip");
-        let modern = classic_dist.join("agent-doc-jetbrains-263-0.2.93.zip");
+        // GH #249: the 263 ZIP is built by the modular project. A same-version
+        // 263 ZIP left in the classic project is a pre-#249 classic-source
+        // build without frontend frame isolation and must never be selected.
+        let modern = modular_dist.join("agent-doc-jetbrains-263-0.2.93.zip");
+        let stale_classic_source_modern = classic_dist.join("agent-doc-jetbrains-263-0.2.93.zip");
         fs::write(&classic, b"classic").unwrap();
         fs::write(&modular, b"modular").unwrap();
+        fs::write(&stale_classic_source_modern, b"classic-source 263").unwrap();
+        let error = local_jetbrains_zip_in(tmp.path(), modern_target)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("editors/jetbrains-262"), "{error}");
         fs::write(&modern, b"modern").unwrap();
         assert_eq!(
             local_jetbrains_zip_in(tmp.path(), classic_target).unwrap(),
@@ -4892,7 +4903,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         write_test_modern_jetbrains_zip(
             &project.join(format!(
-                "editors/jetbrains/build/distributions/agent-doc-jetbrains-263-{modern}.zip"
+                "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-263-{modern}.zip"
             )),
             modern,
             b"modern",

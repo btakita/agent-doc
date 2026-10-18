@@ -89,8 +89,8 @@ pub fn editor_plugin_generation_matches(editor_kind: &str, running: &str) -> boo
 }
 
 /// Every package version this binary's release pairs with an editor kind, one
-/// per IDE line (GH #236). JetBrains ships classic-source packages for 242-261
-/// and 263 plus a modular 262 package under three distinct versions.
+/// per IDE line (GH #236). JetBrains ships a classic-source package for 242-261
+/// plus modular 262 and 263 packages (GH #249) under three distinct versions.
 pub fn release_paired_editor_plugin_versions(editor_kind: &str) -> Vec<&'static str> {
     let mut versions = Vec::new();
     if let Some(primary) = expected_editor_plugin_version(editor_kind) {

@@ -4601,6 +4601,27 @@ pub fn run_queue_maintenance_with_coin_gate(
         mutated = true;
         eprintln!("[preflight] queue: created agent:queue for admitted free-text work");
     }
+    // A queue id is durable work identity, not a parser fallback. As soon as a
+    // second queue exists, assign every omitted id through the same binary-owned
+    // maintenance write as the rest of preflight. All graph readers in this pass
+    // then see the exact projection that will be persisted; subsequent passes are
+    // idempotent because only an absent `id` is eligible for backfill.
+    match agent_doc_queue::queue_set::backfill_missing_queue_ids(&current_content, &components) {
+        Ok(Some(normalized)) => {
+            current_content = normalized;
+            content = current_content.clone();
+            components = agent_doc_element::element::parse(&current_content)?;
+            mutated = true;
+            eprintln!(
+                "[preflight] queue: assigned deterministic ids to unkeyed multi-queue components"
+            );
+        }
+        Ok(None) => {}
+        Err(err) => {
+            eprintln!("[preflight] queue topology warning: {err}");
+            return Ok(QueueState::default());
+        }
+    }
     let selected_queue_id =
         match agent_doc_queue::queue_set::QueueSet::parse(&current_content, &components) {
             Ok(queues) => match queues.selected().or_else(|| queues.blocks().first()) {

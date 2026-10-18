@@ -171,6 +171,7 @@ The existing landlord-notification TODO remains the right path for a durable loa
 ## Queue
 
 <!-- agent:queue priority subagents -->
+- I'll get an oil heater, which can be effective at low wattage.
 <!-- /agent:queue -->
 
 ## Todo

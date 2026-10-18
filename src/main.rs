@@ -60,6 +60,7 @@ mod crash_resilience;
 mod dashboard_cmd;
 mod dedupe_cmd;
 mod describe_image;
+mod dogfood_cmd;
 mod env_cmd;
 mod exchange;
 mod extract;
@@ -2253,6 +2254,11 @@ enum Commands {
         #[command(subcommand)]
         action: OpsAction,
     },
+    /// Inspect the resolved document-local dogfood routing policy
+    Dogfood {
+        #[command(subcommand)]
+        action: DogfoodAction,
+    },
     /// Verify editor op-capture producer and merge-consumer evidence in ops.log
     VerifyOpCapture {
         /// Path to the session document
@@ -3972,6 +3978,18 @@ enum OpsAction {
 }
 
 #[derive(Subcommand)]
+enum DogfoodAction {
+    /// Resolve session/project precedence, destination, and auto-queue policy
+    Policy {
+        /// Session document whose effective policy should be resolved
+        file: PathBuf,
+        /// Emit structured JSON for watcher integrations
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum MemoryAction {
     /// Index backlog/review/done/icebox/exchange surfaces into .tsift/memory.db
     Index {
@@ -5263,6 +5281,9 @@ fn try_main() -> anyhow::Result<()> {
                 limit,
                 json,
             ),
+        },
+        Commands::Dogfood { action } => match action {
+            DogfoodAction::Policy { file, json } => dogfood_cmd::run(&file, json),
         },
         Commands::VerifyOpCapture {
             file,
@@ -8221,6 +8242,25 @@ mod recycle_force_tests {
             parse(&["agent-doc", "version", "--json"]),
             Commands::Version { json: true }
         ));
+    }
+
+    #[test]
+    fn dogfood_policy_subcommand_parses_as_typed_query() {
+        match parse(&[
+            "agent-doc",
+            "dogfood",
+            "policy",
+            "tasks/session.md",
+            "--json",
+        ]) {
+            Commands::Dogfood {
+                action: DogfoodAction::Policy { file, json },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert!(json);
+            }
+            _ => panic!("expected dogfood policy query"),
+        }
     }
 
     #[test]

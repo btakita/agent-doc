@@ -12,8 +12,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **Dogfood routing is explicit and layered.** `dogfood` accepts false, true, a
   project-relative target, or `{ path, auto }`; session frontmatter overrides
   `.agent-doc/project.md`, absence everywhere is off, and `auto` is false unless
-  explicitly enabled. Self-targeting uses stable finding keys rather than
-  recursive invocation.
+  explicitly enabled. `agent-doc dogfood policy <FILE> --json` exposes the
+  binary-resolved policy to watchers without duplicating YAML semantics.
+  Self-targeting uses stable finding keys rather than recursive invocation.
 
 - **Queue/subagent attempts now have durable, typed lineage.** Claims are fenced
   by monotonic generations, late workers cannot mutate replacement attempts,

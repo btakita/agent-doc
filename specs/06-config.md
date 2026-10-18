@@ -165,6 +165,12 @@ deduplicate it and routing never invokes agent-doc recursively. The canonical
 serialized key remains `agent_doc_dogfood`; `dogfood` and `dogfood_mode` are
 read aliases.
 
+Integrations query the binary-owned resolver with
+`agent-doc dogfood policy <FILE> --json`. Its typed report distinguishes a
+disabled policy from an enabled destination and includes `auto` and
+`self_target`; watchers must not reimplement frontmatter parsing, inheritance,
+or project-relative path resolution.
+
 This switch gates feedback routing, not diagnosis. Queue lifecycle invariants
 are checked for every session. Cosmetic projection drift has the single safe
 repair of re-projecting the durable claim state; an unconfirmed worker remains

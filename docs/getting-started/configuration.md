@@ -93,6 +93,9 @@ dogfood:
 to false; when true, only generated stable-keyed findings are queued. The same
 typed value may be set in `.agent-doc/project.md`, while session frontmatter
 wins. `dogfood: false` disables inheritance and absence everywhere is off.
+`agent-doc dogfood policy <FILE> --json` shows the effective destination and
+auto-queue setting after applying that precedence. Watchers use this typed query
+instead of parsing either document themselves.
 Invariant diagnosis and uniquely-safe projection repair remain on regardless.
 
 To opt a document into retained-write-owned terminal convergence:

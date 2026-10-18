@@ -172,57 +172,92 @@ fn load_from_conn(
 
 /// Rolling-upgrade bridge: the document-global scheduler stored the first
 /// schedule under the legacy `queue_schedule` kind even when its queue had an
-/// explicit ID. Move that row atomically to the first identified schedule so
-/// an upgrade cannot refire a tick or reset a pass count.
-fn migrate_legacy_state(file: &Path, queue_id: &str, now: u64) -> Result<()> {
+/// explicit ID. A one-queue rename has one possible successor and adopts the
+/// row atomically. A multi-queue split is ambiguous, so it discards the legacy
+/// row instead of assigning an open pass/roster to an unrelated sibling.
+fn migrate_legacy_state(file: &Path, queue_id: &str, now: u64, queue_count: usize) -> Result<bool> {
     if queue_id == agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID {
-        return Ok(());
+        return Ok(false);
     }
     let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
-        return Ok(());
+        return Ok(false);
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
     conn.execute_batch("BEGIN IMMEDIATE")
         .context("begin queue schedule migration")?;
     let result = (|| {
         if load_from_conn(&conn, &document_hash, queue_id)?.is_some() {
-            return Ok(());
+            return Ok(false);
         }
         let Some(legacy) = load_from_conn(
             &conn,
             &document_hash,
             agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID,
-        )? else {
-            return Ok(());
+        )?
+        else {
+            return Ok(false);
         };
-        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
-            &conn,
-            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
-                document_hash: document_hash.clone(),
-                state_kind: state_kind(queue_id),
-                canonical_path,
-                payload_json: serde_json::to_string(&legacy)
-                    .context("serialize migrated queue schedule state")?,
-                updated_at_secs: now,
-            },
-        )?;
+        let discarded = queue_count != 1;
+        if !discarded {
+            let mut legacy = legacy;
+            legacy.owner_queue_id = Some(queue_id.to_string());
+            agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+                &conn,
+                &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                    document_hash: document_hash.clone(),
+                    state_kind: state_kind(queue_id),
+                    canonical_path,
+                    payload_json: serde_json::to_string(&legacy)
+                        .context("serialize migrated queue schedule state")?,
+                    updated_at_secs: now,
+                },
+            )?;
+        }
         agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
             &conn,
             &document_hash,
             QUEUE_SCHEDULE_STATE_KIND,
         )?;
-        Ok(())
+        Ok(discarded)
     })();
     match result {
-        Ok(()) => {
+        Ok(discarded) => {
             conn.execute_batch("COMMIT")?;
-            Ok(())
+            Ok(discarded)
         }
         Err(err) => {
             let _ = conn.execute_batch("ROLLBACK");
             Err(err)
         }
     }
+}
+
+/// Bind a row to its keyed queue. A pre-provenance row in a multi-queue
+/// document is ambiguous: releases before the owner field could have copied
+/// document-global counters or an open roster into the first scheduled queue.
+/// Restart it from the current queue rather than letting sibling progress gate,
+/// restore, or exhaust this queue.
+fn bind_queue_owner(
+    mut state: QueueScheduleState,
+    spec: &agent_doc_queue::queue_schedule::QueueScheduleSpec,
+    queue_id: &str,
+    queue_count: usize,
+    now: u64,
+    preexisting: bool,
+) -> (QueueScheduleState, bool) {
+    if state.owner_queue_id.as_deref() == Some(queue_id) {
+        return (state, false);
+    }
+    let ambiguous = preexisting
+        && match state.owner_queue_id.as_deref() {
+            Some(owner) => owner != queue_id,
+            None => queue_count > 1,
+        };
+    if ambiguous {
+        state = QueueScheduleState::new(spec, now);
+    }
+    state.owner_queue_id = Some(queue_id.to_string());
+    (state, ambiguous)
 }
 
 /// Apply `mutate` to the freshly loaded row in one immediate transaction and
@@ -362,9 +397,22 @@ impl QueueScheduleWorker {
     fn try_refresh(&self, file: &Path) -> Result<()> {
         let text = self.io.current_text(file)?;
         let schedules = queue_schedule::identified_queue_schedules(&text)?;
+        let components = agent_doc_element::element::parse(&text)?;
+        let queue_count = agent_doc_queue::queue_graph::QueueGraph::parse(&text, &components)
+            .map_err(anyhow::Error::new)?
+            .blocks()
+            .len();
         let now = self.io.now_secs();
-        if let Some(first) = schedules.first() {
-            migrate_legacy_state(file, &first.queue_id, now)?;
+        if let Some(first) = schedules.first()
+            && migrate_legacy_state(file, &first.queue_id, now, queue_count)?
+        {
+            self.io.log(
+                file,
+                &format!(
+                    "queue_schedule_legacy_state_discarded queue_id={} reason=ambiguous_multi_queue_owner",
+                    first.queue_id
+                ),
+            );
         }
         let declared = schedules
             .iter()
@@ -410,12 +458,23 @@ impl QueueScheduleWorker {
             }
             let spec = schedule.spec.expect("valid schedule has a spec");
             let live = queue_schedule::live_heads_for_queue(&text, &queue_id)?;
-            let (state, outcome, admitted) = mutate_schedule_state(file, &queue_id, now, |prev| {
-                let admitted = prev.is_none();
-                let state = queue_schedule::reconcile(prev, &spec, now);
-                let (state, outcome) = queue_schedule::observe(state, &spec, &live, now);
-                (Some(state.clone()), (state, outcome, admitted))
-            })?;
+            let (state, outcome, admitted, repaired) =
+                mutate_schedule_state(file, &queue_id, now, |prev| {
+                    let admitted = prev.is_none();
+                    let state = queue_schedule::reconcile(prev, &spec, now);
+                    let (state, repaired) =
+                        bind_queue_owner(state, &spec, &queue_id, queue_count, now, !admitted);
+                    let (state, outcome) = queue_schedule::observe(state, &spec, &live, now);
+                    (Some(state.clone()), (state, outcome, admitted, repaired))
+                })?;
+            if repaired {
+                self.io.log(
+                    file,
+                    &format!(
+                        "queue_schedule_legacy_state_reset queue_id={queue_id} reason=ambiguous_multi_queue_owner"
+                    ),
+                );
+            }
             if admitted {
                 self.io.log(
                     file,
@@ -962,8 +1021,16 @@ mod tests {
                 .passes_completed,
             0
         );
-        assert!(io.text.lock().contains("id=main interval=5m loop -->\n- ship now\n"));
-        assert!(io.text.lock().contains("id=issues interval=1h loop -->\n- poll issues\n"));
+        assert!(
+            io.text
+                .lock()
+                .contains("id=main interval=5m loop -->\n- ship now\n")
+        );
+        assert!(
+            io.text
+                .lock()
+                .contains("id=issues interval=1h loop -->\n- poll issues\n")
+        );
     }
 
     #[test]
@@ -985,12 +1052,9 @@ mod tests {
         worker(&io).refresh(&file);
 
         assert!(
-            load_schedule_state_for_queue(
-                &file,
-                agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID
-            )
-            .unwrap()
-            .is_none()
+            load_schedule_state_for_queue(&file, agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID)
+                .unwrap()
+                .is_none()
         );
         assert_eq!(
             load_schedule_state_for_queue(&file, "issues")
@@ -998,6 +1062,125 @@ mod tests {
                 .unwrap()
                 .passes_completed,
             2
+        );
+        assert_eq!(
+            load_schedule_state_for_queue(&file, "issues")
+                .unwrap()
+                .unwrap()
+                .owner_queue_id
+                .as_deref(),
+            Some("issues")
+        );
+    }
+
+    #[test]
+    fn multi_queue_split_discards_ambiguous_legacy_open_pass() {
+        let content = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue id=main go -->\n",
+            "- ship now\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues interval=1h loop -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, file) = project(content);
+        let spec = queue_schedule::queue_schedule_spec(content).unwrap();
+        let mut legacy = QueueScheduleState::new(&spec, 900);
+        legacy.window = queue_schedule::ScheduleWindow::Open {
+            pass: 1,
+            opened_secs: 900,
+            roster: vec!["ship now".into(), "poll issues".into()],
+        };
+        mutate_schedule_state(
+            &file,
+            agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID,
+            900,
+            |_| (Some(legacy), ()),
+        )
+        .unwrap();
+
+        let io = FakeIo::new(content);
+        let worker = worker(&io);
+        worker.refresh(&file);
+
+        assert!(
+            load_schedule_state_for_queue(&file, agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID)
+                .unwrap()
+                .is_none()
+        );
+        let issues = load_schedule_state_for_queue(&file, "issues")
+            .unwrap()
+            .expect("issues schedule admitted from its own queue");
+        assert!(!issues.window_open());
+        assert_eq!(issues.owner_queue_id.as_deref(), Some("issues"));
+        assert!(io.logs.lock().iter().any(|line| line.contains(
+            "queue_schedule_legacy_state_discarded queue_id=issues reason=ambiguous_multi_queue_owner"
+        )));
+
+        worker.run_due(&due_for(&file, "issues"));
+        let issues = load_schedule_state_for_queue(&file, "issues")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            issues.window,
+            queue_schedule::ScheduleWindow::Open {
+                pass: 1,
+                opened_secs: 1_000,
+                roster: vec!["poll issues".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn refresh_repairs_pre_provenance_multi_queue_pass_before_it_can_stay_busy() {
+        let content = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue id=main go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues interval=1h loop -->\n",
+            "- poll issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, file) = project(content);
+        let spec = queue_schedule::queue_schedule_spec(content).unwrap();
+        let mut contaminated = QueueScheduleState::new(&spec, 900);
+        contaminated.window = queue_schedule::ScheduleWindow::Open {
+            pass: 1,
+            opened_secs: 700,
+            roster: vec!["old main task".into(), "poll issues".into()],
+        };
+        contaminated.last_fired_due_secs = Some(900);
+        contaminated.passes_completed = 7;
+        mutate_schedule_state(&file, "issues", 900, |_| (Some(contaminated), ())).unwrap();
+
+        let io = FakeIo::new(content);
+        let worker = worker(&io);
+        worker.refresh(&file);
+
+        let repaired = load_schedule_state_for_queue(&file, "issues")
+            .unwrap()
+            .unwrap();
+        assert!(!repaired.window_open());
+        assert_eq!(repaired.last_fired_due_secs, None);
+        assert_eq!(repaired.passes_completed, 0);
+        assert_eq!(repaired.owner_queue_id.as_deref(), Some("issues"));
+        assert_eq!(worker.graph().earliest_wake(), Some(1_000));
+        assert!(io.logs.lock().iter().any(|line| line.contains(
+            "queue_schedule_legacy_state_reset queue_id=issues reason=ambiguous_multi_queue_owner"
+        )));
+
+        worker.run_due(&due_for(&file, "issues"));
+        let opened = load_schedule_state_for_queue(&file, "issues")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            opened.window,
+            queue_schedule::ScheduleWindow::Open {
+                pass: 1,
+                opened_secs: 1_000,
+                roster: vec!["poll issues".into()],
+            }
         );
     }
 

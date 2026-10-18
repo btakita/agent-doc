@@ -488,6 +488,32 @@ Proof:
 - escalation: none
 
 > **Queue prompt:** do [#extractliveapply]
+
+### Re: queue-marker reconciliation — gpt-5 · 2026-10-18T00:16:08-04:00
+
+> The queue markers are out of sync with the document state?
+
+They were. The old projection could delete a marker when its claim TTL expired, then restore a generic `🚧` after reclaim, even though that marker did not prove the worker was running. It could also leave already-resolved work bare when a prior closeout failed to reap the queue mirror.
+
+The integrated fix makes the claim ledger authoritative and the document marker a derived projection:
+
+- `🟡` claimed/dispatching
+- `🚧` generation-matched running evidence
+- `📥` reported/awaiting integration
+- `⚠️` lost/expired
+- integrated completion closes/removes the live queue row
+
+Claim, refresh, report, expiry, reclaim, release, and queue closure all reconcile the marker. Every mutable worker action is fenced by the claim generation, so an old attempt cannot relabel or release its replacement. Stale already-done tracked-work mirrors, such as `#extractliveapply`, are reaped at closeout rather than given a misleading pending marker.
+
+Proof:
+
+- changed paths: the queue lifecycle implementation was already integrated in commit `f0dec845d4`; no additional source change in this cycle
+- commands: inspected the live claim ledger, replayed the generation-0 report idempotently, and observed the `claimed -> reported` transition; the preceding closeout reaped the already-done `#extractliveapply` mirror
+- verification: integrated `make check-fast` and authoritative `make check` passed; `make audit-docs` passed
+- confidence: high
+- escalation: none
+
+> **Queue prompt:** The queue markers are out of sync with the document state?
 <!-- agent:boundary:4ad75070 -->
 <!-- /agent:exchange -->
 

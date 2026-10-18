@@ -3643,6 +3643,12 @@ mod tests {
         );
         assert!(SKILL_TEMPLATE.contains("agent-doc respond <FILE>"));
         assert!(SKILL_TEMPLATE.contains("binary resolves and commits the turn"));
+        assert!(SKILL_TEMPLATE.contains(
+            "never emit the terminal `final` message before connected `agent_doc_finalize` succeeds"
+        ));
+        assert!(
+            SKILL_TEMPLATE.contains("the Stop hook must otherwise create a same-turn continuation")
+        );
         assert!(
             SKILL_TEMPLATE
                 .contains("stage and commit only the intended non-session repo files first")

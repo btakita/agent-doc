@@ -19,7 +19,7 @@
 //!   decides whether recovery is still blocked. A lease is not itself a user-
 //!   visible blocker when that owner reaches the terminal state.
 //! - If the cycle still cannot be closed automatically, the hook falls back to
-//!   blocking the turn with instructions to finish recovery/persistence.
+//!   a same-turn continuation with instructions to finish recovery/persistence.
 //! - If Codex reaches a second `Stop` for the same still-open cycle
 //!   (`stop_hook_active = true`), fail closed with `continue=false` instead of
 //!   looping forever.
@@ -139,23 +139,63 @@ impl ClaudeStopContinuation {
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(untagged)]
+/// Semantic outcome of a Codex Stop decision.
+///
+/// The wire protocol unfortunately spells [`Self::ContinueTurn`] as
+/// `decision: "block"`. For a Stop hook that means "create another prompt in
+/// this turn", not "reject the turn". Keeping the host spelling out of the
+/// domain type prevents healthy continuation from being confused with
+/// [`Self::RefuseExit`] in code and makes every model-visible continuation
+/// identify itself as non-error feedback.
+#[derive(Debug, PartialEq, Eq)]
 enum StopResponse {
-    Continue {
-        #[serde(rename = "continue")]
-        continue_: bool,
-    },
-    Block {
-        decision: &'static str,
+    /// `P || !D`: persistence is proved, or this thread owns no write debt.
+    AllowExit,
+    /// `D && !P && C`: write debt exists, is unproved, and a same-turn recovery remains possible.
+    ContinueTurn {
+        class: StopContinuationClass,
         reason: String,
     },
-    Stop {
-        #[serde(rename = "continue")]
-        continue_: bool,
-        #[serde(rename = "stopReason")]
-        stop_reason: String,
-    },
+    /// `D && !P && !C`: unproved write debt exists and this Stop invocation cannot recover it.
+    RefuseExit { reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopContinuationClass {
+    Queue,
+    SessionWriteback,
+    Recovery,
+}
+
+impl StopContinuationClass {
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Queue => "Queue continuation, not an error: ",
+            Self::SessionWriteback => "Session persistence continuation, not a refusal or error: ",
+            Self::Recovery => "Recovery continuation, not a refusal or error: ",
+        }
+    }
+}
+
+impl Serialize for StopResponse {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::AllowExit => serde_json::json!({ "continue": true }).serialize(serializer),
+            Self::ContinueTurn { class, reason } => serde_json::json!({
+                "decision": "block",
+                "reason": format!("{}{reason}", class.prefix()),
+            })
+            .serialize(serializer),
+            Self::RefuseExit { reason } => serde_json::json!({
+                "continue": false,
+                "stopReason": reason,
+            })
+            .serialize(serializer),
+        }
+    }
 }
 
 enum StopCloseAttempt {
@@ -401,9 +441,8 @@ pub fn handle_stop() -> Result<()> {
     {
         Ok(run) => run,
         Err(err) => StopHookRun {
-            response: StopResponse::Stop {
-                continue_: false,
-                stop_reason: format!("agent-doc Stop hook failed closed: {err}"),
+            response: StopResponse::RefuseExit {
+                reason: format!("agent-doc Stop hook failed closed: {err}"),
             },
             timed_out: false,
         },
@@ -1062,7 +1101,7 @@ fn apply_stop_within_budget(
     {
         return run_stop_hook_task_within_budget(budget, move || {
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            Ok(StopResponse::Continue { continue_: true })
+            Ok(StopResponse::AllowExit)
         });
     }
     run_stop_hook_task_within_budget(budget, move || apply_stop(&input))
@@ -1107,9 +1146,8 @@ where
             timed_out: false,
         }),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(StopHookRun {
-            response: StopResponse::Stop {
-                continue_: false,
-                stop_reason: format!(
+            response: StopResponse::RefuseExit {
+                reason: format!(
                     "agent-doc Stop hook exceeded its {}s internal budget and failed closed before the harness timeout. The route-owned supervisor retains any captured closeout and continues recovery; do not rerun finalize or recapture the response. Phases: {}",
                     budget.as_secs(),
                     ledger.render(),
@@ -1148,7 +1186,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         // prove that this Codex thread owns that work. Falling back from a
         // missing exact session binding to a project-scoped marker lets an
         // unrelated pure Codex session inherit agent-doc work.
-        return Ok(StopResponse::Continue { continue_: true });
+        return Ok(StopResponse::AllowExit);
     };
 
     let file = PathBuf::from(&state.doc_path);
@@ -1161,11 +1199,11 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         // inherit the other pane's open-cycle debt.
         clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
         agent_doc_ops_log_io::log_op(&file, "codex_stop_refused_admission_preserved");
-        return Ok(StopResponse::Continue { continue_: true });
+        return Ok(StopResponse::AllowExit);
     }
     if !file.exists() {
         clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
-        return Ok(StopResponse::Continue { continue_: true });
+        return Ok(StopResponse::AllowExit);
     }
 
     // Codex runs hooks from its harness hook executor. That executor can carry the tmux pane
@@ -1227,7 +1265,7 @@ fn apply_bound_stop(
                     file,
                     "codex_stop_foreign_turn_passed_through source=clean_session_turn_fence",
                 );
-                return Ok(StopResponse::Continue { continue_: true });
+                return Ok(StopResponse::AllowExit);
             }
             stop_phase("auto_queue_continuation");
             if let Some(response) =
@@ -1247,7 +1285,7 @@ fn apply_bound_stop(
             }
             stop_phase("settle_session_binding");
             settle_session_binding(file, cleanup_roots, loaded_root, state)?;
-            Ok(StopResponse::Continue { continue_: true })
+            Ok(StopResponse::AllowExit)
         }
         // `#steerinterruptexit`: steering pending after a committed cycle is a
         // success status for the CLI, but the Stop gate must still hand it back
@@ -1265,8 +1303,8 @@ fn apply_bound_stop(
             // through to "already continued once" and require an operator to
             // type `agent-doc <FILE>` manually.
             if let Some((cycle_id, prompt)) = reopen_abandoned_cycle_for_pending_steering(file)? {
-                return Ok(StopResponse::Block {
-                    decision: "block",
+                return Ok(StopResponse::ContinueTurn {
+                    class: StopContinuationClass::Recovery,
                     reason: format!(
                         "agent-doc Stop hook opened successor cycle {cycle_id} for operator steering that outlived an empty abandoned predecessor in {disp}. Continue THIS turn and handle the steering by its previously supplied dispatch; wait for any dispatched worker result, then persist the completed answer through the normal agent-doc closeout. Pending steering begins: {prompt:?}. Do not send the final answer yet.",
                         disp = file.display(),
@@ -1333,8 +1371,8 @@ fn apply_bound_stop(
                         agent_doc_session_check_io::SessionCheckStatus::Interrupted(message)
                         | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(
                             message,
-                        ) => Ok(StopResponse::Block {
-                            decision: "block",
+                        ) => Ok(StopResponse::ContinueTurn {
+                            class: StopContinuationClass::Recovery,
                             reason: format!(
                                 "agent-doc Stop hook finished terminal completed-item maintenance for {}, but newer work still needs its owning turn. {} The predecessor assistant text was not replayed. Continue in-pane and do not send the final answer yet.",
                                 file.display(),
@@ -1361,13 +1399,10 @@ fn apply_bound_stop(
                     file.display(),
                 );
                 if input.stop_hook_active {
-                    return Ok(StopResponse::Stop {
-                        continue_: false,
-                        stop_reason: message,
-                    });
+                    return Ok(StopResponse::RefuseExit { reason: message });
                 }
-                return Ok(StopResponse::Block {
-                    decision: "block",
+                return Ok(StopResponse::ContinueTurn {
+                    class: StopContinuationClass::Recovery,
                     reason: message,
                 });
             }
@@ -1383,10 +1418,10 @@ fn apply_bound_stop(
                     "codex_stop_retained_closeout_needs_operator action=report_operator_blocker",
                 );
                 if input.stop_hook_active {
-                    return Ok(StopResponse::Continue { continue_: true });
+                    return Ok(StopResponse::AllowExit);
                 }
-                return Ok(StopResponse::Block {
-                    decision: "block",
+                return Ok(StopResponse::ContinueTurn {
+                    class: StopContinuationClass::Recovery,
                     reason: format!(
                         "agent-doc Stop hook found a retained closeout that requires operator action for {}. {} Report this exact blocker and its recovery to the operator; do not resend or recapture the response, force disk, or keep retrying session-check. After reporting it, the recursive Stop may finish this turn while the durable capture remains retained.",
                         file.display(),
@@ -1424,13 +1459,10 @@ fn apply_bound_stop(
                     "agent-doc Stop hook found a binary-owned closeout still converging for {display}. {reason} The captured response is retained and the agent-doc binary/supervisor owns the keyed editor/CRDT retry and terminal commit. Do not recapture the response, rerun finalize, kill the controller, or use `--force-disk`; only re-check session status after the binary reports recovery, unless it explicitly reports `needs_operator`. Do not send the final answer yet."
                 );
                 if input.stop_hook_active {
-                    return Ok(StopResponse::Stop {
-                        continue_: false,
-                        stop_reason: message,
-                    });
+                    return Ok(StopResponse::RefuseExit { reason: message });
                 }
-                return Ok(StopResponse::Block {
-                    decision: "block",
+                return Ok(StopResponse::ContinueTurn {
+                    class: StopContinuationClass::Recovery,
                     reason: message,
                 });
             }
@@ -1487,8 +1519,8 @@ fn apply_bound_stop(
                             file,
                             &format!("codex_stop_auto_close_failed err={err}"),
                         );
-                        return Ok(StopResponse::Block {
-                            decision: "block",
+                        return Ok(StopResponse::ContinueTurn {
+                            class: StopContinuationClass::Recovery,
                             reason: format!(
                                 "agent-doc Stop hook intercepted an unfinished document cycle for {}. The hook wrote or recovered the response but could not finish the required commit boundary: {err}. Do not send the final answer yet. Finish the commit boundary for this turn with `agent-doc commit {}` and end with `agent-doc session-check {}`.",
                                 file.display(),
@@ -1522,7 +1554,7 @@ fn apply_bound_stop(
                             return Ok(response);
                         }
                         settle_session_binding(file, cleanup_roots, loaded_root, state)?;
-                        return Ok(StopResponse::Continue { continue_: true });
+                        return Ok(StopResponse::AllowExit);
                     }
                     StopCloseAttempt::AlreadyCommitted => {
                         // `#fixlazilycodex`: the closing text is the committed
@@ -1541,14 +1573,14 @@ fn apply_bound_stop(
                         payload_already_committed = true;
                     }
                     StopCloseAttempt::DeferredToDurableOwner => {
-                        return Ok(StopResponse::Continue { continue_: true });
+                        return Ok(StopResponse::AllowExit);
                     }
                     StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
                         return await_durable_owner_repair_deferral(file, &note, input);
                     }
                     StopCloseAttempt::StillOpen { note } => {
-                        return Ok(StopResponse::Block {
-                            decision: "block",
+                        return Ok(StopResponse::ContinueTurn {
+                            class: StopContinuationClass::Recovery,
                             reason: format!(
                                 "agent-doc Stop hook intercepted an unfinished document cycle for {}. {}{} Do not send the final answer yet. If the response is missing from the document, run `agent-doc repair {}` first. Then finish the commit boundary for this turn and end with `agent-doc session-check {}`.",
                                 file.display(),
@@ -1573,15 +1605,14 @@ fn apply_bound_stop(
                 if let Some(response) = committed_prompt_diff_stop_response(file, &reason)? {
                     return Ok(response);
                 }
-                return Ok(StopResponse::Stop {
-                    continue_: false,
-                    stop_reason: format!(
+                return Ok(StopResponse::RefuseExit {
+                    reason: format!(
                         "agent-doc Stop hook already continued once for {display}, but the cycle is still open. {reason}{capture_note}"
                     ),
                 });
             }
-            Ok(StopResponse::Block {
-                decision: "block",
+            Ok(StopResponse::ContinueTurn {
+                class: StopContinuationClass::Recovery,
                 reason: format!(
                     "agent-doc Stop hook intercepted an unfinished document cycle for {display}. {reason}{capture_note} Do not send the final answer yet. If the response is missing from the document, run `agent-doc repair {display}` first. Then finish the commit boundary for this turn and end with `agent-doc session-check {display}`."
                 ),
@@ -1850,8 +1881,8 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
                 item.verbatim.trim().len(),
             ),
         );
-        return Ok(Some(StopResponse::Block {
-            decision: "block",
+        return Ok(Some(StopResponse::ContinueTurn {
+            class: StopContinuationClass::SessionWriteback,
             reason: format!(
                 "agent-doc Stop hook found a reported worker result for {disp} that was never persisted. {} Do NOT send the final answer yet.",
                 agent_doc_queue::claim_release_receipt::persist_reported_instruction(
@@ -1879,7 +1910,7 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
                 pending.len(),
             ),
         );
-        return Ok(Some(StopResponse::Continue { continue_: true }));
+        return Ok(Some(StopResponse::AllowExit));
     }
     // `#queuetypingsteer`: a `content_edit` is the operator's own edit inside an
     // existing queue item or prompt; name that edit, not some other prompt the
@@ -1898,8 +1929,8 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
             .or_else(|| prompt_target_from_interruption_reason(reason))
     }
     .unwrap_or_else(|| "the unresolved exchange prompt".to_string());
-    Ok(Some(StopResponse::Block {
-        decision: "block",
+    Ok(Some(StopResponse::ContinueTurn {
+        class: StopContinuationClass::SessionWriteback,
         reason: format!(
             "agent-doc Stop hook found fresh unresolved exchange work for {disp} after the previous cycle was already committed. Continue THIS turn in-pane: answer {prompt:?} in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`).{queue_close} Do NOT send the final answer yet.",
             prompt = first_nonempty_prompt_line(&prompt),
@@ -1966,8 +1997,8 @@ fn active_session_prompt_requires_writeback(
                 previous_cycle_id, opened.cycle_id,
             ),
         );
-        return Ok(Some(StopResponse::Block {
-            decision: "block",
+        return Ok(Some(StopResponse::ContinueTurn {
+            class: StopContinuationClass::SessionWriteback,
             reason: format!(
                 "agent-doc Stop hook opened successor cycle {cycle_id} for fresh post-commit session work in {disp}. The previous closing assistant text belongs to committed predecessor {previous_cycle_id} and was deliberately not captured. Active prompt: {prompt:?}. Continue THIS turn in-pane, answer that prompt, and persist through the normal agent-doc closeout. Do not send the final answer yet.",
                 cycle_id = opened.cycle_id,
@@ -1977,15 +2008,18 @@ fn active_session_prompt_requires_writeback(
         }));
     }
 
+    // `#stopwritebackfirst`: prompt debt plus a replayable answer is enough to
+    // attempt the binary-owned closeout. Requiring an already-committed
+    // predecessor here left an admitted/open cycle on the slower fallback:
+    // Codex first rendered the answer, then rendered the Stop continuation as
+    // `Blocked by hook`, and only the continuation could call finalize. The
+    // closeout routine already proves capture, editor delivery, and commit, so
+    // attempt it before exposing any continuation wire response.
     let mut payload_already_committed = false;
-    if agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
-        && matches!(
-            agent_doc_template::replay_guard::classify_replay_payload(
-                &input.last_assistant_message
-            ),
-            agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
-        )
-    {
+    if matches!(
+        agent_doc_template::replay_guard::classify_replay_payload(&input.last_assistant_message),
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
+    ) {
         match attempt_stop_closeout(file, state, input)? {
             // `#fixlazilycodex`: the closing text is already committed, so it
             // is not this prompt's answer and must not be recaptured. The
@@ -1995,25 +2029,25 @@ fn active_session_prompt_requires_writeback(
                 settle_session_binding(file, roots, loaded_root, state)?;
                 agent_doc_ops_log_io::log_op(
                     file,
-                    "codex_stop_post_commit_prompt_auto_closed source=exact_thread_prompt_debt",
+                    "codex_stop_prompt_writeback_auto_closed source=exact_thread_prompt_debt",
                 );
-                return Ok(Some(StopResponse::Continue { continue_: true }));
+                return Ok(Some(StopResponse::AllowExit));
             }
             StopCloseAttempt::DeferredToDurableOwner => {
                 agent_doc_ops_log_io::log_op(
                     file,
-                    "codex_stop_post_commit_prompt_closeout_deferred owner=durable_retained_capture",
+                    "codex_stop_prompt_writeback_closeout_deferred owner=durable_retained_capture",
                 );
-                return Ok(Some(StopResponse::Continue { continue_: true }));
+                return Ok(Some(StopResponse::AllowExit));
             }
             StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
                 return await_durable_owner_repair_deferral(file, &note, input).map(Some);
             }
             StopCloseAttempt::StillOpen { note } => {
-                return Ok(Some(StopResponse::Block {
-                    decision: "block",
+                return Ok(Some(StopResponse::ContinueTurn {
+                    class: StopContinuationClass::SessionWriteback,
                     reason: format!(
-                        "agent-doc Stop hook opened a fresh cycle for post-commit prompt work in {disp}, then retained the response under that cycle but could not finish closeout.{note} Do not recapture the response or rerun finalize/write. Run `agent-doc session-check {disp}` and let the binary-owned keyed retry finish.",
+                        "agent-doc Stop hook attempted binary-owned closeout for session prompt work in {disp}, retained the response under that cycle, but could not finish closeout.{note} Do not recapture the response or rerun finalize/write. Run `agent-doc session-check {disp}` and let the binary-owned keyed retry finish.",
                         disp = file.display(),
                     ),
                 }));
@@ -2026,8 +2060,8 @@ fn active_session_prompt_requires_writeback(
     } else {
         capture_assistant_text(file, state, input)
     };
-    Ok(Some(StopResponse::Block {
-        decision: "block",
+    Ok(Some(StopResponse::ContinueTurn {
+        class: StopContinuationClass::SessionWriteback,
         reason: format!(
             "agent-doc Stop hook found active session-document work for {disp} that has not crossed the binary-owned write boundary. Active prompt: {prompt:?}. Continue THIS turn in-pane and persist with `agent-doc finalize {disp}` or `agent-doc write --commit {disp}`, then run `agent-doc session-check {disp}`. Do not send the final answer yet.{capture_note}",
             disp = file.display(),
@@ -2203,7 +2237,7 @@ fn codex_stop_auto_clear_yield_with(
             agent_doc_hash::content_hash(prompt),
         ),
     );
-    Some(StopResponse::Continue { continue_: true })
+    Some(StopResponse::AllowExit)
 }
 
 /// With queue auto-clear off (`disable-auto-clear`) or no ready supervisor, a
@@ -2468,8 +2502,8 @@ fn repeated_queue_recovery_unavailable_response(
     prompt: &str,
     note: &str,
 ) -> StopResponse {
-    StopResponse::Block {
-        decision: "block",
+    StopResponse::ContinueTurn {
+        class: StopContinuationClass::Queue,
         reason: format!(
             "agent-doc Stop hook requested auto-queue continuation for {}, but the queue head did not advance after the previous continuation request: {:?}. The hook could not safely replay the last assistant response.{} {}",
             file.display(),
@@ -2495,11 +2529,11 @@ fn tracked_repeated_queue_recovery_response(
     stop_phase("repeated_queue_next_head");
     let Some(next_prompt) = active_auto_queue_prompt(file)? else {
         park_state_across_roots(cleanup_roots, loaded_root, state)?;
-        return Ok(StopResponse::Continue { continue_: true });
+        return Ok(StopResponse::AllowExit);
     };
     if next_prompt == prompt {
-        return Ok(StopResponse::Block {
-            decision: "block",
+        return Ok(StopResponse::ContinueTurn {
+            class: StopContinuationClass::Queue,
             reason: format!(
                 "agent-doc Stop hook replayed a response for {}, but the queue head still did not advance: {:?}.{} {}",
                 file.display(),
@@ -2528,8 +2562,8 @@ fn tracked_repeated_queue_recovery_response(
         "tracked_state_after_recovery",
         state.last_context_clear_at,
     );
-    Ok(StopResponse::Block {
-        decision: "block",
+    Ok(StopResponse::ContinueTurn {
+        class: StopContinuationClass::Queue,
         reason: format!(
             "agent-doc Stop hook recovered the previous queue response for {disp}.{note} The next queue prompt is {prompt:?}. {instruction}",
             disp = file.display(),
@@ -2718,10 +2752,10 @@ fn auto_queue_continuation_response(
     // with `agent-doc finalize <FILE>` (a non-dispatch command) continues the
     // queue without any nested self-invocation. This matches the run-path guard's
     // own OwnedPaneSelfInvocation guidance so both sources agree.
-    Ok(Some(StopResponse::Block {
-        decision: "block",
+    Ok(Some(StopResponse::ContinueTurn {
+        class: StopContinuationClass::Queue,
         reason: format!(
-            "Queue continuation, not an error: Codex labels it `Blocked by hook`. Next `agent:queue auto` prompt for {disp}: {prompt:?}. {instruction}",
+            "Codex labels the Stop continuation wire shape `Blocked by hook`. Next `agent:queue auto` prompt for {disp}: {prompt:?}. {instruction}",
             disp = file.display(),
             prompt = prompt,
             instruction = {
@@ -2842,13 +2876,10 @@ fn retained_write_queue_recovery_response(
 
 fn retained_queue_stop_response(message: String, stop_hook_active: bool) -> StopResponse {
     if stop_hook_active {
-        StopResponse::Stop {
-            continue_: false,
-            stop_reason: message,
-        }
+        StopResponse::RefuseExit { reason: message }
     } else {
-        StopResponse::Block {
-            decision: "block",
+        StopResponse::ContinueTurn {
+            class: StopContinuationClass::Queue,
             reason: message,
         }
     }
@@ -2896,13 +2927,10 @@ fn durable_owner_repair_deferral_response(
         "agent-doc Stop hook retained the exact closeout for {display} under its durable keyed retry.{note} The controller owns delivery, the editor-native save receipt, and the terminal commit. Do not reopen or recapture the cycle, rerun finalize/write/repair, force disk, recycle the supervisor, or resend the response. Wait for the existing controller state edge unless it explicitly reports `needs_operator`; do not send the final answer yet."
     );
     if stop_hook_active {
-        StopResponse::Stop {
-            continue_: false,
-            stop_reason: message,
-        }
+        StopResponse::RefuseExit { reason: message }
     } else {
-        StopResponse::Block {
-            decision: "block",
+        StopResponse::ContinueTurn {
+            class: StopContinuationClass::Recovery,
             reason: message,
         }
     }
@@ -2920,10 +2948,10 @@ fn captured_finalize_needs_operator_response(
     stop_hook_active: bool,
 ) -> StopResponse {
     if stop_hook_active {
-        return StopResponse::Continue { continue_: true };
+        return StopResponse::AllowExit;
     }
-    StopResponse::Block {
-        decision: "block",
+    StopResponse::ContinueTurn {
+        class: StopContinuationClass::Recovery,
         reason: format!(
             "agent-doc Stop hook's exact retained closeout for {} reached `needs_operator` after the owner state edge. {} This is an operator blocker, not an in-progress owner wait. Report this exact blocker and its recovery to the operator; do not restart, recapture, force disk, or claim that waiting will resolve it.",
             file.display(),
@@ -3893,25 +3921,51 @@ mod tests {
         assert!(output.get("reason").is_none(), "{output}");
     }
 
-    /// The Codex Stop contract is untouched by the Claude feedback form.
+    /// Codex's protocol calls a continuation `decision: "block"`; our typed
+    /// outcome keeps that host spelling separate from a true refusal and makes
+    /// every continuation's model-visible reason say that it is not an error.
     #[test]
-    fn codex_stop_output_shapes_are_unchanged() {
+    fn codex_stop_output_shapes_distinguish_continuation_from_refusal() {
         assert_eq!(
-            serde_json::to_value(StopResponse::Block {
-                decision: "block",
+            serde_json::to_value(StopResponse::ContinueTurn {
+                class: StopContinuationClass::SessionWriteback,
                 reason: "r".to_string(),
             })
             .unwrap(),
-            serde_json::json!({"decision": "block", "reason": "r"})
+            serde_json::json!({
+                "decision": "block",
+                "reason": "Session persistence continuation, not a refusal or error: r"
+            })
         );
         assert_eq!(
-            serde_json::to_value(StopResponse::Continue { continue_: true }).unwrap(),
+            serde_json::to_value(StopResponse::ContinueTurn {
+                class: StopContinuationClass::Queue,
+                reason: "q".to_string(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "decision": "block",
+                "reason": "Queue continuation, not an error: q"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(StopResponse::ContinueTurn {
+                class: StopContinuationClass::Recovery,
+                reason: "x".to_string(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "decision": "block",
+                "reason": "Recovery continuation, not a refusal or error: x"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(StopResponse::AllowExit).unwrap(),
             serde_json::json!({"continue": true})
         );
         assert_eq!(
-            serde_json::to_value(StopResponse::Stop {
-                continue_: false,
-                stop_reason: "s".to_string(),
+            serde_json::to_value(StopResponse::RefuseExit {
+                reason: "s".to_string()
             })
             .unwrap(),
             serde_json::json!({"continue": false, "stopReason": "s"})
@@ -3968,7 +4022,7 @@ mod tests {
             stop_hook_active: false,
         })
         .unwrap();
-        assert!(matches!(result, StopResponse::Continue { continue_: true }));
+        assert!(matches!(result, StopResponse::AllowExit));
         assert_eq!(fs::read_to_string(&doc).unwrap(), before);
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
         assert!(
@@ -4029,15 +4083,12 @@ mod tests {
         });
         let run = run_stop_hook_task_within_budget(None, move || {
             gate.recv().unwrap();
-            Ok(StopResponse::Continue { continue_: true })
+            Ok(StopResponse::AllowExit)
         })
         .unwrap();
         releaser.join().unwrap();
         assert!(!run.timed_out);
-        assert!(matches!(
-            run.response,
-            StopResponse::Continue { continue_: true }
-        ));
+        assert!(matches!(run.response, StopResponse::AllowExit));
     }
 
     #[test]
@@ -4045,18 +4096,12 @@ mod tests {
         let run =
             run_stop_hook_task_within_budget(Some(std::time::Duration::from_millis(1)), || {
                 std::thread::sleep(std::time::Duration::from_millis(20));
-                Ok(StopResponse::Continue { continue_: true })
+                Ok(StopResponse::AllowExit)
             })
             .unwrap();
 
         assert!(run.timed_out);
-        assert!(matches!(
-            run.response,
-            StopResponse::Stop {
-                continue_: false,
-                ..
-            }
-        ));
+        assert!(matches!(run.response, StopResponse::RefuseExit { .. }));
     }
 
     #[test]
@@ -4523,7 +4568,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
 
         assert!(
             agent_doc_capture_io::load_active(&doc).unwrap().is_none(),
@@ -4935,9 +4980,9 @@ Done.\n\
         let err = anyhow::anyhow!(refusal);
         let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));
         let first = durable_owner_repair_deferral_response(Path::new("/p/fpe.md"), &note, false);
-        assert!(matches!(first, StopResponse::Block { .. }));
+        assert!(matches!(first, StopResponse::ContinueTurn { .. }));
         let recursive = durable_owner_repair_deferral_response(Path::new("/p/fpe.md"), &note, true);
-        assert!(matches!(recursive, StopResponse::Stop { .. }));
+        assert!(matches!(recursive, StopResponse::RefuseExit { .. }));
         let rendered = serde_json::to_string(&recursive).unwrap();
         assert!(
             rendered.contains(retry_key),
@@ -5057,7 +5102,7 @@ Done.\n\
 
         assert_eq!(
             captured_finalize_needs_operator_response(file, reason, true),
-            StopResponse::Continue { continue_: true },
+            StopResponse::AllowExit,
             "the recursive Stop must let the exact operator-blocker report through",
         );
     }
@@ -5266,7 +5311,7 @@ Done.\n\
                 stop_hook_active,
             );
             assert_eq!(
-                matches!(&response, StopResponse::Stop { .. }),
+                matches!(&response, StopResponse::RefuseExit { .. }),
                 stop_hook_active,
             );
             let rendered = serde_json::to_string(&response).unwrap();
@@ -5499,7 +5544,7 @@ Done.\n\
             stop_hook_active: false,
         })
         .unwrap();
-        assert_eq!(first_stop, StopResponse::Continue { continue_: true });
+        assert_eq!(first_stop, StopResponse::AllowExit);
         let first_cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
 
         let prompt = "Why did you not acknowledge this in the agent document?";
@@ -5521,7 +5566,7 @@ Done.\n\
         .unwrap();
         assert_eq!(
             followup_stop,
-            StopResponse::Continue { continue_: true },
+            StopResponse::AllowExit,
             "same-thread follow-up should cross the binary-owned write boundary automatically"
         );
         let followup_cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -5562,7 +5607,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Why was startup missed?"));
         assert!(content.contains("Recovered through Stop."));
@@ -5580,7 +5625,7 @@ Done.\n\
     }
 
     #[test]
-    fn stop_blocks_direct_chat_manual_queue_response_after_recursive_guard() {
+    fn stop_auto_closes_direct_chat_manual_queue_response_after_recursive_guard() {
         let dir = setup_project();
         let doc = write_manual_queue_doc(
             &dir,
@@ -5609,33 +5654,26 @@ Done.\n\
         })
         .unwrap();
 
-        match response {
-            StopResponse::Block { reason, .. } => {
-                assert!(reason.contains("active session-document work"), "{reason}");
-                assert!(reason.contains("2300 words"), "{reason}");
-                assert!(reason.contains("agent-doc finalize"), "{reason}");
-                assert!(reason.contains("agent-doc write --commit"), "{reason}");
-                assert!(reason.contains("agent-doc session-check"), "{reason}");
-                assert!(reason.contains("pending/capture ledger"), "{reason}");
-            }
-            other => panic!("expected direct-chat writeback block, got {other:?}"),
-        }
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(
-            !content.contains("counting characters"),
-            "chat-only answer must not be treated as document closeout"
+            content.contains("counting characters"),
+            "Stop must persist a replayable same-thread answer before allowing exit"
         );
-        let pending = agent_doc_repair_io::pending::load_active_pending_response(&doc)
-            .unwrap()
-            .unwrap();
         assert!(
-            pending.contains("counting characters"),
-            "the hook should capture the replayable answer for recovery"
+            agent_doc_repair_io::pending::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none(),
+            "a successful binary-owned closeout must leave no pending capture"
+        );
+        assert!(
+            agent_doc_flow_io::closeout::cycle_already_committed(&doc).is_some(),
+            "allow-exit requires committed closeout proof"
         );
     }
 
     #[test]
-    fn stop_blocks_consecutive_direct_chat_manual_queue_answers() {
+    fn stop_auto_closes_consecutive_direct_chat_manual_queue_answers() {
         let dir = setup_project();
         let doc = write_manual_queue_doc(&dir, &["Remove the max character count cap"]);
         init_git_repo(dir.path(), &doc);
@@ -5659,10 +5697,7 @@ Done.\n\
             stop_hook_active: false,
         })
         .unwrap();
-        assert!(
-            matches!(first, StopResponse::Block { .. }),
-            "first direct-chat closeout must be blocked"
-        );
+        assert_eq!(first, StopResponse::AllowExit);
 
         apply_user_prompt_submit(&UserPromptSubmitInput {
             session_id: "codex-session".to_string(),
@@ -5681,22 +5716,16 @@ Done.\n\
         })
         .unwrap();
 
-        match second {
-            StopResponse::Block { reason, .. } => {
-                assert!(
-                    reason.contains("Remove the max character count cap"),
-                    "{reason}"
-                );
-                assert!(reason.contains("agent-doc write --commit"), "{reason}");
-                assert!(reason.contains("agent-doc session-check"), "{reason}");
-            }
-            other => panic!("expected second direct-chat writeback block, got {other:?}"),
-        }
-        let pending_body = agent_doc_repair_io::pending::load_active_pending_response(&doc)
-            .unwrap()
-            .unwrap();
-        assert!(pending_body.contains("Second direct-chat answer."));
-        assert!(!pending_body.contains("First direct-chat answer."));
+        assert_eq!(second, StopResponse::AllowExit);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("First direct-chat answer."), "{content}");
+        assert!(content.contains("Second direct-chat answer."), "{content}");
+        assert!(
+            agent_doc_repair_io::pending::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none(),
+            "both replayable answers must cross the binary-owned boundary"
+        );
     }
 
     #[test]
@@ -5783,7 +5812,7 @@ Done.\n\
         .unwrap();
 
         let blocked_after_submodule_commit = match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(
                     reason.contains("could not finish the required commit boundary"),
                     "block reason should name closeout failure, got: {reason}"
@@ -5860,7 +5889,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Recovered from visible response."));
         match agent_doc_session_check_io::inspect(
@@ -5923,7 +5952,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: #next-steps — gpt-5"));
         assert!(
@@ -5986,7 +6015,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: Please reply — gpt-5"));
         assert!(content.contains("Hook closeout body."));
@@ -6061,7 +6090,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: #next-steps — gpt-5"));
         assert!(
@@ -6136,7 +6165,7 @@ Done.\n\
             stop_hook_active: false,
         })
         .unwrap();
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         agent_doc_capture_io::latest_committed(&doc)
             .unwrap()
             .expect("Stop hook should commit the captured response");
@@ -6253,7 +6282,7 @@ Done.\n\
         .unwrap();
 
         assert!(
-            matches!(&response, StopResponse::Block { reason, .. }
+            matches!(&response, StopResponse::ContinueTurn { reason, .. }
                 if reason.contains("HAVN-1489") && reason.contains("in-pane")),
             "the untouched next head must be handed to its owner: {response:?}"
         );
@@ -6336,7 +6365,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Post-closeout active-session drift."));
         assert!(content.contains("Recovered post-closeout drift."));
@@ -6457,7 +6486,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             cycle.cycle_id, previous.cycle_id,
@@ -6550,7 +6579,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Operator revised the completion note."));
         assert!(content.contains("Preserved the operator correction."));
@@ -6604,7 +6633,7 @@ Done.\n\
             })
             .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Recovered from nested root drift."));
         match agent_doc_session_check_io::inspect(
@@ -6685,7 +6714,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Visible drift after committed closeout."));
         assert!(content.contains("Recovered after preamble prompt tracking."));
@@ -6720,7 +6749,7 @@ Done.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("unfinished document cycle"));
                 assert!(reason.contains("agent-doc repair"));
                 assert!(reason.contains("tool-only or authentication step"));
@@ -6766,7 +6795,7 @@ Done.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("unfinished document cycle"));
                 assert!(reason.contains("refused to replay"));
                 assert!(reason.contains("blocked-stop"));
@@ -6817,7 +6846,7 @@ Done.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
     }
 
@@ -6865,7 +6894,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
     }
 
@@ -6909,7 +6938,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
     }
 
@@ -7025,11 +7054,8 @@ Reviewed the gated items.\n\
     #[test]
     fn same_turn_repeat_during_closeout_keeps_stop_queue_continuation() {
         match stop_after_same_turn_repeat_during_closeout(false) {
-            StopResponse::Block { reason, .. } => {
-                assert!(
-                    reason.starts_with("Queue continuation, not an error:"),
-                    "{reason}"
-                );
+            StopResponse::ContinueTurn { class, reason } => {
+                assert_eq!(class, StopContinuationClass::Queue);
                 assert!(
                     reason.contains("What is the merge order for my accepted PRs"),
                     "the pending operator prompt must be re-dispatched: {reason}"
@@ -7047,7 +7073,7 @@ Reviewed the gated items.\n\
     fn refusal_receipt_for_same_turn_repeat_strands_the_queue_prompt() {
         assert_eq!(
             stop_after_same_turn_repeat_during_closeout(true),
-            StopResponse::Continue { continue_: true }
+            StopResponse::AllowExit
         );
     }
 
@@ -7068,11 +7094,8 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
-                assert!(
-                    reason.starts_with("Queue continuation, not an error:"),
-                    "Codex renders every Stop continuation as `Blocked by hook`; the payload must immediately disambiguate a healthy queue continuation: {reason}"
-                );
+            StopResponse::ContinueTurn { class, reason } => {
+                assert_eq!(class, StopContinuationClass::Queue);
                 assert!(reason.contains("agent:queue auto"), "{reason}");
                 assert!(reason.contains("do #fix1"), "{reason}");
                 assert!(reason.contains("send the final answer"), "{reason}");
@@ -7114,7 +7137,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_turn_id, "coordinator-turn");
@@ -7153,7 +7176,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("max character count cap"), "{reason}");
                 assert!(reason.contains("send the final answer"), "{reason}");
             }
@@ -7748,7 +7771,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
 
         let root = project_root_for(dir.path()).unwrap();
         assert!(load_state(&root, "codex-session").unwrap().is_none());
@@ -7793,7 +7816,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
 
         let root = project_root_for(dir.path()).unwrap();
         assert!(load_state(&root, "codex-session").unwrap().is_none());
@@ -7816,7 +7839,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("queued slash command"), "{reason}");
                 assert!(reason.contains("\"/model sonnet\""), "{reason}");
                 assert!(!reason.contains("Run `/clear`"), "{reason}");
@@ -7850,7 +7873,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("do #fix2"), "{reason}");
             }
             other => panic!("expected auto-queue continuation block, got {other:?}"),
@@ -7890,7 +7913,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(
                     reason.contains("configured `agent-doc` MCP server"),
                     "{reason}"
@@ -7948,7 +7971,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let ops_log =
             fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
@@ -7974,7 +7997,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
     }
 
     /// `#codexstopterse`: Codex prints the Stop continuation `reason` verbatim in
@@ -8036,7 +8059,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
                 assert_operator_pane_continuation_is_terse(&reason, &doc);
             }
@@ -8087,11 +8110,8 @@ Reviewed the gated items.\n\
 
         let display = doc.display().to_string();
         match response {
-            StopResponse::Block { reason, .. } => {
-                assert!(
-                    reason.starts_with("Queue continuation, not an error:"),
-                    "{reason}"
-                );
+            StopResponse::ContinueTurn { class, reason } => {
+                assert_eq!(class, StopContinuationClass::Queue);
                 assert!(
                     reason.ends_with(&render_prompt_continuation_instruction(&display, true)),
                     "reset reason must not change the MCP instruction path: {reason}"
@@ -8132,7 +8152,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
                 assert_operator_pane_continuation_is_terse(&reason, &doc);
             }
@@ -8169,7 +8189,7 @@ Reviewed the gated items.\n\
             "tracked_state",
             |_| agent_doc_controller::status::SupervisorDrainReadiness::Ready { supervisor_pid: 7 },
         );
-        assert_eq!(response, Some(StopResponse::Continue { continue_: true }));
+        assert_eq!(response, Some(StopResponse::AllowExit));
         let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("codex_stop_queue_continuation_yield")
@@ -8315,7 +8335,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
                 assert_operator_pane_continuation_is_terse(&reason, &doc);
             }
@@ -8408,7 +8428,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
                 assert!(reason.contains("agent-doc finalize"), "{reason}");
                 assert!(!reason.contains("Run `/clear`"), "{reason}");
@@ -8438,7 +8458,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(
                     reason.contains("do [#seopdp] deploy product page"),
                     "{reason}"
@@ -8481,7 +8501,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("do #fix1"), "{reason}");
                 assert!(!reason.contains("do #fix2"), "{reason}");
             }
@@ -8533,7 +8553,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(
                     reason.contains("recovered the previous queue response"),
                     "{reason}"
@@ -8585,7 +8605,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("could not safely replay"), "{reason}");
                 assert!(reason.contains("agent-doc finalize"), "{reason}");
                 assert!(reason.contains("do #fix1"), "{reason}");
@@ -8634,7 +8654,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Block { reason, .. } => {
+            StopResponse::ContinueTurn { reason, .. } => {
                 assert!(reason.contains("do #fix2"), "{reason}");
             }
             other => panic!("expected continued auto-queue block, got {other:?}"),
@@ -8683,12 +8703,9 @@ Reviewed the gated items.\n\
         .unwrap();
 
         match response {
-            StopResponse::Stop {
-                continue_: false,
-                stop_reason,
-            } => {
-                assert!(stop_reason.contains("already continued once"));
-                assert!(stop_reason.contains("cycle is still open"));
+            StopResponse::RefuseExit { reason } => {
+                assert!(reason.contains("already continued once"));
+                assert!(reason.contains("cycle is still open"));
             }
             other => panic!("expected stop response, got {other:?}"),
         }
@@ -8757,10 +8774,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert!(
-            matches!(response, StopResponse::Continue { continue_: true }),
-            "{response:?}"
-        );
+        assert!(matches!(response, StopResponse::AllowExit), "{response:?}");
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert!(state.last_prompt.is_empty());
         assert!(state.last_turn_id.is_empty());
@@ -8839,7 +8853,7 @@ Reviewed the gated items.\n\
         .expect("new queue work must block the first Stop");
 
         assert!(
-            matches!(&response, StopResponse::Block { reason, .. }
+            matches!(&response, StopResponse::ContinueTurn { reason, .. }
                 if reason.contains("opened successor cycle")
                     && reason.contains(queue_prompt)
                     && reason.contains("deliberately not captured")),
@@ -8952,10 +8966,7 @@ Reviewed the gated items.\n\
             stop_hook_active: false,
         })
         .unwrap();
-        assert!(
-            matches!(response, StopResponse::Continue { continue_: true }),
-            "{response:?}"
-        );
+        assert!(matches!(response, StopResponse::AllowExit), "{response:?}");
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert!(state.last_prompt.is_empty());
         assert!(state.last_turn_id.is_empty());
@@ -9103,7 +9114,7 @@ Reviewed the gated items.\n\
         })
         .expect("a Stop after a committed closeout must never fail closed");
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             before,
@@ -9154,7 +9165,7 @@ Reviewed the gated items.\n\
         .expect("a committed payload is never a fail-closed error");
 
         assert!(
-            matches!(&response, StopResponse::Block { reason, .. }
+            matches!(&response, StopResponse::ContinueTurn { reason, .. }
                 if reason.contains("Explain the release pin order")),
             "{response:?}\n{}",
             fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
@@ -9323,7 +9334,7 @@ Reviewed the gated items.\n\
         .unwrap();
 
         assert!(
-            matches!(&response, StopResponse::Block { reason, .. }
+            matches!(&response, StopResponse::ContinueTurn { reason, .. }
                 if reason.contains("fresh unresolved exchange work")),
             "the fresh diff must be handed back in-pane: {response:?}"
         );
@@ -9384,10 +9395,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert!(
-            matches!(response, StopResponse::Continue { continue_: true }),
-            "{response:?}"
-        );
+        assert!(matches!(response, StopResponse::AllowExit), "{response:?}");
         assert!(
             fs::read_to_string(&doc)
                 .unwrap()
@@ -9557,7 +9565,7 @@ Reviewed the gated items.\n\
             .unwrap()
             .expect("content_edit steering after a commit must be handed back in-pane");
         assert!(
-            matches!(&response, StopResponse::Block { reason, .. }
+            matches!(&response, StopResponse::ContinueTurn { reason, .. }
                 if reason.contains("fresh unresolved exchange work")
                     && reason.contains("Even if formal logic code is not directly understandable")),
             "{response:?}"
@@ -9606,7 +9614,7 @@ Reviewed the gated items.\n\
         assert!(is_committed_prompt_diff_interruption(&reason), "{reason}");
         assert_eq!(
             committed_prompt_diff_stop_response(&doc, &reason).unwrap(),
-            Some(StopResponse::Continue { continue_: true }),
+            Some(StopResponse::AllowExit),
             "claimed worker steering must not be re-admitted as coordinator work"
         );
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -9620,7 +9628,7 @@ Reviewed the gated items.\n\
             .unwrap()
             .expect("released prompt must re-enter");
         assert!(
-            matches!(&response, StopResponse::Block { reason, .. }
+            matches!(&response, StopResponse::ContinueTurn { reason, .. }
                 if reason.contains("fresh unresolved exchange work")
                     && reason.contains(prompt)),
             "{response:?}"
@@ -9677,7 +9685,7 @@ Reviewed the gated items.\n\
         let response = committed_prompt_diff_stop_response(&doc, &reason)
             .unwrap()
             .expect("an unpersisted reported result must be handed back");
-        let StopResponse::Block { reason, .. } = &response else {
+        let StopResponse::ContinueTurn { reason, .. } = &response else {
             panic!("expected a block: {response:?}");
         };
         assert!(
@@ -9714,7 +9722,7 @@ Reviewed the gated items.\n\
         let response = committed_prompt_diff_stop_response(&doc, &reason_for(prompt))
             .unwrap()
             .expect("requeued line re-enters");
-        let StopResponse::Block { reason, .. } = &response else {
+        let StopResponse::ContinueTurn { reason, .. } = &response else {
             panic!("expected a block: {response:?}");
         };
         assert!(
@@ -9766,7 +9774,7 @@ Reviewed the gated items.\n\
             .unwrap()
             .expect("unclaimed work must re-enter");
         assert!(
-            matches!(&response, StopResponse::Block { reason, .. }
+            matches!(&response, StopResponse::ContinueTurn { reason, .. }
                 if reason.contains(unclaimed) && !reason.contains(claimed)),
             "{response:?}"
         );
@@ -9830,7 +9838,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(response, StopResponse::AllowExit);
         let closed = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(closed.phase.as_str(), "committed");
         assert!(
@@ -9901,7 +9909,7 @@ Reviewed the gated items.\n\
         })
         .unwrap();
         assert!(
-            matches!(&continued, StopResponse::Block { reason, .. }
+            matches!(&continued, StopResponse::ContinueTurn { reason, .. }
                 if reason.contains("opened successor cycle")
                     && reason.contains("Diagnose the recursive Stop stall")),
             "{continued:?}"
@@ -9937,7 +9945,7 @@ Reviewed the gated items.\n\
             stop_hook_active: true,
         })
         .unwrap();
-        assert_eq!(closed, StopResponse::Continue { continue_: true });
+        assert_eq!(closed, StopResponse::AllowExit);
         let terminal = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(terminal.cycle_id, successor.cycle_id);
         assert_eq!(terminal.phase.as_str(), "committed");

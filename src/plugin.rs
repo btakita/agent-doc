@@ -2811,13 +2811,24 @@ fn print_permanent_dynamic_upgrade_loss_once(reason: &str) {
 /// line for the project owning the working directory (best-effort).
 #[cfg(not(test))]
 fn log_jetbrains_upgrade_decision(message: &str) {
-    let Some(root) = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| agent_doc_project_root_io::project_root_containing(&cwd))
-    else {
-        return;
-    };
-    let _ = agent_doc_ops_log_io::append_ops_log_at_project(
+    let result = std::env::current_dir()
+        .context("cannot resolve the current directory")
+        .and_then(|cwd| log_jetbrains_upgrade_decision_at(&cwd, message));
+    if let Err(error) = result {
+        eprintln!("{}", plugin_upgrade_log_warning(message, &error));
+    }
+}
+
+fn plugin_upgrade_log_warning(message: &str, error: &anyhow::Error) -> String {
+    format!(
+        "WARNING: JetBrains plugin upgrade verdict was not written to ops.log: {error:#}; verdict={message}"
+    )
+}
+
+fn log_jetbrains_upgrade_decision_at(cwd: &Path, message: &str) -> Result<()> {
+    let root = agent_doc_project_root_io::project_root_containing(cwd)
+        .with_context(|| format!("{} is not inside an agent-doc project", cwd.display()))?;
+    agent_doc_ops_log_io::try_append_ops_log_at_project(
         &root,
         message,
         agent_doc_ops_log_io::OpsLogTracking {
@@ -2825,7 +2836,13 @@ fn log_jetbrains_upgrade_decision(message: &str) {
             session_id: None,
             turn_id: None,
         },
-    );
+    )
+    .with_context(|| {
+        format!(
+            "failed to append {}",
+            root.join(".agent-doc/logs/ops.log").display()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -6168,9 +6185,18 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert!(refusal.contains("exact-263"), "{refusal}");
         assert!(refusal.contains("running 263 IDE"), "{refusal}");
         assert!(refusal.contains("no safe whole-package swap"), "{refusal}");
-        assert!(refusal.contains("retires plugin classloaders asynchronously"), "{refusal}");
-        assert!(refusal.contains("frontend may run in another JetBrains Client JVM"), "{refusal}");
-        assert!(refusal.contains("already present in agent.doc.backend.jar"), "{refusal}");
+        assert!(
+            refusal.contains("retires plugin classloaders asynchronously"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains("frontend may run in another JetBrains Client JVM"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains("already present in agent.doc.backend.jar"),
+            "{refusal}"
+        );
         assert!(refusal.contains("adding a Main-Class"), "{refusal}");
         assert!(!refusal.contains("predates"), "{refusal}");
         assert!(!refusal.contains("legacy"), "{refusal}");
@@ -6875,6 +6901,64 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             super::PluginReconcileReport::default().summary("0.35.442"),
             summary
         );
+    }
+
+    #[test]
+    fn plugin_upgrade_verdict_logging_reports_missing_project_root() {
+        let tmp = TempDir::new().unwrap();
+        let error = super::log_jetbrains_upgrade_decision_at(
+            tmp.path(),
+            "plugin_upgrade_summary release=0.35.518",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("is not inside an agent-doc project"),
+            "{error}"
+        );
+        assert!(!tmp.path().join(".agent-doc/logs/ops.log").exists());
+    }
+
+    #[test]
+    fn plugin_upgrade_verdict_logging_writes_the_project_ops_log() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".agent-doc")).unwrap();
+        let nested = tmp.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let verdict = "plugin_upgrade_summary release=0.35.518 hot_upgraded=0 restart_required=1";
+
+        super::log_jetbrains_upgrade_decision_at(&nested, verdict).unwrap();
+
+        let log = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains(verdict), "{log}");
+    }
+
+    #[test]
+    fn plugin_upgrade_verdict_logging_preserves_append_failure() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+
+        let error = super::log_jetbrains_upgrade_decision_at(
+            tmp.path(),
+            "plugin_dynamic_upgrade outcome=restart_required",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("failed to append"), "{error}");
+        assert!(error.contains(".agent-doc/logs/ops.log"), "{error}");
+    }
+
+    #[test]
+    fn plugin_upgrade_verdict_logging_failure_keeps_the_complete_verdict_visible() {
+        let verdict = "plugin_dynamic_upgrade outcome=restart_required declined_by=modular_package version=0.2.698";
+        let warning = super::plugin_upgrade_log_warning(verdict, &anyhow::anyhow!("disk full"));
+
+        assert!(warning.starts_with("WARNING: JetBrains plugin upgrade verdict was not written"));
+        assert!(warning.contains("disk full"), "{warning}");
+        assert!(warning.ends_with(verdict), "{warning}");
     }
 
     #[test]

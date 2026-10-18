@@ -140,12 +140,13 @@ selectors support `status`, `exchange`, `queue`, `backlog`, `todo`, `review`,
 When compaction removes a live exchange node after a selection was saved, the
 planner searches the source document's derived compact-archive index for the
 same content-stable node ID. The preview records the resolved archive locator
-and uses transfer mode `archived_context_copy`; an explicit `archive_locators`
-selector resolves the same way. Apply embeds the selected archived response in
-the target exchange between provenance markers, while the canonical compact
-archive remains immutable. A locator owned by another source document, a
-non-assistant turn, or a missing turn is rejected before either document is
-written.
+and uses transfer mode `archived_context_copy`; saved prompt-node and
+response-node selectors both resolve through the assistant response's locator,
+and retain their adjacent prompt/response pair. An explicit `archive_locators`
+selector resolves the same pair. Apply embeds the selected archived pair in the
+target exchange between provenance markers, while the canonical compact archive
+remains immutable. A locator owned by another source document, a non-assistant
+turn, or a missing turn is rejected before either document is written.
 Selected tracked item blocks retain their stable ID, checkbox/gate state, text,
 and indented continuation bytes exactly.
 

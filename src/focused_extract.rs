@@ -306,6 +306,72 @@ fn normalized_archive_locator(archive_path: &str, turn_ordinal: i64) -> String {
     format!("archive:{archive_path}#{turn_ordinal}")
 }
 
+fn archived_response_with_prompt(
+    source: &Path,
+    archive_path: &str,
+    turn_ordinal: i64,
+) -> Result<ArchivedExchangeSelection> {
+    let turns = agent_doc_sqlite::archive_index::fetch_turn_window(
+        source,
+        archive_path,
+        turn_ordinal,
+        1,
+        0,
+    )?;
+    let response = turns
+        .iter()
+        .find(|turn| turn.turn_ordinal == turn_ordinal)
+        .with_context(|| {
+            format!(
+                "archive response not found for {}#{}",
+                archive_path, turn_ordinal
+            )
+        })?;
+    if response.speaker != "assistant" {
+        bail!(
+            "focused-extract archive locator is not an assistant response: {}",
+            normalized_archive_locator(archive_path, turn_ordinal)
+        );
+    }
+
+    let expected_source = source
+        .canonicalize()
+        .unwrap_or_else(|_| lexical_absolute(source));
+    let project_root = agent_doc_fs::find_project_root(&expected_source)
+        .with_context(|| format!("project root not found for {}", source.display()))?;
+    let indexed_source = lexical_absolute(&project_root.join(&response.document_path));
+    if indexed_source != expected_source {
+        bail!(
+            "focused-extract archive locator belongs to {}, not {}: {}",
+            response.document_path,
+            source.display(),
+            normalized_archive_locator(archive_path, turn_ordinal)
+        );
+    }
+
+    let prompt = turns.iter().find(|turn| {
+        turn.speaker == "user" && turn.turn_ordinal.checked_add(1) == Some(turn_ordinal)
+    });
+    let text = match prompt {
+        Some(prompt) => format!(
+            "{}\n{}",
+            prompt.text.trim_end_matches('\n'),
+            response.text.trim_start_matches('\n')
+        ),
+        None => response.text.clone(),
+    };
+    let node_ids = parse_exchange_nodes(&text)
+        .into_iter()
+        .filter(|node| !matches!(node.kind, ExchangeNodeKind::Salient { .. }))
+        .map(|node| node.node_id())
+        .collect();
+    Ok(ArchivedExchangeSelection {
+        locator: normalized_archive_locator(&response.archive_path, response.turn_ordinal),
+        text,
+        node_ids,
+    })
+}
+
 fn resolve_archive_locator(source: &Path, locator: &str) -> Result<ArchivedExchangeSelection> {
     let Some(locator_body) = locator.trim().strip_prefix("archive:") else {
         bail!("focused-extract archive locator must start with 'archive:': {locator}");
@@ -316,44 +382,10 @@ fn resolve_archive_locator(source: &Path, locator: &str) -> Result<ArchivedExcha
     let turn_ordinal: i64 = ordinal
         .parse()
         .with_context(|| format!("invalid archive turn '{ordinal}'"))?;
-    let mut turns = agent_doc_sqlite::archive_index::fetch_turn_window(
-        source,
-        archive_path,
-        turn_ordinal,
-        0,
-        0,
-    )?;
-    let turn = turns
-        .pop()
+    let mut selection = archived_response_with_prompt(source, archive_path, turn_ordinal)
         .with_context(|| format!("archive locator not found: {locator}"))?;
-    if turn.speaker != "assistant" {
-        bail!("focused-extract archive locator is not an assistant response: {locator}");
-    }
-
-    let expected_source = source
-        .canonicalize()
-        .unwrap_or_else(|_| lexical_absolute(source));
-    let project_root = agent_doc_fs::find_project_root(&expected_source)
-        .with_context(|| format!("project root not found for {}", source.display()))?;
-    let indexed_source = lexical_absolute(&project_root.join(&turn.document_path));
-    if indexed_source != expected_source {
-        bail!(
-            "focused-extract archive locator belongs to {}, not {}: {locator}",
-            turn.document_path,
-            source.display()
-        );
-    }
-
-    let node_ids = parse_exchange_nodes(&turn.text)
-        .into_iter()
-        .filter(|node| !matches!(node.kind, ExchangeNodeKind::Salient { .. }))
-        .map(|node| node.node_id())
-        .collect();
-    Ok(ArchivedExchangeSelection {
-        locator: locator.trim().to_string(),
-        text: turn.text,
-        node_ids,
-    })
+    selection.locator = locator.trim().to_string();
+    Ok(selection)
 }
 
 fn archived_node_selections(
@@ -367,15 +399,17 @@ fn archived_node_selections(
     let mut selections = Vec::new();
     let mut matched = BTreeSet::new();
     for turn in turns {
+        let archived =
+            archived_response_with_prompt(source, &turn.archive_path, turn.turn_ordinal)?;
         let (remaining, moved, selected_ids, _, selected_explicit) =
-            exchange_selection(&turn.text, &BTreeSet::new(), node_ids);
+            exchange_selection(&archived.text, &BTreeSet::new(), node_ids);
         let _ = remaining;
         if moved.trim().is_empty() {
             continue;
         }
         matched.extend(selected_explicit);
         selections.push(ArchivedExchangeSelection {
-            locator: normalized_archive_locator(&turn.archive_path, turn.turn_ordinal),
+            locator: archived.locator,
             text: moved,
             node_ids: selected_ids,
         });
@@ -1607,13 +1641,17 @@ mod tests {
         let target = dir.path().join("target.md");
         let archive_dir = dir.path().join(".agent-doc/archives");
         std::fs::create_dir_all(&archive_dir).unwrap();
+        let archived_prompt = "❯ Request archived legal decision.";
         let archived_response = "### Re: Archived legal decision\n\nCounsel approved [#archlegal].";
-        let archived_node_id = parse_exchange_nodes(archived_response)[0].node_id();
+        let archived_pair = format!("{archived_prompt}\n{archived_response}");
+        let archived_nodes = parse_exchange_nodes(&archived_pair);
+        let archived_prompt_id = archived_nodes[0].node_id();
+        let archived_node_id = archived_nodes[1].node_id();
         let archive = archive_dir.join("legal.md");
         std::fs::write(
             &archive,
             format!(
-                "---\narchived_from: compact\narchived_at: 20261017-120000\ncomponent: exchange\ndocument: source.md\n---\n\n## User\n\n❯ Request archived legal decision\n\n## Assistant\n\n{archived_response}\n"
+                "---\narchived_from: compact\narchived_at: 20261017-120000\ncomponent: exchange\ndocument: source.md\n---\n\n## User\n\n{archived_prompt}\n\n## Assistant\n\n{archived_response}\n"
             ),
         )
         .unwrap();
@@ -1640,6 +1678,7 @@ mod tests {
         )
         .unwrap();
 
+        assert!(prepared.target_after.contains(archived_prompt));
         assert!(prepared.target_after.contains(archived_response));
         assert!(prepared.target_after.contains(
             "agent-doc-extract-archive locator=\"archive:.agent-doc/archives/legal.md#2\""
@@ -1650,10 +1689,71 @@ mod tests {
             .iter()
             .find(|transfer| transfer.mode == "archived_context_copy")
             .unwrap();
-        assert_eq!(transfer.node_ids, [archived_node_id]);
+        assert_eq!(transfer.node_ids, [archived_prompt_id, archived_node_id]);
         assert_eq!(
             transfer.archive_locators,
             ["archive:.agent-doc/archives/legal.md#2"]
+        );
+    }
+
+    #[test]
+    fn compacted_prompt_node_selector_resolves_through_the_response_archive_locator() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = dir.path().join("source.md");
+        let target = dir.path().join("target.md");
+        let archive_dir = dir.path().join(".agent-doc/archives");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        let archived_prompt = "❯ Request archived legal decision.";
+        let archived_response = "### Re: Archived legal decision\n\nCounsel approved [#archlegal].";
+        let archived_pair = format!("{archived_prompt}\n{archived_response}");
+        let archived_nodes = parse_exchange_nodes(&archived_pair);
+        let archived_prompt_id = archived_nodes[0].node_id();
+        let archived_response_id = archived_nodes[1].node_id();
+        std::fs::write(
+            archive_dir.join("legal-prompt.md"),
+            format!(
+                "---\narchived_from: compact\narchived_at: 20261017-120002\ncomponent: exchange\ndocument: source.md\n---\n\n## User\n\n{archived_prompt}\n\n## Assistant\n\n{archived_response}\n"
+            ),
+        )
+        .unwrap();
+        let source_content = source_doc().replace(
+            "❯ Decide [#legal1]\n### Re: Legal\n\nDecision for #legal1.\n### Re: Dev\n\nUnrelated.\n",
+            "### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/legal-prompt.md`*\n",
+        );
+        std::fs::write(&source, &source_content).unwrap();
+
+        let prepared = prepare(
+            &source,
+            &target,
+            source_content,
+            None,
+            &frontmatter::Frontmatter::default(),
+            &FocusedExtractRequest {
+                focus: None,
+                rationale: None,
+                ids: Vec::new(),
+                exchange_node_ids: vec![archived_prompt_id.clone()],
+                archive_locators: Vec::new(),
+                components: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        assert!(prepared.target_after.contains(archived_prompt));
+        assert!(prepared.target_after.contains(archived_response));
+        let transfer = prepared
+            .preview
+            .transfers
+            .iter()
+            .find(|transfer| transfer.mode == "archived_context_copy")
+            .unwrap();
+        assert_eq!(
+            transfer.node_ids,
+            [archived_prompt_id, archived_response_id]
+        );
+        assert_eq!(
+            transfer.archive_locators,
+            ["archive:.agent-doc/archives/legal-prompt.md#2"]
         );
     }
 
@@ -1675,25 +1775,42 @@ mod tests {
         let source_content = source_doc();
         std::fs::write(&source, &source_content).unwrap();
 
+        let request = FocusedExtractRequest {
+            focus: Some("compliance".into()),
+            rationale: None,
+            ids: Vec::new(),
+            exchange_node_ids: Vec::new(),
+            archive_locators: vec!["archive:.agent-doc/archives/compliance.md#2".into()],
+            components: Vec::new(),
+        };
         let prepared = prepare(
             &source,
             &target,
             source_content,
             None,
             &frontmatter::Frontmatter::default(),
-            &FocusedExtractRequest {
-                focus: Some("compliance".into()),
-                rationale: None,
-                ids: Vec::new(),
-                exchange_node_ids: Vec::new(),
-                archive_locators: vec!["archive:.agent-doc/archives/compliance.md#2".into()],
-                components: Vec::new(),
-            },
+            &request,
         )
         .unwrap();
 
+        assert!(
+            prepared
+                .target_after
+                .contains("❯ Request archived compliance context")
+        );
         assert!(prepared.target_after.contains(archived_response));
         assert!(prepared.preview.unmatched_archive_locators.is_empty());
+
+        let rerun = prepare(
+            &source,
+            &target,
+            prepared.source_after.clone(),
+            Some(prepared.target_after.clone()),
+            &frontmatter::Frontmatter::default(),
+            &request,
+        )
+        .unwrap();
+        assert!(rerun.preview.already_applied);
     }
 
     #[test]

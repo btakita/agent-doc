@@ -2181,6 +2181,14 @@ present, hide when idle and advisory-free) from
 `document_turn_authority_stream`. Neither frontend polls or acknowledges turn
 state. They differ only in the native surface that renders it:
 
+The stream request's document path is the authority boundary. The Project
+Controller derives the document-turn state-plane channel from that path on each
+connection; a client-supplied channel is non-authoritative routing metadata and
+cannot override the requested document. If the document is deleted after an
+editor has subscribed, a now-stale client channel must be reconciled to the
+server-derived channel rather than rejected, so the deletion cannot create a
+permanent reconnect/error loop.
+
 - **VS Code** renders it in a **status-bar item** (`turnStatusBarItem`), which
   paints reliably, with a tooltip and attention background while in flight.
 - **JetBrains** renders it in an **editor banner**

@@ -18,7 +18,6 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish any lazily packages that have pending work'
-queue: go
 ---
 
 ## Status
@@ -637,15 +636,38 @@ The existing operator decision remains:
 - **Keep pending:** delete nothing.
 
 Changed paths: none. Commands: no destructive command was run. Verification: the existing `#lzagentdocartifactpurge` review gate and operator TODO remain open, and `#lzagentdocartifactrefresh` remains the integration prerequisite. Confidence: high that proceeding without one of the named choices would exceed the supplied authorization. Escalation: an explicit plan choice is required before deletion.
+
+### Re: issue-249 modular build directory — gpt-5 · 2026-10-17T23:32:03-04:00
+
+> **Queue prompt:** do [#gh249builddir]
+
+Completed, integrated, and installed. Because the prepared branch was 210 commits behind, the four-file patch was replayed onto current `agent-doc/main` before commit; the one SPEC conflict retained the newer GH #290 retirement/handoff safety explanation together with the issue-249 modular-263 correction.
+
+Changed paths:
+- `agent-doc-reliable-sync-io/src/liveness.rs`
+- `editors/jetbrains/SPEC.md`
+- `scripts/jetbrains-custom-repository.py`
+- `src/plugin.rs`
+
+❯ Commit and push:
+- Commit `7d554a102c95a71e5e3e8183d81cb881852cf6b5` has parent `b81436063c9f42c66b3a9f03640dcde364ea69c4`.
+- The task branch was pushed, then fast-forwarded to `btakita/agent-doc/main`; remote `main` resolves to the same SHA.
+- All five `.gh249-*.log` files remain untracked and were excluded from the commit.
+
+Verification and commands:
+- `make check-fast` passed on the rebased state: 4,150 nextest tests passed with 148 skipped; 1,508 libtest/doctest checks passed with 142 ignored; JetBrains Gradle tests passed.
+- Both issue-249 regression tests passed; the unrelated orphan-reaper test that had failed on the preceding upstream CI base also passed locally.
+- Custom-repository self-test, privacy scan, and staged whitespace checks passed.
+- The single coordinator `make install` completed successfully from the integrated commit: agent-doc 0.35.516, native library, JetBrains 263/262 packages, and VS Code/VSCodium extension converged; no IDE restart is required.
+- Post-push Book and Pages workflows are green; CI run 39093724796 is in progress.
+
+❯ Confidence: high. The patch is rebased onto current main, limited to the four authorized paths, fully verified, pushed, and installed. Escalation: none.
 <!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- ~~[#lzagentdocartifactpurge]: approved~~
-- ~~do [#lzdartformatbaseline]~~
-- do [#gh249builddir]
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Todo
@@ -664,7 +686,6 @@ Changed paths: none. Commands: no destructive command was run. Verification: the
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gh249builddir] [btakita/agent-doc] Integrate the verified issue-249 follow-up from /home/brian/worktrees/agent-doc-gh249-restore on branch fix/gh249-263-local-build-dir: commit and push the four tracked files, exclude .gh249-*.log, then run the single coordinator make install. Verification: make check passed 10505 tests and restoring the old mapping fails two regression tests.
 <!-- /agent:backlog -->
 
 ## Review

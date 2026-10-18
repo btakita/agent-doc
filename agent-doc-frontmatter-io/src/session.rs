@@ -193,8 +193,7 @@ fn resolve_dogfood_value(
                 agent_doc_fs::referenced_markdown_path_checked(file, target)?
             }
         }
-        None => agent_doc_project_config_io::agent_doc_bug_target_document_for_doc(file)?
-            .or_else(|| Some(file.to_path_buf())),
+        None => Some(file.to_path_buf()),
     };
     let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let self_target = target.as_ref().is_some_and(|target| {
@@ -401,6 +400,88 @@ mod tests {
             effective_dogfood_for_file(&std::fs::read_to_string(&doc).unwrap(), &doc).unwrap();
         assert!(resolved.enabled);
         assert!(resolved.self_target);
+    }
+
+    #[test]
+    fn dogfood_scalar_map_and_layer_precedence_truth_table() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("tasks/work.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let project_file = dir.path().join(".agent-doc/project.md");
+
+        let cases = [
+            // project value, session value, enabled, target suffix/current, auto
+            (None, None, false, None, false),
+            (Some("dogfood: false"), None, false, None, false),
+            (Some("dogfood: true"), None, true, Some("tasks/work.md"), false),
+            (
+                Some("dogfood: tasks/project-bugs.md"),
+                None,
+                true,
+                Some("tasks/project-bugs.md"),
+                false,
+            ),
+            (
+                Some("dogfood:\n  path: tasks/project-auto.md\n  auto: true"),
+                None,
+                true,
+                Some("tasks/project-auto.md"),
+                true,
+            ),
+            (
+                Some("dogfood:\n  path: tasks/project-auto.md\n  auto: true"),
+                Some("dogfood: false"),
+                false,
+                None,
+                false,
+            ),
+            (
+                Some("dogfood:\n  path: tasks/project-auto.md\n  auto: true"),
+                Some("dogfood: true"),
+                true,
+                Some("tasks/work.md"),
+                false,
+            ),
+            (
+                Some("dogfood:\n  path: tasks/project-auto.md\n  auto: true"),
+                Some("dogfood:\n  auto: false"),
+                true,
+                Some("tasks/work.md"),
+                false,
+            ),
+            (
+                Some("dogfood: false"),
+                Some("dogfood:\n  path: tasks/session-auto.md\n  auto: true"),
+                true,
+                Some("tasks/session-auto.md"),
+                true,
+            ),
+        ];
+
+        for (project, session, enabled, target_suffix, auto) in cases {
+            match project {
+                Some(value) => std::fs::write(&project_file, format!("---\n{value}\n---\n"))
+                    .unwrap(),
+                None => {
+                    if project_file.exists() {
+                        std::fs::remove_file(&project_file).unwrap();
+                    }
+                }
+            }
+            let content = format!("---\n{}\n---\n", session.unwrap_or("agent_doc_format: template"));
+            std::fs::write(&doc, &content).unwrap();
+            let resolved = effective_dogfood_for_file(&content, &doc).unwrap();
+            assert_eq!(resolved.enabled, enabled, "project={project:?} session={session:?}");
+            assert_eq!(resolved.auto, auto, "project={project:?} session={session:?}");
+            match target_suffix {
+                Some(suffix) => assert!(
+                    resolved.target.as_ref().is_some_and(|path| path.ends_with(suffix)),
+                    "project={project:?} session={session:?} resolved={resolved:?}"
+                ),
+                None => assert!(resolved.target.is_none(), "resolved={resolved:?}"),
+            }
+        }
     }
 
     #[test]

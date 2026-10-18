@@ -12,7 +12,6 @@ codex_args: -s danger-full-access
 presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#self': agent-doc-bugs.md
-queue: go
 ---
 
 ## Status
@@ -609,13 +608,6 @@ Release `v0.35.517` is tagged and locally installed. Its public build matrix is 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/284~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/285~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/286~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/287~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/288~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/289~~ — auto-struck: answered this cycle (#ftstrike)
-- release + publish
 <!-- /agent:queue -->
 --
 

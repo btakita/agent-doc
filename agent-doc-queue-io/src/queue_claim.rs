@@ -287,8 +287,8 @@ pub(crate) fn editor_authority_text(file: &Path, source: &str) -> Option<String>
     }
 }
 
-/// Resolve a claim `--item` against the on-disk document, falling back to
-/// the editor authority's current text on a miss (GH #124 ask 5): dispatch
+/// Resolve a claim `--item` against the live editor authority when available,
+/// otherwise against the on-disk document (GH #124 ask 5, GH #296): dispatch
 /// and claim must agree on what a live head is even while an editor save to
 /// disk is deferred. Returns the resolved head and the live heads of the view
 /// it resolved in (a new claim's anchor, `#claimfollowedit`).
@@ -305,14 +305,8 @@ fn resolve_live_claim_target(
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("read {} to resolve queue item {item:?}", file.display()))?;
     let disk_heads = live_queue_head_texts(&content).unwrap_or_default();
-    let mut authority: Option<Vec<String>> = None;
-    let resolved = match resolve_claim_target_in_views(item, &disk_heads, None) {
-        Ok(resolved) => Ok(resolved),
-        Err(_) => {
-            authority = editor_authority_queue_heads(file, source);
-            resolve_claim_target_in_views(item, &disk_heads, authority.as_deref())
-        }
-    };
+    let authority = editor_authority_queue_heads(file, source);
+    let resolved = resolve_claim_target_in_views(item, &disk_heads, authority.as_deref());
     let (target, view) = match resolved {
         Ok(resolved) => resolved,
         Err(miss) if miss.ambiguous.is_empty() => {
@@ -334,7 +328,9 @@ fn resolve_live_claim_target(
         }
         Err(miss) => return Err(miss.into()),
     };
-    if view == ClaimHeadSource::EditorAuthority {
+    if view == ClaimHeadSource::EditorAuthority
+        && agent_doc_queue::queue_claim::resolve_claim_target(item, &disk_heads).is_err()
+    {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -352,8 +348,9 @@ fn resolve_live_claim_target(
 }
 
 /// The live head a claim that followed an operator edit away from `item`
-/// now holds (`#claimfollowedit`), in the first view where that claim's line
-/// is live. `None` when no single claim followed away from `item`.
+/// now holds (`#claimfollowedit`), in the authoritative view. The editor cut
+/// is authoritative when present; disk is used only while detached. `None`
+/// when no single claim followed away from `item`.
 fn followed_claim_target(
     file: &Path,
     item: &str,
@@ -364,16 +361,15 @@ fn followed_claim_target(
     if stored.claims.is_empty() {
         return None;
     }
-    let views = std::iter::once((disk_heads, ClaimHeadSource::Disk))
-        .chain(authority_heads.map(|heads| (heads, ClaimHeadSource::EditorAuthority)));
-    for (heads, view) in views {
-        let mut ledger = stored.clone();
-        ledger.follow_edits(now_secs(), heads);
-        if let Some(text) = ledger.followed_item_text(item)
-            && let Ok(target) = agent_doc_queue::queue_claim::resolve_claim_target(text, heads)
-        {
-            return Some((target, view));
-        }
+    let (heads, view) = authority_heads
+        .map(|heads| (heads, ClaimHeadSource::EditorAuthority))
+        .unwrap_or((disk_heads, ClaimHeadSource::Disk));
+    let mut ledger = stored;
+    ledger.follow_edits(now_secs(), heads);
+    if let Some(text) = ledger.followed_item_text(item)
+        && let Ok(target) = agent_doc_queue::queue_claim::resolve_claim_target(text, heads)
+    {
+        return Some((target, view));
     }
     None
 }
@@ -1259,6 +1255,25 @@ mod tests {
         assert!(release(&doc, "fix issue 110 now").unwrap().is_some());
         assert!(!claimed_items_for_content(&doc, &content).claims("fix issue 110 now"));
         assert!(release(&doc, "fix issue 110 now").unwrap().is_none());
+    }
+
+    #[test]
+    fn followed_claim_target_does_not_fall_back_to_stale_disk_when_authority_is_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["rename this queue item"]);
+        claim(&doc, "rename this queue item", "subagent:worker", 600).unwrap();
+        let disk_heads = vec!["rename this queue item with context".to_string()];
+        let authority_heads = Vec::new();
+
+        assert_eq!(
+            followed_claim_target(
+                &doc,
+                "rename this queue item",
+                &disk_heads,
+                Some(&authority_heads),
+            ),
+            None
+        );
     }
 
     #[test]

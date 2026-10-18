@@ -1762,40 +1762,20 @@ impl ClaimHeadSource {
 /// ask 5). Preflight computes `queue_subagent_dispatch` from the editor
 /// authority's current text; `queue claim` used to resolve against disk only,
 /// so a head the operator typed but the editor had not yet saved was offered
-/// for dispatch and then refused as "no live queue head". The disk view wins
-/// when both resolve; the authority view is consulted only on a disk miss. A
-/// miss in both reports the disk miss, with the authority-only heads appended
-/// to its live-head list so the operator sees every head either view holds.
+/// for dispatch and then refused as "no live queue head". When an authority
+/// cut exists it is the only live view: stale disk additions must not remain
+/// claimable after the authority deletes them. Disk is authoritative only when
+/// no live authority cut is available.
 pub fn resolve_claim_target_in_views(
     item: &str,
     disk_heads: &[String],
     authority_heads: Option<&[String]>,
 ) -> Result<(String, ClaimHeadSource), QueueClaimMiss> {
-    let disk_miss = match resolve_claim_target(item, disk_heads) {
-        Ok(target) => return Ok((target, ClaimHeadSource::Disk)),
-        Err(miss) => miss,
-    };
-    let Some(authority_heads) = authority_heads else {
-        return Err(disk_miss);
-    };
-    match resolve_claim_target(item, authority_heads) {
-        Ok(target) => Ok((target, ClaimHeadSource::EditorAuthority)),
-        Err(authority_miss) if !authority_miss.ambiguous.is_empty() => Err(authority_miss),
-        Err(_) if !disk_miss.ambiguous.is_empty() => Err(disk_miss),
-        Err(_) => {
-            let mut live_heads = disk_miss.live_heads;
-            for head in authority_heads {
-                if !live_heads.contains(head) {
-                    live_heads.push(head.clone());
-                }
-            }
-            Err(QueueClaimMiss {
-                item: disk_miss.item,
-                live_heads,
-                ambiguous: Vec::new(),
-            })
-        }
+    if let Some(authority_heads) = authority_heads {
+        return resolve_claim_target(item, authority_heads)
+            .map(|target| (target, ClaimHeadSource::EditorAuthority));
     }
+    resolve_claim_target(item, disk_heads).map(|target| (target, ClaimHeadSource::Disk))
 }
 
 /// A set of claimed queue items, consulted by the drainability filter.
@@ -2338,7 +2318,7 @@ mod tests {
     /// GH #124 ask 5: a head present in the editor authority (what dispatch
     /// saw) but not yet saved to disk is still claimable.
     #[test]
-    fn claim_target_resolves_in_the_editor_authority_view_on_a_disk_miss() {
+    fn claim_target_resolves_against_editor_authority_when_available() {
         let disk = vec!["do [#restartideload]".to_string()];
         let authority = vec![
             "do [#restartideload]".to_string(),
@@ -2360,7 +2340,7 @@ mod tests {
             resolve_claim_target_in_views("#restartideload", &disk, Some(&authority))
                 .unwrap()
                 .1,
-            ClaimHeadSource::Disk
+            ClaimHeadSource::EditorAuthority
         );
         assert!(
             resolve_claim_target_in_views("#bug: The tmux panes are swapped.", &disk, None)
@@ -2372,6 +2352,22 @@ mod tests {
                 .contains(&"#bug: The tmux panes are swapped.".to_string()),
             "{miss}"
         );
+    }
+
+    #[test]
+    fn claim_target_rejects_a_stale_disk_head_deleted_from_editor_authority() {
+        let disk = vec!["#gh-issue https://example.test/issues/296".to_string()];
+        let authority = vec!["do [#still-live]".to_string()];
+
+        let miss = resolve_claim_target_in_views(
+            "#gh-issue https://example.test/issues/296",
+            &disk,
+            Some(&authority),
+        )
+        .unwrap_err();
+
+        assert_eq!(miss.live_heads, authority);
+        assert!(miss.ambiguous.is_empty());
     }
 
     #[test]

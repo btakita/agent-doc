@@ -41,6 +41,12 @@ Rust binary.
   warning names the build, the supported ranges and the version left
   installed, with no retry or manual-install advice, and the upgrade exits 0. Update numbers are compared only within one line; a target
   holding the other line is always replaced with its own line's package.
+- A new agent-doc release retains each JetBrains package's existing update
+  number when its recorded `pluginSourceDigest` still matches the source tree.
+  Updating `pluginReleaseVersion` alone must not manufacture a package upgrade:
+  the binary remains paired with the live generation and installed-plugin
+  reconciliation is an `Unchanged` no-op (GH #295). A changed digest allocates
+  a fresh update number above every compatibility line before packaging.
 - Restart-free dynamic upgrade is a per-line capability. The JetBrains classic
   line ships an attach launcher; the exact-262 modular line does not, so a live
   262 IDE gets a file replacement plus an explicit restart-required verdict that

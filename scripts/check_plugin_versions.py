@@ -200,7 +200,7 @@ def next_jetbrains_version() -> tuple[int, int, int]:
 
 
 def project_jetbrains_release(release_version: str) -> int:
-    """Assign fresh, distinct Marketplace update versions for one app release."""
+    """Project one app release without replacing source-identical plugins."""
     if re.fullmatch(r"\d+\.\d+\.\d+", release_version) is None:
         raise SystemExit(f"invalid semantic release version {release_version!r}")
 
@@ -220,14 +220,27 @@ def project_jetbrains_release(release_version: str) -> int:
         return 0
 
     next_version = next_jetbrains_version()
-    for offset, target in enumerate(targets):
-        assigned = (next_version[0], next_version[1], next_version[2] + offset)
-        old = ".".join(map(str, read_gradle_version(target.primary_version)))
-        new = ".".join(map(str, assigned))
-        write_gradle_version(target.primary_version, assigned)
+    allocated = 0
+    for target in targets:
+        old_version = read_gradle_version(target.primary_version)
+        old = ".".join(map(str, old_version))
+        recorded_digest = read_property(target.primary_version, DIGEST_KEY)
+        if recorded_digest == current_digests[target.name]:
+            assigned = old_version
+        else:
+            assigned = (next_version[0], next_version[1], next_version[2] + allocated)
+            allocated += 1
+            write_gradle_version(target.primary_version, assigned)
         write_property(target.primary_version, DIGEST_KEY, current_digests[target.name])
         write_property(target.primary_version, RELEASE_KEY, release_version)
-        print(f"[release-version] {target.name}: pluginVersion {old} -> {new}")
+        new = ".".join(map(str, assigned))
+        if assigned == old_version:
+            print(
+                f"[release-version] {target.name}: sources byte-identical to pluginVersion "
+                f"{old}; retaining the live-compatible generation for release {release_version}"
+            )
+        else:
+            print(f"[release-version] {target.name}: pluginVersion {old} -> {new}")
     return 0
 
 
@@ -359,9 +372,10 @@ def self_test() -> int:
                     handle.write("tasks.jar { manifest { } }")
                 assert source_digest(jb) != third, "artifact build metadata must change the digest"
 
-                # One release owns three fresh Marketplace updates. Repeating the
-                # projection is byte-stable, while changed sources allocate a new
-                # pair above both prior versions rather than reusing either one.
+                # A release with changed sources owns fresh Marketplace updates.
+                # Repeating the projection is byte-stable, and a new app release
+                # with the same source digests keeps those live-compatible plugin
+                # generations instead of manufacturing a restart-only update.
                 project_jetbrains_release("2.4.6")
                 assert read_gradle_version(jb.primary_version) == (0, 2, 389)
                 assert read_gradle_version(jb262.primary_version) == (0, 2, 390)
@@ -374,9 +388,16 @@ def self_test() -> int:
                 assert read_gradle_version(jb.primary_version) == (0, 2, 389)
                 assert read_gradle_version(jb262.primary_version) == (0, 2, 390)
                 assert read_gradle_version(jb263.primary_version) == (0, 2, 391)
+                project_jetbrains_release("2.4.7")
+                assert read_gradle_version(jb.primary_version) == (0, 2, 389)
+                assert read_gradle_version(jb262.primary_version) == (0, 2, 390)
+                assert read_gradle_version(jb263.primary_version) == (0, 2, 391)
+                assert read_property(jb.primary_version, RELEASE_KEY) == "2.4.7"
+                assert read_property(jb262.primary_version, RELEASE_KEY) == "2.4.7"
+                assert read_property(jb263.primary_version, RELEASE_KEY) == "2.4.7"
                 with open(kt, "w", encoding="utf-8") as handle:
                     handle.write("class A { val release = 2 }")
-                project_jetbrains_release("2.4.6")
+                project_jetbrains_release("2.4.7")
                 assert read_gradle_version(jb.primary_version) == (0, 2, 392)
                 assert read_gradle_version(jb262.primary_version) == (0, 2, 393)
                 assert read_gradle_version(jb263.primary_version) == (0, 2, 394)
@@ -537,7 +558,7 @@ def main() -> int:
     parser.add_argument(
         "--release-version",
         metavar="VERSION",
-        help="project VERSION onto fresh, collision-free JetBrains update versions",
+        help="project VERSION onto source-identity-fenced JetBrains update versions",
     )
     args = parser.parse_args()
     if args.self_test:

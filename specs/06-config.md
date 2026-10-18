@@ -280,7 +280,7 @@ After the IDE plugin consumes an IPC patch file:
 3. **Force-disk cleanup:** When `--force-disk` is set, any pending IPC patch files are deleted before disk write to prevent the plugin from applying stale patches (double-write prevention).
 4. **Claimed stale-patch cleanup:** If the CLI rejects an IPC patch because the cycle already committed, it writes `.agent-doc/claimed-patches/<patch_id>`. Plugins must treat that sentinel as a durable per-patch skip signal and delete the stale patch file instead of replaying it into the editor buffer; the sentinel must survive repeated watcher scans so multiple editor consumers cannot race a stale patch into a duplicate external edit.
 5. **Append patch idempotence:** Editor-side component patch application must treat append-mode patches as replay-safe. Before appending a patch into `agent:exchange` or another append component, the native/shared patcher and editor fallbacks compare the normalized existing component body against the normalized patch body, ignoring transient `(HEAD)` response-heading markers and `agent:boundary` comments. If the patch body is already present, the plugin must leave the document unchanged instead of duplicating the exchange. JetBrains File Cache Conflict retries also revalidate against the current disk file and committed `HEAD`; `HEAD` is accepted as proof only when the disk file still matches it, so stale editor buffers are not left missing a committed response.
-6. **Snapshot freshness cleanup:** On pending-patch pickup, if `.agent-doc/snapshots/<hash>.md` is newer than the patch file, the patch is stale and must be deleted without apply.
+6. **Ledger freshness cleanup:** On pending-patch pickup, the controller's typed operation receipt and document generation decide whether the patch is stale; no filesystem snapshot timestamp participates.
 7. **Malformed patchback rejection:** Before capturing or sending a named socket intent, the CLI validates the parsed template patchback shape. If patch/replace markers are present outside code blocks but no closed patch blocks parse, the write fails closed with `template_patchback_malformed_rejected`; no transaction or editor mutation is created.
 8. **Forensic visible-write logging:** Socket IPC sends log `ipc_socket_attempt` with patch counts, synthesized IPC patch counts, unmatched lengths, baseline length, normalization target count, and unmatched marker count. Successful lazily visible-write receipts log `ipc_socket_visible_write` with receipt source and pre-write disk hashes/lengths before snapshot persistence.
 
@@ -298,12 +298,12 @@ A document has one live text authority and three projections during a write cycl
 | **Lazily current** | in-process CRDT replicas | Lazily + editor replica | Sole live text, including unsaved operator edits and semantic agent cells. |
 | **Transaction state** | `.agent-doc/state.db` | Binary state machine | Baselines, captured responses, operation ids, phases, receipts, queue tombstones, and recovery checkpoints. |
 | **Disk projection** | document file | Binary/editor save integration | Durable visible projection after `ReplicaVisible`; never an attached-editor merge authority. |
-| **Snapshot** | `.agent-doc/snapshots/<hash>.md` | Binary | Cold recovery/audit image emitted after verified convergence. |
 
-There is no live-buffer, baseline, capture, pending, cycle JSON, or CRDT file
-sidecar and no compatibility import for one. The structured CRDT recovery
-checkpoint is stored in `state.db`; file snapshots cannot override Lazily
-current text or the transaction ledger.
+There is no live-buffer, baseline, capture, pending, cycle JSON, markdown
+snapshot, or CRDT file sidecar and no compatibility import for one. Baselines
+and structured CRDT recovery checkpoints are stored in `state.db`; no copied
+document path exists that could override Lazily current text or the transaction
+ledger.
 
 **Consistency invariants:**
 
@@ -316,6 +316,6 @@ current text or the transaction ledger.
   transaction backward or expose a terminal capture as active.
 - Disk projection happens only after visible-replica proof. Detached documents
   may project directly through the same authority resolver.
-- After commit, Git `HEAD`, the disk projection, and the cold snapshot agree on
-  the clean boundary shape. Lazily may additionally retain editor-only display
-  annotations.
+- After commit, Git `HEAD`, the disk projection, and the typed ledger baseline
+  agree on the clean boundary shape. Lazily may additionally retain editor-only
+  display annotations.

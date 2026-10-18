@@ -15180,6 +15180,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn project_internal_state_path_is_never_a_replica_document() {
+        use super::rpc::is_agent_doc_internal_path;
+
+        assert!(is_agent_doc_internal_path(std::path::Path::new(
+            "/project/.agent-doc/snapshots/abc.md"
+        )));
+        assert!(is_agent_doc_internal_path(std::path::Path::new(
+            "/project/.agent-doc/dashboard.md"
+        )));
+        assert!(!is_agent_doc_internal_path(std::path::Path::new(
+            "/project/tasks/agent-doc/session.md"
+        )));
+        assert!(!is_agent_doc_internal_path(std::path::Path::new(
+            "/project/tasks/.agent-document.md"
+        )));
+    }
+
     struct ReliableSyncOpenFixture {
         document_hash: String,
         pid: u64,

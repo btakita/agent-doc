@@ -57,6 +57,14 @@ class AgentDocDocumentTextTest {
     }
 
     @Test
+    fun `project internal state path is never a user document`() {
+        assertFalse(isAgentDocUserDocumentPathUtil("/project/.agent-doc/snapshots/abc.md"))
+        assertFalse(isAgentDocUserDocumentPathUtil("/project/.agent-doc/dashboard.md"))
+        assertTrue(isAgentDocUserDocumentPathUtil("/project/tasks/agent-doc/session.md"))
+        assertTrue(isAgentDocUserDocumentPathUtil("/project/tasks/.agent-document.md"))
+    }
+
+    @Test
     fun `plain markdown close is a no-op only when no replica is attached`() {
         val plain = "# Notes\n\nOrdinary markdown.\n"
         val session = "$plain\n<!-- agent:exchange -->\n"
@@ -86,7 +94,10 @@ class AgentDocDocumentTextTest {
             manager.substringAfter("private fun forwarderFor(")
                 .substringBefore("private fun finalizeRegistrationProjection(")
         val factoryGuard = forwarderFor.indexOf("!isAgentDocDocumentTextUtil(initialEditorText)")
+        val internalPathGuard = forwarderFor.indexOf("!isAgentDocUserDocumentPathUtil(filePath)")
         val transportRegister = forwarderFor.indexOf("if (!forwarder.register())")
+        assertTrue("the shared factory must reject project-internal state", internalPathGuard >= 0)
+        assertTrue("the path guard must precede the controller round trip", internalPathGuard < transportRegister)
         assertTrue("the shared factory must reject plain bootstrap text", factoryGuard >= 0)
         assertTrue("the text guard must precede the controller round trip", factoryGuard < transportRegister)
 

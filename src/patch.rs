@@ -20,7 +20,7 @@
 //!
 //! ## Agentic Contracts
 //! - `run(file, component_name, content)` — returns `Err` if the file is missing, the component is not found, or any hook fails.
-//! - The typed baseline is always updated after a successful patch. Its filesystem snapshot sidecar is a downstream write-only crash effect.
+//! - The typed baseline is always updated after a successful patch; no filesystem document sidecar is emitted.
 //! - `pre_patch` hook failure (non-zero exit) aborts the patch and returns `Err`; no partial write occurs.
 //! - `post_patch` hook failure never aborts the patch; stderr warning only.
 //! - `trim_entries(content, max)` trims to the last `max` non-empty lines; returns content unchanged when under the limit.
@@ -455,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_baseline_drives_crash_projection_after_patch() {
+    fn patch_checkpoints_typed_baseline_without_filesystem_projection() {
         let dir = setup_project();
         let doc = write_doc(
             dir.path(),
@@ -470,9 +470,10 @@ mod tests {
             .expect("typed baseline");
         assert!(baseline.contains("new"));
         assert!(!baseline.contains("old"));
-        let crash_projection =
-            std::fs::read_to_string(agent_doc_fs::snapshot_path_for(&doc).unwrap()).unwrap();
-        assert_eq!(crash_projection, baseline);
+        assert!(
+            !dir.path().join(".agent-doc/snapshots").exists(),
+            "patch must not emit a content-bearing sidecar"
+        );
     }
 
     #[test]

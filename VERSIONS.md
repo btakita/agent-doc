@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.517
 
+- **Document baselines no longer create filesystem sidecars (GH #300).**
+  Baseline, undo, and CRDT recovery content lives only in the typed state ledger;
+  checkpoint and clear operations no longer emit `.agent-doc/snapshots/<hash>.md`.
+  JetBrains rejects every `.agent-doc` path before both the attached-replica fast
+  path and transport registration, and the controller independently rejects it
+  before relay-authority lookup, so copied session text cannot turn a project
+  artifact into a second session document or receive a stale canonical.
 - **Strict closeouts publish addressable TODO rows (GH #293).** After response
   and same-cycle tracked-work projection converge, closeout runs the
   authority-safe todo-id pass before commit and rejects any newly introduced

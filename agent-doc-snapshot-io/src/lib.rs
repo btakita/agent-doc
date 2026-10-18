@@ -1,4 +1,4 @@
-//! Durable document-baseline authority plus write-only crash-state sidecars.
+//! Durable document-baseline authority backed only by the typed state ledger.
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -7,38 +7,6 @@ use std::path::{Path, PathBuf};
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 use agent_doc_frontmatter::frontmatter::session_id_from_content;
 use agent_doc_git_io::revision::HeadWorktreeFallback;
-
-/// Downstream filesystem effects projected from authoritative typed state.
-///
-/// Implementations may write or remove crash state, but they are never a
-/// read authority for document state.
-pub trait CrashStateEffects {
-    fn write_markdown_crash_state(&self, doc: &Path, content: &str) -> Result<()>;
-
-    fn clear_markdown_crash_state(&self, doc: &Path) -> Result<()>;
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct FilesystemCrashStateEffects;
-
-impl CrashStateEffects for FilesystemCrashStateEffects {
-    fn write_markdown_crash_state(&self, doc: &Path, content: &str) -> Result<()> {
-        let path = agent_doc_fs::snapshot_path_for(doc)?;
-        agent_doc_fs::write_atomic(&path, content.as_bytes())
-            .with_context(|| format!("write crash-state sidecar {}", path.display()))
-    }
-
-    fn clear_markdown_crash_state(&self, doc: &Path) -> Result<()> {
-        let path = agent_doc_fs::snapshot_path_for(doc)?;
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => {
-                Err(error).with_context(|| format!("remove crash-state sidecar {}", path.display()))
-            }
-        }
-    }
-}
 
 /// Load the content-bearing merge baseline from the durable state ledger.
 pub fn load_document_baseline(doc: &Path) -> Result<Option<String>> {
@@ -65,19 +33,7 @@ pub fn checkpoint_document_baseline(
     content: &str,
     logger: impl FnMut(&Path, &str),
 ) -> Result<()> {
-    checkpoint_document_baseline_with_effects(doc, content, logger, &FilesystemCrashStateEffects)
-}
-
-/// Append the typed baseline fact, then write the crash-state sidecar effect.
-///
-/// The ordering is intentional: the sidecar is an effect of committed typed
-/// state and can never become the input that creates or repairs that state.
-pub fn checkpoint_document_baseline_with_effects(
-    doc: &Path,
-    content: &str,
-    mut logger: impl FnMut(&Path, &str),
-    effects: &dyn CrashStateEffects,
-) -> Result<()> {
+    let mut logger = logger;
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
     let projection = load_document_state_projection(doc)?;
@@ -101,15 +57,14 @@ pub fn checkpoint_document_baseline_with_effects(
     // Gating on content identity here, at the one function that owns the fact,
     // fixes it for every call site at once. Gating ~30 individual call sites on a
     // "proven durable projection" would instead ask each of them to re-derive the
-    // same answer this function already holds. The crash-state sidecar is still
-    // rewritten, because it is a write-only effect of the projected baseline and
-    // may be missing on disk even when the typed fact is current.
+    // same answer this function already holds. The typed ledger is the sole
+    // mutable baseline store: no content-bearing filesystem projection is
+    // emitted beside the operator document.
     if let Some(existing) = projection
         .as_ref()
         .and_then(|projection| projection.document.merge_baseline.as_ref())
         && existing.content_hash == content_hash
     {
-        effects.write_markdown_crash_state(doc, content)?;
         logger(
             doc,
             &format!(
@@ -136,7 +91,6 @@ pub fn checkpoint_document_baseline_with_effects(
         format!("document-baseline:{document_hash}:{generation}:{content_hash}"),
         fact,
     )?;
-    effects.write_markdown_crash_state(doc, content)?;
     logger(
         doc,
         &format!(
@@ -242,14 +196,6 @@ fn append_document_fact(
 
 /// Clear the normal merge baseline while retaining an auditable ledger fact.
 pub fn clear_document_baseline(doc: &Path) -> Result<()> {
-    clear_document_baseline_with_effects(doc, &FilesystemCrashStateEffects)
-}
-
-/// Append the typed clear fact, then remove its write-only crash-state sidecar.
-pub fn clear_document_baseline_with_effects(
-    doc: &Path,
-    effects: &dyn CrashStateEffects,
-) -> Result<()> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
     let generation = load_document_state_projection(doc)?
@@ -263,8 +209,7 @@ pub fn clear_document_baseline_with_effects(
             document_hash,
             generation,
         },
-    )?;
-    effects.clear_markdown_crash_state(doc)
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -649,7 +594,6 @@ pub fn clear_undo_content(doc: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
     use std::process::Command;
 
     fn setup() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -681,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn markdown_snapshot_save_load_and_delete_roundtrips() {
+    fn markdown_baseline_roundtrips_only_through_typed_state() {
         let (_dir, doc) = setup();
         let mut logs = Vec::new();
 
@@ -694,11 +638,10 @@ mod tests {
             load_document_baseline(&doc).unwrap().as_deref(),
             Some("snapshot body")
         );
-        let crash_projection = agent_doc_fs::snapshot_path_for(&doc).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&crash_projection).unwrap(),
-            "snapshot body",
-            "the typed checkpoint should drive the write-only crash-state sidecar"
+        let project_root = agent_doc_project_root_io::project_root_or_file_parent(&doc).unwrap();
+        assert!(
+            !project_root.join(".agent-doc/snapshots").exists(),
+            "typed baseline checkpoints must not emit content-bearing filesystem sidecars"
         );
         assert!(
             logs.iter()
@@ -707,41 +650,7 @@ mod tests {
 
         delete_recovery_projection_and_clear_baseline(&doc).unwrap();
         assert!(load_document_baseline(&doc).unwrap().is_none());
-        assert!(!crash_projection.exists());
         delete_recovery_projection_and_clear_baseline(&doc).unwrap();
-    }
-
-    struct StateFirstCrashEffect {
-        saw_committed_typed_state: Cell<bool>,
-    }
-
-    impl CrashStateEffects for StateFirstCrashEffect {
-        fn write_markdown_crash_state(&self, doc: &Path, content: &str) -> Result<()> {
-            self.saw_committed_typed_state
-                .set(load_document_baseline(doc)?.as_deref() == Some(content));
-            Ok(())
-        }
-
-        fn clear_markdown_crash_state(&self, doc: &Path) -> Result<()> {
-            self.saw_committed_typed_state
-                .set(load_document_baseline(doc)?.is_none());
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn crash_projection_effect_runs_after_typed_state_commit() {
-        let (_dir, doc) = setup();
-        let effect = StateFirstCrashEffect {
-            saw_committed_typed_state: Cell::new(false),
-        };
-
-        checkpoint_document_baseline_with_effects(&doc, "state first", |_, _| {}, &effect).unwrap();
-
-        assert!(
-            effect.saw_committed_typed_state.get(),
-            "crash-state effect must observe the authoritative typed checkpoint"
-        );
     }
 
     #[test]

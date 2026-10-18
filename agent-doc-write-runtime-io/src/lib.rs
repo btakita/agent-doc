@@ -5,7 +5,8 @@
 //! intent in the state ledger. The pipeline advances monotonically through
 //! canonical apply, editor acceptance/visibility, disk projection, and commit;
 //! retries and reconnects resume that same intent. Lazily is the sole attached
-//! editor authority. Snapshot/CRDT files are detached recovery projections only.
+//! editor authority. Recovery state lives in the typed ledger; no document-copy
+//! snapshot or CRDT filesystem sidecar participates in recovery.
 //!
 //! ## Write dedup (v0.28.2)
 //!
@@ -134,8 +135,8 @@
 //!
 //! - `write_appends_response`: inline write appends `## Assistant\n\n<text>` +
 //!   `\n## User\n\n` to a document → both headings and content present in file.
-//! - `write_updates_snapshot`: after a write the snapshot path resolves to
-//!   `.agent-doc/snapshots/` and a roundtrip read/write is lossless.
+//! - `write_updates_baseline`: after a write the typed ledger baseline roundtrips
+//!   losslessly and no `.agent-doc/snapshots/` directory is emitted.
 //! - `write_preserves_user_edits_via_merge`: 3-way merge when user appends to
 //!   `## User` block concurrently → merged result contains both response and
 //!   user addition.
@@ -146,8 +147,8 @@
 //! - `concurrent_writes_no_corruption`: 20 threads racing on atomic_write →
 //!   final file is one complete writer's content (no corruption or partial
 //!   writes).
-//! - `snapshot_matches_disk_state`: snapshot saved as `final_content`;
-//!   snapshot always matches the actual file on disk after a write.
+//! - `baseline_matches_disk_state`: the typed baseline is checkpointed as
+//!   `final_content` and always matches the actual file on disk after a write.
 //! - `try_ipc_refuses_incomplete_registration`: an attached document without a
 //!   matching PID-scoped endpoint fails closed without a disk write.
 //! - `try_ipc_succeeds_with_visible_receipt`: the matching endpoint accepts the
@@ -5889,29 +5890,20 @@ mod tests {
         assert!(result.contains("## User\n\nHello"));
     }
     #[test]
-    fn write_updates_snapshot() {
-        // Use a direct snapshot write/read to avoid CWD dependency.
-        // The snapshot module uses relative paths (.agent-doc/snapshots/),
-        // so we verify the pattern works via agent_doc_fs::snapshot_path_for + direct I/O.
+    fn write_checkpoint_uses_typed_ledger_without_snapshot_sidecar() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
         fs::write(&doc, content).unwrap();
 
-        // Verify snapshot path computation works
-        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
-        assert!(
-            snap_path
-                .to_string_lossy()
-                .contains(".agent-doc/snapshots/")
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, content, |_, _| {}).unwrap();
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(content)
         );
-
-        // Verify atomic_write + read roundtrip (the core of snapshot save)
-        let snap_abs = dir.path().join(&snap_path);
-        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
-        fs::write(&snap_abs, content).unwrap();
-        let loaded = fs::read_to_string(&snap_abs).unwrap();
-        assert_eq!(loaded, content);
+        assert!(!dir.path().join(".agent-doc/snapshots").exists());
     }
     /// gh#240 fixture: two free-text heads, `queue: go`, a response that
     /// answers only the first.

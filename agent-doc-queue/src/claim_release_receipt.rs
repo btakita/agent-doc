@@ -182,6 +182,8 @@ mod tests {
             identity: claim_identity(text),
             item_text: text.to_string(),
             owner: owner.to_string(),
+            generation: 1,
+            state: crate::queue_claim::QueueClaimState::Reported,
             claimed_at_secs: 1,
             expires_at_secs: 100,
             owner_session: None,

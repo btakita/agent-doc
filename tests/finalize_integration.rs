@@ -5137,7 +5137,7 @@ fn respond_does_not_supersede_a_session_check_refusal_that_survives_its_commit()
 #[test]
 fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     let (tmp, doc) = setup_session_stream_doc();
-    let setup = "Setup head held by a running worker.";
+    let setup = "Setup head claimed for a worker.";
     let question = "Does the page status enum have an archived value? What are the values?";
     let original = fs::read_to_string(&doc).unwrap().replace(
         "<!-- agent:backlog -->",
@@ -5160,7 +5160,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     assert!(!head_blob(tmp.path()).contains(question));
 
     // The operator adds the question after the commit; the coordinator claims
-    // it for a worker, and releases the claim when the worker reports.
+    // it for a worker, and releases the claim when the worker reports. A fresh
+    // claim is dispatching (`🟡`); only a generation-matched refresh/start
+    // receipt can truthfully advance it to running (`🚧`).
     let current = fs::read_to_string(&doc).unwrap().replace(
         &format!("- {setup}\n<!-- /agent:queue -->"),
         &format!("- {setup}\n- {question}\n<!-- /agent:queue -->"),
@@ -5181,8 +5183,8 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .success();
     let claimed_projection = fs::read_to_string(&doc).unwrap();
     assert!(
-        claimed_projection.contains(&format!("- 🚧 {setup}\n"))
-            && claimed_projection.contains(&format!("- 🚧 {question}\n")),
+        claimed_projection.contains(&format!("- 🟡 {setup}\n"))
+            && claimed_projection.contains(&format!("- 🟡 {question}\n")),
         "claim must immediately project every active worker row:\n{claimed_projection}"
     );
     let released = agent_doc()
@@ -5193,6 +5195,8 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
             doc.to_str().unwrap(),
             "--item",
             question,
+            "--generation",
+            "1",
         ])
         .assert()
         .success();
@@ -5205,10 +5209,10 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     );
     let released_projection = fs::read_to_string(&doc).unwrap();
     assert!(
-        released_projection.contains(&format!("- 🚧 {setup}\n"))
-            && released_projection.contains(&format!("- {question}\n"))
-            && !released_projection.contains(&format!("- 🚧 {question}\n")),
-        "release must clear only its claim marker immediately:\n{released_projection}"
+        released_projection.contains(&format!("- 🟡 {setup}\n"))
+            && released_projection.contains(&format!("- 📥 {question}\n"))
+            && !released_projection.contains(&format!("- 🟡 {question}\n")),
+        "reported release must retain a distinct awaiting-integration marker:\n{released_projection}"
     );
     assert_eq!(
         agent_doc_queue_io::claim_release_receipt::load(&doc)
@@ -5235,7 +5239,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         "the echoed, worker-reported head must be struck:\n{head}"
     );
     assert!(
-        head.contains(&format!("- 🚧 {setup}\n")),
+        head.contains(&format!("- 🟡 {setup}\n")),
         "the unrelated claimed head stays queued:\n{head}"
     );
     assert!(

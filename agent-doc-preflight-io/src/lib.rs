@@ -875,8 +875,10 @@ into `agent:exchange`, present it from the main session, and return the operator
 same worker when the harness can continue it. The closeout that presents a blocking packet must \
 also record its concrete operator action in `agent:todo` with `--todo-add`; when the answer and \
 worker result complete that action, check it off with `--todo-done`. Never treat a chat answer as \
-a tool permission grant; the harness must grant the exact protected action. Run `agent-doc queue release <FILE> \
---item <item>` when a subagent reports back, then close the item normally.";
+a tool permission grant; the harness must grant the exact protected action. Keep the generation \
+printed by the claim. When the subagent reports back, run `agent-doc queue report-complete <FILE> \
+--item <item> --generation <generation>`; integrate and close the item normally. Use `queue release \
+--requeue --generation <generation>` only for explicitly abandoned work.";
 
 /// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3048,14 +3050,21 @@ fn stale_claim_fact(
     let handle = quote(&agent_doc_queue::queue_claim::claim_item_handle(
         &claim.item_text,
     ));
+    let generation = if claim.generation > 0 {
+        format!(" --generation {}", claim.generation)
+    } else {
+        String::new()
+    };
     agent_doc_queue::no_changes_explanation::StaleClaimFact {
         reason: reason.as_str().to_string(),
         detail: reason.describe().to_string(),
         adopt_command: format!(
-            "agent-doc queue claim {doc} --item {handle} --owner {} --refresh",
-            quote(&claim.owner)
+            "agent-doc queue claim {doc} --item {handle} --owner {} --refresh{generation}",
+            quote(&claim.owner),
         ),
-        release_command: format!("agent-doc queue release {doc} --item {handle}"),
+        release_command: format!(
+            "agent-doc queue release {doc} --item {handle}{generation}"
+        ),
     }
 }
 
@@ -6339,6 +6348,18 @@ pub fn run_queue_maintenance_with_coin_gate(
     // `⏭️` over the claim's `🚧`, and the first `[operator-verify]` head was
     // blamed by the fallback (observed 2026-10-11 on haiven-dev `tasks/sdk.md`:
     // claimed `#cligenport` and deferred `#quirkbigint` both showed `⏭️`).
+    let active_claim_generations: std::collections::HashMap<String, u64> = if activation.active {
+        agent_doc_queue_io::queue_claim::active_claims_for_content(file, &current_content)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|claim| {
+                agent_doc_queue::queue_continuation::extract_head_id(&claim.item_text)
+                    .map(|id| (id.to_ascii_lowercase(), claim.generation))
+            })
+            .collect()
+    } else {
+        std::collections::HashMap::new()
+    };
     let claimed_head_ids: std::collections::HashSet<String> = if activation.active {
         agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(file, &current_content)
             .iter()
@@ -6386,10 +6407,17 @@ pub fn run_queue_maintenance_with_coin_gate(
                     .join(", "),
                 claims_held_after_report
                     .iter()
-                    .map(|id| format!(
-                        "`agent-doc queue release {} --item '#{id}'`",
-                        file.display()
-                    ))
+                    .map(|id| {
+                        let generation = active_claim_generations
+                            .get(id)
+                            .filter(|generation| **generation > 0)
+                            .map(|generation| format!(" --generation {generation}"))
+                            .unwrap_or_default();
+                        format!(
+                            "`agent-doc queue release {} --item '#{id}'{generation}`",
+                            file.display()
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("; "),
             ),
@@ -6558,22 +6586,34 @@ pub fn run_queue_maintenance_with_coin_gate(
             !agent_doc_queue_io::subagent_dispatch::is_dispatch_item(&subagent_dispatch, prompt)
         })
         .collect();
-    // `#claimmarker`: selection deliberately excludes claimed heads, but the
-    // lifecycle projection must show all work currently in flight. Keep the
-    // selected-only vector for cycle/drain semantics and use this union only
-    // for the transient queue/backlog `🚧` projection. The claim reader
-    // returns each matching live row, so repeated heads retain marker cardinality.
-    // Release, expiry, or queue removal drops a head from this union on the next
-    // maintenance pass and therefore clears its stale marker automatically.
-    let mut in_progress_queue_prompt_texts = active_queue_prompt_texts.clone();
-    if activation.active {
-        in_progress_queue_prompt_texts.extend(
-            agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(
-                file,
-                &current_content,
-            ),
-        );
+    // `#queueclaimstate`: selection excludes blocking attempts, while the
+    // visible queue projection derives every attempt state from the ledger.
+    // Durable completion cells can restore a matching attempt to Reported
+    // after restart; unmatched/older-generation evidence never creates state.
+    if activation.active
+        && let Err(err) = agent_doc_queue_io::queue_claim::reconcile_completion_evidence(
+            file,
+            &current_content,
+        )
+    {
+        eprintln!("[preflight] queue: completion evidence recovery failed ({err:#})");
     }
+    let claim_states = if activation.active {
+        agent_doc_queue_io::queue_claim::claim_states_for_content(file, &current_content)
+            .unwrap_or_else(|err| {
+                eprintln!("[preflight] queue: failed to read typed claim states ({err:#})");
+                Vec::new()
+            })
+    } else {
+        Vec::new()
+    };
+    let mut in_progress_queue_prompt_texts = active_queue_prompt_texts.clone();
+    in_progress_queue_prompt_texts.extend(
+        claim_states
+            .iter()
+            .filter(|claim| claim.state.blocks_dispatch())
+            .map(|claim| claim.item_text.clone()),
+    );
     if activation.active
         && let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
             file,
@@ -6598,10 +6638,25 @@ pub fn run_queue_maintenance_with_coin_gate(
     .context("queue maintenance: queue component vanished before in-progress marker")?
     .content(&current_content)
     .to_string();
+    let mut lifecycle_targets = active_queue_prompt_texts
+        .iter()
+        .cloned()
+        .map(|text| {
+            (
+                text,
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
+            )
+        })
+        .collect::<Vec<_>>();
+    lifecycle_targets.extend(
+        claim_states
+            .iter()
+            .map(|claim| (claim.item_text.clone(), claim.state.projection_marker())),
+    );
     if let Some((new_body, marked_entries)) =
-        agent_doc_queue::document_queue::project_prompts_in_progress(
+        agent_doc_queue::document_queue::project_prompt_lifecycle_markers(
             &marker_body,
-            &in_progress_queue_prompt_texts,
+            &lifecycle_targets,
         )?
     {
         current_content = {
@@ -9035,7 +9090,8 @@ mod tests {
     /// it was blamed as "dispatched and came back unconsumed" and the next cycle
     /// stamped `⏭️` over the claim; the `[operator-verify]` head whose subagent
     /// had finished showed no marker at all and read as unstarted. Now the claim
-    /// keeps `🚧`, the finished head shows `⏳`, and nothing is skipped — across
+    /// keeps its truthful `🟡` claimed/dispatching marker, the finished head
+    /// shows `⏳`, and nothing is skipped — across
     /// repeated maintenance passes.
     #[test]
     fn run_queue_maintenance_projects_claim_and_awaiting_operator_lifecycle() {
@@ -9045,7 +9101,7 @@ mod tests {
             let updated = std::fs::read_to_string(&doc).unwrap();
             assert_eq!(
                 queue_line(&updated, "claimed"),
-                "- 🚧 do [#claimed]",
+                "- 🟡 do [#claimed]",
                 "pass {pass}: a live claim keeps its in-flight marker:\n{updated}"
             );
             assert_eq!(
@@ -9091,7 +9147,8 @@ mod tests {
     }
 
     /// `#queueawaitop`: a claim held on a head whose item already waits on the
-    /// operator keeps `🚧` (the claim is real) but preflight names it, so the
+    /// operator keeps `🟡` (the claim is real, but no worker heartbeat/report
+    /// receipt exists) and preflight names it, so the
     /// coordinator releases it instead of leaving the queue showing work in
     /// flight that finished.
     #[test]
@@ -9101,7 +9158,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             queue_line(&updated, "verify"),
-            "- 🚧 do [#verify]",
+            "- 🟡 do [#verify]",
             "{updated}"
         );
         let warning = state
@@ -14250,7 +14307,7 @@ mod tests {
         assert_eq!(state.queue_drainable_head_count, 2);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#a]\n- 🚧 do [#b]\n- 🚧 do [#c]\n- do [#d]"),
+            updated.contains("- 🚧 do [#a]\n- 🟡 do [#b]\n- 🟡 do [#c]\n- do [#d]"),
             "selected and all claimed queue heads must be marked:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#a] inline work"));
@@ -14262,7 +14319,7 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- do [#b]\n- 🚧 do [#c]\n- do [#d]"));
+        assert!(updated.contains("- 🚧 do [#a]\n- do [#b]\n- 🟡 do [#c]\n- do [#d]"));
         assert!(updated.contains("- [ ] [#b] worker one"));
         assert!(updated.contains("- [ ] 🚧 [#c] worker two"));
 
@@ -14270,7 +14327,7 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- do [#b]\n- do [#c]\n- do [#d]"));
+        assert!(updated.contains("- 🚧 do [#a]\n- do [#b]\n- ⚠️ do [#c]\n- do [#d]"));
         assert!(updated.contains("- [ ] [#c] worker two"));
     }
 
@@ -17625,7 +17682,7 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains(&format!("- ~~{done}~~")), "{updated}");
-        assert!(updated.contains(&format!("- 🚧 {pending}\n")), "{updated}");
+        assert!(updated.contains(&format!("- 🟡 {pending}\n")), "{updated}");
         let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
         let owners: Vec<&str> = ledger.claims.iter().map(|c| c.owner.as_str()).collect();
         assert_eq!(

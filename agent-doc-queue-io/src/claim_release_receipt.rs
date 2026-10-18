@@ -135,6 +135,25 @@ pub enum ReleaseKind {
 /// [`ReleaseKind::Requeue`], forget) its release receipt.
 pub fn release(file: &Path, item: &str, kind: ReleaseKind) -> Result<Option<QueueClaim>> {
     let released = crate::queue_claim::release(file, item)?;
+    apply_release_receipt(file, item, kind, released)
+}
+
+pub fn release_attempt(
+    file: &Path,
+    item: &str,
+    kind: ReleaseKind,
+    generation: Option<u64>,
+) -> Result<Option<QueueClaim>> {
+    let released = crate::queue_claim::release_attempt(file, item, generation)?;
+    apply_release_receipt(file, item, kind, released)
+}
+
+fn apply_release_receipt(
+    file: &Path,
+    item: &str,
+    kind: ReleaseKind,
+    released: Option<QueueClaim>,
+) -> Result<Option<QueueClaim>> {
     match kind {
         ReleaseKind::Reported => {
             if let Some(claim) = &released {

@@ -75,6 +75,8 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
                     doc.to_str().unwrap(),
                     "--item",
                     item,
+                    "--generation",
+                    "1",
                 ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -385,6 +387,8 @@ fn several_reports_then_preflight_admits_the_next_turn() {
                 doc.to_str().unwrap(),
                 "--item",
                 item,
+                "--generation",
+                "1",
             ],
         );
         assert!(

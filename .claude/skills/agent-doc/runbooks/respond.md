@@ -246,9 +246,12 @@ and the pending granular-flags-only rule. This runbook carries the rest.
        as the child result; after the coordinator asks, continue the same child
        session ID when available. Child permissions remain independent.
   5. While a subagent runs past a cycle, keep its claim alive with
-     `agent-doc queue claim <FILE> --item <...> --owner subagent:<label> --refresh`
-     (the heartbeat; the default TTL is 2h). Under the attribute, an expired claim
-     is offered for dispatch again and never drained inline.
+     `agent-doc queue claim <FILE> --item <...> --owner subagent:<label> --refresh --generation <N>`
+     using the generation printed by the original claim. This explicit receipt
+     is the positive dispatch/heartbeat evidence that changes `🟡` claimed to
+     `🚧` running; never infer running from a label or process poll. Under the
+     attribute, an expired attempt becomes `⚠️` lost and is offered for dispatch
+     again with a new generation, never drained inline.
   6. A subagent commits and pushes its branch (fast-forward only, never force).
      It never runs `make install`, a release build, a version bump, a tag, or a
      release. Concurrent subagents share the coordinator's scratchpad, so a
@@ -258,7 +261,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      unique `mktemp` path (one subagent's commit once carried a sibling's
      message).
   7. As soon as a subagent reports back, run
-     `agent-doc queue report-complete <FILE> --item <...>`. The binary appends
+     `agent-doc queue report-complete <FILE> --item <...> --generation <N>`.
+     The exact generation fence prevents a late result from mutating a reclaimed
+     item and changes its marker to `📥` (reported/awaiting integration). The binary appends
      immediate, deduplicated completion feedback to `agent:exchange` through
      its cross-process document owner and editor/CRDT authority while leaving
      the claim active; the worker never edits the session document. The
@@ -279,13 +284,13 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `> **Queue prompt:** <line>` echo for a free-text head (a `### Re:`
      heading alone leaves the line queued). That closeout also ends the claim,
      so no release is needed first (`#claimstrike`). A bare
-     `agent-doc queue release <FILE> --item <...>` records that the worker
+     `agent-doc queue release <FILE> --item <...> --generation <N>` records that the worker
      reported (`#reportedrelease`): the line stays queued, is never offered to
      a new worker, steering routes it `dispatch=persist_reported`, and the
      Codex Stop hook blocks until it is persisted, so release only when
      integration must finish before you can answer, and persist before the
      turn ends. For abandoned, failed, or requeued work run
-     `agent-doc queue release <FILE> --item <...> --requeue`: no report is
+     `agent-doc queue release <FILE> --item <...> --generation <N> --requeue`: no report is
      recorded and the line is dispatchable to a new worker again.
   Harnesses without an in-session Agent tool (Codex, OpenCode, Grok Build,
   Cursor) claim the same items and fall back to

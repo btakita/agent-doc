@@ -284,7 +284,7 @@ fn id_prefix(text: &str) -> &str {
         .unwrap_or("")
 }
 
-/// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🚧`/`⏭️`/`⏳`
+/// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🟡`/`🚧`/`📥`/`⚠️`/`⏭️`/`⏳`
 /// and the `**pin**`/`**prioritized**` word forms) from a queue head so a
 /// marker-decorated line keys to the same durable identity as the bare line.
 /// Shared with the CRDT cell-merge free-text keyer so merge, convergence, and
@@ -307,7 +307,11 @@ pub fn strip_priority_markers(text: &str) -> String {
             "_pin_",
             ":round_pushpin:",
             "📍",
+            // Fenced subagent-attempt lifecycle projections.
+            "🟡",
             "🚧",
+            "📥",
+            "⚠️",
             "⏭\u{fe0f}",
             // `#queueawaitop`: awaiting-operator lifecycle projection.
             "⏳",
@@ -329,7 +333,7 @@ pub fn strip_priority_markers(text: &str) -> String {
 /// It answers "which piece of work is this line about?", so it ignores
 /// everything on the line that only says *how* to run that work:
 ///
-/// * lifecycle / priority markers (`🚧`, `⏭️`, `📌`, `**pin**`, ...), via
+/// * lifecycle / priority markers (`🟡`, `🚧`, `📥`, `⚠️`, `⏭️`, `📌`, `**pin**`, ...), via
 ///   [`strip_priority_markers`];
 /// * leading intent/preset tags: `#subagents`, `#subagent:`, `#gh-fix`,
 ///   `#bug:` — any leading `#tag` / `#tag:` token that starts with a letter and
@@ -398,7 +402,10 @@ mod tests {
         let claimed = queue_head_identity(&format!("#subagents: {url}"));
         for edited in [
             format!("#subagents: #gh-fix {url}"),
+            format!("🟡 #subagents: #gh-fix {url}"),
             format!("🚧 #subagents: #gh-fix {url}"),
+            format!("📥 #subagents: #gh-fix {url}"),
+            format!("⚠️ #subagents: #gh-fix {url}"),
             format!("#gh-fix {url}"),
             format!("#subagent: {url}"),
             format!("⏭\u{fe0f} #subagents 📌 {url}"),

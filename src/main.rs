@@ -4390,6 +4390,10 @@ enum QueueAction {
         /// harness session, e.g. after the claiming coordinator `/clear`ed.
         #[arg(long)]
         refresh: bool,
+        /// Exact generation printed by the original claim. Required with
+        /// `--refresh` for generated claims.
+        #[arg(long, requires = "refresh")]
+        generation: Option<u64>,
     },
     /// Publish immediate binary-owned `agent:exchange` feedback that a claimed
     /// background subagent reported back. The claim remains active while the
@@ -4401,6 +4405,10 @@ enum QueueAction {
         /// The claimed queue item: `#id` / `do [#id]`, or the queue line's text
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
+        /// Exact generation printed by `queue claim`. Required for generated
+        /// claims; omitted only for legacy generation-zero rows.
+        #[arg(long)]
+        generation: Option<u64>,
     },
     /// Repair the v0.34 rolling-upgrade completion notices whose binary marker
     /// was written directly beneath a bodyless `### Re:` heading. Rewrites
@@ -4428,6 +4436,10 @@ enum QueueAction {
         /// dispatchable to a new worker again
         #[arg(long)]
         requeue: bool,
+        /// Exact generation printed by `queue claim`. Prevents a late worker
+        /// result from releasing a replacement attempt.
+        #[arg(long)]
+        generation: Option<u64>,
     },
     /// Print the operator authorization preamble for a dispatched queue item
     /// (`#waypostauthorization`): the verbatim item, the backlog text an id head
@@ -5015,6 +5027,7 @@ fn is_operator_usage_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause.is::<agent_doc_queue::queue_claim::QueueClaimMiss>()
             || cause.is::<agent_doc_queue::queue_claim::QueueClaimRefreshRefused>()
+            || cause.is::<agent_doc_queue::queue_claim::QueueClaimTransitionRefused>()
             || cause.is::<read::UnknownReadComponent>()
     })
 }
@@ -7614,10 +7627,16 @@ fn try_main() -> anyhow::Result<()> {
                 owner,
                 ttl_secs,
                 refresh,
+                generation,
             } => {
                 if refresh {
-                    let claim =
-                        agent_doc_queue_io::queue_claim::refresh(&file, &item, &owner, ttl_secs)?;
+                    let claim = agent_doc_queue_io::queue_claim::refresh_attempt(
+                        &file,
+                        &item,
+                        &owner,
+                        ttl_secs,
+                        generation,
+                    )?;
                     let queue_effects = CliQueueCommandEffects;
                     agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
                         &queue_effects,
@@ -7625,8 +7644,8 @@ fn try_main() -> anyhow::Result<()> {
                         None,
                     )?;
                     eprintln!(
-                        "[queue] refreshed {:?} for {} until {}",
-                        claim.item_text, claim.owner, claim.expires_at_secs
+                        "[queue] refreshed {:?} for {} generation {} until {} (running)",
+                        claim.item_text, claim.owner, claim.generation, claim.expires_at_secs
                     );
                     return Ok(());
                 }
@@ -7639,8 +7658,12 @@ fn try_main() -> anyhow::Result<()> {
                     None,
                 )?;
                 eprintln!(
-                    "[queue] claimed {:?} for {} until {} ({:?})",
-                    claim.item_text, claim.owner, claim.expires_at_secs, outcome
+                    "[queue] claimed {:?} for {} generation {} until {} ({:?}, dispatching)",
+                    claim.item_text,
+                    claim.owner,
+                    claim.generation,
+                    claim.expires_at_secs,
+                    outcome
                 );
                 Ok(())
             }
@@ -7648,14 +7671,15 @@ fn try_main() -> anyhow::Result<()> {
                 file,
                 item,
                 requeue,
+                generation,
             } => {
-                use agent_doc_queue_io::claim_release_receipt::{ReleaseKind, release};
+                use agent_doc_queue_io::claim_release_receipt::{ReleaseKind, release_attempt};
                 let kind = if requeue {
                     ReleaseKind::Requeue
                 } else {
                     ReleaseKind::Reported
                 };
-                let released = release(&file, &item, kind)?;
+                let released = release_attempt(&file, &item, kind, generation)?;
                 if let Some(claim) = released.as_ref() {
                     let queue_effects = CliQueueCommandEffects;
                     agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
@@ -7706,10 +7730,14 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
-            QueueAction::ReportComplete { file, item } => {
-                match queue_completion_feedback::report_complete(&file, &item)? {
+            QueueAction::ReportComplete {
+                file,
+                item,
+                generation,
+            } => {
+                match queue_completion_feedback::report_complete(&file, &item, generation)? {
                     Some(outcome) => eprintln!(
-                        "[queue] subagent completion feedback {} for {:?} (owner {}); claim remains active",
+                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration",
                         if outcome.appended {
                             "accepted"
                         } else {
@@ -7717,6 +7745,7 @@ fn try_main() -> anyhow::Result<()> {
                         },
                         outcome.claim.item_text,
                         outcome.claim.owner,
+                        outcome.claim.generation,
                     ),
                     None => eprintln!(
                         "[queue] no subagent claim on {item:?}; no completion feedback written"

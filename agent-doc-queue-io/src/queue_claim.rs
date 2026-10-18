@@ -431,12 +431,22 @@ pub fn claim_with_session(
             .context("claimed item missing from the ledger after claim")?;
         Ok((outcome, stored))
     })?;
+    if result.0 == ClaimOutcome::HeldByOther {
+        bail!(
+            "queue head {:?} is already held by {} generation {}; release/expire that attempt before redispatch",
+            result.1.item_text,
+            result.1.owner,
+            result.1.generation
+        );
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_claim outcome={:?} owner={} expires_at={} item_bytes={} occurrences={occurrences} owner_session={}",
+            "queue_claim outcome={:?} owner={} generation={} state={:?} expires_at={} item_bytes={} occurrences={occurrences} owner_session={}",
             result.0,
             result.1.owner,
+            result.1.generation,
+            result.1.state,
             result.1.expires_at_secs,
             item.trim().len(),
             owner_session_log_token(result.1.owner_session.as_ref()),
@@ -453,7 +463,35 @@ pub fn refresh(file: &Path, item: &str, owner: &str, ttl_secs: u64) -> Result<Qu
     refresh_at(file, item, owner, ttl_secs, now_secs())
 }
 
+pub fn refresh_attempt(
+    file: &Path,
+    item: &str,
+    owner: &str,
+    ttl_secs: u64,
+    generation: Option<u64>,
+) -> Result<QueueClaim> {
+    refresh_attempt_at(file, item, owner, ttl_secs, now_secs(), generation)
+}
+
 fn refresh_at(file: &Path, item: &str, owner: &str, ttl_secs: u64, now: u64) -> Result<QueueClaim> {
+    // Compatibility helper for internal callers/tests. Command boundaries use
+    // `refresh_attempt` and enforce a generation fence.
+    let generation = load_ledger(file)?
+        .claims
+        .into_iter()
+        .find(|claim| claim.identity == claim_identity(item))
+        .map(|claim| claim.generation);
+    refresh_attempt_at(file, item, owner, ttl_secs, now, generation)
+}
+
+fn refresh_attempt_at(
+    file: &Path,
+    item: &str,
+    owner: &str,
+    ttl_secs: u64,
+    now: u64,
+    generation: Option<u64>,
+) -> Result<QueueClaim> {
     if item.trim().is_empty() {
         bail!("queue claim --refresh needs a non-empty --item (`#id` or the queue line's text)");
     }
@@ -468,14 +506,23 @@ fn refresh_at(file: &Path, item: &str, owner: &str, ttl_secs: u64, now: u64) -> 
     // the subagent makes the claim live again.
     let owner_session = current_owner_session();
     let outcome = mutate_ledger(file, |ledger| {
-        Ok(ledger.refresh_in_session(&target, owner, now, ttl_secs, owner_session))
+        Ok(ledger.refresh_attempt_in_session(
+            &target,
+            owner,
+            now,
+            ttl_secs,
+            owner_session,
+            generation,
+        ))
     })?;
     match &outcome {
         Ok(claim) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_claim_refresh outcome=refreshed owner={} expires_at={} item_bytes={} owner_session={}",
+                "queue_claim_refresh outcome=refreshed owner={} generation={} state={:?} expires_at={} item_bytes={} owner_session={}",
                 claim.owner,
+                claim.generation,
+                claim.state,
                 claim.expires_at_secs,
                 item.trim().len(),
                 owner_session_log_token(claim.owner_session.as_ref()),
@@ -492,6 +539,73 @@ fn refresh_at(file: &Path, item: &str, owner: &str, ttl_secs: u64, now: u64) -> 
         ),
     }
     outcome.map_err(|refused: QueueClaimRefreshRefused| refused.into())
+}
+
+/// Mark one exact worker attempt as reported/awaiting integration.
+pub fn report_attempt(file: &Path, item: &str, generation: Option<u64>) -> Result<QueueClaim> {
+    let (target, _) = resolve_live_claim_target(file, item, "queue_claim_report")?;
+    let claim = mutate_ledger(file, |ledger| {
+        ledger
+            .report(&target, generation)
+            .map_err(anyhow::Error::from)
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_state state=reported owner={} generation={} item_bytes={}",
+            claim.owner,
+            claim.generation,
+            claim.item_text.len()
+        ),
+    );
+    Ok(claim)
+}
+
+/// Stable binary attestation key for one exact worker attempt. Generation is
+/// part of every new key, so a completion from an older attempt cannot attest
+/// to a replacement attempt even when the queue text and worker label match.
+pub fn completion_feedback_key(claim: &QueueClaim) -> Result<String> {
+    let identity = serde_json::to_string(&claim.identity).context("serialize claim identity")?;
+    let material = if claim.generation == 0 {
+        format!("{identity}\n{}\n{}", claim.owner, claim.claimed_at_secs)
+    } else {
+        format!(
+            "{identity}\n{}\n{}\n{}",
+            claim.owner, claim.generation, claim.claimed_at_secs
+        )
+    };
+    Ok(agent_doc_hash::content_hash(&material))
+}
+
+/// Recover a reported state from a durable binary completion cell for the
+/// exact current attempt. This is deliberately bounded: feedback whose keyed
+/// attempt no longer exists in the ledger is left quarantined and cannot
+/// manufacture ownership for a newly claimed generation.
+pub fn reconcile_completion_evidence(file: &Path, content: &str) -> Result<usize> {
+    let recovered = mutate_ledger(file, |ledger| {
+        let mut recovered = 0;
+        for claim in &mut ledger.claims {
+            if claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported {
+                continue;
+            }
+            let current =
+                agent_doc_document::subagent_completion::marker(&completion_feedback_key(claim)?);
+            // Generation-zero claims compute the historical key above. New
+            // claims never accept that unfenced form.
+            if content.contains(&current) {
+                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Reported;
+                recovered += 1;
+            }
+        }
+        Ok(recovered)
+    })?;
+    if recovered > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("queue_claim_recovered_reported count={recovered}"),
+        );
+    }
+    Ok(recovered)
 }
 
 /// Log-safe summary of a claim's owner session: harness, pane and pid, never
@@ -513,6 +627,20 @@ fn owner_session_log_token(session: Option<&ClaimOwnerSession>) -> String {
 
 /// Release the claim on `item`. Returns the released claim, if there was one.
 pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
+    let target = resolve_live_claim_target(file, item, "queue_claim_release")
+        .map(|(target, _)| target)
+        .unwrap_or_else(|_| item.to_string());
+    let released = mutate_ledger(file, |ledger| {
+        Ok(ledger.release(&target).or_else(|| ledger.release(item)))
+    })?;
+    Ok(released)
+}
+
+pub fn release_attempt(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+) -> Result<Option<QueueClaim>> {
     // Release by the same resolution `claim` used, so `--item #id` releases a
     // `#subagents do [#id]` head; fall back to the literal item (a closed head
     // can still hold a stale claim worth releasing).
@@ -529,7 +657,12 @@ pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
         }
     };
     let released = mutate_ledger(file, |ledger| {
-        Ok(ledger.release(&target).or_else(|| ledger.release(item)))
+        match ledger.release_fenced(&target, generation)? {
+            Some(claim) => Ok(Some(claim)),
+            None => ledger
+                .release_fenced(item, generation)
+                .map_err(anyhow::Error::from),
+        }
     })?;
     agent_doc_ops_log_io::log_op(
         file,
@@ -598,6 +731,31 @@ pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<Queue
         .active(now_secs(), live.as_ref())
         .into_iter()
         .cloned()
+        .collect())
+}
+
+/// Every live queue-head claim record, including lost and reported states, for
+/// the visible runtime projection. Expired active attempts are presented as
+/// lost even before the next durable prune pass.
+pub fn claim_states_for_content(file: &Path, content: &str) -> Result<Vec<QueueClaim>> {
+    let ledger = load_ledger_following(file, content)?;
+    let live = live_queue_head_identities(content);
+    let now = now_secs();
+    Ok(ledger
+        .claims
+        .into_iter()
+        .filter(|claim| {
+            live.as_ref()
+                .is_some_and(|live| live.contains(&claim.identity))
+        })
+        .map(|mut claim| {
+            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
+                && claim.is_expired(now)
+            {
+                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            }
+            claim
+        })
         .collect())
 }
 
@@ -712,13 +870,21 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
         }
         Ok(ledger.prune_detailed(now, live.as_ref()))
     })?;
-    // `#claimfollowedit`: name every dropped claim, so a prune is never silent.
+    // `#claimfollowedit`: name every closure and every active->lost transition,
+    // so expiry is visible without pretending the attempt record disappeared.
     for (claim, cause) in &pruned {
+        let event = match cause {
+            agent_doc_queue::queue_claim::ClaimPruneCause::Expired => {
+                "queue_claim_state state=lost"
+            }
+            agent_doc_queue::queue_claim::ClaimPruneCause::Closed => "queue_claim_pruned",
+        };
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_claim_pruned owner={} cause={} item_bytes={} followed_edits={}",
+                "{event} owner={} generation={} cause={} item_bytes={} followed_edits={}",
                 claim.owner,
+                claim.generation,
                 cause.as_str(),
                 claim.item_text.trim().len(),
                 claim.followed_from.len()
@@ -886,6 +1052,38 @@ mod tests {
         assert!(release(&doc, "fix issue 110 now").unwrap().is_some());
         assert!(!claimed_items_for_content(&doc, &content).claims("fix issue 110 now"));
         assert!(release(&doc, "fix issue 110 now").unwrap().is_none());
+    }
+
+    #[test]
+    fn durable_completion_evidence_recovers_only_the_exact_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["finish worker task"]);
+        let (_, claim) = claim(&doc, "finish worker task", "subagent:worker", 600).unwrap();
+
+        let mut stale = claim.clone();
+        stale.generation = 0;
+        let stale_marker = agent_doc_document::subagent_completion::marker(
+            &completion_feedback_key(&stale).unwrap(),
+        );
+        assert_eq!(
+            reconcile_completion_evidence(&doc, &stale_marker).unwrap(),
+            0,
+            "an unfenced historical result must not attest generation one"
+        );
+
+        let exact = agent_doc_document::subagent_completion::cell(
+            &claim.owner,
+            &claim.item_text,
+            &completion_feedback_key(&claim).unwrap(),
+        );
+        assert_eq!(reconcile_completion_evidence(&doc, &exact).unwrap(), 1);
+        let stored = load_ledger(&doc).unwrap().claims.remove(0);
+        assert_eq!(stored.generation, 1);
+        assert_eq!(
+            stored.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert!(stored.blocks_dispatch(u64::MAX));
     }
 
     fn refusal(err: &anyhow::Error) -> &agent_doc_queue::queue_claim::RefreshRefusal {

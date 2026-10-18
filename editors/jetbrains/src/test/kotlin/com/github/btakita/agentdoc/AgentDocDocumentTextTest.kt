@@ -70,6 +70,28 @@ class AgentDocDocumentTextTest {
     }
 
     @Test
+    fun `known plain markdown close does not reacquire a read permit`() {
+        assertFalse(
+            closingDocumentCutRequiresTextUtil(
+                hasAttachedForwarder = false,
+                knownNotAgentDocDocument = true,
+            ),
+        )
+        assertTrue(
+            closingDocumentCutRequiresTextUtil(
+                hasAttachedForwarder = true,
+                knownNotAgentDocDocument = true,
+            ),
+        )
+        assertTrue(
+            closingDocumentCutRequiresTextUtil(
+                hasAttachedForwarder = false,
+                knownNotAgentDocDocument = false,
+            ),
+        )
+    }
+
+    @Test
     fun `every registration entry point treats plain current text as terminal`() {
         val manager = managerSource()
         val localForward =
@@ -107,5 +129,30 @@ class AgentDocDocumentTextTest {
         assertTrue(closingPublish.contains("recordNotAgentDocDocument(filePath)"))
         assertTrue(closingPublish.contains("clearLocalPending(filePath)"))
         assertTrue(closingPublish.contains("return@submit true"))
+
+        val companionPublish =
+            manager.substringAfter("fun publishClosingDocumentCut(filePath: String, document: Document): Boolean")
+                .substringBefore("fun isApplyingRemote")
+        assertTrue(
+            "a path outside every project must close as a successful no-op",
+            companionPublish.contains("managerForFilePath(filePath) ?: return true"),
+        )
+        assertFalse(
+            "the companion close entry point must not report absent project ownership as failure",
+            companionPublish.contains("managerForFilePath(filePath) ?: return false"),
+        )
+
+        val knownPlainGuard = closingPublish.indexOf("closingDocumentCutRequiresTextUtil")
+        val blockingRead = closingPublish.indexOf("ReadAction.compute<String, RuntimeException> { document.text }")
+        assertTrue("known plain classification must be checked before reading", knownPlainGuard >= 0)
+        assertTrue("known plain classification must bypass the closing read", knownPlainGuard < blockingRead)
+        assertFalse(
+            "closing settlement must not treat transient read-action refusal as publish failure",
+            closingPublish.contains("tryReadDocumentText(document) ?: return false"),
+        )
+        assertTrue(
+            "closing settlement must wait for a read permit on its dedicated worker",
+            blockingRead >= 0,
+        )
     }
 }

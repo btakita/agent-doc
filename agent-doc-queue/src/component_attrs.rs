@@ -41,6 +41,14 @@ pub fn is_prompt_component_attr(key: &str) -> bool {
     PROMPT_COMPONENT_ATTRS.contains(&key)
 }
 
+/// Whether `key` is part of the complete public `agent:queue` marker
+/// vocabulary. Mutation commands and lint reconciliation share this owner so a
+/// newly supported queue attribute cannot be writable-but-warned or
+/// lint-clean-but-silently-ignored.
+pub fn is_queue_component_attr(key: &str) -> bool {
+    is_queue_only_component_attr(key) || is_prompt_component_attr(key) || key == "priority"
+}
+
 /// Whether `key` is valid on `agent:queue` without an explicit value.
 pub fn is_queue_bare_flag_attr(key: &str) -> bool {
     matches!(

@@ -505,11 +505,31 @@ fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec
         .into_iter()
         .filter(|finding| {
             !is_registry_known_unknown_component_finding(finding)
+                && !is_agent_doc_queue_known_attr_finding(finding)
                 && !is_agent_doc_queue_bare_flag_finding(finding)
                 && !is_explicit_no_preset_finding(finding)
         })
         .map(rewrite_empty_attr_value_hint)
         .collect()
+}
+
+/// Tagpath's queue attribute allowlist can lag the queue domain. Reconcile its
+/// `unknown-attr` findings against the queue crate's complete public marker
+/// vocabulary so runtime-valid queue identifiers and schedules also pass lint.
+/// Unknown keys and known keys on the wrong component remain findings.
+fn is_agent_doc_queue_known_attr_finding(finding: &LintFinding) -> bool {
+    if finding.rule != "agent-doc/unknown-attr" {
+        return false;
+    }
+    let mut quoted = finding.message.split('`');
+    let Some(attribute) = quoted.nth(1) else {
+        return false;
+    };
+    let Some(component) = quoted.nth(1) else {
+        return false;
+    };
+    component == "agent:queue"
+        && agent_doc_queue::component_attrs::is_queue_component_attr(attribute)
 }
 
 /// GH #227 (operator decision): `preset=""` on a prompt component
@@ -1174,6 +1194,28 @@ operator-owned scratch state\n\
         assert!(message.contains("agent-doc/malformed-attr"), "{message}");
         assert!(message.contains("attribute `preset`"), "{message}");
         assert!(message.contains("missing `=value`"), "{message}");
+    }
+
+    #[test]
+    fn valid_identified_queue_schedule_attributes_pass_lint() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:queue id=main -->\n\
+            - immediate\n\
+            <!-- /agent:queue -->\n\n\
+            <!-- agent:queue id=issues interval=1h loop -->\n\
+            - hourly\n\
+            <!-- /agent:queue -->\n";
+        let file = write_doc(&dir, "identified-schedules.md", doc);
+        run(&file, None).unwrap_or_else(|error| {
+            panic!("valid queue `id` / `interval` attributes must pass lint: {error:#}")
+        });
+        run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+            panic!("valid queue `id` / `interval` attributes must pass strict lint: {error:#}")
+        });
     }
 
     /// GH #227 (operator decision): `preset=""` means explicitly no preset. It

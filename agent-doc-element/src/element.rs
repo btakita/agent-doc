@@ -652,6 +652,19 @@ pub fn unset_open_marker_attr(marker: &str, attr: &str) -> Result<String, Marker
     Ok(render_open_marker(&parts, &tokens))
 }
 
+/// Parse the raw attribute tokens from one opening marker without collapsing
+/// malformed empty pairs into absence.
+///
+/// Unlike [`parse_attrs`], this preserves `key=` as `Some("")`. Exact marker
+/// mutation commands use that distinction to refuse a malformed selector
+/// instead of accidentally treating it as an omitted legacy attribute.
+pub fn open_marker_attr_tokens(
+    marker: &str,
+) -> Result<Vec<(String, Option<String>)>, MarkerAttrError> {
+    let parts = split_open_marker(marker)?;
+    Ok(split_attr_tokens(&parts.attr_text))
+}
+
 /// The byte-preserving decomposition of an opening marker.
 struct OpenMarkerParts {
     /// Everything up to and including the component name, e.g. `<!-- agent:backlog`.

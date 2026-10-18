@@ -4387,6 +4387,22 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
+    /// Atomically set/remove opening-marker attributes on one exact queue id.
+    /// The edit is planned from live document authority and committed through
+    /// the editor/CRDT compare-and-swap path; sibling queues are untouched.
+    Attr {
+        /// Path to the session document
+        file: PathBuf,
+        /// Exact canonical queue id (`default` for a legacy single unkeyed queue)
+        #[arg(long)]
+        id: String,
+        /// Set an attribute (`KEY=VALUE`, or `KEY` for a bare flag); repeatable
+        #[arg(long = "set", value_name = "KEY[=VALUE]")]
+        set: Vec<String>,
+        /// Remove an attribute by key; repeatable
+        #[arg(long = "remove", value_name = "KEY")]
+        remove: Vec<String>,
+    },
     /// Reserve a live queue head for dispatch to a worker outside the
     /// in-session loop (`#queueclaim`). A claim blocks duplicate dispatch but
     /// does not prove that a worker is running; `queue start` records that
@@ -7808,6 +7824,31 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
+            QueueAction::Attr {
+                file,
+                id,
+                set,
+                remove,
+            } => {
+                let sets = set
+                    .iter()
+                    .map(|raw| agent_doc_queue_io::queue_attr::QueueAttrSet::parse(raw))
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                let queue_effects = CliQueueCommandEffects;
+                let changed = agent_doc_queue_io::queue_attr::edit_with_effects(
+                    &queue_effects,
+                    &file,
+                    &id,
+                    &sets,
+                    &remove,
+                )?;
+                println!(
+                    "{}: queue id `{id}` attributes {}",
+                    file.display(),
+                    if changed { "updated" } else { "already satisfied" }
+                );
+                Ok(())
+            }
             QueueAction::ReportComplete {
                 file,
                 item,
@@ -8299,6 +8340,40 @@ mod recycle_force_tests {
             parse(&["agent-doc", "version", "--json"]),
             Commands::Version { json: true }
         ));
+    }
+
+    #[test]
+    fn queue_attr_parses_exact_id_and_repeatable_mutations() {
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "attr",
+            "tasks/session.md",
+            "--id",
+            "issues",
+            "--set",
+            "interval=1h",
+            "--set",
+            "loop",
+            "--remove",
+            "time",
+        ]) {
+            Commands::Queue {
+                action:
+                    QueueAction::Attr {
+                        file,
+                        id,
+                        set,
+                        remove,
+                    },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert_eq!(id, "issues");
+                assert_eq!(set, ["interval=1h", "loop"]);
+                assert_eq!(remove, ["time"]);
+            }
+            _ => panic!("expected queue attr subcommand"),
+        }
     }
 
     #[test]

@@ -20808,10 +20808,23 @@ fn serve_document_turn_authority_stream(
             .context("parse document-turn authority subscription")?;
     let project_root = runtime.bootstrap_snapshot()?.project_root;
     let document_hash = agent_doc_hash::document_id_for_path(&file);
-    anyhow::ensure!(
-        invocation.channel == document_turn_authority_channel(&document_hash),
-        "document-turn authority channel does not match requested document"
-    );
+    // The requested file is the authority boundary; the channel is a derived
+    // transport key, not an independent client assertion.  In particular, an
+    // editor can open a file and compute its canonical-path hash before the
+    // file is deleted.  Rust's documented missing-path identity is then the
+    // display path, so rejecting the stale derived key makes the editor retry
+    // the same permanently-invalid request forever.  Re-derive the channel
+    // from the request file on every connection and record the reconciliation.
+    let channel = document_turn_authority_channel(&document_hash);
+    if invocation.channel != channel {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "document_turn_authority_channel_reconciled requested={} derived={} reason=server_file_authority",
+                invocation.channel, channel
+            ),
+        );
+    }
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &project_root,
         &file.to_string_lossy(),
@@ -20832,7 +20845,7 @@ fn serve_document_turn_authority_stream(
     // Closing it makes the editor reconnect to the successor.
     while !should_stop.load(Ordering::SeqCst) && !runtime.successor_promoted() {
         let subscription = runtime.subscribe_state_plane(
-            &invocation.channel,
+            &channel,
             after_controller_generation,
             after_version,
             timeout,
@@ -49399,7 +49412,8 @@ mod tests {
         let dir = async_handoff_test_project();
         let runtime = test_controller_runtime(&test_bootstrap(&dir));
         let file = dir.path().join("tasks/one.md");
-        let channel = document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
+        let channel =
+            document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
         let (request, _) = document_turn_authority_stream_request(&file, &channel, None).unwrap();
         let dependency = runtime.state_plane_graph.channel_dependency(&channel);
         let stream_runtime = Arc::clone(&runtime);
@@ -49468,6 +49482,27 @@ mod tests {
             runtime.subscribe_state_plane(&channel, Some(generation), u64::MAX, HANG_CEILING);
         assert!(late.timed_out);
         assert!(started.elapsed() < HANG_CEILING);
+    }
+
+    /// `#dogfood-authority-channel-retry-loop`: an editor computes the
+    /// canonical-path channel while a file exists. If the file is deleted
+    /// before reconnect, `document_id_for_path` deliberately falls back to the
+    /// display path. The server must derive its own channel from the file
+    /// authority instead of rejecting a deterministic stale client key.
+    #[test]
+    fn a_deleted_document_cannot_wedge_authority_reconnect_on_its_old_channel() {
+        let dir = async_handoff_test_project();
+        let runtime = test_controller_runtime(&test_bootstrap(&dir));
+        let file = dir.path().join("tasks/one.md");
+        let channel = document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
+        let (request, _) = document_turn_authority_stream_request(&file, &channel, None).unwrap();
+        std::fs::remove_file(&file).unwrap();
+
+        let should_stop = AtomicBool::new(true);
+        let mut written = Vec::new();
+        serve_document_turn_authority_stream(&runtime, request, &should_stop, &mut written)
+            .expect("the server-derived channel must tolerate a file deleted after subscription");
+        assert!(written.is_empty());
     }
 
     /// `#drainingpredecessor` (GH #261): a promoted predecessor ran the

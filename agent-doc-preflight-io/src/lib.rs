@@ -352,16 +352,43 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
 /// current, or a refused write changes nothing this pass. Returns ids assigned
 /// during this pass.
 pub fn run_todo_id_maintenance(file: &Path, coin_gate: &FreeTextCoinGate) -> Result<Vec<String>> {
+    run_todo_id_maintenance_with_options(file, coin_gate, false, None)
+}
+
+/// Force-disk counterpart used by an explicitly force-disk strict closeout.
+/// The caller supplies the same write effects as pending maintenance so write
+/// provenance remains complete even though editor authority is bypassed.
+pub fn run_todo_id_maintenance_force_disk(
+    file: &Path,
+    coin_gate: &FreeTextCoinGate,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+) -> Result<Vec<String>> {
+    run_todo_id_maintenance_with_options(file, coin_gate, true, Some(write_effects))
+}
+
+fn run_todo_id_maintenance_with_options(
+    file: &Path,
+    coin_gate: &FreeTextCoinGate,
+    force_disk: bool,
+    write_effects: Option<&dyn PreflightMaintenanceWriteEffects>,
+) -> Result<Vec<String>> {
     let source = "preflight_todo_id_maintenance";
-    let content = match current_text_via_preflight_authority_retrying(file, source)? {
-        Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
-        Some(agent_doc_crdt_relay_io::CurrentText::Detached) | None => {
-            match std::fs::read_to_string(file) {
-                Ok(text) => text,
-                Err(_) => return Ok(Vec::new()),
-            }
+    let content = if force_disk {
+        match std::fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(_) => return Ok(Vec::new()),
         }
-        Some(_) => return Ok(Vec::new()),
+    } else {
+        match current_text_via_preflight_authority_retrying(file, source)? {
+            Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+            Some(agent_doc_crdt_relay_io::CurrentText::Detached) | None => {
+                match std::fs::read_to_string(file) {
+                    Ok(text) => text,
+                    Err(_) => return Ok(Vec::new()),
+                }
+            }
+            Some(_) => return Ok(Vec::new()),
+        }
     };
     if agent_doc_element::todo::find_todo_component(&content)
         .ok()
@@ -408,13 +435,25 @@ pub fn run_todo_id_maintenance(file: &Path, coin_gate: &FreeTextCoinGate) -> Res
         return Ok(Vec::new());
     }
     let project_root = agent_doc_project_root_io::project_root_containing(file);
-    let persisted = persist_queue_maintenance_doc(
-        file,
-        &source_outcome.content,
-        &content,
-        project_root.as_deref(),
-        source,
-    )?;
+    let persisted = if force_disk {
+        persist_pending_maintenance_doc(
+            file,
+            &content,
+            &source_outcome.content,
+            source,
+            true,
+            write_effects.context("force-disk todo-id maintenance requires write effects")?,
+        )?;
+        source_outcome.content.clone()
+    } else {
+        persist_queue_maintenance_doc(
+            file,
+            &source_outcome.content,
+            &content,
+            project_root.as_deref(),
+            source,
+        )?
+    };
     if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
         && let Some(new_snapshot) = agent_doc_element::todo::carry_todo_body_into_snapshot(
             &snapshot,

@@ -582,8 +582,10 @@ work, or picks a custom surrogate only when the action does not layer on
 exactly one tracked item (otherwise the receipt prints `requested id=<id> not
 used` and the todo takes the tracked id), and is rejected when `<id>` is
 already resolved. Prefer
-`--todo-add` over `patch:todo` for new items: a patch line without an own id
-gets a `[todo] advisory (#todoids)`. Preflight audits explicit and implicit
+`--todo-add` over `patch:todo` for new items because it expresses the identity
+directly. A strict closeout still assigns an own id to an id-less `patch:todo`
+row before commit (`#todoidcloseout`); the committed row never waits for the
+next preflight. Preflight audits explicit and implicit
 legacy rows that identify exactly one open tracked source, reports them as
 `legacy_source_unqualified` in `todo_signals`, and appends the canonical source
 locator through the live-editor/detached-disk authority path behind the typing

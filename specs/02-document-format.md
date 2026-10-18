@@ -218,10 +218,12 @@ file):
 
 Minted ids avoid every `#id` token in the document, the active tracked-work
 ids, and every id in the done archive, so a minted id is never mistaken for a
-link. A `patch:todo` that adds an item without an own id prints a
-non-blocking `[todo] advisory (#todoids)`; the write does not mint ids into the
-patch, because the keyed merge keys an id-less item by its text and re-keying a
-line the operator may be editing would duplicate it.
+link. A `patch:todo` is first merged while its id-less item is still keyed by
+text; a strict closeout (`respond`, `finalize`, or `write --commit`) then runs
+the authority-safe id maintenance against the converged document before the
+commit boundary (`#todoidcloseout`). Thus re-keying cannot duplicate a
+concurrent item, while a successful strict closeout never publishes a
+structurally complete todo row without an own id.
 
 **Source qualification migration (`#todocontextmigration`).** Every preflight
 (except `--probe`) audits legacy todo rows against current open review, backlog,
@@ -233,10 +235,13 @@ holds a row still being edited. Preflight emits a
 `legacy_source_unqualified` `todo_signals` finding for the audited legacy row,
 and stderr/ops.log record whether migration landed or was held for a later pass.
 
-**Id backfill (`#todoidbackfill`).** Every preflight (except `--probe`) gives
-each id-less todo row an own id, the way queue maintenance coins finished
-free-text queue lines into backlog ids. That covers rows the operator typed by
-hand, rows an older binary wrote, and `patch:todo` additions. The rules match
+**Id backfill (`#todoidbackfill`, `#todoidcloseout`).** Every preflight (except
+`--probe`) gives each id-less todo row an own id, the way queue maintenance
+coins finished free-text queue lines into backlog ids. A strict closeout runs
+that same maintenance after response and tracked-work projection and before
+commit, so a `patch:todo` addition is addressable in the commit that introduces
+it rather than only after another cycle. This also covers rows the operator
+typed by hand and rows an older binary wrote. The rules match
 `--todo-add`: an OPEN row whose action cites exactly one OPEN
 `agent:review`/`agent:backlog`/`agent:icebox` id that no todo owns reuses that id (the row is
 the operator prompt for that work, so checking it reports the prerequisite done
@@ -252,8 +257,9 @@ without it (`#todoidlayer`). The pass:
 - runs behind the free-text typing gate, so a row the operator is still typing
   stays id-less until a later pass;
 - skips rows whose text duplicates another row's (duplicate folding owns them);
-- runs before queue maintenance against the same editor authority with the same
-  compare-and-swap write, carries the ids into the snapshot when its todo body
+- runs before queue maintenance during preflight, and before publication during
+  strict closeout, against the same editor authority with the same
+  compare-and-swap write; carries the ids into the snapshot when its todo body
   matched, and logs `todo_id_assigned id=<id> linked=<component|none>`;
 - fails closed: unreadable tracked-work evidence, an editor head that is not
   current, or a refused write assigns nothing that pass and never blocks

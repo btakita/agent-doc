@@ -3570,6 +3570,60 @@ fn run_command_inner_within_pass(
         PendingStatusMutationOutcome::default()
     };
 
+    // `#todoidcloseout` / GH #293: a strict closeout is the publication
+    // boundary for every assistant-authored patch. `patch:todo` used to land
+    // an id-less row here and rely on the *next* preflight to assign its id,
+    // leaving the committed document temporarily unaddressable. Run the same
+    // authority-safe maintenance after the response and tracked-work envelope
+    // have converged (so a todo can reuse a review/backlog id created by this
+    // closeout) and before any commit gate. The structural gate still protects
+    // an incomplete concurrent operator row; a failure is fatal, so closeout
+    // cannot publish a row it promised to normalize but failed to project.
+    //
+    // Formally, for pre-write cut b and successful required-closeout cut d:
+    // C(b, d) => every t in NewTodoRows(b, d) has own_id(t).
+    if write_result.is_ok() && commit_mode == CommitMode::Required {
+        let coin_gate = agent_doc_queue::free_text_admission::FreeTextCoinGate::structural_only();
+        if options.force_disk {
+            agent_doc_preflight_io::run_todo_id_maintenance_force_disk(
+                file,
+                &coin_gate,
+                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            )?;
+        } else {
+            agent_doc_preflight_io::run_todo_id_maintenance(file, &coin_gate)?;
+        }
+        let before_todo = current_content
+            .as_deref()
+            .or(baseline.as_deref())
+            .and_then(|content| {
+                agent_doc_element::todo::find_todo_component(content)
+                    .ok()
+                    .flatten()
+                    .map(|component| component.content(content).to_string())
+            })
+            .unwrap_or_default();
+        let published = if options.force_disk {
+            resolve_force_disk_document(file, "todo_id_closeout_invariant")?.into_content()
+        } else {
+            resolve_current_document(file, "todo_id_closeout_invariant")?.into_content()
+        };
+        let published_todo = agent_doc_element::todo::find_todo_component(&published)?
+            .map(|component| component.content(&published).to_string())
+            .unwrap_or_default();
+        let bare_additions =
+            agent_doc_element::todo::new_idless_todo_items(&before_todo, &published_todo);
+        anyhow::ensure!(
+            bare_additions.is_empty(),
+            "strict closeout refused before commit: newly added agent:todo row(s) still have no own [#id] after #todoidcloseout maintenance: {}. Use --todo-add for a complete operator action, or finish the patch:todo row before retrying",
+            bare_additions
+                .iter()
+                .map(|action| format!("{action:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
     if write_result.is_ok() {
         agent_doc_session_check_io::run_closeout_pending_maintenance(
             file,

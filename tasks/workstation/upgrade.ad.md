@@ -6,6 +6,7 @@ agent: codex
 resume:
   claude: 80050dae-ffc1-48f6-bb8c-17c794ecb6ac
   codex: 01a14d5c-352b-7781-b889-76815eb85c88
+queue: go
 ---
 
 ## Status
@@ -165,13 +166,38 @@ So the practical answer is:
 - Without building work, use the heater's own low-wattage setting or turn it off during high workstation load. That prevents the overload instead of racing two breakers.
 
 The existing landlord-notification TODO remains the right path for a durable load-shedding installation. The exchange is large, but I kept the active queue draining rather than interrupting it for compaction.
-<!-- agent:boundary:74e3c564 -->
+
+### Re: Subagent completed: `subagent:oil_heater` returned work for queue item “I'll get an oil heater, which can be effective at low wattage.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=4ef7e2d13f492b7bf94953d15326b8400bb80d14a40073b0b032352d79c21d39 -->
+> **Queue prompt:** I'll get an oil heater, which can be effective at low wattage.
+
+### Re: Oil-filled heater at low wattage — gpt-5 · 2026-10-18T01:48-04:00
+
+That can be a sensible choice for quiet, steady background heat—but only if you choose a model with a **documented fixed low-power setting**, ideally around 500–600 W, and keep it in that mode.
+
+An oil-filled radiator is not more electrically efficient than another resistance heater at the same wattage. Resistance heating is essentially one unit of electrical energy converted into one unit of room heat; the oil simply stores heat and releases it more gradually, producing slower warm-up, steadier comfort, and delayed cooldown. [DOE resistance-heating guidance](https://betterbuildingssolutioncenter.energy.gov/sites/default/files/attachments/FINAL%20Industrial%20Electrification%20Booklet.pdf) [De'Longhi oil-radiator explanation](https://www.delonghi.com/en-us/faqs/Radiant-heater/a/17537)
+
+At 120 V:
+
+- 600 W is about 5 A.
+- 900 W is about 7.5 A.
+- 1,500 W is about 12.5 A.
+
+The fixed wattage setting matters more than the thermostat or an “Eco” label. A thermostat reduces average energy by cycling, but whenever the heating element is on it can still draw the full selected wattage. Confirm in the manual that Low truly caps instantaneous power and that startup or power restoration does not silently return to 1,500 W.
+
+Choose a unit with a recognized NRTL listing such as UL, ETL, or CSA; a manual-stated fixed low setting; over-temperature protection; stable construction; and controls that remain on the selected low setting. Add the heater's amperage to the workstation's **measured wall draw**, monitors, lights, and every other load sharing the branch. Even 600 W is not a guarantee if the workstation and other loads already consume the remaining capacity.
+
+Plug the heater directly into a sound wall receptacle—never the PDU, an extension cord, UPS, smart plug, or power strip. Keep at least three feet from combustibles, use it on a flat stable surface, and turn it off when unattended or sleeping. Stop immediately if the plug, cord, receptacle, or faceplate becomes hot. [CPSC space-heater safety](https://www.cpsc.gov/Newsroom/News-Releases/2026/Keep-Warm-and-Safe-This-Winter-Tips-for-Using-Generators-Furnaces-and-Space-Heaters)
+
+I recorded the fixed-low-wattage and safety criteria in the Todo list. The exchange remains large, but I kept the active queue draining rather than interrupting it for compaction.
+<!-- agent:boundary:feb4ceea -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority subagents -->
-- I'll get an oil heater, which can be effective at low wattage.
+- 📥 I'll get an oil heater, which can be effective at low wattage.
 <!-- /agent:queue -->
 
 ## Todo

@@ -86,6 +86,8 @@ To dogfood Agent Doc itself, opt a document into typed, deduplicated findings:
 dogfood:
   path: tasks/agent-doc/agent-doc-bugs.md
   auto: true
+  prompt: >-
+    File a GitHub issue with the diagnostic instead of changing code.
 ---
 ```
 
@@ -93,15 +95,19 @@ dogfood:
 to false; when true, only generated stable-keyed findings are queued. The same
 typed value may be set in `.agent-doc/project.md`, while session frontmatter
 wins. `dogfood: false` disables inheritance and absence everywhere is off.
+`prompt` optionally replaces the default “diagnose and fix” action while keeping
+the stable issue metadata and retained-write safety guidance. Blank prompts use
+the default action, and map fields do not merge across precedence layers.
 `agent-doc dogfood policy <FILE> --json` shows the effective destination and
-auto-queue setting after applying that precedence. Watchers use this typed query
-instead of parsing either document themselves.
+auto-queue setting plus any custom prompt after applying that precedence.
+Watchers use this typed query instead of parsing either document themselves.
 Set a document-local policy without editing live frontmatter directly:
 
 ```sh
 agent-doc dogfood set tasks/session.md
 agent-doc dogfood set tasks/session.md \
-  --path tasks/agent-doc/agent-doc-bugs.md --auto true
+  --path tasks/agent-doc/agent-doc-bugs.md --auto true \
+  --prompt 'File a GitHub issue with the diagnostic instead of changing code.'
 ```
 
 The first form targets the current document with `auto: false`. The second path

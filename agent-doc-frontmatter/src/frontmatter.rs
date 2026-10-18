@@ -472,6 +472,8 @@ pub struct DogfoodOptions {
     pub path: Option<String>,
     #[serde(default)]
     pub auto: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
 }
 
 impl DogfoodConfig {
@@ -497,6 +499,17 @@ impl DogfoodConfig {
 
     pub fn auto(&self) -> bool {
         matches!(self, Self::Options(DogfoodOptions { auto: true, .. }))
+    }
+
+    pub fn prompt(&self) -> Option<&str> {
+        match self {
+            Self::Options(options) => options
+                .prompt
+                .as_deref()
+                .map(str::trim)
+                .filter(|prompt| !prompt.is_empty()),
+            _ => None,
+        }
     }
 }
 
@@ -5584,15 +5597,33 @@ mod tests {
                 "tasks/agent-doc/agent-doc-bugs.md".to_string()
             ))
         );
-        let (options, _) =
-            parse("---\ndogfood:\n  path: tasks/agent-doc/agent-doc-bugs.md\n  auto: true\n---\n")
-                .unwrap();
+        let (options, _) = parse(
+            "---\ndogfood:\n  path: tasks/agent-doc/agent-doc-bugs.md\n  auto: true\n  prompt: File a GitHub issue instead of fixing the defect.\n---\n",
+        )
+        .unwrap();
         assert_eq!(
             options.dogfood_mode,
             Some(DogfoodConfig::Options(DogfoodOptions {
                 path: Some("tasks/agent-doc/agent-doc-bugs.md".to_string()),
                 auto: true,
+                prompt: Some("File a GitHub issue instead of fixing the defect.".to_string()),
             }))
+        );
+        assert_eq!(
+            options
+                .dogfood_mode
+                .as_ref()
+                .and_then(DogfoodConfig::prompt),
+            Some("File a GitHub issue instead of fixing the defect.")
+        );
+
+        let (blank_prompt, _) = parse("---\ndogfood:\n  prompt: '   '\n---\n").unwrap();
+        assert_eq!(
+            blank_prompt
+                .dogfood_mode
+                .as_ref()
+                .and_then(DogfoodConfig::prompt),
+            None
         );
     }
 

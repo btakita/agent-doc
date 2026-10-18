@@ -157,6 +157,8 @@ dogfood: tasks/agent-doc/bugs.md       # project-relative target; manual queuein
 dogfood:
   path: tasks/agent-doc/bugs.md        # optional; absent = current document
   auto: true                           # optional; default false
+  prompt: >-                           # optional; default action is diagnose + fix
+    File a GitHub issue with the diagnostic instead of changing code.
 ```
 
 `auto: true` applies only to generated, stable-keyed dogfood findings; ordinary
@@ -165,17 +167,27 @@ deduplicate it and routing never invokes agent-doc recursively. The canonical
 serialized key is the public `dogfood`; `agent_doc_dogfood` and `dogfood_mode`
 remain read aliases.
 
+`prompt` replaces only the action sentence in the terminal-failure notification.
+The binary-owned `ACTIONABLE_AGENT_DOC_FIX_PROMPT` marker, stable issue class/key,
+failure context, and retained-capture/no-resubmit/no-recycle safety guidance are
+always preserved. This allows a remote or review-only dogfood runner to file a
+GitHub issue instead of modifying code directly. Leading and trailing whitespace
+is trimmed; an absent, empty, or whitespace-only value uses the default
+“diagnose and fix” action. Like `path` and `auto`, `prompt` belongs to the selected
+session-or-project dogfood value; map fields do not merge across precedence layers.
+
 Integrations query the binary-owned resolver with
 `agent-doc dogfood policy <FILE> --json`. Its typed report distinguishes a
 disabled policy from an enabled destination and includes `auto` and
 `self_target`; watchers must not reimplement frontmatter parsing, inheritance,
 or project-relative path resolution.
 
-`agent-doc dogfood set <FILE> [--path <PATH>] [--auto <BOOL>]` is the
+`agent-doc dogfood set <FILE> [--path <PATH>] [--auto <BOOL>] [--prompt <TEXT>]` is the
 binary-owned mutation boundary. It reads and writes through live document
 authority and changes only the local `dogfood:` field while preserving
 unrelated frontmatter and body bytes. An omitted path means the current
-document; omitted `auto` means false. Explicit paths must be project-relative
+document; omitted `auto` means false; omitted or blank `prompt` selects the
+default action. Explicit paths must be project-relative
 Markdown paths without parent traversal, and the resolved policy is validated
 before the write crosses the authority boundary. The mutation remains visible
 to the ordinary session closeout rather than advancing its baseline out of band.

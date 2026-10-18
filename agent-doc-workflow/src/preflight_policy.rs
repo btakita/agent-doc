@@ -247,6 +247,20 @@ pub fn dogfood_terminal_issue_class(diagnostic: &str) -> &'static str {
 /// and timestamps. Generic failures include a normalized diagnostic fingerprint
 /// so unrelated causes do not collapse onto one `terminal_failure` issue key.
 pub fn format_dogfood_terminal_issue_prompt(document_id: &str, diagnostic: &str) -> String {
+    format_dogfood_terminal_issue_prompt_with_action(document_id, diagnostic, None)
+}
+
+/// Render the dogfood notification with an optional operator-authored action.
+///
+/// The override replaces only the default "diagnose and fix" sentence. Stable
+/// issue metadata and retained-write safety guidance remain binary-owned so a
+/// custom action cannot accidentally turn a failure notification into unsafe
+/// retry/recycle guidance. Empty overrides use the default action.
+pub fn format_dogfood_terminal_issue_prompt_with_action(
+    document_id: &str,
+    diagnostic: &str,
+    action: Option<&str>,
+) -> String {
     let issue_class = dogfood_terminal_issue_class(diagnostic);
     let discriminator = if issue_class == "terminal_failure" {
         let normalized = diagnostic
@@ -264,9 +278,16 @@ pub fn format_dogfood_terminal_issue_prompt(document_id: &str, diagnostic: &str)
     let issue_key = agent_doc_hash::content_hash(&format!(
         "dogfood-terminal:{document_id}:{discriminator}"
     ));
+    let action = action
+        .map(str::trim)
+        .filter(|action| !action.is_empty())
+        .unwrap_or(
+            "Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy.",
+        );
     format!(
         "[dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class={issue_class} issue_key={issue_key}\n\
-         Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic."
+         Agent Doc did not complete this turn successfully. {action}\n\
+         Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic."
     )
 }
 
@@ -579,6 +600,28 @@ mod tests {
         let first_key = first.split("issue_key=").nth(1).unwrap().lines().next();
         let second_key = second.split("issue_key=").nth(1).unwrap().lines().next();
         assert_eq!(first_key, second_key);
+    }
+
+    #[test]
+    fn dogfood_terminal_prompt_replaces_only_the_action_sentence() {
+        let custom = format_dogfood_terminal_issue_prompt_with_action(
+            "/repo/tasks/bugs.md",
+            "open_cycle cycle-100 could not finish",
+            Some("  File a GitHub issue with the diagnostic; do not change code.  "),
+        );
+
+        assert!(custom.contains("ACTIONABLE_AGENT_DOC_FIX_PROMPT"));
+        assert!(custom.contains("issue_class=open_cycle_wedge"));
+        assert!(custom.contains("File a GitHub issue with the diagnostic; do not change code."));
+        assert!(!custom.contains("Diagnose and fix the underlying Agent Doc defect"));
+        assert!(custom.contains("obey no-resubmit/no-recycle guidance"));
+
+        let blank = format_dogfood_terminal_issue_prompt_with_action(
+            "/repo/tasks/bugs.md",
+            "open_cycle cycle-100 could not finish",
+            Some("  "),
+        );
+        assert!(blank.contains("Diagnose and fix the underlying Agent Doc defect"));
     }
 
     #[test]

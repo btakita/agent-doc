@@ -122,6 +122,7 @@ pub struct EffectiveDogfood {
     pub target: Option<std::path::PathBuf>,
     pub self_target: bool,
     pub auto: bool,
+    pub prompt: Option<String>,
 }
 
 pub fn effective_dogfood_for_file(content: &str, file: &Path) -> Result<EffectiveDogfood> {
@@ -164,6 +165,7 @@ pub fn effective_dogfood_for_file(content: &str, file: &Path) -> Result<Effectiv
         target: None,
         self_target: false,
         auto: false,
+        prompt: None,
     })
 }
 
@@ -177,6 +179,7 @@ fn resolve_dogfood_value(
             target: None,
             self_target: false,
             auto: false,
+            prompt: None,
         });
     }
     let target = match value.target() {
@@ -204,6 +207,7 @@ fn resolve_dogfood_value(
         target,
         self_target,
         auto: value.auto(),
+        prompt: value.prompt().map(str::to_owned),
     })
 }
 
@@ -360,13 +364,23 @@ mod tests {
 
         std::fs::write(
             dir.path().join(".agent-doc/project.md"),
-            "---\ndogfood: tasks/project-bugs.md\n---\n",
+            "---\ndogfood:\n  path: tasks/project-bugs.md\n  prompt: File a GitHub issue from the project runner.\n---\n",
         )
         .unwrap();
         let inherited =
             effective_dogfood_for_file(&std::fs::read_to_string(&doc).unwrap(), &doc).unwrap();
         assert!(inherited.enabled);
-        assert!(inherited.target.unwrap().ends_with("tasks/project-bugs.md"));
+        assert!(
+            inherited
+                .target
+                .as_ref()
+                .unwrap()
+                .ends_with("tasks/project-bugs.md")
+        );
+        assert_eq!(
+            inherited.prompt.as_deref(),
+            Some("File a GitHub issue from the project runner.")
+        );
 
         let local_false = "---\nagent_doc_format: template\ndogfood: false\n---\n";
         assert!(
@@ -380,12 +394,26 @@ mod tests {
         assert!(resolved.enabled);
         assert!(!resolved.auto);
         assert!(resolved.target.unwrap().ends_with("tasks/local-bugs.md"));
+        assert_eq!(
+            resolved.prompt, None,
+            "a local scalar policy replaces the project map rather than merging its prompt"
+        );
 
-        let local_auto = "---\ndogfood:\n  path: tasks/auto-bugs.md\n  auto: true\n---\n";
+        let local_auto = "---\ndogfood:\n  path: tasks/auto-bugs.md\n  auto: true\n  prompt: File a GitHub issue instead of fixing the defect.\n---\n";
         let resolved = effective_dogfood_for_file(local_auto, &doc).unwrap();
         assert!(resolved.enabled);
         assert!(resolved.auto);
-        assert!(resolved.target.unwrap().ends_with("tasks/auto-bugs.md"));
+        assert!(
+            resolved
+                .target
+                .as_ref()
+                .unwrap()
+                .ends_with("tasks/auto-bugs.md")
+        );
+        assert_eq!(
+            resolved.prompt.as_deref(),
+            Some("File a GitHub issue instead of fixing the defect.")
+        );
     }
 
     #[test]

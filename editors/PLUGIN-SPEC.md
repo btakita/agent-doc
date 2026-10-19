@@ -48,11 +48,15 @@ Rust binary.
   reconciliation is an `Unchanged` no-op (GH #295). A changed digest allocates
   a fresh update number above every compatibility line before packaging.
 - Restart-free dynamic upgrade is a per-line capability. The JetBrains classic
-  line ships an attach launcher; the exact-262 modular line does not, so a live
+  line ships an attach launcher. The exact-262 modular line does not, so a live
   262 IDE gets a file replacement plus an explicit restart-required verdict that
   names the missing entry point, never a misleading "legacy package" or
-  upgrader-failure warning. Live-process plugin-jar probes match every line's
-  versioned plugin jar (`agent-doc-jetbrains-<v>.jar`, `agent.doc-<v>.jar`).
+  upgrader-failure warning. Exact-263 is also restart-only: a filtered launcher
+  probe on a live split-mode IU 263.7031.23 reached `DynamicPlugins`, which
+  computed Agent Doc's removal but rejected the new state because the plugin
+  remained included in the module graph; `unloadPlugin` returned false (GH
+  #299). Live-process plugin-jar probes match every line's versioned plugin jar
+  (`agent-doc-jetbrains-<v>.jar`, `agent.doc-<v>.jar`).
 
 There is no filesystem delivery queue, live-value projection, receipt file,
 plugin-owner file, queue journal, or file-signal compatibility transport.

@@ -542,14 +542,17 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   a restart (GH #295). Only a changed source digest receives a fresh update
   version.
   When a live IDE owns a 262 or 263 target, the modular package exposes no safe
-  restart-free dynamic upgrade entry point: asynchronous classloader retirement
-  provides no synchronous success receipt, and a backend attach cannot
-  atomically replace the frontend in a separate JetBrains Client JVM (GH #290).
-  The upgrader classes already ship in `agent.doc.backend.jar`, so adding a root
-  manifest entry would not bypass either safety boundary. The installer skips
-  the attach, replaces the files, and reports restart-required naming those
-  deepest blockers (`declined_by=modular_package`), not a legacy-package or
-  upgrader failure.
+  restart-free dynamic upgrade entry point. Exact-262 has no synchronous
+  classloader-retirement receipt, and a backend attach cannot atomically replace
+  the frontend in a separate JetBrains Client JVM (GH #290). Exact-263 has live
+  platform evidence: on split-mode IU 263.7031.23, a filtered attach bridge
+  reached `DynamicPlugins`; it computed Agent Doc's removal, then rejected the
+  state because the plugin remained included in the module graph, and
+  `unloadPlugin` returned false (GH #299). The upgrader classes already ship in
+  `agent.doc.backend.jar`, so adding a root manifest entry does not bypass these
+  boundaries. The installer skips the attach, replaces the files, and reports
+  restart-required naming the applicable blocker
+  (`declined_by=modular_package`), not a legacy-package or upgrader failure.
   That loss is permanent on the build (GH #277), so it is reported like the
   GH #108 decline: the permanent-loss NOTE (once per process), the summary
   line "restart-free upgrade is unavailable on this build", and

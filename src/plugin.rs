@@ -1684,11 +1684,19 @@ fn copy_jetbrains_package_for_upgrade_launcher(source: &Path, destination: &Path
 /// are present in `agent.doc.backend.jar`, but the package deliberately exposes
 /// no launcher: asynchronous classloader retirement supplies no synchronous
 /// success receipt, and a backend attach cannot atomically replace a frontend
-/// generation in another JVM (GH #290). That is a property of these package
-/// lines, not a legacy build, so it must never read as "predates restart-free
-/// support" or imply that adding a manifest entry would make the swap safe.
+/// generation in another JVM (GH #290). A filtered attach probe on split-mode
+/// IU 263.7031.23 reached `DynamicPlugins`, but its computed removal state kept
+/// Agent Doc in the module graph and `unloadPlugin` returned false (GH #299).
+/// That is a property of these package lines, not a legacy build, so it must
+/// never read as "predates restart-free support" or imply that adding a manifest
+/// entry would make the swap safe.
 const JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE: &str =
     "modular JetBrains package has no restart-free dynamic upgrade entry point";
+
+/// Stable measured blocker for exact-263, kept separate from the general
+/// modular-package classification so operator diagnostics name live evidence.
+const JETBRAINS_263_MODULE_GRAPH_UNLOAD_BLOCKER: &str =
+    "live split-mode IU 263.7031.23 kept Agent Doc included in the module graph";
 
 /// Which compatibility line a package ZIP holds. The published archive root is
 /// authoritative because exact-262 and 263 share `agent.doc-<v>.jar` (GH #255).
@@ -1723,16 +1731,14 @@ fn jetbrains_dynamic_upgrade_entry_point_refusal(
     launcher_has_main: impl FnOnce() -> Result<bool>,
 ) -> Result<Option<String>> {
     match package_range {
-        JetbrainsPackageRange::Modular262 | JetbrainsPackageRange::Modular263 => {
-            let build = match package_range {
-                JetbrainsPackageRange::Modular262 => 262,
-                JetbrainsPackageRange::Modular263 => 263,
-                JetbrainsPackageRange::Classic242To261 => unreachable!(),
-            };
+        JetbrainsPackageRange::Modular262 => {
             Ok(Some(format!(
-                "the exact-{build} {JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} because no safe whole-package swap exists: this build retires plugin classloaders asynchronously without a synchronous success receipt, and v{expected_version} is a Plugin Model v2 split-mode package whose frontend may run in another JetBrains Client JVM; adding a Main-Class to agent.doc-{expected_version}.jar or invoking the upgrader classes already present in agent.doc.backend.jar would only reach those unsafe boundaries, so a running {build} IDE keeps its current plugin generation until it restarts"
+                "the exact-262 {JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} because no safe whole-package swap exists: this build retires plugin classloaders asynchronously without a synchronous success receipt, and v{expected_version} is a Plugin Model v2 split-mode package whose frontend may run in another JetBrains Client JVM; adding a Main-Class to agent.doc-{expected_version}.jar or invoking the upgrader classes already present in agent.doc.backend.jar would only reach those unsafe boundaries, so a running 262 IDE keeps its current plugin generation until it restarts"
             )))
         }
+        JetbrainsPackageRange::Modular263 => Ok(Some(format!(
+            "the exact-263 {JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} because {JETBRAINS_263_MODULE_GRAPH_UNLOAD_BLOCKER}: a filtered attach probe reached DynamicPlugins, which computed Agent Doc's removal but rejected the new state because the plugin was expected not to be loaded yet remained included in the module graph; unloadPlugin returned false. Adding a Main-Class to agent.doc-{expected_version}.jar or invoking the upgrader classes already present in agent.doc.backend.jar therefore cannot provide a safe restart-free swap, so a running 263 IDE keeps its current plugin generation until it restarts"
+        ))),
         JetbrainsPackageRange::Classic242To261 => {
             Ok((!launcher_has_main()?).then(|| {
             format!(
@@ -2741,7 +2747,7 @@ fn dynamic_upgrade_fallback_warning(reason: &str, fallback: &str) -> String {
         // lines, not a failure and not a legacy build. GH #290: name the
         // safety boundary, not only the intentionally absent entry point.
         if reason.contains("exact-263") {
-            "the exact-263 modular restart-free upgrade is unsafe because asynchronous classloader retirement and the separate split-mode frontend leave no whole-package swap point, so the running IDE keeps its current plugin generation until restart"
+            "the exact-263 modular restart-free upgrade is unavailable because live split-mode IU 263.7031.23 kept Agent Doc included in the module graph after DynamicPlugins computed its removal, so the running IDE keeps its current plugin generation until restart"
         } else {
             "the exact-262 modular restart-free upgrade is unsafe because asynchronous classloader retirement and the separate split-mode frontend leave no whole-package swap point, so the running IDE keeps its current plugin generation until restart"
         }
@@ -2763,10 +2769,16 @@ fn permanent_dynamic_upgrade_loss_note(reason: &str) -> String {
         } else {
             "exact-263"
         };
-        (
+        let cause = if line == "exact-263" {
+            "its exact-263 modular plugin package has no safe whole-package swap: live split-mode IU 263.7031.23 kept Agent Doc included in the module graph after DynamicPlugins computed its removal"
+                .to_string()
+        } else {
             format!(
                 "its {line} modular plugin package has no safe whole-package swap: classloader retirement is asynchronous and its split-mode frontend may run in another JVM"
-            ),
+            )
+        };
+        (
+            cause,
             "every future plugin install will replace the files and need an IDE restart the same way",
         )
     } else {
@@ -6184,20 +6196,22 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         assert!(refusal.contains("exact-263"), "{refusal}");
         assert!(refusal.contains("running 263 IDE"), "{refusal}");
-        assert!(refusal.contains("no safe whole-package swap"), "{refusal}");
         assert!(
-            refusal.contains("retires plugin classloaders asynchronously"),
+            refusal.contains(super::JETBRAINS_263_MODULE_GRAPH_UNLOAD_BLOCKER),
             "{refusal}"
         );
+        assert!(refusal.contains("DynamicPlugins"), "{refusal}");
         assert!(
-            refusal.contains("frontend may run in another JetBrains Client JVM"),
+            refusal.contains("computed Agent Doc's removal"),
             "{refusal}"
         );
+        assert!(refusal.contains("expected not to be loaded"), "{refusal}");
+        assert!(refusal.contains("unloadPlugin returned false"), "{refusal}");
         assert!(
             refusal.contains("already present in agent.doc.backend.jar"),
             "{refusal}"
         );
-        assert!(refusal.contains("adding a Main-Class"), "{refusal}");
+        assert!(refusal.contains("Adding a Main-Class"), "{refusal}");
         assert!(!refusal.contains("predates"), "{refusal}");
         assert!(!refusal.contains("legacy"), "{refusal}");
         assert!(!refusal.contains("refusing to replace"), "{refusal}");
@@ -6385,16 +6399,17 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 .load(std::sync::atomic::Ordering::Relaxed)
         );
 
-        // GH #290: the NOTE names the deepest safety boundary and the
-        // between-restarts rule; a missing launcher is only a consequence.
+        // GH #299: the NOTE names the blocker measured on live split-mode
+        // 263.7031.23 and the between-restarts rule; a missing launcher is only
+        // a consequence.
         let note = super::permanent_dynamic_upgrade_loss_note(&reason);
         assert!(
             note.starts_with(
-                "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build (its exact-263 modular plugin package has no safe whole-package swap: classloader retirement is asynchronous and its split-mode frontend may run in another JVM)"
+                "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build (its exact-263 modular plugin package has no safe whole-package swap: live split-mode IU 263.7031.23 kept Agent Doc included in the module graph after DynamicPlugins computed its removal)"
             ),
             "{note}"
         );
-        assert!(note.contains("asynchronous"), "{note}");
+        assert!(note.contains("included in the module graph"), "{note}");
         assert!(!note.contains("ships no upgrade entry point"), "{note}");
         assert!(note.contains(&super::between_restarts_guidance()), "{note}");
         let guidance = super::between_restarts_guidance();

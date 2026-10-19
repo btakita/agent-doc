@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(
             codex_model_capacity_recovery_decision(
                 "codex",
-                Some(&message),
+                Some(message),
                 Some(true),
                 Some(true),
                 0,
@@ -339,7 +339,7 @@ mod tests {
         assert_eq!(
             codex_model_capacity_recovery_decision(
                 "claude",
-                Some(&message),
+                Some(message),
                 Some(true),
                 Some(true),
                 0,
@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(
             codex_model_capacity_recovery_decision(
                 "codex",
-                Some(&message),
+                Some(message),
                 Some(false),
                 Some(true),
                 0,
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(
             codex_model_capacity_recovery_decision(
                 "codex",
-                Some(&message),
+                Some(message),
                 Some(true),
                 Some(false),
                 0,

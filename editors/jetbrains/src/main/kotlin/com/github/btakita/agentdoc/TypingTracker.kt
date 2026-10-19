@@ -218,6 +218,7 @@ private const val BOUNDED_EDITOR_SPLICES_CAPABILITY = "bounded_editor_splices_v1
 // sync with agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY on the binary side.
 private const val LOSSLESS_TREE_CRDT_CAPABILITY = "lossless_tree_crdt_v1"
 private const val NATIVE_HOT_RELOAD_CAPABILITY = "native_hot_reload_generation_v1"
+private const val COORDINATED_EXTRACT_CAPABILITY = "coordinated_extract_v1"
 // #ctrlkillreregister Tier 3: this plugin calls agent_doc_peer_replicas_missing about
 // itself on startup and on detected controller-transport recovery. This is
 // complementary to the controller's targeted restart push: a transparent controller
@@ -230,6 +231,7 @@ internal val EDITOR_CAPABILITIES = buildList {
     add(BOUNDED_EDITOR_SPLICES_CAPABILITY)
     add(LOSSLESS_TREE_CRDT_CAPABILITY)
     add(PEER_REPLICA_PULL_CAPABILITY)
+    add(COORDINATED_EXTRACT_CAPABILITY)
     if (System.getProperty("os.name").lowercase().contains("linux")) {
         add(NATIVE_HOT_RELOAD_CAPABILITY)
     }

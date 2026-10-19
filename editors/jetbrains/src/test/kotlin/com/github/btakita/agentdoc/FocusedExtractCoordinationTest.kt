@@ -12,8 +12,18 @@ class FocusedExtractCoordinationTest {
             Files.readString(Path.of("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"))
         val manager =
             Files.readString(Path.of("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"))
+        val tracker =
+            Files.readString(Path.of("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"))
 
-        assertTrue(watcher.contains("coordinated_extract_v1"))
+        assertTrue(tracker.contains("coordinated_extract_v1"))
+        assertTrue(
+            "the capability must be present on the shared registration surface used by open editors",
+            EDITOR_CAPABILITIES.split(",").contains("coordinated_extract_v1"),
+        )
+        assertTrue(
+            "focused-extract receipts must reuse the same capabilities advertised at registration",
+            watcher.contains("EDITOR_CAPABILITIES,"),
+        )
         assertTrue(watcher.contains("FreezeForExtract(\"freeze_for_extract\")"))
         assertTrue(watcher.contains("ResumeAfterExtract(\"resume_after_extract\")"))
         assertTrue(manager.contains("extractFrozenPaths.contains(filePath)"))

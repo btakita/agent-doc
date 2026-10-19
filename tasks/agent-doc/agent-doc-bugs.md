@@ -124,7 +124,96 @@ Agent-doc cycle completed successfully.
 Diagnostics are complete. You can unwedge it now by restarting JetBrains, then reopen `sdk-demo.md`. No need to preserve the wedged state.
 
 Disk content and permissions are unchanged; the stale read-only flag exists only in the current IDE process.
-<!-- agent:boundary:04649fab -->
+
+### Re: Subagent completed: `subagent:issue315` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/315” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=6bad6ffa7a2cd16ffa164384b7669cb3f2cb96dfe2ac367284a60f53649d68fc -->
+
+### Re: Subagent completed: `subagent:issue314` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/314” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=89bf6190406c6f6d1430b3b73f8db7c8cda9a871394138b6c0deda8a57d05557 -->
+
+### Re: Subagent completed: `subagent:sdkdemoreadonly` returned work for queue item “sdk-demo.md is Read Only. Why? Did agent-doc make it read-only? It should not have.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=81db76ff1c619f6bfb3d628089a190947e7834e9933f5849b3a10f80a4a11985 -->
+> **Chat prompt (#chatprompt):** What was the last published release and when was it published?
+
+> **Chat prompt (#chatprompt):** continue
+
+> **Chat prompt (#chatprompt):** cont
+
+> **Chat prompt (#chatprompt):** continue
+
+> **Chat prompt (#chatprompt):** have we published a recent release?
+
+> **Chat prompt (#chatprompt):** Can you keep the agent:status up to date with the last publish release?
+
+> **Chat prompt (#chatprompt):** Should we have a `sync="..."` attribute on `agent:status` to allow the operator to prompt the agent to keep the status in sync?
+
+> **Chat prompt (#chatprompt):** Should we make sync additive, so the other status messages that would normally be used are also included?
+
+> **Chat prompt (#chatprompt):** How can we make the sync use the non-default destructive mode?
+
+> **Chat prompt (#chatprompt):** I agree with your proposal
+
+> **Chat prompt (#chatprompt):** Do we have docs on all tags and their attributes? If not, create the docs and link to those docs in the README.md
+
+> **Chat prompt (#chatprompt):** do these tasks in subagents
+
+> **Chat prompt (#chatprompt):** The release is published?
+
+> **Chat prompt (#chatprompt):** sdk-demo.md is wedged in read-only
+
+> **Chat prompt (#chatprompt):** Can we unwedge it now or do you need it for diagnostics?
+
+> **Chat prompt (#chatprompt):** subagent: fix: • Blocked by hook └ Recovery continuation, not a refusal or error: agent-doc Stop hook retained the exact closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md under its durable keyed retry. The latest assistant text was captured into the pending/capture ledger before auto-close. The hook could not finish the required commit boundary: closeout operation is already in progress for cycle cycle-1792424550895 by captured-finalize-resume-2833522-1792439873427526237-t1 pid=2833522 role=captured_finalize_resume until=1792440173 [closeout_owner_retry_at=1792440173]. The retained capture or projection is already durable and this exact retained intent commits itself once delivery converges — this is a deferral, not a lost response. Wait for its controller-owned terminal state edge; do not use the document's current-cycle status as proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force disk, or `admin recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document is not serving its replica, and then its remedy governs. The controller owns delivery, the editor-native save receipt, and the terminal commit. Do not reopen or recapture the cycle, rerun finalize/write/repair, force disk, recycle the supervisor, or resend the response. Wait for the existing controller state edge unless it explicitly reports `needs_operator`; do not send the final answer yet.
+
+> **Queue prompt:** release + publish
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/311
+
+> **Queue prompt:** release + publish: include #311
+
+> **Queue prompt:** bossroom-p2p.md: Claim Tmux Pane, then Run Agent Doc, then Ctrl+c in the Claude session, then switch to agent to codex using `agent: codex`, then Restart Agent: got a prompt saying a turn was occurring. Clicked Interrupt and Restart then the followup Interrupt and Restart. Nothing happened. The Claude Code prompt was submitted and the turn started in Claude Code, not Codex. `agent: codex` was removed from the document.
+
+> **Queue prompt:** I saw `■ Selected model is at capacity. Please try a different model.`, and a `continue`, then another `■ Selected model is at capacity. Please try a different model.`. Please confirm the behavior and work on any necessary fixes. Run Agent Doc has an error as well, presumably due to agent-doc's state not recognizing the error: [route] a turn is already running on /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second trigger was sent and nothing needs recovery. The live turn owns the queue; head "release + publish" is in its scope and is answered or drained at that turn's boundary. Do not cancel or recover it (owner: [session-check] IN PROGRESS: cycle `cycle-1792424550895` remains `preflight_started` (preflight_started) while owning pane `%2` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.) owner_turn=live ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/312
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/313
+
+> **Queue prompt:** the queue id=issues gained "In sdk-demo.md, I deleted some struck queue items right after they were struck. Got an error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.: I have since undid my changes." and lost the prompt to watch https://github.com/btakita/agent-doc/issues.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/314
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/315
+
+> **Queue prompt:** sdk-demo.md is Read Only. Why? Did agent-doc make it read-only? It should not have.
+
+> **Queue prompt:** release + publish including PRs #312-#315
+
+### Re: release, synchronized status, and tag reference — gpt-5 · 2026-10-19T18:26-04:00
+
+Released and verified. GitHub published [v0.35.525](https://github.com/btakita/agent-doc/releases/tag/v0.35.525) at 2026-10-19 22:23:24 UTC, and PyPI published `agent-doc 0.35.525` at 22:24:09 UTC. All six native archives, `SHA256SUMS`, VS Code 0.2.83, JetBrains 0.2.720/0.2.721/0.2.722 packages, Release, CI, and PyPI verification are green.
+
+The `agent:status` opener now has a persistent `sync` instruction and this cycle refreshed it to v0.35.525. Synchronization is additive by default, preserving ordinary status text and operational projections. Use `sync-mode="replace"` for the explicit destructive mode; protected queue/restart/repair projections still survive. The user-facing tag and attribute reference is `docs/reference/tags-and-attributes.md`, linked from `README.md`; it covers built-in and generic components, common attributes, status synchronization, queue scheduling/routing attributes, backlog-to-queue synchronization, response patches, internal markers, and validation behavior. These shipped in `79cee1fde7` and `8ae7a390c9`.
+
+### Re: integrated queue fixes — gpt-5 · 2026-10-19T18:26-04:00
+
+Issue #311 was fixed in `0256991fe3` and closed; restart-agent retries now preserve the intended Codex target instead of falling back to the interrupted Claude session. The capacity presentation is handled by `d8fcd79535`: one `continue` is submitted per visible standalone capacity error, including while Codex still appears busy, and it rearms only after the presentation clears.
+
+Issues #312–#315 are closed and included in v0.35.525. Claimed subagent heads are skipped by orphan drain (`38b8b4b451`); same-cycle free-text strike authority survives premature abandonment (`38bf307745`); missing operator TODO handoffs produce an advisory (`6c6061670b`); and transient editor replica loss with stale plugin bytes is held for bounded recovery instead of immediately escalating (`f86766e5be`). Deletion-only removal of settled struck queue rows is reconciled as a keyed tombstone in `e6d8ad688d`, preserving the live issue-watch prompt.
+
+### Re: retained-closeout Stop hook — gpt-5 · 2026-10-19T18:26-04:00
+
+Fixed by the delegated subagent, integrated as `0d9dd855c7`, and published in v0.35.525. The final closeout boundary now distinguishes an owned active `closeout_owner_retry_at` lease from an unowned error: it performs a bounded wait for the exact controller state edge and then resumes/reinspects. A durable missing response still defers to its retained owner; unrelated or unowned contention still fails closed. The reported retained cycle reached `retained_captured_projection_settled` and `captured_finalize_resume_committed`, so its captured response was not replayed.
+
+### Re: sdk-demo read-only and extraction — gpt-5 · 2026-10-19T18:26-04:00
+
+The stale read-only wedge is fixed in `a3607e6061` and published. Live JetBrains was dynamically upgraded to 0.2.720; both `sdk-dev.md` and `sdk-demo.md` now report fresh, attached editor replicas with no lag, so the wedged state is no longer needed for diagnostics.
+
+The preserved transfer itself is not claimed as complete. Coordinated extraction now resumes both tabs safely, but the live-authority commit returned `projection_changed` after the nominal apply path. I stopped retrying, did not force disk or repair either live document, and added `#extract-coordinated-projection-changed` as the focused follow-up to prove exactly-once convergence.
+<!-- agent:boundary:f08de573 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -132,7 +221,7 @@ Disk content and permissions are unchanged; the stale read-only flag exists only
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📥 release + publish
+- ~~release + publish~~
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/311
 - 📥 release + publish: include #311
 - 📥 bossroom-p2p.md: Claim Tmux Pane, then Run Agent Doc, then Ctrl+c in the Claude session, then switch to agent to codex using `agent: codex`, then Restart Agent: got a prompt saying a turn was occurring. Clicked Interrupt and Restart then the followup Interrupt and Restart. Nothing happened. The Claude Code prompt was submitted and the turn started in Claude Code, not Codex. `agent: codex` was removed from the document.
@@ -140,16 +229,18 @@ Disk content and permissions are unchanged; the stale read-only flag exists only
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/312
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/313
 - 📥 the queue id=issues gained "In sdk-demo.md, I deleted some struck queue items right after they were struck. Got an error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.: I have since undid my changes." and lost the prompt to watch https://github.com/btakita/agent-doc/issues.
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/314
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/315
-- 🚧 sdk-demo.md is Read Only. Why? Did agent-doc make it read-only? It should not have.
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/314
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/315
+- 📥 sdk-demo.md is Read Only. Why? Did agent-doc make it read-only? It should not have.
 - 🚧 release + publish including PRs #312-#315
+- do [#extract-coordinated-projection-changed]
 <!-- /agent:queue -->
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
 - Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 - If an issue was added, also add `- release + publish`
+- Should `agent-doc-subagent-completion` tags be replaced with the response? sdk-demo.md has some lingering `agent-doc-subagent-completion` tags.
 <!-- /agent:queue -->
 
 ## Todo

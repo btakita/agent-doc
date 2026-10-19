@@ -4,6 +4,8 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+## 0.35.525
+
 - **Focused extract now freezes on CRDT replica membership, not open tabs.** The
   coordinated handoff polls the controller-owned live replica count while the
   durable editor registration remains attached, rechecks that count and exact
@@ -13,6 +15,29 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   idempotent without accepting a stale operation ID. Selected exchange moves
   also retain the source boundary and insert before the target boundary, so the
   two document-local boundary identities never collapse into one document.
+  JetBrains now waits for an admitted replica reattach beyond the short receipt
+  timeout and restores watcher-owned writable states during plugin disposal, so
+  a failed coordinated extraction cannot leave a tab wedged read-only.
+- **Queue dispatch preserves worker and response ownership.** Orphan drain skips
+  subagent-claimed heads and advances to the next eligible head (GH #312), while
+  same-cycle captures retain an answered free-text strike across premature
+  abandonment until terminal proof (GH #313).
+- **Settled struck-row deletion can rebase without losing live queue work.** A
+  deletion-only removal of already-settled struck queue rows is applied as keyed
+  tombstones while live prompts, surviving row order, canonical responses, and
+  unrelated canonical advances remain intact. Other ambiguity still fails closed.
+- **Transient native-replica loss no longer forces an unnecessary restart.** A
+  reachable endpoint keeps superseded plugin-package bytes advisory and receives
+  the bounded admission hold; terminal restart remains reserved for typed build
+  mismatch or when every endpoint is unreachable (GH #315).
+- **Operator-owned publication steps produce a closeout advisory.** When a
+  publish/post decision or an unpublished Markdown draft is handed to the
+  operator without `--todo-add`, closeout names the missing durable TODO action
+  and suppresses the warning once the action is recorded (GH #314).
+- **Codex Stop waits through retained closeout-owner contention.** A final-boundary
+  `closeout_owner_retry_at=` result follows the same bounded controller-state
+  await, exact resume, and reinspection path as repair-stage contention instead
+  of falsely reporting “Blocked by hook”; unowned contention still fails closed.
 
 ## 0.35.524
 

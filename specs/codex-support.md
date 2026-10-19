@@ -158,6 +158,19 @@ Operator stop/clear/recovery is exempt from the dispatch gate, so a session whos
 
 Codex startup UI that asks the operator to review hooks is also a dispatch blocker. The warning text such as `hook needs review` / `Open /hooks to review it` requires interactive approval before the TUI can consume routed input, even if a later capability-proof diagnostic records `status=proven`. Route/start readiness checks must fail closed with that blocker instead of treating the proof line or model/context footer as an idle prompt. Dispatch-only refusals for this blocker must include recovery guidance to open `/hooks`, approve or disable the pending hook change, wait for the idle composer, and rerun the route/editor action.
 
+**Transient model-capacity recovery (`#codexcapacityretry`).** A managed Codex
+pane that renders the exact terminal error `Selected model is at capacity.
+Please try a different model.` can otherwise remain at an idle composer forever:
+there is no assistant response for the Stop hook to continue. Before the
+supervisor idle watch takes its quiescent fast path, it samples the live pane.
+Only an informative, dispatch-ready Codex composer carrying that exact error
+authorizes a synthetic `continue` submission. The effect uses the ordinary
+supervisor prompt-dispatch path and records its attempt/result. Recovery is hard
+bounded to two submissions per supervisor generation; a persistent provider
+failure settles to an `exhausted` receipt and awaits the operator instead of
+creating an automatic prompt loop. Other harnesses, approximate capacity text,
+unrendered frames, and occupied composers never authorize recovery.
+
 Managed Codex instructions and generated prompt context must also scope remote-host evidence to the active project. Approved command prefixes, ambient SSH config, or a host name seen in another workspace/client are launch-environment facts only; they are not evidence that the current document should use that host. Codex may use a named remote host only when the current user prompt, session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbook explicitly identifies it. Otherwise the session must ask or record follow-up work to confirm the intended host before using it in answers, probes, or backlog items.
 
 For resumed Codex sessions, agent-doc must not pass legacy sandbox flags through blindly. `codex resume` / `codex exec resume` policy is expressed with `-c sandbox_mode="..."`; supervisor restart and backend resume paths translate `-s <SANDBOX>` / `--sandbox=<SANDBOX>` into that form, strip `--add-dir` entries that resume cannot accept, and fail closed on malformed or conflicting sandbox args before a resumed session can run task work. A direct backend turn that has a saved Codex resume id but whose current launch args require `--add-dir` roots must fresh-start with the full root set, because resume cannot add missing git metadata roots. This prevents a document requesting `danger-full-access` or extra writable roots from silently resuming under Codex's older launch policy.

@@ -220,6 +220,60 @@ pub fn pane_has_busy_cue(content: &str, harness: &HarnessConfig) -> bool {
     harness.has_busy_cue(content)
 }
 
+/// Stable Codex renderer text for transient model-capacity backpressure.
+///
+/// This is deliberately exact enough not to turn arbitrary operator prose
+/// about "capacity" into a synthetic prompt, while tolerating surrounding
+/// renderer chrome and ANSI sequences in a live pane capture.
+pub const CODEX_MODEL_CAPACITY_MESSAGE: &str =
+    "Selected model is at capacity. Please try a different model.";
+
+/// One supervisor generation may make only this many automatic recovery
+/// submissions. A provider outage must never become an unbounded prompt loop.
+pub const CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS: u8 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexModelCapacityRecoveryDecision {
+    NotApplicable,
+    WaitForReadyComposer,
+    Retry,
+    Exhausted,
+}
+
+fn codex_model_capacity_error_visible(content: &str) -> bool {
+    let plain = agent_doc_turn_executor_tmux::prompt::strip_ansi(content);
+    let normalized = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    normalized.contains(CODEX_MODEL_CAPACITY_MESSAGE)
+}
+
+/// Decide whether the supervisor should submit a short `continue` prompt after
+/// Codex rendered a terminal model-capacity error.
+///
+/// Detection alone is insufficient: the live composer must also be rendered
+/// and dispatch-ready. `attempts` is process-local state owned by the caller;
+/// the hard cap makes repeated provider failures settle as `Exhausted` rather
+/// than recursively restarting the turn forever.
+pub fn codex_model_capacity_recovery_decision(
+    harness_binary: &str,
+    pane_content: Option<&str>,
+    frame_rendered: Option<bool>,
+    dispatch_ready: Option<bool>,
+    attempts: u8,
+) -> CodexModelCapacityRecoveryDecision {
+    if harness_binary != "codex"
+        || !pane_content.is_some_and(codex_model_capacity_error_visible)
+    {
+        return CodexModelCapacityRecoveryDecision::NotApplicable;
+    }
+    if attempts >= CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS {
+        return CodexModelCapacityRecoveryDecision::Exhausted;
+    }
+    if frame_rendered != Some(true) || dispatch_ready != Some(true) {
+        return CodexModelCapacityRecoveryDecision::WaitForReadyComposer;
+    }
+    CodexModelCapacityRecoveryDecision::Retry
+}
+
 /// (`#unrenderedframestorm`) Whether a pane capture is a rendered harness frame
 /// at all, and may therefore be read as evidence about the composer.
 ///
@@ -267,6 +321,87 @@ pub fn pane_frame_answers_composer_state(content: &str) -> bool {
 mod tests {
     use super::*;
     use crate::idle_reconcile::QUEUED_DRAFT_BLOCKER_REASON;
+
+    #[test]
+    fn codex_model_capacity_recovery_requires_exact_error_and_ready_composer() {
+        let message = "error\n\x1b[31mSelected model is at capacity. Please try a\n\
+                       different model.\x1b[0m\n❯ ";
+        assert_eq!(
+            codex_model_capacity_recovery_decision(
+                "codex",
+                Some(&message),
+                Some(true),
+                Some(true),
+                0,
+            ),
+            CodexModelCapacityRecoveryDecision::Retry
+        );
+        assert_eq!(
+            codex_model_capacity_recovery_decision(
+                "claude",
+                Some(&message),
+                Some(true),
+                Some(true),
+                0,
+            ),
+            CodexModelCapacityRecoveryDecision::NotApplicable
+        );
+        assert_eq!(
+            codex_model_capacity_recovery_decision(
+                "codex",
+                Some("Selected model has limited capacity"),
+                Some(true),
+                Some(true),
+                0,
+            ),
+            CodexModelCapacityRecoveryDecision::NotApplicable
+        );
+        assert_eq!(
+            codex_model_capacity_recovery_decision(
+                "codex",
+                Some(&message),
+                Some(false),
+                Some(true),
+                0,
+            ),
+            CodexModelCapacityRecoveryDecision::WaitForReadyComposer
+        );
+        assert_eq!(
+            codex_model_capacity_recovery_decision(
+                "codex",
+                Some(&message),
+                Some(true),
+                Some(false),
+                0,
+            ),
+            CodexModelCapacityRecoveryDecision::WaitForReadyComposer
+        );
+    }
+
+    #[test]
+    fn codex_model_capacity_recovery_is_hard_bounded() {
+        let message = format!("{CODEX_MODEL_CAPACITY_MESSAGE}\n❯ ");
+        assert_eq!(
+            codex_model_capacity_recovery_decision(
+                "codex",
+                Some(&message),
+                Some(true),
+                Some(true),
+                CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS - 1,
+            ),
+            CodexModelCapacityRecoveryDecision::Retry
+        );
+        assert_eq!(
+            codex_model_capacity_recovery_decision(
+                "codex",
+                Some(&message),
+                Some(true),
+                Some(true),
+                CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS,
+            ),
+            CodexModelCapacityRecoveryDecision::Exhausted
+        );
+    }
 
     #[test]
     fn prompt_visible_ready_transition_requires_first_prompt_or_non_ready_actor() {

@@ -76,6 +76,10 @@ The destination is initialized when absent. The operation records provenance in
 both documents, rejects collisions and unmatched selectors, and can resume a
 target-first interrupted apply without duplicating target content. Relative
 linked-resource paths are rebased when the destination directory differs.
+Extraction does not auto-claim or start the destination: the source normally
+already owns the invoking pane, so rebinding that pane would orphan the source
+session. After a successful apply, use `agent-doc claim TARGET --new-pane` when
+the extracted document should immediately get its own routing pane.
 Preview's terminal notice names the exact destination and explicitly says that
 it was not created (or was left unchanged). If `--apply` is blocked by a live
 editor, the command prints the deterministic preview before failing and names
@@ -191,4 +195,5 @@ agent-doc extract tasks/software/agent-doc.md tasks/software/new-feature.md
 - Both commands write directly to the target document -- no manual copy-paste needed
 - Both update snapshots for both files, so the next `/agent-doc` cycle sees a clean baseline
 - The source session's skill does NOT need to write to the target -- the binary handles cross-file writes
+- Extract does not auto-claim the target; claim it explicitly with `--new-pane` when it should become a separate live session
 - **Cross-pane transfers:** Use `--bypass-claim` when the target is owned by a different pane. Transfer is a deliberate user action, not a concurrent write, so pane ownership should not block it.

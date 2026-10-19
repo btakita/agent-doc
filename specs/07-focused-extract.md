@@ -38,6 +38,12 @@ without making an agent manually copy managed document regions.
   are computed once before I/O. The remaining direct calls are one-shot file
   writes, rollback, and snapshot checkpoints; they have no durable scheduling
   relationship and therefore no new reactive edge.
+- **Routing boundary:** extraction never claims or starts the destination. A
+  source document normally already owns the invoking pane, and silently
+  rebinding that pane to the new destination would orphan the source session.
+  To work the extracted document immediately, provision its routing explicitly
+  with `agent-doc claim TARGET --new-pane` (or start it through the normal
+  routing workflow) after apply succeeds.
 - **Allowed edit surfaces:** the focused-extract module, CLI routing, target
   scaffold shared with transfer, this command spec, its runbook, and regression
   tests.
@@ -175,3 +181,5 @@ documents changed, and states whether the intended target was not created or
 left unchanged.
 `--bypass-claim` bypasses only the tmux pane-ownership check, never the
 editor-authority gate or the coordinated freeze capability check.
+The ownership check is read-only: neither preview nor apply auto-claims or
+starts the destination. This remains true when apply initializes a new target.

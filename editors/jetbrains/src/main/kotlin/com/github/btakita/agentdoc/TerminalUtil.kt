@@ -241,6 +241,14 @@ object TerminalUtil {
         val tail: String,
     )
 
+    internal enum class RestartTarget(
+        val commandName: String,
+        val noun: String,
+    ) {
+        AGENT("restart-agent", "agent"),
+        SUPERVISOR("restart-supervisor", "supervisor"),
+    }
+
     internal data class StartingSessionRestartRefusal(
         val file: String,
         val reason: String,
@@ -882,8 +890,7 @@ object TerminalUtil {
         runRestartCommand(
             project = project,
             file = file,
-            commandName = "restart-agent",
-            startedMessage = "Restarting agent for ${file.name}",
+            target = RestartTarget.AGENT,
             force = false,
             onComplete = onComplete,
         )
@@ -1210,8 +1217,7 @@ object TerminalUtil {
         runRestartCommand(
             project = project,
             file = file,
-            commandName = "restart-supervisor",
-            startedMessage = "Restarting supervisor for ${file.name}",
+            target = RestartTarget.SUPERVISOR,
             force = force,
             afterSuccess = afterSuccess,
             onComplete = onComplete,
@@ -1221,8 +1227,7 @@ object TerminalUtil {
     private fun runRestartCommand(
         project: Project,
         file: VirtualFile,
-        commandName: String,
-        startedMessage: String,
+        target: RestartTarget,
         force: Boolean,
         afterSuccess: (() -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
@@ -1232,13 +1237,9 @@ object TerminalUtil {
         runSessionCommand(
             project = project,
             file = file,
-            args = if (force) listOf(commandName, "--force") else listOf(commandName),
-            startedMessage = startedMessage,
-            failureAction = if (commandName == "restart-agent") {
-                "restart the agent"
-            } else {
-                "restart the supervisor"
-            },
+            args = restartCommandArgs(target, force),
+            startedMessage = "Restarting ${target.noun} for ${file.name}",
+            failureAction = "restart the ${target.noun}",
             onSuccess = { relativePath, output ->
                 val telemetry = readRestartSupervisorTelemetry(telemetryCwd, relativePath, telemetryStartLine)
                 val message = restartSessionSuccessMessage(relativePath, output, telemetry)
@@ -1262,11 +1263,11 @@ object TerminalUtil {
                 } else {
                     val busyRefusal = parseBusySessionRestartRefusal(output)
                     if (busyRefusal != null) {
-                        notifyBusySessionRestartBlocked(project, file, relativePath, busyRefusal, output)
+                        notifyBusySessionRestartBlocked(project, file, relativePath, target, busyRefusal, output)
                     } else {
                         val startingRefusal = parseStartingSessionRestartRefusal(output)
                         if (startingRefusal != null) {
-                            notifyStartingSessionRestartBlocked(project, file, relativePath, startingRefusal, output)
+                            notifyStartingSessionRestartBlocked(project, file, relativePath, target, startingRefusal, output)
                         } else {
                             notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
                         }
@@ -1277,12 +1278,17 @@ object TerminalUtil {
         )
     }
 
-    fun interruptAndRestartSession(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+    internal fun interruptAndRestartSession(
+        project: Project,
+        file: VirtualFile,
+        target: RestartTarget,
+        onComplete: (() -> Unit)? = null,
+    ) {
         ApplicationManager.getApplication().invokeLater {
             val decision = Messages.showYesNoDialog(
                 project,
-                "Interrupt the running agent-doc turn and restart its supervisor? Unsaved work in the terminal session may be discarded.",
-                "Interrupt and Restart Supervisor",
+                "Interrupt the running agent-doc turn and restart its ${target.noun}? Unsaved work in the terminal session may be discarded.",
+                "Interrupt and Restart ${target.noun.replaceFirstChar { it.uppercase() }}",
                 "Interrupt and restart",
                 "Cancel",
                 Messages.getWarningIcon(),
@@ -1291,7 +1297,7 @@ object TerminalUtil {
                 onComplete?.invoke()
                 return@invokeLater
             }
-            runRestartSupervisorCommand(project, file, force = true, onComplete = onComplete)
+            runRestartCommand(project, file, target = target, force = true, onComplete = onComplete)
         }
     }
 
@@ -1609,6 +1615,9 @@ object TerminalUtil {
         addAll(args)
         add(relativePath)
     }
+
+    internal fun restartCommandArgs(target: RestartTarget, force: Boolean): List<String> =
+        if (force) listOf(target.commandName, "--force") else listOf(target.commandName)
 
     internal fun buildAdminQueueResumeCommand(
         agentDoc: String,
@@ -2359,6 +2368,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         project: Project,
         file: VirtualFile,
         relativePath: String,
+        target: RestartTarget,
         refusal: BusySessionRestartRefusal,
         rawOutput: String,
     ) {
@@ -2369,7 +2379,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
-                interruptAndRestartSession(project, file)
+                interruptAndRestartSession(project, file, target)
             })
             notification.addAction(NotificationAction.createSimple("Show status") {
                 showSessionStatus(project, file)
@@ -2388,6 +2398,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         project: Project,
         file: VirtualFile,
         relativePath: String,
+        target: RestartTarget,
         refusal: StartingSessionRestartRefusal,
         rawOutput: String,
     ) {
@@ -2398,7 +2409,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
-                interruptAndRestartSession(project, file)
+                interruptAndRestartSession(project, file, target)
             })
             notification.addAction(NotificationAction.createSimple("Show status") {
                 showSessionStatus(project, file)
@@ -2813,7 +2824,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 deferred.restartInFlight -> {}
                 deferred.forceRequired -> {
                     notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
-                        interruptAndRestartSession(project, file)
+                        interruptAndRestartSession(project, file, RestartTarget.SUPERVISOR)
                     })
                 }
                 else -> {

@@ -103,7 +103,11 @@ fn log_status_tree_parity<E: StatusWriteEffects + ?Sized>(
     );
 }
 
-/// Replace the status component content with the provided text.
+/// Update the status component with the provided text.
+///
+/// The legacy path replaces the whole body. When the status opening marker has
+/// `sync="..."`, the pure document projection applies its additive (default) or
+/// protected replace synchronization contract instead.
 pub fn set<E: StatusWriteEffects + ?Sized>(effects: &E, file: &Path, text: &str) -> Result<()> {
     set_with_options(effects, file, text, false)
 }
@@ -125,7 +129,7 @@ pub fn set_with_options<E: StatusWriteEffects + ?Sized>(
     }
     .context("failed to read document")?;
     let new_doc =
-        agent_doc_document::status_projection::replace_status_content(&full_content, text)?;
+        agent_doc_document::status_projection::update_status_content(&full_content, text)?;
     // Phase 2 strangler shadow (#lzlosstree): compute the same status-body replace
     // through a bounded lossless-tree mutation and log whether it is byte-identical
     // to the legacy projection. Measurement only — `new_doc` stays the authority
@@ -368,5 +372,35 @@ mod tests {
             .expect("writeback log present");
         assert!(writeback.contains("transport=disk_force"));
         assert!(writeback.contains("reason=force_disk"));
+    }
+
+    #[test]
+    fn set_honors_additive_status_sync_and_preserves_marker_attributes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("sync.md");
+        let current = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace sync=\"Keep release current\" custom=kept -->\n",
+            "operator note\n",
+            "<!-- /agent:status -->\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+        let effects = TestEffects::new();
+
+        set(&effects, &doc, "Published: v1.2.3").unwrap();
+
+        let updated = effects.updated.borrow().clone().unwrap();
+        assert!(updated.contains("operator note"));
+        assert!(updated.contains("<!-- status:sync -->\nPublished: v1.2.3\n<!-- /status:sync -->"));
+        assert!(updated.contains(
+            "<!-- agent:status patch=replace sync=\"Keep release current\" custom=kept -->"
+        ));
+        assert!(
+            effects
+                .logs
+                .borrow()
+                .iter()
+                .any(|line| line.contains("lossless_write_parity op=status_set result=mismatch"))
+        );
     }
 }

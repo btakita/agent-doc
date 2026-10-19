@@ -25,6 +25,7 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
 
 /// Prompt defaults shared by `agent:queue` and `agent:exchange`.
 const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "presets", "subagents", "fan-out"];
+const STATUS_COMPONENT_ATTRS: &[&str] = &["sync", "sync-mode"];
 
 /// Whether `key` is a flag/value attribute owned by `agent:queue`.
 ///
@@ -180,6 +181,18 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                     issues.push(format!(
                         "`{key}={value}` on `agent:exchange`: expected a bare `{key}` flag because exchange prompts dispatch one at a time"
                     ));
+                }
+            } else if STATUS_COMPONENT_ATTRS.contains(&key.as_str()) {
+                if component.name != "status" {
+                    issues.push(format!(
+                        "`{key}` is a status-only attribute but appears on `agent:{}` (use it on `agent:status`)",
+                        component.name
+                    ));
+                } else if key == "sync-mode" && !component.attrs.contains_key("sync") {
+                    issues.push(
+                        "`sync-mode` on `agent:status` requires a non-empty `sync` instruction"
+                            .to_string(),
+                    );
                 }
             } else if key == "queue" && matches!(component.name.as_str(), "backlog" | "pending") {
                 if BacklogQueueSyncMode::parse(value).is_none() {
@@ -519,5 +532,32 @@ mod tests {
             .message_body();
         assert!(body.contains("prompt-component attribute"), "{body}");
         assert!(body.contains("fan-out"), "{body}");
+    }
+
+    #[test]
+    fn status_sync_attributes_are_status_only_and_require_an_instruction() {
+        let valid = concat!(
+            "<!-- agent:status sync=\"Keep release current\" sync-mode=replace -->\n",
+            "old\n",
+            "<!-- /agent:status -->\n",
+        );
+        assert!(component_attr_warning(valid).is_none());
+
+        let misplaced =
+            "<!-- agent:exchange sync=\"Keep release current\" -->\nq\n<!-- /agent:exchange -->\n";
+        let body = component_attr_warning(misplaced)
+            .expect("sync outside status warns")
+            .message_body();
+        assert!(body.contains("status-only attribute"), "{body}");
+
+        let orphaned_mode =
+            "<!-- agent:status sync-mode=replace -->\nold\n<!-- /agent:status -->\n";
+        let body = component_attr_warning(orphaned_mode)
+            .expect("sync-mode without sync warns")
+            .message_body();
+        assert!(
+            body.contains("requires a non-empty `sync` instruction"),
+            "{body}"
+        );
     }
 }

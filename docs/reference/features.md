@@ -31,6 +31,11 @@ that still covers the routed document instead of racing it with republication.
 
 ## Full catalog
 
+- **Compaction-resistant skill router** — installed Claude/Codex/OpenCode
+  `SKILL.md` files are generated from one small table of contents. The router
+  survives context compaction and requires `session-cycle.md`; that bundled
+  runbook owns the ordered closeout spine and routes branch work to focused
+  runbooks, with coverage tests preserving the former inline invariants.
 - **Template mode** — named component regions (`<!-- agent:name -->`) updated independently; inline attrs (`patch=`, `max_lines=`) > `components.toml` > built-in defaults
 - **Completed backlog archive** — reaped tracked work is stored in canonical `agent:done`, or in an explicit repo-relative `.done.md` file via `agent:done archive=...`; `agent-doc migrate` rewrites old `agent:backlog-done` and `agent:pending-done` tags
 - **Review-pending tracked work** — `agent:review` holds code-complete `[/]` items awaiting human review. `--pending-gate` moves backlog items into review, `--pending-ungate` moves them back, `--done` accepts review items, and optional `review_done_guard` can warn or fail when a project requires review before done.

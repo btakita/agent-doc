@@ -31,7 +31,6 @@
 //! - check_not_installed: no SKILL.md present → path does not exist (check would return false)
 //! - bundled_skill_is_not_empty: shared skill template length > 0 at compile time
 //! - bundled_skill_contains_agent_doc: bundled content references "agent-doc"
-
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -109,13 +108,13 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 **Note:** Codex does not support project-defined slash commands. If this root file disagrees with the installed harness-specific instructions, treat the installed harness file as authoritative for the current turn.
 "#;
 
-const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`; Codex `agent-doc skill install --harness codex`, then re-read the installed `.codex/skills/agent-doc/SKILL.md` completely and continue the same turn without restarting the supervisor; OpenCode `agent-doc skill install --harness opencode`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Claude stops only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`; if the binary is newer, follow the active-harness update procedure in [runbooks/harness-invocation.md](runbooks/harness-invocation.md), then continue as that runbook directs.";
 
-const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`. On `SKILL_RELOAD=restart`, ask the user to restart Claude Code and re-invoke `/agent-doc <FILE>`, then stop. Use `--reload compact` and ask for `/compact` only when that explicit opt-in exists. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`; if newer, follow the Claude update procedure in [runbooks/harness-invocation.md](runbooks/harness-invocation.md), including any emitted reload boundary.";
 
-const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness codex` without a reload request. After a real update, re-read the installed `.codex/skills/agent-doc/SKILL.md` completely and continue the same turn under those instructions. Do not call `agent-doc session restart-supervisor`, stop, or ask the user to restart: replacing an active Codex child interrupts the conversation, while the explicit re-read loads the updated workflow in place. If install says already up to date, treat it as stale instruction drift, continue this turn, and use the installed Codex instructions. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`; if newer, follow the Codex update procedure in [runbooks/harness-invocation.md](runbooks/harness-invocation.md), re-read the installed skill after a real update, and continue the same turn.";
 
-const OPENCODE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness opencode`; if it says already up to date, treat as stale instruction drift, continue this turn, and use the installed OpenCode skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const OPENCODE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`; if newer, follow the OpenCode update procedure in [runbooks/harness-invocation.md](runbooks/harness-invocation.md), then continue as directed.";
 
 /// Claude-Code-only auto-loop instruction appended to the rendered SKILL.md.
 ///
@@ -135,25 +134,21 @@ const OPENCODE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-d
 ///
 /// Plan: tasks/agent-doc/plan-claude-code-queue-auto-loop.md
 const CLAUDE_QUEUE_AUTO_LOOP_SECTION: &str = r#"
-## Auto-loop while queue is active (Claude Code)
-**Queue subagent dispatch is a three-boundary protocol (`#queueclaimworker`):** run the entry's `claim_command` first (`🟡` means reserved/dispatching), invoke the harness spawn, and only after spawn returns a concrete worker identity run the entry's `start_command` with that identity and the claim's printed generation (`🚧` means worker-bound/running). Never infer running from a claim, label, intended spawn, process poll, or heartbeat. `queue claim --refresh` only extends an already-started attempt. A claim generation binds to at most one worker and one worker binds to at most one live claim in the document; stale generations and conflicting bindings are refused without mutation. After a successful `agent-doc finalize` / `agent-doc write --commit` cycle whose `agent-doc session-check` returns OK, check preflight's queue fields:
-- `preflight.queue_active == true`
-- `preflight.queue_continuation_required == true` — the authoritative "there is agent-drainable work the **in-session loop** can take" signal (`#cleardrainsignal`/`#qchurn`). As of `#qcontdrain` the in-session `/loop` **drains `[clean-session]` heads in place** (it no longer defers them to the supervisor — a supervisor that may itself be stalled left the queue stranded), so this is `false` **only** when every remaining head is `[operator-verify]` (needs a live editor/pane) or inert noise, even while `queue_active == true` and a `queue_trigger` is present. **When it is `false`, do NOT loop and do NOT re-dispatch from this session** — only operator-gated / noise heads remain. When it is `true` and a `[clean-session]` head is next, just drain it; the supervisor still owns context resets between items (idle-boundary recycle), but you no longer stop the loop merely because the head is `[clean-session]`. This signal is computed in the binary from the in-session drainability filter, which defers only `[operator-verify]` heads — the same rule the supervisor idle-watch applies. Never re-derive drainability by hand from the queue prose. `preflight.queue_drainable_head_count` is the underlying loop-scope count (`0` ⇒ stop the loop).
-- `preflight.queue_trigger == "auto"` **or** `preflight.queue_trigger == "persisted"` — `auto` is a start trigger only; once the queue is active, a persisted-active queue (`queue_active: true` with no `auto` attribute) is equally continuation-eligible (`#active-queue-persisted-no-continue`). Do not require the `auto` attribute to keep draining an already-active queue.
-- `preflight.queue_prompts.len() >= 1`
-- `preflight.user_intent_prompt_changes` is empty (a real user prompt mid-loop takes precedence; do NOT auto-loop over it). Managed-component state edits — queue activity toggle, queue item add/strike, backlog/review/done item edits, `queue_active:` frontmatter flip — are filtered out of `user_intent_prompt_changes` so routine session bookkeeping does not block the auto-loop. Likewise, an edit the affectedness classifier scopes as independent of the current turn (`op_affectedness.turn_affected == false`, `#queue-no-stop-unrelated-edit`) is filtered out — an edit unrelated to the active turn never halts the drain; only a real user prompt, which edits the in-scope `exchange` tail and classifies as turn-affecting, preempts.
-When all of these hold, drive the next cycle from the same Claude Code session by SUBMITTING `/loop agent-doc <FILE>` as a real prompt: call `ScheduleWakeup` with exactly that prompt. Do not call the `Skill` tool with `skill: "loop"` instead (`#loopskillnoadmit`): a Skill call is not a submitted prompt, so it never runs binary preflight or claims the drain-owner lease, and it seals no cycle contract. The binary claims the `claude_loop` drain-owner lease as part of each `/loop agent-doc <FILE>` admission, before preflight reconciles the prior continuation, so do not run a separate `agent-doc drain-claim`. That lease tells the supervisor idle-queue watch that `/loop` owns this drain, so it defers instead of *also* injecting `agent-doc <FILE>` into the input queue and flooding it with duplicate triggers. The lease is short-TTL and self-expiring — if the loop stops, the supervisor resumes draining on its own; you never need to release it manually. `/loop` self-paces the next invocation and terminates naturally when the queue drains, when the user interrupts, when `agent_doc_queue_max_iterations` (frontmatter or `.agent-doc/config.toml`) is hit, or when the environment hard-cap `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) is exceeded. **A `/loop` re-entry seals its own cycle contract — do NOT stop for this (`#loopcontractseal`).** It arrives as an ordinary submitted prompt, so the `UserPromptSubmit` hook runs binary-owned preflight for it exactly as for an operator-typed trigger, including the `/loop agent-doc <FILE>` and `/loop <interval> agent-doc <FILE>` wrapper shapes the loop skill re-arms with. A genuinely absent marker is a harness-admission defect to repair (a binary predating 0.35.188 rejects the wrapped shape) — fail closed and say so; never recreate admission by shelling `agent-doc preflight` from the model turn, and never hand drainable heads back to the operator as if the missing contract were a valid stop reason.
-**Do not defer a drainable queued item to a "fresh" or "focused cycle" (`#drain-no-defer`).** During an active queue drain, "this deserves its own focused/clean/fully-verified cycle" is a **stall, not valid closeout** — the drain IS the cycle sequence, and context growth between items is the supervisor's job, not a reason for you to stop. When `session_accretion` reports high accretion (`level: warn`/`block`, over `clear_threshold`) while `queue_active == true`, do **not** hand the remaining items back, ask the operator to compact, or pause for a clean session: finish the current item and keep looping. Context resets between items are the supervisor's job, never yours (`#bgclearpolicy`). With queue auto-clear on — the default for an active `agent:queue`; `<!-- agent:queue disable-auto-clear -->` turns it off, and preflight reports the setting as `queue_auto_clear` — the binary hands each item boundary to a ready supervisor: preflight reports `queue_auto_clear_yield: true` and session-check prints `queue_auto_clear_yield=true`, both with `queue_continuation_required == false`. Then end the turn after the proven closeout (no `ScheduleWakeup`/`/loop`); the supervisor resets the context at the idle boundary (`/clear` typed into the live Claude Code process, `/new` into OpenCode, a fresh restart for Codex, whose `/clear` exits the process) and dispatches the next item to the fresh agent. With auto-clear off, or when no ready supervisor can take the hand-off, `queue_continuation_required` stays `true` and you keep looping in the same context; only an explicit operator Clear resets it. A context clear never shrinks the document: accretion `block` measures the exchange size, which only compaction reduces. Only a genuinely operator-gated item (a required live editor/pane proof, an external approval/CI outage) may be left for the operator and tagged so go-mode defers it (`#goqueuestall`); an **agent-drainable** item is never deferred to "a fresh cycle."
+## Claude queue continuation
 
-Skip the auto-loop on any failed closeout, `session-check` interruption, or `lint-gate` block — those need explicit operator attention. `[session-check] steering pending: …` (exit `0`) is **not** an interruption (`#steerinterruptexit`): it lists operator steering that arrived after the committed response, each item verbatim with its `dispatch`; an `address_now` exchange prompt is the next cycle's input, so re-enter with `ScheduleWakeup` and the prompt `/loop agent-doc <FILE>` even when `queue_continuation_required == false` (that line reads `steering_pending=true`). Skip when `preflight.queue_active == false` (queue drained or halted) **or `preflight.queue_continuation_required == false`** (no *in-session*-loop-drainable head — `[operator-verify]`, `[focused-cycle]`, or noise heads remain; looping would just churn a no-op `#qchurn` cycle, so report the remaining heads in one line and stop without pausing or punting). As of `#qcontdrain`, `[clean-session]` heads are loop-drainable and therefore keep `queue_continuation_required == true` — do **not** stop the loop on them; drain them in place. High session-accretion is **not** in that skip list — keep draining (a context clear does not reduce it; only compaction does). `queue_auto_clear_yield` is not a stop either: it is the intentional auto-clear hand-off above, so end the turn and report "yielding to supervisor auto-clear," never an operator stall. **Stopping ≠ stalling — read `ui_outcome` (`#qfocsup`):** `deferred_for_supervisor_drain` (`yield_to_supervisor_clear_and_continue`) means a `[focused-cycle]` head remains that the CP/supervisor clear-and-continue path drains (it re-dispatches the head, clearing the context first when queue auto-clear is on — why the in-session loop yields it instead of running mid-drift), so just end your turn for the supervisor to take over and report "yielding to supervisor," never an operator stall (treating it as operator-gated is what wrongly idles the queue); `deferred_for_operator_proof` (`operator_proof_required`) means only `[operator-verify]`/noise heads remain (need a human / clearing) so report and stop; `no_drainable_work` means fully drained. `supervisor_drain_unavailable` (`drain_in_session_supervisor_unavailable`, `#supdrainlive`/`#focusedfallback`) means a `[focused-cycle]` head remains but its supervisor cannot drain it (none live, stale heartbeat, or stale binary) — the binary then reports `queue_continuation_required == true` and you drain that head IN-SESSION now; never hand it back to the operator or ask for a re-trigger, and never report "yielding to supervisor". **A head dispatched to a subagent is claimed; the loop does not re-enter for it (`#queueclaim`).** Before handing a queue head to a background subagent (for example under a `#subagents` preset), claim it: `agent-doc queue claim <FILE> --item <#id or the queue line text> --owner subagent:<label>`. A claimed head is in flight elsewhere: preflight does not select it, it does not count toward `queue_drainable_head_count` / `queue_continuation_required`, and the Stop hook does not ask for a `/loop` re-entry for it. If every remaining head is claimed or operator-gated, end the turn quietly and wait for the subagents' notifications; do not schedule a `/loop` re-entry. The claim ends when the item closes (it leaves the queue): when the subagent reports back, persist its result in the SAME turn with the closeout that strikes the line (the verbatim `> **Queue prompt:**` echo, or `--done <id>`), which also ends the claim. A generation-matched `agent-doc queue release <FILE> --item <...> --generation <N>` records that the worker reported (`#reportedrelease`), so the line is persisted (`dispatch=persist_reported`) rather than re-dispatched, and `--generation <N> --requeue` abandons it for a new worker. A claim attempt transitions to visible nonblocking `⚠️` lost when its TTL expires (default two hours, `--ttl-secs`), so a crashed subagent cannot strand the queue and its lineage is not erased. `agent-doc queue claims <FILE>` lists retained claim attempts and their typed state.
-
-**The skip list above is exhaustive — do NOT invent stop reasons after a proven editor delivery (`#degraded-ipc-no-stall`).** A closeout is successful only after the monotonic write pipeline reaches `committed` and `session-check` is OK. A timeout, missing Lazily visibility proof, or `recovery=retry_without_disk_write` is not success: do not continue the queue or elect an attached-document disk write. The keyed worker retains the same intent in `state.db` and resumes it after the registered editor endpoint recovers. When `queue_continuation_required == true`, follow the binary's `queue_continuation_guidance`; high session accretion and semantic-completion warnings are not stop reasons after proven closeout. A stale binary recycles at the next idle boundary through the controller projection or `agent-doc admin recycle`, after which the loop continues on the fresh build. `make install` / `agent-doc lib-install` sends the shared `reload_library` intent to every live Lazily editor registration through its PID-scoped endpoint; `agent-doc admin reload-lib` repeats that typed fan-out. No filesystem delivery or reload broadcast participates in the hot path.
-
-This section's `/loop` invocation is Claude-Code-specific. Codex auto-loops via its `Stop` hook in user-level `$CODEX_HOME/hooks.json`; with queue auto-clear on and a ready supervisor, that hook allows the stop instead, and the supervisor restarts Codex fresh and dispatches the next head. **OpenCode has no `/loop` and no `Stop` hook, so the OpenCode agent MUST self-drive the drain in-turn (`#ocdrainstall` Part A):** after a proven closeout (`agent-doc write --commit <FILE>` reached `committed` + `session-check` OK) with `preflight.queue_continuation_required == true` and `preflight.queue_drainable_head_count > 0`, do NOT end the turn — immediately run `agent-doc preflight <FILE>` again and drain the next head (preflight → respond → `agent-doc write --commit <FILE>`), repeating in the SAME turn until `queue_continuation_required == false`, `queue_drainable_head_count == 0`, a genuine stop condition (failed closeout, `session-check` interruption, only `[operator-verify]` heads remaining), or the `agent_doc_queue_max_iterations` / `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) cap is reached. "Low context budget" and "this head deserves its own focused/clean cycle" are **NOT** stop reasons (`#drain-no-defer`) — they are stalls; keep draining. When `queue_auto_clear_yield` is true, end the turn after the proven closeout; the supervisor types `/new` and dispatches the next head. If context is genuinely saturated, finish the current item's proven closeout, then end the turn for the supervisor's idle-boundary recycle + re-dispatch — but never stop mid-queue without a proven closeout, and never hand an agent-drainable head back to the operator to re-invoke manually. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) and `tasks/agent-doc/plan-claude-code-queue-auto-loop.md`.
+When queue continuation or supervisor handoff fields are present, read [runbooks/queue-auto-loop.md](runbooks/queue-auto-loop.md) completely and follow its Claude Code branch. It owns the submitted `/loop agent-doc <FILE>` protocol, drainability fields, subagent claim fencing, iteration caps, and exhaustive stop conditions.
 "#;
 
 /// Bundled runbooks installed alongside the skill.
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
+    (
+        "session-cycle.md",
+        include_str!("../runbooks/session-cycle.md"),
+    ),
+    (
+        "queue-auto-loop.md",
+        include_str!("../runbooks/queue-auto-loop.md"),
+    ),
     (
         "compact-exchange.md",
         include_str!("../runbooks/compact-exchange.md"),
@@ -376,8 +371,10 @@ fn looks_like_managed_root_agents(content: &str) -> bool {
     content.contains("user-invocable: true")
         && content.contains("agent-doc-version:")
         && content.contains("# agent-doc")
-        && content.contains("## Harness Compatibility")
-        && content.contains("## Workflow")
+        && ((content.contains("## Harness Compatibility") && content.contains("## Workflow"))
+            || (content.contains("## Required cycle")
+                && content.contains("## Runbook table")
+                && content.contains("runbooks/session-cycle.md")))
 }
 
 fn skill_rel_path_for_env(env: agent_kit::detect::Environment) -> std::path::PathBuf {
@@ -2150,67 +2147,72 @@ mod tests {
     #[test]
     fn bundled_skill_hot_path_stays_compact() {
         assert!(
-            line_count(SKILL_TEMPLATE) <= 140,
-            "SKILL.md hot path grew to {} lines",
+            line_count(SKILL_TEMPLATE) <= 50,
+            "SKILL.md routing table grew to {} lines",
             line_count(SKILL_TEMPLATE)
         );
+        assert!(
+            SKILL_TEMPLATE.len() <= 4_000,
+            "SKILL.md routing table grew to {} bytes",
+            SKILL_TEMPLATE.len()
+        );
+        assert!(SKILL_TEMPLATE.contains("This file is a routing table"));
+        assert!(SKILL_TEMPLATE.contains("runbooks/session-cycle.md"));
     }
 
     #[test]
     fn rendered_claude_skill_includes_queue_auto_loop_section() {
         let rendered = super::content_for_env(Environment::ClaudeCode);
         assert!(
-            rendered.contains("## Auto-loop while queue is active (Claude Code)"),
-            "Claude-rendered SKILL.md must include the auto-loop section header"
+            rendered.contains("## Claude queue continuation")
+                && rendered.contains("runbooks/queue-auto-loop.md"),
+            "Claude-rendered SKILL.md must route queue continuation to the bundled runbook"
         );
+        let auto_loop = bundled_runbook("queue-auto-loop.md");
         assert!(
-            rendered.contains("call `ScheduleWakeup` with exactly that prompt")
-                && rendered.contains("SUBMITTING `/loop agent-doc <FILE>`"),
+            auto_loop.contains("SUBMIT")
+                && auto_loop.contains("`/loop agent-doc <FILE>`")
+                && auto_loop.contains("`ScheduleWakeup`"),
             "auto-loop section must re-enter through a submitted `/loop agent-doc <FILE>` prompt"
         );
         assert!(
-            !rendered.contains("invoke the `Skill` tool with `skill: \"loop\"`"),
+            auto_loop.contains("Do not invoke\n  the `loop` Skill directly"),
             "`#loopskillnoadmit`: a loop Skill call admits no cycle, so it must not be the re-entry"
         );
         assert!(
-            rendered.contains("AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP"),
+            auto_loop.contains("AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP"),
             "auto-loop section must name the env hard-cap"
         );
         assert!(
-            rendered.contains("queue_active") && rendered.contains("queue_prompts"),
+            auto_loop.contains("queue_active") && auto_loop.contains("queue_prompts"),
             "auto-loop section must reference preflight queue fields"
         );
         assert!(
-            rendered.contains("\"persisted\""),
+            auto_loop.contains("`persisted`"),
             "auto-loop section must make persisted-active queues continuation-eligible (#active-queue-persisted-no-continue)"
         );
         // #degraded-ipc-no-stall: a proven committed transition continues the
         // queue, while a missing Lazily visibility proof leaves the captured
         // intent retained in the sole state ledger.
         assert!(
-            rendered.contains("#degraded-ipc-no-stall"),
+            auto_loop.contains("#degraded-ipc-no-stall"),
             "auto-loop section must carry the degraded-IPC no-stall rule"
         );
         assert!(
-            rendered.contains("monotonic write pipeline")
-                && rendered.contains("missing Lazily visibility proof")
-                && rendered.contains("state.db")
-                && rendered.contains("PID-scoped endpoint")
-                && rendered.contains("No filesystem delivery or reload broadcast"),
+            auto_loop.contains("missing Lazily visibility proof")
+                && auto_loop.contains("state.db")
+                && auto_loop.contains("registered endpoint recovers"),
             "auto-loop section must distinguish a proven ledger closeout from retained Lazily delivery"
         );
         assert!(
-            rendered.contains("queue_continuation_guidance"),
+            auto_loop.contains("queue_continuation_guidance"),
             "auto-loop section must point at the binary-authoritative queue_continuation_guidance field"
         );
         // #bgclearpolicy: the drain contract names the shipped reset owner and
         // its opt-out, and never implies a clear fixes exchange-size accretion.
         assert!(
-            rendered.contains("#bgclearpolicy")
-                && rendered.contains("disable-auto-clear")
-                && rendered.contains("queue_auto_clear_yield")
-                && rendered.contains("only compaction reduces")
-                && !rendered.contains("the supervisor owns the `/clear`"),
+            auto_loop.contains("queue_auto_clear_yield")
+                && auto_loop.contains("only compaction reduces"),
             "auto-loop section must describe queue auto-clear as shipped"
         );
     }
@@ -2219,7 +2221,7 @@ mod tests {
     fn rendered_codex_skill_omits_queue_auto_loop_section() {
         let rendered = super::content_for_env(Environment::Codex);
         assert!(
-            !rendered.contains("## Auto-loop while queue is active (Claude Code)"),
+            !rendered.contains("## Claude queue continuation"),
             "Codex-rendered SKILL.md must NOT include the Claude-only auto-loop section (Codex uses its own Stop hook)"
         );
     }
@@ -2228,7 +2230,7 @@ mod tests {
     fn rendered_opencode_skill_omits_queue_auto_loop_section() {
         let rendered = super::content_for_env(Environment::OpenCode);
         assert!(
-            !rendered.contains("## Auto-loop while queue is active (Claude Code)"),
+            !rendered.contains("## Claude queue continuation"),
             "OpenCode-rendered SKILL.md must NOT include the Claude-only auto-loop section"
         );
     }
@@ -2237,7 +2239,7 @@ mod tests {
     fn rendered_generic_skill_omits_queue_auto_loop_section() {
         let rendered = super::content_for_env(Environment::Generic);
         assert!(
-            !rendered.contains("## Auto-loop while queue is active (Claude Code)"),
+            !rendered.contains("## Claude queue continuation"),
             "Generic-rendered SKILL.md must NOT include the Claude-only auto-loop section"
         );
     }
@@ -2251,19 +2253,15 @@ mod tests {
             Environment::Generic,
         ] {
             let content = super::content_for_env(env);
-            // 152: raised from 150 by `#preflightinbinary`, which adds one
-            // hot-path digest bullet. The bullet is what flips the default —
-            // an agent that does not read it re-runs preflight every turn — so
-            // it earns a line. Keep the headroom small: the guard exists to
-            // catch drift, and a generous ceiling stops catching it.
-            // 153: `#midturn-steering` adds one bullet. Steering now arrives
-            // mid-turn through a hook, and an agent that does not know the
-            // `dispatch` contract would interrupt the current item for every
-            // queue addition, so it must be on the hot path.
             assert!(
-                line_count(&content) <= 153,
+                line_count(&content) <= 60,
                 "{env:?} rendered instruction surface grew to {} lines",
                 line_count(&content)
+            );
+            assert!(
+                content.len() <= 5_500,
+                "{env:?} rendered instruction surface grew to {} bytes",
+                content.len()
             );
         }
     }
@@ -2300,6 +2298,23 @@ mod tests {
 
     fn line_count(content: &str) -> usize {
         content.lines().count()
+    }
+
+    fn bundled_runbook(name: &str) -> &'static str {
+        BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(candidate, _)| *candidate == name)
+            .map(|(_, body)| *body)
+            .unwrap_or_else(|| panic!("{name} missing from BUNDLED_RUNBOOKS"))
+    }
+
+    fn bundled_instruction_text() -> String {
+        let mut text = SKILL_TEMPLATE.to_string();
+        for (_, body) in BUNDLED_RUNBOOKS {
+            text.push('\n');
+            text.push_str(body);
+        }
+        text
     }
 
     fn assert_codex_mcp_config(config: &toml::Value, _root: &std::path::Path) {
@@ -2894,16 +2909,9 @@ mod tests {
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
-        assert!(
-            content.contains("agent-doc skill install --harness codex` without a reload request")
-        );
-        assert!(
-            content.contains("re-read the installed `.codex/skills/agent-doc/SKILL.md` completely")
-        );
-        assert!(content.contains("Do not call `agent-doc session restart-supervisor`"));
-        assert!(!content.contains("codex resume --last"));
-        assert!(content.contains("stale instruction drift"));
-        assert!(content.contains("continue this turn"));
+        assert!(content.contains("follow the Codex update procedure"));
+        assert!(content.contains("re-read the installed skill"));
+        assert!(content.contains("runbooks/session-cycle.md"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
         assert!(
@@ -2923,10 +2931,8 @@ mod tests {
 
         assert!(content.contains("Interactive markdown session for OpenCode"));
         assert!(content.contains("/agent-doc <FILE>"));
-        assert!(content.contains("agent-doc skill install --harness opencode"));
-        assert!(content.contains("installed OpenCode skill"));
-        assert!(content.contains("agent-doc respond <FILE>"));
-        assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
+        assert!(content.contains("follow the OpenCode update procedure"));
+        assert!(content.contains("runbooks/session-cycle.md"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
     }
@@ -2960,10 +2966,7 @@ mod tests {
         assert!(!dir.path().join(".codex/AGENTS.md").exists());
         let codex_skill =
             std::fs::read_to_string(dir.path().join(".codex/skills/agent-doc/SKILL.md")).unwrap();
-        assert!(
-            codex_skill
-                .contains("agent-doc skill install --harness codex` without a reload request")
-        );
+        assert!(codex_skill.contains("follow the Codex update procedure"));
     }
 
     #[test]
@@ -3491,8 +3494,11 @@ mod tests {
     }
 
     #[test]
-    fn bundled_skill_contains_harness_preamble() {
-        assert!(SKILL_TEMPLATE.contains("Harness Compatibility"));
+    fn bundled_skill_is_a_complete_runbook_table() {
+        assert!(SKILL_TEMPLATE.contains("## Required cycle"));
+        assert!(SKILL_TEMPLATE.contains("## Runbook table"));
+        assert!(SKILL_TEMPLATE.contains("session-cycle.md"));
+        assert!(SKILL_TEMPLATE.contains("queue-auto-loop.md"));
         assert!(SKILL_TEMPLATE.contains("harness-invocation.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/commit.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/command-synonyms.md"));
@@ -3503,59 +3509,59 @@ mod tests {
 
     #[test]
     fn bundled_skill_contains_backlog_capture_rules() {
-        assert!(SKILL_TEMPLATE.contains("Backlog capture rule"));
-        assert!(SKILL_TEMPLATE.contains("[recommended]"));
-        assert!(SKILL_TEMPLATE.contains("--backlog-queue-placement append"));
-        assert!(SKILL_TEMPLATE.contains("must not preempt the existing head"));
-        assert!(SKILL_TEMPLATE.contains("--backlog-add-after <id>"));
-        assert!(SKILL_TEMPLATE.contains("--backlog-add-before <id>"));
-        assert!(SKILL_TEMPLATE.contains("does not override them"));
-        assert!(SKILL_TEMPLATE.contains("multi-phase implementation work"));
-        assert!(SKILL_TEMPLATE.contains("prefer one backlog ID per actionable phase"));
-        assert!(SKILL_TEMPLATE.contains("`do #id` closeout rule"));
-        assert!(SKILL_TEMPLATE.contains("--done <id>"));
-        assert!(SKILL_TEMPLATE.contains("pending_done_guard"));
-        assert!(SKILL_TEMPLATE.contains("An `[operator-verify]` tag alone is not a gate"));
-        assert!(SKILL_TEMPLATE.contains("use `--backlog-ungate <id>`"));
-        assert!(SKILL_TEMPLATE.contains("not `--review-edit`"));
+        assert!(bundled_instruction_text().contains("Backlog capture rule"));
+        assert!(bundled_instruction_text().contains("[recommended]"));
+        assert!(bundled_instruction_text().contains("--backlog-queue-placement append"));
+        assert!(bundled_instruction_text().contains("must not preempt the existing head"));
+        assert!(bundled_instruction_text().contains("--backlog-add-after <id>"));
+        assert!(bundled_instruction_text().contains("--backlog-add-before <id>"));
+        assert!(bundled_instruction_text().contains("does not override them"));
+        assert!(bundled_instruction_text().contains("multi-phase implementation work"));
+        assert!(bundled_instruction_text().contains("one backlog ID per actionable phase"));
+        assert!(bundled_instruction_text().contains("`do #id` closeout rule"));
+        assert!(bundled_instruction_text().contains("--done <id>"));
+        assert!(bundled_instruction_text().contains("pending_done_guard"));
+        assert!(bundled_instruction_text().contains("An `[operator-verify]` tag alone never justifies `agent:review`"));
+        assert!(bundled_instruction_text().contains("`--backlog-ungate <id>`"));
+        assert!(bundled_instruction_text().contains("not `--review-edit`"));
     }
 
     #[test]
     fn bundled_skill_treats_imperative_document_edits_as_executable_work() {
-        assert!(SKILL_TEMPLATE.contains("Imperative edits are executable directives"));
-        assert!(SKILL_TEMPLATE.contains("is already operator authorization for the work it names"));
-        assert!(SKILL_TEMPLATE.contains("do not ask the operator to say `go` / `push`"));
-        assert!(SKILL_TEMPLATE.contains("or invoke the preset again"));
-        assert!(SKILL_TEMPLATE.contains("harness-native tool-permission prompt"));
+        assert!(bundled_instruction_text().contains("Imperative edits are executable directives"));
+        assert!(bundled_instruction_text().contains("authorize the named work"));
+        assert!(bundled_instruction_text().contains("Do not ask the operator\n  to say `go` / `push` again"));
+        assert!(bundled_instruction_text().contains("or invoke the preset again"));
+        assert!(bundled_instruction_text().contains("harness-native tool-permission prompt"));
         assert!(
-            SKILL_TEMPLATE
-                .contains("MCP auth / OAuth steps are sub-steps, not closeout boundaries")
+            bundled_instruction_text()
+                .contains("MCP auth / OAuth is a sub-step, not a closeout boundary")
         );
-        assert!(SKILL_TEMPLATE.contains(
-            "Do not keep appending \"starting/continuing\" status prose while the requested work remains undone"
+        assert!(bundled_instruction_text().contains(
+            "\"starting/continuing\" status prose while requested work remains undone"
         ));
     }
 
     #[test]
     fn bundled_skill_routes_natural_language_focused_extract_requests() {
-        assert!(SKILL_TEMPLATE.contains("Focused extraction starts from document prose"));
-        assert!(SKILL_TEMPLATE.contains("load [runbooks/transfer-extract.md]"));
-        assert!(SKILL_TEMPLATE.contains(
-            "imperative extraction request itself authorizes `--apply` after a clean preview"
+        assert!(bundled_instruction_text().contains("The operator may ask naturally inside the source document"));
+        assert!(SKILL_TEMPLATE.contains("[transfer-extract.md](runbooks/transfer-extract.md)"));
+        assert!(bundled_instruction_text().contains(
+            "An imperative extraction request authorizes the agent"
         ));
-        assert!(SKILL_TEMPLATE.contains(
-            "use `--apply --coordinate-live-editors` to persist, freeze, detach, apply, and resume"
+        assert!(bundled_instruction_text().contains(
+            "--apply --coordinate-live-editors"
         ));
-        assert!(SKILL_TEMPLATE.contains(
-            "if an endpoint lacks the advertised capability, present the concrete fallback"
+        assert!(bundled_instruction_text().contains(
+            "If an endpoint lacks `coordinated_extract_v1`"
         ));
-        assert!(SKILL_TEMPLATE.contains(
-            "Exploratory wording such as `Can we extract ...?` authorizes only an answer or preview"
+        assert!(bundled_instruction_text().contains(
+            "Exploratory/question wording authorizes"
         ));
-        assert!(SKILL_TEMPLATE.contains(
-            "never has to provide IDs, exchange-node handles, or a manifest"
+        assert!(bundled_instruction_text().contains(
+            "supply IDs or a manifest"
         ));
-        assert!(SKILL_TEMPLATE.contains("there is no `split` alias"));
+        assert!(bundled_instruction_text().contains("There is no `split` alias"));
     }
 
     /// qsubattr4: the queue-level `subagents` attribute makes the in-session
@@ -3563,19 +3569,19 @@ mod tests {
     /// respond and planning-dispatch runbooks own the full procedure.
     #[test]
     fn bundled_surfaces_carry_queue_subagents_coordinator_contract() {
-        assert!(SKILL_TEMPLATE.contains("Under `<!-- agent:queue subagents -->`"));
-        assert!(SKILL_TEMPLATE.contains("agent-doc queue claim ... --refresh"));
-        assert!(SKILL_TEMPLATE.contains("--refresh --generation <N>"));
-        assert!(SKILL_TEMPLATE.contains("queue report-complete ... --generation <N>"));
-        assert!(SKILL_TEMPLATE.contains("queue release ... --generation <N>"));
-        assert!(SKILL_TEMPLATE.contains("A fresh claim displays `🟡`"));
-        assert!(SKILL_TEMPLATE.contains("ONE `make install` per batch"));
-        assert!(SKILL_TEMPLATE.contains("agent-doc orchestrate <FILE> --mode parallel"));
-        assert!(SKILL_TEMPLATE.contains("(`#queuesubagents`)"));
+        assert!(bundled_instruction_text().contains("Under `<!-- agent:queue subagents -->`"));
+        assert!(bundled_instruction_text().contains("queue claim --refresh --generation <N>"));
+        assert!(bundled_instruction_text().contains("--refresh --generation <N>"));
+        assert!(bundled_instruction_text().contains("queue report-complete <FILE> --item <...> --generation <N>"));
+        assert!(bundled_instruction_text().contains("queue release <FILE> --item <...> --generation <N>"));
+        assert!(bundled_instruction_text().contains("`🟡` means reserved/dispatching"));
+        assert!(bundled_instruction_text().contains("`make install` per integrated batch"));
+        assert!(bundled_instruction_text().contains("agent-doc orchestrate <FILE> --mode parallel"));
+        assert!(bundled_instruction_text().contains("(`#queuesubagents`)"));
         // `#waypostauthorization`: the coordinator pastes the binary-resolved
         // operator authorization into each subagent prompt.
-        assert!(SKILL_TEMPLATE.contains("`authorization.subagent_prompt_preamble` verbatim"));
-        assert!(SKILL_TEMPLATE.contains("agent-doc queue brief <FILE> --item <...>"));
+        assert!(bundled_instruction_text().contains("`authorization.subagent_prompt_preamble` VERBATIM"));
+        assert!(bundled_instruction_text().contains("agent-doc queue brief <FILE> --item <...>"));
         let runbook = |name: &str| {
             BUNDLED_RUNBOOKS
                 .iter()
@@ -3612,59 +3618,46 @@ mod tests {
 
     #[test]
     fn bundled_skill_preserves_operator_visible_document_authority() {
-        assert!(SKILL_TEMPLATE.contains("Operator-visible document text is authoritative"));
-        assert!(SKILL_TEMPLATE.contains("content_ours"));
-        assert!(SKILL_TEMPLATE.contains(
-            "Snapshots and incomplete token captures are backup/audit state, not hot-path authority"
-        ));
-        assert!(SKILL_TEMPLATE.contains("fail closed or retry through the editor"));
+        assert!(bundled_instruction_text().contains("Operator-visible document text is authoritative"));
+        assert!(bundled_instruction_text().contains("content_ours"));
+        assert!(bundled_instruction_text().contains("backup/audit state, not\n  hot-path authority"));
+        assert!(bundled_instruction_text().contains("fail closed or retry through the editor"));
     }
 
     #[test]
     fn bundled_skill_treats_harness_native_entrypoints_as_binary_owned_cycles() {
-        assert!(SKILL_TEMPLATE.contains(
+        assert!(bundled_instruction_text().contains(
             "Harness-native `agent-doc` entrypoints start the binary-owned response cycle"
         ));
-        assert!(SKILL_TEMPLATE.contains("executable workflow start"));
-        assert!(SKILL_TEMPLATE.contains("generic document-editing request"));
-        assert!(
-            SKILL_TEMPLATE
-                .contains("Do not manually patch the final assistant response into the document")
-        );
-        assert!(SKILL_TEMPLATE.contains("agent-doc respond <FILE>"));
-        assert!(SKILL_TEMPLATE.contains("binary resolves and commits the turn"));
-        assert!(SKILL_TEMPLATE.contains(
-            "never emit the terminal `final` message before connected `agent_doc_finalize` succeeds"
-        ));
-        assert!(
-            SKILL_TEMPLATE.contains("the Stop hook must otherwise create a same-turn continuation")
-        );
-        assert!(
-            SKILL_TEMPLATE
-                .contains("stage and commit only the intended non-session repo files first")
-        );
-        assert!(SKILL_TEMPLATE.contains("code-enforced-directives.md"));
+        assert!(bundled_instruction_text().contains("executable workflow start"));
+        assert!(bundled_instruction_text().contains("generic\n  document-editing request"));
+        assert!(SKILL_TEMPLATE.contains("Never manually patch the final response into the session document"));
+        assert!(bundled_instruction_text().contains("agent-doc respond <FILE>"));
+        assert!(bundled_instruction_text().contains("binary resolves and commits the turn"));
+        assert!(bundled_instruction_text().contains("$CODEX_HOME/hooks.json"));
+        assert!(bundled_instruction_text().contains("Manual repository commits exclude the active session document"));
+        assert!(bundled_instruction_text().contains("code-enforced-directives.md"));
     }
 
     #[test]
     fn bundled_skill_contains_manual_repair_write_commit_rule() {
-        assert!(SKILL_TEMPLATE.contains("Manual repair / missed patchback rule (all harnesses)"));
+        assert!(bundled_instruction_text().contains("Manual repair / missed patchback rule (all harnesses)"));
         assert!(
-            SKILL_TEMPLATE
-                .contains("do **not** patch the assistant response directly into the file")
+            bundled_instruction_text()
+                .contains("do **not** patch the\nassistant response directly into the file")
         );
-        assert!(SKILL_TEMPLATE.contains("Use `agent-doc write --commit <FILE>`"));
-        assert!(SKILL_TEMPLATE.contains("bare `agent-doc write`"));
+        assert!(bundled_instruction_text().contains("Use `agent-doc write --commit <FILE>`"));
+        assert!(bundled_instruction_text().contains("bare `agent-doc write`"));
     }
 
     #[test]
     fn bundled_skill_delegates_captured_finalize_recovery_to_the_binary() {
-        assert!(SKILL_TEMPLATE.contains("Captured finalize is binary-owned (all harnesses)"));
-        assert!(SKILL_TEMPLATE.contains("owned by the keyed supervisor worker"));
-        assert!(SKILL_TEMPLATE.contains("Do not recapture, re-answer"));
-        assert!(SKILL_TEMPLATE.contains("bounded retry and exact-once commit semantics"));
-        assert!(SKILL_TEMPLATE.contains("exact editor save-flush"));
-        assert!(!SKILL_TEMPLATE.contains("then retry the same closeout once"));
+        assert!(bundled_instruction_text().contains("Captured finalize is\nbinary-owned"));
+        assert!(bundled_instruction_text().contains("keyed supervisor worker"));
+        assert!(bundled_instruction_text().contains("do not recapture, re-answer"));
+        assert!(bundled_instruction_text().contains("bounded retry and exact-once commit semantics"));
+        assert!(bundled_instruction_text().contains("whose exact bytes reach disk clears it"));
+        assert!(!bundled_instruction_text().contains("then retry the same closeout once"));
     }
 
     /// `#respondbaselineflag`: no response-persistence command accepts a baseline
@@ -3679,15 +3672,15 @@ mod tests {
         // are banned.
         let banned_usage = "--baseline-file <";
         assert!(
-            !SKILL_TEMPLATE.contains(banned_usage),
+            !bundled_instruction_text().contains(banned_usage),
             "SKILL.md must not put --baseline-file in a command template; no agent-doc command accepts it"
         );
         assert!(
-            !SKILL_TEMPLATE.contains("baseline_file"),
+            !bundled_instruction_text().contains("baseline_file"),
             "SKILL.md must not reference a preflight baseline_file field; preflight emits none"
         );
         assert!(
-            SKILL_TEMPLATE.contains("There is no `--baseline-file` flag"),
+            bundled_instruction_text().contains("no `--baseline-file` flag"),
             "SKILL.md must state the prohibition explicitly so an agent does not reinvent the flag"
         );
         for (name, body) in BUNDLED_RUNBOOKS {
@@ -3717,30 +3710,18 @@ mod tests {
         );
     }
 
-    /// GH #125 / #140 (`#chatprompt`): the hot path must tell every agent to
-    /// record a chat-originated prompt in the document, including OpenCode
-    /// where no `UserPromptSubmit` hook can deliver the instruction, and that
-    /// `no_changes: true` is not a stop when the turn carries such a prompt.
+    /// GH #125 / #140 (`#chatprompt`): the routing table must load the cycle
+    /// owner, and that runbook must retain the hook-independent chat contract.
     #[test]
-    fn bundled_skill_records_chat_originated_prompts() {
-        assert!(SKILL_TEMPLATE.contains("`#chatprompt`, GH #125"));
-        assert!(SKILL_TEMPLATE.contains("`#chatprompt`, GH #140"));
-        assert!(SKILL_TEMPLATE.contains(
-            "OpenCode has no `UserPromptSubmit` hook, so its agent MUST self-apply the shared rule"
-        ));
-        assert!(SKILL_TEMPLATE.contains(
-            "begin the `patch:exchange` response with `> **Chat prompt (#chatprompt):** <verbatim prompt>` and persist it through `respond` / `write --commit`"
-        ));
-        assert!(SKILL_TEMPLATE.contains(
-            "unless this harness turn carries an operator prompt absent from the document"
-        ));
-        assert!(SKILL_TEMPLATE.contains("[agent-doc] chat prompt for session document"));
-        // GH #125 follow-up: the contract carries unrecorded chat prompts, and
-        // closeout warns when a cycle skipped their record.
-        assert!(SKILL_TEMPLATE.contains("A non-empty `chat_prompts` is never `no_changes`"));
-        assert!(SKILL_TEMPLATE.contains("`session-check` warns `chat prompt not recorded`"));
-        let respond = include_str!("../runbooks/respond.md");
-        assert!(respond.contains("Chat-originated prompts are session turns (`#chatprompt`"));
+    fn bundled_surfaces_record_chat_originated_prompts() {
+        let cycle = bundled_runbook("session-cycle.md");
+        assert!(SKILL_TEMPLATE.contains("runbooks/session-cycle.md"));
+        assert!(cycle.contains("`#chatprompt`, GH #125"));
+        assert!(cycle.contains("`#chatprompt`, GH #140"));
+        assert!(cycle.contains("OpenCode has no `UserPromptSubmit` hook"));
+        assert!(cycle.contains("> **Chat prompt (#chatprompt):** <verbatim prompt>"));
+        assert!(cycle.contains("A non-empty `chat_prompts` is never `no_changes`"));
+        assert!(cycle.contains("`session-check` warns `chat prompt not recorded`"));
         for env in [
             Environment::ClaudeCode,
             Environment::Codex,
@@ -3748,54 +3729,54 @@ mod tests {
             Environment::Generic,
         ] {
             assert!(
-                content_for_env(env).contains("`#chatprompt`"),
-                "{env:?} skill omits the chat prompt rule"
+                content_for_env(env).contains("runbooks/session-cycle.md"),
+                "{env:?} skill omits the mandatory cycle route"
             );
         }
     }
 
     #[test]
     fn bundled_skill_contains_binary_owned_respond_commit_invariant() {
-        assert!(SKILL_TEMPLATE.contains("agent-doc respond <FILE>"));
+        assert!(bundled_instruction_text().contains("agent-doc respond <FILE>"));
         assert!(
-            SKILL_TEMPLATE
-                .contains("unless the user explicitly told you to leave the response uncommitted")
+            bundled_instruction_text()
+                .contains("unless the user explicitly asked to leave the response uncommitted")
         );
-        assert!(SKILL_TEMPLATE.contains("requires the cycle to reach `committed`"));
-        assert!(SKILL_TEMPLATE.contains("agent-doc session-check <FILE>"));
-        assert!(SKILL_TEMPLATE.contains("final document-mutation boundary for the cycle"));
-        assert!(SKILL_TEMPLATE.contains(
-            "After `respond` / `write --commit`, do not start more long-running task work"
+        assert!(bundled_instruction_text().contains("requires the cycle to reach `committed`"));
+        assert!(bundled_instruction_text().contains("agent-doc session-check <FILE>"));
+        assert!(bundled_instruction_text().contains("document-mutation boundary for the cycle"));
+        assert!(bundled_instruction_text().contains(
+            "`write --commit`, start no more long-running work for that turn"
         ));
-        assert!(SKILL_TEMPLATE.contains("`finalize` is its compatibility alias"));
+        assert!(bundled_instruction_text().contains("`finalize` is its compatibility alias"));
     }
 
     #[test]
     fn bundled_skill_compact_entry_uses_commit_closeout() {
-        assert!(SKILL_TEMPLATE.contains("agent-doc compact <FILE> --commit"));
-        assert!(SKILL_TEMPLATE.contains("compact exchange <FILE>"));
+        assert!(bundled_instruction_text().contains("agent-doc compact <FILE> --commit"));
+        assert!(bundled_instruction_text().contains("compact exchange <FILE>"));
     }
 
     #[test]
     fn bundled_skill_contains_model_short_name_attribution_rule() {
         // `#timestampresponseheader`: the heading now carries model AND timestamp.
-        assert!(SKILL_TEMPLATE.contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00"));
-        assert!(SKILL_TEMPLATE.contains("YYYY-MM-DDTHH:MM"));
-        assert!(SKILL_TEMPLATE.contains("Never use the harness label (`codex`, `claude`)"));
+        assert!(bundled_instruction_text().contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00"));
+        assert!(bundled_instruction_text().contains("YYYY-MM-DDTHH:MM"));
+        assert!(bundled_instruction_text().contains("never the harness label (`codex`, `claude`)"));
         // The one-em-dash invariant is what keeps all four heading parsers agreeing;
         // three split on the first em dash and `strip_re_heading_attribution` on the
         // last, so a second one leaves the model name behind as permanent commit drift.
-        assert!(SKILL_TEMPLATE.contains("exactly ONE spaced em dash"));
+        assert!(bundled_instruction_text().contains("exactly ONE spaced em dash"));
         assert!(
-            !SKILL_TEMPLATE.contains("### Re: topic — gpt-5"),
+            !bundled_instruction_text().contains("### Re: topic — gpt-5"),
             "the untimestamped example must not survive alongside the timestamped rule"
         );
     }
 
     #[test]
     fn bundled_skill_requires_oldest_first_exchange_tail_reconciliation() {
-        assert!(SKILL_TEMPLATE.contains("Do not stop at the newest question"));
-        assert!(SKILL_TEMPLATE.contains("each unresolved prompt in that tail"));
+        assert!(bundled_instruction_text().contains("do not stop at the newest question"));
+        assert!(bundled_instruction_text().contains("each unresolved prompt in that tail"));
     }
 
     #[test]
@@ -3805,36 +3786,10 @@ mod tests {
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
-        assert!(
-            content.contains("agent-doc skill install --harness codex` without a reload request")
-        );
-        assert!(
-            content.contains("re-read the installed `.codex/skills/agent-doc/SKILL.md` completely")
-        );
-        assert!(content.contains("Do not call `agent-doc session restart-supervisor`"));
-        assert!(!content.contains("codex resume --last"));
-        assert!(content.contains("stale instruction drift"));
-        assert!(content.contains("continue this turn"));
-        assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
-        assert!(content.contains("agent-doc session-check <FILE>"));
-        assert!(content.contains("binary-owned response cycle"));
-        assert!(content.contains("generic document-editing request"));
-        assert!(content.contains("final document-mutation boundary for the cycle"));
-        assert!(content.contains("do not start more long-running task work for that same turn"));
-        assert!(content.contains("$CODEX_HOME/hooks.json"));
-        assert!(content.contains(".codex/config.toml"));
-        assert!(content.contains("fail-closed backstop"));
-        assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
-        assert!(content.contains("Project-scoped remote hosts"));
-        assert!(content.contains("globally approved SSH commands"));
-        assert!(content.contains("project-local `.agent-doc/config.toml`"));
-        // `#timestampresponseheader`: the documented example carries model AND timestamp.
-        assert!(content.contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00"));
-        assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
-        assert!(content.contains("Imperative edits are executable directives"));
-        assert!(content.contains("do not ask the operator to say `go` / `push`"));
-        assert!(content.contains("or invoke the preset again"));
-        assert!(content.contains("harness-native tool-permission prompt"));
+        assert!(content.contains("follow the Codex update procedure"));
+        assert!(content.contains("re-read the installed skill"));
+        assert!(content.contains("runbooks/session-cycle.md"));
+        assert!(content.contains("runbooks/harness-invocation.md"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
     }
 
@@ -3844,17 +3799,10 @@ mod tests {
 
         assert!(content.contains("Interactive markdown session for OpenCode"));
         assert!(content.contains("/agent-doc <FILE>"));
-        assert!(content.contains("agent-doc skill install --harness opencode"));
-        assert!(content.contains("installed OpenCode skill"));
-        assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
-        assert!(content.contains("binary-owned response cycle"));
-        assert!(content.contains("final document-mutation boundary for the cycle"));
-        assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
-        assert!(content.contains("Imperative edits are executable directives"));
-        assert!(content.contains("do not ask the operator to say `go` / `push`"));
+        assert!(content.contains("follow the OpenCode update procedure"));
+        assert!(content.contains("runbooks/session-cycle.md"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
         assert!(!content.contains("Codex CLI will reject it"));
-        assert!(!content.contains("In OpenCode, invoke agent-doc by writing"));
     }
 
     #[test]
@@ -3901,17 +3849,10 @@ mod tests {
 
         assert!(content.contains("/agent-doc <FILE>"));
         assert!(content.contains("TRIGGER: user invokes /agent-doc <file>"));
-        assert!(content.contains("agent-doc skill install --harness claude --reload restart"));
-        assert!(content.contains("SKILL_RELOAD=restart"));
-        assert!(content.contains("agent_doc_auto_compact"));
-        assert!(content.contains("Use `--reload compact`"));
-        assert!(content.contains("stale instruction drift"));
-        assert!(content.contains("continue this turn"));
-        assert!(content.contains("binary-owned response cycle"));
-        assert!(content.contains("Do not manually patch the final assistant response"));
-        assert!(content.contains("do not ask the operator to say `go` / `push`"));
-        assert!(content.contains("or invoke the preset again"));
-        assert!(content.contains("harness-native tool-permission prompt"));
+        assert!(content.contains("follow the Claude update procedure"));
+        assert!(content.contains("## Claude queue continuation"));
+        assert!(content.contains("runbooks/queue-auto-loop.md"));
+        assert!(content.contains("runbooks/session-cycle.md"));
     }
 
     #[test]
@@ -3921,12 +3862,8 @@ mod tests {
         assert!(content.contains("Claude Code: `/agent-doc <FILE>`"));
         assert!(content.contains("Codex: `agent-doc <FILE>`"));
         assert!(content.contains("OpenCode: `/agent-doc <FILE>`"));
-        assert!(content.contains("agent-doc skill install --harness claude --reload restart"));
-        assert!(content.contains("agent_doc_auto_compact"));
-        assert!(content.contains("Codex `agent-doc skill install --harness codex`"));
-        assert!(content.contains("agent-doc skill install --harness opencode"));
-        assert!(content.contains("stale duplicate instructions"));
-        assert!(content.contains("continue with the task"));
+        assert!(content.contains("active-harness update procedure"));
+        assert!(content.contains("runbooks/session-cycle.md"));
     }
 
     #[test]
@@ -3940,7 +3877,7 @@ mod tests {
         let opencode_shared = super::remove_markdown_section(&opencode, "## Invocation");
         let claude_shared = super::remove_markdown_section(
             &claude_shared,
-            "## Auto-loop while queue is active (Claude Code)",
+            "## Claude queue continuation",
         );
         let claude_shared = claude_shared.replace(CLAUDE_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
         let codex_shared = codex_shared.replace(CODEX_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
@@ -4330,29 +4267,30 @@ mod tests {
             .find(|(name, _)| *name == "manual-job-packets.md")
             .unwrap()
             .1;
+        let session_cycle = bundled_runbook("session-cycle.md");
 
         for content in [&claude, &codex, &opencode] {
-            assert!(content.contains("agent-doc respond <FILE>"));
-            assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
-            assert!(content.contains("requires the cycle to reach `committed`"));
-            assert!(content.contains("agent-doc session-check <FILE>"));
-            assert!(content.contains("final document-mutation boundary for the cycle"));
-            assert!(content.contains("Imperative edits are executable directives"));
-            assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
-            assert!(content.contains("Agent harnesses own tiered verification"));
-            assert!(content.contains("make check-fast"));
-            assert!(content.contains("exactly one authoritative `make check`"));
-            assert!(content.contains("repository-bytes/toolchain fingerprint"));
-            assert!(content.contains("runner-native failure evidence"));
-            assert!(content.contains("Do not rely on a pre-commit hook"));
+            assert!(content.contains("This file is a routing table"));
+            assert!(content.contains("runbooks/session-cycle.md"));
+            assert!(content.contains("runbooks/persist-closeout.md"));
+            assert!(content.len() <= 5_500);
         }
+        assert!(session_cycle.contains("agent-doc respond <FILE>"));
+        assert!(session_cycle.contains("agent-doc write --commit <FILE>"));
+        assert!(session_cycle.contains("agent-doc session-check <FILE>"));
+        assert!(session_cycle.contains("Imperative edits are executable directives"));
+        assert!(session_cycle.contains("never the harness label (`codex`, `claude`)"));
+        assert!(persist_closeout.contains("Agent harnesses own tiered verification"));
+        assert!(persist_closeout.contains("make check-fast"));
+        assert!(persist_closeout.contains("exactly one\nauthoritative `make check`"));
+        assert!(persist_closeout.contains("repository-bytes/toolchain fingerprint"));
+        assert!(persist_closeout.contains("Do not rely on a pre-commit hook"));
         assert!(persist_closeout.contains("Capture two independent proofs"));
         assert!(persist_closeout.contains("deliberately failing run"));
         assert!(manual_job_packets.contains("target runner's native"));
         assert!(manual_job_packets.contains("generic cross-runner"));
         assert!(manual_job_packets.contains("grep is not acceptable verification"));
-        assert!(claude.contains("final document-mutation boundary for the cycle"));
-        assert!(codex.contains("$CODEX_HOME/hooks.json"));
-        assert!(codex.contains("fail-closed backstop"));
+        assert!(claude.contains("## Claude queue continuation"));
+        assert!(codex.contains("follow the Codex update procedure"));
     }
 }

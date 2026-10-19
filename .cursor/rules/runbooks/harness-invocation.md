@@ -1,5 +1,24 @@
 # Harness Invocation Patterns
 
+## Skill auto-update
+
+Compare `agent-doc --version` with the installed `agent-doc-version`. If the
+binary is newer, update only the active harness:
+
+- Claude Code: run `agent-doc skill install --harness claude --reload restart`
+  unless `agent_doc_auto_compact` explicitly selects compact reload. Stop only
+  on a real `SKILL_RELOAD=...`; if already current, continue the turn.
+- Codex: run `agent-doc skill install --harness codex` without `--reload`, then
+  re-read the installed `.codex/skills/agent-doc/SKILL.md` completely and
+  continue the same turn. Do not restart the active supervisor.
+- OpenCode: run `agent-doc skill install --harness opencode`; continue under the
+  installed skill when it is already current.
+- Other harnesses: run `agent-doc skill install` for the detected environment.
+
+An "already up to date" result means the visible copy was stale instruction
+drift, not a reason to stop. If the executable is absent or versions match, skip
+the update.
+
 ## Grok Build
 
 Install with `agent-doc skill install --harness grok`. The skill and bundled

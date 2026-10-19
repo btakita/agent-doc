@@ -172,29 +172,31 @@ from the root manifest is not the final blocker and adding a `Main-Class` would
 not restore a safe upgrade (GH #290).
 
 JetBrains `DynamicPlugins` computes and validates a replacement state from the
-main plugin descriptor and its resolved module graph, so content modules are not
-an independently established prohibition. Agent Doc nevertheless cannot make
-the build-263 swap safe. First, the build uses
-`AwaitClassloaderUnloadAsyncPostReconfiguration`: the platform may report the
-reconfiguration call complete before proving the outgoing classloader retired,
-and the observed classic-package attempt in GH #95 left the old classloader live
-before the platform requested a restart. Awaiting that later notification is not
-a positive retirement receipt—it is a delayed failure report after replacement—
-so the GH #108 guard remains required on 263.7031. Second, the modular package is
-installed on both sides of split mode. Attaching only to the backend cannot
-atomically update `agent.doc.frontend` in the separate JetBrains Client JVM, and
-local-archive plugin synchronization supplies no cross-JVM handoff receipt.
-A backend-only swap while the client keeps the old frontend is therefore not a
-valid whole-package upgrade.
+main plugin descriptor and its resolved module graph. A live split-mode probe on
+IU 263.7031.23 supplied the missing platform evidence (GH #299): a filtered
+launcher containing only the attach bridge reached the backend without adding
+plugin implementation classes to the system classloader. `DynamicPlugins`
+computed a state excluding Agent Doc and logged that the plugin would be removed
+from the context, then rejected the state because Agent Doc was expected not to
+be loaded but remained included in the module graph. `unloadPlugin` returned
+false. This happens before a replacement generation can load, so exact-263 has
+no safe restart-free whole-package swap through the supported platform API.
+
+The modular package is also installed on both sides of split mode. Attaching
+only to the backend cannot atomically update `agent.doc.frontend` in the separate
+JetBrains Client JVM, and local-archive plugin synchronization supplies no
+cross-JVM handoff receipt. A backend-only swap while the client keeps the old
+frontend is therefore not a valid fallback after the measured module-graph
+refusal.
 
 When a live IDE owns either modular target, the installer recognizes the package
 line from its `agent.doc-<version>.jar`, does not attempt an attach, replaces the
-plugin files on disk, and reports restart-required. The reason names the deepest
-safety boundary—no synchronous classloader-retirement receipt and no atomic
-backend/frontend handoff—then explains that the absent launcher is deliberate
-and that invoking the already-shipped backend upgrader would not bypass those
-boundaries (`ops.log`: `declined_by=modular_package`). It never reports either
-package as one that "predates restart-free dynamic upgrade support"; that
+plugin files on disk, and reports restart-required. Exact-262 names its
+classloader/frontend safety boundaries; exact-263 names the live 263.7031.23
+module-graph refusal plus the frontend boundary. The absent launcher is
+deliberate, and invoking the already-shipped backend upgrader would not bypass
+those boundaries (`ops.log`: `declined_by=modular_package`). It never reports
+either package as one that "predates restart-free dynamic upgrade support"; that
 wording is reserved for a classic jar without a `Main-Class`. The live-jar
 probes (`#pluginbyteidentity` superseded-bytes detection, the controller's
 `editor_route` admission, the install's `#jbdynamicfalsereport` load proof and

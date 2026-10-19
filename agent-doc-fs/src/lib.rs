@@ -73,8 +73,50 @@ pub fn find_project_root_canonical(path: &Path) -> Option<PathBuf> {
 /// The target itself may not exist yet. Existing ancestors are canonicalized
 /// so a symlink cannot redirect a new file outside the project root.
 pub fn resolve_document_relative_path(document: &Path, relative: &Path) -> Result<PathBuf> {
+    resolve_relative_path(document, relative, ProjectPathAnchor::Document)
+}
+
+/// Resolve a path relative to the project containing `document`, while keeping
+/// the result inside that project.
+pub fn resolve_project_relative_path(document: &Path, relative: &Path) -> Result<PathBuf> {
+    resolve_relative_path(document, relative, ProjectPathAnchor::Project)
+}
+
+/// Base directory for a relative path constrained to an agent-doc project.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProjectPathAnchor {
+    Document,
+    Project,
+}
+
+/// Resolve a relative path that may carry an explicit `document:` or
+/// `project:` anchor. Unprefixed paths use `default_anchor`.
+pub fn resolve_anchored_project_path(
+    document: &Path,
+    configured: &str,
+    default_anchor: ProjectPathAnchor,
+) -> Result<PathBuf> {
+    let (anchor, relative) = if let Some(relative) = configured.strip_prefix("document:") {
+        (ProjectPathAnchor::Document, relative)
+    } else if let Some(relative) = configured.strip_prefix("project:") {
+        (ProjectPathAnchor::Project, relative)
+    } else {
+        (default_anchor, configured)
+    };
+    resolve_relative_path(document, Path::new(relative), anchor)
+}
+
+fn resolve_relative_path(
+    document: &Path,
+    relative: &Path,
+    anchor: ProjectPathAnchor,
+) -> Result<PathBuf> {
+    let anchor_name = match anchor {
+        ProjectPathAnchor::Document => "document",
+        ProjectPathAnchor::Project => "project",
+    };
     if relative.is_absolute() {
-        bail!("path must be relative to the document");
+        bail!("path must be relative to the {anchor_name}");
     }
 
     let document = document
@@ -84,12 +126,15 @@ pub fn resolve_document_relative_path(document: &Path, relative: &Path) -> Resul
         .with_context(|| format!("failed to find project root for {}", document.display()))?
         .canonicalize()
         .context("failed to canonicalize project root")?;
-    let base = document.parent().with_context(|| {
-        format!(
-            "document has no containing directory: {}",
-            document.display()
-        )
-    })?;
+    let base = match anchor {
+        ProjectPathAnchor::Document => document.parent().with_context(|| {
+            format!(
+                "document has no containing directory: {}",
+                document.display()
+            )
+        })?,
+        ProjectPathAnchor::Project => root.as_path(),
+    };
 
     let mut target = base.to_path_buf();
     for component in relative.components() {
@@ -98,16 +143,16 @@ pub fn resolve_document_relative_path(document: &Path, relative: &Path) -> Resul
             Component::Normal(part) => target.push(part),
             Component::ParentDir => {
                 if !target.pop() || !target.starts_with(&root) {
-                    bail!("document-relative path escapes the project root");
+                    bail!("{anchor_name}-relative path escapes the project root");
                 }
             }
             Component::RootDir | Component::Prefix(_) => {
-                bail!("path must be relative to the document");
+                bail!("path must be relative to the {anchor_name}");
             }
         }
     }
     if !target.starts_with(&root) {
-        bail!("document-relative path escapes the project root");
+        bail!("{anchor_name}-relative path escapes the project root");
     }
 
     let mut existing = target.as_path();
@@ -118,7 +163,7 @@ pub fn resolve_document_relative_path(document: &Path, relative: &Path) -> Resul
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", existing.display()))?;
     if !canonical_existing.starts_with(&root) {
-        bail!("document-relative path resolves outside the project root");
+        bail!("{anchor_name}-relative path resolves outside the project root");
     }
     Ok(target)
 }

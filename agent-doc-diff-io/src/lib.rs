@@ -43,15 +43,20 @@ pub trait LiveCurrentSource {
 }
 
 fn resolve_external_done_archive_target(doc: &Path, archive_path: &str) -> Option<PathBuf> {
-    let relative = if archive_path.trim().is_empty() {
-        PathBuf::from(format!("{}.done.md", doc.file_stem()?.to_str()?))
+    let configured = if archive_path.trim().is_empty() {
+        format!("document:{}.done.md", doc.file_stem()?.to_str()?)
     } else {
-        PathBuf::from(archive_path)
+        archive_path.to_string()
     };
-    if !relative.to_string_lossy().ends_with(".done.md") {
+    if !configured.ends_with(".done.md") {
         return None;
     }
-    agent_doc_fs::resolve_document_relative_path(doc, &relative).ok()
+    agent_doc_fs::resolve_anchored_project_path(
+        doc,
+        &configured,
+        agent_doc_fs::ProjectPathAnchor::Project,
+    )
+    .ok()
 }
 
 /// Prove which external-done drains between `previous` and `current` were
@@ -438,6 +443,28 @@ mod tests {
         assert_eq!(proof.len(), 1, "exact archive append must be proven");
 
         assert_eq!(compute(&TestBaselineStore, &doc).unwrap(), None);
+    }
+
+    #[test]
+    fn external_done_archive_targets_honor_project_and_document_anchors() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/nested")).unwrap();
+        let doc = dir.path().join("tasks/nested/session.md");
+        std::fs::write(&doc, "# session\n").unwrap();
+
+        assert_eq!(
+            resolve_external_done_archive_target(&doc, "history.done.md"),
+            Some(dir.path().join("history.done.md")),
+        );
+        assert_eq!(
+            resolve_external_done_archive_target(&doc, "document:history.done.md"),
+            Some(dir.path().join("tasks/nested/history.done.md")),
+        );
+        assert_eq!(
+            resolve_external_done_archive_target(&doc, "project:history.done.md"),
+            Some(dir.path().join("history.done.md")),
+        );
     }
 
     #[test]

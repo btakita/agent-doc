@@ -57,14 +57,18 @@ fn is_legacy_mcp_entry(entry: &toml::Value) -> bool {
             .is_some_and(|args| args.len() == 1 && args[0].as_str() == Some("mcp"))
 }
 
-pub fn install(root: Option<&Path>) -> Result<()> {
+pub fn install(root: Option<&Path>) -> Result<bool> {
     let base = root
         .map(Path::to_path_buf)
         .or_else(resolve_root)
         .unwrap_or(std::env::current_dir()?);
     let dir = base.join(REL_PATH);
     std::fs::create_dir_all(&dir)?;
-    write_if_changed(&dir.join("SKILL.md"), &content())?;
+    let skill_path = dir.join("SKILL.md");
+    let skill_content = content();
+    let skill_updated = std::fs::read_to_string(&skill_path)
+        .map_or(true, |existing| existing != skill_content);
+    write_if_changed(&skill_path, &skill_content)?;
     install_bundle(&dir.join("runbooks"), BUNDLED_RUNBOOKS)?;
     install_bundle(&dir.join("okf"), BUNDLED_OKF)?;
     let path = base.join(".grok/config.toml");
@@ -108,7 +112,7 @@ pub fn install(root: Option<&Path>) -> Result<()> {
         "[Grok Build] installed skill v{VERSION} -> {}",
         dir.display()
     );
-    Ok(())
+    Ok(skill_updated)
 }
 
 pub fn check(root: Option<&Path>) -> Result<()> {
@@ -196,8 +200,8 @@ mod tests {
         let path = dir.path().join(".grok/config.toml");
         let custom = "# operator configuration\n[mcp_servers.agent-doc]\ncommand='custom-agent-doc'\nenabled=false\n";
         std::fs::write(&path, custom).unwrap();
-        install(Some(dir.path())).unwrap();
-        install(Some(dir.path())).unwrap();
+        assert!(install(Some(dir.path())).unwrap());
+        assert!(!install(Some(dir.path())).unwrap());
         assert_eq!(std::fs::read_to_string(path).unwrap(), custom);
         audit(dir.path()).unwrap();
         let text = content();

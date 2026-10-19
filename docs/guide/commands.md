@@ -173,18 +173,18 @@ Archive old exchange/component content and rewrite the document atomically. Use 
 ## skill
 
 ```
-agent-doc skill install
+agent-doc skill install [--harness HARNESS | --all] [--root DIR] [--reload MODE]
 agent-doc skill check
 ```
 
-Manage the Claude Code skill definition.
+Manage the harness skill definition and its shared support bundle.
 
 | Subcommand | Description |
 |------------|-------------|
-| `install` | Write the bundled SKILL.md to `.claude/skills/agent-doc/SKILL.md`. Idempotent. |
+| `install` | Write the bundled skill for the detected or selected harness. Idempotent. |
 | `check` | Compare installed skill vs bundled version. Exit 0 if up to date, exit 1 if outdated. |
 
-The skill content is embedded in the binary at build time. After `agent-doc upgrade`, run `agent-doc skill install` in each project to update the skill definition.
+The skill content is embedded in the binary at build time. After `agent-doc upgrade`, run `agent-doc skill install` in each project to update the skill definition. If an install changes skill content, `--reload restart` prints `SKILL_RELOAD=restart`; other explicit reload modes print `SKILL_RELOAD=compact`. The signal is consistent with `--harness`, `--root`, Grok, and `--all`, and is omitted when the skill was already current.
 
 ## patch
 

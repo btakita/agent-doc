@@ -5893,38 +5893,38 @@ fn try_main() -> anyhow::Result<()> {
                 all,
                 root,
             } => {
-                if all {
-                    skill::install_all_at(root.as_deref())?;
+                let updated = if all {
+                    skill::install_all_at(root.as_deref())?
                 } else if harness
                     .as_deref()
                     .is_some_and(|h| matches!(h, "grok" | "grok-build"))
                     || (harness.is_none() && std::env::var_os("GROK_SESSION_ID").is_some())
                 {
-                    skill::grok::install(root.as_deref())?;
+                    skill::grok::install(root.as_deref())?
                 } else if let Some(ref h) = harness {
                     let env = agent_kit::detect::Environment::from_name(h)
                         .ok_or_else(|| anyhow::anyhow!(
                             "unknown harness '{}'. Valid: claude, opencode, codex, grok, cursor, generic", h
                         ))?;
-                    skill::install_for_at(env, root.as_deref())?;
+                    skill::install_for_at(env, root.as_deref())?
                 } else if let Some(root) = root.as_deref() {
-                    skill::install_at(Some(root))?;
+                    skill::install_at(Some(root))?
                 } else {
-                    let updated = skill::install_and_check_updated()?;
-                    if updated && let Some(ref mode) = reload {
-                        match mode.as_str() {
-                            "restart" => {
-                                println!("SKILL_RELOAD=restart");
-                                println!(
-                                    "Skill updated. Please restart this session with --resume to reload the skill."
-                                );
-                            }
-                            _ => {
-                                println!("SKILL_RELOAD=compact");
-                                println!(
-                                    "Skill updated. Please run /compact to reload the updated skill instructions."
-                                );
-                            }
+                    skill::install_and_check_updated()?
+                };
+                if updated && let Some(ref mode) = reload {
+                    match mode.as_str() {
+                        "restart" => {
+                            println!("SKILL_RELOAD=restart");
+                            println!(
+                                "Skill updated. Please restart this session with --resume to reload the skill."
+                            );
+                        }
+                        _ => {
+                            println!("SKILL_RELOAD=compact");
+                            println!(
+                                "Skill updated. Please run /compact to reload the updated skill instructions."
+                            );
                         }
                     }
                 }

@@ -33845,6 +33845,40 @@ fn test_cli_skill_install_reload_compact() {
 }
 
 #[test]
+fn test_cli_skill_install_reload_restart_with_explicit_harness_and_root() {
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["skill", "install", "--harness", "claude", "--root"])
+        .arg(tmp.path())
+        .args(["--reload", "restart"]);
+    let output = cmd.output().unwrap();
+    assert!(
+        output.status.success(),
+        "explicit-harness skill install should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("SKILL_RELOAD=restart"),
+        "a changed explicit-harness install must request reload: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(tmp.path().join(".claude/skills/agent-doc/SKILL.md").exists());
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["skill", "install", "--harness", "claude", "--root"])
+        .arg(tmp.path())
+        .args(["--reload", "restart"]);
+    let output = cmd.output().unwrap();
+    assert!(output.status.success());
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("SKILL_RELOAD="),
+        "an unchanged install must not request reload"
+    );
+}
+
+#[test]
 fn test_skill_md_contains_required_steps() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();

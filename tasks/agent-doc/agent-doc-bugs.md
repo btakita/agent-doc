@@ -990,6 +990,12 @@ Publication is complete:
 > **Queue prompt:** If an issue was added, also add `- release + publish`
 
 Satisfied. The #299 fix was added to the release work, and the corresponding release-and-publish item was queued, completed, and published as v0.35.520. The public artifacts are available on GitHub and PyPI.
+
+### Re: GitHub issue intake — gpt-5 · 2026-10-18T22:27-04:00
+
+> **Queue prompt:** Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
+
+Checked the repository's current open issues. Only #40 and #45 are open, and both are explicitly excluded by this queue item, so there are no new issues to add to the backlog or queue.
 <!-- agent:boundary:6975e85b -->
 <!-- /agent:exchange -->
 
@@ -1004,7 +1010,7 @@ Satisfied. The #299 fix was added to the release work, and the corresponding rel
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
-- Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
+- ~~Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.~~
 - If an issue was added, also add `- release + publish`
 <!-- /agent:queue -->
 

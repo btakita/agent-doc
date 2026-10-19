@@ -1450,6 +1450,15 @@ pub fn strike_orphan_id_backed_queue_head(
     }
     let keys = id_backed_head_node_keys(&content, &target_id)?;
     if keys.is_empty() {
+        if queue_head_is_free_text_prompt(&content)? {
+            anyhow::bail!(
+                "{}: the active queue head is free-text, not an id-backed [#{target_id}] head. \
+                 After answering it, consume it with `agent-doc queue consume {}` (without \
+                 `--id`).",
+                file.display(),
+                file.display()
+            );
+        }
         anyhow::bail!(
             "{}: no live id-backed queue head matching [#{target_id}] to strike \
              (already struck, drained, or the head is free-text).",
@@ -1528,6 +1537,15 @@ pub fn acknowledge_open_id_backed_queue_head(
         anyhow::bail!("open-id ack: empty id");
     }
     if !head_id_names_open_backlog_item(&content, &target_id) {
+        if queue_head_is_free_text_prompt(&content)? {
+            anyhow::bail!(
+                "{}: the active queue head is free-text, not an open id-backed [#{target_id}] \
+                 head. After answering it, consume it with `agent-doc queue consume {}` \
+                 (without `--ack-id`).",
+                file.display(),
+                file.display()
+            );
+        }
         anyhow::bail!(
             "{}: [#{target_id}] does not name an OPEN backlog item. Use \
             `agent-doc queue consume {} --id {target_id}` for orphan id-backed heads, \
@@ -1538,6 +1556,15 @@ pub fn acknowledge_open_id_backed_queue_head(
     }
     let keys = id_backed_head_node_keys(&content, &target_id)?;
     if keys.is_empty() {
+        if queue_head_is_free_text_prompt(&content)? {
+            anyhow::bail!(
+                "{}: the active queue head is free-text prose that merely mentions the id, \
+                 not an exact id-backed [#{target_id}] head. After answering it, consume it \
+                 with `agent-doc queue consume {}` (without `--ack-id`).",
+                file.display(),
+                file.display()
+            );
+        }
         anyhow::bail!(
             "{}: no exact id-backed queue head matching [#{target_id}] to acknowledge \
             (already struck/drained, or the head is prose that merely mentions the id; \
@@ -4934,6 +4961,51 @@ mod core_tests {
             "open backlog head must remain runnable:\n{result}"
         );
     }
+
+    #[test]
+    fn id_consume_modes_route_bare_bracketed_colon_note_to_bare_consume() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- [#todo-a]: note\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#todo-a] tracked only as a todo\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let expected_command = format!("agent-doc queue consume {}", doc.display());
+
+        let orphan_err = strike_orphan_id_backed_queue_head(&doc, "todo-a")
+            .expect_err("--id must refuse a free-text colon note");
+        assert!(orphan_err.to_string().contains("free-text"), "{orphan_err}");
+        assert!(
+            orphan_err.to_string().contains(&expected_command),
+            "--id refusal must name the bare consume command: {orphan_err}"
+        );
+
+        let ack_err = acknowledge_open_id_backed_queue_head(&doc, "todo-a")
+            .expect_err("--ack-id must refuse a free-text colon note");
+        assert!(ack_err.to_string().contains("free-text"), "{ack_err}");
+        assert!(
+            ack_err.to_string().contains(&expected_command),
+            "--ack-id refusal must name the bare consume command: {ack_err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            content,
+            "both refused id modes must leave the free-text head untouched"
+        );
+    }
+
     #[test]
     fn queue_consume_uses_node_keys_to_preserve_duplicate_prompt_identity() {
         let dir = tempfile::tempdir().unwrap();
@@ -5443,6 +5515,57 @@ mod core_tests {
             !exchange.content(&after_again).contains("auto-struck"),
             "the auto-strike note must never target exchange:\n{after_again}"
         );
+    }
+
+    #[test]
+    fn exact_echo_strikes_bare_bracketed_colon_note_after_done_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let response = concat!(
+            "### Re: todo note -- codex\n\n",
+            "> **Queue prompt:** [#todo-a]: note\n\n",
+            "Handled the note.\n",
+        );
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- do [#work]\n",
+                "- [#todo-a]: note\n",
+                "- do [#later]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#work] tracked work\n",
+                "- [ ] [#later] later tracked work\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#todo-a] tracked only as a todo\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            response,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let completed =
+            mark_completed_queue_prompts_for_done_ids(&doc, &["work".to_string()], true).unwrap();
+        assert_eq!(completed, 1, "the tracked head should close first");
+        let struck = strike_answered_free_text_queue_heads(&doc, response, true).unwrap();
+        assert_eq!(struck, 1, "the exact echo should close the colon note");
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("~~do [#work]~~"), "{updated}");
+        assert!(
+            updated.contains("~~[#todo-a]: note~~ — auto-struck: answered this cycle (#ftstrike)"),
+            "the colon note must be struck through the free-text path: {updated}"
+        );
+        assert!(updated.contains("- do [#later]"), "{updated}");
     }
 
     /// `#claimstrike` fixture (live, 2026-10-05): the coordinator claimed a

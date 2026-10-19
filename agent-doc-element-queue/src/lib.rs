@@ -247,10 +247,17 @@ fn extract_head_id(prompt: &str) -> Option<String> {
     let stripped = strip_priority_markers(prompt);
     let trimmed = stripped.trim();
     let lower = trimmed.to_ascii_lowercase();
+    let explicit_do = lower.starts_with("do ");
     let topic = lower.strip_prefix("do ").unwrap_or(&lower).trim();
     let raw = topic
         .strip_prefix("[#")
-        .and_then(|rest| rest.split_once(']').map(|(id, _)| id))
+        .and_then(|rest| {
+            let (id, tail) = rest.split_once(']')?;
+            // Under the optional-`do` grammar, a colon immediately following a
+            // bare `[#id]` makes the line prose (`[#id]: note`). An explicit
+            // `do [#id]: note` remains an id-backed annotated directive.
+            (!tail.starts_with(':') || explicit_do).then_some(id)
+        })
         .or_else(|| {
             let rest = topic.strip_prefix('#')?;
             let id = id_prefix(rest);
@@ -668,5 +675,16 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, other);
         assert!(!a.is_id_backed());
+    }
+
+    #[test]
+    fn queue_item_identity_keeps_bare_bracketed_id_colon_notes_as_free_text() {
+        let note = QueueItemIdentity::from_prompt("[#todo-a]: note");
+        let pinned_note = QueueItemIdentity::from_prompt(":pushpin: [#todo-a]: note");
+        let explicit_directive = QueueItemIdentity::from_prompt("do [#todo-a]: note");
+
+        assert_eq!(note, QueueItemIdentity::FreeText("[#todo-a]: note".into()));
+        assert_eq!(pinned_note, note);
+        assert_eq!(explicit_directive, QueueItemIdentity::Id("todo-a".into()));
     }
 }

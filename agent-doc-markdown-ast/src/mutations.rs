@@ -128,6 +128,29 @@ pub fn all_item_nodes(source: &str) -> Vec<MutationItemNode> {
         .collect()
 }
 
+/// Return item nodes from every occurrence of `component`, in document order.
+///
+/// Node keys include the component occurrence, so callers can safely mutate a
+/// later component even when an earlier component with the same name is empty.
+pub fn item_nodes_all(source: &str, component: &str) -> MutationResult<Vec<MutationItemNode>> {
+    let components = overlay::components(source);
+    if !components.iter().any(|node| node.name == component) {
+        return Err(MutationError::ComponentNotFound(component.to_string()));
+    }
+    Ok(components
+        .into_iter()
+        .enumerate()
+        .filter(|(_, node)| node.name == component)
+        .flat_map(|(component_index, component_node)| {
+            item_nodes_for_component(
+                component_index,
+                component_node.name,
+                component_node.items,
+            )
+        })
+        .collect())
+}
+
 fn item_nodes_for_component(
     component_index: usize,
     component: String,
@@ -160,6 +183,26 @@ pub fn consume_node(source: &str, component: &str, node_key: &str) -> MutationRe
 /// Strike component items by durable node key. Already-struck items are idempotent.
 pub fn consume_nodes(source: &str, component: &str, node_keys: &[&str]) -> MutationResult<String> {
     let nodes = item_nodes(source, component)?;
+    consume_nodes_from_snapshot(source, component, node_keys, &nodes)
+}
+
+/// Strike items by durable node key across every occurrence of `component`.
+/// Already-struck items are idempotent.
+pub fn consume_nodes_all(
+    source: &str,
+    component: &str,
+    node_keys: &[&str],
+) -> MutationResult<String> {
+    let nodes = item_nodes_all(source, component)?;
+    consume_nodes_from_snapshot(source, component, node_keys, &nodes)
+}
+
+fn consume_nodes_from_snapshot(
+    source: &str,
+    component: &str,
+    node_keys: &[&str],
+    nodes: &[MutationItemNode],
+) -> MutationResult<String> {
     let mut requested = HashSet::new();
     for node_key in node_keys {
         if !requested.insert(*node_key) {
@@ -171,7 +214,7 @@ pub fn consume_nodes(source: &str, component: &str, node_keys: &[&str]) -> Mutat
     }
     let mut replacements = Vec::new();
     for node_key in node_keys {
-        let node = find_node(&nodes, component, node_key)?;
+        let node = find_node(nodes, component, node_key)?;
         if !node.item.struck {
             let (start, end) = raw_range(source, component, node)?;
             replacements.push((start, end, render_struck_item(&node.item)));
@@ -834,6 +877,24 @@ mod tests {
 
         assert!(updated.contains("- ~~:pushpin: do [#alpha]~~\n"));
         assert!(updated.contains("- do [#beta]\n- ~~do [#beta]~~\n"));
+    }
+
+    #[test]
+    fn consume_nodes_all_reaches_later_component_when_first_is_empty() {
+        let doc = concat!(
+            "<!-- agent:queue id=main -->\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=issues -->\n",
+            "- publish the release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let nodes = item_nodes_all(doc, "queue").unwrap();
+
+        assert_eq!(nodes.len(), 1);
+        assert!(nodes[0].node_key.starts_with("queue:1:"));
+
+        let updated = consume_nodes_all(doc, "queue", &[&nodes[0].node_key]).unwrap();
+        assert!(updated.contains("- ~~publish the release~~\n"), "{updated}");
     }
 
     #[test]

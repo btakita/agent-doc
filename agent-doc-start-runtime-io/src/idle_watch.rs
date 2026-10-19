@@ -6540,7 +6540,7 @@ mod tests {
     #[test]
     fn codex_capacity_recovery_precedes_the_quiescent_fast_path() {
         let source = include_str!("idle_watch.rs")
-            .split_once("\n#[cfg(test)]")
+            .rsplit_once("\n#[cfg(test)]\nmod tests {")
             .map(|(production, _)| production)
             .expect("tests must remain behind cfg(test)");
         let recovery = source

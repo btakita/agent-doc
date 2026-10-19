@@ -317,6 +317,26 @@ The important boundary is billing: paid plans grant API access, but **API usage 
 Recommendation: do not buy a $300 plan solely to unblock `#j0ee`. If you want Grok Build itself, start with the current Ultra offer (or confirm exactly what a grandfathered Heavy account includes), run one representative week, inspect Settings → Usage, and use capped top-ups if needed. Keep a separate API budget for unattended/headless automation. I added that one-week trial as a recommended backlog item.
 
 For `#j0ee`, the remaining operator choice is unchanged: add OpenAI credits and retry the five-model benchmark, or stop it blocked with `OPENAI_MODEL` unchanged.
+
+### Re: Response
+
+> **Queue prompt:** do [#runoneweek]
+
+The one-week Grok trial cannot start with auditable measurements yet.
+
+Read-only checks found Grok Build installed and logged in to `grok.com`. The default model is `grok-4.7`, and `grok-4.7-build-fast` is available. However, the CLI does not expose the account’s subscription tier or account-wide weekly pool baseline; `grok usage` reports only persisted usage for an individual session. No XAI/GROK/OpenRouter API environment-variable names or separately billed API baseline were available.
+
+No purchase, top-up, billing change, secret access, external account mutation, file change, commit, or test run occurred. I gated `#runoneweek` on the required operator baseline rather than beginning an unauditable trial.
+
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question
+blocking: true
+request: Please confirm that the currently authenticated grok.com account is the intended current Ultra/Heavy account and provide the trial-start usage baselines for (1) its weekly Build/cloud-agent pool and (2) separately billed xAI API usage, or choose to defer the trial until those figures are available.
+context: Read-only checks found Grok Build installed and logged in to grok.com, with grok-4.7 as the default model and grok-4.7-build-fast available. The CLI does not expose the subscription tier or account-wide weekly pool baseline; `grok usage` only reports persisted usage for an individual session. No XAI/GROK/OpenRouter API environment variable names are present, and no separately billed API baseline is available. Starting now would make the one-week comparison unauditable; no purchase, top-up, billing change, secret access, or external account mutation was attempted.
+choices:
+- Provide baselines (Recommended): Confirm Ultra/Heavy and supply dated screenshots or numeric start values from the Grok weekly usage view and xAI API usage/billing view, with account identifiers redacted.
+- Defer trial: Leave #runoneweek open until both read-only baselines can be captured.
+- Pool-only trial: Confirm Ultra/Heavy and supply the weekly-pool baseline, accepting that separately billed API usage cannot be evaluated in this trial.
 <!-- agent:boundary:5d323eb2 -->
 <!-- /agent:exchange -->
 
@@ -327,7 +347,7 @@ For `#j0ee`, the remaining operator choice is unchanged: add OpenAI credits and 
 - ~~[#rjrh]: #push: Try the npm auth again.~~
 - ~~[#fhmig]: retry~~
 - ~~[#fhmig]: more context please~~
-- do [#runoneweek]
+- 📥 do [#runoneweek]
 <!-- /agent:queue -->
 
 ## Notes
@@ -338,7 +358,7 @@ For `#j0ee`, the remaining operator choice is unchanged: add OpenAI credits and 
 ## Todo
 
 <!-- agent:todo -->
-- [ ] [#rjrh] Choose release versions, prepare version-bumped package commits, and complete npm authentication/2FA for [#rjrh] (source: agent:backlog [#rjrh])
+- [ ] [#rjrh] Re-authenticate npm for this environment, then provide publishable version-bump commits for @rappstack/ui--any 0.1.1, @rappstack/domain--server 0.1.3, and @rappstack/domain--server--blog 0.1.5 before retrying publication. (source: agent:backlog [#rjrh])
 - [ ] [#fhmig] Choose whether to detach the source and retry or defer [#fhmig] (source: agent:review [#fhmig])
 - [ ] [#50fc] Choose the plugin aggregation policy for [#50fc] (source: agent:review [#50fc])
 - [ ] [#2amm] Choose a Hermes credential recovery path for [#2amm] (source: agent:review [#2amm])
@@ -349,12 +369,12 @@ For `#j0ee`, the remaining operator choice is unchanged: add OpenAI credits and 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev. BLOCKED: the current local manifest versions are already published (ui--any 0.1.0, domain--server 0.1.2, domain--server--blog 0.1.1 while registry latest is 0.1.4), so publishable version bumps are required in addition to npm authentication/2FA. Suggested patch releases are 0.1.1, 0.1.3, and 0.1.5; after publication, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
-- [ ] [#runoneweek] [recommended] Run a one-week representative trial of current Grok Ultra for Build/cloud-agent work, record weekly pool consumption and separately billed API usage, then decide whether to keep the plan or use capped top-ups.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] 🚧 [#runoneweek] [recommended] Run a one-week representative trial of current Grok Ultra for Build/cloud-agent work and record weekly pool consumption plus separately billed API usage. GATED on operator confirming the authenticated grok.com account is the intended Ultra/Heavy account and supplying dated trial-start usage baselines, or explicitly choosing a pool-only trial.
 - [/] [#j0ee] Pick the moderation model empirically after OpenAI billing is restored. All five authorized candidates currently return HTTP 429 no credits, so no UNSAFE/latency winner can be selected and OPENAI_MODEL remains unchanged on both surfaces; GATED on operator adding credits or choosing to stop blocked
 - [/operator] [#2amm] Restore Hermes one-shot inference. Hermes is already 0.21.5 and the old ResponseNotRead crash is gone, but /opt/hermes-agent has no git/update method and the active GOOGLE_API_KEY is invalid; GATED on operator choosing key rotation, another provider, or stopping with the diagnosis
 - [/operator] [#50fc] Choose the plugin aggregation policy for the truncated requirement ending at 'It will automatically'. The missing continuation is unrecoverable from every committed copy and blocks #k0ye; GATED on operator selection among fail-closed consensus, strict majority, first decisive answer, or supplied intended wording

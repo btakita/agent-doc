@@ -532,6 +532,9 @@ fn attached_editor_refusal_message(
 }
 
 const COORDINATED_EXTRACT_CAPABILITY: &str = "coordinated_extract_v1";
+const COORDINATED_EXTRACT_DETACH_POLLS: usize = 201;
+const COORDINATED_EXTRACT_DETACH_POLL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(25);
 
 #[derive(Debug, Clone)]
 struct FrozenEditor {
@@ -539,6 +542,175 @@ struct FrozenEditor {
     file: PathBuf,
     editor_pid: u64,
     editor_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LiveReplicaObservation {
+    source: usize,
+    target: usize,
+}
+
+impl LiveReplicaObservation {
+    fn detached(self) -> bool {
+        self.source == 0 && self.target == 0
+    }
+}
+
+fn live_replica_count(file: &Path) -> Result<usize> {
+    if !file.exists() {
+        return Ok(0);
+    }
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
+    let inspection = agent_doc_controller_io::project_controller::inspect_actor(
+        &project_root,
+        Some(file),
+        None,
+        None,
+    )
+    .with_context(|| {
+        format!(
+            "failed to inspect live CRDT replica membership for {}",
+            file.display()
+        )
+    })?;
+    inspection
+        .editor_replica
+        .map(|health| health.live_replicas)
+        .with_context(|| {
+            format!(
+                "controller did not report CRDT replica membership for {}",
+                file.display()
+            )
+        })
+}
+
+fn observe_live_replicas(source: &Path, target: &Path) -> Result<LiveReplicaObservation> {
+    Ok(LiveReplicaObservation {
+        source: live_replica_count(source)?,
+        target: live_replica_count(target)?,
+    })
+}
+
+fn wait_for_replica_detach_with<Observe, Wait>(
+    max_polls: usize,
+    mut observe: Observe,
+    mut wait: Wait,
+) -> Result<LiveReplicaObservation>
+where
+    Observe: FnMut() -> Result<LiveReplicaObservation>,
+    Wait: FnMut(),
+{
+    anyhow::ensure!(
+        max_polls > 0,
+        "replica detach wait requires at least one poll"
+    );
+    let mut last = LiveReplicaObservation {
+        source: 0,
+        target: 0,
+    };
+    for poll in 0..max_polls {
+        last = observe()?;
+        if last.detached() {
+            return Ok(last);
+        }
+        if poll + 1 < max_polls {
+            wait();
+        }
+    }
+    bail!(
+        "timed out waiting for coordinated CRDT replica detach (source_live_replicas={}, target_live_replicas={})",
+        last.source,
+        last.target
+    )
+}
+
+fn wait_for_live_replicas_to_detach(
+    source: &Path,
+    target: &Path,
+) -> Result<LiveReplicaObservation> {
+    wait_for_replica_detach_with(
+        COORDINATED_EXTRACT_DETACH_POLLS,
+        || observe_live_replicas(source, target),
+        || std::thread::sleep(COORDINATED_EXTRACT_DETACH_POLL_INTERVAL),
+    )
+}
+
+fn ensure_replica_mutation_boundary(observation: LiveReplicaObservation) -> Result<()> {
+    anyhow::ensure!(
+        observation.detached(),
+        "focused extract did not apply; a CRDT replica attached after coordinated freeze (source_live_replicas={}, target_live_replicas={})",
+        observation.source,
+        observation.target
+    );
+    Ok(())
+}
+
+fn registration_was_frozen(
+    registered_file: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    frozen: &[FrozenEditor],
+) -> bool {
+    frozen.iter().any(|editor| {
+        editor.file == registered_file
+            && editor.editor_pid == editor_pid
+            && editor.editor_id == editor_id
+    })
+}
+
+fn ensure_only_frozen_editor_registrations(
+    source: &Path,
+    target: &Path,
+    frozen: &[FrozenEditor],
+) -> Result<()> {
+    for file in [source, target] {
+        if !file.exists() {
+            continue;
+        }
+        for registration in
+            agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file)?
+        {
+            let registered_file = registered_editor_file(file, &registration.path)?;
+            anyhow::ensure!(
+                registration_was_frozen(
+                    &registered_file,
+                    registration.pid,
+                    &registration.editor_id,
+                    frozen,
+                ),
+                "focused extract did not apply; editor {} pid {} attached to {} after coordinated freeze",
+                registration.editor_id,
+                registration.pid,
+                registered_file.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn frozen_file_identities(frozen: &[FrozenEditor]) -> BTreeSet<PathBuf> {
+    frozen.iter().map(|editor| editor.file.clone()).collect()
+}
+
+fn frozen_file_for<'a>(file: &Path, frozen_files: &'a BTreeSet<PathBuf>) -> Option<&'a PathBuf> {
+    file.canonicalize()
+        .ok()
+        .and_then(|identity| frozen_files.get(&identity))
+}
+
+fn write_extract_document(
+    file: &Path,
+    content: &str,
+    frozen_files: &BTreeSet<PathBuf>,
+) -> Result<()> {
+    if let Some(frozen_file) = frozen_file_for(file, frozen_files) {
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(
+            frozen_file,
+            content,
+        )
+    } else {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
 }
 
 fn registered_editor_file(requested_file: &Path, registered_path: &str) -> Result<PathBuf> {
@@ -650,6 +822,15 @@ fn freeze_live_editors(
                 &agent_doc_hash::content_hash(&current),
                 current.len(),
             )?;
+            // Record the compensating resume before the freeze request crosses
+            // the IPC boundary. A timeout can mean the editor applied the
+            // freeze but its receipt was lost; rollback must still resume it.
+            frozen.push(FrozenEditor {
+                project_root: project_root.clone(),
+                file: file.clone(),
+                editor_pid: registration.pid,
+                editor_id: registration.editor_id.clone(),
+            });
             agent_doc_ipc_io::send_freeze_for_extract_to_editor(
                 &project_root,
                 registration.pid,
@@ -657,25 +838,12 @@ fn freeze_live_editors(
                 &file.to_string_lossy(),
                 operation_id,
             )?;
-            frozen.push(FrozenEditor {
-                project_root,
-                file,
-                editor_pid: registration.pid,
-                editor_id: registration.editor_id,
-            });
         }
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while [source, target].into_iter().any(|file| {
-            file.exists()
-                && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file)
-        }) {
-            anyhow::ensure!(
-                std::time::Instant::now() < deadline,
-                "timed out waiting for coordinated editor detach"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(25));
-        }
+        // The tab remains open and its durable endpoint registration remains
+        // live while frozen. Detachment is proven only by the controller-owned
+        // CRDT relay membership count reaching zero.
+        wait_for_live_replicas_to_detach(source, target)?;
         Ok(())
     })();
     if let Err(error) = freeze_result {
@@ -1224,18 +1392,18 @@ fn prepare(
     })
 }
 
-fn rollback(prepared: &PreparedExtract, source: &Path, target: &Path) {
-    if let Err(error) = agent_doc_document_realtime_io::atomic_write_through_authority(
-        source,
-        &prepared.source_before,
-    ) {
+fn rollback(
+    prepared: &PreparedExtract,
+    source: &Path,
+    target: &Path,
+    frozen_files: &BTreeSet<PathBuf>,
+) {
+    if let Err(error) = write_extract_document(source, &prepared.source_before, frozen_files) {
         eprintln!("[extract] WARNING: failed to roll back source: {error:#}");
     }
     match &prepared.target_before {
         Some(content) => {
-            if let Err(error) =
-                agent_doc_document_realtime_io::atomic_write_through_authority(target, content)
-            {
+            if let Err(error) = write_extract_document(target, content, frozen_files) {
                 eprintln!("[extract] WARNING: failed to roll back target: {error:#}");
             }
         }
@@ -1336,29 +1504,35 @@ pub fn run(
     } else {
         Vec::new()
     };
+    let frozen_files = frozen_file_identities(&frozen);
     let operation_id = prepared.preview.operation_id.clone();
     let apply_result = (|| -> Result<()> {
         if !bypass_claim {
             super::extract::check_target_ownership(target)?;
         }
 
-        // Recheck at the mutation boundary as well as command admission. A
-        // coordinated freeze must have released every live authority, and a
-        // newly attached editor must fail closed before either write.
-        let source_attached =
-            agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(source);
-        let target_attached = target.exists()
-            && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(target);
-        if source_attached || target_attached {
-            bail!(attached_editor_refusal_message(
-                source,
-                target,
-                source_attached,
-                target_attached,
-                prepared.preview.target_would_be_created,
-                true,
-            ));
-        }
+        // Recheck the controller-owned CRDT membership at the mutation
+        // boundary. Durable endpoint registrations intentionally remain live
+        // for frozen, still-open tabs; only a live replica retains mutation
+        // authority. Also refuse a newly arrived endpoint that was not part of
+        // this operation's frozen set.
+        ensure_replica_mutation_boundary(observe_live_replicas(source, target)?)?;
+        ensure_only_frozen_editor_registrations(source, target, &frozen)?;
+
+        // Frozen tabs retain their durable endpoint registration, so the
+        // ordinary authority writer would route back to the intentionally
+        // detached editor. Capture the force-disk fence after detach and keep
+        // it across apply plus rollback; the writer revalidates that no replica
+        // reattached before each atomic mutation.
+        let _force_disk_scopes = frozen_files
+            .iter()
+            .map(|file| {
+                agent_doc_document_realtime_io::begin_force_disk_authority_scope(
+                    file,
+                    "focused_extract_coordinated_freeze",
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
         if !frozen.is_empty() {
             let source_disk = std::fs::read_to_string(source)?;
             anyhow::ensure!(
@@ -1381,16 +1555,10 @@ pub fn run(
         {
             std::fs::create_dir_all(parent)?;
         }
-        agent_doc_document_realtime_io::atomic_write_through_authority(
-            target,
-            &prepared.target_after,
-        )
-        .with_context(|| format!("failed to write target {}", target.display()))?;
-        if let Err(error) = agent_doc_document_realtime_io::atomic_write_through_authority(
-            source,
-            &prepared.source_after,
-        ) {
-            rollback(&prepared, source, target);
+        write_extract_document(target, &prepared.target_after, &frozen_files)
+            .with_context(|| format!("failed to write target {}", target.display()))?;
+        if let Err(error) = write_extract_document(source, &prepared.source_after, &frozen_files) {
+            rollback(&prepared, source, target, &frozen_files);
             return Err(error)
                 .context("source write failed after target write; target rollback attempted");
         }
@@ -1406,7 +1574,7 @@ pub fn run(
                 agent_doc_ops_log_io::log_op,
             )
         }) {
-            rollback(&prepared, source, target);
+            rollback(&prepared, source, target, &frozen_files);
             if let Err(snapshot_error) = agent_doc_snapshot_io::checkpoint_document_baseline(
                 source,
                 &prepared.source_before,
@@ -1459,6 +1627,79 @@ mod tests {
     use super::*;
 
     #[test]
+    fn coordinated_detach_waits_for_controller_replica_membership_to_reach_zero() {
+        let mut observations = std::collections::VecDeque::from([
+            LiveReplicaObservation {
+                source: 1,
+                target: 1,
+            },
+            LiveReplicaObservation {
+                source: 0,
+                target: 1,
+            },
+            LiveReplicaObservation {
+                source: 0,
+                target: 0,
+            },
+        ]);
+        let mut waits = 0;
+
+        let detached = wait_for_replica_detach_with(
+            3,
+            || Ok(observations.pop_front().unwrap()),
+            || waits += 1,
+        )
+        .unwrap();
+
+        assert!(detached.detached());
+        assert_eq!(waits, 2);
+    }
+
+    #[test]
+    fn coordinated_detach_timeout_reports_the_remaining_replica_membership() {
+        let mut waits = 0;
+
+        let error = wait_for_replica_detach_with(
+            3,
+            || {
+                Ok(LiveReplicaObservation {
+                    source: 0,
+                    target: 1,
+                })
+            },
+            || waits += 1,
+        )
+        .unwrap_err();
+
+        assert_eq!(waits, 2);
+        assert!(error.to_string().contains("source_live_replicas=0"));
+        assert!(error.to_string().contains("target_live_replicas=1"));
+    }
+
+    #[test]
+    fn coordinated_mutation_boundary_accepts_open_tabs_only_after_replica_detach() {
+        ensure_replica_mutation_boundary(LiveReplicaObservation {
+            source: 0,
+            target: 0,
+        })
+        .unwrap();
+
+        let source_error = ensure_replica_mutation_boundary(LiveReplicaObservation {
+            source: 1,
+            target: 0,
+        })
+        .unwrap_err();
+        assert!(source_error.to_string().contains("source_live_replicas=1"));
+
+        let target_error = ensure_replica_mutation_boundary(LiveReplicaObservation {
+            source: 0,
+            target: 1,
+        })
+        .unwrap_err();
+        assert!(target_error.to_string().contains("target_live_replicas=1"));
+    }
+
+    #[test]
     fn coordinated_extract_uses_the_registered_editor_path_for_a_relative_cli_path() {
         let cwd = std::env::current_dir().unwrap();
         let dir = tempfile::TempDir::new_in(&cwd).unwrap();
@@ -1470,8 +1711,28 @@ mod tests {
         assert!(!requested.is_absolute());
         assert_eq!(
             registered_editor_file(requested, &registered.to_string_lossy()).unwrap(),
-            registered
+            registered.clone()
         );
+        let frozen_files = BTreeSet::from([registered.clone()]);
+        assert_eq!(frozen_file_for(requested, &frozen_files), Some(&registered));
+        let frozen = [FrozenEditor {
+            project_root: cwd,
+            file: registered.clone(),
+            editor_pid: 41,
+            editor_id: "editor-1".to_string(),
+        }];
+        assert!(registration_was_frozen(
+            &registered,
+            41,
+            "editor-1",
+            &frozen
+        ));
+        assert!(!registration_was_frozen(
+            &registered,
+            42,
+            "editor-2",
+            &frozen
+        ));
     }
 
     #[test]

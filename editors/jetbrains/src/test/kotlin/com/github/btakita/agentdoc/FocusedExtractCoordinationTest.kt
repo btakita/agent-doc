@@ -2,10 +2,27 @@ package com.github.btakita.agentdoc
 
 import java.nio.file.Files
 import java.nio.file.Path
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FocusedExtractCoordinationTest {
+    @Test
+    fun `resume is idempotent but never crosses operation ids`() {
+        assertEquals(
+            ExtractResumeDecision.ALREADY_RESUMED,
+            extractResumeDecision(null, "operation-2"),
+        )
+        assertEquals(
+            ExtractResumeDecision.RESUME,
+            extractResumeDecision("operation-2", "operation-2"),
+        )
+        assertEquals(
+            ExtractResumeDecision.REJECT_STALE_OPERATION,
+            extractResumeDecision("operation-3", "operation-2"),
+        )
+    }
+
     @Test
     fun `coordinated extract freezes registration and resumes before restoring writes`() {
         val watcher =
@@ -26,6 +43,7 @@ class FocusedExtractCoordinationTest {
         )
         assertTrue(watcher.contains("FreezeForExtract(\"freeze_for_extract\")"))
         assertTrue(watcher.contains("ResumeAfterExtract(\"resume_after_extract\")"))
+        assertTrue(watcher.contains("ExtractResumeDecision.ALREADY_RESUMED -> return true"))
         assertTrue(manager.contains("extractFrozenPaths.contains(filePath)"))
         assertTrue(manager.contains("focused-extract freeze still pending"))
 

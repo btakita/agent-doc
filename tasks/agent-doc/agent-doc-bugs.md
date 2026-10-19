@@ -1001,6 +1001,14 @@ Checked the repository's current open issues. Only #40 and #45 are open, and bot
 > **Queue prompt:** If an issue was added, also add `- release + publish`
 
 No eligible issue was added during the current intake check, so this conditional does not add another release-and-publish task. The earlier #299 release remains complete as v0.35.520.
+
+### Re: hourly GitHub issue intake retained — gpt-5 · 2026-10-18T22:30-04:00
+
+> **Queue prompt:** Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
+
+The current check remains complete: only excluded issues #40 and #45 are open, so no backlog, queue, or release task was added. The two issue-intake rows remain active intentionally as the hourly recurring queue template.
+
+<!-- no-free-text-queue-head-guard -->
 <!-- agent:boundary:6975e85b -->
 <!-- /agent:exchange -->
 
@@ -1015,6 +1023,8 @@ No eligible issue was added during the current intake check, so this conditional
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
+- Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
+- If an issue was added, also add `- release + publish`
 <!-- /agent:queue -->
 
 ## Todo

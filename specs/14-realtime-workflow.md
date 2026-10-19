@@ -392,6 +392,16 @@ resolution, derives its instruction from that witness through
 `authority_recovery::decide_attached_editor_recovery`. It must never prescribe
 the effect the receipt definitively refused.
 
+A mapped superseded plugin jar is diagnostic package state, not document-
+authority state (GH #315). It must not by itself select `RestartEditor` or turn a
+transient `missing_replica` into `RefuseNow`. While any registered native
+endpoint remains reachable and no typed build-mismatch refusal overrides it,
+the recovery remains `ReloadEditor`, so start admission holds for the bounded
+replica-return window and re-resolves authoritative editor text. Restart is
+terminal recovery only when every registered endpoint is unreachable; stale
+plugin-package guidance otherwise remains advisory and may wait for a
+convenient plugin-only update.
+
 For a replaced sender, the terminal instruction names the already-scheduled
 route-owned supervisor recycle and its next idle boundary. The native reload
 planner remains the owner of process-scoped admission; when another document's

@@ -9233,7 +9233,6 @@ fn attached_editor_refusal_remedy(
     let build_mismatch_refusal = refusal.and_then(|refusal| refusal.build_mismatch_refusal);
     (
         attached_editor_recovery_decision_from(
-            &superseded,
             &editors,
             &unreachable,
             build_mismatch_refusal,
@@ -9293,7 +9292,6 @@ pub fn attached_editor_disk_read_refusal(
 
 /// The terminal recovery class behind [`attached_editor_refusal_remedy_from`].
 fn attached_editor_recovery_decision_from(
-    superseded: &[agent_doc_fs::plugin_jar::SupersededEditor],
     editors: &[(String, u32)],
     unreachable: &[u32],
     build_mismatch_refusal: Option<agent_doc_turn::authority_recovery::BuildMismatchRefusal>,
@@ -9301,7 +9299,6 @@ fn attached_editor_recovery_decision_from(
     agent_doc_turn::authority_recovery::decide_attached_editor_recovery(
         agent_doc_turn::authority_recovery::AttachedEditorRecoveryFacts {
             build_mismatch_refusal,
-            plugin_bytes_superseded: !superseded.is_empty(),
             endpoints_found: !editors.is_empty(),
             all_endpoints_unreachable: !editors.is_empty()
                 && editors.iter().all(|(_, pid)| unreachable.contains(pid)),
@@ -9329,7 +9326,7 @@ fn attached_editor_refusal_remedy_from(
         pids.join(", ")
     };
     let decision =
-        attached_editor_recovery_decision_from(superseded, editors, unreachable, build_mismatch_refusal);
+        attached_editor_recovery_decision_from(editors, unreachable, build_mismatch_refusal);
     match decision {
         agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::WaitForSenderRecycle => {
             let blocker = blocking_document
@@ -9361,27 +9358,20 @@ fn attached_editor_refusal_remedy_from(
             )
         }
         agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::RestartEditor => {
-            if let Some(editor) = superseded.first() {
+            let superseded_advisory = superseded.first().map_or_else(String::new, |editor| {
                 format!(
-                    "plugin_bytes_superseded: live {kind} editor pid {pid} is executing superseded \
-                     plugin bytes ({detail}), so it cannot serve this document's replica; disk is \
-                     not adopted because that editor's buffer may still hold unsaved text. \
-                     {remedy} Then retry the same command; a captured response is re-delivered, \
-                     not lost (#84).",
-                    kind = editor.editor_kind,
-                    pid = editor.pid,
+                    " Its mapped plugin package is also superseded ({detail}); the editor restart \
+                     required to restore the unreachable endpoint will load the installed package.",
                     detail = editor.detail,
-                    remedy = editor.remedy(),
                 )
-            } else {
-                format!(
-                    "Remedy: {holder} holds the document but its agent-doc IPC endpoint no longer \
-                     accepts connections, so `agent-doc admin reload-lib` cannot reach it (it \
-                     reports the endpoint unavailable and fails). Restart that editor so it \
-                     re-registers its replica, then retry the same command; a captured response is \
-                     re-delivered, not lost (#84, GH #94)."
-                )
-            }
+            });
+            format!(
+                "Remedy: {holder} holds the document but its agent-doc IPC endpoint no longer \
+                 accepts connections, so `agent-doc admin reload-lib` cannot reach it (it reports \
+                 the endpoint unavailable and fails). Restart that editor so it re-registers its \
+                 replica, then retry the same command; a captured response is re-delivered, not \
+                 lost (#84, GH #94).{superseded_advisory}"
+            )
         }
         agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReregisterEditor => {
             format!(
@@ -9395,10 +9385,18 @@ fn attached_editor_refusal_remedy_from(
             // GH #131 (`#replicaunservedremedy`): the reload-lib instruction is owned by
             // the write-ownership predicate, so the retained-write refusal for the same
             // observation cannot forbid what this gate prescribes.
+            let superseded_advisory = superseded.first().map_or_else(String::new, |editor| {
+                format!(
+                    " The mapped plugin package is superseded ({detail}), but that package state is \
+                     advisory for document authority while the native endpoint remains reachable; \
+                     finish any plugin-only update at a convenient time.",
+                    detail = editor.detail,
+                )
+            });
             format!(
                 "Remedy: {holder} holds the document but is not serving its replica, and no plugin \
-                 byte replacement explains it. {}",
-                agent_doc_turn::write_ownership::editor_replica_recovery()
+                 byte replacement requires an immediate editor restart. {}{superseded_advisory}",
+                agent_doc_turn::write_ownership::editor_replica_recovery(),
             )
         }
     }
@@ -10561,10 +10559,11 @@ mod tests {
         );
     }
 
-    /// GH #84: an editor running superseded plugin bytes refuses with the pid,
-    /// the replaced jar, and a restart-free first rung — never a bare mechanism.
+    /// GH #315: superseded package bytes do not override a reachable native
+    /// endpoint. The replica can return during the bounded admission hold, and
+    /// package replacement stays advisory for document authority.
     #[test]
-    fn attached_editor_refusal_names_superseded_editor_and_restart_free_rung() {
+    fn reachable_superseded_editor_holds_admission_and_keeps_restart_advisory() {
         let editor = agent_doc_fs::plugin_jar::SupersededEditor {
             editor_kind: "jetbrains".into(),
             pid: 4242,
@@ -10580,38 +10579,59 @@ mod tests {
             None,
             None,
         );
-        assert!(remedy.starts_with("plugin_bytes_superseded"), "{remedy}");
+        let recovery = attached_editor_recovery_decision_from(
+            &[("jetbrains".into(), 4242)],
+            &[],
+            None,
+        );
+        assert_eq!(
+            recovery,
+            agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor,
+        );
+        assert_eq!(
+            agent_doc_turn::authority_recovery::decide_admission_replica_hold(recovery),
+            agent_doc_turn::authority_recovery::AdmissionReplicaHold::Hold,
+        );
         assert!(remedy.contains("pid 4242"), "{remedy}");
         assert!(
             remedy.contains("agent-doc-jetbrains-0.2.455.jar"),
             "{remedy}"
         );
         assert!(
-            remedy.contains("Re-run the plugin installation once"),
+            remedy.contains("agent-doc admin reload-lib"),
             "{remedy}"
         );
         assert!(
-            !remedy.contains("Restart the editor to load them"),
+            remedy.contains("advisory for document authority"),
             "{remedy}"
         );
+        assert!(!remedy.starts_with("plugin_bytes_superseded"), "{remedy}");
+        assert!(!remedy.contains("Restart that editor"), "{remedy}");
     }
 
-    /// GH #84: once an install recorded that this process refused the dynamic
-    /// update, the refusal derives the restart from that record.
+    /// GH #315: even a recorded dynamic-package refusal does not make restart
+    /// the document-recovery action while the native endpoint is reachable.
     #[test]
-    fn attached_editor_refusal_advises_restart_only_after_a_recorded_refusal() {
+    fn recorded_package_refusal_stays_advisory_for_reachable_document_endpoint() {
         let editor = agent_doc_fs::plugin_jar::SupersededEditor {
             editor_kind: "jetbrains".into(),
             pid: 4242,
             detail: "jar unlinked".into(),
             restart_verdict: Some("dynamic upgrade unavailable: plugin cannot unload".into()),
         };
-        let remedy = attached_editor_refusal_remedy_from(&[editor], &[], &[], None, None);
+        let remedy = attached_editor_refusal_remedy_from(
+            &[editor],
+            &[("jetbrains".into(), 4242)],
+            &[],
+            None,
+            None,
+        );
         assert!(
-            remedy.contains("Restart the editor to load them"),
+            remedy.contains("agent-doc admin reload-lib"),
             "{remedy}"
         );
-        assert!(remedy.contains("plugin cannot unload"), "{remedy}");
+        assert!(remedy.contains("advisory for document authority"), "{remedy}");
+        assert!(!remedy.contains("Restart that editor"), "{remedy}");
     }
 
     /// GH #84: with no superseded editor the refusal still names an action and
@@ -10723,6 +10743,30 @@ mod tests {
         assert!(
             mixed.contains("Run `agent-doc admin reload-lib`"),
             "{mixed}"
+        );
+
+        // Superseded package bytes may decorate a restart that endpoint
+        // unreachability selected, but they never select the restart themselves.
+        let superseded = agent_doc_fs::plugin_jar::SupersededEditor {
+            editor_kind: "jetbrains".into(),
+            pid: 836968,
+            detail: "jar unlinked".into(),
+            restart_verdict: None,
+        };
+        let unreachable_superseded = attached_editor_refusal_remedy_from(
+            &[superseded],
+            &[("jetbrains".into(), 836968)],
+            &[836968],
+            None,
+            None,
+        );
+        assert!(
+            unreachable_superseded.contains("Restart that editor"),
+            "{unreachable_superseded}"
+        );
+        assert!(
+            unreachable_superseded.contains("mapped plugin package is also superseded"),
+            "{unreachable_superseded}"
         );
     }
 

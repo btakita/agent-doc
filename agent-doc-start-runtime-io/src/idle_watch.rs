@@ -2054,6 +2054,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // acted on. Separate from the two dedupes above so the eventual
             // authoritative answer still requests exactly one restart.
             let mut agent_change_restart_deferred_for: Option<String> = None;
+            // `#codexcapacityretry`: Codex can settle at a ready composer after
+            // rendering a transient provider-capacity error, without producing
+            // another event that would wake the stalled turn. Submit the same
+            // short continuation an operator uses, but cap attempts for this
+            // supervisor generation so a provider outage cannot prompt-loop.
+            let mut codex_model_capacity_recovery_attempts: u8 = 0;
+            let mut codex_model_capacity_recovery_exhausted_logged = false;
             let auto_install_enabled =
                 agent_doc_supervisor_io::config::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
@@ -2756,6 +2763,65 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                 }
+                // `#codexcapacityretry`: this observation must precede the
+                // quiescent fast path. A capacity-stalled Codex pane is otherwise
+                // exactly the stable/idle state that sleeps here forever.
+                let capacity_observation = (harness.binary == "codex")
+                    .then(|| {
+                        supervisor_pane_payload_observation(&shared, "continue", &harness)
+                    })
+                    .flatten();
+                match agent_doc_supervisor::detection::codex_model_capacity_recovery_decision(
+                    &harness.binary,
+                    capacity_observation
+                        .as_ref()
+                        .map(|observation| observation.content.as_str()),
+                    capacity_observation
+                        .as_ref()
+                        .map(|observation| observation.frame_rendered),
+                    capacity_observation
+                        .as_ref()
+                        .map(|observation| observation.dispatch_ready),
+                    codex_model_capacity_recovery_attempts,
+                ) {
+                    agent_doc_supervisor::detection::CodexModelCapacityRecoveryDecision::Retry => {
+                        codex_model_capacity_recovery_attempts =
+                            codex_model_capacity_recovery_attempts.saturating_add(1);
+                        let outcome =
+                            auto_trigger_inject_command(&shared, &stop, "continue", &harness);
+                        let event = format!(
+                            "codex_model_capacity_recovery file={} pane={} attempt={} max_attempts={} action=submit_continue result={:?} (#codexcapacityretry)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            codex_model_capacity_recovery_attempts,
+                            agent_doc_supervisor::detection::CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS,
+                            outcome,
+                        );
+                        log_event(&mut session_log, &event);
+                        agent_doc_ops_log_io::log_op(&path, &event);
+                        if outcome == AutoTriggerOutcome::Cancelled {
+                            return;
+                        }
+                        // Whether accepted or failed, do not mix ordinary queue
+                        // drain/recycle effects into the same observation tick.
+                        continue;
+                    }
+                    agent_doc_supervisor::detection::CodexModelCapacityRecoveryDecision::Exhausted
+                        if !codex_model_capacity_recovery_exhausted_logged =>
+                    {
+                        codex_model_capacity_recovery_exhausted_logged = true;
+                        let event = format!(
+                            "codex_model_capacity_recovery_exhausted file={} pane={} attempts={} action=await_operator (#codexcapacityretry)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            codex_model_capacity_recovery_attempts,
+                        );
+                        log_event(&mut session_log, &event);
+                        agent_doc_ops_log_io::log_op(&path, &event);
+                    }
+                    _ => {}
+                }
+
                 if idle_watch_fast_path_can_sleep(
                     queue_state_observed,
                     actor_ready_fast,
@@ -6470,6 +6536,28 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_capacity_recovery_precedes_the_quiescent_fast_path() {
+        let source = include_str!("idle_watch.rs")
+            .split_once("\n#[cfg(test)]")
+            .map(|(production, _)| production)
+            .expect("tests must remain behind cfg(test)");
+        let recovery = source
+            .find("codex_model_capacity_recovery_decision(")
+            .expect("the idle watch must decide capacity recovery");
+        let injection = source[recovery..]
+            .find("auto_trigger_inject_command(&shared, &stop, \"continue\", &harness)")
+            .map(|offset| recovery + offset)
+            .expect("capacity recovery must submit a continuation through the shared path");
+        let fast_path = source[injection..]
+            .find("if idle_watch_fast_path_can_sleep(")
+            .map(|offset| injection + offset)
+            .expect("capacity recovery must run before the quiescent fast path");
+
+        assert!(recovery < injection);
+        assert!(injection < fast_path);
+    }
 
     #[test]
     fn stale_supervisor_reexec_refuses_transiently_unterminated_frontmatter() {

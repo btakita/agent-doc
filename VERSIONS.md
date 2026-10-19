@@ -25,6 +25,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **Codex capacity errors recover while the pane remains busy.** The supervisor
   recognizes the renderer-owned capacity presentation, sends one deduplicated
   `continue`, and clears stale dispatch admission before retrying.
+- **Queued owner routes stay informational in JetBrains.** A concurrent Run
+  Agent Doc action that correctly returns `queued_behind_owner` no longer sets
+  an attempt error or blocked-route projection while the live turn drains.
 - **Chained Remote Development focus escalations preserve pane order (GH
   #311).** Unknown-order folds always use the retained positive order basis, so
   successive focus-only replacements cannot reverse the routed document pair.

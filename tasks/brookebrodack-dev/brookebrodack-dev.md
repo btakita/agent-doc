@@ -292,17 +292,42 @@ No operator decisions or billing change arrived for the remaining queue heads, s
 - `#2amm` — Hermes is already 0.21.5 and the old response-read crash is gone, but the active Google key is invalid and this installation has no known updater. Choose “rotate Google key,” “switch provider,” or “stop with diagnosis.”
 
 Their existing TODOs remain the operator handoffs. No credentials, services, model settings, or moderation policy were changed.
+
+### Re: Response
+
+> **Queue prompt:** [#rjrh]: #push: Try the npm auth again.
+
+The npm retry is still blocked. The registry is reachable (`npm ping` returned `PONG`), but `npm whoami` returned `E401 Unauthorized`. The three checked-out versions are already published: `@rappstack/ui--any@0.1.0`, `@rappstack/domain--server@0.1.2`, and `@rappstack/domain--server--blog@0.1.1` (registry latest `0.1.0`, `0.1.2`, and `0.1.4`). No publish was attempted and no files or commits changed.
+
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question
+blocking: true
+request: Re-authenticate npm for this environment, then provide publishable version-bump commits for @rappstack/ui--any 0.1.1, @rappstack/domain--server 0.1.3, and @rappstack/domain--server--blog 0.1.5 before retrying publication.
+context: In isolated worktrees, `npm whoami` reached https://registry.npmjs.org but returned E401 Unauthorized, while `npm ping` returned PONG. The checked-out manifest versions are @rappstack/ui--any 0.1.0, @rappstack/domain--server 0.1.2, and @rappstack/domain--server--blog 0.1.1; registry latest versions are respectively 0.1.0, 0.1.2, and 0.1.4, so every local version is already published. No publish was attempted. This worker is prohibited from performing version bumps or releases.
+choices:
+- Re-authenticate and prepare bumps: Run `npm login` or install a valid npm token for this environment, prepare the three publishable version-bump commits, then queue another retry.
+- Stop with diagnosis: Leave publication blocked and record the E401 plus already-published-version findings.
+
+On the Grok question: **a $300 Grok Build Heavy subscription would not, by itself, cover this automation end to end.**
+
+For interactive coding and first-party Grok Build/cloud-agent work, a high tier is likely ample for a serious individual workload, but xAI does not publish a fixed task or token quota. Usage comes from a shared weekly pool, and long coding jobs consume substantially more than chat, so nobody can honestly guarantee “automation plus additional work” without measuring your workload. The current public lineup is Plus $8, Premium $30, Super $100, and **Ultra $200/month**; Ultra is 50× Plus and is xAI’s recommendation for power users. A $300 Heavy offer appears to be a legacy/account-specific plan rather than the current public new-customer tier. See [xAI pricing](https://x.ai/pricing) and [usage-limit details](https://docs.x.ai/grok/faq#how-do-supergroks-weekly-usage-limits-work).
+
+The important boundary is billing: paid plans grant API access, but **API usage is billed separately** and does not draw from the subscription pool. Third-party models are also billed separately. And the currently blocked `#j0ee` benchmark specifically calls five OpenAI models, so a Grok subscription will not supply the missing OpenAI credits or unblock that empirical comparison. See [xAI’s API billing clarification](https://x.ai/pricing#frequently-asked-questions).
+
+Recommendation: do not buy a $300 plan solely to unblock `#j0ee`. If you want Grok Build itself, start with the current Ultra offer (or confirm exactly what a grandfathered Heavy account includes), run one representative week, inspect Settings → Usage, and use capped top-ups if needed. Keep a separate API budget for unattended/headless automation. I added that one-week trial as a recommended backlog item.
+
+For `#j0ee`, the remaining operator choice is unchanged: add OpenAI credits and retry the five-model benchmark, or stop it blocked with `OPENAI_MODEL` unchanged.
 <!-- agent:boundary:5d323eb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue subagents priority go -->
-- ~~do [#fhmig]~~
-- ~~do [#50fc]~~
 - ~~do [#j0ee]~~
-- ~~do [#2amm]~~
-- ~~do [#rappstackdevtypescript]~~
+- ~~[#rjrh]: #push: Try the npm auth again.~~
+- ~~[#fhmig]: retry~~
+- ~~[#fhmig]: more context please~~
+- do [#runoneweek]
 <!-- /agent:queue -->
 
 ## Notes
@@ -310,27 +335,28 @@ Their existing TODOs remain the operator handoffs. No credentials, services, mod
 <!-- agent:notes -->
 <!-- /agent:notes -->
 
+## Todo
+
+<!-- agent:todo -->
+- [ ] [#rjrh] Choose release versions, prepare version-bumped package commits, and complete npm authentication/2FA for [#rjrh] (source: agent:backlog [#rjrh])
+- [ ] [#fhmig] Choose whether to detach the source and retry or defer [#fhmig] (source: agent:review [#fhmig])
+- [ ] [#50fc] Choose the plugin aggregation policy for [#50fc] (source: agent:review [#50fc])
+- [ ] [#2amm] Choose a Hermes credential recovery path for [#2amm] (source: agent:review [#2amm])
+- [ ] [#j0ee] Add OpenAI credits and retry, or stop blocked, for [#j0ee] (source: agent:review [#j0ee])
+<!-- /agent:todo -->
+
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev. BLOCKED: the current local manifest versions are already published (ui--any 0.1.0, domain--server 0.1.2, domain--server--blog 0.1.1 while registry latest is 0.1.4), so publishable version bumps are required in addition to npm authentication/2FA. Suggested patch releases are 0.1.1, 0.1.3, and 0.1.5; after publication, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
+- [ ] [#runoneweek] [recommended] Run a one-week representative trial of current Grok Ultra for Build/cloud-agent work, record weekly pool consumption and separately billed API usage, then decide whether to keep the plan or use capped top-ups.
 <!-- /agent:backlog -->
-
-## Todo
-
-<!-- agent:todo -->
-- [ ] [#rjrh] Choose release versions, prepare version-bumped package commits, and complete npm authentication/2FA for [#rjrh]
-- [ ] [#fhmig] Choose whether to detach the source and retry or defer [#fhmig]
-- [ ] [#50fc] Choose the plugin aggregation policy for [#50fc]
-- [ ] [#2amm] Choose a Hermes credential recovery path for [#2amm]
-- [ ] [#j0ee] Add OpenAI credits and retry, or stop blocked, for [#j0ee]
-<!-- /agent:todo -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#j0ee] Pick the moderation model empirically after OpenAI billing is restored. All five authorized candidates currently return HTTP 429 no credits, so no UNSAFE/latency winner can be selected and OPENAI_MODEL remains unchanged on both surfaces; GATED on operator adding credits or choosing to stop blocked
 - [/operator] [#2amm] Restore Hermes one-shot inference. Hermes is already 0.21.5 and the old ResponseNotRead crash is gone, but /opt/hermes-agent has no git/update method and the active GOOGLE_API_KEY is invalid; GATED on operator choosing key rotation, another provider, or stopping with the diagnosis
-- [/operator] [#j0ee] Pick the moderation model empirically after OpenAI billing is restored. All five authorized candidates currently return HTTP 429 no credits, so no UNSAFE/latency winner can be selected and OPENAI_MODEL remains unchanged on both surfaces; GATED on operator adding credits or choosing to stop blocked
 - [/operator] [#50fc] Choose the plugin aggregation policy for the truncated requirement ending at 'It will automatically'. The missing continuation is unrecoverable from every committed copy and blocks #k0ye; GATED on operator selection among fail-closed consensus, strict majority, first decisive answer, or supplied intended wording
 - [/operator] [#fhmig] Migrate the freehold-scoped items (#sbv9, #nd8n, #dj8c, #p0rw, #k0ye, #50fc) into tasks/software/freehold.md. GATED on operator choice: the former target owner is gone, but the source document remains editor-attached; #p0rw and #k0ye must be reopened from done before rerunning the six-ID extract. The verified four-item preview operation was 81cdbfc60caf
 - [/] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear

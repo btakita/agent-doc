@@ -252,7 +252,12 @@ Independent review approved the change with no actionable findings. Focused rela
 The live `sdk-demo.md` replica is already healthy and writable with no projection lag. I did not force disk, repair either SDK document, or rerun the preserved live transfer. The latest published release remains v0.35.525; this extraction fix is post-release on `main`, not a newly published release.
 
 The review noted one non-blocking coverage opportunity: fault injection for disk-persist failure and full second-document rollback. Code inspection found the rollback paths correct, so no follow-up item was required for this fix.
-<!-- agent:boundary:198801fa -->
+> **Queue prompt:** If an issue was added, also add `- release + publish`
+
+### Re: issue-watch release condition — gpt-5 · 2026-10-19T19:25-04:00
+
+No new issue was added in this pass, so no release-and-publish item was added.
+<!-- agent:boundary:2a4cf9aa -->
 <!-- /agent:exchange -->
 
 <!--

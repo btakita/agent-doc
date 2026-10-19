@@ -727,11 +727,33 @@ fn consume_queue_prompts_with_options_fenced(
     }
 
     // `#queuesubagents` (GH #308): an unclaimed queue-level subagent head is
-    // coordinator dispatch work, not an inline closeout's head to consume.
+    // coordinator dispatch work, not an inline closeout's head to consume. A
+    // reported claim, durable release receipt, or binary completion cell is the
+    // opposite: the worker handoff is complete and coordinator closeout may
+    // consume the response it just integrated.
     // Apply the same derived ownership projection as preflight/session-check so
     // the write seam fails closed even if a stale caller selected the head.
     let out_of_loop = crate::subagent_dispatch::out_of_loop_items_for_content(file, &content);
-    if out_of_loop.claims(&plan.consumed_text) {
+    let released_reported =
+        crate::claim_release_receipt::reported_items_for_content(file, &content);
+    let consumed_identity =
+        agent_doc_queue::queue_claim::claim_identity(&plan.consumed_text);
+    let actively_reported = crate::queue_claim::claim_states_for_content(file, &content)
+        .map(|claims| {
+            claims.into_iter().any(|claim| {
+                claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
+                    && claim.identity == consumed_identity
+            })
+        })
+        .unwrap_or(false);
+    let completion_reported = crate::queue_claim::completion_evidence_head_texts(&content)
+        .iter()
+        .any(|head| same_queue_head_text(head, &plan.consumed_text));
+    if out_of_loop.claims(&plan.consumed_text)
+        && !released_reported.claims(&plan.consumed_text)
+        && !actively_reported
+        && !completion_reported
+    {
         eprintln!(
             "[queue] WARNING: refusing to consume subagent-owned or dispatchable head {:?}; claim and dispatch it, or report worker complete before consuming it (#queuesubagents, GH #308)",
             plan.consumed_text
@@ -6424,5 +6446,74 @@ Old.
 
         assert!(outcome.is_none());
         assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn consume_allows_reported_queue_subagent_head() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let content = concat!(
+            "---\nqueue: go\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: Run queued thing\n\n> **Queue prompt:** Run queued thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents go -->\n",
+            "- Run queued thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (_, claimed) =
+            crate::queue_claim::claim(&doc, "Run queued thing", "subagent:worker", 3600)
+                .unwrap();
+        let running = crate::queue_claim::start_attempt(
+            &doc,
+            "Run queued thing",
+            "subagent:worker",
+            "worker:worker",
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(
+            &doc,
+            "Run queued thing",
+            Some(claimed.generation),
+        )
+        .unwrap();
+        let completion = agent_doc_document::subagent_completion::cell(
+            &running.owner,
+            &running.item_text,
+            &crate::queue_claim::completion_feedback_key(&running).unwrap(),
+        );
+        let completed_content = content.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{completion}\n<!-- /agent:exchange -->"),
+        );
+        fs::write(&doc, &completed_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &completed_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        crate::queue_claim::release(&doc, "Run queued thing")
+            .unwrap()
+            .expect("the reported claim remains active until coordinator integration");
+
+        let outcome = consume_queue_prompt_with_outcome(&doc).unwrap();
+
+        assert!(outcome.is_some(), "a reported handoff is ready to consume");
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(!updated.contains("- Run queued thing"), "{updated}");
+        assert!(
+            updated.contains(agent_doc_document::subagent_completion::MARKER_PREFIX),
+            "consuming the handoff must preserve its durable completion evidence: {updated}"
+        );
     }
 }

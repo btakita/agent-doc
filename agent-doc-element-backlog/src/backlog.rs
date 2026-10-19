@@ -1362,6 +1362,12 @@ pub fn document_reserved_identity_ids(content: &str) -> HashSet<String> {
                     let id = normalize_pending_id(&item.id);
                     (!id.is_empty()).then_some(id)
                 }));
+            } else if agent_doc_element::todo::is_todo_component(&component.name) {
+                reserved.extend(component.content(content).lines().filter_map(|line| {
+                    let id = agent_doc_element::todo::parse_todo_line(line)?.own_id?;
+                    let id = normalize_pending_id(id);
+                    (!id.is_empty()).then_some(id)
+                }));
             } else if element::is_backlog_done_component(&component.name) {
                 reserved.extend(extract_done_item_own_ids(component.content(content)));
             }
@@ -7050,6 +7056,26 @@ mod tests {
         let body = "- [ ] [#agent-doc-bug] the first tagged item\n";
         let outcome = op_add_with_outcome_reserved(body, text, DOC_ID, false, &reserved).unwrap();
         assert_ne!(outcome.id, "agent-doc-bug");
+    }
+
+    /// GH #306: todo rows share the tracked-work id namespace. A free-text add
+    /// that cites a todo id must keep the citation as prose and coin a new id.
+    #[test]
+    fn a_todo_id_is_reserved_from_inferred_inline_identity() {
+        let doc = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#draftreview] Review the draft MR\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let reserved = document_reserved_identity_ids(doc);
+        assert!(reserved.contains("draftreview"), "todo id must be reserved");
+
+        let text = "Why is [#draftreview] still in the todo?";
+        let outcome = op_add_with_outcome_reserved("", text, DOC_ID, false, &reserved).unwrap();
+        assert_ne!(outcome.id, "draftreview");
+        assert!(outcome.body.contains(text), "citation must remain in prose");
     }
 
     /// The inference still applies when the tag is free — this is the behavior

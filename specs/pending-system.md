@@ -86,6 +86,12 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
   request made a document-wide tag single-use — the first
   `--backlog-add "#agent-doc-bug ..."` claimed the id and every later one failed
   closed. The same degrade applies to `extract_inline_tag_id`.
+- **Todo ids share the reserved identity namespace (`#todoidreservation`, GH
+  #306):** auto-id and free-text queue admission reserve every own id in
+  `agent:todo`, as well as tracked-work, done-history, and prompt-preset ids. A
+  mid-line `[#id]` that cites any reserved identity remains verbatim prose and
+  the promoted backlog item receives a fresh id; admission must never strip the
+  citation or create a second open meaning for the cited id.
 - **A replayed add is the same mutation (`#respondcloseoutbacklog`):** an add's
   identity is the `(id, text)` it resolves to before collision handling — the
   explicit `id=` / `[#id]` id, else the inferred leading bare `#tag`. When an

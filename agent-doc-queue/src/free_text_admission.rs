@@ -1391,6 +1391,54 @@ mod tests {
         ));
     }
 
+    /// GH #306: queue admission must not steal an existing todo id from a
+    /// mid-line citation or remove that citation from the promoted work text.
+    #[test]
+    fn midline_todo_id_mention_keeps_text_and_coins_a_fresh_id() {
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#draftreview] Review the draft MR\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- Why is [#draftreview] still in the todo?\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(prepared.admitted_count, 1);
+        assert_eq!(prepared.unique_ids.len(), 1);
+        assert_ne!(prepared.unique_ids[0], "draftreview");
+        assert!(
+            prepared
+                .content
+                .contains("Why is [#draftreview] still in the todo?")
+        );
+
+        let admitted_id = prepared.unique_ids[0].clone();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        assert!(
+            admission
+                .content
+                .contains("- [ ] [#draftreview] Review the draft MR")
+        );
+        assert!(
+            admission
+                .content
+                .contains(&format!("- do [#{admitted_id}]"))
+        );
+    }
+
     /// GH #289: the I/O boundary supplies identities from the configured done
     /// archive so free-text promotion cannot mint a historical id again.
     #[test]

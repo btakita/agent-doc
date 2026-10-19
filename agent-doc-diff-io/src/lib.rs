@@ -5,7 +5,7 @@
 //! editor owns the document.
 
 use anyhow::Result;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use agent_doc_diff::{
     ExternalDoneArchiveDrainCandidate, archive_content_proves_exact_append,
@@ -43,31 +43,15 @@ pub trait LiveCurrentSource {
 }
 
 fn resolve_external_done_archive_target(doc: &Path, archive_path: &str) -> Option<PathBuf> {
-    let relative = Path::new(archive_path);
-    if archive_path.trim().is_empty()
-        || !archive_path.ends_with(".done.md")
-        || relative.is_absolute()
-        || relative.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
+    let relative = if archive_path.trim().is_empty() {
+        PathBuf::from(format!("{}.done.md", doc.file_stem()?.to_str()?))
+    } else {
+        PathBuf::from(archive_path)
+    };
+    if !relative.to_string_lossy().ends_with(".done.md") {
         return None;
     }
-    let root = agent_doc_fs::find_project_root(doc)?;
-    let target = root.join(relative);
-    if let Ok(canonical_target) = target.canonicalize() {
-        canonical_target.starts_with(&root).then_some(target)
-    } else if let Some(parent) = target.parent()
-        && let Ok(canonical_parent) = parent.canonicalize()
-        && !canonical_parent.starts_with(&root)
-    {
-        None
-    } else {
-        Some(target)
-    }
+    agent_doc_fs::resolve_document_relative_path(doc, &relative).ok()
 }
 
 /// Prove which external-done drains between `previous` and `current` were

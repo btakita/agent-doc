@@ -507,6 +507,7 @@ fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec
             !is_registry_known_unknown_component_finding(finding)
                 && !is_agent_doc_queue_known_attr_finding(finding)
                 && !is_agent_doc_queue_bare_flag_finding(finding)
+                && !is_agent_doc_done_bare_archive_finding(finding)
                 && !is_explicit_no_preset_finding(finding)
         })
         .map(rewrite_empty_attr_value_hint)
@@ -603,6 +604,22 @@ fn is_agent_doc_queue_bare_flag_finding(finding: &LintFinding) -> bool {
         return false;
     };
     agent_doc_queue::component_attrs::is_recognized_bare_flag_attr(component, attribute)
+}
+
+/// A bare `archive` flag on `agent:done` selects the document-local default
+/// `<document-basename>.done.md`. `archive=` remains an invalid empty pair.
+fn is_agent_doc_done_bare_archive_finding(finding: &LintFinding) -> bool {
+    if finding.rule != "agent-doc/malformed-attr" {
+        return false;
+    }
+    let mut quoted = finding.message.split('`');
+    let Some(attribute) = quoted.nth(1) else {
+        return false;
+    };
+    let Some(component) = quoted.nth(1) else {
+        return false;
+    };
+    attribute == "archive" && component == "agent:done"
 }
 
 fn is_registry_known_unknown_component_finding(finding: &LintFinding) -> bool {
@@ -1250,6 +1267,20 @@ operator-owned scratch state\n\
                 panic!("`preset=\"\"` in {name} must pass strict lint: {error:#}")
             });
         }
+    }
+
+    #[test]
+    fn bare_done_archive_selects_document_local_default_and_passes_lint() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:done archive -->\n\
+            <!-- /agent:done -->\n";
+        let file = write_doc(&dir, "bare-archive.md", doc);
+        run(&file, None).expect("bare archive flag must pass lint");
+        run(&file, Some(LintCliMode::Strict)).expect("bare archive flag must pass strict lint");
     }
 
     /// Other empty attribute values stay malformed; their hint leads with

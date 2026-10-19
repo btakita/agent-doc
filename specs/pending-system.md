@@ -226,11 +226,16 @@ On every preflight run:
    - Append an archive entry to canonical `agent:done`. If the component does not
      already exist, create a visible `## Completed / Reaped` section after the
      tracked work components first, then append the entry. If the opening marker
-     uses `archive=<repo-relative>.done.md`, append to that external markdown
-     file instead, create it when missing, leave the local `agent:done` component
-     as the routing marker, and suppress duplicate date/id/text entries on
-     retry. Absolute paths, parent-directory escapes, outside-repo targets, and
-     non-`.done.md` targets fail closed before active tracked work is mutated.
+     uses `archive=<document-relative>.done.md`, append to that external markdown
+     file instead and create it when missing. A bare `archive` flag defaults to
+     `<document-basename>.done.md` beside the session document. Existing inline
+     `agent:done` content is moved into the external file, after which the local
+     component remains only as the routing marker; retries suppress duplicate
+     content and date/id/text entries, and the combined archive entries are
+     ordered by their leading timestamp. Parent-directory segments are allowed
+     only while the resolved target remains inside the project. Absolute paths,
+     outside-project targets, and non-`.done.md` targets fail closed before
+     active tracked work is mutated.
      Legacy `agent:backlog-done` and `agent:pending-done` components are not
      accepted as archive aliases; run `agent-doc migrate` to rewrite them to
      `agent:done`. Completed tracked work must remain grep-visible in either the

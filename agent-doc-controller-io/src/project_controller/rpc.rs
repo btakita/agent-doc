@@ -9107,6 +9107,11 @@ struct ControllerCrdtCpWritePayload {
     /// field — both keep the unscoped whole-document path.
     #[serde(default)]
     component_scope: Option<Vec<(String, usize)>>,
+    /// Require the relay membership to remain empty through the canonical
+    /// compare-and-swap. Coordinated cross-document operations set this only
+    /// after every participating editor has acknowledged its frozen replica.
+    #[serde(default)]
+    require_zero_live_replicas: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -9167,6 +9172,40 @@ pub fn apply_cp_write_via_controller_model_for_doc(
     content: &str,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
+    apply_cp_write_via_controller_model_for_doc_with_detach_fence(
+        doc,
+        expected_current,
+        content,
+        source,
+        false,
+    )
+}
+
+/// Apply a CP write only while the controller canonical has no live editor
+/// replica. The zero-member fence is evaluated by the relay under the same hub
+/// lock as the canonical compare-and-swap.
+pub fn apply_detached_cp_write_via_controller_model_for_doc(
+    doc: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
+    apply_cp_write_via_controller_model_for_doc_with_detach_fence(
+        doc,
+        expected_current,
+        content,
+        source,
+        true,
+    )
+}
+
+fn apply_cp_write_via_controller_model_for_doc_with_detach_fence(
+    doc: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+    require_zero_live_replicas: bool,
+) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
     let authority = crdt_authority_for_file(&file_arg);
@@ -9200,8 +9239,11 @@ pub fn apply_cp_write_via_controller_model_for_doc(
         // The scope is ambient rather than a parameter because it has to survive
         // the whole `persist_pending_write` -> `converge_or_disk_write` chain that
         // every other write shares (`#cpwritecomponentscoped`).
-        component_scope: agent_doc_element::component_scope::current_component_write_scope()
+        component_scope: (!require_zero_live_replicas)
+            .then(agent_doc_element::component_scope::current_component_write_scope)
+            .flatten()
             .map(|scope| scope.to_pairs()),
+        require_zero_live_replicas,
     };
     let result: ControllerCrdtCpWriteResult = request_controller_with_timeout(
         &project_root,
@@ -10808,13 +10850,27 @@ fn handle_crdt_cp_write_rpc(
         .component_scope
         .clone()
         .map(agent_doc_element::ComponentWriteScope::from_pairs);
-    let write = agent_doc_crdt_relay_io::apply_cp_write_for_file_scoped(
-        &canonical,
-        &payload.expected_current,
-        &payload.content,
-        source,
-        scope.as_ref(),
-    )?;
+    let write = if payload.require_zero_live_replicas {
+        anyhow::ensure!(
+            scope.is_none(),
+            "detached CRDT CP write for {} cannot carry a component scope",
+            canonical.display(),
+        );
+        agent_doc_crdt_relay_io::apply_detached_cp_write_for_file(
+            &canonical,
+            &payload.expected_current,
+            &payload.content,
+            source,
+        )?
+    } else {
+        agent_doc_crdt_relay_io::apply_cp_write_for_file_scoped(
+            &canonical,
+            &payload.expected_current,
+            &payload.content,
+            source,
+            scope.as_ref(),
+        )?
+    };
     Ok(ControllerCrdtCpWriteResult { write })
 }
 

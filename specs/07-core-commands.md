@@ -711,6 +711,7 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 `agent-doc extract <SOURCE> <TARGET> [--component NAME]`
 
 - Moves the last exchange entry from the source into the target's matching component and preserves both documents' snapshots.
+- Does not auto-claim or start the target. Use `agent-doc claim <TARGET> --new-pane` when the extracted document should get its own routing pane.
 
 ## backlog
 

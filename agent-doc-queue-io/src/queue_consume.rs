@@ -758,6 +758,12 @@ fn consume_queue_prompts_with_options_fenced(
     }
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
 
+    // `#claimstrike` / GH #303: id-backed heads reach this consume path rather
+    // than the free-text strike path below. End their claims at the same
+    // successful mutation boundary so a Reported attempt cannot survive the
+    // strike and attach to a later operator re-add of the same `#id`.
+    release_claims_on_struck_heads(file, &content, &plan.consumed_texts);
+
     let outcome = QueueConsumptionOutcome {
         consumed_text: plan.consumed_text.clone(),
         consumed_count: plan.consumed_texts.len(),
@@ -1211,20 +1217,31 @@ fn strike_free_text_queue_heads_with_proof(
     Ok(keys.len())
 }
 
-/// Release the worker claim on a free-text head this closeout struck as
-/// answered (`#claimstrike`). Logged either way; a failure is reported, never
-/// fatal, because a claim on a closed head is inert and closeout prunes it.
+/// Release the worker claim on a queue head this closeout struck as answered
+/// (`#claimstrike`). Logged either way; a failure is reported, never fatal,
+/// because a claim on a closed head is inert and closeout prunes it.
 fn release_claim_on_struck_head(file: &Path, head: &str) {
     match crate::queue_claim::release_closed_head(file, head) {
         Ok(Some(claim)) => eprintln!(
-            "[queue] released {}'s claim on the answered free-text head it struck (#claimstrike)",
+            "[queue] released {}'s claim on the answered head it struck (#claimstrike)",
             claim.owner
         ),
         Ok(None) => {}
         Err(err) => eprintln!(
-            "[queue] WARNING: could not release the claim on a struck free-text head in {}: {err:#}",
+            "[queue] WARNING: could not release the claim on a struck head in {}: {err:#}",
             file.display()
         ),
+    }
+}
+
+fn release_claims_on_struck_heads(file: &Path, before: &str, struck_heads: &[String]) {
+    let claimed = agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(
+        &crate::queue_claim::claimed_live_head_texts_for_content(file, before),
+    );
+    for head in struck_heads {
+        if claimed.claims(head) {
+            release_claim_on_struck_head(file, head);
+        }
     }
 }
 
@@ -1737,6 +1754,10 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     if let Some(new_snapshot) = new_snapshot {
         save_snapshot_recovery_only(file, &new_snapshot, "queue done-id mark");
     }
+    // `#claimstrike` / GH #303: the done-id renderer is the primary id-backed
+    // strike path. Close its attempt now, while the pre-strike authority still
+    // identifies the exact claimed head.
+    release_claims_on_struck_heads(file, &authority_content, &marked_texts);
 
     eprintln!(
         "[queue] marked {} completed item(s) by done id: {:?}",
@@ -5534,11 +5555,11 @@ mod core_tests {
         );
     }
 
-    /// `#claimstrike` control: the id-backed path (`do [#id]` + `--done`)
-    /// completes a claimed head regardless of its claim, as it did live; the
-    /// closed head's claim is then pruned at closeout reconciliation.
+    /// `#claimstrike` / GH #303: the id-backed path (`do [#id]` + `--done`)
+    /// must release the exact attempt in the same consume operation. A reported
+    /// claim otherwise never expires and can attach to a later re-add of the id.
     #[test]
-    fn claimstrike_claimed_id_backed_head_completes_by_done_id() {
+    fn claimstrike_reported_id_backed_head_releases_before_same_id_is_readded() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("s.md");
@@ -5556,7 +5577,25 @@ mod core_tests {
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        crate::queue_claim::claim(&doc, "#altshiftmenu", "subagent:altshiftmenu", 3600).unwrap();
+        let (_, claimed) =
+            crate::queue_claim::claim(&doc, "#altshiftmenu", "subagent:altshiftmenu", 3600)
+                .unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            "#altshiftmenu",
+            "subagent:altshiftmenu",
+            "worker:altshiftmenu",
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        let reported =
+            crate::queue_claim::report_attempt(&doc, "#altshiftmenu", Some(claimed.generation))
+                .unwrap();
+        assert_eq!(
+            reported.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
 
         let marked =
             mark_completed_queue_prompts_for_done_ids(&doc, &["altshiftmenu".to_string()], true)
@@ -5565,10 +5604,25 @@ mod core_tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("- ~~do [#altshiftmenu]~~\n"), "{updated}");
         assert!(updated.contains("- do [#tail]\n"), "{updated}");
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty(),
+            "the consume itself must release the reported claim"
+        );
+
+        let readded = updated.replace(
+            "- ~~do [#altshiftmenu]~~\n",
+            "- ~~do [#altshiftmenu]~~\n- do [#altshiftmenu]\n",
+        );
+        std::fs::write(&doc, &readded).unwrap();
+        let (_, fresh) =
+            crate::queue_claim::claim(&doc, "#altshiftmenu", "subagent:fresh", 3600).unwrap();
+        assert_eq!(fresh.owner, "subagent:fresh");
         assert_eq!(
-            crate::queue_claim::prune_closed_claims(&doc, &updated).unwrap(),
-            1,
-            "the completed head's claim closes with it"
+            fresh.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Claimed
         );
     }
 

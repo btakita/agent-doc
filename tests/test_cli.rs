@@ -17197,7 +17197,7 @@ fn test_dispatch_turn_start_is_recorded_on_the_busy_transition() {
 }
 
 /// `#timestampresponseheader`: the response-header contract is an instruction surface,
-/// so the rule has to live in SKILL.md and the respond runbook. The agent authors the
+/// so the rule has to live in the mandatory session cycle and the respond runbook. The agent authors the
 /// model and timestamp from its preflight contract; the production write canonicalizer
 /// must preserve the complete heading. The cross-parser property itself is behaviour-
 /// tested by `a_timestamped_heading_reads_the_same_through_every_parser` in
@@ -17242,7 +17242,7 @@ fn test_response_header_timestamp_contract_is_documented_and_singly_owned() {
         "the model/timestamp separator must stay a middle dot, not a second em dash"
     );
 
-    for relative in ["SKILL.md", "runbooks/respond.md"] {
+    for relative in ["runbooks/session-cycle.md", "runbooks/respond.md"] {
         let surface = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             surface.contains("#timestampresponseheader"),
@@ -30531,6 +30531,16 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
         ".opencode/skills/agent-doc/SKILL.md",
         ".grok/skills/agent-doc/SKILL.md",
         ".cursor/rules/agent-doc.md",
+    ] {
+        let surface = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            surface.contains("runbooks/respond.md")
+                && surface.contains("runbooks/pending-ops.md"),
+            "{relative_path} must route tracked-work mutations to the focused runbooks"
+        );
+    }
+
+    for relative_path in [
         "runbooks/respond.md",
         ".claude/skills/agent-doc/runbooks/respond.md",
         ".codex/skills/agent-doc/runbooks/respond.md",
@@ -33705,6 +33715,24 @@ fn assert_operator_authority_instructions(content: &str, surface: &str) {
     );
 }
 
+fn assert_compact_skill_router(content: &str, surface: &str) {
+    assert!(
+        content.lines().count() <= 60,
+        "{surface} should remain compact enough to survive context compaction"
+    );
+    assert!(
+        content.len() <= 5_500,
+        "{surface} should remain below the compact-router byte budget"
+    );
+    assert!(content.contains("## Required cycle"));
+    assert!(content.contains("## Runbook table"));
+    assert!(content.contains("runbooks/session-cycle.md"));
+    assert!(content.contains("runbooks/harness-invocation.md"));
+    assert!(content.contains("runbooks/persist-closeout.md"));
+    assert!(content.contains("runbooks/respond.md"));
+    assert!(content.contains("runbooks/pending-ops.md"));
+}
+
 #[test]
 fn root_agents_instructions_preserve_operator_authority() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -33855,46 +33883,52 @@ fn test_skill_md_contains_required_steps() {
 
     let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
     let content = std::fs::read_to_string(&skill_path).unwrap();
-    assert_operator_authority_instructions(&content, "Claude SKILL.md");
+    assert_compact_skill_router(&content, "Claude SKILL.md");
 
-    let required_steps = ["### 0.", "### 1.", "### 2."];
+    let runbook_root = tmp.path().join(".claude/skills/agent-doc/runbooks");
+    let cycle = std::fs::read_to_string(runbook_root.join("session-cycle.md")).unwrap();
+    let harness = std::fs::read_to_string(runbook_root.join("harness-invocation.md")).unwrap();
+    let persist = std::fs::read_to_string(runbook_root.join("persist-closeout.md")).unwrap();
+    let planning = std::fs::read_to_string(runbook_root.join("planning-dispatch.md")).unwrap();
+    let respond = std::fs::read_to_string(runbook_root.join("respond.md")).unwrap();
+    let routed_contract = format!("{cycle}\n{harness}\n{persist}\n{planning}\n{respond}");
+
+    let required_steps = ["## 0.", "## 1.", "## 2."];
     for step in &required_steps {
         assert!(
-            content.contains(step),
-            "SKILL.md missing required workflow step: {step}"
+            cycle.contains(step),
+            "session-cycle.md missing required workflow step: {step}"
         );
     }
     assert!(
-        content.contains("agent-doc respond <FILE>"),
-        "SKILL.md should use binary-owned respond for the normal response cycle"
+        cycle.contains("agent-doc respond <FILE>"),
+        "session-cycle.md should use binary-owned respond for the normal response cycle"
     );
     assert!(
-        content.contains("agent-doc session-check <FILE>"),
-        "SKILL.md should still mention the direct session-check command"
+        cycle.contains("agent-doc session-check <FILE>"),
+        "session-cycle.md should still mention the direct session-check command"
     );
     assert!(
-        content.contains(
-            "The `respond` command is the binary-owned turn-resolution and final document-mutation boundary for the cycle"
-        ),
-        "SKILL.md should delegate turn resolution to the binary closeout boundary"
+        cycle.contains("The mandatory normal boundary is"),
+        "session-cycle.md should delegate turn resolution to the binary closeout boundary"
     );
     assert!(
-        content.contains("Imperative edits are executable directives"),
-        "SKILL.md should treat document-local `do` edits as executable work directives"
+        cycle.contains("Imperative edits are executable directives"),
+        "session-cycle.md should treat document-local `do` edits as executable work directives"
     );
     assert!(
-        content.contains(
+        cycle.contains(
             "Harness-native `agent-doc` entrypoints start the binary-owned response cycle"
         ),
-        "SKILL.md should treat harness-native agent-doc invocations as binary-owned workflow starts"
+        "session-cycle.md should treat harness-native agent-doc invocations as binary-owned workflow starts"
     );
     assert!(
-        content.contains("Do not manually patch the final assistant response into the document"),
-        "SKILL.md should forbid manual final-response patchback on harness-native agent-doc turns"
+        cycle.contains("Do not manually patch the final assistant response"),
+        "session-cycle.md should forbid manual final-response patchback on harness-native agent-doc turns"
     );
     assert!(
-        content.contains("Do not stop at the newest question"),
-        "SKILL.md should require reconciling the changed exchange tail oldest-first"
+        cycle.contains("do not stop at the newest question"),
+        "session-cycle.md should require reconciling the changed exchange tail oldest-first"
     );
     assert!(
         content.contains("runbooks/command-synonyms.md"),
@@ -33905,39 +33939,40 @@ fn test_skill_md_contains_required_steps() {
         "SKILL.md should point agents to the compound-task steering runbook"
     );
     assert!(
-        content.contains("orchestration_request"),
-        "SKILL.md should treat binary-owned orchestration requests as first-class preflight output"
+        cycle.contains("orchestration_request"),
+        "session-cycle.md should treat binary-owned orchestration requests as first-class preflight output"
     );
     assert!(
-        content.contains(
-            "agent-doc orchestrate <FILE> --mode <orchestration_request.mode> --from-exchange"
-        ),
-        "SKILL.md should require dispatching preflight orchestration requests through agent-doc orchestrate"
+        planning.contains("agent-doc orchestrate"),
+        "planning-dispatch.md should route orchestration requests through agent-doc orchestrate"
     );
     assert!(
-        content.contains("agent-doc plan <FILE>"),
-        "SKILL.md should require the binary-owned planning phase after preflight"
+        cycle.contains("agent-doc plan <FILE>"),
+        "session-cycle.md should require the binary-owned planning phase after preflight"
     );
     assert!(
         content.contains("runbooks/planning-dispatch.md"),
         "SKILL.md should point agents to the planning/dispatch runbook"
     );
     assert!(
-        content.contains("external CI-start blocker"),
-        "SKILL.md should classify empty-step no-log GitHub jobs as external CI-start blockers"
+        persist.contains("external CI-start blocker"),
+        "persist-closeout.md should classify empty-step no-log GitHub jobs as external CI-start blockers"
     );
     assert!(
-        content.contains("billing/spending-limit exhaustion"),
-        "SKILL.md should name billing/spending-limit failures as CI-start blockers"
+        persist.contains("billing/spending-limit exhaustion"),
+        "persist-closeout.md should name billing/spending-limit failures as CI-start blockers"
     );
     assert!(
-        content.contains("create the plan file first"),
-        "SKILL.md should require creating plan files before adding plan-backed backlog items"
+        respond.contains("create the plan file first"),
+        "respond.md should require creating plan files before adding plan-backed backlog items"
     );
     assert!(
-        content.contains("include that exact plan file path"),
-        "SKILL.md should require plan-backed backlog items to include the plan path"
+        respond.contains("include that exact"),
+        "respond.md should require plan-backed backlog items to include the plan path"
     );
+    assert!(routed_contract.contains("Operator-visible document text is authoritative"));
+    assert!(routed_contract.contains("content_ours"));
+    assert!(routed_contract.contains("fail closed or retry through the editor instead"));
     assert!(
         tmp.path()
             .join(".claude/skills/agent-doc/runbooks/compound-task-steering.md")
@@ -34025,12 +34060,19 @@ fn test_codex_skill_install_writes_hook_artifacts() {
     );
 
     let skill = std::fs::read_to_string(&skill_path).unwrap();
-    assert_operator_authority_instructions(&skill, "Codex SKILL.md");
+    assert_compact_skill_router(&skill, "Codex SKILL.md");
     assert!(skill.contains("Interactive markdown session for Codex"));
-    assert!(skill.contains("agent-doc skill install --harness codex` without a reload request"));
-    assert!(skill.contains("re-read the installed `.codex/skills/agent-doc/SKILL.md` completely"));
-    assert!(skill.contains("Do not call `agent-doc session restart-supervisor`"));
+    assert!(skill.contains("follow the Codex update procedure"));
     assert!(!skill.contains("codex resume --last"));
+    let invocation = std::fs::read_to_string(
+        tmp.path()
+            .join(".codex/skills/agent-doc/runbooks/harness-invocation.md"),
+    )
+    .unwrap();
+    assert!(invocation.contains("agent-doc skill install --harness codex"));
+    assert!(invocation.contains("re-read the installed `.codex/skills/agent-doc/SKILL.md` completely"));
+    assert!(invocation.contains("Do not restart the active supervisor"));
+    assert!(invocation.contains("Do **not** type `/agent-doc`"));
 
     let hooks: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&hooks_path).unwrap()).unwrap();
@@ -34123,14 +34165,24 @@ fn test_opencode_skill_install_preserves_operator_authority_instructions() {
 
     let skill_path = tmp.path().join(".opencode/skills/agent-doc/SKILL.md");
     let content = std::fs::read_to_string(&skill_path).unwrap();
-    assert_operator_authority_instructions(&content, "OpenCode SKILL.md");
+    assert_compact_skill_router(&content, "OpenCode SKILL.md");
     assert!(content.contains("Interactive markdown session for OpenCode"));
-    assert!(content.contains("agent-doc skill install --harness opencode"));
-    assert!(content.contains("`#chatprompt`, GH #140"));
-    assert!(content.contains(
-        "OpenCode has no `UserPromptSubmit` hook, so its agent MUST self-apply the shared rule"
-    ));
-    assert!(content.contains("> **Chat prompt (#chatprompt):** <verbatim prompt>"));
+    assert!(content.contains("follow the OpenCode update procedure"));
+    let cycle = std::fs::read_to_string(
+        tmp.path()
+            .join(".opencode/skills/agent-doc/runbooks/session-cycle.md"),
+    )
+    .unwrap();
+    let invocation = std::fs::read_to_string(
+        tmp.path()
+            .join(".opencode/skills/agent-doc/runbooks/harness-invocation.md"),
+    )
+    .unwrap();
+    assert!(invocation.contains("agent-doc skill install --harness opencode"));
+    assert!(cycle.contains("`#chatprompt`, GH #140"));
+    assert!(cycle.contains("OpenCode has no `UserPromptSubmit` hook"));
+    assert!(cycle.contains("self-apply this rule"));
+    assert!(cycle.contains("> **Chat prompt (#chatprompt):** <verbatim prompt>"));
 }
 
 #[test]

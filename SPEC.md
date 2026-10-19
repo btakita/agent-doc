@@ -576,6 +576,12 @@ new operator intent; an unanswered quoted tail remains actionable.
 | 16 | [Codex Support](specs/codex-support.md) | Harness-specific differences for Codex vs Claude Code |
 
 Command sub-specs:
+- Installed Claude/Codex/OpenCode `SKILL.md` files are one shared,
+  compaction-resistant table of contents. `runbooks/session-cycle.md` owns the
+  ordered binary-owned cycle spine; focused bundled runbooks own branch detail;
+  generated-surface tests prove the former hot-path invariants remain reachable
+  through the table. Harness differences are limited to trigger/frontmatter,
+  invocation wording, and a short harness-specific route.
 - [Core Commands](specs/07-core-commands.md)
 - [Focused Document Extract](specs/07-focused-extract.md)
 - [Session And Tmux Commands](specs/07-session-tmux-commands.md)

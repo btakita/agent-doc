@@ -6,8 +6,11 @@ runbooks or binary-generated preflight/plan output.
 
 ## Instruction Surface Pattern
 
-- `SKILL.md` owns trigger wording, mandatory closeout boundaries, and the ordered
-  cycle spine.
+- `SKILL.md` is a compaction-resistant table of contents: it owns trigger
+  wording, the minimum required-cycle route, and links to the ordered cycle
+  spine. It does not duplicate procedure detail.
+- `runbooks/session-cycle.md` owns the ordered cycle spine and routes active
+  branches to focused runbooks. Agents reload it after context compaction.
 - `runbooks/*.md` own branch-specific procedure detail.
 - Structured prompt presets may associate a `runbook:` path. Use
   `agent-doc runbook list/show/create` and follow

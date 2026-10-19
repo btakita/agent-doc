@@ -43,6 +43,9 @@ ask a focused question before applying. An in-document request usually leaves
 the source editor-attached. Preview immediately, then use the already-authorized
 coordinated path when the attached JetBrains endpoints support it:
 
+There is no `split` alias. The operator never has to provide exchange-node
+handles; resolve selectors and the selection manifest from the named concern.
+
 ```bash
 agent-doc extract SOURCE TARGET --selection SELECTION.json --apply --coordinate-live-editors
 ```

@@ -63,6 +63,32 @@ pub fn rebase(
             resulting_text: canonical.to_owned(),
         });
     }
+    // `#struckqueuepruneattach`: a settled struck queue row is already
+    // terminal. If the operator changed *only* by deleting such rows, apply
+    // those cell tombstones to canonical instead of holding the replica merely
+    // because canonical decorated the same retired row. The semantic helper
+    // accepts no other operator edit and preserves canonical as the output
+    // spine, including every live queue head.
+    if let Some(merged) = crate::crdt::merge_operator_deleted_struck_queue_items(
+        base,
+        &batch.resulting_text,
+        canonical,
+    ) {
+        let target: Vec<char> = merged.chars().collect();
+        let edits = splices_between(&current, &target);
+        let mut replayed = current.clone();
+        for edit in &edits {
+            apply(&mut replayed, edit)?;
+        }
+        ensure!(
+            replayed == target,
+            "struck queue deletion splices did not reproduce the semantic merge"
+        );
+        return Ok(CapturedSpliceBatch {
+            edits,
+            resulting_text: merged,
+        });
+    }
     let captured_changes = char_diff(&old, &captured_result);
     let canonical_changes = char_diff(&old, &current);
     // `#steerreplicachurn`: a captured change that touches a canonical change
@@ -1889,8 +1915,6 @@ mod tests {
             "- do [#sdkdocs]\n- review [#retryloop]\n",
             // The struck line replaced in place by a new item.
             "- review [#retryloop]\n- do [#sdkdocs]\n",
-            // Removed only.
-            "- do [#sdkdocs]\n",
         ] {
             let visible = base.replace(queue, operator_queue);
             let out = rebase(base, &canonical, &captured_typing(base, &visible));
@@ -2035,15 +2059,15 @@ mod tests {
             base, &buffer, &canonical, &merged
         ));
 
-        // The deleted-anchor variant: canonical closes the struck line the
-        // operator deleted. There is no line to carry the close, so the
-        // registration merge refuses (the plugin then holds the operator's
-        // buffer) instead of attaching it to a typed item.
+        // The deleted-anchor variant with replacement typing: canonical closes
+        // the struck line the operator deleted. There is no line to carry the
+        // close, so the registration merge refuses (the plugin then holds the
+        // operator's buffer) instead of attaching it to a typed item. Pure
+        // pruning of already-struck rows is covered separately below.
         let closed_struck = base.replace("- ~~do [#tdc]~~\n", "- ~~do [#tdc]~~ (closed)\n");
         for operator_queue in [
             "- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n",
             "- review [#retryloop]\n- do [#sdkdocs]\n",
-            "- do [#sdkdocs]\n",
         ] {
             let buffer = base.replace(queue, operator_queue);
             if let Ok(merged) = registration_merge(base, &buffer, &closed_struck) {
@@ -2071,6 +2095,100 @@ mod tests {
         let edited_heading = buffer.replace("## Queue\n", "## Queue (next)\n");
         let merged = registration_merge(base, &edited_heading, &canonical).unwrap();
         assert_eq!(merged, expected.replace("## Queue\n", "## Queue (next)\n"));
+    }
+
+    /// `#struckqueuepruneattach` (sdk-demo.md 2026-10-19). Immediately after
+    /// the controller struck queue work, the operator deleted the terminal row.
+    /// Canonical advanced that same row while retaining another live prompt,
+    /// so the generic deleted-anchor guard held registration forever as
+    /// `ambiguous-retained-projection`. Deleting an already-settled struck row
+    /// is a keyed queue tombstone, not an ambiguous rewrite: prune only that
+    /// key from canonical and retain both the live head and response.
+    #[test]
+    fn registration_merge_prunes_only_settled_struck_queue_rows() {
+        let base = concat!(
+            "# SDK demo\n",
+            "<!-- agent:exchange -->\n",
+            "settled response\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue id=issues -->\n",
+            "- ~~investigate attach [#retired]~~\n",
+            "- ~~document prior attach [#retired2]~~\n",
+            "- watch https://github.com/btakita/agent-doc/issues\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let buffer = base.replace(
+            concat!(
+                "- ~~investigate attach [#retired]~~\n",
+                "- ~~document prior attach [#retired2]~~\n",
+            ),
+            "",
+        );
+        let canonical = base
+            .replace(
+                "settled response\n",
+                "settled response\n\n### Re: retained attach\n\nRecorded.\n",
+            )
+            .replace(
+                "- ~~investigate attach [#retired]~~\n",
+                "- ~~investigate attach [#retired]~~ (closed)\n",
+            )
+            .replace(
+                "- ~~document prior attach [#retired2]~~\n",
+                "- ~~document prior attach [#retired2]~~ (closed)\n",
+            );
+        let expected = canonical
+            .replace("- ~~investigate attach [#retired]~~ (closed)\n", "")
+            .replace("- ~~document prior attach [#retired2]~~ (closed)\n", "");
+
+        let answer = rebase(base, &canonical, &single_splice_batch(base, &buffer))
+            .expect("deleting only a settled struck queue row is unambiguous");
+        assert_eq!(answer.resulting_text, expected);
+        assert!(
+            answer
+                .resulting_text
+                .contains("https://github.com/btakita/agent-doc/issues")
+        );
+        assert!(answer.resulting_text.contains("### Re: retained attach"));
+        assert!(!answer.resulting_text.contains("[#retired]"));
+        assert!(!answer.resulting_text.contains("[#retired2]"));
+        let mut replay: Vec<char> = canonical.chars().collect();
+        for edit in &answer.edits {
+            apply(&mut replay, edit).unwrap();
+        }
+        assert_eq!(replay.iter().collect::<String>(), expected);
+
+        // Deleting a live row that canonical concurrently edits remains an
+        // overlap; the semantic exception never tombstones live work.
+        let live_deleted =
+            base.replace("- watch https://github.com/btakita/agent-doc/issues\n", "");
+        let live_advanced = base.replace(
+            "- watch https://github.com/btakita/agent-doc/issues\n",
+            "- watch https://github.com/btakita/agent-doc/issues (pinned)\n",
+        );
+        assert!(
+            rebase(
+                base,
+                &live_advanced,
+                &single_splice_batch(base, &live_deleted)
+            )
+            .is_err()
+        );
+
+        // Deleting the struck row while typing replacement work still has no
+        // anchor for canonical's close decoration and remains held.
+        let replaced = buffer.replace(
+            "- watch https://github.com/btakita/agent-doc/issues\n",
+            concat!(
+                "- watch https://github.com/btakita/agent-doc/issues\n",
+                "- investigate another attach [#new]\n",
+            ),
+        );
+        let closed_struck = base.replace(
+            "- ~~investigate attach [#retired]~~\n",
+            "- ~~investigate attach [#retired]~~ (closed)\n",
+        );
+        assert!(rebase(base, &closed_struck, &single_splice_batch(base, &replaced)).is_err());
     }
 
     /// `#mergecapturedsplice` property: no canonical change ever lands inside

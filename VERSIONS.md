@@ -36,6 +36,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   restart action now carries a typed agent target and runs `restart-agent
   --force`; supervisor retries remain `restart-supervisor --force`, so a
   Claude-to-Codex switch cannot be consumed by the old Claude child.
+- **Status components can carry persistent synchronization instructions.** A
+  non-empty `sync` attribute is surfaced on every preflight, additive mode
+  upserts one managed block while preserving other status prose, and explicit
+  `sync-mode="replace"` removes ordinary prose while preserving binary-owned
+  operational status. Unknown modes and malformed managed blocks fail closed.
+- **Tag and opening-marker attributes have one user-facing reference.** The
+  README now links to a complete component, attribute, response-directive, and
+  internal-marker inventory, including ownership and validation rules.
 
 ## 0.35.523
 

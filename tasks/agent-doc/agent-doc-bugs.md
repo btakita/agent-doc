@@ -975,10 +975,10 @@ Issue #299 remains claimed by its worker because its changed-source IntelliJ 263
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#gh302]~~
-- ~~Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue.~~
+- ~~Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/299
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/301
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/302
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/301~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/302~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues

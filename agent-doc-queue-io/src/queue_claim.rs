@@ -446,7 +446,7 @@ pub fn claim_with_session(
             result.1.generation,
             result.1.state,
             result.1.expires_at_secs,
-            item.trim().len(),
+            result.1.item_text.len(),
             owner_session_log_token(result.1.owner_session.as_ref()),
         ),
     );
@@ -1636,5 +1636,41 @@ mod tests {
         );
         assert!(release(&doc, "#preflightdeadline").unwrap().is_some());
         assert!(load_ledger(&doc).unwrap().claims.is_empty());
+    }
+
+    /// GH #304: a lifecycle marker projected onto a requeued head is runtime
+    /// state, not operator-authored claim text. Both id-backed and free-text
+    /// claims must store and return the marker-free head.
+    #[test]
+    fn claim_strips_projected_lifecycle_marker_from_stored_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(
+            dir.path(),
+            &["⚠️ do [#upgrade]", "🚧 finish the free-text task"],
+        );
+
+        let (_, id_claim) = claim(&doc, "#upgrade", "subagent:upgrade", 60).unwrap();
+        assert_eq!(id_claim.item_text, "do [#upgrade]");
+
+        let (_, text_claim) =
+            claim(&doc, "finish the free-text task", "subagent:free-text", 60).unwrap();
+        assert_eq!(text_claim.item_text, "finish the free-text task");
+
+        let ledger = load_ledger(&doc).unwrap();
+        assert_eq!(
+            ledger
+                .claims
+                .iter()
+                .map(|claim| claim.item_text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["do [#upgrade]", "finish the free-text task"]
+        );
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.lines()
+                .any(|line| line.contains("queue_claim") && line.contains("item_bytes=13")),
+            "the claim log measures canonical stored text, not the shorter #id argument: {ops}"
+        );
     }
 }

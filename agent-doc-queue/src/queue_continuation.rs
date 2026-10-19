@@ -972,7 +972,9 @@ pub fn live_queue_head_texts(content: &str) -> Option<Vec<String>> {
     Some(
         document_queue::prompts(&entries)
             .into_iter()
-            .map(|prompt| prompt.text.trim().to_string())
+            // Lifecycle glyphs are a binary-owned projection, never part of
+            // the operator-authored head stored in a claim or its anchor.
+            .map(|prompt| strip_in_progress_marker(prompt.text.trim()))
             .collect(),
     )
 }
@@ -3097,6 +3099,19 @@ mod tests {
 
         assert_eq!(continuation.head_prompt, "do [#a]");
         assert_eq!(continuation.head_id.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn live_queue_head_texts_strip_lifecycle_projection() {
+        let content = doc_with_backlog(
+            &["⚠️ do [#a]", "🚧 finish the free-text task"],
+            &["- [ ] [#a] first"],
+        );
+
+        assert_eq!(
+            live_queue_head_texts(&content).unwrap(),
+            vec!["do [#a]", "finish the free-text task"]
+        );
     }
 
     #[test]

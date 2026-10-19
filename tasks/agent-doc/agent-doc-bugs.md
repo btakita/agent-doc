@@ -993,7 +993,7 @@ Publication is complete:
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/299~~
-- 📥 release + publish: include #299 in the release
+- ~~release + publish: include #299 in the release~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues

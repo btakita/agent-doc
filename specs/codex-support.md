@@ -160,16 +160,22 @@ Codex startup UI that asks the operator to review hooks is also a dispatch block
 
 **Transient model-capacity recovery (`#codexcapacityretry`).** A managed Codex
 pane that renders the exact terminal error `Selected model is at capacity.
-Please try a different model.` can otherwise remain at an idle composer forever:
+Please try a different model.` can otherwise remain stalled forever:
 there is no assistant response for the Stop hook to continue. Before the
 supervisor idle watch takes its quiescent fast path, it samples the live pane.
-Only an informative, dispatch-ready Codex composer carrying that exact error
-authorizes a synthetic `continue` submission. The effect uses the ordinary
-supervisor prompt-dispatch path and records its attempt/result. Recovery is hard
-bounded to two submissions per supervisor generation; a persistent provider
-failure settles to an `exhausted` receipt and awaits the operator instead of
-creating an automatic prompt loop. Other harnesses, approximate capacity text,
-unrendered frames, and occupied composers never authorize recovery.
+Only an informative Codex frame carrying the exact standalone renderer line
+`■ Selected model is at capacity. Please try a different model.` authorizes a
+synthetic `continue` submission; quoted prompt, document, and assistant prose do
+not match. The error itself is terminal-turn evidence, so recovery does not wait
+for an idle composer that Codex may never render: it submits through Codex's
+steerable input path even while the pane still appears busy. The effect clears a
+matching stale dispatch admission, uses the ordinary supervisor prompt-dispatch
+path, and records its attempt/result. Each visible error presentation authorizes
+one submission and rearms only after a rendered frame proves the error absent.
+Recovery is hard bounded to two submissions per supervisor generation; repeated
+provider failures settle to an `exhausted` receipt and await the operator instead
+of creating an automatic prompt loop. Other harnesses, approximate or quoted
+capacity text, and unrendered frames never authorize recovery.
 
 Managed Codex instructions and generated prompt context must also scope remote-host evidence to the active project. Approved command prefixes, ambient SSH config, or a host name seen in another workspace/client are launch-environment facts only; they are not evidence that the current document should use that host. Codex may use a named remote host only when the current user prompt, session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbook explicitly identifies it. Otherwise the session must ask or record follow-up work to confirm the intended host before using it in answers, probes, or backlog items.
 

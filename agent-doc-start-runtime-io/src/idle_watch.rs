@@ -2061,6 +2061,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // supervisor generation so a provider outage cannot prompt-loop.
             let mut codex_model_capacity_recovery_attempts: u8 = 0;
             let mut codex_model_capacity_recovery_exhausted_logged = false;
+            let mut codex_model_capacity_error_armed = true;
             let auto_install_enabled =
                 agent_doc_supervisor_io::config::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
@@ -2771,6 +2772,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         supervisor_pane_payload_observation(&shared, "continue", &harness)
                     })
                     .flatten();
+                let capacity_error_visible = capacity_observation.as_ref().is_some_and(
+                    |observation| {
+                        agent_doc_supervisor::detection::codex_model_capacity_error_visible(
+                            &observation.content,
+                        )
+                    },
+                );
+                // One renderer error presentation authorizes one continuation.
+                // A positive rendered observation without the error is the only
+                // re-arm proof; a failed/partial capture must not duplicate it.
+                if capacity_observation
+                    .as_ref()
+                    .is_some_and(|observation| observation.frame_rendered)
+                    && !capacity_error_visible
+                {
+                    codex_model_capacity_error_armed = true;
+                }
                 match agent_doc_supervisor::detection::codex_model_capacity_recovery_decision(
                     &harness.binary,
                     capacity_observation
@@ -2779,22 +2797,32 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     capacity_observation
                         .as_ref()
                         .map(|observation| observation.frame_rendered),
-                    capacity_observation
-                        .as_ref()
-                        .map(|observation| observation.dispatch_ready),
+                    codex_model_capacity_error_armed,
                     codex_model_capacity_recovery_attempts,
                 ) {
                     agent_doc_supervisor::detection::CodexModelCapacityRecoveryDecision::Retry => {
+                        codex_model_capacity_error_armed = false;
                         codex_model_capacity_recovery_attempts =
                             codex_model_capacity_recovery_attempts.saturating_add(1);
+                        // The same short recovery may already have a durable
+                        // admission left by a prior accepted write. The exact
+                        // renderer error plus a rendered frame independently
+                        // prove that write did not recover this turn, so retire
+                        // the matching projection before retrying.
+                        let recovered_projection = shared
+                            .clear_matching_prompt_dispatch_projection_for_retry(
+                                "auto_trigger",
+                                "continue",
+                            );
                         let outcome =
                             auto_trigger_inject_command(&shared, &stop, "continue", &harness);
                         let event = format!(
-                            "codex_model_capacity_recovery file={} pane={} attempt={} max_attempts={} action=submit_continue result={:?} (#codexcapacityretry)",
+                            "codex_model_capacity_recovery file={} pane={} attempt={} max_attempts={} recovered_projection={} action=submit_continue result={:?} (#codexcapacityretry)",
                             path.display(),
                             shared.inject_pane.as_deref().unwrap_or("<pty>"),
                             codex_model_capacity_recovery_attempts,
                             agent_doc_supervisor::detection::CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS,
+                            recovered_projection,
                             outcome,
                         );
                         log_event(&mut session_log, &event);
@@ -6550,12 +6578,17 @@ mod tests {
             .find("auto_trigger_inject_command(&shared, &stop, \"continue\", &harness)")
             .map(|offset| recovery + offset)
             .expect("capacity recovery must submit a continuation through the shared path");
+        let projection_recovery = source[recovery..injection]
+            .find("clear_matching_prompt_dispatch_projection_for_retry(")
+            .map(|offset| recovery + offset)
+            .expect("capacity recovery must retire a stale matching dispatch projection");
         let fast_path = source[injection..]
             .find("if idle_watch_fast_path_can_sleep(")
             .map(|offset| injection + offset)
             .expect("capacity recovery must run before the quiescent fast path");
 
         assert!(recovery < injection);
+        assert!(projection_recovery < injection);
         assert!(injection < fast_path);
     }
 

@@ -235,41 +235,63 @@ pub const CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS: u8 = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexModelCapacityRecoveryDecision {
     NotApplicable,
-    WaitForReadyComposer,
+    WaitForRenderedFrame,
+    WaitForFreshError,
     Retry,
     Exhausted,
 }
 
-fn codex_model_capacity_error_visible(content: &str) -> bool {
+/// Whether the pane contains Codex's renderer-owned capacity error line.
+///
+/// Match a complete `■ ...` line instead of a substring: the operator prompt,
+/// session document, or assistant output may legitimately quote the message while
+/// discussing this recovery path.
+pub fn codex_model_capacity_error_visible(content: &str) -> bool {
     let plain = agent_doc_turn_executor_tmux::prompt::strip_ansi(content);
-    let normalized = plain.split_whitespace().collect::<Vec<_>>().join(" ");
-    normalized.contains(CODEX_MODEL_CAPACITY_MESSAGE)
+    let expected = format!("■ {CODEX_MODEL_CAPACITY_MESSAGE}");
+    let lines = plain.lines().collect::<Vec<_>>();
+    lines.iter().enumerate().any(|(index, line)| {
+        let first = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !first.starts_with('■') {
+            return false;
+        }
+        lines[index..lines.len().min(index + 3)]
+            .iter()
+            .flat_map(|line| line.split_whitespace())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .starts_with(&expected)
+    })
 }
 
 /// Decide whether the supervisor should submit a short `continue` prompt after
 /// Codex rendered a terminal model-capacity error.
 ///
-/// Detection alone is insufficient: the live composer must also be rendered
-/// and dispatch-ready. `attempts` is process-local state owned by the caller;
-/// the hard cap makes repeated provider failures settle as `Exhausted` rather
-/// than recursively restarting the turn forever.
+/// The exact renderer-owned error is itself the terminal-turn proof: Codex may
+/// leave the actor looking busy and never render an idle composer, but its input
+/// path still accepts the same queued `continue` steering an operator uses.
+/// `error_armed` makes one visible error presentation authorize one submission;
+/// the caller rearms only after a rendered frame proves that line disappeared.
+/// `attempts` is process-local state owned by the caller, and the hard cap makes
+/// repeated provider failures settle as `Exhausted` rather than prompt-looping.
 pub fn codex_model_capacity_recovery_decision(
     harness_binary: &str,
     pane_content: Option<&str>,
     frame_rendered: Option<bool>,
-    dispatch_ready: Option<bool>,
+    error_armed: bool,
     attempts: u8,
 ) -> CodexModelCapacityRecoveryDecision {
-    if harness_binary != "codex"
-        || !pane_content.is_some_and(codex_model_capacity_error_visible)
-    {
+    if harness_binary != "codex" || !pane_content.is_some_and(codex_model_capacity_error_visible) {
         return CodexModelCapacityRecoveryDecision::NotApplicable;
     }
     if attempts >= CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS {
         return CodexModelCapacityRecoveryDecision::Exhausted;
     }
-    if frame_rendered != Some(true) || dispatch_ready != Some(true) {
-        return CodexModelCapacityRecoveryDecision::WaitForReadyComposer;
+    if frame_rendered != Some(true) {
+        return CodexModelCapacityRecoveryDecision::WaitForRenderedFrame;
+    }
+    if !error_armed {
+        return CodexModelCapacityRecoveryDecision::WaitForFreshError;
     }
     CodexModelCapacityRecoveryDecision::Retry
 }
@@ -323,27 +345,14 @@ mod tests {
     use crate::idle_reconcile::QUEUED_DRAFT_BLOCKER_REASON;
 
     #[test]
-    fn codex_model_capacity_recovery_requires_exact_error_and_ready_composer() {
-        let message = "error\n\x1b[31mSelected model is at capacity. Please try a\n\
-                       different model.\x1b[0m\n❯ ";
+    fn codex_model_capacity_recovery_requires_renderer_error_and_rendered_frame() {
+        let message = "error\n\x1b[31m■ Selected model is at capacity. Please try a different model.\x1b[0m\n❯ ";
         assert_eq!(
-            codex_model_capacity_recovery_decision(
-                "codex",
-                Some(message),
-                Some(true),
-                Some(true),
-                0,
-            ),
+            codex_model_capacity_recovery_decision("codex", Some(message), Some(true), true, 0,),
             CodexModelCapacityRecoveryDecision::Retry
         );
         assert_eq!(
-            codex_model_capacity_recovery_decision(
-                "claude",
-                Some(message),
-                Some(true),
-                Some(true),
-                0,
-            ),
+            codex_model_capacity_recovery_decision("claude", Some(message), Some(true), true, 0,),
             CodexModelCapacityRecoveryDecision::NotApplicable
         );
         assert_eq!(
@@ -351,7 +360,7 @@ mod tests {
                 "codex",
                 Some("Selected model has limited capacity"),
                 Some(true),
-                Some(true),
+                true,
                 0,
             ),
             CodexModelCapacityRecoveryDecision::NotApplicable
@@ -359,34 +368,44 @@ mod tests {
         assert_eq!(
             codex_model_capacity_recovery_decision(
                 "codex",
-                Some(message),
-                Some(false),
+                Some(
+                    "The operator quoted: `■ Selected model is at capacity. Please try a different model.`"
+                ),
                 Some(true),
+                true,
                 0,
             ),
-            CodexModelCapacityRecoveryDecision::WaitForReadyComposer
+            CodexModelCapacityRecoveryDecision::NotApplicable
         );
         assert_eq!(
-            codex_model_capacity_recovery_decision(
-                "codex",
-                Some(message),
-                Some(true),
-                Some(false),
-                0,
-            ),
-            CodexModelCapacityRecoveryDecision::WaitForReadyComposer
+            codex_model_capacity_recovery_decision("codex", Some(message), Some(false), true, 0,),
+            CodexModelCapacityRecoveryDecision::WaitForRenderedFrame
+        );
+        assert_eq!(
+            codex_model_capacity_recovery_decision("codex", Some(message), Some(true), false, 0,),
+            CodexModelCapacityRecoveryDecision::WaitForFreshError
+        );
+    }
+
+    #[test]
+    fn codex_model_capacity_recovery_does_not_require_idle_composer() {
+        let message =
+            "■ Selected model is at capacity. Please try a\n  different model.\nWorking (2m 13s)";
+        assert_eq!(
+            codex_model_capacity_recovery_decision("codex", Some(message), Some(true), true, 0,),
+            CodexModelCapacityRecoveryDecision::Retry
         );
     }
 
     #[test]
     fn codex_model_capacity_recovery_is_hard_bounded() {
-        let message = format!("{CODEX_MODEL_CAPACITY_MESSAGE}\n❯ ");
+        let message = format!("■ {CODEX_MODEL_CAPACITY_MESSAGE}\n❯ ");
         assert_eq!(
             codex_model_capacity_recovery_decision(
                 "codex",
                 Some(&message),
                 Some(true),
-                Some(true),
+                true,
                 CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS - 1,
             ),
             CodexModelCapacityRecoveryDecision::Retry
@@ -396,7 +415,7 @@ mod tests {
                 "codex",
                 Some(&message),
                 Some(true),
-                Some(true),
+                true,
                 CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS,
             ),
             CodexModelCapacityRecoveryDecision::Exhausted

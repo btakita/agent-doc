@@ -1773,11 +1773,7 @@ mod th {
     ) {
         {
             let _tmux_guard = tmux_start_lock();
-            let shell_command = format!("exec /bin/sh -c {}", shell_quote(command));
-            tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, &shell_command])
-                .unwrap_or_else(|error| {
-                    panic!("failed to respawn pane {pane} for retained-dead test: {error}")
-                });
+            respawn_pane_with_shell_command(tmux, pane, command);
         }
         assert!(
             wait_for_pane_dead(tmux, pane, timeout),
@@ -1790,6 +1786,16 @@ mod th {
     }
     fn shell_quote(value: &str) -> String {
         format!("'{}'", value.replace('\'', "'\\''"))
+    }
+
+    pub(crate) fn respawn_pane_with_shell_command(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        command: &str,
+    ) {
+        let shell_command = format!("exec /bin/sh -c {}", shell_quote(command));
+        tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, &shell_command])
+            .unwrap_or_else(|error| panic!("failed to respawn pane {pane}: {error}"));
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1984,10 +1990,10 @@ mod th {
 }
 #[cfg(test)]
 pub(crate) use th::{
-    ScopedCurrentDir, drive_pane_to_retained_dead, launch_mock_agent_doc, test_cwd, test_entry,
-    wait_for_pane_contains, wait_for_pane_current_command, wait_for_pane_in_stash_window,
-    wait_for_pane_removed, wait_for_process_pid, wait_for_shell, wait_for_window_relation,
-    write_mock_agent_doc,
+    ScopedCurrentDir, drive_pane_to_retained_dead, launch_mock_agent_doc,
+    respawn_pane_with_shell_command, test_cwd, test_entry, wait_for_pane_contains,
+    wait_for_pane_current_command, wait_for_pane_in_stash_window, wait_for_pane_removed,
+    wait_for_process_pid, wait_for_shell, wait_for_window_relation, write_mock_agent_doc,
 };
 
 #[cfg(test)]
@@ -2173,8 +2179,11 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_wrong_session_kills_pane_and_deregisters() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(root.path());
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-test-fix-sess");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = root.path().to_path_buf();
 
         let pane = iso.auto_start("wrong", &cwd).unwrap();
         assert!(iso.pane_alive(&pane));
@@ -2465,8 +2474,11 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn no_wrong_window_for_stash_panes() {
         // A pane in a stash window should NOT trigger WrongWindow.
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(root.path());
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-test-stash-excl");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = root.path().to_path_buf();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.auto_start("test", &cwd).unwrap();
@@ -2496,8 +2508,11 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_wrong_window_stashes_pane() {
         // --fix for WrongWindow should move the pane to stash.
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(root.path());
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-test-fix-win");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = root.path().to_path_buf();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.auto_start("test", &cwd).unwrap();
@@ -2548,8 +2563,11 @@ mod tests {
     fn fix_wrong_session_idle_shell_still_killed() {
         // Regression: idle shells in the wrong session should still be killed
         // even with the new agent-preservation logic.
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(root.path());
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-fix-shell-killed");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = root.path().to_path_buf();
 
         let pane = iso.auto_start("wrong", &cwd).unwrap();
         let _ = iso.new_window("wrong", &cwd); // second window so kill works
@@ -2582,8 +2600,11 @@ mod tests {
     fn fix_wrong_session_deregisters_agent_without_kill_when_expected_session_dead() {
         // When the expected session doesn't exist, active agent panes should be
         // deregistered but NOT killed.
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(root.path());
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-fix-agent-nodeadkill");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = root.path().to_path_buf();
 
         // Start a pane running `node -e "setTimeout(()=>{},60000)"` to simulate
         // an agent process. If node isn't available, use `sleep` and adjust expectations.
@@ -2632,8 +2653,11 @@ mod tests {
     fn fix_wrong_session_relocates_agent_when_expected_session_alive() {
         // When the expected session exists, active agent panes should be relocated
         // via join-pane, not killed.
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(root.path());
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-fix-agent-relocate");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = root.path().to_path_buf();
 
         // Create the expected session with a pane (needed for join-pane target)
         let _anchor = iso.auto_start("correct", &cwd).unwrap();

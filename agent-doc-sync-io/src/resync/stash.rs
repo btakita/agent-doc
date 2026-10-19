@@ -894,15 +894,20 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_bulk_preserves_agent_without_ownership_metadata() {
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-agent-no-owner-bulk");
-        let cwd = std::env::current_dir().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let agent_bin = dir.path().join("agent-doc");
-        std::os::unix::fs::symlink("/bin/sleep", &agent_bin).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(root.path());
+        let cwd = root.path();
+        let agent_bin = root.path().join("agent-doc");
+        std::fs::copy("/bin/sleep", &agent_bin).unwrap();
 
-        let pane1 = iso.auto_start("test", &cwd).unwrap();
-        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        iso.send_keys(&pane2, &format!("exec {} 60", agent_bin.display()))
-            .unwrap();
+        let pane1 = iso.auto_start("test", cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, cwd, "-dh").unwrap();
+        respawn_pane_with_shell_command(
+            &iso,
+            &pane2,
+            &format!("exec {} 60", agent_bin.display()),
+        );
         assert!(wait_for_pane_current_command(
             &iso,
             &pane2,
@@ -932,12 +937,15 @@ mod tests {
         let bin_dir = dir.path().join("bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
         let agent_bin = bin_dir.join("agent-doc");
-        std::os::unix::fs::symlink("/bin/sleep", &agent_bin).unwrap();
+        std::fs::copy("/bin/sleep", &agent_bin).unwrap();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        iso.send_keys(&pane2, &format!("exec {} 60", agent_bin.display()))
-            .unwrap();
+        respawn_pane_with_shell_command(
+            &iso,
+            &pane2,
+            &format!("exec {} 60", agent_bin.display()),
+        );
         assert!(
             wait_for_pane_current_command(
                 &iso,
@@ -971,8 +979,7 @@ mod tests {
         let script = write_mock_agent_doc(dir.path());
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        iso.send_keys(&pane2, &format!("exec {}", script.display()))
-            .unwrap();
+        respawn_pane_with_shell_command(&iso, &pane2, &format!("exec {}", script.display()));
         let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
         let live_pid = wait_for_process_pid(
             &script.display().to_string(),
@@ -1033,8 +1040,7 @@ mod tests {
         let script = write_mock_agent_doc(&child_root);
         let pane1 = iso.auto_start("test", root.path()).unwrap();
         let pane2 = iso.split_window(&pane1, &child_root, "-dh").unwrap();
-        iso.send_keys(&pane2, &format!("exec {}", script.display()))
-            .unwrap();
+        respawn_pane_with_shell_command(&iso, &pane2, &format!("exec {}", script.display()));
         let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
         let live_pid = wait_for_process_pid(
             &script.display().to_string(),
@@ -1076,15 +1082,20 @@ mod tests {
     fn purge_orphan_agent_in_non_stash_window_preserves_live_agent_without_metadata() {
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-orphan-agent");
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let agent_bin = dir.path().join("agent-doc");
-        std::os::unix::fs::symlink("/bin/sleep", &agent_bin).unwrap();
+        std::fs::copy("/bin/sleep", &agent_bin).unwrap();
         let cwd = dir.path();
 
         // Create a session with 2 panes in the same window
         let pane1 = iso.auto_start("test", cwd).unwrap();
         let pane2 = iso.split_window(&pane1, cwd, "-dh").unwrap();
-        iso.send_keys(&pane2, &format!("exec {} 60", agent_bin.display()))
-            .unwrap();
+        respawn_pane_with_shell_command(
+            &iso,
+            &pane2,
+            &format!("exec {} 60", agent_bin.display()),
+        );
         assert!(wait_for_pane_current_command(
             &iso,
             &pane2,

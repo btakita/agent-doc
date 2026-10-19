@@ -642,8 +642,7 @@ mod tests {
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        iso.send_keys(&pane2, &format!("exec {}", script.display()))
-            .unwrap();
+        respawn_pane_with_shell_command(&iso, &pane2, &format!("exec {}", script.display()));
         let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
         iso.stash_pane(&pane2, "test").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -691,8 +690,7 @@ mod tests {
         let script = write_mock_agent_doc(dir.path());
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        iso.send_keys(&pane2, &format!("exec {}", script.display()))
-            .unwrap();
+        respawn_pane_with_shell_command(&iso, &pane2, &format!("exec {}", script.display()));
         let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
         let live_pid = wait_for_process_pid(
             &script.display().to_string(),

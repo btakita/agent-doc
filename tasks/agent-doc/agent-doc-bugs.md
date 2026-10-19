@@ -935,7 +935,38 @@ Fixed and published the focus-order authority bug on `main` in commit `ec62c4320
 The controller now retains the last confirmed positive order as provisional provenance while folding unknown membership and anchoring Remote Dev restarts. That provenance is retired once structural membership confirms the guessed slot, preventing a transient focus guess from becoming authoritative ordering.
 
 The combined batch passed the authoritative suite: 11,052/11,052 Rust tests, 202/202 VS Code tests, cross-editor simulation, JetBrains classic/262/263 builds, bootstrap, docs audit, and the TLA proof. One `make install` completed successfully; one attached editor deferred its native-library reload until its next idle boundary.
-<!-- agent:boundary:e26e2a25 -->
+
+### Re: Subagent completed: `subagent:gh302_recheck` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/302” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=68be46a7d612d0027a170cf6b201cae152ce2caf559a954bb82d78f1ac269003 -->
+
+### Re: Subagent completed: `subagent:gh301_recheck` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/301” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=8b45da9deb07c74f00260c79a27bff768e8ffcc918a242191add87ec9179c6da -->
+> **Chat prompt (#chatprompt):** is the release published?
+
+### Re: release publication status — gpt-5 · 2026-10-18T20:37-04:00
+
+No. The fixes are pushed to `main`, but no release containing them has been published.
+
+The latest public release is `v0.35.519` at commit `27e91076a45448098a1e8a774bc080c8ea8dc5aa`. Current `main` is `ec62c43207052bb56b575c6c0a95f1bdf9bedb7e`, seven commits ahead, and no tag contains that commit.
+
+The latest `main` CI ran the full `make check` successfully but failed later in `make tmux-ci`: `resync::tests::mock_agent_launch_waits_for_shell_acceptance_not_process_name` timed out (123 passed, 1 failed). A trustworthy release should wait for that CI path to be green.
+
+> **Queue prompt:** Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue.
+
+The configuration change is already implemented and merged on `main` in `0ae53bd4f7`; it is not yet part of a published release.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/301
+
+Verified the existing fix `627fef9efa` on current `main`; focused acceptance tests passed and issue #301 is closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/302
+
+Verified the existing fix `ec62c43207`; focused regression tests passed and issue #302 is closed.
+
+Issue #299 remains claimed by its worker because its changed-source IntelliJ 263 upgrade path still needs implementation and split-mode live proof.
+<!-- agent:boundary:6975e85b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -944,7 +975,10 @@ The combined batch passed the authoritative suite: 11,052/11,052 Rust tests, 202
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#gh302]~~
-- 📥 Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue. 
+- ~~Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue.~~
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/299
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/301
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/302
 <!-- /agent:queue -->
 
 ## Queue: Issues

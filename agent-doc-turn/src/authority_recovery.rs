@@ -62,7 +62,6 @@ pub enum BuildMismatchRefusal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AttachedEditorRecoveryFacts {
     pub build_mismatch_refusal: Option<BuildMismatchRefusal>,
-    pub plugin_bytes_superseded: bool,
     pub endpoints_found: bool,
     pub all_endpoints_unreachable: bool,
 }
@@ -95,7 +94,7 @@ pub const fn decide_attached_editor_recovery(
             }
         };
     }
-    if facts.plugin_bytes_superseded || facts.all_endpoints_unreachable {
+    if facts.all_endpoints_unreachable {
         AttachedEditorRecoveryDecision::RestartEditor
     } else if !facts.endpoints_found {
         AttachedEditorRecoveryDecision::ReregisterEditor
@@ -119,8 +118,8 @@ pub enum AdmissionReplicaHold {
     /// The replica can return without operator action. Hold admission for a
     /// bounded window, observing only, and resolve again when it returns.
     Hold,
-    /// Waiting cannot change the facts behind the refusal (superseded plugin
-    /// bytes, an unreachable endpoint, a build-mismatch refusal). Refuse now
+    /// Waiting cannot change the facts behind the refusal (an unreachable
+    /// endpoint or a build-mismatch refusal). Refuse now
     /// with the named remedy instead of spending the admission budget.
     RefuseNow,
 }
@@ -290,7 +289,6 @@ mod tests {
     fn definitive_build_mismatch_refusals_override_reload_shaped_fallbacks() {
         let base = AttachedEditorRecoveryFacts {
             build_mismatch_refusal: None,
-            plugin_bytes_superseded: false,
             endpoints_found: true,
             all_endpoints_unreachable: false,
         };
@@ -321,28 +319,24 @@ mod tests {
         let cases = [
             (
                 Some(BuildMismatchRefusal::SenderExecutableReplaced),
-                false,
                 true,
                 false,
                 WaitForSenderRecycle,
             ),
             (
                 Some(BuildMismatchRefusal::ReloadAlreadyRequested),
-                false,
                 true,
                 false,
                 WaitForEndpointGeneration,
             ),
-            (None, true, true, false, RestartEditor),
-            (None, false, true, true, RestartEditor),
-            (None, false, false, false, ReregisterEditor),
-            (None, false, true, false, ReloadEditor),
+            (None, true, true, RestartEditor),
+            (None, false, false, ReregisterEditor),
+            (None, true, false, ReloadEditor),
         ];
-        for (build_mismatch_refusal, superseded, endpoints_found, unreachable, expected) in cases {
+        for (build_mismatch_refusal, endpoints_found, unreachable, expected) in cases {
             assert_eq!(
                 decide_attached_editor_recovery(AttachedEditorRecoveryFacts {
                     build_mismatch_refusal,
-                    plugin_bytes_superseded: superseded,
                     endpoints_found,
                     all_endpoints_unreachable: unreachable,
                 }),

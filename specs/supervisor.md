@@ -171,6 +171,11 @@ plain controller recycle (`#agentrestartwire`). Every hop must preserve that
 prefix verbatim:
 
 - `session_actor_cmd::restart_agent` encodes it.
+- Editor retry UI must preserve the same typed restart target. In particular, a
+  failed JetBrains **Restart Agent** followed by **Interrupt and restart** sends
+  `restart-agent --force`; it must never degrade to `restart-supervisor --force`,
+  which preserves the old harness child and loses the requested frontmatter
+  switch. Supervisor retries likewise remain supervisor retries.
 - The controller (`parse_supervisor_replacement_request` →
   `SupervisorReplacementIntent`) accepts it, keeps `restart_agent` alongside the
   mode, and forwards `intent.wire_mode()` on the supervisor IPC `Restart`

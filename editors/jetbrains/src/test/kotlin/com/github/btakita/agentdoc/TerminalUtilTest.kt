@@ -1385,6 +1385,26 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `interrupt restart preserves the original restart target`() {
+        assertEquals(
+            listOf("restart-agent"),
+            TerminalUtil.restartCommandArgs(TerminalUtil.RestartTarget.AGENT, force = false),
+        )
+        assertEquals(
+            listOf("restart-agent", "--force"),
+            TerminalUtil.restartCommandArgs(TerminalUtil.RestartTarget.AGENT, force = true),
+        )
+        assertEquals(
+            listOf("restart-supervisor"),
+            TerminalUtil.restartCommandArgs(TerminalUtil.RestartTarget.SUPERVISOR, force = false),
+        )
+        assertEquals(
+            listOf("restart-supervisor", "--force"),
+            TerminalUtil.restartCommandArgs(TerminalUtil.RestartTarget.SUPERVISOR, force = true),
+        )
+    }
+
+    @Test
     fun `busy restart refusal parses force guidance details`() {
         val output = """
             agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="gpt-5 high - ~/repo - Context 20% used"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.

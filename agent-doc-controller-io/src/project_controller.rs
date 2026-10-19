@@ -467,7 +467,13 @@ pub(crate) struct PaneLayoutDesired {
 }
 
 impl PaneLayoutDesired {
-    /// Columns that may authoritatively seed an editor surface's order memory.
+    /// Columns that authoritatively seed unknown-order folds and editor-surface
+    /// order memory.
+    ///
+    /// A focus escalation can only guess which retained slot a newly focused
+    /// document replaced. Keep folding against the last positive basis even
+    /// after a chain of escalations replaces every document in that basis;
+    /// otherwise the newest guessed slot becomes order authority (GH #311).
     pub(crate) fn order_authority_columns(&self) -> &[String] {
         self.provenance
             .provisional_order_basis
@@ -475,37 +481,6 @@ impl PaneLayoutDesired {
             .unwrap_or(&self.invocation.columns)
     }
 
-    /// Order basis for an editor publication whose own order is unknown.
-    ///
-    /// A focus escalation can only guess which retained slot a newly focused
-    /// document replaced. If the next structural observation revives a document
-    /// displaced by that guess, fold it against the last positively observed
-    /// order instead of allowing the guessed slot to reverse the panes (GH #302).
-    pub(crate) fn order_basis_for(&self, incoming: &[String]) -> &[String] {
-        let Some(basis) = self.provenance.provisional_order_basis.as_deref() else {
-            return &self.invocation.columns;
-        };
-        let contains = |columns: &[String], document: &str| {
-            columns
-                .iter()
-                .flat_map(|column| column.split(','))
-                .map(str::trim)
-                .any(|candidate| candidate == document)
-        };
-        if basis.iter().any(|column| {
-            column
-                .split(',')
-                .map(str::trim)
-                .any(|document| {
-                    !contains(&self.invocation.columns, document)
-                        && contains(incoming, document)
-                })
-        }) {
-            basis
-        } else {
-            &self.invocation.columns
-        }
-    }
 }
 
 /// The publisher that produced a desired pane-layout generation (GH #111).

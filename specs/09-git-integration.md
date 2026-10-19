@@ -97,7 +97,10 @@ as `Blocked by hook`, and the hook must not append stale queue-guard or manual
 `repair`/`finalize` guidance to that handoff. A bounded wait with no progress,
 an observation failure, or an explicit `needs_operator` result remains
 fail-closed. Without retained-capture ownership, the same lease receipt remains
-fail-closed.
+fail-closed. This policy applies whether the lease refusal is observed during
+repair/replay or at the final closeout/commit boundary after the response was
+already materialized; those phases must not classify the same owned lease
+differently.
 
 A refused UserPromptSubmit admission never binds that Codex thread to the
 document. Its refusal receipt fences the matching Stop invocation, which then

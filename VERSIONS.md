@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.522
+
+- **The agent-doc skill is now a compact runbook router.** Essential session and
+  queue workflows live in focused runbooks, while the root skill remains a
+  table of contents small enough to survive context compaction. The canonical
+  skill shrank by about 92% without dropping workflow coverage.
+- **Todo identities share one collision-safe namespace (GH #306).** A todo's
+  own ID is now reserved during backlog promotion. Mid-line `[#todo-id]`
+  citations remain intact, while promoted free-text items receive a distinct
+  backlog ID instead of colliding with the cited todo.
+
 ## 0.35.521
 
 - **Struck ID-backed queue heads retire their claims immediately (GH #303).**

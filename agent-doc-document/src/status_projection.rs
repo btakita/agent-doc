@@ -8,6 +8,11 @@ use agent_doc_element::element::{is_backlog_component, is_tracked_work_component
 /// document is mapping a STALE agent-doc binary.
 pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your supervisor)";
 
+/// Prefix for the binary-owned queue handoff summary projected into
+/// `agent:status`. Reported queue rows (`📥`) are not stale or finished: their
+/// worker result still needs coordinator integration, verification, and closeout.
+pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
+
 /// Replace the `agent:status` component body with canonical status text.
 pub fn replace_status_content(content: &str, text: &str) -> Result<String> {
     let components = element::parse(content).context("failed to parse components")?;
@@ -161,6 +166,63 @@ pub fn reconcile_stale_supervisor_status_content(
     };
     let status_body = status.content(content);
     match apply_stale_supervisor_marker(status_body, is_stale) {
+        Some(new_body) => Ok(Some(status.replace_content(content, &new_body))),
+        None => Ok(None),
+    }
+}
+
+fn reported_queue_status_line(reported_count: usize) -> String {
+    let noun = if reported_count == 1 { "item" } else { "items" };
+    format!(
+        "{REPORTED_QUEUE_STATUS_PREFIX} {reported_count} reported {noun} awaiting coordinator integration, verification, and closeout."
+    )
+}
+
+/// Reconcile the binary-owned reported-queue summary in a status body.
+///
+/// The line is projection-only telemetry. It is replaced rather than appended,
+/// so changing counts cannot accumulate stale summaries, and count zero removes
+/// it while preserving every operator-authored status line.
+pub fn apply_reported_queue_status(
+    status_body: &str,
+    reported_count: usize,
+) -> Option<String> {
+    let expected = (reported_count > 0).then(|| reported_queue_status_line(reported_count));
+    let mut retained = String::new();
+    let mut existing = Vec::new();
+    for segment in status_body.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        if line.trim().starts_with(REPORTED_QUEUE_STATUS_PREFIX) {
+            existing.push(line.trim().to_string());
+        } else {
+            retained.push_str(segment);
+        }
+    }
+
+    if existing.len() == usize::from(expected.is_some())
+        && existing.first().map(String::as_str) == expected.as_deref()
+    {
+        return None;
+    }
+
+    let Some(expected) = expected else {
+        return Some(retained);
+    };
+    let retained = retained.strip_prefix('\n').unwrap_or(&retained);
+    Some(format!("\n{expected}\n{retained}"))
+}
+
+/// Reconcile the reported-queue handoff summary in the document's status
+/// component without changing any operator-authored status prose.
+pub fn reconcile_reported_queue_status_content(
+    content: &str,
+    reported_count: usize,
+) -> Result<Option<String>> {
+    let components = element::parse(content).context("failed to parse components")?;
+    let Some(status) = components.iter().find(|component| component.name == "status") else {
+        return Ok(None);
+    };
+    match apply_reported_queue_status(status.content(content), reported_count) {
         Some(new_body) => Ok(Some(status.replace_content(content, &new_body))),
         None => Ok(None),
     }
@@ -323,5 +385,38 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn reported_queue_status_is_counted_updated_and_removed_without_touching_status_prose() {
+        let doc = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Operator-authored summary.\n",
+            "<!-- /agent:status -->\n"
+        );
+
+        let one = reconcile_reported_queue_status_content(doc, 1)
+            .unwrap()
+            .expect("reported work should add a status summary");
+        assert!(one.contains("📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."));
+        assert!(one.contains("Operator-authored summary."));
+        assert!(
+            reconcile_reported_queue_status_content(&one, 1)
+                .unwrap()
+                .is_none()
+        );
+
+        let many = reconcile_reported_queue_status_content(&one, 3)
+            .unwrap()
+            .expect("a changed count should replace the summary");
+        assert!(many.contains("📥 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout."));
+        assert_eq!(many.matches(REPORTED_QUEUE_STATUS_PREFIX).count(), 1);
+
+        let cleared = reconcile_reported_queue_status_content(&many, 0)
+            .unwrap()
+            .expect("zero reported items should clear the summary");
+        assert!(!cleared.contains(REPORTED_QUEUE_STATUS_PREFIX));
+        assert!(cleared.contains("Operator-authored summary."));
     }
 }

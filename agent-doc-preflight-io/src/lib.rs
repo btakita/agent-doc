@@ -2206,6 +2206,64 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
     }
 
+    // `#queuehandoffstatus`: a queue made entirely (or mostly) of 📥 rows can
+    // otherwise look inert even though every row is a live coordinator obligation.
+    // Project one aggregate line into agent:status; the pane title's existing
+    // turn-active marker remains the truthful signal that a coordinator turn is
+    // currently executing, so no synthetic actionable queue row is invented.
+    let reported_count = match agent_doc_queue_io::queue_claim::claim_states_for_content(
+        file,
+        &current_content,
+    ) {
+        Ok(claims) => {
+            let mut reported_identities = claims
+                .into_iter()
+                .filter(|claim| {
+                    claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
+                })
+                .map(|claim| claim.identity)
+                .collect::<std::collections::HashSet<_>>();
+            reported_identities.extend(
+                agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
+                    file,
+                    &current_content,
+                )
+                .into_iter()
+                .map(|head| agent_doc_queue::queue_claim::claim_identity(&head)),
+            );
+            Some(reported_identities.len())
+        }
+        Err(err) => {
+            // An uncertain ledger must never erase a previously projected handoff.
+            eprintln!("[preflight] status: failed to read reported queue claims ({err:#})");
+            None
+        }
+    };
+    if let Some(reported_count) = reported_count {
+        if let Some(reconciled) =
+            agent_doc_document::status_projection::reconcile_reported_queue_status_content(
+                &current_content,
+                reported_count,
+            )?
+        {
+            eprintln!(
+                "[preflight] status: reconciled reported queue handoff count={reported_count}"
+            );
+            current_content = reconciled;
+            mutated = true;
+        }
+        if let Some(ref mut snap_content) = snapshot_content
+            && let Some(reconciled) =
+                agent_doc_document::status_projection::reconcile_reported_queue_status_content(
+                    snap_content,
+                    reported_count,
+                )?
+        {
+            *snap_content = reconciled;
+            snapshot_mutated = true;
+        }
+    }
+
     let stale_marker_before = (
         current_content.clone(),
         snapshot_content.clone(),
@@ -15550,6 +15608,74 @@ mod tests {
                 .contains(agent_doc_document::status_projection::STALE_SUPERVISOR_STATUS_MARKER),
             "fresh supervisor must clear the stale marker from the snapshot: {snapshot_after}"
         );
+    }
+
+    #[test]
+    fn pending_maintenance_projects_reported_queue_handoff_into_status() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Session ready.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#reported]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#reported] integrate the completed worker result\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "#reported", "subagent:worker", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#reported",
+            "subagent:worker",
+            "worker:test",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(
+            &doc,
+            "#reported",
+            Some(claim.generation),
+        )
+        .unwrap();
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            "#reported",
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+            Some(claim.generation),
+        )
+        .unwrap();
+
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
+
+        let expected = "📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.";
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(file_after.contains(expected), "{file_after}");
+        assert!(
+            file_after.contains("Session ready."),
+            "operator-authored status prose must be preserved: {file_after}"
+        );
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(snapshot_after.contains(expected), "{snapshot_after}");
     }
 
     #[test]

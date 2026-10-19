@@ -27135,6 +27135,8 @@ fn test_agent_doc_document_owns_status_projection_policy() {
     for required in [
         "pub const STALE_SUPERVISOR_STATUS_MARKER",
         "pub fn replace_status_content",
+        "pub fn status_sync_directive",
+        "pub fn update_status_content",
         "pub fn reconcile_top_backlog_status_content",
         "pub fn apply_stale_supervisor_marker",
         "pub fn reconcile_stale_supervisor_status_content",
@@ -27156,7 +27158,7 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         "pub fn set<E: StatusWriteEffects + ?Sized>",
         "pub fn set_with_runtime_options(",
         "pub fn set_with_options<E: StatusWriteEffects + ?Sized>",
-        "agent_doc_document::status_projection::replace_status_content",
+        "agent_doc_document::status_projection::update_status_content",
         "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
         "agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)",
         "agent_doc_write_converge_io::converge_or_disk_write(",

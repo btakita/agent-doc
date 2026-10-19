@@ -1086,6 +1086,11 @@ pub struct PreflightOutput {
     /// action (operator-checked gates to resolve, finished links to check off).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub todo_signals: Vec<TodoSignal>,
+    /// Persistent operator instruction from `agent:status sync="..."`.
+    /// The agent applies its result through `write --status`; the status marker's
+    /// `sync-mode` determines additive managed-block vs protected replace behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_sync: Option<agent_doc_document::status_projection::StatusSyncDirective>,
     /// Canonical serialized list of user-authored changes that should preempt
     /// or guide the current response cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

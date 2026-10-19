@@ -562,6 +562,11 @@ fn run_with_options_to_writer_in_pass(
         &content,
         agent_doc_ops_log_io::log_op,
     )?;
+    // A status sync marker is a persistent operator instruction, not ordinary
+    // status prose. Validate it before opening or mutating the response cycle so
+    // unknown modes and malformed/duplicate managed blocks fail closed.
+    let status_sync = agent_doc_document::status_projection::status_sync_directive(&content)
+        .context("invalid agent:status sync contract")?;
     // Phase 1 lossless-tree shadow projection (#lzlosstree): build the lossless
     // tree from the authoritative current text, render it, and log whether it
     // round-trips. Pure and non-blocking — the flat CRDT stays the authority and
@@ -2808,6 +2813,7 @@ fn run_with_options_to_writer_in_pass(
         review_gated_count: pending_report.review_gated_count,
         gate_verify: gate_verify_results,
         todo_signals: pending_report.todo_signals.clone(),
+        status_sync,
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
@@ -9991,5 +9997,74 @@ mod tests {
                 .contains("Why did the agent suggest int32 in the ADR?"),
             "the operator's edit stays this turn's prompt"
         );
+    }
+
+    #[test]
+    fn preflight_surfaces_persistent_status_sync_instruction() {
+        let dir = setup_project();
+        let doc = dir.path().join("status-sync.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:status patch=replace sync=\"Keep the published release current\" -->\n",
+                "Release not checked.\n",
+                "<!-- /agent:status -->\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+            &mut output,
+        )
+        .unwrap();
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            contract["status_sync"]["instruction"],
+            "Keep the published release current"
+        );
+        assert_eq!(contract["status_sync"]["mode"], "additive");
+    }
+
+    #[test]
+    fn preflight_rejects_unknown_status_sync_mode() {
+        let dir = setup_project();
+        let doc = dir.path().join("status-sync-invalid.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:status sync=\"Keep release current\" sync-mode=clobber -->\n",
+                "Release not checked.\n",
+                "<!-- /agent:status -->\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+        let before = std::fs::read_to_string(&doc).unwrap();
+
+        let err = run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("invalid agent:status sync contract")
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
     }
 }

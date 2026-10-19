@@ -599,6 +599,8 @@ class TerminalUtilTest {
         assertTrue(message.contains("queued"))
         assertTrue(message.contains(relativePath))
         assertTrue(message.contains("when that turn drains"))
+        assertFalse(TerminalUtil.routeStageBlocksStateProjection("route_queued_pending"))
+        assertTrue(TerminalUtil.routeStageBlocksStateProjection("route_failed"))
     }
 
     @Test

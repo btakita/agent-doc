@@ -615,7 +615,6 @@ object TerminalUtil {
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
                         notifyRunAgentDocQueued(project, relativePath, output)
                         finalStage = "route_queued_pending"
-                        finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.QUEUE_PAUSED) {
                         LOG.warn("[route] queue paused for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
@@ -675,11 +674,7 @@ object TerminalUtil {
                 } finally {
                     finalStage?.let { stage ->
                         attempt?.finishIfCurrent(stage, command = cmd, error = finalError)
-                        if (
-                            stage != "route_success" &&
-                            stage != "route_steering_delivered" &&
-                            stage != "route_superseded"
-                        ) {
+                        if (routeStageBlocksStateProjection(stage)) {
                             StateProjectionBridge.recordRouteBlocked(
                                 documentPath,
                                 routeGeneration,
@@ -733,6 +728,17 @@ object TerminalUtil {
         val compact = output.replace("\r", "\\r").replace("\n", "\\n").take(2000)
         return "exit=$exitCode failure=$failureKind output=$compact"
     }
+
+    /**
+     * A queued-behind-owner route is a successful handoff to the live turn, not
+     * a failed dispatch. Keep it out of the blocked projection just like the
+     * other benign terminal stages.
+     */
+    internal fun routeStageBlocksStateProjection(stage: String): Boolean =
+        stage != "route_success" &&
+            stage != "route_steering_delivered" &&
+            stage != "route_queued_pending" &&
+            stage != "route_superseded"
 
     internal fun buildEditorRouteRequestCommand(relativePath: String): MutableList<String> =
         mutableListOf(

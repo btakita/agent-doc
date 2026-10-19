@@ -2170,11 +2170,10 @@ fn run_pending_maintenance_with_options(
         file,
         &current_content,
         &[],
-    )? {
-        if archived != current_content {
-            current_content = archived;
-            mutated = true;
-        }
+    )? && archived != current_content
+    {
+        current_content = archived;
+        mutated = true;
     }
     if let Some(ref mut snap_content) = snapshot_content
         && let Some(archived) = agent_doc_element_backlog_io::done_archive::archive_pending_done(
@@ -2182,11 +2181,10 @@ fn run_pending_maintenance_with_options(
             snap_content,
             &[],
         )?
+        && archived != *snap_content
     {
-        if archived != *snap_content {
-            *snap_content = archived;
-            snapshot_mutated = true;
-        }
+        *snap_content = archived;
+        snapshot_mutated = true;
     }
 
     if let Some(reconciled) =

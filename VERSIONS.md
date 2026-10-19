@@ -25,6 +25,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   distinguishes ghost suggestions from typed drafts, and still rejects unknown
   post-composer UI. This restores Run Agent Doc routing for `sdk-pr.md`-style
   sessions that previously timed out as “still booting.”
+- **Done archives are document-relative and can migrate inline history.** A
+  relative `agent:done archive=...` target resolves beside its session document;
+  bare `archive` defaults to `<document-basename>.done.md`. Existing inline done
+  entries move into that file during preflight, and merged entries remain ordered
+  by their recorded date.
 
 ## 0.35.520
 

@@ -33,6 +33,9 @@ material.
 
 ## Reference
 
+- [Tags and Opening-Marker Attributes](reference/tags-and-attributes.md) -
+  authoritative `agent:*`, response patch, boundary, and opening-attribute
+  reference.
 - [Feature Catalog](reference/features.md) - the detailed capability ledger
   that used to live in the README.
 - [Architecture](reference/architecture.md) - binary vs. skill

@@ -176,6 +176,11 @@ Recovery is hard bounded to two submissions per supervisor generation; repeated
 provider failures settle to an `exhausted` receipt and await the operator instead
 of creating an automatic prompt loop. Other harnesses, approximate or quoted
 capacity text, and unrendered frames never authorize recovery.
+While either bounded retry is running, it remains the same live owner turn. A
+concurrent Run Agent Doc therefore returns the benign typed
+`queued_behind_owner` / `wait_for_owner_turn_to_drain` outcome instead of
+injecting a second trigger; editor clients must not project that outcome as an
+error or blocked route.
 
 Managed Codex instructions and generated prompt context must also scope remote-host evidence to the active project. Approved command prefixes, ambient SSH config, or a host name seen in another workspace/client are launch-environment facts only; they are not evidence that the current document should use that host. Codex may use a named remote host only when the current user prompt, session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbook explicitly identifies it. Otherwise the session must ask or record follow-up work to confirm the intended host before using it in answers, probes, or backlog items.
 

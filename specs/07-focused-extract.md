@@ -27,9 +27,12 @@ without making an agent manually copy managed document regions.
   replica counts (not durable open-tab registrations) to reach zero, reject any
   unexpected registration or replica at the mutation boundary, apply through a
   revalidated force-disk authority scope, reload the result, restore editability,
-  and re-register. A lost freeze receipt still schedules compensating resume;
-  duplicate resume after success is an idempotent acknowledgement, while a resume
-  carrying another operation ID is refused.
+  and re-register. Selected exchange nodes never carry their source document's
+  trailing boundary: the source retains that boundary and the moved nodes are
+  inserted before the target's existing boundary, preserving one document-local
+  boundary on each side. A lost freeze receipt still schedules compensating
+  resume; duplicate resume after success is an idempotent acknowledgement, while
+  a resume carrying another operation ID is refused.
 - **Evidence inputs:** parsed agent components, tracked item IDs (including
   `agent:done`), stable live exchange node IDs, compact archive locators,
   source-content hash, destination operation marker, frontmatter
@@ -60,9 +63,10 @@ without making an agent manually copy managed document regions.
 - **Verification:** pure coordination tests cover replica-count wait/timeout and
   mutation-boundary rows, while editor tests cover idempotent same-operation
   resume and stale-operation refusal. Planner tests cover multi-surface and
-  completed-item ID selection, exchange adjacency, archive-locator resolution
-  after compaction, complete destination initialization, collision refusal, and
-  operation-marker resume; CLI help and the full project check cover wiring.
+  completed-item ID selection, exchange adjacency, source/target boundary
+  identity preservation, archive-locator resolution after compaction, complete
+  destination initialization, collision refusal, and operation-marker resume;
+  CLI help and the full project check cover wiring.
 - **Out of scope:** semantic-topic inference inside the mutation binary,
   cross-filesystem transactions, and simultaneous multi-document CRDT commits.
 

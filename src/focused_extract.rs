@@ -481,6 +481,18 @@ fn append_to_component(doc: &str, name: &str, moved: &str) -> Result<String> {
     Ok(component.replace_content(doc, &combined))
 }
 
+fn append_to_exchange_preserving_boundary(doc: &str, moved: &str) -> Result<String> {
+    let component = find_component(doc, "exchange")?
+        .context("target component 'exchange' was not initialized")?;
+    if let Some(boundary_id) =
+        agent_doc_element_boundary::boundary::find_boundary_id_in_component(doc, &component)
+    {
+        Ok(component.append_with_boundary(doc, moved, &boundary_id))
+    } else {
+        append_to_component(doc, "exchange", moved)
+    }
+}
+
 fn operation_marker(operation_id: &str, source: &Path) -> String {
     format!(
         "<!-- agent-doc-extract operation=\"{operation_id}\" source=\"{}\" -->",
@@ -871,7 +883,15 @@ fn exchange_selection(
     BTreeSet<String>,
     BTreeSet<String>,
 ) {
-    let nodes = parse_exchange_nodes(content);
+    let mut nodes = parse_exchange_nodes(content);
+    // The exchange parser deliberately keeps a trailing boundary marker in the
+    // last semantic node for byte-stable round trips. A focused move must not
+    // treat that document-local skeleton as response content: retain it in the
+    // source and let the target keep its own boundary identity.
+    let trailing_boundary = nodes
+        .last_mut()
+        .and_then(split_trailing_exchange_boundary)
+        .unwrap_or_default();
     let mut selected = vec![false; nodes.len()];
     let mut matched_ids = BTreeSet::new();
     let mut matched_explicit = BTreeSet::new();
@@ -923,13 +943,33 @@ fn exchange_selection(
             kept.push(node);
         }
     }
+    let mut remaining = render_exchange_nodes(&kept);
+    remaining.push_str(&trailing_boundary.concat());
     (
-        render_exchange_nodes(&kept),
+        remaining,
         render_exchange_nodes(&moved),
         node_ids,
         matched_ids,
         matched_explicit,
     )
+}
+
+fn split_trailing_exchange_boundary(node: &mut ExchangeNode) -> Option<Vec<String>> {
+    let mut split = node.lines.len();
+    let mut saw_boundary = false;
+    while split > 0 {
+        let trimmed = node.lines[split - 1].trim_end_matches(['\n', '\r']).trim();
+        if trimmed.is_empty() {
+            split -= 1;
+        } else if trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->") {
+            saw_boundary = true;
+            split -= 1;
+            break;
+        } else {
+            break;
+        }
+    }
+    saw_boundary.then(|| node.lines.split_off(split))
 }
 
 fn target_covers_selectors(
@@ -1168,7 +1208,7 @@ fn prepare(
                         "target exchange already contains node {collision}; refusing to duplicate it"
                     );
                 }
-                target_after = append_to_component(&target_after, "exchange", &moved)?;
+                target_after = append_to_exchange_preserving_boundary(&target_after, &moved)?;
             }
             transfers.push(FocusedExtractTransfer {
                 component: "exchange".to_string(),
@@ -1227,7 +1267,7 @@ fn prepare(
                         "target exchange already contains archived node {collision}; refusing to duplicate it"
                     );
                 }
-                target_after = append_to_component(&target_after, "exchange", &rendered)?;
+                target_after = append_to_exchange_preserving_boundary(&target_after, &rendered)?;
             }
             transfers.push(FocusedExtractTransfer {
                 component: "exchange".to_string(),
@@ -2161,6 +2201,85 @@ mod tests {
         .unwrap();
         assert!(prepared.target_after.contains("❯ Decide [#legal1]"));
         assert!(prepared.target_after.contains("### Re: Legal"));
+    }
+
+    #[test]
+    fn selected_trailing_response_keeps_each_documents_single_boundary() {
+        let content = source_doc().replace(
+            "<!-- /agent:exchange -->",
+            "<!-- agent:boundary:source-boundary -->\n<!-- /agent:exchange -->",
+        );
+        let target_content = super::super::extract::render_target_scaffold(
+            "Target",
+            "codex",
+            uuid::Uuid::from_u128(1),
+            &frontmatter::Frontmatter::default(),
+        )
+        .replace(
+            "<!-- /agent:exchange -->",
+            "<!-- agent:boundary:target-boundary -->\n<!-- /agent:exchange -->",
+        );
+        let source_boundary =
+            agent_doc_element_boundary::boundary::find_boundary_id(&content, "exchange").unwrap();
+        let source_boundary_marker = format!("<!-- agent:boundary:{source_boundary} -->");
+        let exchange = find_component(&content, "exchange").unwrap().unwrap();
+        let response_id = parse_exchange_nodes(exchange.content(&content))
+            .into_iter()
+            .find(|node| node.render().contains("### Re: Dev"))
+            .unwrap()
+            .node_id();
+
+        let prepared = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            content,
+            Some(target_content),
+            &frontmatter::Frontmatter::default(),
+            &FocusedExtractRequest {
+                focus: None,
+                rationale: None,
+                ids: Vec::new(),
+                exchange_node_ids: vec![response_id],
+                archive_locators: Vec::new(),
+                components: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        let target_boundary = agent_doc_element_boundary::boundary::find_boundary_id(
+            &prepared.target_after,
+            "exchange",
+        )
+        .unwrap();
+        let target_boundary_marker = format!("<!-- agent:boundary:{target_boundary} -->");
+        assert_ne!(source_boundary, target_boundary);
+        assert_eq!(
+            prepared
+                .source_after
+                .matches(&source_boundary_marker)
+                .count(),
+            1
+        );
+        assert_eq!(
+            prepared
+                .target_after
+                .matches(&target_boundary_marker)
+                .count(),
+            1
+        );
+        assert!(!prepared.target_after.contains(&source_boundary_marker));
+        assert!(!prepared.source_after.contains("### Re: Dev"));
+        let response_position = prepared.target_after.find("### Re: Dev").unwrap();
+        let boundary_position = prepared.target_after.find(&target_boundary_marker).unwrap();
+        assert!(response_position < boundary_position);
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&prepared.source_after),
+            None
+        );
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&prepared.target_after),
+            None
+        );
     }
 
     #[test]

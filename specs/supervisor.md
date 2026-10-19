@@ -403,6 +403,12 @@ a closed actor record is replaceable through the stale-authority path.
   supervisor liveness (a full `/proc` scan) only when the cheap facts leave a
   dispatch possible (`orphan_drain_may_dispatch`: active queue and a drainable
   head).
+- The orphan drain uses the same claim-aware supervisor-scope selector as the
+  supervisor idle watch: it skips a head held by a live queue claim, advances to
+  the first unclaimed drainable head when one exists, and emits a transition
+  diagnostic with `reason=queue_head_claimed`. Claim state is independent of the
+  document revision, so a memoized document head is rechecked against the claim
+  ledger before every dispatch attempt; a claim read failure fails closed.
 - If an orphan-drain route finds that the authoritative supervisor recovered
   after the sweep, its first attempt fails closed and yields one bounded
   backoff interval to the recovered idle watch. That preserves the idle

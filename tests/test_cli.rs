@@ -10616,6 +10616,13 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
         orphan_drain.contains("current_text_for_file_nonblocking"),
         "orphan drain must inspect operator-visible realtime text when an editor is attached"
     );
+    assert!(
+        orphan_drain.contains("active_claims(None)")
+            && controller.contains("live_drainable_continuation_head_excluding_claimed")
+            && orphan_drain.contains("reason=queue_head_claimed")
+            && orphan_drain.contains("reason=queue_claim_read_failed"),
+        "orphan drain must skip claimed heads, log the skip, and fail closed when claims cannot be read (GH #312)"
+    );
 
     let pane_resolution =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();

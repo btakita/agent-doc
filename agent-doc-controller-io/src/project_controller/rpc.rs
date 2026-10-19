@@ -18809,7 +18809,59 @@ fn orphan_drain_memoize_head(
         .insert(file.to_path_buf(), (revision, OrphanDrainHead(head)));
 }
 
+fn orphan_drain_active_claims(
+    ledger: &agent_doc_queue::queue_claim::QueueClaimLedger,
+    content: Option<&str>,
+    now_secs: u64,
+) -> agent_doc_queue::queue_claim::ClaimedQueueItems {
+    let mut ledger = ledger.clone();
+    let live = content.and_then(|content| {
+        let heads = agent_doc_queue::queue_continuation::live_queue_head_texts(content)?;
+        ledger.follow_edits(now_secs, &heads);
+        agent_doc_queue::queue_continuation::live_queue_head_identities(content)
+    });
+    ledger.claimed_items(now_secs, live.as_ref())
+}
+
+fn orphan_drain_head_for_content(
+    content: &str,
+    queue_unresolved_prompts: Option<usize>,
+    claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+) -> (Option<String>, Option<String>, bool) {
+    let scope = agent_doc_queue::queue_continuation::DrainScope::Supervisor;
+    let unfiltered = if queue_unresolved_prompts == Some(0) {
+        None
+    } else {
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head(content, scope)
+    };
+    let claimed_head_skipped = unfiltered
+        .as_deref()
+        .is_some_and(|head| claimed.claims(head));
+    let drainable = if claimed_head_skipped {
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+            content, scope, claimed,
+        )
+    } else {
+        unfiltered.clone()
+    };
+    (unfiltered, drainable, claimed_head_skipped)
+}
+
 fn orphan_drain_pause_suppression_transition(file: &Path, suppressed: bool) -> bool {
+    static SUPPRESSED_DOCUMENTS: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> =
+        OnceLock::new();
+    let mut documents = SUPPRESSED_DOCUMENTS
+        .get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+        .lock();
+    if suppressed {
+        documents.insert(file.to_path_buf())
+    } else {
+        documents.remove(file);
+        false
+    }
+}
+
+fn orphan_drain_claim_suppression_transition(file: &Path, suppressed: bool) -> bool {
     static SUPPRESSED_DOCUMENTS: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> =
         OnceLock::new();
     let mut documents = SUPPRESSED_DOCUMENTS
@@ -18846,6 +18898,29 @@ mod orphan_drain_attempt_tests {
         assert!(!orphan_drain_same_attempt(None, &current));
         assert!(!orphan_drain_same_attempt(Some(&stale), &current));
         assert!(orphan_drain_same_attempt(Some(&matching), &current));
+    }
+
+    #[test]
+    fn orphan_drain_skips_claimed_heads_and_advances_to_the_next_unclaimed_head() {
+        let content = "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+## Queue\n\n<!-- agent:queue auto go -->\n- claimed first\n- unclaimed second\n<!-- /agent:queue -->\n";
+        let first = "claimed first".to_string();
+        let second = "unclaimed second".to_string();
+        let first_claimed =
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads([&first]);
+        let all_claimed = agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+            .with_heads([&first, &second]);
+
+        let (unfiltered, drainable, skipped) =
+            orphan_drain_head_for_content(content, None, &first_claimed);
+        assert_eq!(unfiltered.as_deref(), Some(first.as_str()));
+        assert_eq!(drainable.as_deref(), Some(second.as_str()));
+        assert!(skipped);
+
+        let (_, drainable, skipped) =
+            orphan_drain_head_for_content(content, None, &all_claimed);
+        assert_eq!(drainable, None);
+        assert!(skipped);
     }
 }
 
@@ -18938,58 +19013,138 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             }
             _ => None,
         };
+        let now = controller_model_pressure_now_secs();
+        let active_claims =
+            |content: Option<&str>| -> Result<agent_doc_queue::queue_claim::ClaimedQueueItems> {
+                let document_hash = agent_doc_hash::path_hash(&file)?;
+                let ledger = match state_store::load_queue_document_state_from_db(
+                    &conn,
+                    &document_hash,
+                    agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+                )? {
+                    Some(record) => agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
+                        &record.payload_json,
+                    )?,
+                    None => agent_doc_queue::queue_claim::QueueClaimLedger::default(),
+                };
+                Ok(orphan_drain_active_claims(&ledger, content, now))
+            };
         let memoized_head = gate_revision
             .as_ref()
             .and_then(|revision| orphan_drain_memoized_head(&file, revision));
+        let memoized_head_is_claimed = match memoized_head.as_ref() {
+            Some(head) => match head.0.as_deref() {
+                Some(head) => match active_claims(None) {
+                    Ok(claimed) => claimed.claims(head),
+                    Err(err) => {
+                        log_orphan_drain_event(
+                            &file,
+                            OrphanDrainEvent::DispatchSkipped,
+                            &format!("reason=queue_claim_read_failed error={err:#}"),
+                        );
+                        continue;
+                    }
+                },
+                None => false,
+            },
+            None => false,
+        };
         // Operator-visible live text is authoritative. Disk is consulted only
         // when no editor owns the document; an attached-but-pending replica
         // fails closed until the relay can supply a consistent cut.
-        let (content, queue_unresolved_prompts) = match &memoized_head {
+        let (content, queue_unresolved_prompts) = match (&memoized_head, memoized_head_is_claimed) {
             // Unchanged revision: the head cannot have moved, so skip the
             // materialize + SHA + log entirely and reuse the parsed answer.
-            Some(_) => (String::new(), None),
-            None => match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
-                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
-                    text, semantics, ..
-                }) => (
-                    text,
-                    semantics.map(|semantics| semantics.queue_unresolved_prompts),
-                ),
-                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {
-                    let Ok(content) = std::fs::read_to_string(&file) else {
+            // A claim is an independent durable source: if it now owns that
+            // cached head, materialize so the selector can advance to the first
+            // unclaimed head without waiting for a document revision.
+            (Some(_), false) => (String::new(), None),
+            (None, _) | (Some(_), true) => {
+                match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
+                    Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                        text,
+                        semantics,
+                        ..
+                    }) => (
+                        text,
+                        semantics.map(|semantics| semantics.queue_unresolved_prompts),
+                    ),
+                    Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {
+                        let Ok(content) = std::fs::read_to_string(&file) else {
+                            continue;
+                        };
+                        (content, None)
+                    }
+                    Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+                    | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => continue,
+                    Err(err) => {
+                        log_orphan_drain_event(
+                            &file,
+                            OrphanDrainEvent::AuthorityReadFailed,
+                            &format!("error={err:#}"),
+                        );
                         continue;
-                    };
-                    (content, None)
+                    }
                 }
-                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
-                | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => continue,
-                Err(err) => {
-                    log_orphan_drain_event(
-                        &file,
-                        OrphanDrainEvent::AuthorityReadFailed,
-                        &format!("error={err:#}"),
-                    );
-                    continue;
-                }
-            },
-        };
-        let drainable = match memoized_head {
-            Some(head) => head.into_head(),
-            None => {
-                let head = if queue_unresolved_prompts == Some(0) {
-                    None
-                } else {
-                    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-                        &content,
-                        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-                    )
-                };
-                if let Some(revision) = gate_revision.clone() {
-                    orphan_drain_memoize_head(&file, revision, head.clone());
-                }
-                head
             }
         };
+        let (drainable, claimed_head_skipped) = match memoized_head {
+            Some(head) if !memoized_head_is_claimed => (head.into_head(), false),
+            None => {
+                let claimed = match active_claims(Some(&content)) {
+                    Ok(claimed) => claimed,
+                    Err(err) => {
+                        log_orphan_drain_event(
+                            &file,
+                            OrphanDrainEvent::DispatchSkipped,
+                            &format!("reason=queue_claim_read_failed error={err:#}"),
+                        );
+                        continue;
+                    }
+                };
+                let (unfiltered, head, claimed_head_skipped) = orphan_drain_head_for_content(
+                    &content,
+                    queue_unresolved_prompts,
+                    &claimed,
+                );
+                if let Some(revision) = gate_revision.clone() {
+                    // Cache the document-derived answer, never the claim-filtered
+                    // projection: claims change without moving the CRDT revision.
+                    orphan_drain_memoize_head(&file, revision, unfiltered);
+                }
+                (head, claimed_head_skipped)
+            }
+            Some(_) => {
+                let claimed = match active_claims(Some(&content)) {
+                    Ok(claimed) => claimed,
+                    Err(err) => {
+                        log_orphan_drain_event(
+                            &file,
+                            OrphanDrainEvent::DispatchSkipped,
+                            &format!("reason=queue_claim_read_failed error={err:#}"),
+                        );
+                        continue;
+                    }
+                };
+                let (_, head, claimed_head_skipped) = orphan_drain_head_for_content(
+                    &content,
+                    queue_unresolved_prompts,
+                    &claimed,
+                );
+                (head, claimed_head_skipped)
+            }
+        };
+        if orphan_drain_claim_suppression_transition(&file, claimed_head_skipped) {
+            log_orphan_drain_event(
+                &file,
+                OrphanDrainEvent::DispatchSkipped,
+                &format!(
+                    "file={} pane={} reason=queue_head_claimed action=skip_claimed_head focus_effect=preserved pane_effect=none",
+                    file.display(),
+                    record.pane_id,
+                ),
+            );
+        }
         let document_hash = match agent_doc_fs::document_state_hash(&file) {
             Ok(hash) => hash,
             Err(err) => {
@@ -19001,7 +19156,6 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                 continue;
             }
         };
-        let now = controller_model_pressure_now_secs();
         let loop_owns_drain = match state_store::load_coordination_lease_from_db(
             &conn,
             agent_doc_lease::DRAIN_OWNER_SCOPE,

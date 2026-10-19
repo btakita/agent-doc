@@ -10,7 +10,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   frozen registrations at the mutation boundary, and writes frozen documents
   through a revalidated force-disk scope. Ambiguous freeze delivery now always
   schedules compensating resume, and duplicate post-success resume is
-  idempotent without accepting a stale operation ID.
+  idempotent without accepting a stale operation ID. Selected exchange moves
+  also retain the source boundary and insert before the target boundary, so the
+  two document-local boundary identities never collapse into one document.
 
 ## 0.35.524
 

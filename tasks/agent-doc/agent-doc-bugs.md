@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a14fb9-7c96-7ef0-80cd-37aa1509b0cd
+  codex: 01a1521d-9312-7c72-ac5f-e60fcbb4b572
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -16,6 +16,7 @@ presets:
 dogfood:
   path: tasks/agent-doc/agent-doc-bugs.md
   auto: true
+queue: go
 ---
 
 ## Status
@@ -1009,6 +1010,72 @@ No eligible issue was added during the current intake check, so this conditional
 The current check remains complete: only excluded issues #40 and #45 are open, so no backlog, queue, or release task was added. The two issue-intake rows remain active intentionally as the hourly recurring queue template.
 
 <!-- no-free-text-queue-head-guard -->
+
+### Re: Response
+
+All queued work is integrated. Four public releases completed across this cycle, ending with v0.35.523.
+
+The GitHub issue scan was completed and the resulting fixes were released:
+
+- #303: striking an id-backed queue line now retires its claim, so a later line with the same id cannot inherit stale reported state (`863efd7110`).
+- #304: queue claims normalize lifecycle markers out of their stored identity (`34a80c773e`).
+- #305: explicit-harness skill installs now honor the requested reload behavior (`63419fcc73`).
+- #306: free-text admission reserves cited todo ids instead of minting conflicting backlog ids or stripping the citation (`c9528dafa3`).
+- #307: recovered orphan drain routing no longer settles a suppressed dispatch as success forever. The first identical recovered attempt defers to idle-watch ownership; a bounded repeated attempt can fall back to the authoritative actor, while stale or mismatched leases cannot authorize a later head (`7e03bfb2c7`, `2a3bc5d858`).
+
+Issues #303 through #307 are closed. The queue-placement intent was sufficiently clear; the missing behavior was provenance/placement handling rather than wording. Queue-local follow-ups now retain their intended position (`00d674efc9`).
+
+The sdk-pr wedge was addressed in the v0.35.520 routing/readiness batch. The document-relative `agent:done archive` behavior shipped in v0.35.521: a relative value resolves beside the session document, a valueless marker defaults to `<document-basename>.done.md`, moved entries merge in timestamp order, and finalized archive integration is covered by regression tests (`1296b77b71`, `8fac39f3a6`). The agent-doc skill was reduced to a runbook index and shipped in v0.35.522 (`528ea2b6f8`).
+
+The outbox ambiguity is fixed in v0.35.523 (`4ed30e6326`). `📥` means a worker has reported and the result is awaiting coordinator integration, verification, and closeout. The UI now emits an aggregate “reported items awaiting coordinator…” status. A synthetic queue item for current coordinator activity is unnecessary because the coordinator already has the `⟳` activity indicator. The #307 claim was not lost: it waited while the prior release occupied the foreground, then was claimed at the next steering boundary; the new aggregate status makes that state visible.
+
+v0.35.523 is fully public. `make check` passed 11,068 Rust tests plus the editor/native/JetBrains/bootstrap/TLA gates; `make tmux-ci` passed, including the formerly failing same-harness queue auto-clear scenario. GitHub Release run `39216412843` and PyPI run `39219648236` both passed, including the clean PyPI-install verification.
+
+Codex capacity recovery is also implemented and pushed to `main` after the v0.35.523 release boundary (`f4b61ee0b9` through `dbb8d618d1`). It matches the normalized capacity message only when the composer is ready, submits `continue` before the quiescent fast path, caps recovery at two attempts, and logs exhaustion once. Approximate messages, other harnesses, and unready composers do not trigger it. The worker’s full `make check` passed; the post-release integration reran the focused detection/bounding tests (2 passed), ordering test (1 passed), and `git diff --check`. This change is on `main` but is not part of v0.35.523.
+
+> **Queue prompt:** do [#httpsgithubcom]
+
+> **Queue prompt:** If an issue was added, also add `- release + publish`
+
+> **Queue prompt:** 🚧 The queue id=issues should have add the queue items that I added after this queue item. Instead, the 2 queue items above were added...This may be legitimate. I intended `do [#httpsgithubcom]` to have added the 4 queue items after this queue item. Was my prompt not specific enough?
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/303
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/304
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/305
+
+> **Queue prompt:** Run Agent Doc on sdk-pr.md is still wedged. I thought we addressed this issue in a previous release. Still not working.
+
+> **Queue prompt:** 🚧 `agent:done` `archive=...` should support relative paths from the directory of the agent doc itself. Add the feature if not already supported. If `archive` is used without a value, default to `<document-basename>.done.md` in the same directory as the agent doc. If there are contents in `agent:done`, agent-doc should move the content into the *.done.md file if `archive` is present. If the *.done.md file already has content and content from `agent:done` is moved over to *.done.md by agent-doc, the items should be ordered by timestamp.
+
+> **Queue prompt:** The agent-doc SKILL.md should be a table of contents to runbooks. Reduce the size of the SKILL as much as possible so it fully survives compaction.
+
+> **Queue prompt:** release + publish
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/306
+
+> **Queue prompt:** release + publish: which includes #306
+
+> **Queue prompt:** Look at this queue's items. The items from the previous release are still in outbox mode. We also need a way to tell what is happening if all queue items are in outbox mode. Should we add a queue item for your current activity?
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/307
+
+> **Queue prompt:** `- #gh-fix https://github.com/btakita/agent-doc/issues/307` is not claimed yet? It has been in the queue for a while. Or is there some state issue?
+
+> **Queue prompt:** release + publish including #307
+
+> **Queue prompt:** Codex is giving "Selected model is at capacity. Please try a different model." which stalls the turn. agent-doc should attempt to restart the turn. `continue` seems to make it go again.
+
+> **Chat prompt (#chatprompt):** cont
+
+> **Chat prompt (#chatprompt):** cont
+
+> **Chat prompt (#chatprompt):** cont
+
+> **Chat prompt (#chatprompt):** cont
+
+> **Chat prompt (#chatprompt):** cont
 <!-- agent:boundary:6975e85b -->
 <!-- /agent:exchange -->
 
@@ -1017,13 +1084,28 @@ The current check remains complete: only excluded issues #40 and #45 are open, s
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/299~~
-- ~~release + publish: include #299 in the release~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#httpsgithubcom]~~
+- ~~If an issue was added, also add `- release + publish`~~
+- ~~The queue id=issues should have add the queue items that I added after this queue item. Instead, the 2 queue items above were added...This may be legitimate. I intended `do [#httpsgithubcom]` to have added the 4 queue items after this queue item. Was my prompt not specific enough?~~
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/303
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/304
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/305
+- 📥 Run Agent Doc on sdk-pr.md is still wedged. I thought we addressed this issue in a previous release. Still not working.
+- 📥 `agent:done` `archive=...` should support relative paths from the directory of the agent doc itself. Add the feature if not already supported. If `archive` is used without a value, default to `<document-basename>.done.md` in the same directory as the agent doc. If there are contents in `agent:done`, agent-doc should move the content into the *.done.md file if `archive` is present. If the *.done.md file already has content and content from `agent:done` is moved over to *.done.md by agent-doc, the items should be ordered by timestamp.
+- 📥 The agent-doc SKILL.md should be a table of contents to runbooks. Reduce the size of the SKILL as much as possible so it fully survives compaction.
+- 📥 release + publish
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/306
+- 📥 release + publish: which includes #306
+- 📥 Look at this queue's items. The items from the previous release are still in outbox mode. We also need a way to tell what is happening if all queue items are in outbox mode. Should we add a queue item for your current activity?
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/307
+- 📥 `- #gh-fix https://github.com/btakita/agent-doc/issues/307` is not claimed yet? It has been in the queue for a while. Or is there some state issue?
+- 📥 release + publish including #307
+- 📥 Codex is giving "Selected model is at capacity. Please try a different model." which stalls the turn. agent-doc should attempt to restart the turn. `continue` seems to make it go again.
 <!-- /agent:queue -->
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
-- Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
+- do [#httpsgithubcom]
 - If an issue was added, also add `- release + publish`
 <!-- /agent:queue -->
 

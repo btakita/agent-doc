@@ -401,9 +401,16 @@ remain unchanged.
 the resulting `agent:todo` does not reference that id as `#id`, the write prints
 a non-blocking `[todo] advisory (#operatortodo)` line naming the ids and the
 `--todo-add` command, and logs `operator_todo_advisory` to `ops.log`. The check
-is id-based only (no prose heuristics), never writes a todo by itself, and never
-fails the closeout: a gate blocked on CI or an external party rather than the
-operator simply needs no todo.
+is id-based; a gate blocked on CI or an external party rather than the operator
+simply needs no todo.
+
+After the response and same-cycle todo mutations converge, closeout also checks
+the captured response for conservative, deterministic operator-action signals:
+an explicit post/publish decision request, or an unpublished/not-posted draft
+that cites a concrete Markdown path. If such a response supplies no
+`--todo-add`, the write prints the same non-blocking advisory class and logs
+`operator_todo_response_advisory`. Supplying `--todo-add` suppresses this
+response advisory. Neither advisory writes a todo by itself or fails closeout.
 
 **Todo-done advisory.** When a closeout resolves tracked work (`--done`,
 `--review-resolve`) and an OPEN `agent:todo` item still cites it (an item that

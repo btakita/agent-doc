@@ -1963,6 +1963,41 @@ fn emit_operator_todo_advisory(file: &Path, unreferenced_gate_ids: &[String]) {
     );
 }
 
+/// `#operatortodo` / GH #314: the advisory for a response that hands a concrete
+/// action or decision to the operator without recording it through `--todo-add`.
+fn operator_todo_response_advisory(
+    file: &Path,
+    response: &str,
+    todo_add_supplied: bool,
+) -> Option<String> {
+    if todo_add_supplied {
+        return None;
+    }
+    let signal = agent_doc_turn::response_text::operator_todo_response_signal(response)?;
+    Some(format!(
+        "[todo] advisory (#operatortodo): this closeout response leaves an operator action pending ({}) but supplied no --todo-add. If the action remains pending, record it in the next closeout: agent-doc write --commit {} --backlog-only --todo-add \"<operator action>\"",
+        signal.as_str(),
+        file.display(),
+    ))
+}
+
+fn emit_operator_todo_response_advisory(file: &Path, response: &str, todo_add_supplied: bool) {
+    let Some(advisory) = operator_todo_response_advisory(file, response, todo_add_supplied) else {
+        return;
+    };
+    eprintln!("{advisory}");
+    let signal = agent_doc_turn::response_text::operator_todo_response_signal(response)
+        .map(|signal| signal.as_str())
+        .unwrap_or("unknown");
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "operator_todo_response_advisory file={} signal={signal}",
+            file.display(),
+        ),
+    );
+}
+
 /// `#tododone`: tracked-work ids this closeout resolved (`--done`,
 /// `--review-resolve`), deduplicated in first-seen order.
 fn resolved_ids_this_cycle(pending_done: &[String], review_resolve: &[String]) -> Vec<String> {
@@ -3570,6 +3605,11 @@ fn run_command_inner_within_pass(
     } else {
         PendingStatusMutationOutcome::default()
     };
+
+    if write_result.is_ok() {
+        let response_body = active_capture_response_body_for_write(file)?;
+        emit_operator_todo_response_advisory(file, &response_body, !options.todo_add.is_empty());
+    }
 
     // `#todoidcloseout` / GH #293: a strict closeout is the publication
     // boundary for every assistant-authored patch. `patch:todo` used to land
@@ -5542,6 +5582,28 @@ mod tests {
             "{two}"
         );
         assert!(two.contains("does not reference them"), "{two}");
+    }
+
+    #[test]
+    fn operator_todo_response_advisory_names_missing_todo_add_and_suppresses_when_supplied() {
+        let file = Path::new("tasks/session.md");
+        let response = "The unpublished draft is at `docs/launch-note.md`.";
+        let advisory = operator_todo_response_advisory(file, response, false).unwrap();
+        assert!(
+            advisory.contains("leaves an operator action pending (unpublished draft path)"),
+            "{advisory}"
+        );
+        assert!(
+            advisory.ends_with(
+                "agent-doc write --commit tasks/session.md --backlog-only --todo-add \"<operator action>\""
+            ),
+            "{advisory}"
+        );
+        assert_eq!(operator_todo_response_advisory(file, response, true), None);
+        assert_eq!(
+            operator_todo_response_advisory(file, "Published the draft.", false),
+            None
+        );
     }
 
     #[test]

@@ -2221,6 +2221,45 @@ fn write_review_add_without_operator_todo_emits_advisory() {
     );
 }
 
+/// `#operatortodo`, GH #314: completing an old todo must not let a response
+/// hand a new unpublished-draft decision to the operator without an advisory.
+#[test]
+fn write_response_request_without_todo_add_emits_operator_todo_advisory() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n<!-- agent:todo -->\n- [ ] [#old] Review prior draft\n<!-- /agent:todo -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let assert_result = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--todo-done",
+            "old",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n**Description: draft below, not posted.** Say `post` to apply it. Full draft: `docs/launch-note.md`.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(
+        stderr.contains(
+            "[todo] advisory (#operatortodo): this closeout response leaves an operator action pending"
+        ),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("--todo-add"), "stderr: {stderr}");
+    assert!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo")
+            .contains("- [x] [#old] Review prior draft")
+    );
+}
+
 /// `#operatortodo`: a `patch:todo` against a document without `agent:todo`
 /// creates the component instead of spilling the checklist into the exchange.
 #[test]

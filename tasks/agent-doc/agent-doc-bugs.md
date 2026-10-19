@@ -25,6 +25,10 @@ queue: go
 
 📥 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
+
+<!-- status:sync -->
+Latest published release: v0.35.525, published on GitHub at 2026-10-19 22:23:24 UTC; PyPI 0.35.525 published at 2026-10-19 22:24:09 UTC. Release, CI, and PyPI workflows are green. The retained-closeout Stop-hook fix and JetBrains read-only recovery are included. Coordinated sdk-dev → sdk-demo extraction remains unapplied and is tracked as a projection_changed follow-up. Two review items remain gated: jb262dynlauncherrecommen needs an operator decision, and pypiquotarecheck needs an external PyPI reply.
+<!-- /status:sync -->
 <!-- /agent:status -->
  
 
@@ -212,6 +216,18 @@ Fixed by the delegated subagent, integrated as `0d9dd855c7`, and published in v0
 The stale read-only wedge is fixed in `a3607e6061` and published. Live JetBrains was dynamically upgraded to 0.2.720; both `sdk-dev.md` and `sdk-demo.md` now report fresh, attached editor replicas with no lag, so the wedged state is no longer needed for diagnostics.
 
 The preserved transfer itself is not claimed as complete. Coordinated extraction now resumes both tabs safely, but the live-authority commit returned `projection_changed` after the nominal apply path. I stopped retrying, did not force disk or repair either live document, and added `#extract-coordinated-projection-changed` as the focused follow-up to prove exactly-once convergence.
+
+### Re: recovered response
+
+Fixed and published in [v0.35.525](https://github.com/btakita/agent-doc/releases/tag/v0.35.525) at **2026-10-19 22:23:24 UTC**; PyPI followed at **22:24:09 UTC**.
+
+- Stop-hook lease contention fix: `0d9dd855c7`
+- Release, CI, PyPI, native assets, and editor packages verified green.
+- `sdk-demo.md` is unwedgeable/writable with fresh replicas.
+- The extraction remains safely unapplied due to `projection_changed`; a focused subagent follow-up is queued.
+- `agent:status` now tracks the latest release. Sync is additive by default; `sync-mode="replace"` enables destructive replacement.
+- Tag and attribute documentation is in [tags-and-attributes.md](/home/brian/agent-doc-extract-queue-integ/docs/reference/tags-and-attributes.md) and linked from the README.
+- Final `agent-doc session-check` passed. The retained response was not replayed.
 <!-- agent:boundary:f08de573 -->
 <!-- /agent:exchange -->
 
@@ -221,17 +237,17 @@ The preserved transfer itself is not claimed as complete. Coordinated extraction
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~release + publish~~
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/311
-- 📥 release + publish: include #311
-- 📥 bossroom-p2p.md: Claim Tmux Pane, then Run Agent Doc, then Ctrl+c in the Claude session, then switch to agent to codex using `agent: codex`, then Restart Agent: got a prompt saying a turn was occurring. Clicked Interrupt and Restart then the followup Interrupt and Restart. Nothing happened. The Claude Code prompt was submitted and the turn started in Claude Code, not Codex. `agent: codex` was removed from the document.
-- 📥 I saw `■ Selected model is at capacity. Please try a different model.`, and a `continue`, then another `■ Selected model is at capacity. Please try a different model.`. Please confirm the behavior and work on any necessary fixes. Run Agent Doc has an error as well, presumably due to agent-doc's state not recognizing the error: [route] a turn is already running on /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second trigger was sent and nothing needs recovery. The live turn owns the queue; head "release + publish" is in its scope and is answered or drained at that turn's boundary. Do not cancel or recover it (owner: [session-check] IN PROGRESS: cycle `cycle-1792424550895` remains `preflight_started` (preflight_started) while owning pane `%2` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.) owner_turn=live ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/312
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/313
-- 📥 the queue id=issues gained "In sdk-demo.md, I deleted some struck queue items right after they were struck. Got an error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.: I have since undid my changes." and lost the prompt to watch https://github.com/btakita/agent-doc/issues.
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/314
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/315
-- 📥 sdk-demo.md is Read Only. Why? Did agent-doc make it read-only? It should not have.
-- 🚧 release + publish including PRs #312-#315
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/311~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: include #311~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~bossroom-p2p.md: Claim Tmux Pane, then Run Agent Doc, then Ctrl+c in the Claude session, then switch to agent to codex using `agent: codex`, then Restart Agent: got a prompt saying a turn was occurring. Clicked Interrupt and Restart then the followup Interrupt and Restart. Nothing happened. The Claude Code prompt was submitted and the turn started in Claude Code, not Codex. `agent: codex` was removed from the document.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~I saw `■ Selected model is at capacity. Please try a different model.`, and a `continue`, then another `■ Selected model is at capacity. Please try a different model.`. Please confirm the behavior and work on any necessary fixes. Run Agent Doc has an error as well, presumably due to agent-doc's state not recognizing the error: [route] a turn is already running on /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second trigger was sent and nothing needs recovery. The live turn owns the queue; head "release + publish" is in its scope and is answered or drained at that turn's boundary. Do not cancel or recover it (owner: [session-check] IN PROGRESS: cycle `cycle-1792424550895` remains `preflight_started` (preflight_started) while owning pane `%2` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.) owner_turn=live ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/312~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/313~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~the queue id=issues gained "In sdk-demo.md, I deleted some struck queue items right after they were struck. Got an error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.: I have since undid my changes." and lost the prompt to watch https://github.com/btakita/agent-doc/issues.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/314~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/315~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~sdk-demo.md is Read Only. Why? Did agent-doc make it read-only? It should not have.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish including PRs #312-#315~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#extract-coordinated-projection-changed]
 <!-- /agent:queue -->
 
@@ -257,6 +273,7 @@ The preserved transfer itself is not claimed as complete. Coordinated extraction
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#extract-coordinated-projection-changed] [agent-doc] Reproduce and fix coordinated focused extraction returning projection_changed after a nominally applied operation when both source and target live editor replicas are fresh; preserve editor authority and prove the transfer commits exactly once without force-disk or repair.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 

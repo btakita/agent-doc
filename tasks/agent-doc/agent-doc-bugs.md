@@ -966,6 +966,24 @@ Verified the existing fix `627fef9efa` on current `main`; focused acceptance tes
 Verified the existing fix `ec62c43207`; focused regression tests passed and issue #302 is closed.
 
 Issue #299 remains claimed by its worker because its changed-source IntelliJ 263 upgrade path still needs implementation and split-mode live proof.
+
+### Re: #299 and v0.35.520 release — gpt-5 · 2026-10-18T22:26-04:00
+
+> **Chat prompt (#chatprompt):** wait for #299 to finish
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/299
+
+#299 finished and was included in the release. The worker fix commit `df8c780dae35561c2d1669e07db12015f54e51da` was integrated as `5bff0a1db9`, and the issue was closed. Live testing on exact IntelliJ IU 263.7031.23 confirmed that dynamic unload is rejected because Agent Doc remains in the module graph, so exact 263 remains restart-only; the compatibility documentation now records that measured behavior. The full validation suite passed.
+
+> **Queue prompt:** release + publish: include #299 in the release
+
+v0.35.520 was released from `cf88787b75`. The release gate passed, including 11,053 Rust tests, 202 VS Code tests, JetBrains classic/262/263 builds and sandboxes, bootstrap tests, editor parity checks, documentation audits, and a fresh tmux CI run.
+
+Publication is complete:
+
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.520 — public with 15 assets.
+- PyPI: `agent_doc-0.35.520-py3-none-any.whl` — public and verified with a clean install that fetched the pinned native release.
+- All platform release workflows succeeded. The optional Homebrew formula bump was skipped because `HOMEBREW_TAP_TOKEN` was not configured; this was outside the GitHub Release and PyPI publication contract.
 <!-- agent:boundary:6975e85b -->
 <!-- /agent:exchange -->
 
@@ -974,12 +992,8 @@ Issue #299 remains claimed by its worker because its changed-source IntelliJ 263
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#gh302]~~
-- ~~Add an optional "prompt" property to the dogfood yaml configuration. I want to run dogfood on my Coder instance but I want the coder dogfood to file github issues instead of directly fixing the issue.~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/299
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/301~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/302~~ — auto-struck: answered this cycle (#ftstrike)
-- release + publish
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/299~~
+- 📥 release + publish: include #299 in the release
 <!-- /agent:queue -->
 
 ## Queue: Issues

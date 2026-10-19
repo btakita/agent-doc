@@ -5,7 +5,8 @@ agent_doc_write: crdt
 ---
 
 <!-- agent:exchange -->
-Base line E0 (agent-owned).
+
+<!-- agent:boundary:dfe16c9e -->
 <!-- /agent:exchange -->
 
 <!-- agent:notes -->

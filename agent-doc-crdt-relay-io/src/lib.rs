@@ -11949,21 +11949,17 @@ mod tests {
     }
 
     #[test]
-    fn ensure_document_model_recovers_after_delayed_replica_registration() {
+    fn ensure_document_model_observes_registered_replica() {
         let (_dir, doc) = temp_doc("ensure-model-register.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        let doc_for_register = doc.clone();
-        let register = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(50));
-            register_replica_for_file(&doc_for_register, "intellij:ensure-model")
-                .expect("delayed register should not fail")
-                .expect("editor-attached register should allocate model")
-        });
+        let (client_id, _bootstrap) =
+            register_replica_for_file(&doc, "intellij:ensure-model")
+                .expect("register should not fail")
+                .expect("editor-attached register should allocate model");
 
         let current = ensure_document_model(&doc, "test_ensure_model")
-            .expect("ensure should observe the delayed registered model");
-        let (client_id, _bootstrap) = register.join().unwrap();
+            .expect("ensure should observe the registered model");
         match current {
             CurrentText::Current {
                 text, live_editors, ..

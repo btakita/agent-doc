@@ -2,6 +2,30 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.521
+
+- **Struck ID-backed queue heads retire their claims immediately (GH #303).**
+  Ordinary consumption and done-id closeout now release the exact claimed
+  attempt, so a later operator re-add receives a fresh generation instead of
+  inheriting an immortal reported marker.
+- **Queue claims store canonical marker-free text (GH #304).** Lifecycle
+  projection markers are stripped at the shared live-head boundary while
+  priority pins remain intact, keeping stored text, CLI output, anchors,
+  free-text handles, and byte counts stable across requeue.
+- **Explicit skill-install targets honor reload requests (GH #305).** Every
+  install path reports whether it changed `SKILL.md`, and `--reload restart`
+  emits the restart signal for changed explicit harness and root installs
+  instead of silently dropping the option.
+- **Subagent follow-ups preserve their originating queue.** Dispatch briefs now
+  carry the exact queue id, and `queue follow-up` inserts an ordered batch after
+  the exact originating head while failing closed on missing or ambiguous
+  provenance. Mirrored heads in sibling queues remain unchanged.
+- **Grok 4.7 idle composers are recognized without weakening readiness.** The
+  harness accepts the new suggestion-control and numeric Dashboard footer rows,
+  distinguishes ghost suggestions from typed drafts, and still rejects unknown
+  post-composer UI. This restores Run Agent Doc routing for `sdk-pr.md`-style
+  sessions that previously timed out as “still booting.”
+
 ## 0.35.520
 
 - **Dogfood actions can be customized without weakening issue safety.** The

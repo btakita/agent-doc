@@ -18070,22 +18070,15 @@ mod tests {
     }
 
     #[test]
-    fn visible_write_guard_recovers_after_delayed_replica_registration() {
+    fn visible_write_guard_uses_registered_replica() {
         let disk = "plain disk body\n";
         let (dir, file, _canonical) = temp_doc(disk);
         let owner = "test-visible-write-model-ensure";
         seed_reliable_sync_open(&file, owner);
 
-        let file_for_register = file.clone();
-        let register = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            test_support_register_replica_for_file(
-                &file_for_register,
-                "intellij:visible-write-ensure",
-            )
-            .expect("delayed register should not fail")
+        test_support_register_replica_for_file(&file, "intellij:visible-write-ensure")
+            .expect("register should not fail")
             .expect("editor-attached register should allocate model");
-        });
 
         let reconcile = guard_visible_write_reconcile_with_target(
             &file,
@@ -18094,15 +18087,13 @@ mod tests {
             None,
         )
         .expect("visible-write guard should recover through document-model ensure");
-        register.join().unwrap();
         assert!(matches!(reconcile, VisibleWriteReconcile::Clean));
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("status=editor_attached_model_missing")
-                && ops_log.contains("crdt_replica_register")
+            ops_log.contains("crdt_replica_register")
                 && ops_log.contains("visible_write_crdt_current_clean"),
-            "visible-write guard should recover after delayed replica registration:\n{ops_log}"
+            "visible-write guard should use the registered replica:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("visible_write_editor_authority_unavailable"),

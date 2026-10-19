@@ -21,9 +21,8 @@ queue: go
 
 ## Status
 
-<!-- agent:status patch=replace sync="Track the latest published agent-doc release and publication time." -->
+<!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
 <!-- status:sync -->
@@ -228,27 +227,39 @@ Fixed and published in [v0.35.525](https://github.com/btakita/agent-doc/releases
 - `agent:status` now tracks the latest release. Sync is additive by default; `sync-mode="replace"` enables destructive replacement.
 - Tag and attribute documentation is in [tags-and-attributes.md](/home/brian/agent-doc-extract-queue-integ/docs/reference/tags-and-attributes.md) and linked from the README.
 - Final `agent-doc session-check` passed. The retained response was not replayed.
-<!-- agent:boundary:f08de573 -->
+
+### Re: Subagent completed: `subagent:extract_projection_fix` returned work for queue item “do [#extract-coordinated-projection-changed]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=1471c33111a78b09188676f2ff8740316af921c3bba0b125323d4ded8d71907b -->
+> **Chat prompt (#chatprompt):** subagent: fix: • Blocked by hook
+>   └ Session persistence continuation, not a refusal or error: agent-doc Stop hook found active session-document work
+> for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md that has not crossed the binary-owned write
+> boundary. Active prompt: "do [#extract-coordinated-projection-changed]". Continue THIS turn in-pane and persist with
+> `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` or `agent-doc write
+> --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, then run `agent-doc session-check /
+> home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`. Do not send the final answer yet.
+
+### Re: coordinated extraction projection fix — gpt-5 · 2026-10-19T19:22-04:00
+
+Fixed, independently reviewed, integrated, installed, and pushed to `origin/main` as `dc727c4054`.
+
+The active Stop-hook message was a correct session continuation, not a new Stop-hook defect: a successor queue head arrived after the predecessor response committed, so the hook kept this turn open rather than misattributing the old response. The Codex wire protocol represents that healthy continuation with `decision: "block"`, which the UI labels “Blocked by hook”; all 119 Stop-hook tests pass.
+
+The actual queued defect was coordinated focused extraction changing disk without advancing controller CRDT canonical. On resume, the old canonical was restored and the next persist returned `projection_changed`. The fix adds a controller/relay detached canonical write guarded by a zero-live-replica fence under the document hub lock, advances canonical before materializing disk, rolls canonical back if disk projection fails, and makes exact replay idempotent. Two-document rollback now uses exact after-to-before canonical bases and fails closed if an editor reattaches.
+
+Independent review approved the change with no actionable findings. Focused relay, realtime, and extraction tests passed, and the integrated authoritative `make check` passed: 11,104 primary tests, editor simulations, VS Code tests, all JetBrains builds, bootstrap checks, and the unchanged TLA proof. `make install` completed; the CLI/native library and editor packages are locally updated, JetBrains dynamically replaced the changed package, and no IDE restart is required.
+
+The live `sdk-demo.md` replica is already healthy and writable with no projection lag. I did not force disk, repair either SDK document, or rerun the preserved live transfer. The latest published release remains v0.35.525; this extraction fix is post-release on `main`, not a newly published release.
+
+The review noted one non-blocking coverage opportunity: fault injection for disk-persist failure and full second-document rollback. Code inspection found the rollback paths correct, so no follow-up item was required for this fix.
+<!-- agent:boundary:198801fa -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Queue: Main
-<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/311~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: include #311~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~bossroom-p2p.md: Claim Tmux Pane, then Run Agent Doc, then Ctrl+c in the Claude session, then switch to agent to codex using `agent: codex`, then Restart Agent: got a prompt saying a turn was occurring. Clicked Interrupt and Restart then the followup Interrupt and Restart. Nothing happened. The Claude Code prompt was submitted and the turn started in Claude Code, not Codex. `agent: codex` was removed from the document.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~I saw `■ Selected model is at capacity. Please try a different model.`, and a `continue`, then another `■ Selected model is at capacity. Please try a different model.`. Please confirm the behavior and work on any necessary fixes. Run Agent Doc has an error as well, presumably due to agent-doc's state not recognizing the error: [route] a turn is already running on /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second trigger was sent and nothing needs recovery. The live turn owns the queue; head "release + publish" is in its scope and is answered or drained at that turn's boundary. Do not cancel or recover it (owner: [session-check] IN PROGRESS: cycle `cycle-1792424550895` remains `preflight_started` (preflight_started) while owning pane `%2` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.) owner_turn=live ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/312~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/313~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~the queue id=issues gained "In sdk-demo.md, I deleted some struck queue items right after they were struck. Got an error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.: I have since undid my changes." and lost the prompt to watch https://github.com/btakita/agent-doc/issues.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/314~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/315~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~sdk-demo.md is Read Only. Why? Did agent-doc make it read-only? It should not have.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish including PRs #312-#315~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#extract-coordinated-projection-changed]
+<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -273,7 +284,6 @@ Fixed and published in [v0.35.525](https://github.com/btakita/agent-doc/releases
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#extract-coordinated-projection-changed] [agent-doc] Reproduce and fix coordinated focused extraction returning projection_changed after a nominally applied operation when both source and target live editor replicas are fresh; preserve editor authority and prove the transfer commits exactly once without force-disk or repair.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 

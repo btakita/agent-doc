@@ -1773,12 +1773,11 @@ mod th {
     ) {
         {
             let _tmux_guard = tmux_start_lock();
-            assert!(
-                wait_for_shell(tmux, pane, 5000),
-                "shell did not become ready before driving {} to retained-dead",
-                pane
-            );
-            send_keys_with_retry(tmux, pane, command);
+            let shell_command = format!("exec /bin/sh -c {}", shell_quote(command));
+            tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, &shell_command])
+                .unwrap_or_else(|error| {
+                    panic!("failed to respawn pane {pane} for retained-dead test: {error}")
+                });
         }
         assert!(
             wait_for_pane_dead(tmux, pane, timeout),
@@ -1789,26 +1788,8 @@ mod th {
             "pane should still be retained by tmux"
         );
     }
-    pub(crate) fn send_keys_with_retry(tmux: &IsolatedTmux, pane: &str, text: &str) {
-        let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(3);
-        let poll = std::time::Duration::from_millis(100);
-        let mut last_err = None;
-
-        while start.elapsed() < timeout {
-            match tmux.send_keys(pane, text) {
-                Ok(()) => return,
-                Err(err) => last_err = Some(err.to_string()),
-            }
-            std::thread::sleep(poll);
-        }
-
-        panic!(
-            "failed to send keys to pane {} after {:.1}s: {}",
-            pane,
-            start.elapsed().as_secs_f64(),
-            last_err.unwrap_or_else(|| "unknown error".to_string())
-        );
+    fn shell_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1831,17 +1812,6 @@ mod th {
             self.capture
                 .as_ref()
                 .is_ok_and(|content| mock_agent_prompt_visible(content))
-        }
-
-        fn shell_ready(&self, probe_accepted: bool) -> bool {
-            self.pane_liveness == PaneLivenessEvidence::Alive
-                && probe_accepted
-                && self.current_command.as_deref().is_some_and(|command| {
-                    matches!(
-                        pane_process_kind_from_current_command(command),
-                        TmuxPaneProcessKind::IdleShell(_)
-                    )
-                })
         }
 
         fn mock_agent_ready(&self, pane: &str) -> bool {
@@ -1901,31 +1871,6 @@ mod th {
         }
     }
 
-    fn wait_for_shell_readiness_probe(
-        tmux: &IsolatedTmux,
-        pane: &str,
-        file: &std::path::Path,
-        timeout: std::time::Duration,
-    ) -> Result<MockAgentReadinessEvidence, MockAgentReadinessEvidence> {
-        let probe_dir = tempfile::tempdir().expect("create shell readiness probe directory");
-        let probe_path = probe_dir.path().join("accepted");
-        let quoted_probe_path =
-            format!("'{}'", probe_path.to_string_lossy().replace('\'', "'\\''"));
-        send_keys_with_retry(tmux, pane, &format!(": > {quoted_probe_path}"));
-        let start = std::time::Instant::now();
-        let mut evidence = observe_mock_agent_readiness(tmux, pane, file);
-        while start.elapsed() < timeout {
-            if evidence.shell_ready(probe_path.is_file()) {
-                return Ok(evidence);
-            }
-            if evidence.pane_liveness == PaneLivenessEvidence::RetainedDead {
-                return Err(evidence);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            evidence = observe_mock_agent_readiness(tmux, pane, file);
-        }
-        Err(evidence)
-    }
     pub(crate) fn launch_mock_agent_doc(
         tmux: &IsolatedTmux,
         pane: &str,
@@ -1934,20 +1879,15 @@ mod th {
     ) {
         {
             let _tmux_guard = tmux_start_lock();
-            let shell_evidence =
-                wait_for_shell_readiness_probe(tmux, pane, file, std::time::Duration::from_secs(5))
-                    .unwrap_or_else(|evidence| {
-                        panic!(
-                            "shell in {pane} did not accept the readiness probe: {}",
-                            evidence.diagnostic()
-                        )
-                    });
-            debug_assert!(shell_evidence.shell_ready(true));
-            send_keys_with_retry(
-                tmux,
-                pane,
-                &format!("exec {} {}", script.display(), file.display()),
+            let command = format!(
+                "exec {} {}",
+                shell_quote(&script.to_string_lossy()),
+                shell_quote(&file.to_string_lossy())
             );
+            tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, &command])
+                .unwrap_or_else(|error| {
+                    panic!("failed to respawn mock agent in pane {pane}: {error}")
+                });
         }
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(8);
@@ -2025,13 +1965,6 @@ mod th {
             assert!(
                 evidence(PaneLivenessEvidence::Alive, Ok(">\n"), Some(pane)).mock_agent_ready(pane)
             );
-        }
-
-        #[test]
-        fn shell_readiness_requires_executed_probe_evidence() {
-            let evidence = evidence(PaneLivenessEvidence::Alive, Ok(""), None);
-            assert!(!evidence.shell_ready(false));
-            assert!(evidence.shell_ready(true));
         }
 
         #[test]
@@ -2145,7 +2078,7 @@ mod tests {
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn mock_agent_launch_waits_for_shell_acceptance_not_process_name() {
+    fn mock_agent_launch_does_not_depend_on_shell_command_acceptance() {
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-test-delayed-shell-ready");
         let cwd = test_cwd();
         let dir = tempfile::tempdir().unwrap();
@@ -2156,10 +2089,9 @@ mod tests {
         assert!(wait_for_shell(&iso, &pane, 5000));
 
         // The pane still reports a shell-shaped foreground process while the
-        // wrapper delays replacing itself with the shell that can accept the
-        // next command. Process identity alone was the old false readiness
-        // signal. The probe command remains queued until the new shell executes
-        // it and creates the readiness file; echoed command text is not proof.
+        // wrapper delays replacing itself with the shell that could accept the
+        // next typed command. The test launch must bypass that interactive
+        // startup race and replace the pane process directly.
         iso.send_keys(&pane, "exec /bin/sh -c 'sleep 1; exec /bin/sh'")
             .unwrap();
 

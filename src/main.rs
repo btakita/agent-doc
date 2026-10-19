@@ -299,6 +299,10 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             agent_doc_route_io::invocation::BackgroundExistingPaneOnlyGuard::set(
                 invocation.background_existing_pane_only,
             );
+        let _background_recovered_actor_fallback =
+            agent_doc_route_io::invocation::BackgroundRecoveredActorFallbackGuard::set(
+                invocation.background_recovered_actor_fallback,
+            );
         let _layout_owned_by_controller =
             agent_doc_route_io::invocation::LayoutOwnedByControllerGuard::set(
                 invocation.layout_owned_by_controller,

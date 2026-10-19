@@ -10584,7 +10584,10 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
         orphan_drain.contains("enqueue_orphan_drain_route(invocation)")
             && orphan_drain.contains("pane: Some(record.pane_id.clone())")
             && orphan_drain.contains("prune_before_lookup: false")
-            && orphan_drain.contains("background_existing_pane_only: true"),
+            && orphan_drain.contains("background_existing_pane_only: true")
+            && orphan_drain
+                .contains("background_recovered_actor_fallback: recovered_actor_fallback")
+            && orphan_drain.contains("orphan_drain_same_attempt(last_dispatch.as_ref()"),
         "orphan drain must enqueue existing-pane-only target-scoped work without a fleet prune"
     );
     assert!(
@@ -10617,9 +10620,13 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
     assert!(
         pane_resolution.contains(
-            "outcome=allowed reason=supervisor_recovered action=dispatch_via_authoritative_actor",
-        ) && !pane_resolution.contains("outcome=suppressed reason=supervisor_recovered"),
-        "a recovered supervisor must receive the orphan dispatch instead of turning suppression into false success (GH #307)"
+            "outcome=deferred reason=supervisor_recovered action=await_idle_watch",
+        ) && pane_resolution.contains(
+            "outcome=allowed reason=recovered_supervisor_missed_backoff action=dispatch_via_authoritative_actor",
+        ) && pane_resolution.contains("background_recovered_actor_fallback()")
+            && pane_resolution.contains("record_route_deferral(format!(")
+            && !pane_resolution.contains("outcome=suppressed reason=supervisor_recovered"),
+        "a recovered supervisor gets one fail-closed idle-watch interval followed by a bounded orphan fallback, never false success (GH #307)"
     );
     let authoritative_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))

@@ -22,6 +22,9 @@ thread_local! {
     /// alternate pane, or cold-start a replacement. Foreground editor routes
     /// leave this false and retain the normal routing behavior.
     static BACKGROUND_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
+    /// This background route is the bounded retry after a recovered supervisor
+    /// failed to drain during the preceding orphan-dispatch backoff interval.
+    static BACKGROUND_RECOVERED_ACTOR_FALLBACK: Cell<bool> = const { Cell::new(false) };
     /// A no-layout route invoked from a pane that owns another document may
     /// reuse an already-proven target, but must not change tmux topology or
     /// focus. This is the automatic child-route counterpart to controller
@@ -185,6 +188,10 @@ pub fn background_existing_pane_only() -> bool {
     BACKGROUND_EXISTING_PANE_ONLY.with(Cell::get)
 }
 
+pub fn background_recovered_actor_fallback() -> bool {
+    BACKGROUND_RECOVERED_ACTOR_FALLBACK.with(Cell::get)
+}
+
 pub fn cross_document_existing_pane_only() -> bool {
     CROSS_DOCUMENT_EXISTING_PANE_ONLY.with(Cell::get)
 }
@@ -280,6 +287,23 @@ impl BackgroundExistingPaneOnlyGuard {
 impl Drop for BackgroundExistingPaneOnlyGuard {
     fn drop(&mut self) {
         BACKGROUND_EXISTING_PANE_ONLY.with(|cell| cell.set(self.previous));
+    }
+}
+
+pub struct BackgroundRecoveredActorFallbackGuard {
+    previous: bool,
+}
+
+impl BackgroundRecoveredActorFallbackGuard {
+    pub fn set(value: bool) -> Self {
+        let previous = BACKGROUND_RECOVERED_ACTOR_FALLBACK.with(|cell| cell.replace(value));
+        Self { previous }
+    }
+}
+
+impl Drop for BackgroundRecoveredActorFallbackGuard {
+    fn drop(&mut self) {
+        BACKGROUND_RECOVERED_ACTOR_FALLBACK.with(|cell| cell.set(self.previous));
     }
 }
 

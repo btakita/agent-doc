@@ -399,11 +399,13 @@ a closed actor record is replaceable through the stale-authority path.
   dispatch possible (`orphan_drain_may_dispatch`: active queue and a drainable
   head).
 - If an orphan-drain route finds that the authoritative supervisor recovered
-  after the sweep, it must continue the dispatch through that authoritative
-  actor. It must not return the pane as a successful suppression: that false
-  success leaves the head queued forever and repeats every backoff interval
-  (GH #307). The recovered route remains background-only: it neither rescues a
-  stashed pane nor changes tmux focus or layout.
+  after the sweep, its first attempt fails closed and yields one bounded
+  backoff interval to the recovered idle watch. That preserves the idle
+  watch's ownership of queue auto-clear. If the head is still orphaned at the
+  next attempt, route dispatches through the authoritative actor as a bounded
+  fallback. Neither outcome may return a successful no-op (GH #307). The
+  recovered route remains background-only: it neither rescues a stashed pane
+  nor changes tmux focus or layout.
 - Codex background-terminal banners are active-turn evidence. If recent pane
   output contains `Waiting for background terminal (... esc to interrupt)`, the
   supervisor idle-queue watch and route readiness checks must treat the pane as

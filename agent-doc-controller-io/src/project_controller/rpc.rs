@@ -11934,6 +11934,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
             force_disk: payload.force_disk.unwrap_or(false),
             prune_before_lookup: true,
             background_existing_pane_only: false,
+            background_recovered_actor_fallback: false,
             // `#routelaterescue`: the layout above already converged; from here the
             // layout plane is the only topology writer for this route.
             layout_owned_by_controller: true,
@@ -18609,6 +18610,40 @@ fn drain_predecessor_after_promotion(
 const ORPHAN_DRAIN_BACKOFF_SCOPE: &str = "queue_orphan_drain_backoff";
 const ORPHAN_DRAIN_BACKOFF_HOLDER: &str = "controller_orphan_drain";
 
+fn orphan_drain_attempt_holder(
+    file: &Path,
+    revision: Option<&agent_doc_crdt_relay_io::CurrentRevision>,
+    detached_content: &str,
+    head: &str,
+) -> String {
+    let authority = revision.map_or_else(
+        || {
+            let metadata = std::fs::metadata(file).ok();
+            let modified_nanos = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default();
+            format!(
+                "detached:{modified_nanos}:{}:{}",
+                metadata.as_ref().map_or(0, |metadata| metadata.len()),
+                agent_doc_hash::content_hash(detached_content),
+            )
+        },
+        |revision| format!("live:{revision:?}"),
+    );
+    let digest = agent_doc_hash::content_hash(&format!("{authority}\n{head}"));
+    format!("{ORPHAN_DRAIN_BACKOFF_HOLDER}:{digest}")
+}
+
+fn orphan_drain_same_attempt(
+    last_dispatch: Option<&state_store::CoordinationLeaseRecord>,
+    current_holder: &str,
+) -> bool {
+    last_dispatch.is_some_and(|lease| lease.holder == current_holder)
+}
+
 fn log_orphan_drain_event(
     file: &Path,
     event: agent_doc_controller::orphan_drain::OrphanDrainEvent,
@@ -18788,6 +18823,32 @@ fn orphan_drain_pause_suppression_transition(file: &Path, suppressed: bool) -> b
     }
 }
 
+#[cfg(test)]
+mod orphan_drain_attempt_tests {
+    use super::*;
+
+    fn lease(holder: &str) -> state_store::CoordinationLeaseRecord {
+        state_store::CoordinationLeaseRecord {
+            scope_kind: ORPHAN_DRAIN_BACKOFF_SCOPE.to_string(),
+            scope_id: "document".to_string(),
+            holder: holder.to_string(),
+            holder_pid: Some(7),
+            heartbeat_secs: 11,
+        }
+    }
+
+    #[test]
+    fn recovered_actor_fallback_requires_the_same_orphan_attempt() {
+        let current = format!("{ORPHAN_DRAIN_BACKOFF_HOLDER}:current");
+        let stale = lease(&format!("{ORPHAN_DRAIN_BACKOFF_HOLDER}:stale"));
+        let matching = lease(&current);
+
+        assert!(!orphan_drain_same_attempt(None, &current));
+        assert!(!orphan_drain_same_attempt(Some(&stale), &current));
+        assert!(orphan_drain_same_attempt(Some(&matching), &current));
+    }
+}
+
 fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
     use agent_doc_controller::orphan_drain::{
         DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainEvent,
@@ -18923,7 +18984,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
                     )
                 };
-                if let Some(revision) = gate_revision {
+                if let Some(revision) = gate_revision.clone() {
                     orphan_drain_memoize_head(&file, revision, head.clone());
                 }
                 head
@@ -19032,6 +19093,14 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         ) {
             continue;
         }
+        let attempt_holder = orphan_drain_attempt_holder(
+            &file,
+            gate_revision.as_ref(),
+            &content,
+            drainable.as_deref().unwrap_or("unknown"),
+        );
+        let recovered_actor_fallback =
+            orphan_drain_same_attempt(last_dispatch.as_ref(), &attempt_holder);
         let observation = OrphanDrainObservation {
             // The supervisor-scope resolver owns activation (`queue: go`,
             // queue-tag `go`, and legacy active state) as well as drainability.
@@ -19042,6 +19111,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             loop_owns_drain,
             pane_busy: record.state != agent_doc_controller::actor::ActorState::Ready,
             secs_since_last_dispatch: last_dispatch
+                .as_ref()
                 .map(|lease| now.saturating_sub(lease.heartbeat_secs)),
         };
 
@@ -19054,7 +19124,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         let dispatch_claim = state_store::CoordinationLeaseRecord {
             scope_kind: ORPHAN_DRAIN_BACKOFF_SCOPE.to_string(),
             scope_id: document_hash,
-            holder: ORPHAN_DRAIN_BACKOFF_HOLDER.to_string(),
+            holder: attempt_holder,
             holder_pid: Some(std::process::id()),
             heartbeat_secs: now,
         };
@@ -19102,6 +19172,10 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             force_disk: false,
             prune_before_lookup: false,
             background_existing_pane_only: true,
+            // The first recovered-supervisor race yields one backoff interval
+            // so its idle watch can own queue auto-clear. A later orphan
+            // attempt is the bounded authoritative-actor fallback (GH #307).
+            background_recovered_actor_fallback: recovered_actor_fallback,
             layout_owned_by_controller: false,
             navigation_client_id: None,
         };

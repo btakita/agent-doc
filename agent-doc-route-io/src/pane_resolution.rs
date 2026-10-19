@@ -88,6 +88,22 @@ impl BackgroundExistingPaneDecision {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveredSupervisorOrphanAction {
+    DeferToIdleWatch,
+    DispatchBoundedFallback,
+}
+
+const fn recovered_supervisor_orphan_action(
+    same_attempt_already_deferred: bool,
+) -> RecoveredSupervisorOrphanAction {
+    if same_attempt_already_deferred {
+        RecoveredSupervisorOrphanAction::DispatchBoundedFallback
+    } else {
+        RecoveredSupervisorOrphanAction::DeferToIdleWatch
+    }
+}
+
 /// Pure policy used by the route and SimWorld. A background recovery route must
 /// fail closed instead of searching, rescuing, or provisioning when its target
 /// changed after the watchdog observation.
@@ -488,10 +504,28 @@ pub fn resolve_or_create_pane_dispatch_only(
             supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime)
         }) {
             let existing_pane = pane.expect("background pane policy proved an explicit pane");
+            if recovered_supervisor_orphan_action(
+                crate::invocation::background_recovered_actor_fallback(),
+            ) == RecoveredSupervisorOrphanAction::DeferToIdleWatch
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_background_existing_pane_guard file={} pane={} outcome=deferred reason=supervisor_recovered action=await_idle_watch focus_effect=preserved pane_effect=none",
+                        file.display(),
+                        existing_pane,
+                    ),
+                );
+                crate::invocation::record_route_deferral(format!(
+                    "[route] background recovery for {} yielded one bounded interval to the recovered supervisor idle watch",
+                    file.display(),
+                ));
+                return Ok(existing_pane.to_string());
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_background_existing_pane_guard file={} pane={} outcome=allowed reason=supervisor_recovered action=dispatch_via_authoritative_actor focus_effect=preserved pane_effect=none",
+                    "route_background_existing_pane_guard file={} pane={} outcome=allowed reason=recovered_supervisor_missed_backoff action=dispatch_via_authoritative_actor focus_effect=preserved pane_effect=none",
                     file.display(),
                     existing_pane,
                 ),
@@ -2058,7 +2092,10 @@ pub fn controller_dispatch_actor_state(
 
 #[cfg(test)]
 mod gh82_route_occupant_messages {
-    use super::{foreign_harness_pane_release_note, other_document_route_refusal};
+    use super::{
+        RecoveredSupervisorOrphanAction, foreign_harness_pane_release_note,
+        other_document_route_refusal, recovered_supervisor_orphan_action,
+    };
     use std::path::Path;
 
     #[test]
@@ -2087,5 +2124,17 @@ mod gh82_route_occupant_messages {
         assert!(note.contains("owns no document"), "{note}");
         assert!(note.contains("routing to a new pane"), "{note}");
         assert!(note.contains("leaving %53 untouched"), "{note}");
+    }
+
+    #[test]
+    fn recovered_supervisor_gets_one_idle_watch_grace_before_fallback() {
+        assert_eq!(
+            recovered_supervisor_orphan_action(false),
+            RecoveredSupervisorOrphanAction::DeferToIdleWatch,
+        );
+        assert_eq!(
+            recovered_supervisor_orphan_action(true),
+            RecoveredSupervisorOrphanAction::DispatchBoundedFallback,
+        );
     }
 }

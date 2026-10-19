@@ -22,6 +22,8 @@ queue: go
 ## Status
 
 <!-- agent:status patch=replace -->
+
+📥 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 <!-- /agent:status -->
  
@@ -113,12 +115,12 @@ The separate `release + publish` queue item remains with its pre-existing owner 
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/308
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/309
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/310
-- 📥 re: `agent:done` `archive` relative path. We made a breaking change to make the relative path based on the current document. Can we support both the project relative path behavior and document relative path behavior? What do you suggest?
-- 📥 Codex is still getting stuck on `■ Selected model is at capacity. Please try a different model.` and agent doc is not prompting `continue`.
-- 📥 Does `agent-doc extract` also auto-claim? See sdk-demo.md.
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/308~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/309~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/310~~
+- ~~re: `agent:done` `archive` relative path. We made a breaking change to make the relative path based on the current document. Can we support both the project relative path behavior and document relative path behavior? What do you suggest?~~
+- ~~Codex is still getting stuck on `■ Selected model is at capacity. Please try a different model.` and agent doc is not prompting `continue`.~~
+- ~~Does `agent-doc extract` also auto-claim? See sdk-demo.md.~~
 - 📥 release + publish
 <!-- /agent:queue -->
 

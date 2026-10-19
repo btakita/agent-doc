@@ -547,6 +547,12 @@ pub struct FreeTextPromotion {
     pub id: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct FreeTextAdmissionTarget<'a> {
+    pub document_id: &'a str,
+    pub queue_id: &'a str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedFreeTextAdmission {
     pub content: String,
@@ -555,6 +561,7 @@ pub struct PreparedFreeTextAdmission {
     pub warnings: Vec<String>,
     /// Queue heads promoted into backlog ids by this admission.
     pub promotions: Vec<FreeTextPromotion>,
+    queue_id: String,
     queue_entries: Vec<crate::document_queue::QueueEntry>,
     queue_start_required: bool,
 }
@@ -562,10 +569,8 @@ pub struct PreparedFreeTextAdmission {
 impl PreparedFreeTextAdmission {
     pub fn finish(self, execution: FreeTextAdmissionExecution) -> Result<FreeTextAdmission> {
         let components = agent_doc_element::element::parse(&self.content)?;
-        let queue = components
-            .iter()
-            .find(|c| c.name == "queue")
-            .context("free-text admission: queue component missing")?
+        let queue = crate::queue_set::component_for_id(&self.content, &components, &self.queue_id)?
+            .context("free-text admission: selected queue component missing")?
             .clone();
         let mut queue_entries = self.queue_entries;
         let queued_ids = match execution {
@@ -621,7 +626,7 @@ impl PreparedFreeTextAdmission {
         let new_queue_body = crate::document_queue::render(&queue_entries);
         let mut content = queue.replace_content(&self.content, &new_queue_body);
         if execution == FreeTextAdmissionExecution::Queue {
-            content = ensure_queue_priority_attr(&content)?;
+            content = ensure_queue_priority_attr_for_queue(&content, &self.queue_id)?;
         }
         Ok(FreeTextAdmission {
             content,
@@ -670,14 +675,50 @@ pub fn prepare_free_text_admission(
     queue_start_required: bool,
     document_id: &str,
 ) -> Result<Option<PreparedFreeTextAdmission>> {
-    prepare_free_text_admission_with_reserved(
+    let queue_id = first_queue_id(content)?;
+    prepare_free_text_admission_for_queue_with_reserved(
         content,
         entries,
         exchange_prompt,
         queue_scope,
         queue_start_required,
-        document_id,
+        FreeTextAdmissionTarget {
+            document_id,
+            queue_id: &queue_id,
+        },
         &HashSet::new(),
+    )
+}
+
+fn first_queue_id(content: &str) -> Result<String> {
+    let components = agent_doc_element::element::parse(content)?;
+    crate::queue_set::QueueSet::parse(content, &components)
+        .map_err(anyhow::Error::new)?
+        .blocks()
+        .first()
+        .map(|block| block.id.clone())
+        .context("free-text admission: queue component missing")
+}
+
+/// Prepare free-text admission for one identified queue while reserving
+/// identities held outside the document bytes.
+pub fn prepare_free_text_admission_for_queue_with_reserved(
+    content: &str,
+    entries: &[crate::document_queue::QueueEntry],
+    exchange_prompt: Option<&str>,
+    queue_scope: &FreeTextAdmissionScope,
+    queue_start_required: bool,
+    target: FreeTextAdmissionTarget<'_>,
+    externally_reserved: &HashSet<String>,
+) -> Result<Option<PreparedFreeTextAdmission>> {
+    prepare_free_text_admission_for_queue(
+        content,
+        entries,
+        exchange_prompt,
+        queue_scope,
+        queue_start_required,
+        target,
+        externally_reserved,
     )
 }
 
@@ -690,6 +731,30 @@ pub fn prepare_free_text_admission_with_reserved(
     queue_scope: &FreeTextAdmissionScope,
     queue_start_required: bool,
     document_id: &str,
+    externally_reserved: &HashSet<String>,
+) -> Result<Option<PreparedFreeTextAdmission>> {
+    let queue_id = first_queue_id(content)?;
+    prepare_free_text_admission_for_queue(
+        content,
+        entries,
+        exchange_prompt,
+        queue_scope,
+        queue_start_required,
+        FreeTextAdmissionTarget {
+            document_id,
+            queue_id: &queue_id,
+        },
+        externally_reserved,
+    )
+}
+
+fn prepare_free_text_admission_for_queue(
+    content: &str,
+    entries: &[crate::document_queue::QueueEntry],
+    exchange_prompt: Option<&str>,
+    queue_scope: &FreeTextAdmissionScope,
+    queue_start_required: bool,
+    target: FreeTextAdmissionTarget<'_>,
     externally_reserved: &HashSet<String>,
 ) -> Result<Option<PreparedFreeTextAdmission>> {
     let prompts = collect_actionable_free_text_prompts(exchange_prompt, entries, queue_scope);
@@ -763,7 +828,7 @@ pub fn prepare_free_text_admission_with_reserved(
         let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes_reserved(
             &backlog_body,
             &texts_to_add,
-            document_id,
+            target.document_id,
             false,
             &reserved,
         )?;
@@ -842,6 +907,7 @@ pub fn prepare_free_text_admission_with_reserved(
         admitted_count: admitted_keys.len(),
         warnings,
         promotions,
+        queue_id: target.queue_id.to_string(),
         queue_entries,
         queue_start_required,
     }))
@@ -871,11 +937,13 @@ pub fn queue_entry_is_admitted_free_text(
 }
 
 pub fn ensure_queue_priority_attr(content: &str) -> Result<String> {
+    let queue_id = first_queue_id(content)?;
+    ensure_queue_priority_attr_for_queue(content, &queue_id)
+}
+
+pub fn ensure_queue_priority_attr_for_queue(content: &str, queue_id: &str) -> Result<String> {
     let components = agent_doc_element::element::parse(content)?;
-    let Some(queue) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Some(queue) = crate::queue_set::component_for_id(content, &components, queue_id)? else {
         return Ok(content.to_string());
     };
     if queue.attrs.contains_key("priority") {
@@ -1251,6 +1319,17 @@ mod tests {
         crate::document_queue::parse(queue.content(content)).unwrap()
     }
 
+    fn queue_entries_for_id(
+        content: &str,
+        queue_id: &str,
+    ) -> Vec<crate::document_queue::QueueEntry> {
+        let components = agent_doc_element::element::parse(content).unwrap();
+        let queue = crate::queue_set::component_for_id(content, &components, queue_id)
+            .unwrap()
+            .unwrap();
+        crate::document_queue::parse(queue.content(content)).unwrap()
+    }
+
     #[test]
     fn prepare_and_finish_queue_execution_adds_backlog_and_synced_queue() {
         let content = concat!(
@@ -1296,6 +1375,56 @@ mod tests {
             crate::document_queue::QueueEntry::Prompt(prompt)
                 if prompt.text == "Implement checkout setup"
         )));
+    }
+
+    /// GH #310: admission is addressed by the selected queue id. A blocked or
+    /// empty first queue must not receive the later queue's promoted entries.
+    #[test]
+    fn admission_writes_back_to_the_selected_queue_only() {
+        let content = concat!(
+            "<!-- agent:queue id=first priority -->\n",
+            "- ~~preserve prior result~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=selected -->\n",
+            "- Implement checkout setup\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_for_id(content, "selected");
+        let first_before = queue_entries_for_id(content, "first");
+
+        let prepared = prepare_free_text_admission_for_queue_with_reserved(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            FreeTextAdmissionTarget {
+                document_id: "doc-id",
+                queue_id: "selected",
+            },
+            &HashSet::new(),
+        )
+        .unwrap()
+        .unwrap();
+        let admitted_id = prepared.unique_ids[0].clone();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+
+        assert_eq!(
+            queue_entries_for_id(&admission.content, "first"),
+            first_before
+        );
+        let selected = queue_entries_for_id(&admission.content, "selected");
+        assert!(selected.iter().any(|entry| matches!(
+            entry,
+            crate::document_queue::QueueEntry::Prompt(prompt)
+                if prompt.text == format!("do [#{admitted_id}]")
+        )));
+        assert!(!admission.content.contains("id=first priority priority"));
+        assert!(
+            admission
+                .content
+                .contains("agent:queue id=selected priority -->")
+        );
     }
 
     #[test]

@@ -28,9 +28,10 @@ use agent_doc_queue::{
         strip_queue_activation_tokens_in_content,
     },
     free_text_admission::{
-        FreeTextAdmissionExecution, FreeTextAdmissionScope, FreeTextCoinGate,
+        FreeTextAdmissionExecution, FreeTextAdmissionScope, FreeTextAdmissionTarget,
+        FreeTextCoinGate,
         append_empty_agent_component, collect_actionable_free_text_prompts,
-        gate_free_text_admission_scope, prepare_free_text_admission_with_reserved,
+        gate_free_text_admission_scope, prepare_free_text_admission_for_queue_with_reserved,
         queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
     },
     queue_convergence::{
@@ -4903,7 +4904,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     } else {
         HashSet::new()
     };
-    if let Some(prepared_admission) = prepare_free_text_admission_with_reserved(
+    if let Some(prepared_admission) = prepare_free_text_admission_for_queue_with_reserved(
         &current_content,
         &entries,
         exchange_prompt.as_deref(),
@@ -4911,7 +4912,10 @@ pub fn run_queue_maintenance_with_coin_gate(
         // `#queueeditgo`: an operator `queue: pause` holds the queue; admission
         // may still file the free text, but it must not start the queue.
         !queue_active_for_free_text && !queue_paused_by_operator,
-        &document_id,
+        FreeTextAdmissionTarget {
+            document_id: &document_id,
+            queue_id: &selected_queue_id,
+        },
         &archived_identity_ids,
     )? {
         queue_warnings.extend(

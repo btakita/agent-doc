@@ -458,13 +458,16 @@ impl QueueScheduleWorker {
             }
             let spec = schedule.spec.expect("valid schedule has a spec");
             let live = queue_schedule::live_heads_for_queue(&text, &queue_id)?;
+            let completed = queue_schedule::completed_heads_for_queue(&text, &queue_id)?;
             let (state, outcome, admitted, repaired) =
                 mutate_schedule_state(file, &queue_id, now, |prev| {
                     let admitted = prev.is_none();
                     let state = queue_schedule::reconcile(prev, &spec, now);
                     let (state, repaired) =
                         bind_queue_owner(state, &spec, &queue_id, queue_count, now, !admitted);
-                    let (state, outcome) = queue_schedule::observe(state, &spec, &live, now);
+                    let (state, outcome) = queue_schedule::observe_with_completed(
+                        state, &spec, &live, &completed, now,
+                    );
                     (Some(state.clone()), (state, outcome, admitted, repaired))
                 })?;
             if repaired {
@@ -1314,7 +1317,7 @@ mod tests {
         worker.run_due(&due(&file));
         io.fail_restore
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        *io.text.lock() = doc("loop", "");
+        *io.text.lock() = doc("loop", "- ~~a~~\n");
         worker.refresh(&file);
         let state = load_schedule_state(&file).unwrap().unwrap();
         assert!(state.restore_pending.is_some());

@@ -5354,6 +5354,7 @@ fn test_agent_doc_queue_owns_free_text_admission_policy() {
         "pub fn collect_actionable_free_text_prompts",
         "pub fn prepare_free_text_admission",
         "pub fn prepare_free_text_admission_with_reserved",
+        "pub fn prepare_free_text_admission_for_queue_with_reserved",
         "pub fn append_empty_agent_component",
         "pub fn queue_entry_is_admitted_free_text",
         "pub fn ensure_queue_priority_attr",
@@ -5400,7 +5401,7 @@ fn test_agent_doc_queue_owns_free_text_admission_policy() {
     assert!(
         maintenance.contains("free_text_admission::{")
             && maintenance.contains("queue_free_text_admission_scope(")
-            && maintenance.contains("prepare_free_text_admission_with_reserved("),
+            && maintenance.contains("prepare_free_text_admission_for_queue_with_reserved("),
         "preflight maintenance should adapt snapshots into focused queue free-text admission policy"
     );
 }

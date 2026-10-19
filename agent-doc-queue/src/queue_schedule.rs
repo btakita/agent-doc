@@ -391,6 +391,25 @@ pub fn live_heads_for_queue(content: &str, queue_id: &str) -> anyhow::Result<Vec
         .collect())
 }
 
+/// Completed head texts retained in one queue body. The scheduler uses this
+/// proof to distinguish a head that ran from a transient editor draft that was
+/// replaced before dispatch.
+pub fn completed_heads_for_queue(content: &str, queue_id: &str) -> anyhow::Result<Vec<String>> {
+    let components = element::parse(content)?;
+    let graph = QueueGraph::parse(content, &components).map_err(anyhow::Error::new)?;
+    let block = graph
+        .block(queue_id)
+        .ok_or_else(|| anyhow::anyhow!("agent:queue id `{queue_id}` not found"))?;
+    Ok(block
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            QueueEntry::Completed(prompt) => Some(prompt.text.clone()),
+            _ => None,
+        })
+        .collect())
+}
+
 pub fn queue_held_by_control_for_queue(content: &str, queue_id: &str) -> anyhow::Result<bool> {
     let components = element::parse(content)?;
     let queue = queue_block(content, &components, queue_id)?;
@@ -828,9 +847,32 @@ pub enum ObserveOutcome {
 /// it runs join the roster so they loop too. Completion is idempotent:
 /// `passes_completed` becomes `max(passes_completed, pass)`.
 pub fn observe(
+    state: QueueScheduleState,
+    spec: &QueueScheduleSpec,
+    live_heads: &[String],
+    now: u64,
+) -> (QueueScheduleState, ObserveOutcome) {
+    observe_inner(state, spec, live_heads, None, now)
+}
+
+/// Observe a queue with explicit completion evidence. During a loop pass, a
+/// roster item that is neither live nor struck-complete never ran; removing it
+/// prevents intermediate operator keystroke states from being restored later.
+pub fn observe_with_completed(
+    state: QueueScheduleState,
+    spec: &QueueScheduleSpec,
+    live_heads: &[String],
+    completed_heads: &[String],
+    now: u64,
+) -> (QueueScheduleState, ObserveOutcome) {
+    observe_inner(state, spec, live_heads, Some(completed_heads), now)
+}
+
+fn observe_inner(
     mut state: QueueScheduleState,
     spec: &QueueScheduleSpec,
     live_heads: &[String],
+    completed_heads: Option<&[String]>,
     now: u64,
 ) -> (QueueScheduleState, ObserveOutcome) {
     let ScheduleWindow::Open { pass, roster, .. } = &mut state.window else {
@@ -841,6 +883,14 @@ pub fn observe(
         live_heads.iter().map(|head| identity(head)).collect();
     let mut grew = false;
     if spec.loop_limit.is_loop() {
+        if let Some(completed_heads) = completed_heads {
+            let completed: std::collections::HashSet<QueueItemIdentity> =
+                completed_heads.iter().map(|head| identity(head)).collect();
+            roster.retain(|item| {
+                let item = identity(item);
+                live.contains(&item) || completed.contains(&item)
+            });
+        }
         let known: std::collections::HashSet<QueueItemIdentity> =
             roster.iter().map(|item| identity(item)).collect();
         for head in live_heads {
@@ -1352,6 +1402,53 @@ mod tests {
         );
         assert_eq!(state.passes_completed, 1);
         assert!(state.restore_pending.is_none());
+    }
+
+    /// GH #310: realtime refreshes can observe every intermediate state of an
+    /// operator-edited line. Only the current live spelling, or a spelling
+    /// proven struck-complete, remains owned by the pass.
+    #[test]
+    fn loop_roster_drops_replaced_typing_states_before_restore() {
+        let spec = spec(&[("interval", "10m"), ("loop", "")]);
+        let state = reconcile(None, &spec, 0);
+        let (state, decision) = fire(state, &spec, 0, &facts(&["#upgrade"]), &UTC);
+        assert_eq!(decision, FireDecision::Opened);
+
+        let (state, outcome) =
+            observe_with_completed(state, &spec, &heads(&["#upgrade", "refresh prfex"]), &[], 1);
+        assert_eq!(outcome, ObserveOutcome::RosterGrew);
+        let (state, outcome) = observe_with_completed(
+            state,
+            &spec,
+            &heads(&["#upgrade", "refresh prefix"]),
+            &[],
+            2,
+        );
+        assert_eq!(outcome, ObserveOutcome::RosterGrew);
+        assert!(matches!(
+            &state.window,
+            ScheduleWindow::Open { roster, .. }
+                if roster == &heads(&["#upgrade", "refresh prefix"])
+        ));
+
+        let (state, outcome) = observe_with_completed(
+            state,
+            &spec,
+            &[],
+            &heads(&["#upgrade", "refresh prefix"]),
+            3,
+        );
+        assert_eq!(
+            outcome,
+            ObserveOutcome::Completed {
+                pass: 1,
+                restore: heads(&["#upgrade", "refresh prefix"]),
+            }
+        );
+        assert_eq!(
+            state.restore_pending,
+            Some(heads(&["#upgrade", "refresh prefix"]))
+        );
     }
 
     #[test]

@@ -1833,15 +1833,9 @@ mod th {
                 .is_ok_and(|content| mock_agent_prompt_visible(content))
         }
 
-        fn shell_marker_visible(&self, marker: &str) -> bool {
-            self.capture
-                .as_ref()
-                .is_ok_and(|content| content.contains(marker))
-        }
-
-        fn shell_ready(&self, marker: &str) -> bool {
+        fn shell_ready(&self, probe_accepted: bool) -> bool {
             self.pane_liveness == PaneLivenessEvidence::Alive
-                && self.shell_marker_visible(marker)
+                && probe_accepted
                 && self.current_command.as_deref().is_some_and(|command| {
                     matches!(
                         pane_process_kind_from_current_command(command),
@@ -1911,14 +1905,17 @@ mod th {
         tmux: &IsolatedTmux,
         pane: &str,
         file: &std::path::Path,
-        marker: &str,
         timeout: std::time::Duration,
     ) -> Result<MockAgentReadinessEvidence, MockAgentReadinessEvidence> {
-        send_keys_with_retry(tmux, pane, &format!("printf '{}\\n'", marker));
+        let probe_dir = tempfile::tempdir().expect("create shell readiness probe directory");
+        let probe_path = probe_dir.path().join("accepted");
+        let quoted_probe_path =
+            format!("'{}'", probe_path.to_string_lossy().replace('\'', "'\\''"));
+        send_keys_with_retry(tmux, pane, &format!(": > {quoted_probe_path}"));
         let start = std::time::Instant::now();
         let mut evidence = observe_mock_agent_readiness(tmux, pane, file);
         while start.elapsed() < timeout {
-            if evidence.shell_ready(marker) {
+            if evidence.shell_ready(probe_path.is_file()) {
                 return Ok(evidence);
             }
             if evidence.pane_liveness == PaneLivenessEvidence::RetainedDead {
@@ -1935,23 +1932,17 @@ mod th {
         script: &std::path::Path,
         file: &std::path::Path,
     ) {
-        const SHELL_READY_MARKER: &str = "__agent_doc_mock_shell_ready__";
         {
             let _tmux_guard = tmux_start_lock();
-            let shell_evidence = wait_for_shell_readiness_probe(
-                tmux,
-                pane,
-                file,
-                SHELL_READY_MARKER,
-                std::time::Duration::from_secs(5),
-            )
-            .unwrap_or_else(|evidence| {
-                panic!(
-                    "shell in {pane} did not accept the readiness probe: {}",
-                    evidence.diagnostic()
-                )
-            });
-            debug_assert!(shell_evidence.shell_ready(SHELL_READY_MARKER));
+            let shell_evidence =
+                wait_for_shell_readiness_probe(tmux, pane, file, std::time::Duration::from_secs(5))
+                    .unwrap_or_else(|evidence| {
+                        panic!(
+                            "shell in {pane} did not accept the readiness probe: {}",
+                            evidence.diagnostic()
+                        )
+                    });
+            debug_assert!(shell_evidence.shell_ready(true));
             send_keys_with_retry(
                 tmux,
                 pane,
@@ -2034,6 +2025,13 @@ mod th {
             assert!(
                 evidence(PaneLivenessEvidence::Alive, Ok(">\n"), Some(pane)).mock_agent_ready(pane)
             );
+        }
+
+        #[test]
+        fn shell_readiness_requires_executed_probe_evidence() {
+            let evidence = evidence(PaneLivenessEvidence::Alive, Ok(""), None);
+            assert!(!evidence.shell_ready(false));
+            assert!(evidence.shell_ready(true));
         }
 
         #[test]
@@ -2161,7 +2159,7 @@ mod tests {
         // wrapper delays replacing itself with the shell that can accept the
         // next command. Process identity alone was the old false readiness
         // signal. The probe command remains queued until the new shell executes
-        // it and prints the marker.
+        // it and creates the readiness file; echoed command text is not proof.
         iso.send_keys(&pane, "exec /bin/sh -c 'sleep 1; exec /bin/sh'")
             .unwrap();
 

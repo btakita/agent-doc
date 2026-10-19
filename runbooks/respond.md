@@ -261,7 +261,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      Under the
      attribute, an expired attempt becomes `⚠️` lost and is offered for dispatch
      again with a new generation, never drained inline.
-  6. A subagent commits and pushes its branch (fast-forward only, never force).
+  6. A subagent commits and pushes its own branch, fast-forward only by default.
+     Verbatim operator authorization that explicitly names another target branch
+     or explicitly requires a force push overrides only that default; the worker
+     executes exactly the named scope and uses the `#waypostrequest` protocol for
+     any harness-native permission gate.
      It never runs `make install`, a release build, a version bump, a tag, or a
      release. Concurrent subagents share the coordinator's scratchpad, so a
      subagent passes its commit message through `git commit -F -` (a stdin

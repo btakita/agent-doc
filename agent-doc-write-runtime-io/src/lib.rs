@@ -5973,8 +5973,11 @@ mod tests {
     }
 
     #[test]
-    fn closeout_consume_still_takes_the_approved_head_when_it_is_live() {
-        // #qconsumeapprovedhead: the fence is an identity check, not a veto.
+    fn closeout_consume_refuses_an_approved_but_unclaimed_subagent_head() {
+        // #qconsumeapprovedhead remains an identity check, but
+        // #queuesubagents (GH #308) is a later ownership veto: an unclaimed
+        // queue-level subagent head must be claimed and dispatched, not struck
+        // by an inline closeout.
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("plan.md");
@@ -5982,14 +5985,19 @@ mod tests {
         fs::write(&doc, &decision).unwrap();
 
         let outcome = consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true)
-            .unwrap()
-            .expect("the approved head is still the leading live head");
-        assert_eq!(outcome.consumed_text.trim(), "#upgrade");
-        assert_eq!(outcome.consumed_count, 1);
-        assert!(!outcome.drained);
+            .unwrap();
+        assert!(outcome.is_none(), "{outcome:?}");
         let after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(after, decision);
         assert!(after.contains("queue: go"), "{after}");
+        assert!(after.contains("- #upgrade\n"), "{after}");
         assert!(after.contains("- [#rv1]: go\n"), "{after}");
+        let ops =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("queue_consume_subagent_head_refused"),
+            "the ownership veto must be logged:\n{ops}"
+        );
     }
 
     #[test]

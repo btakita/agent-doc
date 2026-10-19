@@ -174,6 +174,28 @@ pub fn pending_subagent_dispatch_or_warn(file: &Path, content: &str) -> Vec<Stri
     }
 }
 
+/// Queue heads owned outside the in-session drain loop.
+///
+/// This single derived projection combines active worker claims with both
+/// dispatchable and concurrency-held queue-level subagent heads. Reported
+/// worker results are deliberately absent: after report release they return to
+/// the ordinary queue lifecycle.
+pub fn out_of_loop_items_for_content(
+    file: &Path,
+    content: &str,
+) -> agent_doc_queue::queue_claim::ClaimedQueueItems {
+    let claimed = crate::queue_claim::claimed_items_for_content(file, content);
+    let dispatch = pending_subagent_dispatch_or_warn(file, content);
+    let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
+    let held = queue_attr_subagent_plan(file, content)
+        .map(|plan| plan.held)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|head| !reported.claims(head))
+        .collect::<Vec<_>>();
+    claimed.with_heads(&dispatch).with_heads(&held)
+}
+
 /// The exact `agent-doc queue claim` command for dispatching `item`.
 pub fn claim_command(document: &str, item: &str) -> String {
     core::claim_command_for(document, item)
@@ -759,5 +781,28 @@ mod tests {
                 .contains(agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE)
         );
         assert!(subagent_authorization_for_item(&file, "#zzz").is_err());
+    }
+
+    #[test]
+    fn out_of_loop_projection_holds_dispatchable_and_capacity_waiting_heads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue subagents=1 go -->\n",
+            "- do [#a]\n",
+            "- do [#b]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, content).unwrap(),
+            vec!["do [#a]".to_string()]
+        );
+        let excluded = out_of_loop_items_for_content(&file, content);
+        assert!(excluded.claims("do [#a]"));
+        assert!(excluded.claims("do [#b]"));
+        assert!(!excluded.claims("not queued"));
     }
 }

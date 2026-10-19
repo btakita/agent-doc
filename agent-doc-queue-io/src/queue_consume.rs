@@ -726,6 +726,26 @@ fn consume_queue_prompts_with_options_fenced(
         return Ok(None);
     }
 
+    // `#queuesubagents` (GH #308): an unclaimed queue-level subagent head is
+    // coordinator dispatch work, not an inline closeout's head to consume.
+    // Apply the same derived ownership projection as preflight/session-check so
+    // the write seam fails closed even if a stale caller selected the head.
+    let out_of_loop = crate::subagent_dispatch::out_of_loop_items_for_content(file, &content);
+    if out_of_loop.claims(&plan.consumed_text) {
+        eprintln!(
+            "[queue] WARNING: refusing to consume subagent-owned or dispatchable head {:?}; claim and dispatch it, or report worker complete before consuming it (#queuesubagents, GH #308)",
+            plan.consumed_text
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_consume_subagent_head_refused head_hash={} #queuesubagents",
+                agent_doc_hash::content_hash(plan.consumed_text.trim())
+            ),
+        );
+        return Ok(None);
+    }
+
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
 
     // `#fcc0`: converge the queue-consume write through the editor IPC when a JB
@@ -6377,5 +6397,32 @@ Old.
             format!("{err:#}").contains("no prompt to consume"),
             "{err:#}"
         );
+    }
+
+    #[test]
+    fn consume_refuses_unclaimed_queue_subagent_head() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let content = concat!(
+            "---\nqueue: go\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: Run queued thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents go -->\n",
+            "- Run queued thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let outcome = consume_queue_prompt_with_outcome(&doc).unwrap();
+
+        assert!(outcome.is_none());
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
     }
 }

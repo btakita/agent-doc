@@ -26,7 +26,7 @@ pub fn detect_required_continuation_with(
     let snapshot_content = load_snapshot(file)?;
     // `#queueclaim`: a head claimed by a worker outside the in-session loop
     // (a dispatched subagent) is in flight, not drainable.
-    let claimed = crate::queue_claim::claimed_items_for_content(file, &content);
+    let claimed = crate::subagent_dispatch::out_of_loop_items_for_content(file, &content);
     // `#qheadresiduescope`: the answered-head skip counts only echoes written
     // after each head's entry point, read from the document's git history.
     queue_continuation::required_continuation_excluding_claimed_scoped(
@@ -51,7 +51,7 @@ pub fn detect_required_continuation_for_content_with(
         return Ok(None);
     }
     let snapshot_content = load_snapshot(file)?;
-    let claimed = crate::queue_claim::claimed_items_for_content(file, content);
+    let claimed = crate::subagent_dispatch::out_of_loop_items_for_content(file, content);
     // `#qheadresiduescope`: the answered-head skip counts only echoes written
     // after each head's entry point, read from the document's git history.
     queue_continuation::required_continuation_excluding_claimed_scoped(
@@ -90,6 +90,30 @@ mod tests {
 
         assert_eq!(continuation.head_id.as_deref(), Some("a"));
         assert_eq!(continuation.head_prompt, "do [#a]");
+    }
+
+    #[test]
+    fn queue_subagent_head_is_dispatch_work_not_inline_continuation() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        let content = continuation_doc("do [#a]").replace(
+            "<!-- agent:queue go -->",
+            "<!-- agent:queue subagents go -->",
+        );
+        std::fs::write(&doc, &content).unwrap();
+
+        let continuation = detect_required_continuation_for_content_with(
+            &doc,
+            &content,
+            |_| Ok(Some(content.clone())),
+            |_| false,
+        )
+        .unwrap();
+
+        assert!(
+            continuation.is_none(),
+            "an unclaimed subagent-intent head must be dispatched, not drained inline"
+        );
     }
 
     #[test]

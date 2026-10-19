@@ -1548,7 +1548,7 @@ fn supervisor_scope_unclaimed_head(file: &Path, content: &str) -> Option<String>
     agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
         content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-        &agent_doc_queue_io::queue_claim::claimed_items_for_content(file, content),
+        &agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, content),
     )
 }
 
@@ -2157,6 +2157,35 @@ fn run_with_options_inner(
                 // as deferred work, not a silent stall.
                 let content =
                     crate::resolve_current_document_content(file, "deferred_queue_head_count").ok();
+                // #queuesubagents (GH #308): an unclaimed queue-level
+                // subagent head belongs to the coordinator's dispatch loop, not
+                // to this session's inline drain loop. Name that next action
+                // explicitly so session-check cannot turn an unclaimed dispatch
+                // head into "drain it in this session now" guidance.
+                if let Some(dispatch_head) = content.as_deref().and_then(|content| {
+                    agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                        file, content,
+                    )
+                    .ok()
+                    .and_then(|heads| heads.into_iter().next())
+                }) {
+                    let dispatch_prompt =
+                        format!("claim and dispatch a subagent for queue head {dispatch_head:?}");
+                    println!(
+                        "queue_continuation_required=true queue_subagent_dispatch_required=true next_queue_prompt={:?}",
+                        dispatch_prompt
+                    );
+                    eprintln!(
+                        "[session-check] queue awaits subagent dispatch for {}: {:?} is an unclaimed subagent-intent head. Claim and dispatch it; do not drain it inline (#queuesubagents, GH #308).",
+                        file.display(),
+                        dispatch_head
+                    );
+                    if codex_final_gate {
+                        crate::profile::report_now(file);
+                        std::process::exit(2);
+                    }
+                    return Ok(());
+                }
                 let deferred = content
                     .as_deref()
                     .map(agent_doc_queue::queue_continuation::deferred_head_count)

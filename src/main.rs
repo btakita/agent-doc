@@ -4379,6 +4379,23 @@ enum QueueAction {
         /// stdin when omitted.
         text: Vec<String>,
     },
+    /// Insert one or more follow-up heads immediately after their originating
+    /// head in one exact identified queue. This preserves queue provenance when
+    /// the origin is mirrored in another queue.
+    #[command(name = "follow-up")]
+    FollowUp {
+        /// Path to the session document
+        file: PathBuf,
+        /// Exact canonical queue id containing the originating head
+        #[arg(long)]
+        id: String,
+        /// Exact text of the originating queue head
+        #[arg(long)]
+        after: String,
+        /// Follow-up queue head text; repeat in desired queue order
+        #[arg(long = "item", required = true)]
+        items: Vec<String>,
+    },
     /// Show a scheduled queue's schedule (`interval=`, `time=`, `loop`,
     /// `#queueschedule`): cadence, whether a pass is running, passes run
     /// against the `loop` limit, the next run, and backoff. The project
@@ -7709,6 +7726,27 @@ fn try_main() -> anyhow::Result<()> {
                     },
                     json,
                 )
+            }
+            QueueAction::FollowUp {
+                file,
+                id,
+                after,
+                items,
+            } => {
+                let queue_effects = CliQueueCommandEffects;
+                let count = agent_doc_queue_io::queue_add::add_followups_with_effects(
+                    &queue_effects,
+                    &file,
+                    &id,
+                    &after,
+                    &items,
+                )?;
+                println!(
+                    "{}: inserted {count} follow-up head(s) after {:?} in queue id `{id}`",
+                    file.display(),
+                    after
+                );
+                Ok(())
             }
             QueueAction::Claim {
                 file,

@@ -83,6 +83,9 @@ pub struct SubagentAuthorization {
     pub status: AuthorizationStatus,
     /// The queue item, verbatim.
     pub item: String,
+    /// Queue-local provenance captured when this item was dispatched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_id: Option<String>,
     /// Tracked items the head names, resolved to their text.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracked_items: Vec<TrackedItemAuthorization>,
@@ -245,9 +248,13 @@ pub fn subagent_authorization_with_presets(
     } else {
         AuthorizationStatus::Resolved
     };
+    let queue_id = crate::queue_graph::QueueSet::parse(content, components)
+        .ok()
+        .and_then(|queues| queues.selected().map(|queue| queue.id.clone()));
     let mut authorization = SubagentAuthorization {
         status,
         item: item.trim().to_string(),
+        queue_id,
         tracked_items,
         unresolved_ids,
         presets,
@@ -348,6 +355,11 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
          own words, not the coordinator's paraphrase.\n\nQueue item (verbatim):\n{}\n",
         quote(&auth.item)
     ));
+    if let Some(queue_id) = &auth.queue_id {
+        out.push_str(&format!(
+            "\nOrigin queue id (dispatch-time provenance):\n> {queue_id}\n\nAny follow-up queue heads produced by this work belong immediately after the originating head in this queue. Report them to the coordinator in order; the coordinator applies them with `agent-doc queue follow-up {document} --id {queue_id} --after <origin> --item <text>...`. Do not place them in a selected or mirrored sibling queue.\n"
+        ));
+    }
     for tracked in &auth.tracked_items {
         out.push_str(&format!(
             "\n{} item #{} (verbatim):\n{}\n",
@@ -701,6 +713,27 @@ mod tests {
         assert!(
             auth.subagent_prompt_preamble
                 .contains("> review only, no commits")
+        );
+    }
+
+    #[test]
+    fn authorization_carries_selected_queue_provenance_when_head_is_mirrored() {
+        let content = concat!(
+            "<!-- agent:queue id=main after=issues -->\n",
+            "- do [#httpsgithubcom]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues subagents -->\n",
+            "- do [#httpsgithubcom]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let auth = subagent_authorization("doc.md", content, "do [#httpsgithubcom]");
+        assert_eq!(auth.queue_id.as_deref(), Some("issues"));
+        assert!(
+            auth.subagent_prompt_preamble.contains(
+                "agent-doc queue follow-up doc.md --id issues --after <origin> --item <text>..."
+            ),
+            "{}",
+            auth.subagent_prompt_preamble
         );
     }
 

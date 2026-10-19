@@ -188,6 +188,32 @@ pub fn add_with_effects(
     }
 }
 
+/// Insert worker-produced follow-ups after their exact originating head in one
+/// identified queue, through the same editor/CRDT authority as other queue
+/// mutations.
+pub fn add_followups_with_effects(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    queue_id: &str,
+    origin: &str,
+    followups: &[String],
+) -> Result<usize> {
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let current = effects.current_document_content(file, "queue_followup")?;
+    let updated = queue_inbound::plan_queue_followups(&current, queue_id, origin, followups)
+        .with_context(|| format!("queue follow-up: {}", file.display()))?;
+    effects.converge_document_or_disk(file, &updated, &current, "queue_followup")?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_followup_write queue_id={queue_id} origin_hash={} count={}",
+            agent_doc_hash::content_hash(origin),
+            followups.len()
+        ),
+    );
+    Ok(followups.len())
+}
+
 /// CLI entry: run [`add_with_effects`] and print the outcome.
 pub fn add(
     effects: &impl QueueCommandEffects,

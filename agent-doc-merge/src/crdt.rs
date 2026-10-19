@@ -1650,6 +1650,203 @@ pub(crate) fn queue_instruction_text(text: &str) -> String {
         .join("\n")
 }
 
+/// Merge the narrow retained-registration case where the operator changed only
+/// by deleting queue rows that were already visibly struck in `base`.
+///
+/// `captured_splice::rebase` normally refuses whenever canonical changed a base
+/// line the operator deleted. That is the right default: the missing anchor
+/// cannot be moved onto unrelated operator text. A struck queue row is a
+/// stronger, domain-owned tombstone, though. Once the settled editor shadow
+/// already carries the strike, deleting that row is terminal-debris pruning,
+/// and the queue cell policy says the operator deletion outranks a concurrent
+/// lifecycle decoration of the same durable item.
+///
+/// This helper deliberately accepts no other operator edit: component markers,
+/// interstitial text, non-queue components, surviving queue rows, and queue
+/// order must be byte-identical to `base`. Canonical may advance independently;
+/// its bytes are the output spine and only the proven struck-row keys are
+/// removed. A missing/ambiguous key fails closed by returning `None`.
+pub(crate) fn merge_operator_deleted_struck_queue_items(
+    base: &str,
+    operator: &str,
+    canonical: &str,
+) -> Option<String> {
+    use agent_doc_element_queue::QueueItemLifecycle;
+
+    fn children_including_empty(body: &str) -> Vec<KeyedChild> {
+        split_list_children(body).unwrap_or_else(|| {
+            if body.is_empty() {
+                Vec::new()
+            } else {
+                vec![KeyedChild {
+                    key: PREAMBLE_KEY.to_string(),
+                    text: body.to_string(),
+                }]
+            }
+        })
+    }
+
+    let base_nodes = segment_into_nodes(base).ok()?;
+    let operator_nodes = segment_into_nodes(operator).ok()?;
+    if base_nodes.len() != operator_nodes.len() {
+        return None;
+    }
+
+    let mut removed_by_node = Vec::with_capacity(base_nodes.len());
+    let mut removed_any = false;
+    for (base_node, operator_node) in base_nodes.iter().zip(&operator_nodes) {
+        let removed = match (base_node, operator_node) {
+            (Node::Interstitial(base_text), Node::Interstitial(operator_text))
+                if base_text == operator_text =>
+            {
+                std::collections::HashSet::new()
+            }
+            (
+                Node::Component {
+                    name: base_name,
+                    text: base_text,
+                },
+                Node::Component {
+                    name: operator_name,
+                    text: operator_text,
+                },
+            ) if base_name == operator_name
+                && base_name != "queue"
+                && base_text == operator_text =>
+            {
+                std::collections::HashSet::new()
+            }
+            (
+                Node::Component {
+                    name: base_name,
+                    text: base_text,
+                },
+                Node::Component {
+                    name: operator_name,
+                    text: operator_text,
+                },
+            ) if base_name == "queue" && operator_name == "queue" => {
+                let (base_open, base_body, base_close) = component_framing(base_text)?;
+                let (operator_open, operator_body, operator_close) =
+                    component_framing(operator_text)?;
+                if base_open != operator_open || base_close != operator_close {
+                    return None;
+                }
+
+                let base_children = split_list_children(base_body)?;
+                let operator_children = children_including_empty(operator_body);
+                if !keys_unique(&base_children) || !keys_unique(&operator_children) {
+                    return None;
+                }
+                let operator_map: std::collections::HashMap<&str, &KeyedChild> = operator_children
+                    .iter()
+                    .map(|child| (child.key.as_str(), child))
+                    .collect();
+                let mut removed = std::collections::HashSet::new();
+                let mut expected_operator_keys = Vec::new();
+                for base_child in &base_children {
+                    if let Some(operator_child) = operator_map.get(base_child.key.as_str()) {
+                        if operator_child.text != base_child.text {
+                            return None;
+                        }
+                        expected_operator_keys.push(base_child.key.as_str());
+                    } else {
+                        if base_child.key == PREAMBLE_KEY
+                            || QueueItemLifecycle::classify(&base_child.text)
+                                != QueueItemLifecycle::Struck
+                        {
+                            return None;
+                        }
+                        removed.insert(base_child.key.clone());
+                    }
+                }
+                let actual_operator_keys: Vec<&str> = operator_children
+                    .iter()
+                    .map(|child| child.key.as_str())
+                    .collect();
+                if actual_operator_keys != expected_operator_keys {
+                    return None;
+                }
+                removed_any |= !removed.is_empty();
+                removed
+            }
+            _ => return None,
+        };
+        removed_by_node.push(removed);
+    }
+    if !removed_any {
+        return None;
+    }
+
+    let canonical_nodes = segment_into_nodes(canonical).ok()?;
+    if canonical_nodes.len() != base_nodes.len() {
+        return None;
+    }
+    let mut merged = String::with_capacity(canonical.len());
+    for (((base_node, operator_node), canonical_node), removed) in base_nodes
+        .iter()
+        .zip(&operator_nodes)
+        .zip(&canonical_nodes)
+        .zip(&removed_by_node)
+    {
+        match (base_node, operator_node, canonical_node) {
+            (Node::Interstitial(_), Node::Interstitial(_), Node::Interstitial(text)) => {
+                merged.push_str(text);
+            }
+            (
+                Node::Component { name: base_name, .. },
+                Node::Component {
+                    name: operator_name,
+                    ..
+                },
+                Node::Component {
+                    name: canonical_name,
+                    text: canonical_text,
+                },
+            ) if base_name == operator_name
+                && operator_name == canonical_name
+                && base_name != "queue" =>
+            {
+                merged.push_str(canonical_text);
+            }
+            (
+                Node::Component {
+                    name: base_name,
+                    text: base_text,
+                },
+                Node::Component {
+                    name: operator_name,
+                    ..
+                },
+                Node::Component {
+                    name: canonical_name,
+                    text: canonical_text,
+                },
+            ) if base_name == "queue" && operator_name == "queue" && canonical_name == "queue" => {
+                let (base_open, _, base_close) = component_framing(base_text)?;
+                let (canonical_open, canonical_body, canonical_close) =
+                    component_framing(canonical_text)?;
+                if canonical_open != base_open || canonical_close != base_close {
+                    return None;
+                }
+                let canonical_children = children_including_empty(canonical_body);
+                if !keys_unique(&canonical_children) {
+                    return None;
+                }
+                merged.push_str(canonical_open);
+                for child in canonical_children {
+                    if !removed.contains(&child.key) {
+                        merged.push_str(&child.text);
+                    }
+                }
+                merged.push_str(canonical_close);
+            }
+            _ => return None,
+        }
+    }
+    Some(merged)
+}
+
 thread_local! {
     /// `#unstrikelost`: queue items the operator's own captured editor ops
     /// re-armed for the merge running on this thread (see

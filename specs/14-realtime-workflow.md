@@ -1706,6 +1706,18 @@ controller-licensed in-place roll-forward on an attached endpoint) settles it;
 the retained response is untouched. The same candidate is recomputed from the
 exact captured bytes at the publication edge before it is merged forward.
 
+There is one queue-semantic answer to the generic deleted-anchor refusal
+(`#struckqueuepruneattach`). When the live buffer differs from the settled
+shadow solely by deleting queue rows that were already visibly struck in that
+shadow, those stable queue-item keys are terminal tombstones. The native rebase
+removes only those keys from canonical while retaining canonical as the output
+spine, including every unstruck queue head, response, and independent advance.
+Component framing, interstitial text, non-queue components, surviving rows,
+and survivor order must remain byte-identical to the shadow; keys must be
+unique. Deleting a live row, editing or reordering a survivor, typing replacement
+work in the same cut, or any malformed/ambiguous key does not qualify and keeps
+the ordinary merge-or-hold behavior.
+
 The registration path previously asked the char-level `conflict_reconcile`
 first (FFI `agent_doc_reconcile_text`). Its character diff has no line
 anchoring: an operator who deleted the struck `- ~~do [#tdc]~~` and typed
@@ -1713,8 +1725,9 @@ anchoring: an operator who deleted the struck `- ~~do [#tdc]~~` and typed
 kept `- do [#sdkdocs]` got `- do [#sdkexamples] (closed)` with zero conflicts,
 and registration merged it forward over the operator's text. The line-anchored
 answer is `- do [#sdkdocs] (closed)` with the typed items verbatim; had
-canonical closed the struck line instead, the rebase refuses. The plugin no
-longer binds the char-level reconcile. Because the native library hot-reloads
+canonical closed the struck line instead, the rebase refuses unless the
+operator's whole change was only pruning that already-struck row as specified
+above. The plugin no longer binds the char-level reconcile. Because the native library hot-reloads
 ahead of an IDE restart, `agent_doc_reconcile_text` itself returns
 `{"ok":false,"error":"line_anchor_lost"}` for a conflict-free answer that is not
 the line-granular merge or keeps a change of either side on a base line the

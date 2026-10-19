@@ -21,7 +21,7 @@ queue: go
 
 ## Status
 
-<!-- agent:status patch=replace -->
+<!-- agent:status patch=replace sync="Track the latest published agent-doc release and publication time." -->
 
 📥 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
@@ -118,6 +118,12 @@ Agent-doc cycle completed successfully.
 - Verification passed: 11,082 full-suite tests plus editor/plugin checks.
 - Final `agent-doc session-check` passed with no drainable work.
 - `release + publish` remains assigned to its existing worker; no duplicate worker was started.
+
+### Re: recovered response
+
+Diagnostics are complete. You can unwedge it now by restarting JetBrains, then reopen `sdk-demo.md`. No need to preserve the wedged state.
+
+Disk content and permissions are unchanged; the stale read-only flag exists only in the current IDE process.
 <!-- agent:boundary:04649fab -->
 <!-- /agent:exchange -->
 
@@ -126,18 +132,23 @@ Agent-doc cycle completed successfully.
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/308~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/309~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/310~~
-- ~~re: `agent:done` `archive` relative path. We made a breaking change to make the relative path based on the current document. Can we support both the project relative path behavior and document relative path behavior? What do you suggest?~~
-- ~~Codex is still getting stuck on `■ Selected model is at capacity. Please try a different model.` and agent doc is not prompting `continue`.~~
-- ~~Does `agent-doc extract` also auto-claim? See sdk-demo.md.~~
 - 📥 release + publish
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/311
+- 📥 release + publish: include #311
+- 📥 bossroom-p2p.md: Claim Tmux Pane, then Run Agent Doc, then Ctrl+c in the Claude session, then switch to agent to codex using `agent: codex`, then Restart Agent: got a prompt saying a turn was occurring. Clicked Interrupt and Restart then the followup Interrupt and Restart. Nothing happened. The Claude Code prompt was submitted and the turn started in Claude Code, not Codex. `agent: codex` was removed from the document.
+- 📥 I saw `■ Selected model is at capacity. Please try a different model.`, and a `continue`, then another `■ Selected model is at capacity. Please try a different model.`. Please confirm the behavior and work on any necessary fixes. Run Agent Doc has an error as well, presumably due to agent-doc's state not recognizing the error: [route] a turn is already running on /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second trigger was sent and nothing needs recovery. The live turn owns the queue; head "release + publish" is in its scope and is answered or drained at that turn's boundary. Do not cancel or recover it (owner: [session-check] IN PROGRESS: cycle `cycle-1792424550895` remains `preflight_started` (preflight_started) while owning pane `%2` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.) owner_turn=live ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/312
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/313
+- 📥 the queue id=issues gained "In sdk-demo.md, I deleted some struck queue items right after they were struck. Got an error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.: I have since undid my changes." and lost the prompt to watch https://github.com/btakita/agent-doc/issues.
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/314
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/315
+- 🚧 sdk-demo.md is Read Only. Why? Did agent-doc make it read-only? It should not have.
+- 🚧 release + publish including PRs #312-#315
 <!-- /agent:queue -->
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
-- ~~do [#httpsgithubcom]~~
+- Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 - If an issue was added, also add `- release + publish`
 <!-- /agent:queue -->
 

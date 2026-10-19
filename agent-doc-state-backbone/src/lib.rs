@@ -1662,13 +1662,19 @@ impl DocumentStateProjection {
 
     /// Return the captured response that may still project queue strikes.
     ///
-    /// Queue strike projection is an open-cycle closeout effect. A terminal
-    /// capture remains durable for audit and recovery, but it no longer owns
-    /// queue text typed after that cycle committed. Requiring exact cycle
-    /// identity also prevents a stale capture from crossing a later admission.
+    /// Queue strike projection belongs to the capture's exact closeout cycle. A
+    /// response may be captured after the supervisor prematurely abandoned that
+    /// cycle; if the write path still materializes it, the same-cycle capture must
+    /// retain its answered-head effect so closeout cannot commit a response while
+    /// leaving its queue prompt runnable (GH #313). A committed capture remains
+    /// durable for audit and recovery, but no longer owns queue text typed after
+    /// that cycle committed. A later admission clears the old capture, so the
+    /// abandoned-cycle allowance cannot cross into a new turn.
     pub fn active_captured_response_for_queue_strike(&self) -> Option<&CapturedResponseProjection> {
         let capture = self.closeout.captured_response.as_ref()?;
-        (self.closeout.phase.is_some_and(CyclePhase::is_open)
+        (self.closeout.phase.is_some_and(|phase| {
+            phase.is_open() || phase == CyclePhase::Abandoned
+        })
             && self.closeout.cycle_id.as_deref() == Some(capture.cycle_id.as_str())
             && !self.captured_response_terminally_proven(capture))
         .then_some(capture)
@@ -10648,15 +10654,25 @@ mod tests {
     }
 
     #[test]
-    fn queue_strike_capture_is_owned_only_by_its_open_closeout_cycle() {
+    fn queue_strike_capture_survives_same_cycle_abandonment_until_commit() {
         let mut projection = DocumentStateProjection::new("doc");
-        projection.closeout.cycle_id = Some("cycle-1".into());
-        projection.closeout.phase = Some(CyclePhase::ResponseCaptured);
-        projection.closeout.captured_response = Some(CapturedResponseProjection {
+        projection.apply_fact(&StateFact::PreflightStarted {
+            document_hash: "doc".into(),
+            cycle_id: "cycle-1".into(),
+            session_id: None,
+            tracked_work_maintenance_required: None,
+        });
+        projection.apply_fact(&StateFact::CycleAbandoned {
+            document_hash: "doc".into(),
+            cycle_id: "cycle-1".into(),
+            reason: "supervisor considered the live turn abandoned".into(),
+        });
+        projection.apply_fact(&StateFact::ResponseCaptured {
+            document_hash: "doc".into(),
             cycle_id: "cycle-1".into(),
             capture_id: "capture-1".into(),
             response_sha256: "response-1".into(),
-            response_body: "response".into(),
+            response_body: Some("response".into()),
             intent_body: None,
             mutation_plan_json: None,
             file_hash: None,
@@ -10664,12 +10680,13 @@ mod tests {
             baseline_content: Some("- deploy to staging\n".into()),
         });
 
+        assert_eq!(projection.closeout.phase, Some(CyclePhase::Abandoned));
         assert_eq!(
             projection
                 .active_captured_response_for_queue_strike()
                 .map(|capture| capture.capture_id.as_str()),
             Some("capture-1"),
-            "the current open cycle must still consume its answered command"
+            "a response captured after same-cycle abandonment must still consume its answered command"
         );
 
         projection.closeout.phase = Some(CyclePhase::Committed);

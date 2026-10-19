@@ -919,7 +919,7 @@ the subagent prompt (`#waypostauthorization`): it quotes the operator's authoriz
 backlog text, preset body) and the coordinator rules; never paraphrase it, and when its \
 `authorization.status` is `unresolved_preset` do not add authorization it lacks. Do NOT execute \
 them inline in queue order; they are excluded from `selected_queue_prompts`. If a worker sends a \
-`#waypostrequest` packet, copy the complete packet (request, context, and every choice) verbatim \
+`[#subagent-operator-request]` packet, copy the complete packet (request, context, and every choice) verbatim \
 into `agent:exchange`, present it from the main session, and return the operator's answer to the \
 same worker when the harness can continue it. The closeout that presents a blocking packet must \
 also record its concrete operator action in `agent:todo` with `--todo-add`; when the answer and \

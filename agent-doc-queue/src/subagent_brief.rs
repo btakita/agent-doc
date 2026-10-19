@@ -304,7 +304,7 @@ pub const SUBAGENT_PREAMBLE_MARKER: &str =
 
 /// Marker that opens a blocking request a worker routes through its coordinator.
 pub const SUBAGENT_OPERATOR_REQUEST_MARKER: &str =
-    "[agent-doc] subagent operator request (#waypostrequest)";
+    "[#subagent-operator-request] subagent operator request";
 
 /// Cross-harness fallback for questions and permission requests that a background
 /// worker cannot present to the operator itself. The field names are deliberately
@@ -315,7 +315,7 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "before ",
     "stopping; use the harness's native parent-message mechanism when available, otherwise ",
     "return the packet as your result:\n\n",
-    "[agent-doc] subagent operator request (#waypostrequest)\n",
+    "[#subagent-operator-request] subagent operator request\n",
     "kind: question | permission\n",
     "blocking: true\n",
     "request: <exact question or exact tool/action requiring permission>\n",
@@ -793,6 +793,13 @@ mod tests {
                 preamble.contains(SUBAGENT_OPERATOR_REQUEST_MARKER),
                 "{preamble}"
             );
+            assert_eq!(
+                preamble.matches(SUBAGENT_OPERATOR_REQUEST_MARKER).count(),
+                1,
+                "{preamble}"
+            );
+            assert!(!preamble.contains("[agent-doc] subagent operator request"));
+            assert!(!preamble.contains("(#waypostrequest)"));
             assert!(preamble.contains("request: <exact question or exact tool/action"));
             assert!(preamble.contains("choices:\n- <label>: <effect>"));
             for harness in ["Claude Code", "Codex", "Grok Build", "OpenCode"] {

@@ -984,6 +984,12 @@ Publication is complete:
 - GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.520 — public with 15 assets.
 - PyPI: `agent_doc-0.35.520-py3-none-any.whl` — public and verified with a clean install that fetched the pinned native release.
 - All platform release workflows succeeded. The optional Homebrew formula bump was skipped because `HOMEBREW_TAP_TOKEN` was not configured; this was outside the GitHub Release and PyPI publication contract.
+
+### Re: release follow-up after #299 — gpt-5 · 2026-10-18T22:27-04:00
+
+> **Queue prompt:** If an issue was added, also add `- release + publish`
+
+Satisfied. The #299 fix was added to the release work, and the corresponding release-and-publish item was queued, completed, and published as v0.35.520. The public artifacts are available on GitHub and PyPI.
 <!-- agent:boundary:6975e85b -->
 <!-- /agent:exchange -->
 

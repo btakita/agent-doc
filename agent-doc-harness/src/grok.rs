@@ -1,5 +1,9 @@
-//! Grok Build boundary observations, verified against the 1.0.24 fullscreen TUI.
+//! Grok Build boundary observations, verified against the fullscreen TUI.
 //! Existing lifecycle computed projections consume these pure observations.
+//!
+//! Grok's composer footer is part of readiness evidence. It may include the
+//! suggestion controls and dashboard status row introduced after 1.0.24, but
+//! unknown post-composer UI remains fail-closed.
 use super::{PaneComposerProjection, PaneComposerReadinessEvidence};
 
 pub fn blocker(output: &str) -> Option<String> {
@@ -17,6 +21,44 @@ pub fn blocker(output: &str) -> Option<String> {
         return Some("active Grok Build turn".into());
     }
     None
+}
+
+fn is_idle_footer_line(line: &str) -> bool {
+    let line = line.trim();
+    if line.is_empty() || line == "[stable]" || line == "[alpha]" {
+        return true;
+    }
+
+    let controls = (line.starts_with("Shift+Tab:mode")
+        || line.starts_with("Tab/→:accept suggestion"))
+        && line.ends_with("Ctrl+x:shortcuts")
+        && !line.contains("cancel");
+    if controls {
+        return true;
+    }
+
+    // Grok 4.7 adds a single status row below the controls. The document/model
+    // label and cwd are intentionally free-form; the numeric context fraction
+    // followed by the Dashboard affordance is the stable structural chrome.
+    let Some((status, dashboard)) = line.rsplit_once('│') else {
+        return false;
+    };
+    if dashboard.trim() != "[Dashboard]" {
+        return false;
+    }
+    let mut tokens = status.split_whitespace().rev();
+    let (Some(limit), Some("/"), Some(used)) = (tokens.next(), tokens.next(), tokens.next()) else {
+        return false;
+    };
+    [used, limit].into_iter().all(|quantity| {
+        let numeric = quantity
+            .strip_suffix('K')
+            .or_else(|| quantity.strip_suffix('M'))
+            .unwrap_or(quantity);
+        !numeric.is_empty()
+            && numeric.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
+            && numeric.chars().filter(|ch| *ch == '.').count() <= 1
+    })
 }
 
 pub fn project(output: &str) -> PaneComposerProjection {
@@ -74,15 +116,10 @@ pub fn project(output: &str) -> PaneComposerProjection {
     }
     // Only the observed idle footer may follow the box. Unknown modal/help/auth
     // UI remains absent, even if old prompt artwork is still visible above it.
-    if lines[end + 1..].iter().any(|line| {
-        let line = line.trim();
-        !line.is_empty()
-            && line != "[stable]"
-            && line != "[alpha]"
-            && !(line.starts_with("Shift+Tab:mode")
-                && line.ends_with("Ctrl+x:shortcuts")
-                && !line.contains("cancel"))
-    }) {
+    if lines[end + 1..]
+        .iter()
+        .any(|line| !is_idle_footer_line(line))
+    {
         return PaneComposerProjection::Absent;
     }
     PaneComposerProjection::ReadyEmpty {
@@ -97,6 +134,15 @@ mod tests {
     use super::*;
     use crate::{HarnessConfig, project_pane_composer};
     const IDLE: &str = "Grok Build 1.0.24\n╭────────────────────────╮\n│ ❯                      │\n╰──── Grok 4.6 (high) ───╯\nShift+Tab:mode  │  Ctrl+x:shortcuts\n";
+    const LIVE_GROK_47_IDLE_GHOST: &str = concat!(
+        "Help improve Grok                    [Opt out] [Opt in]\n",
+        "Off by default. Opt-in to allow SpaceXAI to retain coding data.\n",
+        "╭────────────────────────╮\n",
+        "│ ❯ \x1b[3;38;2;88;88;88magent-doc tasks/sdk/sdk-pr.md\x1b[0m │\n",
+        "╰──── Grok 4.7 (high) ───╯\n",
+        "Tab/→:accept suggestion  │  Shift+Tab:mode  │  Ctrl+x:shortcuts\n",
+        "docs/fpe-service-topology-temporal-plan ~/w/b/a/src/haiven-dev  93K / 256K │ [Dashboard]\n",
+    );
 
     #[test]
     fn launch_preserves_exact_lineage_and_does_not_fall_back_to_claude() {
@@ -200,6 +246,39 @@ mod tests {
             PaneComposerProjection::OperatorDraft {
                 preview: visible.to_string(),
             },
+        );
+    }
+
+    #[test]
+    fn live_grok_47_suggestion_footer_is_dispatch_ready() {
+        let h = HarnessConfig::grok();
+        assert!(matches!(
+            project_pane_composer(LIVE_GROK_47_IDLE_GHOST, &h),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+
+        let typed =
+            LIVE_GROK_47_IDLE_GHOST.replace("\x1b[3;38;2;88;88;88m", "\x1b[38;2;192;202;245m");
+        assert!(matches!(
+            project_pane_composer(&typed, &h),
+            PaneComposerProjection::OperatorDraft { .. }
+        ));
+    }
+
+    #[test]
+    fn suggestion_footer_keeps_unknown_post_composer_ui_fail_closed() {
+        let h = HarnessConfig::grok();
+        let unknown = format!("{LIVE_GROK_47_IDLE_GHOST}Authorize this tool?\n");
+        assert_eq!(
+            project_pane_composer(&unknown, &h),
+            PaneComposerProjection::Absent
+        );
+
+        let fake_dashboard = LIVE_GROK_47_IDLE_GHOST
+            .replace("93K / 256K │ [Dashboard]", "Authorize / Deny │ [Dashboard]");
+        assert_eq!(
+            project_pane_composer(&fake_dashboard, &h),
+            PaneComposerProjection::Absent
         );
     }
 }

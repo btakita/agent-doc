@@ -1765,7 +1765,8 @@ mod tests {
         let visible = "agent-doc tasks/sdk/sdk-pr.md";
         let ghost = format!(
             "╭──╮\n│ ❯ \x1b[3;38;2;88;88;88m{visible}\x1b[0m │\n╰──╯\n\
-             Shift+Tab:mode │ Ctrl+x:shortcuts\n"
+             Tab/→:accept suggestion │ Shift+Tab:mode │ Ctrl+x:shortcuts\n\
+             sdk-pr ~/work/project 93K / 256K │ [Dashboard]\n"
         );
         let projection = agent_doc_harness::project_pane_composer(&ghost, &harness);
         assert!(matches!(

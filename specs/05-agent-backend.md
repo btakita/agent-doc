@@ -17,7 +17,12 @@ The box may contain predicted next-prompt ghost text while the input buffer is
 still empty. Route preserves ANSI until classification: Grok's italic ghost
 (faint in terminal-native themes, explicit light gray in RGB themes) is
 `ReadyEmpty`, while the same visible text without ghost styling is an
-`OperatorDraft` and remains protected from injection.
+`OperatorDraft` and remains protected from injection. The recognized idle
+footer includes both the original `Shift+Tab:mode` controls and Grok 4.7's
+`Tab/→:accept suggestion` controls plus its context-fraction `[Dashboard]`
+status row. These are structural chrome even when a completed turn's opt-in
+card remains in scrollback above the composer; any unrecognized post-composer
+row still makes the projection `Absent`.
 The Grok skill is rendered from the shared workflow; its passive hooks require
 connected MCP admission/finalize and in-turn queue continuation. The installer
 writes `[mcp_servers.agent-doc]` as `command = "agent-doc"`,

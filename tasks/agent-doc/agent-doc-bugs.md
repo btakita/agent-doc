@@ -979,6 +979,7 @@ Issue #299 remains claimed by its worker because its changed-source IntelliJ 263
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/299
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/301~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/302~~ — auto-struck: answered this cycle (#ftstrike)
+- release + publish
 <!-- /agent:queue -->
 
 ## Queue: Issues

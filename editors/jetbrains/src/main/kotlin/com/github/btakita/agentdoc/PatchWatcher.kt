@@ -1870,6 +1870,22 @@ class PatchWatcher(private val project: Project) : Disposable {
     override fun dispose() {
         running = false
         nativeEndpointsQuiesced = true
+        // A dynamic plugin reload must not strand an IntelliJ Document in the
+        // temporary focused-extract read-only state after this watcher's in-memory
+        // operation map disappears. Restore exactly the state captured by the
+        // watcher that imposed the freeze before relinquishing the endpoints.
+        val frozen = frozenExtracts.entries.toList()
+        frozenExtracts.clear()
+        val restoreFrozenDocuments = {
+            val fileDocumentManager = FileDocumentManager.getInstance()
+            val localFileSystem = LocalFileSystem.getInstance()
+            for ((filePath, state) in frozen) {
+                val file = localFileSystem.findFileByPath(filePath) ?: continue
+                fileDocumentManager.getDocument(file)?.setReadOnly(!state.wasWritable)
+            }
+        }
+        if (SwingUtilities.isEventDispatchThread()) restoreFrozenDocuments()
+        else ApplicationManager.getApplication().invokeAndWait { restoreFrozenDocuments() }
         val states = rootStates.values.toList()
         rootStates.clear()
         runNativeSideEffectOffEdt {

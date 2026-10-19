@@ -5682,13 +5682,37 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (SwingUtilities.isEventDispatchThread()) capture()
             else ApplicationManager.getApplication().invokeAndWait { capture() }
             val document = documentRef.get() ?: return false
-            return manager.ensureOpenDocumentReplica(
+            val attached = manager.ensureOpenDocumentReplica(
                 filePath,
                 document,
                 await = true,
                 forceRefresh = true,
                 requireFreshRegistration = true,
             )
+            if (attached) return true
+
+            // The ordinary editor receipt wait is intentionally short (750 ms),
+            // while a controller bootstrap for a large session document routinely
+            // takes longer. The attach was already admitted to this document's
+            // serialized worker, so treating that bounded wait as a refusal makes
+            // PatchWatcher re-arm the freeze while the same attach later succeeds.
+            // Wait for the admitted task's authoritative outcome before deciding
+            // whether the tab must remain frozen.
+            val deadline = System.nanoTime() +
+                TimeUnit.MILLISECONDS.toNanos(DYNAMIC_PLUGIN_ATTACH_RECEIPT_TIMEOUT_MS)
+            while (
+                manager.inFlightAttaches[filePath]?.get()?.let { it > 0 } == true &&
+                System.nanoTime() < deadline
+            ) {
+                if (manager.forwarders[filePath]?.attached == true) return true
+                try {
+                    Thread.sleep(25L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+            return manager.forwarders[filePath]?.attached == true
         }
 
         fun rebindOpenDocumentPath(

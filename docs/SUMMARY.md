@@ -29,6 +29,7 @@
 
 # Reference
 
+- [Tags and Opening-Marker Attributes](reference/tags-and-attributes.md)
 - [Feature Catalog](reference/features.md)
 - [Architecture](reference/architecture.md)
 - [Specification](reference/specs.md)

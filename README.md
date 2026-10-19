@@ -117,6 +117,8 @@ see [Tmux Routing and Navigation Lanes](docs/guide/tmux-routing.md).
 - [Document Format](docs/guide/document-format.md) and
   [Components](docs/guide/components.md): frontmatter, `agent:` sections, queue
   and backlog
+- [Tags and Opening-Marker Attributes](docs/reference/tags-and-attributes.md):
+  complete `agent:*`, response patch, boundary, and attribute reference
 - [Commands](docs/guide/commands.md) and [Configuration](docs/getting-started/configuration.md)
 - [Feature Catalog](docs/reference/features.md): the detailed capability ledger
 - [Architecture](docs/reference/architecture.md): binary vs. skill

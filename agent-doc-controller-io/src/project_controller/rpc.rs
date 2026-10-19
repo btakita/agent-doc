@@ -34539,7 +34539,10 @@ fn publish_pane_layout_desired_invocation_in_lane(
         .as_ref()
         .map(|desired| {
             if invocation.column_order == agent_doc_tmux::LayoutColumnOrder::Unknown {
-                desired.order_basis_for(&desired_columns)
+                // GH #302/#311: an escalation's slot placement is provisional,
+                // even when later escalations have replaced every document in
+                // the last positively observed basis.
+                desired.order_authority_columns()
             } else {
                 desired.invocation.columns.as_slice()
             }
@@ -40031,6 +40034,77 @@ mod tests {
         )
         .unwrap();
         assert_eq!(corrected.invocation.columns, vec![a, c]);
+        assert_eq!(corrected.provenance.provisional_order_basis, None);
+    }
+
+    #[test]
+    fn gh311_chained_focus_escalations_do_not_author_unknown_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let path = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let (a, b, c, d) = (path("a.md"), path("b.md"), path("c.md"), path("d.md"));
+
+        // Positive editor geometry establishes [a | b], focused on a.
+        assert!(escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &a,
+            &[
+                SurfaceColumn {
+                    files: vec![a.clone()],
+                },
+                SurfaceColumn {
+                    files: vec![b.clone()],
+                },
+            ],
+            "actor_pane_not_visible",
+        ));
+
+        // Consecutive focus-only escalations keep replacing the latest focus
+        // slot, but neither guess may replace [a | b] as order authority.
+        assert!(escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &c,
+            &[],
+            "actor_pane_not_visible",
+        ));
+        assert!(escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &d,
+            &[],
+            "actor_pane_not_visible",
+        ));
+        let guessed = runtime.pane_layout_desired().unwrap();
+        assert_eq!(guessed.invocation.columns, vec![d.clone(), b.clone()]);
+        assert_eq!(
+            guessed.provenance.provisional_order_basis,
+            Some(vec![a.clone(), b])
+        );
+
+        // Remote Dev then reports only newer documents. Folding [c | d]
+        // against the latest guess [d | b] would reverse it to [d | c]. With
+        // no positive-basis survivor, preserve the incoming unknown order.
+        let mut observation =
+            automatic_layout_sync_invocation(vec![c.clone(), d.clone()], &d, false);
+        observation.column_order = agent_doc_tmux::LayoutColumnOrder::Unknown;
+        let (corrected, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            observation,
+            Some(1),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(corrected.invocation.columns, vec![c, d]);
         assert_eq!(corrected.provenance.provisional_order_basis, None);
     }
 

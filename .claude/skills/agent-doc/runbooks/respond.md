@@ -420,9 +420,10 @@ An in-progress marker on a free-text head records selection, not completion
 (`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.
 If the response does not actually quote and answer that head, closeout must leave
 it active even when the marker was added earlier in the cycle.
-When a selected head enters the live queue after the pre-turn baseline, the
-combination of that marker and an exact current-response quote plus answer prose
-allows the same atomic closeout to consume it. This prevents the next Stop hook
+When a selected head enters the live queue after the pre-turn baseline, durable
+cycle-state selection plus an exact current-response quote and answer prose
+allows the same atomic closeout to consume it. The visible marker alone is not
+authority. This prevents the next Stop hook
 from reopening work the just-committed response demonstrably completed; neither
 the marker nor preset-expansion wording is sufficient by itself.
 
@@ -440,9 +441,11 @@ unrelated head always survives. id-backed heads are unaffected (they strike by i
 
 The `#ftstrike` pass is **conservative about in-flight edits (`#qstrikeexplain`)**: it
 strikes a free-text head only when that head was present in the stable pre-turn
-baseline (the preflight baseline). A head that first appeared in the live buffer
-*this* turn — a line the operator is still typing — is **never** same-cycle struck,
-even if it happens to fuzzy-match a quoted prompt; it defers to the cycle that
+baseline (the preflight baseline), or durable cycle state proves preflight
+selected that exact head and the current response exactly echoes and answers it.
+A head that first appeared in the live buffer *this* turn — a line the operator
+is still typing — is **never** same-cycle struck merely because it has a visible
+marker or fuzzy-matches a quoted prompt; it defers to the cycle that
 actually answers it (editor-wins, consistent with `#queue-user-edit-overwrite`). So
 quoting a queue head you did not intend to drain cannot strike a line the operator
 is mid-authoring.

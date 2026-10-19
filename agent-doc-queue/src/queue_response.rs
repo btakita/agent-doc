@@ -1466,6 +1466,10 @@ mod tests {
             "a free-text head that merely mentions #ids stays free text"
         );
         assert!(
+            queue_head_is_free_text_prompt(&active_queue_doc("[#todo-a]: note")).unwrap(),
+            "a bare bracketed id followed by a colon is an inert free-text note"
+        );
+        assert!(
             !queue_head_is_free_text_prompt(&active_queue_doc("do queue")).unwrap(),
             "queue activation triggers are not free-text heads"
         );

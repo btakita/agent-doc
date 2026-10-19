@@ -1087,25 +1087,25 @@ Codex capacity recovery is also implemented and pushed to `main` after the v0.35
 - ~~do [#httpsgithubcom]~~
 - ~~If an issue was added, also add `- release + publish`~~
 - ~~The queue id=issues should have add the queue items that I added after this queue item. Instead, the 2 queue items above were added...This may be legitimate. I intended `do [#httpsgithubcom]` to have added the 4 queue items after this queue item. Was my prompt not specific enough?~~
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/303
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/304
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/305
-- 📥 Run Agent Doc on sdk-pr.md is still wedged. I thought we addressed this issue in a previous release. Still not working.
-- 📥 `agent:done` `archive=...` should support relative paths from the directory of the agent doc itself. Add the feature if not already supported. If `archive` is used without a value, default to `<document-basename>.done.md` in the same directory as the agent doc. If there are contents in `agent:done`, agent-doc should move the content into the *.done.md file if `archive` is present. If the *.done.md file already has content and content from `agent:done` is moved over to *.done.md by agent-doc, the items should be ordered by timestamp.
-- 📥 The agent-doc SKILL.md should be a table of contents to runbooks. Reduce the size of the SKILL as much as possible so it fully survives compaction.
-- 📥 release + publish
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/306
-- 📥 release + publish: which includes #306
-- 📥 Look at this queue's items. The items from the previous release are still in outbox mode. We also need a way to tell what is happening if all queue items are in outbox mode. Should we add a queue item for your current activity?
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/307
-- 📥 `- #gh-fix https://github.com/btakita/agent-doc/issues/307` is not claimed yet? It has been in the queue for a while. Or is there some state issue?
-- 📥 release + publish including #307
-- 📥 Codex is giving "Selected model is at capacity. Please try a different model." which stalls the turn. agent-doc should attempt to restart the turn. `continue` seems to make it go again.
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/303~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/304~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/305~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Run Agent Doc on sdk-pr.md is still wedged. I thought we addressed this issue in a previous release. Still not working.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~`agent:done` `archive=...` should support relative paths from the directory of the agent doc itself. Add the feature if not already supported. If `archive` is used without a value, default to `<document-basename>.done.md` in the same directory as the agent doc. If there are contents in `agent:done`, agent-doc should move the content into the *.done.md file if `archive` is present. If the *.done.md file already has content and content from `agent:done` is moved over to *.done.md by agent-doc, the items should be ordered by timestamp.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~The agent-doc SKILL.md should be a table of contents to runbooks. Reduce the size of the SKILL as much as possible so it fully survives compaction.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/306~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: which includes #306~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Look at this queue's items. The items from the previous release are still in outbox mode. We also need a way to tell what is happening if all queue items are in outbox mode. Should we add a queue item for your current activity?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/307~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~`- #gh-fix https://github.com/btakita/agent-doc/issues/307` is not claimed yet? It has been in the queue for a while. Or is there some state issue?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish including #307~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Codex is giving "Selected model is at capacity. Please try a different model." which stalls the turn. agent-doc should attempt to restart the turn. `continue` seems to make it go again.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
-- do [#httpsgithubcom]
+- ~~do [#httpsgithubcom]~~
 - If an issue was added, also add `- release + publish`
 <!-- /agent:queue -->
 

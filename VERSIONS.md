@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.523
+
+- **Reported queue handoffs are visible at a glance.** When every active queue
+  item is already in outbox mode, status now says how many reported items are
+  awaiting coordinator integration, verification, and closeout instead of
+  leaving the operator to infer that state from individual markers.
+- **Recovered supervisors now receive orphan-drain dispatches (GH #307).** A
+  background orphan-drain route no longer suppresses dispatch merely because
+  the authoritative actor has recovered and then falsely reports success. It
+  dispatches through that actor while preserving background pane layout and
+  skipping stash rescue, so the queue head can actually drain.
+
 ## 0.35.522
 
 - **The agent-doc skill is now a compact runbook router.** Essential session and

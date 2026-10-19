@@ -491,12 +491,11 @@ pub fn resolve_or_create_pane_dispatch_only(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_background_existing_pane_guard file={} pane={} outcome=suppressed reason=supervisor_recovered focus_effect=preserved pane_effect=none",
+                    "route_background_existing_pane_guard file={} pane={} outcome=allowed reason=supervisor_recovered action=dispatch_via_authoritative_actor focus_effect=preserved pane_effect=none",
                     file.display(),
                     existing_pane,
                 ),
             );
-            return Ok(existing_pane.to_string());
         }
     }
     if let Some(actor) = authoritative_actor

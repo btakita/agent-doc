@@ -10612,6 +10612,24 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
         orphan_drain.contains("current_text_for_file_nonblocking"),
         "orphan drain must inspect operator-visible realtime text when an editor is attached"
     );
+
+    let pane_resolution =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
+    assert!(
+        pane_resolution.contains(
+            "outcome=allowed reason=supervisor_recovered action=dispatch_via_authoritative_actor",
+        ) && !pane_resolution.contains("outcome=suppressed reason=supervisor_recovered"),
+        "a recovered supervisor must receive the orphan dispatch instead of turning suppression into false success (GH #307)"
+    );
+    let authoritative_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))
+            .unwrap();
+    assert!(
+        authoritative_dispatch.contains("if crate::invocation::preserve_route_layout()")
+            && authoritative_dispatch
+                .contains("route_authoritative_background_stash_rescue_skipped"),
+        "recovered-supervisor orphan dispatch must preserve background pane topology and focus (GH #307)"
+    );
 }
 
 #[test]

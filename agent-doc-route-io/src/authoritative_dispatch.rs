@@ -835,14 +835,26 @@ pub fn route_via_authoritative_actor(
             ),
         );
     }
-    let rescued_from_stash = rescue_from_stash(
-        tmux,
-        &dispatch_pane,
-        session_id,
-        file_path,
-        target_session,
-        split_before,
-    );
+    let rescued_from_stash = if crate::invocation::preserve_route_layout() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_authoritative_background_stash_rescue_skipped file={} pane={} focus_effect=none pane_effect=none",
+                file.display(),
+                dispatch_pane,
+            ),
+        );
+        false
+    } else {
+        rescue_from_stash(
+            tmux,
+            &dispatch_pane,
+            session_id,
+            file_path,
+            target_session,
+            split_before,
+        )
+    };
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
 
     // After a real stash rescue the pane is now visible in the agent-doc window,

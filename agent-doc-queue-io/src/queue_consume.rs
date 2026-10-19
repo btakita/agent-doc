@@ -18,7 +18,7 @@ use agent_doc_queue::{
         consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
         first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
-        project_answered_free_text_strike_with_claims,
+        project_answered_free_text_strike_with_authority,
         project_committed_heading_replay_free_text_strike_with_claims,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
@@ -1131,14 +1131,28 @@ fn strike_free_text_queue_heads_with_proof(
             claimed_heads.push(head);
         }
     }
+    // Preflight records the free-text heads it selected in cycle state. That
+    // durable fact lets an exact current-response echo close a selected head
+    // introduced by queue projection after the response baseline, without
+    // treating a hand-edited/stale `🚧` marker as authority.
+    let selected_heads = agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .filter(|state| {
+            state.queue_selection_authority
+                == agent_doc_cycle_state_io::QueueSelectionAuthority::Preflight
+        })
+        .map(|state| state.selected_free_text_queue_heads)
+        .unwrap_or_default();
     // `#ftstrikeclaimedmention`: a claimed head strikes only on an exact
     // agent-authored echo, never on a mention or preset-body quote.
     let project = |doc: &str| match proof {
-        AnswerPresenceProof::Materialized => project_answered_free_text_strike_with_claims(
+        AnswerPresenceProof::Materialized => project_answered_free_text_strike_with_authority(
             doc,
             response_body,
             baseline.as_deref(),
             &claimed_heads,
+            &selected_heads,
         ),
         AnswerPresenceProof::CommittedHeadingReplay => {
             project_committed_heading_replay_free_text_strike_with_claims(

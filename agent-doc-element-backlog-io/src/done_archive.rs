@@ -13,15 +13,15 @@ pub fn archive_pending_done(
     content: &str,
     removed: &[agent_doc_element_backlog::backlog::PendingItem],
 ) -> Result<Option<String>> {
-    if removed.is_empty() {
-        return Ok(None);
-    }
     let mut content_with_archive = content.to_string();
     let components = agent_doc_element::element::parse(&content_with_archive)?;
     if !components
         .iter()
         .any(|c| agent_doc_element::element::is_backlog_done_component(&c.name))
     {
+        if removed.is_empty() {
+            return Ok(None);
+        }
         content_with_archive =
             agent_doc_element_done::insert_done_component_after_tracked_work(&content_with_archive)
                 .context("failed to insert agent:done component")?;
@@ -37,17 +37,24 @@ pub fn archive_pending_done(
 
     if let Some(archive_path) = archive.attrs.get("archive") {
         let target = resolve_done_archive_target(file, archive_path)?;
-        append_external_done_archive(&target, &today, removed)?;
-        let pointer = format!("\n<!-- completed work archived in {} -->\n", archive_path);
-        let new_body = if existing_body.trim().is_empty() || existing_body.trim() == pointer.trim()
-        {
-            pointer
+        let label = configured_done_archive_label(file, archive_path)?;
+        let pointer = format!("\n<!-- completed work archived in {label} -->\n");
+        let inline_content = existing_body
+            .lines()
+            .filter(|line| {
+                let line = line.trim();
+                !(line.starts_with("<!-- completed work archived in ") && line.ends_with(" -->"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let inline = (!inline_content.trim().is_empty()).then_some(inline_content.as_str());
+        append_external_done_archive(&target, &today, removed, inline)?;
+        let updated = archive.replace_content(&content_with_archive, &pointer);
+        return if updated == content_with_archive && removed.is_empty() {
+            Ok(None)
         } else {
-            existing_body.to_string()
+            Ok(Some(updated))
         };
-        return Ok(Some(
-            archive.replace_content(&content_with_archive, &new_body),
-        ));
     }
 
     let mut new_body = existing_body.to_string();
@@ -246,68 +253,43 @@ pub fn configured_external_done_archive(file: &Path, content: &str) -> Result<Op
 }
 
 pub(crate) fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Result<PathBuf> {
-    if archive_path.trim().is_empty() {
-        bail!("agent:done archive= must not be empty");
-    }
-    if !archive_path.ends_with(".done.md") {
+    let relative = configured_done_archive_relative_path(file, archive_path)?;
+    if !relative.to_string_lossy().ends_with(".done.md") {
         bail!(
             "agent:done archive={} must point to a .done.md file",
             archive_path
         );
     }
-    let relative = Path::new(archive_path);
-    if relative.is_absolute() {
-        bail!(
-            "agent:done archive={} must be repo-relative, not absolute",
+    agent_doc_fs::resolve_document_relative_path(file, &relative).with_context(|| {
+        format!(
+            "agent:done archive={} must stay inside the document project",
             archive_path
-        );
-    }
-    if relative.components().any(|component| {
-        matches!(
-            component,
-            std::path::Component::ParentDir
-                | std::path::Component::RootDir
-                | std::path::Component::Prefix(_)
         )
-    }) {
-        bail!(
-            "agent:done archive={} must not escape the repository",
-            archive_path
-        );
-    }
+    })
+}
 
-    let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root =
-        agent_doc_project_root_io::project_root_containing(&canonical_file).with_context(|| {
-            format!(
-                "failed to find repository root for done archive resolution from {}",
-                file.display()
-            )
-        })?;
-    let target = root.join(relative);
-    if let Ok(canonical_target) = target.canonicalize() {
-        if !canonical_target.starts_with(&root) {
-            bail!(
-                "agent:done archive={} resolves outside the repository",
-                archive_path
-            );
-        }
-    } else if let Some(parent) = target.parent()
-        && let Ok(canonical_parent) = parent.canonicalize()
-        && !canonical_parent.starts_with(&root)
-    {
-        bail!(
-            "agent:done archive={} resolves outside the repository",
-            archive_path
-        );
+fn configured_done_archive_relative_path(file: &Path, archive_path: &str) -> Result<PathBuf> {
+    if !archive_path.trim().is_empty() {
+        return Ok(PathBuf::from(archive_path));
     }
-    Ok(target)
+    let stem = file
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .context("agent:done archive default requires a UTF-8 document basename")?;
+    Ok(PathBuf::from(format!("{stem}.done.md")))
+}
+
+fn configured_done_archive_label(file: &Path, archive_path: &str) -> Result<String> {
+    Ok(configured_done_archive_relative_path(file, archive_path)?
+        .to_string_lossy()
+        .into_owned())
 }
 
 fn append_external_done_archive(
     target: &Path,
     today: &str,
     removed: &[agent_doc_element_backlog::backlog::PendingItem],
+    inline_content: Option<&str>,
 ) -> Result<()> {
     let deferred = crate::backlog_cmd::deferred_raw_content(target);
     let mut existing = match deferred {
@@ -328,6 +310,15 @@ fn append_external_done_archive(
         existing.push('\n');
         changed = true;
     }
+    if let Some(inline) = inline_content
+        .map(str::trim)
+        .filter(|inline| !inline.is_empty())
+        && !existing.contains(inline)
+    {
+        existing.push_str(inline);
+        existing.push('\n');
+        changed = true;
+    }
     for item in removed {
         let first_line = format!("- {} [#{}] {}", today, item.id, item.text);
         if existing.lines().any(|line| line == first_line) {
@@ -339,6 +330,11 @@ fn append_external_done_archive(
             &item.text,
             &item.continuation,
         ));
+        changed = true;
+    }
+    let sorted = sort_done_archive_entries_by_timestamp(&existing);
+    if sorted != existing {
+        existing = sorted;
         changed = true;
     }
     if changed || !target.exists() {
@@ -357,6 +353,44 @@ fn append_external_done_archive(
             .with_context(|| format!("failed to write done archive {}", target.display()))?;
     }
     Ok(())
+}
+
+fn sort_done_archive_entries_by_timestamp(content: &str) -> String {
+    fn timestamp(line: &str) -> Option<&str> {
+        let rest = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))?;
+        let value = rest.split_whitespace().next()?;
+        let bytes = value.as_bytes();
+        (bytes.len() == 10
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes
+                .iter()
+                .enumerate()
+                .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit()))
+        .then_some(value)
+    }
+
+    let mut prefix = String::new();
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for line in content.split_inclusive('\n') {
+        if let Some(stamp) = timestamp(line) {
+            entries.push((stamp.to_string(), line.to_string()));
+        } else if let Some((_, entry)) = entries.last_mut() {
+            entry.push_str(line);
+        } else {
+            prefix.push_str(line);
+        }
+    }
+    if entries.len() < 2 {
+        return content.to_string();
+    }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    for (_, entry) in entries {
+        prefix.push_str(&entry);
+    }
+    prefix
 }
 
 #[cfg(test)]
@@ -466,6 +500,64 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn archive_paths_are_relative_to_the_document_directory() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(project.path().join("tasks/nested")).unwrap();
+        let doc = project.path().join("tasks/nested/session.md");
+        std::fs::write(&doc, "# session\n").unwrap();
+
+        assert_eq!(
+            resolve_done_archive_target(&doc, "history.done.md").unwrap(),
+            project.path().join("tasks/nested/history.done.md")
+        );
+        assert_eq!(
+            resolve_done_archive_target(&doc, "../history.done.md").unwrap(),
+            project.path().join("tasks/history.done.md")
+        );
+        assert!(resolve_done_archive_target(&doc, "../../../escape.done.md").is_err());
+    }
+
+    #[test]
+    fn bare_archive_defaults_beside_document_and_migrates_inline_content() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(project.path().join("tasks")).unwrap();
+        let doc = project.path().join("tasks/session.md");
+        let body = concat!(
+            "<!-- agent:done archive -->\n",
+            "- 2026-10-19 [#old] Existing completion.\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, body).unwrap();
+        let archive = project.path().join("tasks/session.done.md");
+        std::fs::write(
+            &archive,
+            "# Agent Doc Completed Work\n\n- 2026-10-20 [#newer] Newer completion.\n",
+        )
+        .unwrap();
+
+        let updated = archive_pending_done(&doc, body, &[])
+            .unwrap()
+            .expect("inline history must migrate even without a new reap");
+        let archived = std::fs::read_to_string(&archive).unwrap();
+        assert!(
+            archived.contains("[#old] Existing completion."),
+            "{archived}"
+        );
+        assert!(
+            archived.find("[#old]").unwrap() < archived.find("[#newer]").unwrap(),
+            "migrated and existing entries must be ordered by timestamp: {archived}"
+        );
+        assert!(
+            updated.contains("<!-- completed work archived in session.done.md -->"),
+            "{updated}"
+        );
+        assert!(!updated.contains("[#old]"), "{updated}");
+        assert_eq!(archive_pending_done(&doc, &updated, &[]).unwrap(), None);
+    }
 }
 
 #[cfg(test)]
@@ -518,7 +610,7 @@ mod archived_tracked_ids_tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks/nested")).unwrap();
         let doc = dir.path().join("tasks/nested/bugs.md");
-        let body = "<!-- agent:done archive=tasks/elsewhere.done.md -->\n<!-- /agent:done -->\n";
+        let body = "<!-- agent:done archive=../elsewhere.done.md -->\n<!-- /agent:done -->\n";
         std::fs::write(&doc, body).unwrap();
         std::fs::write(
             dir.path().join("tasks/elsewhere.done.md"),

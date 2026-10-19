@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::{Component, Path, PathBuf};
 
 pub mod install_freshness;
@@ -65,6 +65,62 @@ pub fn find_project_root(path: &Path) -> Option<PathBuf> {
 pub fn find_project_root_canonical(path: &Path) -> Option<PathBuf> {
     let canonical = path.canonicalize().ok()?;
     find_project_root(&canonical)
+}
+
+/// Resolve a path relative to the directory containing `document`, while
+/// keeping the result inside the owning agent-doc project.
+///
+/// The target itself may not exist yet. Existing ancestors are canonicalized
+/// so a symlink cannot redirect a new file outside the project root.
+pub fn resolve_document_relative_path(document: &Path, relative: &Path) -> Result<PathBuf> {
+    if relative.is_absolute() {
+        bail!("path must be relative to the document");
+    }
+
+    let document = document
+        .canonicalize()
+        .unwrap_or_else(|_| document.to_path_buf());
+    let root = find_project_root(&document)
+        .with_context(|| format!("failed to find project root for {}", document.display()))?
+        .canonicalize()
+        .context("failed to canonicalize project root")?;
+    let base = document.parent().with_context(|| {
+        format!(
+            "document has no containing directory: {}",
+            document.display()
+        )
+    })?;
+
+    let mut target = base.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => target.push(part),
+            Component::ParentDir => {
+                if !target.pop() || !target.starts_with(&root) {
+                    bail!("document-relative path escapes the project root");
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                bail!("path must be relative to the document");
+            }
+        }
+    }
+    if !target.starts_with(&root) {
+        bail!("document-relative path escapes the project root");
+    }
+
+    let mut existing = target.as_path();
+    while !existing.exists() {
+        existing = existing.parent().context("path has no existing ancestor")?;
+    }
+    let canonical_existing = existing
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", existing.display()))?;
+    if !canonical_existing.starts_with(&root) {
+        bail!("document-relative path resolves outside the project root");
+    }
+    Ok(target)
 }
 
 /// Candidate `<stem>.done.md` archive paths for `file`, from its containing

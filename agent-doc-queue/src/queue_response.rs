@@ -1185,7 +1185,7 @@ pub fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bo
     if head_norm.is_empty() {
         return false;
     }
-    let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(baseline, "queue") else {
+    let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(baseline, "queue") else {
         return false;
     };
     nodes.iter().any(|node| {

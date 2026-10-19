@@ -849,7 +849,7 @@ pub fn answered_free_text_head_node_keys_with_authority(
     if response_body.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let nodes = match agent_doc_markdown_ast::mutations::item_nodes(content, "queue") {
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue") {
         Ok(nodes) => nodes,
         // `#ftstrike-noqueue`: queue is an optional document component. An
         // answered response in a document without one has no queue lifecycle
@@ -873,7 +873,7 @@ pub fn answered_free_text_head_node_keys_with_authority(
     // now than in the baseline has already had its answer applied.
     let struck_counts = |doc: &str| -> std::collections::HashMap<String, usize> {
         let mut counts = std::collections::HashMap::new();
-        if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(doc, "queue") {
+        if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(doc, "queue") {
             for node in nodes.into_iter().filter(|n| n.item.struck) {
                 *counts
                     .entry(normalize_queue_prompt_text(node.item.text.trim()))
@@ -1258,10 +1258,10 @@ pub fn queue_prompt_node_keys_for_done_ids(
 
 pub fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result<String> {
     let borrowed = node_keys.iter().map(String::as_str).collect::<Vec<_>>();
-    let consumed = agent_doc_markdown_ast::mutations::consume_nodes(content, "queue", &borrowed)
-        .map_err(|err| {
-            anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}")
-        })?;
+    let consumed =
+        agent_doc_markdown_ast::mutations::consume_nodes_all(content, "queue", &borrowed).map_err(
+            |err| anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}"),
+        )?;
     Ok(strip_in_progress_marker_from_struck_queue_items(&consumed))
 }
 
@@ -1425,7 +1425,7 @@ pub fn project_committed_heading_replay_free_text_strike_with_claims(
     if answered.is_empty() {
         return Ok(None);
     }
-    let node_keys = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+    let node_keys = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .map_err(|err| {
             anyhow::anyhow!("committed-heading replay strike: failed to derive queue nodes: {err}")
         })?
@@ -1723,33 +1723,33 @@ fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
     let Ok(components) = element::parse(content) else {
         return content.to_string();
     };
-    let Some(queue) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return content.to_string();
-    };
-    let body = queue.content(content);
-    let mut updated_body = body.to_string();
-    for marker in LIFECYCLE_MARKERS {
-        let needle_with_space = format!("~~{marker} ");
-        let needle_bare = format!("~~{marker}");
-        // `#multilinequeuehead`: a multi-line head struck into a `~~~done`
-        // fence keeps its lifecycle marker on the first body line, not after
-        // `~~`.
-        let fence_with_space = format!("~~~done\n{marker} ");
-        let fence_bare = format!("~~~done\n{marker}");
-        updated_body = updated_body
-            .replace(&fence_with_space, "~~~done\n")
-            .replace(&fence_bare, "~~~done\n")
-            .replace(&needle_with_space, "~~")
-            .replace(&needle_bare, "~~");
+    let mut edits = Vec::new();
+    for queue in components.iter().filter(|component| component.name == "queue") {
+        let body = queue.content(content);
+        let mut updated_body = body.to_string();
+        for marker in LIFECYCLE_MARKERS {
+            let needle_with_space = format!("~~{marker} ");
+            let needle_bare = format!("~~{marker}");
+            // `#multilinequeuehead`: a multi-line head struck into a `~~~done`
+            // fence keeps its lifecycle marker on the first body line, not after
+            // `~~`.
+            let fence_with_space = format!("~~~done\n{marker} ");
+            let fence_bare = format!("~~~done\n{marker}");
+            updated_body = updated_body
+                .replace(&fence_with_space, "~~~done\n")
+                .replace(&fence_bare, "~~~done\n")
+                .replace(&needle_with_space, "~~")
+                .replace(&needle_bare, "~~");
+        }
+        if updated_body != body {
+            edits.push((queue.open_end, queue.close_start, updated_body));
+        }
     }
-    if updated_body == body {
-        content.to_string()
-    } else {
-        queue.replace_content(content, &updated_body)
+    let mut updated = content.to_string();
+    for (start, end, replacement) in edits.into_iter().rev() {
+        updated.replace_range(start..end, &replacement);
     }
+    updated
 }
 
 /// Node keys of every active (non-struck) queue head that is non-drainable
@@ -2007,7 +2007,7 @@ fn strip_list_bullet_prefix(line: &str) -> &str {
 /// struck between `before` and `after`.
 pub fn annotate_newly_struck_free_text_heads(before: &str, after: &str) -> anyhow::Result<String> {
     let struck_before: HashSet<String> =
-        agent_doc_markdown_ast::mutations::item_nodes(before, "queue")
+        agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
             .map(|nodes| {
                 nodes
                     .into_iter()
@@ -2017,7 +2017,7 @@ pub fn annotate_newly_struck_free_text_heads(before: &str, after: &str) -> anyho
             })
             .unwrap_or_default();
 
-    let nodes = match agent_doc_markdown_ast::mutations::item_nodes(after, "queue") {
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(after, "queue") {
         Ok(nodes) => nodes,
         Err(_) => return Ok(after.to_string()),
     };
@@ -3403,6 +3403,49 @@ Old.
             "the FIRST copy is the struck one:\n{target}"
         );
         assert!(target.contains("- do [#between]"));
+    }
+
+    /// `#ftstrike-multiqueue`: the queue graph may select a later queue when an
+    /// earlier queue is empty. Answer projection must address the selected
+    /// head's component occurrence, not assume the first `agent:queue` block.
+    #[test]
+    fn answered_free_text_strike_reaches_later_queue_component() {
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: queue-graph-projection\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue id=main -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues -->\n",
+            "- 🚧 If an issue was added, also add `- release + publish`\n",
+            "- follow up after publishing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "> **Queue prompt:** If an issue was added, also add `- release + publish`\n\n",
+            "Added the release and publish follow-up.\n",
+        );
+
+        let projection = project_answered_free_text_strike(document, response, Some(document))
+            .unwrap()
+            .expect("the answered head in the later queue is projected");
+
+        assert_eq!(projection.node_keys.len(), 1);
+        assert!(
+            projection
+                .target_content
+                .contains("- ~~If an issue was added, also add `- release + publish`~~"),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("- follow up after publishing\n")
+        );
     }
 
     /// `#ftstrikeonce` (live, agent-doc-bugs.md 2026-09-30): queue consume

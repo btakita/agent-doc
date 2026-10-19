@@ -1245,7 +1245,7 @@ fn strike_free_text_queue_heads_with_proof(
     );
     // `#qstrikenote` observability: one marker per struck head naming a short text
     // prefix, so a struck line is auditable as an explained auto-strike.
-    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(&content, "queue") {
+    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(&content, "queue") {
         let key_set: std::collections::HashSet<&str> = keys.iter().map(String::as_str).collect();
         let claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);

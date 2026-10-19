@@ -211,6 +211,14 @@ banner.
 
 `agent-doc clean <FILE>` squashes all `agent-doc:` commits for the file into one via `git reset --soft`.
 
+## skill
+
+`agent-doc skill install [--harness HARNESS | --all] [--root DIR] [--reload MODE]`
+
+- Every target-selection path reports whether its installed `SKILL.md` content changed: auto-detected harness, explicit `--harness`, explicit `--root`, Grok, and `--all`.
+- When the selected install changes at least one skill and `--reload restart` is present, stdout includes `SKILL_RELOAD=restart`; any other explicit reload mode emits `SKILL_RELOAD=compact`.
+- An already-current install emits no reload signal. Runbook, OKF, hook, and config reconciliation still runs idempotently but does not by itself require the agent to reload skill instructions.
+
 ## gc
 
 `agent-doc gc [--root DIR] [--dry-run] [--database-only]`

@@ -1920,11 +1920,11 @@ fn ensure_trailing_newline(content: &str) -> String {
 /// Install the bundled SKILL.md to the project.
 /// When `root` is None, resolves to git superproject root (or CWD fallback).
 #[allow(dead_code)]
-pub fn install_at(root: Option<&Path>) -> Result<()> {
+pub fn install_at(root: Option<&Path>) -> Result<bool> {
     let install_user_codex_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let env = detect_install_env();
-    install_skill_for_env(env, resolved.as_deref())?;
+    let updated = install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
     install_runbook_mirrors(resolved.as_deref())?;
     retire_managed_runbook_mirrors(resolved.as_deref())?;
@@ -1933,34 +1933,19 @@ pub fn install_at(root: Option<&Path>) -> Result<()> {
     if install_user_codex_hooks && matches!(env, agent_kit::detect::Environment::Codex) {
         install_codex_user_hook_artifacts()?;
     }
-    retire_managed_always_on_agents(resolved.as_deref())
+    retire_managed_always_on_agents(resolved.as_deref())?;
+    Ok(updated)
 }
 
 /// Public entry point (resolves to superproject root, called from main).
 #[allow(dead_code)]
 pub fn install() -> Result<()> {
-    install_at(None)
+    install_at(None).map(|_| ())
 }
 
 /// Install and return whether the file was actually updated (not just already up to date).
 pub fn install_and_check_updated() -> Result<bool> {
-    let env = detect_install_env();
-    let resolved = resolve_root();
-
-    // Check if already up to date before install
-    let was_current = is_skill_current_for_env(env, resolved.as_deref())?;
-
-    install_skill_for_env(env, resolved.as_deref())?;
-    install_runbooks(resolved.as_deref())?;
-    install_runbook_mirrors(resolved.as_deref())?;
-    retire_managed_runbook_mirrors(resolved.as_deref())?;
-    install_okf(resolved.as_deref())?;
-    install_env_artifacts(env, resolved.as_deref())?;
-    if matches!(env, agent_kit::detect::Environment::Codex) {
-        install_codex_user_hook_artifacts()?;
-    }
-    retire_managed_always_on_agents(resolved.as_deref())?;
-    Ok(!was_current)
+    install_at(None)
 }
 
 /// Install the skill for a specific harness environment under an explicit root.
@@ -1968,10 +1953,13 @@ pub fn install_and_check_updated() -> Result<bool> {
 /// An explicit root is how a submodule-local install gets refreshed: bare root
 /// resolution prefers the superproject, so `src/agent-doc/.claude/...` is
 /// otherwise unreachable from inside the submodule (`#skillinstallstalemirror`).
-pub fn install_for_at(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<()> {
+pub fn install_for_at(
+    env: agent_kit::detect::Environment,
+    root: Option<&Path>,
+) -> Result<bool> {
     let install_user_codex_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
-    install_skill_for_env(env, resolved.as_deref())?;
+    let updated = install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks_for(env, resolved.as_deref())?;
     install_runbook_mirrors(resolved.as_deref())?;
     retire_managed_runbook_mirrors(resolved.as_deref())?;
@@ -1980,17 +1968,18 @@ pub fn install_for_at(env: agent_kit::detect::Environment, root: Option<&Path>) 
     if install_user_codex_hooks && matches!(env, agent_kit::detect::Environment::Codex) {
         install_codex_user_hook_artifacts()?;
     }
-    retire_managed_always_on_agents(resolved.as_deref())
+    retire_managed_always_on_agents(resolved.as_deref())?;
+    Ok(updated)
 }
 
 /// Install the skill for all supported harnesses under an explicit root.
 /// A `None` root resolves to the superproject (or git toplevel) install root.
-pub fn install_all_at(root: Option<&Path>) -> Result<()> {
+pub fn install_all_at(root: Option<&Path>) -> Result<bool> {
     let install_user_codex_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
-    grok::install(resolved.as_deref())?;
+    let mut updated = grok::install(resolved.as_deref())?;
     for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
-        install_skill_for_env(env, resolved.as_deref())?;
+        updated |= install_skill_for_env(env, resolved.as_deref())?;
     }
     install_runbooks_all(resolved.as_deref())?;
     install_runbook_mirrors(resolved.as_deref())?;
@@ -2000,7 +1989,8 @@ pub fn install_all_at(root: Option<&Path>) -> Result<()> {
     if install_user_codex_hooks {
         install_codex_user_hook_artifacts()?;
     }
-    retire_managed_always_on_agents(resolved.as_deref())
+    retire_managed_always_on_agents(resolved.as_deref())?;
+    Ok(updated)
 }
 
 /// Check if the installed skill matches the bundled version.

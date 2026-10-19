@@ -296,7 +296,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `#id` head, or open the response with the verbatim
      `> **Queue prompt:** <line>` echo for a free-text head (a `### Re:`
      heading alone leaves the line queued). That closeout also ends the claim,
-     so no release is needed first (`#claimstrike`). A bare
+     and the same queue-strike successor retires the matching binary completion
+     cell; unmatched worker reports remain visible. Thus the integrated response
+     replaces its temporary “awaiting integration” notice instead of leaving a
+     stale `agent-doc-subagent-completion` marker beside it. No release is needed
+     first (`#claimstrike`). A bare
      `agent-doc queue release <FILE> --item <...> --generation <N>` records that the worker
      reported (`#reportedrelease`): the line stays queued, is never offered to
      a new worker, steering routes it `dispatch=persist_reported`, and the

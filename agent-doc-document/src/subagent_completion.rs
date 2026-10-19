@@ -21,6 +21,10 @@
 //! and closeout classifiers use [`completion_cell_line_ranges`] to keep these
 //! cells out of "agent response" reasoning: they are not a direct patchback, not
 //! a pending response to replay, and not a replayed heading.
+//! Once the matching queue item is proven integrated and struck, closeout uses
+//! [`strip_completion_cells_matching`] to retire the transient cell in the same
+//! authoritative document successor as the queue strike. Unmatched reports stay
+//! visible and continue to provide durable recovery evidence.
 //!
 //! Two heading grammars exist in documents:
 //! - current: [`HEADING_PREFIX`] … [`HEADING_ATTRIBUTION_SUFFIX`];
@@ -143,37 +147,38 @@ pub fn completion_evidence(text: &str) -> Vec<CompletionEvidence> {
     let lines: Vec<&str> = text.lines().collect();
     completion_cell_line_ranges(text)
         .into_iter()
-        .filter_map(|range| {
-            let heading = lines.get(range.start)?.trim();
-            let marker = lines.get(range.end.checked_sub(1)?)?.trim();
-            let key = marker
-                .strip_prefix(MARKER_PREFIX)?
-                .strip_suffix(" -->")?
-                .to_string();
-            let detail = if let Some(detail) = heading
-                .strip_prefix(HEADING_PREFIX)
-                .and_then(|rest| rest.strip_suffix(HEADING_ATTRIBUTION_SUFFIX))
-            {
-                detail
-            } else {
-                heading.strip_prefix(LEGACY_HEADING_PREFIX)?
-            };
-            let detail = detail.trim();
-            let owner_end = detail.strip_prefix('`')?.find('`')? + 1;
-            let owner = detail.get(1..owner_end)?.to_string();
-            let rest = detail.get(owner_end + 1..)?.trim_start();
-            let item = rest
-                .strip_prefix("returned work for queue item “")?
-                .split_once('”')?
-                .0
-                .to_string();
-            (!owner.is_empty() && !item.is_empty()).then_some(CompletionEvidence {
-                owner,
-                item,
-                key,
-            })
-        })
+        .filter_map(|range| completion_evidence_for_range(&lines, &range))
         .collect()
+}
+
+fn completion_evidence_for_range(
+    lines: &[&str],
+    range: &Range<usize>,
+) -> Option<CompletionEvidence> {
+    let heading = lines.get(range.start)?.trim();
+    let marker = lines.get(range.end.checked_sub(1)?)?.trim();
+    let key = marker
+        .strip_prefix(MARKER_PREFIX)?
+        .strip_suffix(" -->")?
+        .to_string();
+    let detail = if let Some(detail) = heading
+        .strip_prefix(HEADING_PREFIX)
+        .and_then(|rest| rest.strip_suffix(HEADING_ATTRIBUTION_SUFFIX))
+    {
+        detail
+    } else {
+        heading.strip_prefix(LEGACY_HEADING_PREFIX)?
+    };
+    let detail = detail.trim();
+    let owner_end = detail.strip_prefix('`')?.find('`')? + 1;
+    let owner = detail.get(1..owner_end)?.to_string();
+    let rest = detail.get(owner_end + 1..)?.trim_start();
+    let item = rest
+        .strip_prefix("returned work for queue item “")?
+        .split_once('”')?
+        .0
+        .to_string();
+    (!owner.is_empty() && !item.is_empty()).then_some(CompletionEvidence { owner, item, key })
 }
 
 /// 0-based line indices of the headings that open a binary-attested cell.
@@ -195,7 +200,28 @@ pub fn completion_cell_heading_lines(text: &str) -> Vec<usize> {
 /// Every other line, including a completion-shaped heading that is NOT followed
 /// by the binary body and marker, is preserved byte for byte.
 pub fn strip_completion_cells(text: &str) -> String {
-    let ranges = completion_cell_line_ranges(text);
+    strip_completion_cells_matching(text, |_| true)
+}
+
+/// Remove only structurally binary-attested completion cells selected by
+/// `should_strip`.
+///
+/// Queue closeout uses this to replace the matching transient "awaiting
+/// integration" notice with the authoritative integrated response while
+/// preserving unrelated worker reports. Heading-shaped prose without the
+/// fixed body and keyed marker is never presented to the predicate or removed.
+pub fn strip_completion_cells_matching(
+    text: &str,
+    mut should_strip: impl FnMut(&CompletionEvidence) -> bool,
+) -> String {
+    let evidence_lines: Vec<&str> = text.lines().collect();
+    let ranges = completion_cell_line_ranges(text)
+        .into_iter()
+        .filter(|range| {
+            completion_evidence_for_range(&evidence_lines, range)
+                .is_some_and(|evidence| should_strip(&evidence))
+        })
+        .collect::<Vec<_>>();
     if ranges.is_empty() {
         return text.to_string();
     }
@@ -317,5 +343,26 @@ mod tests {
             "#gh-fix https://github.com/example/project/issues/262"
         );
         assert!(completion_evidence("### Re: Subagent completed: `subagent:a` returned work for queue item “a” — agent-doc\nnot binary\n").is_empty());
+    }
+
+    #[test]
+    fn matching_strip_retires_only_the_integrated_cell() {
+        let first = cell("subagent:a", "finish a", "k1");
+        let second = cell("subagent:b", "finish b", "k2");
+        let forged = concat!(
+            "### Re: Subagent completed: `subagent:c` returned work for queue item “finish c” — agent-doc\n",
+            "operator-authored body\n",
+            "<!-- agent-doc-subagent-completion key=k3 -->\n",
+        );
+        let text = format!("prior\n\n{first}\n\n{second}\n\n{forged}tail\n");
+
+        let stripped =
+            strip_completion_cells_matching(&text, |evidence| evidence.item == "finish a");
+
+        assert!(!stripped.contains("key=k1"));
+        assert!(stripped.contains("key=k2"));
+        assert!(stripped.contains("key=k3"));
+        assert!(stripped.contains("operator-authored body"));
+        assert_eq!(completion_evidence(&stripped).len(), 1);
     }
 }

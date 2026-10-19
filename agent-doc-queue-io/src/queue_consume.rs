@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::path::Path;
 
@@ -72,7 +73,12 @@ pub trait QueueConsumeWriteEffects {
     /// authority to carry `target_content`'s queue. `Ok(true)` only on that
     /// observed proof; anything unproven is `Ok(false)` and the caller keeps
     /// the original error.
-    fn await_retained_queue_write_landed(&self, file: &Path, target_content: &str) -> Result<bool> {
+    fn await_retained_queue_write_landed(
+        &self,
+        file: &Path,
+        target_content: &str,
+        retired_completion_keys: &HashSet<String>,
+    ) -> Result<bool> {
         let started = std::time::Instant::now();
         let deadline = started + RETAINED_QUEUE_WRITE_CONVERGENCE_WAIT;
         loop {
@@ -90,7 +96,13 @@ pub trait QueueConsumeWriteEffects {
                 };
             if converged {
                 match self.current_document_content(file, "queue_write_deferral_landing") {
-                    Ok(current) if queue_write_landed(target_content, &current) => {
+                    Ok(current)
+                        if queue_write_landed(
+                            target_content,
+                            &current,
+                            retired_completion_keys,
+                        ) =>
+                    {
                         return Ok(true);
                     }
                     Ok(_) => {}
@@ -121,7 +133,11 @@ const RETAINED_QUEUE_WRITE_CONVERGENCE_SLICE: std::time::Duration =
 /// The queue this write produced is what the authority now holds. Compares the
 /// `agent:queue` body and the frontmatter queue control, so a concurrent
 /// operator edit elsewhere in the document does not void the proof.
-fn queue_write_landed(target_content: &str, current: &str) -> bool {
+fn queue_write_landed(
+    target_content: &str,
+    current: &str,
+    retired_completion_keys: &HashSet<String>,
+) -> bool {
     if target_content == current {
         return true;
     }
@@ -137,8 +153,13 @@ fn queue_write_landed(target_content: &str, current: &str) -> bool {
             .ok()
             .map(|(fm, _)| (fm.queue, fm.queue_active))
     };
+    let retired_feedback_is_absent =
+        agent_doc_document::subagent_completion::completion_evidence(current)
+            .into_iter()
+            .all(|evidence| !retired_completion_keys.contains(&evidence.key));
     matches!((queue_body(target_content), queue_body(current)), (Some(a), Some(b)) if a == b)
         && queue_control(target_content) == queue_control(current)
+        && retired_feedback_is_absent
 }
 
 /// Run a queue write; a retained delivery deferral is not a failure when the
@@ -156,6 +177,7 @@ fn converge_awaiting_retained_delivery(
     effects: &dyn QueueConsumeWriteEffects,
     file: &Path,
     target_content: &str,
+    retired_completion_keys: &HashSet<String>,
     reason: &str,
     write: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
@@ -172,7 +194,8 @@ fn converge_awaiting_retained_delivery(
         return Err(err);
     }
     let started = std::time::Instant::now();
-    let landed = effects.await_retained_queue_write_landed(file, target_content)?;
+    let landed =
+        effects.await_retained_queue_write_landed(file, target_content, retired_completion_keys)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -369,6 +392,34 @@ pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
 
 fn same_queue_head_text(left: &str, right: &str) -> bool {
     strip_priority_markers(left).trim() == strip_priority_markers(right).trim()
+}
+
+/// Retire the transient binary completion cells whose queue items are being
+/// proven integrated by this consume. The attempt keys are returned so a
+/// retained editor delivery cannot be declared landed from the queue strike
+/// alone while the stale "awaiting integration" cell is still visible.
+fn retire_consumed_completion_feedback(
+    content: &str,
+    consumed_heads: &[String],
+) -> (String, HashSet<String>) {
+    let consumed_identities = consumed_heads
+        .iter()
+        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
+        .collect::<HashSet<_>>();
+    let mut retired_keys = HashSet::new();
+    let retired = agent_doc_document::subagent_completion::strip_completion_cells_matching(
+        content,
+        |evidence| {
+            let matches = consumed_identities.contains(
+                &agent_doc_queue::queue_claim::claim_identity(&evidence.item),
+            );
+            if matches {
+                retired_keys.insert(evidence.key.clone());
+            }
+            matches
+        },
+    );
+    (retired, retired_keys)
 }
 
 /// Strike the active queue head, **skipping the visible-write idle guard**, for
@@ -768,6 +819,16 @@ fn consume_queue_prompts_with_options_fenced(
         return Ok(None);
     }
 
+    // `#subagentcompletionfeedback`: report-complete's cell is a transient
+    // recovery placeholder, not the integrated response. Retire only cells for
+    // heads this exact closeout proved and struck; concurrent/unmatched reports
+    // remain durable. Keep the snapshot aligned with the same semantic change.
+    let (new_document, retired_completion_keys) =
+        retire_consumed_completion_feedback(&plan.new_document, &plan.consumed_texts);
+    plan.new_document = new_document;
+    plan.new_snapshot =
+        retire_consumed_completion_feedback(&plan.new_snapshot, &plan.consumed_texts).0;
+
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
 
     // `#fcc0`: converge the queue-consume write through the editor IPC when a JB
@@ -783,6 +844,7 @@ fn consume_queue_prompts_with_options_fenced(
             effects,
             file,
             &plan.new_document,
+            &retired_completion_keys,
             "queue_consume",
             || {
                 effects.converge_document_or_disk(
@@ -1202,6 +1264,7 @@ fn strike_free_text_queue_heads_with_proof(
             effects,
             file,
             &new_document,
+            &HashSet::new(),
             "free_text_strike",
             || effects.converge_structural_ops(file, &replace_ops, &content, "free_text_strike"),
         )
@@ -1211,6 +1274,7 @@ fn strike_free_text_queue_heads_with_proof(
             effects,
             file,
             &new_document,
+            &HashSet::new(),
             "free_text_strike",
             || effects.converge_document_or_disk(file, &new_document, &content, "free_text_strike"),
         )
@@ -1803,6 +1867,7 @@ pub fn mark_completed_queue_prompts_for_done_ids(
             effects,
             file,
             &new_document,
+            &HashSet::new(),
             "queue_done_id_mark",
             || {
                 effects.converge_structural_ops(
@@ -1822,6 +1887,7 @@ pub fn mark_completed_queue_prompts_for_done_ids(
             effects,
             file,
             &new_document,
+            &HashSet::new(),
             "queue_done_id_mark",
             || {
                 effects.converge_document_or_disk(
@@ -3175,11 +3241,13 @@ mod core_tests {
             &self,
             file: &Path,
             target_content: &str,
+            retired_completion_keys: &HashSet<String>,
         ) -> Result<bool> {
             self.awaited.fetch_add(1, Ordering::SeqCst);
             Ok(queue_write_landed(
                 target_content,
                 &fs::read_to_string(file)?,
+                retired_completion_keys,
             ))
         }
     }
@@ -3254,10 +3322,76 @@ mod core_tests {
         let target =
             "---\nqueue: stop\n---\n\n<!-- agent:queue -->\n- ~~a~~\n<!-- /agent:queue -->\n";
         let with_edit = target.replace("---\n\n", "---\n\nOperator note.\n\n");
-        assert!(queue_write_landed(target, target));
-        assert!(queue_write_landed(target, &with_edit));
-        assert!(!queue_write_landed(target, &target.replace("~~a~~", "a")));
-        assert!(!queue_write_landed(target, &target.replace("stop", "go")));
+        let retired = HashSet::new();
+        assert!(queue_write_landed(target, target, &retired));
+        assert!(queue_write_landed(target, &with_edit, &retired));
+        assert!(!queue_write_landed(
+            target,
+            &target.replace("~~a~~", "a"),
+            &retired
+        ));
+        assert!(!queue_write_landed(
+            target,
+            &target.replace("stop", "go"),
+            &retired
+        ));
+
+        let cell = agent_doc_document::subagent_completion::cell(
+            "subagent:a",
+            "a",
+            "retired-key",
+        );
+        let stale_feedback = target.replace(
+            "<!-- agent:queue -->",
+            &format!("{cell}\n\n<!-- agent:queue -->"),
+        );
+        let retired = HashSet::from(["retired-key".to_string()]);
+        assert!(!queue_write_landed(target, &stale_feedback, &retired));
+    }
+
+    #[test]
+    fn consuming_reported_head_retires_only_its_completion_feedback() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let sdk =
+            agent_doc_document::subagent_completion::cell("subagent:sdk", "finish sdk", "sdk-key");
+        let dev =
+            agent_doc_document::subagent_completion::cell("subagent:dev", "finish dev", "dev-key");
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "{sdk}\n\n{dev}\n\n",
+                "> **Queue prompt:** finish sdk\n\n",
+                "### Re: integrated sdk — gpt-5\n\nDone.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents -->\n",
+                "- finish sdk\n",
+                "- finish dev\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            sdk = sdk,
+            dev = dev,
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let outcome = consume_queue_prompts_with_outcome(&doc, &[], false, &TEST_EFFECTS)
+            .unwrap()
+            .expect("the reported sdk head is consumed");
+        assert_eq!(outcome.consumed_text, "finish sdk");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(!updated.contains("sdk-key"), "{updated}");
+        assert!(updated.contains("dev-key"), "{updated}");
+        assert!(updated.contains("- ~~finish sdk~~"), "{updated}");
+        assert!(updated.contains("- finish dev"), "{updated}");
+        assert!(updated.contains("### Re: integrated sdk — gpt-5"));
     }
 
     #[test]

@@ -229,6 +229,20 @@ enum DurableOwnerProgressDecision {
     StillPending,
 }
 
+/// Policy for an error returned by the final closeout/commit boundary.
+///
+/// A durable owner can make two different promises. A missing response body is
+/// already owned by the retained delivery worker and can be left to that
+/// worker directly. An active closeout lease is only a transient snapshot, so
+/// Stop must follow the exact cycle's controller projection before deciding
+/// whether to resume or surface a blocker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloseoutFailureDisposition {
+    FailClosed,
+    DeferToDurableOwner,
+    AwaitDurableOwner,
+}
+
 /// Result of the Stop hook's single opportunistic captured-finalize attempt.
 ///
 /// `NeedsOperator` must remain distinct from an ordinary pending retry. Once
@@ -3328,15 +3342,29 @@ fn attempt_stop_closeout(
         Err(err) => {
             let ownership = agent_doc_capture_io::retained_write_ownership(file);
             let rendered = format!("{err:#}").replace('\n', " ");
-            if closeout_failure_is_binary_owned_deferral(&rendered, ownership.verdict()) {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "codex_stop_auto_close_closeout_deferred verdict={} reason=captured_response_not_materialized owner=durable_retained_capture err={rendered}",
-                        ownership.verdict().as_str(),
-                    ),
-                );
-                return Ok(StopCloseAttempt::DeferredToDurableOwner);
+            match closeout_failure_disposition(&rendered, ownership.verdict()) {
+                CloseoutFailureDisposition::DeferToDurableOwner => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "codex_stop_auto_close_closeout_deferred verdict={} reason=captured_response_not_materialized owner=durable_retained_capture err={rendered}",
+                            ownership.verdict().as_str(),
+                        ),
+                    );
+                    return Ok(StopCloseAttempt::DeferredToDurableOwner);
+                }
+                CloseoutFailureDisposition::AwaitDurableOwner => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "codex_stop_auto_close_closeout_deferred verdict={} reason=closeout_owner_active owner=durable_keyed_retry action=await_controller_state_edge err={rendered}",
+                            ownership.verdict().as_str(),
+                        ),
+                    );
+                    note.push_str(&closeout_repair_retained_note(&err, ownership, file));
+                    return Ok(StopCloseAttempt::RepairDeferredToDurableOwner { note });
+                }
+                CloseoutFailureDisposition::FailClosed => {}
             }
             agent_doc_ops_log_io::log_op(
                 file,
@@ -3359,13 +3387,22 @@ fn attempt_stop_closeout(
 /// (`Deferred`): the retained capture's keyed worker projects the body and
 /// commits on the next delivery edge. Every other verdict, including a durable
 /// but unowned capture, stays fail-closed so the agent is told to act.
-fn closeout_failure_is_binary_owned_deferral(
+fn closeout_failure_disposition(
     rendered_error: &str,
     verdict: agent_doc_turn::write_ownership::RetainedWriteVerdict,
-) -> bool {
-    agent_doc_git_io::capture_materialization_guard::is_missing_captured_response_refusal(
+) -> CloseoutFailureDisposition {
+    if verdict != agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred {
+        return CloseoutFailureDisposition::FailClosed;
+    }
+    if agent_doc_repair_command_io::captured_finalize_retry_at(rendered_error).is_some() {
+        return CloseoutFailureDisposition::AwaitDurableOwner;
+    }
+    if agent_doc_git_io::capture_materialization_guard::is_missing_captured_response_refusal(
         rendered_error,
-    ) && verdict == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
+    ) {
+        return CloseoutFailureDisposition::DeferToDurableOwner;
+    }
+    CloseoutFailureDisposition::FailClosed
 }
 
 /// Whether repair has already handed the exact write to the controller-owned
@@ -4943,10 +4980,10 @@ Done.\n\
         );
         let owned = RetainedWriteOwnership::new_with_phase(true, true, false);
         assert_eq!(owned.verdict(), RetainedWriteVerdict::Deferred);
-        assert!(closeout_failure_is_binary_owned_deferral(
-            &refusal,
-            owned.verdict()
-        ));
+        assert_eq!(
+            closeout_failure_disposition(&refusal, owned.verdict()),
+            CloseoutFailureDisposition::DeferToDurableOwner,
+        );
 
         // Fail closed whenever nothing durable owns the intent.
         for verdict in [
@@ -4957,16 +4994,20 @@ Done.\n\
             RetainedWriteVerdict::DeliveryRejected,
             RetainedWriteVerdict::EditorHoldsUnmergedVisibleText,
         ] {
-            assert!(
-                !closeout_failure_is_binary_owned_deferral(&refusal, verdict),
-                "{verdict:?} must stay fail-closed"
+            assert_eq!(
+                closeout_failure_disposition(&refusal, verdict),
+                CloseoutFailureDisposition::FailClosed,
+                "{verdict:?} must stay fail-closed",
             );
         }
         // Any other commit failure stays fail-closed even with a durable owner.
-        assert!(!closeout_failure_is_binary_owned_deferral(
-            "git commit failed: index.lock exists",
-            RetainedWriteVerdict::Deferred
-        ));
+        assert_eq!(
+            closeout_failure_disposition(
+                "git commit failed: index.lock exists",
+                RetainedWriteVerdict::Deferred,
+            ),
+            CloseoutFailureDisposition::FailClosed,
+        );
     }
 
     #[test]
@@ -4979,13 +5020,15 @@ Done.\n\
             .nth(1)
             .expect("closeout crosses the commit boundary");
         let deferral = commit
-            .find("closeout_failure_is_binary_owned_deferral(")
+            .find("closeout_failure_disposition(")
             .expect("commit failure must consult the durable-owner deferral");
         let still_open = commit
             .find("StopCloseAttempt::StillOpen")
             .expect("unowned failures stay still-open");
         assert!(deferral < still_open);
         assert!(commit.contains("StopCloseAttempt::DeferredToDurableOwner"));
+        assert!(commit.contains("CloseoutFailureDisposition::AwaitDurableOwner"));
+        assert!(commit.contains("StopCloseAttempt::RepairDeferredToDurableOwner"));
     }
 
     #[test]
@@ -5051,6 +5094,11 @@ Done.\n\
             &refusal,
             owned.verdict(),
         ));
+        assert_eq!(
+            closeout_failure_disposition(&refusal, owned.verdict()),
+            CloseoutFailureDisposition::AwaitDurableOwner,
+            "the same owned lease must wait whether repair or final closeout observes it",
+        );
 
         let note = closeout_repair_retained_note(
             &anyhow::anyhow!(refusal),
@@ -5074,6 +5122,17 @@ Done.\n\
                 RetainedWriteVerdict::CaptureResumeUnowned,
             ),
             "a lease marker without retained capture ownership must remain fail-closed",
+        );
+        assert_eq!(
+            closeout_failure_disposition(
+                &format!(
+                    "closeout operation is already in progress [{}123456]",
+                    agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER,
+                ),
+                RetainedWriteVerdict::CaptureResumeUnowned,
+            ),
+            CloseoutFailureDisposition::FailClosed,
+            "the final closeout phase must also fail closed without retained ownership",
         );
     }
 

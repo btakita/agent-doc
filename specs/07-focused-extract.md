@@ -25,14 +25,20 @@ without making an agent manually copy managed document regions.
   JetBrains editor plus `--coordinate-live-editors` -> persist the exact visible
   revisions, freeze the tabs read-only, wait for the controller-owned live CRDT
   replica counts (not durable open-tab registrations) to reach zero, reject any
-  unexpected registration or replica at the mutation boundary, apply through a
-  revalidated force-disk authority scope, reload the result, restore editability,
-  and re-register. Selected exchange nodes never carry their source document's
-  trailing boundary: the source retains that boundary and the moved nodes are
-  inserted before the target's existing boundary, preserving one document-local
-  boundary on each side. A lost freeze receipt still schedules compensating
-  resume; duplicate resume after success is an idempotent acknowledgement, while
-  a resume carrying another operation ID is refused.
+  unexpected registration or replica at the mutation boundary, compare-and-swap
+  each frozen controller canonical under a zero-live-replica fence, materialize
+  disk from that canonical, reload the result, restore editability, and
+  re-register. Disk-only force writes are forbidden for this transition: a
+  nominal disk apply that leaves controller canonical unchanged would let resume
+  bootstrap the pre-extraction text and report `projection_changed` on the next
+  save. If disk materialization fails after a canonical advance, the binary
+  restores that document's exact pre-write canonical before running the existing
+  two-document rollback. Selected exchange nodes never carry their source
+  document's trailing boundary: the source retains that boundary and the moved
+  nodes are inserted before the target's existing boundary, preserving one
+  document-local boundary on each side. A lost freeze receipt still schedules
+  compensating resume; duplicate resume after success is an idempotent
+  acknowledgement, while a resume carrying another operation ID is refused.
 - **Evidence inputs:** parsed agent components, tracked item IDs (including
   `agent:done`), stable live exchange node IDs, compact archive locators,
   source-content hash, destination operation marker, frontmatter
@@ -48,9 +54,11 @@ without making an agent manually copy managed document regions.
 - **Imperative extraction audit:** selector resolution and all resulting content
   are computed once before I/O. The old poll of durable open-tab liveness is not
   a detach signal and is removed. Remaining direct calls are the bounded
-  cross-process membership observation, one-shot force-disk writes, rollback,
-  and snapshot checkpoints; they have no durable scheduling relationship and
-  therefore no new reactive edge.
+  cross-process membership observation, zero-member-fenced canonical CAS plus
+  its exact disk projection, rollback, and snapshot checkpoints; they have no
+  durable scheduling relationship and therefore no new reactive edge. Replaying
+  an already-applied canonical target is an idempotent no-op, so the operation
+  marker and source removal still commit exactly once.
 - **Routing boundary:** extraction never claims or starts the destination. A
   source document normally already owns the invoking pane, and silently
   rebinding that pane to the new destination would orphan the source session.
@@ -61,12 +69,15 @@ without making an agent manually copy managed document regions.
   scaffold shared with transfer, this command spec, its runbook, and regression
   tests.
 - **Verification:** pure coordination tests cover replica-count wait/timeout and
-  mutation-boundary rows, while editor tests cover idempotent same-operation
-  resume and stale-operation refusal. Planner tests cover multi-surface and
-  completed-item ID selection, exchange adjacency, source/target boundary
-  identity preservation, archive-locator resolution after compaction, complete
-  destination initialization, collision refusal, and operation-marker resume;
-  CLI help and the full project check cover wiring.
+  mutation-boundary rows. Relay tests prove the detached CAS rejects a raced
+  live replica, advances a zero-member canonical, and treats an exact replay as
+  a no-op; realtime tests prove disk and the resume bootstrap expose that same
+  canonical without creating force-disk conflict lineage. Editor tests cover
+  idempotent same-operation resume and stale-operation refusal. Planner tests
+  cover multi-surface and completed-item ID selection, exchange adjacency,
+  source/target boundary identity preservation, archive-locator resolution after
+  compaction, complete destination initialization, collision refusal, and
+  operation-marker resume; CLI help and the full project check cover wiring.
 - **Out of scope:** semantic-topic inference inside the mutation binary,
   cross-filesystem transactions, and simultaneous multi-document CRDT commits.
 

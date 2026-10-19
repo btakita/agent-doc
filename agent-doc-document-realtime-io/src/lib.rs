@@ -353,6 +353,35 @@ pub fn begin_force_disk_authority_scope(
     file: &Path,
     source: &str,
 ) -> Result<ForceDiskAuthorityScope> {
+    begin_zero_replica_mutation_authority_scope(
+        file,
+        source,
+        "force-disk",
+        "force_disk_authority_scope",
+    )
+}
+
+/// Capture the same zero-replica mutation fence for a controller-canonical
+/// operation. Unlike the force-disk caller, this scope authorizes no disk-only
+/// authority transition; the mutation still has to pass the relay CAS.
+pub fn begin_detached_canonical_authority_scope(
+    file: &Path,
+    source: &str,
+) -> Result<ForceDiskAuthorityScope> {
+    begin_zero_replica_mutation_authority_scope(
+        file,
+        source,
+        "detached canonical mutation",
+        "detached_canonical_authority_scope",
+    )
+}
+
+fn begin_zero_replica_mutation_authority_scope(
+    file: &Path,
+    source: &str,
+    mode: &str,
+    event: &str,
+) -> Result<ForceDiskAuthorityScope> {
     let file = file.to_path_buf();
     let owner = std::thread::current().id();
     {
@@ -360,7 +389,7 @@ pub fn begin_force_disk_authority_scope(
         if let Some(active) = baselines.get_mut(&file) {
             if active.owner != owner {
                 anyhow::bail!(
-                    "another force-disk authorization is already active for {}; wait for it to finish instead of issuing concurrent closeout commands",
+                    "another zero-replica mutation authorization is already active for {}; wait for it to finish instead of issuing concurrent closeout commands",
                     file.display()
                 );
             }
@@ -373,7 +402,7 @@ pub fn begin_force_disk_authority_scope(
     }
     let current = query_live_editor_authority(&file, source).with_context(|| {
         format!(
-            "force-disk could not capture initial editor authority for {}; no disk write was performed",
+            "{mode} could not capture initial editor authority for {}; no mutation was performed",
             file.display()
         )
     })?;
@@ -381,7 +410,7 @@ pub fn begin_force_disk_authority_scope(
     let mut baselines = FORCE_DISK_MUTATION_BASELINES.lock();
     if baselines.contains_key(&file) {
         anyhow::bail!(
-            "another force-disk authorization is already active for {}; wait for it to finish instead of issuing concurrent closeout commands",
+            "another zero-replica mutation authorization is already active for {}; wait for it to finish instead of issuing concurrent closeout commands",
             file.display()
         );
     }
@@ -397,7 +426,7 @@ pub fn begin_force_disk_authority_scope(
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(
-            "force_disk_authority_scope file={} source={} initial={:?}",
+            "{event} file={} source={} initial={:?}",
             file.display(),
             source,
             baseline
@@ -425,10 +454,15 @@ fn force_disk_mutation_fence(
     }
 }
 
-fn ensure_force_disk_mutation_authority(file: &Path) -> Result<()> {
-    let current = query_live_editor_authority(file, "force_disk_mutation_fence").with_context(|| {
+fn ensure_zero_replica_mutation_authority(
+    file: &Path,
+    source: &str,
+    mode: &str,
+    changed_remedy: &str,
+) -> Result<()> {
+    let current = query_live_editor_authority(file, source).with_context(|| {
         format!(
-            "force-disk mutation fence could not revalidate editor authority for {}; no disk write was performed; retry after the controller is responsive",
+            "{mode} fence could not revalidate editor authority for {}; no mutation was performed; retry after the controller is responsive",
             file.display()
         )
     })?;
@@ -446,7 +480,7 @@ fn ensure_force_disk_mutation_authority(file: &Path) -> Result<()> {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "force_disk_mutation_fence file={} status=clear initial={:?} editor_authority={}",
+                    "{source} file={} status=clear initial={:?} editor_authority={}",
                     file.display(),
                     initial,
                     current_text_status(&current)
@@ -456,7 +490,7 @@ fn ensure_force_disk_mutation_authority(file: &Path) -> Result<()> {
         }
         (initial, ForceDiskMutationFence::RegisteredEditorReplica) => {
             Err(ForceDiskAuthorityChanged(format!(
-                "force-disk authority changed before mutation for {}: a live editor relay is now registered (initial={initial:?}, status={}); no disk write was performed; run only agent-doc session-check for the existing binary-owned capture so the editor replica can reconcile; do not resubmit finalize, write --commit, or --force-disk",
+                "{mode} authority changed before mutation for {}: a live editor relay is now registered (initial={initial:?}, status={}); no mutation was performed; {changed_remedy}",
                 file.display(),
                 current_text_status(&current)
             ))
@@ -1978,9 +2012,149 @@ pub fn atomic_write_force_disk_through_authority(path: &Path, content: &str) -> 
     // Revalidate at the serialized mutation boundary. Authorization may have
     // been granted while the editor relay was absent, then become stale while
     // this write waited behind another document operation.
-    ensure_force_disk_mutation_authority(path)?;
+    ensure_zero_replica_mutation_authority(
+        path,
+        "force_disk_mutation_fence",
+        "force-disk",
+        "run only agent-doc session-check for the existing binary-owned capture so the editor replica can reconcile; do not resubmit finalize, write --commit, or --force-disk",
+    )?;
     retain_force_disk_reconnect_intent(path, content)?;
     atomic_write_authority_raw(path, content)
+}
+
+/// Advance a frozen document's controller canonical, then materialize the same
+/// bytes on disk, while refusing any raced editor reattach.
+///
+/// This is the coordinated-operation counterpart to the explicit force-disk
+/// escape hatch. A frozen tab still owns editor authority even though its relay
+/// member is temporarily absent, so disk must remain a projection of the CRDT
+/// canonical rather than becoming a competing external candidate. If disk
+/// persistence fails after this call advanced canonical, it restores the
+/// caller's exact CAS baseline before returning the error.
+pub fn atomic_write_detached_canonical_through_authority(
+    path: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<()> {
+    validate_canonical_document_target(path, content, source)?;
+    let visible_document = agent_doc_document_realtime::write_authority::is_visible_document(path);
+    if visible_document && !agent_doc_document_realtime::write_authority::within_owner_scope() {
+        let base_dir = agent_doc_project_root_io::project_root_containing(path)
+            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let file = path.to_string_lossy().to_string();
+        let projection_base = expected_current.to_string();
+        let queued_source = source.to_string();
+        return agent_doc_queue_io::write_queue::serialized_atomic_write_with(
+            &SESSION_ACTOR_WRITE_QUEUE,
+            &base_dir,
+            &file,
+            path,
+            content,
+            move |queued_path, queued_content| {
+                atomic_write_detached_canonical_through_authority_inner(
+                    queued_path,
+                    &projection_base,
+                    queued_content,
+                    &queued_source,
+                )
+            },
+        );
+    }
+
+    atomic_write_detached_canonical_through_authority_inner(
+        path,
+        expected_current,
+        content,
+        source,
+    )
+}
+
+fn atomic_write_detached_canonical_through_authority_inner(
+    path: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<()> {
+    let result = (|| -> Result<()> {
+        // Revalidate the freeze's zero-replica observation at the serialized
+        // mutation boundary, then repeat the same fence under the relay lock.
+        ensure_zero_replica_mutation_authority(
+            path,
+            "detached_canonical_mutation_fence",
+            "coordinated detached canonical mutation",
+            "the coordinated operation must abort and resume its frozen editors before retry",
+        )?;
+        let write = apply_detached_cp_write_through_relay_authority(
+            path,
+            expected_current,
+            content,
+            source,
+        )?
+        .with_context(|| {
+            format!(
+                "{source}: frozen editor authority for {} has no controller canonical",
+                path.display()
+            )
+        })?;
+        anyhow::ensure!(
+            write.live_editors == 0,
+            "{source}: detached canonical write for {} lost its zero-replica fence",
+            path.display(),
+        );
+
+        if let Err(disk_error) = atomic_write_authority_raw(path, content) {
+            if write.applied {
+                let rollback = apply_detached_cp_write_through_relay_authority(
+                    path,
+                    content,
+                    expected_current,
+                    &format!("{source}_disk_failure_rollback"),
+                );
+                return match rollback {
+                    Ok(Some(rollback)) if rollback.live_editors == 0 => Err(disk_error).with_context(
+                        || {
+                            format!(
+                                "{source}: disk projection failed for {}; controller canonical was restored",
+                                path.display()
+                            )
+                        },
+                    ),
+                    Ok(other) => Err(disk_error).with_context(|| {
+                        format!(
+                            "{source}: disk projection failed for {} and canonical rollback did not retain its detached authority: {other:?}",
+                            path.display()
+                        )
+                    }),
+                    Err(rollback_error) => Err(disk_error).with_context(|| {
+                        format!(
+                            "{source}: disk projection failed for {} and canonical rollback also failed: {rollback_error:#}",
+                            path.display()
+                        )
+                    }),
+                };
+            }
+            return Err(disk_error).with_context(|| {
+                format!(
+                    "{source}: disk projection failed for {}; requested content was already canonical",
+                    path.display()
+                )
+            });
+        }
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "coordinated_detached_canonical_write file={} source={} applied={} content_hash={} authority=crdt disk_projection_exact=true",
+                path.display(),
+                source,
+                write.applied,
+                write.content_hash,
+            ),
+        );
+        Ok(())
+    })();
+    current_document_projection::invalidate_current_document_projection(path);
+    result
 }
 
 pub fn atomic_write_if_current_through_authority(
@@ -3182,6 +3356,33 @@ pub fn apply_cp_write_through_relay_authority(
         );
     }
     agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
+        file,
+        expected_current,
+        content,
+        source,
+    )
+}
+
+/// Apply a canonical update only if the editor-owned relay remains detached.
+/// The relay checks membership and the content CAS under one hub lock.
+pub fn apply_detached_cp_write_through_relay_authority(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
+    validate_canonical_document_target(file, content, source)?;
+    if controller_document_mutation_in_progress()
+        || agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file)
+    {
+        return agent_doc_crdt_relay_io::apply_detached_cp_write_for_file(
+            file,
+            expected_current,
+            content,
+            source,
+        );
+    }
+    agent_doc_controller_io::project_controller::apply_detached_cp_write_via_controller_model_for_doc(
         file,
         expected_current,
         content,
@@ -17506,6 +17707,62 @@ mod tests {
         );
         assert!(pending_external_disk_candidate(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+    }
+
+    #[test]
+    fn coordinated_detached_write_advances_canonical_and_disk_exactly_once() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\ntransferred once\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-coordinated-detached-write";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            assert!(hub.disconnect(client_id));
+            assert_eq!(hub.live_count(), 0);
+        })
+        .unwrap();
+
+        let _scope =
+            begin_detached_canonical_authority_scope(&file, "test_coordinated_detach").unwrap();
+        atomic_write_detached_canonical_through_authority(
+            &file,
+            baseline,
+            target,
+            "test_coordinated_detach",
+        )
+        .unwrap();
+        atomic_write_detached_canonical_through_authority(
+            &file,
+            baseline,
+            target,
+            "test_coordinated_detach_replay",
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            assert_eq!(hub.canonical_text(), target);
+            assert_eq!(hub.live_count(), 0);
+        })
+        .unwrap();
+        assert!(
+            pending_external_disk_candidate(&file).is_none(),
+            "a canonical-first coordinated transfer is not an external disk candidate"
+        );
+
+        let (client_id, bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("resumed editor replica should reattach");
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        assert_eq!(replica.text(), target);
+        assert_eq!(
+            try_resolve_current_document_content(&file, "test_coordinated_detach_resume").unwrap(),
+            target,
+        );
     }
 
     #[test]

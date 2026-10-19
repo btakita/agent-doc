@@ -3867,7 +3867,15 @@ fn apply_cp_write_on_hub(
     expected_current: &str,
     content: &str,
     scope: Option<&agent_doc_element::ComponentWriteScope>,
+    require_zero_live_replicas: bool,
 ) -> Result<CpRelayWrite> {
+    if require_zero_live_replicas && hub.live_count() != 0 {
+        anyhow::bail!(
+            "CP relay write refused for {}: coordinated_detach_lost live_replicas={}",
+            file.display(),
+            hub.live_count(),
+        );
+    }
     let ready = hub.commit_barrier_under_authority(authority)?;
     if !ready {
         anyhow::bail!(
@@ -4211,6 +4219,28 @@ pub fn apply_cp_write_for_file(
     apply_cp_write_for_file_scoped(file, expected_current, content, source, None)
 }
 
+/// Apply a CP write only while the controller canonical has no live replica.
+///
+/// Coordinated focused extraction keeps the editor endpoint registered while
+/// temporarily removing its relay member. This fence is checked under the hub
+/// lock, before the canonical CAS, so a raced reattach cannot receive a
+/// half-committed cross-document transfer.
+pub fn apply_detached_cp_write_for_file(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<Option<CpRelayWrite>> {
+    apply_cp_write_for_file_scoped_with_detach_fence(
+        file,
+        expected_current,
+        content,
+        source,
+        None,
+        true,
+    )
+}
+
 /// [`apply_cp_write_for_file`] for a CP write that declared which components it
 /// mutates (`#cpwritecomponentscoped`).
 ///
@@ -4223,6 +4253,24 @@ pub fn apply_cp_write_for_file_scoped(
     content: &str,
     source: &str,
     scope: Option<&agent_doc_element::ComponentWriteScope>,
+) -> Result<Option<CpRelayWrite>> {
+    apply_cp_write_for_file_scoped_with_detach_fence(
+        file,
+        expected_current,
+        content,
+        source,
+        scope,
+        false,
+    )
+}
+
+fn apply_cp_write_for_file_scoped_with_detach_fence(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+    scope: Option<&agent_doc_element::ComponentWriteScope>,
+    require_zero_live_replicas: bool,
 ) -> Result<Option<CpRelayWrite>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
@@ -4237,7 +4285,15 @@ pub fn apply_cp_write_for_file_scoped(
     // a controller recycle / editor restart, or the FFI replica dropped), the hub
     // is absent and `with_existing_hub` returns `None`.
     let result = if let Some(result) = with_existing_hub(file, |hub| {
-        apply_cp_write_on_hub(hub, file, authority, expected_current, content, scope)
+        apply_cp_write_on_hub(
+            hub,
+            file,
+            authority,
+            expected_current,
+            content,
+            scope,
+            require_zero_live_replicas,
+        )
     })? {
         result
     } else {
@@ -4255,7 +4311,15 @@ pub fn apply_cp_write_for_file_scoped(
         let recovered = recover_missing_hub_from_retained_projection(file, &hash)?;
         match if recovered {
             with_existing_hub(file, |hub| {
-                apply_cp_write_on_hub(hub, file, authority, expected_current, content, scope)
+                apply_cp_write_on_hub(
+                    hub,
+                    file,
+                    authority,
+                    expected_current,
+                    content,
+                    scope,
+                    require_zero_live_replicas,
+                )
             })?
         } else {
             None
@@ -10528,6 +10592,69 @@ mod tests {
         assert!(result.applied);
         assert_eq!(result.live_editors, 0);
         with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), next)).unwrap();
+    }
+
+    #[test]
+    fn detached_cp_write_fences_reattach_and_is_exactly_once() {
+        let (_dir, doc) = temp_doc("cp-coordinated-detach.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:cp-coordinated-detach";
+        register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let baseline = match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        let target = format!("{baseline}\ncoordinated transfer\n");
+
+        let error = apply_detached_cp_write_for_file(
+            &doc,
+            &baseline,
+            &target,
+            "test_coordinated_detach",
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("coordinated_detach_lost"),
+            "a raced live replica must refuse the canonical mutation: {error:#}"
+        );
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), baseline)).unwrap();
+
+        let client_id = mint_client_id(identity);
+        with_hub(&doc, |hub| {
+            assert!(hub.disconnect(client_id));
+            assert_eq!(hub.live_count(), 0);
+        })
+        .unwrap();
+        let first = apply_detached_cp_write_for_file(
+            &doc,
+            &baseline,
+            &target,
+            "test_coordinated_detach",
+        )
+        .unwrap()
+        .expect("the frozen document keeps its controller canonical");
+        assert!(first.applied);
+        assert_eq!(first.live_editors, 0);
+
+        let replay = apply_detached_cp_write_for_file(
+            &doc,
+            &baseline,
+            &target,
+            "test_coordinated_detach_replay",
+        )
+        .unwrap()
+        .expect("an exact replay remains on the canonical plane");
+        assert!(!replay.applied);
+        assert_eq!(replay.live_editors, 0);
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), target)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            baseline,
+            "the relay transition alone must not silently promote disk authority"
+        );
     }
 
     #[test]

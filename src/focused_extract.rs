@@ -712,16 +712,24 @@ fn frozen_file_for<'a>(file: &Path, frozen_files: &'a BTreeSet<PathBuf>) -> Opti
 
 fn write_extract_document(
     file: &Path,
+    expected_current: &str,
     content: &str,
     frozen_files: &BTreeSet<PathBuf>,
 ) -> Result<()> {
     if let Some(frozen_file) = frozen_file_for(file, frozen_files) {
-        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(
+        agent_doc_document_realtime_io::atomic_write_detached_canonical_through_authority(
             frozen_file,
+            expected_current,
             content,
+            "focused_extract_coordinated_freeze",
         )
     } else {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+        agent_doc_document_realtime_io::atomic_write_rebased_through_authority(
+            file,
+            expected_current,
+            content,
+            "focused_extract",
+        )
     }
 }
 
@@ -1438,12 +1446,22 @@ fn rollback(
     target: &Path,
     frozen_files: &BTreeSet<PathBuf>,
 ) {
-    if let Err(error) = write_extract_document(source, &prepared.source_before, frozen_files) {
+    if let Err(error) = write_extract_document(
+        source,
+        &prepared.source_after,
+        &prepared.source_before,
+        frozen_files,
+    ) {
         eprintln!("[extract] WARNING: failed to roll back source: {error:#}");
     }
     match &prepared.target_before {
         Some(content) => {
-            if let Err(error) = write_extract_document(target, content, frozen_files) {
+            if let Err(error) = write_extract_document(
+                target,
+                &prepared.target_after,
+                content,
+                frozen_files,
+            ) {
                 eprintln!("[extract] WARNING: failed to roll back target: {error:#}");
             }
         }
@@ -1559,15 +1577,14 @@ pub fn run(
         ensure_replica_mutation_boundary(observe_live_replicas(source, target)?)?;
         ensure_only_frozen_editor_registrations(source, target, &frozen)?;
 
-        // Frozen tabs retain their durable endpoint registration, so the
-        // ordinary authority writer would route back to the intentionally
-        // detached editor. Capture the force-disk fence after detach and keep
-        // it across apply plus rollback; the writer revalidates that no replica
-        // reattached before each atomic mutation.
-        let _force_disk_scopes = frozen_files
+        // Frozen tabs retain their durable endpoint registration while their
+        // relay member is intentionally absent. Capture that zero-replica
+        // fence across apply plus rollback. Each write revalidates it, advances
+        // controller canonical by CAS, then materializes disk as its projection.
+        let _detached_canonical_scopes = frozen_files
             .iter()
             .map(|file| {
-                agent_doc_document_realtime_io::begin_force_disk_authority_scope(
+                agent_doc_document_realtime_io::begin_detached_canonical_authority_scope(
                     file,
                     "focused_extract_coordinated_freeze",
                 )
@@ -1595,9 +1612,19 @@ pub fn run(
         {
             std::fs::create_dir_all(parent)?;
         }
-        write_extract_document(target, &prepared.target_after, &frozen_files)
-            .with_context(|| format!("failed to write target {}", target.display()))?;
-        if let Err(error) = write_extract_document(source, &prepared.source_after, &frozen_files) {
+        write_extract_document(
+            target,
+            prepared.target_before.as_deref().unwrap_or(""),
+            &prepared.target_after,
+            &frozen_files,
+        )
+        .with_context(|| format!("failed to write target {}", target.display()))?;
+        if let Err(error) = write_extract_document(
+            source,
+            &prepared.source_before,
+            &prepared.source_after,
+            &frozen_files,
+        ) {
             rollback(&prepared, source, target, &frozen_files);
             return Err(error)
                 .context("source write failed after target write; target rollback attempted");

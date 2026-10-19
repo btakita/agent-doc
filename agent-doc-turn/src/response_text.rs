@@ -205,6 +205,76 @@ fn truncate_response_summary(input: &str, max_chars: usize) -> String {
     output
 }
 
+/// A conservative response-text signal that a closeout left a concrete action
+/// or decision with the operator (`#operatortodo`, GH #314).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorTodoResponseSignal {
+    ExplicitRequest,
+    UnpublishedDraft,
+}
+
+impl OperatorTodoResponseSignal {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitRequest => "explicit operator request",
+            Self::UnpublishedDraft => "unpublished draft path",
+        }
+    }
+}
+
+const EXPLICIT_OPERATOR_TODO_SIGNALS: &[&str] = &[
+    "say `post`",
+    "say 'post'",
+    "say \"post\"",
+    "say post",
+    "reply `post`",
+    "reply 'post'",
+    "reply \"post\"",
+    "reply post",
+    "needs your ok",
+    "needs your approval",
+    "awaits your ok",
+    "awaits your approval",
+    "waits for your go",
+    "waiting for your go",
+    "waits for your approval",
+    "waiting for your approval",
+    "should i post",
+    "shall i post",
+    "should i publish",
+    "shall i publish",
+];
+
+const UNPUBLISHED_DRAFT_SIGNALS: &[&str] = &[
+    "unpublished",
+    "not posted",
+    "not published",
+    "not yet posted",
+    "not yet published",
+    "has not been posted",
+    "has not been published",
+    "hasn't been posted",
+    "hasn't been published",
+];
+
+/// Detect only high-confidence operator actions. General future-looking prose is
+/// intentionally excluded: it belongs to backlog capture, not `agent:todo`.
+/// A named Markdown draft plus an explicit unpublished/not-posted state is the
+/// canonical path-backed action from GH #314.
+pub fn operator_todo_response_signal(response: &str) -> Option<OperatorTodoResponseSignal> {
+    let lower = response.to_ascii_lowercase();
+    if contains_any_signal(&lower, EXPLICIT_OPERATOR_TODO_SIGNALS) {
+        return Some(OperatorTodoResponseSignal::ExplicitRequest);
+    }
+    if lower.contains("draft")
+        && lower.contains(".md")
+        && contains_any_signal(&lower, UNPUBLISHED_DRAFT_SIGNALS)
+    {
+        return Some(OperatorTodoResponseSignal::UnpublishedDraft);
+    }
+    None
+}
+
 const IMPERATIVE_STATUS_ONLY_SIGNALS: &[&str] = &[
     "in progress",
     "continuing",
@@ -507,6 +577,44 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn operator_todo_signal_detects_explicit_post_request() {
+        assert_eq!(
+            operator_todo_response_signal(
+                "**Description: draft below, not posted.** Say `post` to apply it."
+            ),
+            Some(OperatorTodoResponseSignal::ExplicitRequest)
+        );
+    }
+
+    #[test]
+    fn operator_todo_signal_detects_unpublished_markdown_draft_path() {
+        assert_eq!(
+            operator_todo_response_signal(
+                "The unpublished draft is ready at `docs/launch-note.md`."
+            ),
+            Some(OperatorTodoResponseSignal::UnpublishedDraft)
+        );
+    }
+
+    #[test]
+    fn operator_todo_signal_ignores_completed_or_pathless_draft_prose() {
+        assert_eq!(
+            operator_todo_response_signal("Published the draft at `docs/launch-note.md`."),
+            None
+        );
+        assert_eq!(
+            operator_todo_response_signal("The draft is not posted because CI is still red."),
+            None
+        );
+        assert_eq!(
+            operator_todo_response_signal(
+                "Implementation is complete; no operator action remains."
+            ),
+            None
+        );
+    }
 
     #[test]
     fn strips_echoed_assistant_heading() {

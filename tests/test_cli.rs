@@ -4571,8 +4571,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "recycle_yield_pending(file)",
         "std::fs::read_to_string(file)",
         "let snapshot_content = load_snapshot(file)?",
-        "crate::queue_claim::claimed_items_for_content(file, &content)",
-        "crate::queue_claim::claimed_items_for_content(file, content)",
+        "crate::subagent_dispatch::out_of_loop_items_for_content(file, &content)",
+        "crate::subagent_dispatch::out_of_loop_items_for_content(file, content)",
         "queue_continuation::required_continuation_excluding_claimed_scoped(",
         "agent_doc_git_io::revision::free_text_head_entry_anchor_exchange(file, queue_id, head)",
     ] {

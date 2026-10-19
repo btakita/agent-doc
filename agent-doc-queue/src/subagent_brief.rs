@@ -448,8 +448,10 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
     );
     out.push_str(concat!("- ", subagent_scratch_isolation_rule!(), "\n"));
     out.push_str(
-        "- Commit and push only your own branch, fast-forward only, never force, and only when the \
-         authorization above includes commit/push.\n\
+        "- Commit and push only when the authorization above includes it. Use your own branch and \
+         fast-forward by default. An explicitly named target branch or explicit force-push directive \
+         in the verbatim authorization overrides only that default: execute the exact authorized \
+         scope, never broaden it, and route any harness-native permission through the request protocol.\n\
          - Report back: branch, commit SHA, files changed, and exact test results.\n",
     );
     out.push('\n');
@@ -758,9 +760,11 @@ mod tests {
             // It sits inside the coordinator rules, before the commit/push rule.
             assert!(p.find("Coordinator rules").unwrap() < rule_at, "{p}");
             assert!(
-                rule_at < p.find("- Commit and push only your own branch").unwrap(),
+                rule_at < p.find("- Commit and push only when").unwrap(),
                 "{p}"
             );
+            assert!(p.contains("explicit force-push directive"), "{p}");
+            assert!(p.contains("overrides only that default"), "{p}");
         }
         assert!(SUBAGENT_SCRATCH_ISOLATION_RULE.contains("`git commit -F -`"));
         assert!(

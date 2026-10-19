@@ -3589,10 +3589,15 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     } else {
         Vec::new()
     };
+    let out_of_loop_queue_items = if activation.active {
+        agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, &content)
+    } else {
+        agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+    };
     let queue_drainable_head_count = if activation.active {
         agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
             &drainability_content,
-            &claimed_queue_items,
+            &out_of_loop_queue_items,
         )
     } else {
         0
@@ -3602,7 +3607,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed(
             &drainability_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-            &claimed_queue_items,
+            &out_of_loop_queue_items,
         )
     } else {
         None
@@ -6671,6 +6676,14 @@ pub fn run_queue_maintenance_with_coin_gate(
     } else {
         Vec::new()
     };
+    let out_of_loop_queue_items = if activation.active {
+        agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(
+            file,
+            &current_content,
+        )
+    } else {
+        agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+    };
     let projection_entries = entries_without_out_of_loop_heads(
         &activation.entries_after,
         &claimed_queue_items,
@@ -7102,7 +7115,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     } else if activation.active {
         agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
             &current_content,
-            &claimed_queue_items,
+            &out_of_loop_queue_items,
         )
     } else {
         0
@@ -7121,7 +7134,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed(
             &current_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-            &claimed_queue_items,
+            &out_of_loop_queue_items,
         )
     } else {
         None

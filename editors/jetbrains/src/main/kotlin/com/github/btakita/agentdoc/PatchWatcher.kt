@@ -58,18 +58,6 @@ private enum class EditorIntent(val token: String) {
  * history instead of the currently open editor surface.
  */
 class PatchWatcher(private val project: Project) : Disposable {
-    private val operatorTextAuthorityCapability = "operator_text_authority_v1"
-    private val lazilyTransportReceiptsCapability = "lazily_transport_receipts_v1"
-    private val coordinatedExtractCapability = "coordinated_extract_v1"
-    private val editorCapabilities = buildList {
-        add(operatorTextAuthorityCapability)
-        add(lazilyTransportReceiptsCapability)
-        add(coordinatedExtractCapability)
-        if (System.getProperty("os.name").lowercase().contains("linux")) {
-            add("native_hot_reload_generation_v1")
-        }
-    }.joinToString(",")
-
     private data class RootState(
         val root: String,
         @Volatile var ipcCallback: AgentDocLib.IpcMessageCallback? = null,
@@ -997,7 +985,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     EditorIdentity.id,
                     "jetbrains",
                     patchWatcherPluginVersion(),
-                    editorCapabilities,
+                    EDITOR_CAPABILITIES,
                 )) {
                     recordEditorSurfaceOps(filePath, "content_projection", "editor_content_applied_for_editor_v1", "write_finalize_ipc", patchId, "ok")
                     return true

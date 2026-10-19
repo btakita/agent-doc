@@ -2,6 +2,33 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.524
+
+- **Focused extraction works through live JetBrains authorities.** JetBrains
+  registrations now advertise the coordinated freeze/detach/apply/resume
+  capability that the plugin already implements, so focused extraction no
+  longer requires closing both document tabs.
+- **Exact free-text response echoes consume the selected queue head atomically.**
+  The durable preflight selection now authorizes the position-independent
+  strike during response persistence, while unproven raw lifecycle markers
+  continue to fail closed.
+- **Subagent queue handoffs are lifecycle-safe.** Subagent-intent heads stay out
+  of inline draining, reported handoffs are consumed only after coordinator
+  integration, follow-up authorization remains explicit, and extract routing
+  ownership is documented without implying auto-claim behavior.
+- **Free-text and multi-queue admission preserve identity and locality.** Bare
+  bracketed colon notes remain free text, exact queue echoes retain stable
+  identity, and admission state cannot leak into a sibling queue.
+- **Done archive paths regain backward-compatible anchors.** Unprefixed paths
+  keep their project-relative meaning, while `document:` and `project:` select
+  explicit resolution and preserve escape checks across every consumer.
+- **Codex capacity errors recover while the pane remains busy.** The supervisor
+  recognizes the renderer-owned capacity presentation, sends one deduplicated
+  `continue`, and clears stale dispatch admission before retrying.
+- **Chained Remote Development focus escalations preserve pane order (GH
+  #311).** Unknown-order folds always use the retained positive order basis, so
+  successive focus-only replacements cannot reverse the routed document pair.
+
 ## 0.35.523
 
 - **Reported queue handoffs are visible at a glance.** When every active queue

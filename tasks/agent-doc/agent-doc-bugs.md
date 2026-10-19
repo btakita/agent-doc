@@ -124,7 +124,6 @@ Agent-doc cycle completed successfully.
 Diagnostics are complete. You can unwedge it now by restarting JetBrains, then reopen `sdk-demo.md`. No need to preserve the wedged state.
 
 Disk content and permissions are unchanged; the stale read-only flag exists only in the current IDE process.
-
 ### Re: Subagent completed: `subagent:issue315` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/315” — agent-doc
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=6bad6ffa7a2cd16ffa164384b7669cb3f2cb96dfe2ac367284a60f53649d68fc -->

@@ -47,6 +47,12 @@ class FocusedExtractCoordinationTest {
         assertTrue(manager.contains("extractFrozenPaths.contains(filePath)"))
         assertTrue(manager.contains("focused-extract freeze still pending"))
 
+        val managerResume = manager.substringAfter("fun resumeOpenDocumentAfterExtract(")
+            .substringBefore("fun rebindOpenDocumentPath(")
+        assertTrue(managerResume.contains("manager.inFlightAttaches[filePath]"))
+        assertTrue(managerResume.contains("DYNAMIC_PLUGIN_ATTACH_RECEIPT_TIMEOUT_MS"))
+        assertTrue(managerResume.contains("manager.forwarders[filePath]?.attached == true"))
+
         val freeze = watcher.substringAfter("private fun freezeForExtract(")
             .substringBefore("private fun resumeAfterExtract(")
         assertTrue(
@@ -64,5 +70,10 @@ class FocusedExtractCoordinationTest {
             resume.indexOf("resumeOpenDocumentAfterExtract") <
                 resume.lastIndexOf("setReadOnly(!frozen.wasWritable)"),
         )
+
+        val dispose = watcher.substringAfter("override fun dispose()")
+            .substringBefore("companion object")
+        assertTrue(dispose.contains("val frozen = frozenExtracts.entries.toList()"))
+        assertTrue(dispose.contains("setReadOnly(!state.wasWritable)"))
     }
 }

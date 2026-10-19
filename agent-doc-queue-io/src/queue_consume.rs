@@ -6660,8 +6660,8 @@ Old.
         let updated = fs::read_to_string(&doc).unwrap();
         assert!(!updated.contains("- Run queued thing"), "{updated}");
         assert!(
-            updated.contains(agent_doc_document::subagent_completion::MARKER_PREFIX),
-            "consuming the handoff must preserve its durable completion evidence: {updated}"
+            !updated.contains(agent_doc_document::subagent_completion::MARKER_PREFIX),
+            "consuming the handoff must retire its now-superseded completion evidence: {updated}"
         );
     }
 }

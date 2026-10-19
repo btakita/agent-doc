@@ -13,7 +13,6 @@ presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#audit': 'Audit agent-doc runtime for dogfooding. Add issues to the backlog + queue.'
   '#self': agent-doc-bugs.md
-queue: go
 dogfood:
   path: tasks/agent-doc/agent-doc-bugs.md
   auto: true
@@ -996,6 +995,12 @@ Satisfied. The #299 fix was added to the release work, and the corresponding rel
 > **Queue prompt:** Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.
 
 Checked the repository's current open issues. Only #40 and #45 are open, and both are explicitly excluded by this queue item, so there are no new issues to add to the backlog or queue.
+
+### Re: conditional release follow-up — gpt-5 · 2026-10-18T22:29-04:00
+
+> **Queue prompt:** If an issue was added, also add `- release + publish`
+
+No eligible issue was added during the current intake check, so this conditional does not add another release-and-publish task. The earlier #299 release remains complete as v0.35.520.
 <!-- agent:boundary:6975e85b -->
 <!-- /agent:exchange -->
 
@@ -1010,8 +1015,6 @@ Checked the repository's current open issues. Only #40 and #45 are open, and bot
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
-- ~~Add new #gh-issue https://github.com/btakita/agent-doc/issues/. Add new issues into the backlog + queue. Don't add Issue #40 + #45.~~
-- If an issue was added, also add `- release + publish`
 <!-- /agent:queue -->
 
 ## Todo

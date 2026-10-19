@@ -3309,6 +3309,10 @@ pub struct ControllerAnsweredFreeTextStrikeInvocation {
     /// (`#ftstrikeclaimedmention`); a snapshot projection judges them by the
     /// same exact-echo proof.
     pub claimed_heads: Vec<String>,
+    /// Free-text heads selected by this cycle's preflight. This is durable
+    /// selection authority for an exactly answered head introduced after the
+    /// response baseline, not the cosmetic marker rendered in the document.
+    pub selected_heads: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -5533,6 +5537,8 @@ struct QueueAuthorityObservation {
     /// projection strikes them only on an exact `> **Queue prompt:**` echo
     /// (`#claimstrike` still strikes that echo). Re-read on every observation.
     claimed_heads: Vec<String>,
+    /// Live heads selected by this cycle's binary-owned preflight projection.
+    selected_heads: Vec<String>,
 }
 
 /// Live queue heads of `content` held by an active worker claim, read from the
@@ -5574,6 +5580,23 @@ fn claimed_live_queue_head_texts(file: &Path, content: &str) -> Vec<String> {
     })
 }
 
+fn selected_live_queue_head_texts(file: &Path, content: &str) -> Vec<String> {
+    let Some(state) = agent_doc_cycle_state_io::load(file).ok().flatten() else {
+        return Vec::new();
+    };
+    if state.queue_selection_authority
+        != agent_doc_cycle_state_io::QueueSelectionAuthority::Preflight
+    {
+        return Vec::new();
+    }
+    let selected = agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+        .with_heads(&state.selected_free_text_queue_heads);
+    agent_doc_queue::queue_heads::active_free_text_queue_heads(content)
+        .into_iter()
+        .filter(|head| selected.claims(head))
+        .collect()
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct AnsweredFreeTextQueueStrikeProjection {
     file: Option<PathBuf>,
@@ -5586,6 +5609,7 @@ struct AnsweredFreeTextQueueStrikeProjection {
     baseline_content: Option<String>,
     node_keys: Vec<String>,
     claimed_heads: Vec<String>,
+    selected_heads: Vec<String>,
     error: Option<String>,
 }
 
@@ -7208,6 +7232,7 @@ impl ControllerDocumentGraphs {
             file: file.to_path_buf(),
             content_hash: agent_doc_hash::content_hash(&content),
             claimed_heads: claimed_live_queue_head_texts(file, &content),
+            selected_heads: selected_live_queue_head_texts(file, &content),
             content,
         };
         self.queue_authority
@@ -7278,11 +7303,12 @@ impl ControllerDocumentGraphs {
                 ) {
                     return AnsweredFreeTextQueueStrikeProjection::default();
                 }
-                match agent_doc_queue::queue_consume::project_answered_free_text_strike_with_claims(
+                match agent_doc_queue::queue_consume::project_answered_free_text_strike_with_authority(
                     &observation.content,
                     &captured.response_body,
                     captured.baseline_content.as_deref(),
                     &observation.claimed_heads,
+                    &observation.selected_heads,
                 ) {
                     Ok(Some(target)) => {
                         let projection_id = agent_doc_hash::content_hash(&format!(
@@ -7302,6 +7328,7 @@ impl ControllerDocumentGraphs {
                             baseline_content: captured.baseline_content,
                             node_keys: target.node_keys,
                             claimed_heads: observation.claimed_heads,
+                            selected_heads: observation.selected_heads,
                             error: None,
                         }
                     }
@@ -7650,6 +7677,7 @@ impl ControllerDocumentGraphs {
                 baseline_content: projection.baseline_content.clone(),
                 node_keys: projection.node_keys.clone(),
                 claimed_heads: projection.claimed_heads.clone(),
+                selected_heads: projection.selected_heads.clone(),
             };
             let Some(sender) = sender.get() else {
                 return;
@@ -24092,6 +24120,79 @@ revised operator request
             strike.has_target(),
             "a released head answered by the response is struck: {strike:?}"
         );
+    }
+
+    #[test]
+    fn preflight_selected_late_free_text_head_projects_exact_echo_strike() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("sdk-dev.md");
+        let head = "Transfer this sdk demo thread/context/backlog/todo/exchange/etc to sdk-demo.md";
+        let baseline = concat!(
+            "---\nagent_doc_session: queue-projection\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n<!-- /agent:queue -->\n",
+        );
+        let response = format!(
+            "### Re: sdk transfer — gpt-6.1-sol\n\n> **Queue prompt:** {head}\n\nTransfer prepared and verified.\n"
+        );
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: queue-projection\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n- 🚧 {head}\n<!-- /agent:queue -->\n",
+            ),
+            response = response,
+            head = head,
+        );
+        std::fs::write(&file, &content).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        agent_doc_cycle_state_io::start_preflight(
+            &canonical,
+            Some(baseline),
+            Some(baseline),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(
+            &canonical,
+            &[head.to_string()],
+        )
+        .unwrap();
+
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let runtime = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        let preflight = preflight_started_event(&document_hash);
+        append_state_event(dir.path(), &preflight).unwrap();
+        runtime.apply_state_event(&preflight).unwrap();
+        let captured = agent_doc_state_backbone::StateEvent::new(
+            "response-captured-selected-late-free-text",
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.clone(),
+                cycle_id: "cycle-1".to_string(),
+                capture_id: "capture-selected-late-free-text".to_string(),
+                response_sha256: agent_doc_hash::content_hash(&response),
+                response_body: Some(response),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: Some(baseline.to_string()),
+            },
+        );
+        append_state_event(dir.path(), &captured).unwrap();
+        runtime.apply_state_event(&captured).unwrap();
+        runtime
+            .document_queue_authority_observe(&document_hash, &canonical, content)
+            .unwrap();
+
+        let strike = runtime
+            .document_graphs
+            .current_answered_free_text_strike(&document_hash);
+        assert!(
+            strike.has_target(),
+            "the exact sdk-style echo should consume its durably selected late head: {strike:?}"
+        );
+        assert_eq!(strike.selected_heads, vec![head.to_string()]);
     }
 
     #[test]

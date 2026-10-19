@@ -813,7 +813,29 @@ pub fn answered_free_text_head_node_keys_with_claims(
     baseline: Option<&str>,
     claimed_heads: &[String],
 ) -> Result<Vec<String>> {
+    answered_free_text_head_node_keys_with_authority(
+        content,
+        response_body,
+        baseline,
+        claimed_heads,
+        &[],
+    )
+}
+
+/// [`answered_free_text_head_node_keys_with_claims`] plus the free-text heads
+/// selected by this cycle's preflight. Selection is durable binary authority,
+/// unlike the cosmetic `🚧` projection in `content`, so an exactly echoed and
+/// answered selected head may close even when queue projection introduced it
+/// after the response baseline was captured.
+pub fn answered_free_text_head_node_keys_with_authority(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+    selected_heads: &[String],
+) -> Result<Vec<String>> {
     let claimed = crate::queue_claim::ClaimedQueueItems::none().with_heads(claimed_heads);
+    let selected = crate::queue_claim::ClaimedQueueItems::none().with_heads(selected_heads);
     // `#claimstrike` (live, 2026-10-05): a worker claim does NOT hold an
     // answered head back. A claim says who owns the work; the response's
     // `> **Queue prompt:**` echo says that work is finished, and the
@@ -909,17 +931,20 @@ pub fn answered_free_text_head_node_keys_with_claims(
         // Formal post-baseline closeout rule:
         //
         //   strike(q) => echo(q) && !deferred(q)
-        //                && (baseline(q) || exact_worker_authority(q))
+        //                && (baseline(q) || exact_worker_authority(q)
+        //                    || preflight_selection_authority(q))
         //
         // `claimed` is the caller-supplied set of heads backed by current
         // claim-attempt authority (a live claim or an exact-attempt release
-        // receipt). A cosmetic lifecycle prefix is never authority: accepting
-        // `🚧` here allowed a hand-edited/stale marker to consume new operator
-        // work, while rejecting `📥` made a real reported release race the
-        // baseline refresh.
+        // receipt). `selected` is the cycle-state projection recorded by
+        // preflight. A cosmetic lifecycle prefix is never authority: accepting
+        // raw `🚧` here allowed a hand-edited/stale marker to consume new
+        // operator work, while rejecting binary-recorded selection made an
+        // exactly answered projected head survive its own atomic closeout.
         if let Some(baseline) = baseline
             && !crate::queue_response::free_text_head_present_in_baseline(baseline, text)
-            && !(claimed.claims(text) && has_explicit_answer_evidence)
+            && !((claimed.claims(text) || selected.claims(text))
+                && has_explicit_answer_evidence)
         {
             continue;
         }
@@ -1325,15 +1350,34 @@ pub fn project_answered_free_text_strike_with_claims(
     baseline: Option<&str>,
     claimed_heads: &[String],
 ) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
-    if response_body.trim().is_empty() {
-        return Ok(None);
-    }
-    agent_doc_frontmatter::frontmatter::parse(content)?;
-    let node_keys = answered_free_text_head_node_keys_with_claims(
+    project_answered_free_text_strike_with_authority(
         content,
         response_body,
         baseline,
         claimed_heads,
+        &[],
+    )
+}
+
+/// [`project_answered_free_text_strike_with_claims`] plus durable preflight
+/// selection authority for post-baseline free-text heads.
+pub fn project_answered_free_text_strike_with_authority(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+    selected_heads: &[String],
+) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
+    if response_body.trim().is_empty() {
+        return Ok(None);
+    }
+    agent_doc_frontmatter::frontmatter::parse(content)?;
+    let node_keys = answered_free_text_head_node_keys_with_authority(
+        content,
+        response_body,
+        baseline,
+        claimed_heads,
+        selected_heads,
     )?;
     project_free_text_strike_of_node_keys(content, node_keys)
 }
@@ -3446,12 +3490,12 @@ Old.
         );
     }
 
-    /// `#presetlateclaim`: a claimed preset head can join the live queue after
-    /// the pre-turn baseline while the response is still being composed. An
-    /// exact prompt echo plus answer proves that this is selected work, not an
-    /// operator draft that should be deferred to the next auto-queue cycle.
+    /// A preflight-selected head can join the live queue after the response
+    /// baseline (for example through queue projection). An exact prompt echo
+    /// plus answer proves that this is selected work, not an operator draft
+    /// that should be deferred to the next auto-queue cycle.
     #[test]
-    fn selected_preset_added_after_baseline_is_struck_by_exact_response_evidence() {
+    fn selected_head_added_after_baseline_is_struck_by_exact_response_evidence() {
         let baseline = concat!(
             "---\nqueue_active: true\nprompt_presets:\n",
             "  '#gh-fix': fix then close\n",
@@ -3480,16 +3524,17 @@ Old.
             response = response,
         );
 
-        let worker_authority =
+        let selection_authority =
             ["#gh-fix https://github.com/btakita/agent-doc/issues/177".to_string()];
-        let projected = project_answered_free_text_strike_with_claims(
+        let projected = project_answered_free_text_strike_with_authority(
             &current,
             response,
             Some(baseline),
-            &worker_authority,
+            &[],
+            &selection_authority,
         )
         .unwrap()
-        .expect("an attested and explicitly answered late head should be consumed");
+        .expect("a selected and explicitly answered late head should be consumed");
         assert_eq!(projected.node_keys.len(), 1);
         assert!(projected.target_content.contains(
             "- ~~#gh-fix https://github.com/btakita/agent-doc/issues/177~~ — auto-struck: answered this cycle (#ftstrike)"
@@ -3500,7 +3545,7 @@ Old.
             project_answered_free_text_strike(&current, response, Some(baseline))
                 .unwrap()
                 .is_none(),
-            "a lifecycle marker without claim-attempt authority cannot consume post-baseline work"
+            "a lifecycle marker without durable selection authority cannot consume post-baseline work"
         );
 
         let operator_draft = current.replacen("- 🚧 #gh-fix", "- #gh-fix", 1);
@@ -3509,6 +3554,50 @@ Old.
                 .unwrap()
                 .is_none(),
             "an unselected head absent from the baseline remains next-cycle work"
+        );
+    }
+
+    #[test]
+    fn selected_plain_free_text_added_after_baseline_is_struck_by_exact_echo() {
+        let head = "Transfer this sdk demo thread/context/backlog/todo/exchange/etc to sdk-demo.md";
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n<!-- /agent:queue -->\n",
+        );
+        let response = format!(
+            "### Re: sdk transfer — gpt-6.1-sol\n\n> **Queue prompt:** {head}\n\nTransfer prepared and verified.\n"
+        );
+        let current = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n- 🚧 {head}\n<!-- /agent:queue -->\n",
+            ),
+            response = response,
+            head = head,
+        );
+
+        let projected = project_answered_free_text_strike_with_authority(
+            &current,
+            &response,
+            Some(baseline),
+            &[],
+            &[head.to_string()],
+        )
+        .unwrap()
+        .expect("durably selected late free-text head should close atomically");
+        assert_eq!(projected.node_keys.len(), 1);
+        assert!(
+            !projected.target_content.contains(&format!("- 🚧 {head}")),
+            "the final answered head should be removed by lossless queue drain: {}",
+            projected.target_content
+        );
+        assert!(
+            project_answered_free_text_strike(&current, &response, Some(baseline))
+                .unwrap()
+                .is_none(),
+            "the visible marker and exact echo are insufficient without durable selection"
         );
     }
 

@@ -598,6 +598,16 @@ hello
     }
 
     #[test]
+    fn subagent_operator_request_id_uses_tracked_id_highlighting() {
+        let doc = "[#subagent-operator-request] subagent operator request\n";
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::TrackedId),
+            vec!["[#subagent-operator-request]"]
+        );
+        assert!(tokens_of(doc, VisualTokenKind::LabelTag).is_empty());
+    }
+
+    #[test]
     fn collects_binary_queue_prompt_quote_blocks_as_prompts() {
         let doc = "\
 ### Re: queued work — gpt-5

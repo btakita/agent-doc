@@ -649,7 +649,7 @@ granted through the harness permission system. Conversely, the existence of a
 possible native prompt MUST NOT make the agent reject or re-confirm task
 authorization before it attempts the authorized action.
 
-### Subagent operator-request handback (`#waypostrequest`)
+### Subagent operator-request handback (`[#subagent-operator-request]`)
 
 Every `agent-doc queue brief` preamble MUST tell a dispatched worker how to
 surface a genuinely missing scope/choice or a harness-native permission request
@@ -658,7 +658,7 @@ but MUST first honor any task authorization already resolved above. Before
 stopping, it sends or returns this packet without paraphrase:
 
 ```text
-[agent-doc] subagent operator request (#waypostrequest)
+[#subagent-operator-request] subagent operator request
 kind: question | permission
 blocking: true
 request: <exact question or exact tool/action requiring permission>

@@ -259,7 +259,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   separate grant; unresolved presets remain fail-closed.
 - **Blocking subagent handbacks create operator TODOs (`#wayposttodo`).** The
   coordinator records the concrete action with `--todo-add` when it presents a
-  `#waypostrequest`, then checks it with `--todo-done` once the answer and
+  `[#subagent-operator-request]`, then checks it with `--todo-done` once the answer and
   continued worker result complete it, so exchange-only requests cannot become
   invisible operator work.
 

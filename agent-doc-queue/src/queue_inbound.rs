@@ -45,6 +45,61 @@ pub enum InboundAppendPlan {
     Duplicate { existing: String },
 }
 
+/// Insert queue-local follow-up heads immediately after the head that produced
+/// them. Queue id and origin are both mandatory: a mirrored copy in another
+/// queue must never redirect the insertion to the document's selected queue.
+pub fn plan_queue_followups(
+    content: &str,
+    queue_id: &str,
+    origin: &str,
+    followups: &[String],
+) -> Result<String> {
+    if followups.is_empty() {
+        bail!("queue follow-up needs at least one --item");
+    }
+    let components = agent_doc_element::element::parse(content)?;
+    let queue = crate::queue_graph::component_for_id(content, &components, queue_id)?
+        .ok_or_else(|| anyhow::anyhow!("agent:queue id `{queue_id}` not found"))?;
+    let body = queue.content(content);
+    let wanted = crate::queue_head_alignment::normalize_queue_head_text(origin);
+    let mut matches = Vec::new();
+    let mut offset = 0usize;
+    for line in body.split_inclusive('\n') {
+        let line_text = line.trim_end_matches(['\r', '\n']);
+        let Some(prompt) = line_text
+            .trim_start()
+            .strip_prefix("- ")
+            .filter(|text| !text.trim_start().starts_with("~~"))
+        else {
+            offset += line.len();
+            continue;
+        };
+        if crate::queue_head_alignment::normalize_queue_head_text(prompt) == wanted {
+            matches.push(offset + line.len());
+        }
+        offset += line.len();
+    }
+    let insertion_at = match matches.as_slice() {
+        [offset] => queue.open_end + offset,
+        [] => bail!("queue follow-up origin {origin:?} not found in queue id `{queue_id}`"),
+        _ => bail!(
+            "queue follow-up origin {origin:?} is ambiguous in queue id `{queue_id}`"
+        ),
+    };
+    let mut insertion = String::new();
+    for item in followups {
+        let item = normalize_inbound_text(item)?;
+        insertion.push_str("- ");
+        insertion.push_str(&item);
+        insertion.push('\n');
+    }
+    let mut updated = String::with_capacity(content.len() + insertion.len());
+    updated.push_str(&content[..insertion_at]);
+    updated.push_str(&insertion);
+    updated.push_str(&content[insertion_at..]);
+    Ok(updated)
+}
+
 fn valid_token_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/' | '@')
 }
@@ -256,6 +311,60 @@ mod tests {
                 "- ~~done earlier~~\n- [from:ci] fix the build\n"
             )
         );
+    }
+
+    #[test]
+    fn followups_stay_after_origin_in_exact_queue_when_head_is_mirrored() {
+        let doc = concat!(
+            "<!-- agent:queue id=main subagents -->\n",
+            "- do [#httpsgithubcom]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues loop interval=1h -->\n",
+            "- do [#httpsgithubcom]\n",
+            "- existing tail\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let followups = vec![
+            "#gh-fix https://github.com/btakita/agent-doc/issues/303".to_string(),
+            "#gh-fix https://github.com/btakita/agent-doc/issues/304".to_string(),
+            "#gh-fix https://github.com/btakita/agent-doc/issues/305".to_string(),
+            "release + publish".to_string(),
+        ];
+        let updated = plan_queue_followups(doc, "issues", "do [#httpsgithubcom]", &followups)
+            .unwrap();
+        assert_eq!(
+            updated,
+            concat!(
+                "<!-- agent:queue id=main subagents -->\n",
+                "- do [#httpsgithubcom]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:queue id=issues loop interval=1h -->\n",
+                "- do [#httpsgithubcom]\n",
+                "- #gh-fix https://github.com/btakita/agent-doc/issues/303\n",
+                "- #gh-fix https://github.com/btakita/agent-doc/issues/304\n",
+                "- #gh-fix https://github.com/btakita/agent-doc/issues/305\n",
+                "- release + publish\n",
+                "- existing tail\n",
+                "<!-- /agent:queue -->\n",
+            )
+        );
+    }
+
+    #[test]
+    fn followups_fail_closed_on_wrong_queue_or_ambiguous_origin() {
+        let doc = concat!(
+            "<!-- agent:queue id=main -->\n",
+            "- do [#same]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue id=issues -->\n",
+            "- do [#same]\n",
+            "- do [#same]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let items = vec!["follow-up".to_string()];
+        assert!(plan_queue_followups(doc, "missing", "do [#same]", &items).is_err());
+        assert!(plan_queue_followups(doc, "issues", "do [#missing]", &items).is_err());
+        assert!(plan_queue_followups(doc, "issues", "do [#same]", &items).is_err());
     }
 
     #[test]

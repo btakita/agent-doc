@@ -23,21 +23,31 @@ without making an agent manually copy managed document regions.
   refuse before mutation with the exact attached path(s) and explicit
   confirmation that the target was not created (or was left unchanged); live
   JetBrains editor plus `--coordinate-live-editors` -> persist the exact visible
-  revisions, freeze the tabs read-only, detach their replicas, recheck the disk
-  generations, apply, reload the result, restore editability, and re-register.
+  revisions, freeze the tabs read-only, wait for the controller-owned live CRDT
+  replica counts (not durable open-tab registrations) to reach zero, reject any
+  unexpected registration or replica at the mutation boundary, apply through a
+  revalidated force-disk authority scope, reload the result, restore editability,
+  and re-register. A lost freeze receipt still schedules compensating resume;
+  duplicate resume after success is an idempotent acknowledgement, while a resume
+  carrying another operation ID is refused.
 - **Evidence inputs:** parsed agent components, tracked item IDs (including
   `agent:done`), stable live exchange node IDs, compact archive locators,
   source-content hash, destination operation marker, frontmatter
-  collaboration/security metadata, pane ownership, and durable editor liveness.
+  collaboration/security metadata, pane ownership, durable editor registrations,
+  exact frozen endpoint identities, and controller CRDT relay membership counts.
 - **Reactive topology:** editor registrations remain in the existing
   document/process `Source -> Computed liveness -> write Effect -> receipt`
-  graph. Focused extraction is a deliberately one-shot boundary and consumes
-  the liveness projection; it does not create a parallel actor or
-  poll/recompute readiness.
+  graph, while replica register/deregister events drive the controller relay
+  membership used by `admin inspect`. Focused extraction is a deliberately
+  one-shot CLI boundary. Because the controller exposes no replica-membership
+  subscription, it uses a bounded RPC poll of that typed projection during the
+  five-second freeze handoff; it does not create a parallel authority owner.
 - **Imperative extraction audit:** selector resolution and all resulting content
-  are computed once before I/O. The remaining direct calls are one-shot file
-  writes, rollback, and snapshot checkpoints; they have no durable scheduling
-  relationship and therefore no new reactive edge.
+  are computed once before I/O. The old poll of durable open-tab liveness is not
+  a detach signal and is removed. Remaining direct calls are the bounded
+  cross-process membership observation, one-shot force-disk writes, rollback,
+  and snapshot checkpoints; they have no durable scheduling relationship and
+  therefore no new reactive edge.
 - **Routing boundary:** extraction never claims or starts the destination. A
   source document normally already owns the invoking pane, and silently
   rebinding that pane to the new destination would orphan the source session.
@@ -47,10 +57,12 @@ without making an agent manually copy managed document regions.
 - **Allowed edit surfaces:** the focused-extract module, CLI routing, target
   scaffold shared with transfer, this command spec, its runbook, and regression
   tests.
-- **Verification:** pure planner tests cover multi-surface and completed-item ID
-  selection, exchange adjacency, archive-locator resolution after compaction,
-  complete destination initialization, collision refusal, and operation-marker
-  resume; CLI help and the full project check cover wiring.
+- **Verification:** pure coordination tests cover replica-count wait/timeout and
+  mutation-boundary rows, while editor tests cover idempotent same-operation
+  resume and stale-operation refusal. Planner tests cover multi-surface and
+  completed-item ID selection, exchange adjacency, archive-locator resolution
+  after compaction, complete destination initialization, collision refusal, and
+  operation-marker resume; CLI help and the full project check cover wiring.
 - **Out of scope:** semantic-topic inference inside the mutation binary,
   cross-filesystem transactions, and simultaneous multi-document CRDT commits.
 

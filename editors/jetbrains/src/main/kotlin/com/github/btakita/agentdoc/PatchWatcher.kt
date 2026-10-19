@@ -28,6 +28,22 @@ internal fun socketListenerRetryDelayMsUtil(failureCount: Int): Long {
     return (250L shl exponent).coerceAtMost(30_000L)
 }
 
+internal enum class ExtractResumeDecision {
+    ALREADY_RESUMED,
+    RESUME,
+    REJECT_STALE_OPERATION,
+}
+
+internal fun extractResumeDecision(
+    frozenOperationId: String?,
+    requestedOperationId: String,
+): ExtractResumeDecision =
+    when (frozenOperationId) {
+        null -> ExtractResumeDecision.ALREADY_RESUMED
+        requestedOperationId -> ExtractResumeDecision.RESUME
+        else -> ExtractResumeDecision.REJECT_STALE_OPERATION
+    }
+
 /** Cross-language editor intent names; mirrored by Rust and VS Code. */
 private enum class EditorIntent(val token: String) {
     ApplyCanonical("apply_canonical"),
@@ -766,8 +782,13 @@ class PatchWatcher(private val project: Project) : Disposable {
     /** Reload the detached transaction result, synchronously re-register its
      * replica, and only then restore the tab's prior writable state. */
     private fun resumeAfterExtract(filePath: String, operationId: String): Boolean {
-        val frozen = frozenExtracts[filePath] ?: return false
-        if (frozen.operationId != operationId) return false
+        val frozen = frozenExtracts[filePath]
+        when (extractResumeDecision(frozen?.operationId, operationId)) {
+            ExtractResumeDecision.ALREADY_RESUMED -> return true
+            ExtractResumeDecision.REJECT_STALE_OPERATION -> return false
+            ExtractResumeDecision.RESUME -> Unit
+        }
+        checkNotNull(frozen)
         var reloaded = false
         ApplicationManager.getApplication().invokeAndWait {
             val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(filePath)

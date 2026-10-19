@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **Focused extract now freezes on CRDT replica membership, not open tabs.** The
+  coordinated handoff polls the controller-owned live replica count while the
+  durable editor registration remains attached, rechecks that count and exact
+  frozen registrations at the mutation boundary, and writes frozen documents
+  through a revalidated force-disk scope. Ambiguous freeze delivery now always
+  schedules compensating resume, and duplicate post-success resume is
+  idempotent without accepting a stale operation ID.
+
 ## 0.35.524
 
 - **Focused extraction works through live JetBrains authorities.** JetBrains

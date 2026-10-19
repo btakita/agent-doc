@@ -812,7 +812,7 @@ mod tests {
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n\n",
-            "<!-- agent:done archive=session.done.md -->\n",
+            "<!-- agent:done archive=document:session.done.md -->\n",
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&file, content).unwrap();
@@ -836,7 +836,7 @@ mod tests {
         let external = std::fs::read_to_string(dir.path().join("tasks/session.done.md")).unwrap();
         assert!(external.contains("[#done1] completed externally"));
         assert!(!archived.contains("[#done1]"));
-        assert!(archived.contains("completed work archived in session.done.md"));
+        assert!(archived.contains("completed work archived in document:session.done.md"));
 
         agent_doc_element_backlog_io::done_archive::archive_pending_done(
             &file,
@@ -911,7 +911,7 @@ mod tests {
         let current = concat!(
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n\n",
-            "<!-- agent:done archive=session.done.md -->\n",
+            "<!-- agent:done archive=document:session.done.md -->\n",
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&file, current).unwrap();

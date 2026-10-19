@@ -260,7 +260,17 @@ pub(crate) fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Re
             archive_path
         );
     }
-    agent_doc_fs::resolve_document_relative_path(file, &relative).with_context(|| {
+    let configured = relative.to_string_lossy();
+    agent_doc_fs::resolve_anchored_project_path(
+        file,
+        &configured,
+        if archive_path.trim().is_empty() {
+            agent_doc_fs::ProjectPathAnchor::Document
+        } else {
+            agent_doc_fs::ProjectPathAnchor::Project
+        },
+    )
+    .with_context(|| {
         format!(
             "agent:done archive={} must stay inside the document project",
             archive_path
@@ -280,6 +290,9 @@ fn configured_done_archive_relative_path(file: &Path, archive_path: &str) -> Res
 }
 
 fn configured_done_archive_label(file: &Path, archive_path: &str) -> Result<String> {
+    if !archive_path.trim().is_empty() {
+        return Ok(archive_path.to_string());
+    }
     Ok(configured_done_archive_relative_path(file, archive_path)?
         .to_string_lossy()
         .into_owned())
@@ -502,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn archive_paths_are_relative_to_the_document_directory() {
+    fn archive_paths_support_legacy_project_and_explicit_document_anchors() {
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(project.path().join("tasks/nested")).unwrap();
@@ -511,13 +524,22 @@ mod tests {
 
         assert_eq!(
             resolve_done_archive_target(&doc, "history.done.md").unwrap(),
+            project.path().join("history.done.md")
+        );
+        assert_eq!(
+            resolve_done_archive_target(&doc, "project:tasks/history.done.md").unwrap(),
+            project.path().join("tasks/history.done.md")
+        );
+        assert_eq!(
+            resolve_done_archive_target(&doc, "document:history.done.md").unwrap(),
             project.path().join("tasks/nested/history.done.md")
         );
         assert_eq!(
-            resolve_done_archive_target(&doc, "../history.done.md").unwrap(),
+            resolve_done_archive_target(&doc, "document:../history.done.md").unwrap(),
             project.path().join("tasks/history.done.md")
         );
-        assert!(resolve_done_archive_target(&doc, "../../../escape.done.md").is_err());
+        assert!(resolve_done_archive_target(&doc, "document:../../../escape.done.md").is_err());
+        assert!(resolve_done_archive_target(&doc, "project:../escape.done.md").is_err());
     }
 
     #[test]
@@ -610,7 +632,8 @@ mod archived_tracked_ids_tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks/nested")).unwrap();
         let doc = dir.path().join("tasks/nested/bugs.md");
-        let body = "<!-- agent:done archive=../elsewhere.done.md -->\n<!-- /agent:done -->\n";
+        let body =
+            "<!-- agent:done archive=document:../elsewhere.done.md -->\n<!-- /agent:done -->\n";
         std::fs::write(&doc, body).unwrap();
         std::fs::write(
             dir.path().join("tasks/elsewhere.done.md"),

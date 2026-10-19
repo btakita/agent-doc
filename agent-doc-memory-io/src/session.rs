@@ -390,20 +390,24 @@ fn collect_session_events(file: &Path) -> Result<SessionEvents> {
 }
 
 fn read_done_archive(file: &Path, archive: &str) -> Result<Option<(PathBuf, String)>> {
-    let relative = if archive.trim().is_empty() {
+    let configured = if archive.trim().is_empty() {
         let stem = file
             .file_stem()
             .and_then(|stem| stem.to_str())
             .context("agent:done archive default requires a UTF-8 document basename")?;
-        PathBuf::from(format!("{stem}.done.md"))
+        format!("document:{stem}.done.md")
     } else {
-        PathBuf::from(archive)
+        archive.to_string()
     };
-    if !relative.to_string_lossy().ends_with(".done.md") {
+    if !configured.ends_with(".done.md") {
         bail!("agent:done archive={archive} must point to a .done.md file");
     }
-    let target = agent_doc_fs::resolve_document_relative_path(file, &relative)
-        .with_context(|| format!("agent:done archive={archive} must stay inside the project"))?;
+    let target = agent_doc_fs::resolve_anchored_project_path(
+        file,
+        &configured,
+        agent_doc_fs::ProjectPathAnchor::Project,
+    )
+    .with_context(|| format!("agent:done archive={archive} must stay inside the project"))?;
     match std::fs::read_to_string(&target) {
         Ok(content) => Ok(Some((target, content))),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -466,7 +470,7 @@ Shipped cache repair.
 - [/] [#shipcheck] Await release verification
 <!-- /agent:review -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );
@@ -534,7 +538,7 @@ Shipped cache repair.
 - Repair cache duplication
 <!-- /agent:queue -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );
@@ -566,7 +570,7 @@ Shipped cache repair.
 - [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (66 as of 2026-10-06); src/agent-doc/scripts/steergate-model-eval --dataset currently exits insufficient_data. Then integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md
 <!-- /agent:backlog -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );
@@ -619,7 +623,7 @@ Shipped cache repair.
 - Repair cache duplication on save
 <!-- /agent:queue -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );
@@ -716,7 +720,7 @@ Shipped cache repair.
 - [ ] [#revlist] Opencode responses are reverse ordering numeric lists
 <!-- /agent:backlog -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );
@@ -746,7 +750,7 @@ Shipped cache repair.
 - do [#cachefix] Repair cache duplication on save
 <!-- /agent:queue -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );
@@ -778,7 +782,7 @@ Shipped cache repair.
 - deploy
 <!-- /agent:queue -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );
@@ -809,7 +813,7 @@ Shipped cache repair.
 - #spec-test-commit-push
 <!-- /agent:queue -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );
@@ -842,7 +846,7 @@ Shipped cache repair.
 - fix the deploy script so it retries on a transient 500
 <!-- /agent:queue -->
 
-<!-- agent:done archive=../tasks.done.md -->
+<!-- agent:done archive=document:../tasks.done.md -->
 <!-- /agent:done -->
 "#,
         );

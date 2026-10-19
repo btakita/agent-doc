@@ -2,6 +2,32 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.520
+
+- **Dogfood actions can be customized without weakening issue safety.** The
+  optional `dogfood.prompt` setting works at project or session scope and
+  replaces only the default action sentence; stable issue metadata and
+  retained-write guidance remain binary-owned. The CLI exposes the resolved
+  value and supports setting it with `dogfood set --prompt`.
+- **Scheduled queues preserve their own ownership.** Legacy scheduler state is
+  no longer inherited ambiguously across split queues, so an issues watcher
+  cannot remain `skipped_busy` behind unrelated work.
+- **Missing subagent dispatch acknowledgements fail visibly (GH #301).** One
+  shared overdue-claim predicate now drives preflight warnings, strict closeout,
+  Stop-hook enforcement, and generation-fenced recovery commands.
+- **Transient focus guesses no longer become ordering authority (GH #302).**
+  The controller retains the last confirmed positive order as provisional
+  provenance until structural membership confirms the guessed slot, including
+  Remote Development restart anchoring.
+- **Tmux shell readiness requires proof of execution.** Live resync tests and
+  helpers require an external readiness-file side effect instead of accepting
+  text that a tty may merely echo before the replacement shell executes it.
+- **IntelliJ 263 upgrade diagnostics reflect measured platform behavior (GH
+  #299).** Live split-mode proof on IU 263.7031.23 shows DynamicPlugins rejecting
+  unload while Agent Doc remains in the module graph. Exact 263 therefore stays
+  restart-only and reports that evidence directly; exact artifact and sandbox
+  verification cover the supported contract.
+
 ## 0.35.517
 
 - **Document baselines no longer create filesystem sidecars (GH #300).**

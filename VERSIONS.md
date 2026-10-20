@@ -4,6 +4,36 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+## 0.35.526
+
+- **Persistent status sync can re-surface mid-turn on an opt-in `interval`.**
+  `<!-- agent:status sync="..." interval=5m -->` makes the owner-only
+  `PostToolUse` hook repeat the sync instruction no sooner than the interval,
+  with the due edge derived from controller-owned Lazily state rather than
+  SQLite timing. Periodic checkpoints default to off; bare, malformed, or
+  sub-minute values fail closed. The reminder names the focused
+  `agent-doc status set <FILE> --text ...` command, which updates only
+  `agent:status` without capturing, sealing, or committing the active cycle.
+- **Late queue handoff status is retained at closeout (GH #316).** The exact
+  ledger-derived reported-queue status projection that lands after the response
+  snapshot commit is treated as binary-owned; unrelated status drift still trips
+  the strict closeout guard.
+- **Answered free-text heads are consumed across the whole queue graph
+  (`#ftstrike-multiqueue`).** Discovery, strike, marker cleanup, annotation, and
+  claim release inspect every `agent:queue` occurrence, so an empty earlier
+  queue no longer hides an answered head in a later one.
+- **Integrated subagent completion feedback is retired.** A closeout that proves
+  and strikes a reported queue head removes its structurally attested completion
+  cell; unmatched reports and heading-shaped prose are preserved.
+- **Subagent operator requests carry a tracked id.** The handback packet is now
+  `[#subagent-operator-request]`, styled as a standard tracked id by both editor
+  plugins.
+- **`agent-doc patch <FILE> <component> --id <id>`** selects the component
+  occurrence whose opening tag carries that `id` attribute.
+- **Focused extract preserves CRDT authority.** Frozen editor documents advance
+  through a zero-live-replica-fenced controller canonical compare-and-swap before
+  disk is materialized, with canonical rollback on disk failure, so resume no
+  longer bootstraps pre-extraction text or reports `projection_changed`.
 ## 0.35.525
 
 - **Focused extract now freezes on CRDT replica membership, not open tabs.** The

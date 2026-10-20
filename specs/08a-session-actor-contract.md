@@ -211,6 +211,10 @@ No legacy layout file is imported or emitted.
   a busy actor can receive real-time steering. It never pane-polls, waits for
   dispatch-start proof, or re-sends the submit key. This exception does not apply
   to prompt-aware reruns, fresh-start recovery, or queued document work.
+  It is also operator-only (GH #319): an `automated_background`
+  dispatch origin (the controller orphan drain) against a `busy` or
+  `waiting_input` actor defers (`DeferAutomatedBehindLiveTurn`) and retries after
+  its backoff instead of typing the plain trigger into the live turn.
 - A prompt-aware dispatch-only reopen whose starting pane contains exactly the
   route's own unsubmitted agent-doc trigger may send one bare harness submit key,
   then must await the controller turn-admission projection. Missing projection

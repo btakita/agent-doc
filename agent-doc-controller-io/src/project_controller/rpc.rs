@@ -12035,6 +12035,9 @@ fn handle_editor_route_rpc_with_layout_delegate(
             prune_before_lookup: true,
             background_existing_pane_only: false,
             background_recovered_actor_fallback: false,
+            // An editor Run Agent Doc is operator-initiated.
+            dispatch_origin:
+                agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin::Operator,
             // `#routelaterescue`: the layout above already converged; from here the
             // layout plane is the only topology writer for this route.
             layout_owned_by_controller: true,
@@ -19546,6 +19549,10 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             // so its idle watch can own queue auto-clear. A later orphan
             // attempt is the bounded authoritative-actor fallback (GH #307).
             background_recovered_actor_fallback: recovered_actor_fallback,
+            // GH #319: no operator is watching this pane. A live
+            // turn defers this drain to the next backoff interval.
+            dispatch_origin:
+                agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin::AutomatedBackground,
             layout_owned_by_controller: false,
             navigation_client_id: None,
         };

@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **The controller orphan drain no longer types into a running turn (GH
+  #319).** An orphan-drain route read a stale `ready` actor record, saw the live `✽ Proofing…` cue, downgraded the actor to busy and skipped the
+  ready-wait, then submitted its plain trigger anyway: the plain-trigger busy
+  pass-through is operator real-time steering and was origin-blind. Routes now
+  carry a typed dispatch origin (`operator` / `automated_background`); an
+  automated origin against a `busy` or `waiting_input` actor defers
+  (`route_automated_dispatch_deferred_live_turn`, exit 75) and retries after the
+  drain's durable backoff, with focus and layout untouched. The dispatch-only
+  pre-submit pane check fences the same case. Operator Run Agent Doc steering is
+  unchanged.
+
 ## 0.35.527
 
 - **Residual-work lists reach the operator-todo advisory, and one

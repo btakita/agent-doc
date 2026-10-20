@@ -1,6 +1,7 @@
 //! Route invocation entrypoints and per-call state.
 
 use crate::command::{self, RouteCommandEffects, RouteMode};
+use agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin;
 use anyhow::Result;
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -25,6 +26,13 @@ thread_local! {
     /// This background route is the bounded retry after a recovered supervisor
     /// failed to drain during the preceding orphan-dispatch backoff interval.
     static BACKGROUND_RECOVERED_ACTOR_FALLBACK: Cell<bool> = const { Cell::new(false) };
+    /// GH #319: who asked for this route. Distinct from the
+    /// background layout restriction above: that one also covers
+    /// `#stashbackgroundreentry` owner re-entry, while this names the
+    /// controller-originated (automated) dispatch origin that must defer behind
+    /// a live turn instead of using the operator plain-trigger steering path.
+    static DISPATCH_ORIGIN: Cell<AuthoritativeActorDispatchOrigin> =
+        const { Cell::new(AuthoritativeActorDispatchOrigin::Operator) };
     /// A no-layout route invoked from a pane that owns another document may
     /// reuse an already-proven target, but must not change tmux topology or
     /// focus. This is the automatic child-route counterpart to controller
@@ -192,6 +200,11 @@ pub fn background_recovered_actor_fallback() -> bool {
     BACKGROUND_RECOVERED_ACTOR_FALLBACK.with(Cell::get)
 }
 
+/// GH #319: the dispatch origin of this thread's route invocation.
+pub fn dispatch_origin() -> AuthoritativeActorDispatchOrigin {
+    DISPATCH_ORIGIN.with(Cell::get)
+}
+
 pub fn cross_document_existing_pane_only() -> bool {
     CROSS_DOCUMENT_EXISTING_PANE_ONLY.with(Cell::get)
 }
@@ -304,6 +317,25 @@ impl BackgroundRecoveredActorFallbackGuard {
 impl Drop for BackgroundRecoveredActorFallbackGuard {
     fn drop(&mut self) {
         BACKGROUND_RECOVERED_ACTOR_FALLBACK.with(|cell| cell.set(self.previous));
+    }
+}
+
+/// Scopes [`dispatch_origin`] to one route invocation and restores the previous
+/// value on drop.
+pub struct DispatchOriginGuard {
+    previous: AuthoritativeActorDispatchOrigin,
+}
+
+impl DispatchOriginGuard {
+    pub fn set(value: AuthoritativeActorDispatchOrigin) -> Self {
+        let previous = DISPATCH_ORIGIN.with(|cell| cell.replace(value));
+        Self { previous }
+    }
+}
+
+impl Drop for DispatchOriginGuard {
+    fn drop(&mut self) {
+        DISPATCH_ORIGIN.with(|cell| cell.set(self.previous));
     }
 }
 

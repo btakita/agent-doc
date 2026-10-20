@@ -236,6 +236,22 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
 
     let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
     let resume_id = fm.resume_for_harness(&harness);
+    // `#runchildresumesowner`: never resume the harness session this command
+    // runs inside; refuse before the pre-commit and before any child launch.
+    if let Some(conflict) = agent_doc_turn::live_session_resume::live_session_resume_conflict(
+        &harness,
+        resume_id,
+        |key| std::env::var(key).ok(),
+    ) {
+        anyhow::bail!(
+            "{}",
+            agent_doc_turn::live_session_resume::live_session_resume_refusal(
+                &file.display().to_string(),
+                agent_name,
+                &conflict,
+            )
+        );
+    }
 
     // Build prompt
     let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();

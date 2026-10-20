@@ -20,6 +20,7 @@ pub mod document_drift;
 pub mod drain_stall;
 pub mod exchange_tail;
 pub mod heuristics;
+pub mod live_session_resume;
 pub mod no_change;
 pub mod op_log;
 pub mod owner_pane_recursion;

@@ -371,21 +371,7 @@ fn late_reported_queue_status_projection(
         return Ok(None);
     }
 
-    let mut reported_identities =
-        agent_doc_queue_io::queue_claim::claim_states_for_content(file, current_content)?
-            .into_iter()
-            .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
-            .map(|claim| claim.identity)
-            .collect::<HashSet<_>>();
-    reported_identities.extend(
-        agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
-            file,
-            current_content,
-        )
-        .into_iter()
-        .map(|head| agent_doc_queue::queue_claim::claim_identity(&head)),
-    );
-    let reported_count = reported_identities.len();
+    let reported_count = reported_queue_count(file, current_content)?;
     let Some(target) =
         agent_doc_document::status_projection::reconcile_reported_queue_status_content(
             committed_content,
@@ -396,6 +382,129 @@ fn late_reported_queue_status_projection(
     };
 
     Ok((target == current_content).then_some(reported_count))
+}
+
+/// The durable claim ledger's reported-handoff count for `content`, the input
+/// of the binary-owned `📥 Queue handoff` status projection.
+fn reported_queue_count(file: &Path, content: &str) -> Result<usize> {
+    let mut reported_identities =
+        agent_doc_queue_io::queue_claim::claim_states_for_content(file, content)?
+            .into_iter()
+            .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
+            .map(|claim| claim.identity)
+            .collect::<HashSet<_>>();
+    reported_identities.extend(
+        agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(file, content)
+            .into_iter()
+            .map(|head| agent_doc_queue::queue_claim::claim_identity(&head)),
+    );
+    Ok(reported_identities.len())
+}
+
+/// Which binary-owned projections a composed late-landing proof applied.
+#[derive(Debug, PartialEq, Eq)]
+struct LateComposedProjection {
+    parts: Vec<&'static str>,
+    capture_id: Option<String>,
+}
+
+/// The `--status` text the committed cycle's own captured closeout plan carried.
+fn committed_cycle_plan_status(file: &Path) -> Result<Option<String>> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    let Some(capture) = agent_doc_cycle_state_io::load_closeout_projection(file)?
+        .and_then(|projection| projection.captured_response)
+        .filter(|capture| capture.cycle_id == state.cycle_id)
+    else {
+        return Ok(None);
+    };
+    Ok(capture
+        .mutation_plan_json
+        .as_deref()
+        .and_then(|json| {
+            serde_json::from_str::<agent_doc_write_command_io::CapturedCloseoutMutationPlan>(json)
+                .ok()
+        })
+        .and_then(|plan| plan.status))
+}
+
+/// Prove that post-HEAD drift is exactly a COMPOSITION of the committed cycle's
+/// own late-landing projections (`#runchildresumesowner`).
+///
+/// The single-projection proofs above each demand that the whole document
+/// equal HEAD plus that one projection. On 2026-10-20 a skill closeout's commit
+/// landed before its retained tracked-work half: the captured plan's `--status`
+/// and the `#ftstrike` answered-head strikes both converged through the live
+/// editor seconds after Git committed the response. Neither proof alone matched
+/// the document, so the terminal retry refused the binary's OWN projections as
+/// an unanswered operator edit, and the live coordinator that obeyed the
+/// remedy launched a headless child resuming itself.
+///
+/// Every candidate here is a deterministic projection the committed cycle owns:
+/// the captured plan's status (`update_status_content`, the same projection the
+/// closeout replays), the claim ledger's reported-handoff count, and the
+/// capture-scoped answered-free-text strike. The proof still demands
+/// byte-for-byte equality with the editor-authoritative document, so any
+/// operator byte outside those projections keeps the strict refusal.
+fn late_composed_binary_owned_projection(
+    file: &Path,
+    committed_content: &str,
+    current_content: &str,
+) -> Result<Option<LateComposedProjection>> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if !matches!(
+        state.phase,
+        agent_doc_turn::CyclePhase::WriteApplied | agent_doc_turn::CyclePhase::Committed
+    ) {
+        return Ok(None);
+    }
+    let reported_count = reported_queue_count(file, current_content)?;
+    let mut bases: Vec<(String, Vec<&'static str>)> = Vec::new();
+    if let Some(status) = committed_cycle_plan_status(file)?
+        && let Ok(with_status) =
+            agent_doc_document::status_projection::update_status_content(committed_content, &status)
+        && with_status != committed_content
+    {
+        if let Some(with_count) =
+            agent_doc_document::status_projection::reconcile_reported_queue_status_content(
+                &with_status,
+                reported_count,
+            )?
+        {
+            bases.push((with_count, vec!["plan_status", "reported_queue_status"]));
+        }
+        bases.push((with_status, vec!["plan_status"]));
+    }
+    if let Some(with_count) =
+        agent_doc_document::status_projection::reconcile_reported_queue_status_content(
+            committed_content,
+            reported_count,
+        )?
+    {
+        bases.push((with_count, vec!["reported_queue_status"]));
+    }
+    for (base, parts) in bases {
+        if base == current_content {
+            return Ok(Some(LateComposedProjection {
+                parts,
+                capture_id: None,
+            }));
+        }
+        if let Some(LateAnsweredFreeTextStrike::Exact(capture_id)) =
+            late_answered_free_text_strike_capture(file, &base, current_content)?
+        {
+            let mut parts = parts;
+            parts.push("answered_free_text_strike");
+            return Ok(Some(LateComposedProjection {
+                parts,
+                capture_id: Some(capture_id),
+            }));
+        }
+    }
+    Ok(None)
 }
 
 /// `#synthcommitstrike`: whether the current document carries an answered
@@ -2722,6 +2831,40 @@ where
                 "commit_reconciled_late_answered_free_text_strike file={} capture_id={} basis=committed_head_exact_projection_or_reap snap_len={} file_len={}",
                 file.display(),
                 capture_id,
+                snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0),
+                file_content.len(),
+            ),
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &file_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        snapshot_content = Some(file_content.clone());
+        snapshot_matches_head = false;
+    }
+    // `#runchildresumesowner`: the committed cycle's own late projections can
+    // land TOGETHER (plan status + answered strike + handoff count). The
+    // single-projection proofs above each require the others to be absent, so
+    // the composition is proven here before the strict refusal reads it as an
+    // operator edit.
+    if snapshot_matches_head
+        && binary_owned_side_effects.is_empty()
+        && let Some(head) = head_doc.as_deref()
+        && let Some(composed) = late_composed_binary_owned_projection(file, head, &file_content)?
+    {
+        eprintln!(
+            "[commit] committing the committed cycle's own late projections for {} ({})",
+            file.display(),
+            composed.parts.join("+")
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_reconciled_late_binary_owned_projection file={} basis=committed_head_exact_projection parts={} capture_id={} snap_len={} file_len={}",
+                file.display(),
+                composed.parts.join("+"),
+                composed.capture_id.as_deref().unwrap_or("none"),
                 snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0),
                 file_content.len(),
             ),

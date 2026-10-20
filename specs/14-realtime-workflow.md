@@ -561,6 +561,17 @@ re-decided at a site:
   reading. This is consistent with `#admissionsteeringagree`: admission is
   refused only by a holder that can still change what the next turn reads.
 
+A terminating remedy must also be safe for the caller who reads it. The
+`UnansweredEditPending` remedy once said "run `agent-doc <FILE>` to open the
+next cycle" unconditionally; a live Claude Code coordinator rendering it from
+a `--origin skill` closeout obeyed, and the run path launched a headless child
+resuming the coordinator's own conversation (`#runchildresumesowner`). The
+remedy now comes from `unanswered_edit_answer_instruction`: inside a harness
+turn, end the turn and let the next `/agent-doc <FILE>` cycle answer; never the
+run path from inside a harness turn; `agent-doc run <FILE>` only from a plain
+shell. The run path independently refuses a live-session resume, so the two
+cannot recombine into the same loop.
+
 ### Binary-owned CLI writes settle a converging retention (`#binaryownedcli`)
 
 Standalone mutation commands — `agent-doc backlog|icebox|review <FILE> ...`

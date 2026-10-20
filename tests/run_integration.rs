@@ -543,6 +543,92 @@ fn bare_path_alias_uses_same_template_safe_path() {
     );
 }
 
+/// `#runchildresumesowner` (2026-10-20): a live Claude Code coordinator ran
+/// `agent-doc <FILE>` from its own Bash tool, and the run path launched a
+/// headless `claude` child resuming the coordinator's OWN conversation. The run
+/// path must refuse before any diff, pre-commit, snapshot, cycle, or child
+/// launch whenever the resume id is the session the caller runs inside — and
+/// must still run normally when the resume id is a different conversation.
+#[test]
+fn run_refuses_to_resume_the_live_harness_session_it_runs_inside() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let initial = template_doc().replacen(
+        "---\n",
+        "---\nagent: claude\nresume:\n  claude: live-coordinator-session\n",
+        1,
+    );
+    fs::write(&doc, &initial).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let head_before = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+
+    let (script, marker) = write_marker_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: reply — gpt-5\nAnswered.\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_claude_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("CLAUDE_CODE_SESSION_ID", "live-coordinator-session")
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("refusing to launch a headless `claude` child")
+                .and(predicate::str::contains("live-coordinator-session"))
+                .and(predicate::str::contains("CLAUDE_CODE_SESSION_ID"))
+                .and(predicate::str::contains("#runchildresumesowner"))
+                .and(predicate::str::contains("Submitting to").not())
+                .and(predicate::str::contains("pre-commit preserved").not()),
+        );
+    assert!(
+        !marker.exists(),
+        "the refused run must never launch the harness child"
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        initial,
+        "the refused run must not touch the document"
+    );
+    let head_after = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(
+        head_after, head_before,
+        "the refused run must not pre-commit"
+    );
+    assert!(
+        cycle_state::load(&doc).unwrap().is_none(),
+        "the refused run must not open a cycle"
+    );
+
+    // Precision control: a resume id that is NOT the caller's live session is
+    // an ordinary resumed run.
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("CLAUDE_CODE_SESSION_ID", "some-other-live-session")
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    assert!(marker.exists(), "a different session must still dispatch");
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("### Re: reply — gpt-5")
+    );
+}
+
 #[test]
 fn run_answers_fresh_typed_component_edit_after_committed_cycle() {
     let tmp = TempDir::new().unwrap();

@@ -438,6 +438,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-scope-io",
  "agent-doc-workflow",
+ "agent-doc-write-command-io",
  "agent-doc-write-converge-io",
  "agent-doc-write-ipc-io",
  "anyhow",

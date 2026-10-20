@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.529
 
+- **A `/clear` in a Claude Code session moves the document's `resume.claude` to the new conversation
+  (`#clauderesumeafterclear`).** The `SessionStart` hook (`source=clear`/`startup`) records the new session id through
+  the binary-owned frontmatter write, but only when the hook is proven to come from the document's supervised Claude
+  process on that pane; `resume`/`compact` never rewrite it. Relaunches and Restart Agent now resume the
+  post-clear conversation.
+- **Test determinism:** the stale-owner tmux fixture execs its fake harness directly and waits on a readiness file
+  instead of racing an interactive shell's startup against a 3 s deadline (`#ownerpaneflake`).
 - **A supervisor's adopted run keeps its ready proof across a binary refresh (GH #321).** `execve_preserve_child`
   now carries the adopted run's ready proof into the refreshed image, so a re-exec onto a new binary no longer
   leaves an idle session looking not-ready.

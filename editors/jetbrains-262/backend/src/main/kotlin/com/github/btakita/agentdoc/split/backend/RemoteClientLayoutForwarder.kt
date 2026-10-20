@@ -24,6 +24,7 @@ import com.google.gson.annotations.SerializedName
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import javax.swing.SwingUtilities
 
 /**
  * GH #320 option B: the main window's layout as the JetBrains Client measured it.
@@ -142,30 +143,104 @@ internal object RemoteClientMeasuredLayout {
 /** The controller surface a measured layout publishes: its root and the `editor_surface` payload. */
 internal data class ForwardedRemoteSurface(val projectRoot: String, val surfaceJson: String)
 
+/**
+ * GH #326 phase 4: the controller surface a measured layout publishes, derived by the hot-reloaded
+ * native `remote_client_surface` derivation.
+ *
+ * The forwarder reports the measured columns, the selected document, and that document's own
+ * project root (a filesystem read it makes on its worker); native owns the root that spans the
+ * layout (the `sync_layout` root rule), the paths normalized against it, and the `editor_surface`
+ * payload. The order provenance is `editor` because the columns came from measured geometry. The
+ * forward owns pane membership and order only (`preserve_focus`): the snapshot names each split's
+ * selected document but not which split has keyboard focus, so it must not move tmux focus. The
+ * payload stays JSON, so a field a newer library adds reaches the controller without a plugin
+ * generation. [frozen] answers only when no native generation does and is never extended.
+ */
 internal object RemoteClientSurfacePayload {
+    private val LOG = Logger.getInstance(RemoteClientSurfacePayload::class.java)
     private val GSON = com.google.gson.Gson()
 
+    /** One measured layout to forward. Wire shape of Rust `RemoteClientSurfaceEvidence`. */
+    internal data class Evidence(
+        @SerializedName("base_path") val basePath: String?,
+        @SerializedName("fallback_root") val fallbackRoot: String?,
+        val focused: String,
+        val columns: List<List<String>>,
+    )
+
+    internal fun evidence(
+        basePath: String?,
+        layout: MeasuredMainLayout.Measured,
+        focusedRoot: (String?, String) -> String = { base, focused ->
+            TerminalUtil.resolveProjectPath(base, focused).first
+        },
+    ): Evidence =
+        Evidence(
+            basePath = basePath,
+            fallbackRoot = focusedRoot(basePath, layout.focused),
+            focused = layout.focused,
+            columns = layout.columns,
+        )
+
+    /** Derive the forwarded surface. Never on the EDT: the forwarder's worker calls this. */
+    fun build(
+        basePath: String?,
+        layout: MeasuredMainLayout.Measured,
+        derivation: EditorDerivation = EditorDerivation.Native,
+    ): ForwardedRemoteSurface {
+        val evidence = evidence(basePath, layout)
+        val native =
+            if (SwingUtilities.isEventDispatchThread()) {
+                LOG.warn("[rd-layout] remote_client_surface asked on the EDT; using the compatibility floor")
+                null
+            } else {
+                derivation.derive("remote_client_surface", GSON.toJson(evidence))?.let(::parseNative)
+            }
+        return native ?: frozen(evidence)
+    }
+
+    /** Parse the native `remote_client_surface` output; `null` takes the frozen floor. */
+    internal fun parseNative(json: String): ForwardedRemoteSurface? =
+        try {
+            val root = com.google.gson.JsonParser.parseString(json).asJsonObject
+            val surface = root.get("surface")?.takeIf { it.isJsonObject }?.asJsonObject
+            val projectRoot = root.get("project_root")?.takeIf { it.isJsonPrimitive }?.asString
+            if (surface == null || projectRoot.isNullOrBlank()) {
+                LOG.warn("[rd-layout] native remote client surface incomplete: root=$projectRoot")
+                null
+            } else {
+                ForwardedRemoteSurface(projectRoot, surface.toString())
+            }
+        } catch (e: Exception) {
+            LOG.warn("[rd-layout] native remote client surface unreadable: ${e.message}")
+            null
+        }
+
     /**
-     * Same root choice and path normalization as the classic surface ([SyncLayoutAction]); the
-     * order provenance is `editor` because the columns came from measured geometry. The forward
-     * owns pane membership and order only (`preserve_focus`): the snapshot names each split's
-     * selected document but not which split has keyboard focus, so it must not move tmux focus.
+     * GH #326 compatibility floor: the pre-#326 forward rules (the classic surface's
+     * [SyncLayoutAction] root choice and path normalization, then the
+     * [EditorTabSyncListener.SurfaceReport] payload), frozen. Used only when no native generation
+     * answers. Never extend it; change the native derivation instead.
      */
-    fun build(basePath: String?, layout: MeasuredMainLayout.Measured): ForwardedRemoteSurface {
-        val focusedRoot = TerminalUtil.resolveProjectPath(basePath, layout.focused).first
-        val projectRoot = SyncLayoutAction.chooseSyncProjectRoot(basePath, focusedRoot, layout.visible)
+    internal fun frozen(
+        evidence: Evidence,
+        nearestRoot: (String) -> String? = TerminalUtil::nearestAgentDocProjectRoot,
+    ): ForwardedRemoteSurface {
+        val visible = evidence.columns.flatten().distinct()
+        val focusedRoot = evidence.fallbackRoot?.takeIf { it.isNotBlank() } ?: evidence.basePath ?: ""
+        val projectRoot = SyncLayoutAction.chooseSyncProjectRoot(evidence.basePath, focusedRoot, visible, nearestRoot)
         val editorLayout = SyncLayoutAction.absolutizeEditorLayout(
             projectRoot,
             SyncLayoutAction.normalizeEditorLayout(
-                basePath,
+                evidence.basePath,
                 projectRoot,
-                EditorLayout(layout.columns.map(::LayoutColumn), columnOrder = "editor"),
+                EditorLayout(evidence.columns.map(::LayoutColumn), columnOrder = "editor"),
             ),
         )
         val surface = EditorTabSyncListener.SurfaceReport.buildSurface(
-            focusedFile = layout.focused,
-            visibleMdFiles = layout.visible,
-            openMdFiles = layout.visible,
+            focusedFile = evidence.focused,
+            visibleMdFiles = visible,
+            openMdFiles = visible,
             editorLayout = editorLayout,
             forceReconcile = false,
             preserveFocus = true,

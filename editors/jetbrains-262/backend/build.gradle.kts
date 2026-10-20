@@ -60,6 +60,12 @@ sourceSets {
         kotlin.exclude("**/PluginLifecycleListener.kt")
         java.srcDir("../../jetbrains/src/main/java")
     }
+    test {
+        // GH #326: the shared native-derivation parity fixtures live with the classic tests; the
+        // backend's frozen floors answer the same files.
+        resources.srcDir("../../jetbrains/src/test/resources")
+        resources.include("editor-derivations/**")
+    }
 }
 
 val generatedResources = layout.buildDirectory.dir("generated/agent-doc-backend-resources")

@@ -1164,29 +1164,9 @@ object LayoutDetector {
     /** Re-log an unchanged observation every this many runs, so "stuck" reads differently from "never ran". */
     internal const val OBSERVED_LAYOUT_HEARTBEAT = 50L
 
-    /**
-     * GH #88: one snapshot per selected session document on a backend with no editor
-     * windows. Every snapshot shares the origin, so each becomes its own column.
-     */
-    internal fun headlessSelectionSnapshots(selectedSessionFiles: List<String>): List<LayoutWindowSnapshot> =
-        selectedSessionFiles.distinct().map { LayoutWindowSnapshot(x = 0, y = 0, file = it) }
-
     /** A local one-window observation is known structure, unlike headless remote ambiguity. */
     internal fun knownSingleWindowLayout(selectedSessionPath: String?): EditorLayout? =
         selectedSessionPath?.let { EditorLayout(listOf(LayoutColumn(listOf(it)))) }
-
-    /**
-     * A Remote Dev frontend owns one [ClientFileEditorManager]. Its selected-file
-     * set is split evidence only when that ONE client reports at least two files.
-     * Never combine one focused file from separate clients into a fabricated split.
-     */
-    internal fun uniqueRemoteSplitSelection(clientSelections: List<List<String>>): List<String>? {
-        val candidates = clientSelections
-            .map { it.distinct() }
-            .filter { it.size >= 2 }
-            .distinct()
-        return candidates.singleOrNull()
-    }
 
     /** GH #134: what one Remote Dev client reports, restricted to session documents. */
     internal data class RemoteClientSessionEditors(
@@ -1296,7 +1276,9 @@ object LayoutDetector {
      */
     internal fun detectEditorLayout(
         snapshot: RemoteLayoutSnapshot,
-        nativeFold: (String, String) -> String? = NativeAdminControls::resolveRemoteLayout,
+        nativeFold: (String, String) -> String? = { projectRoot, evidenceJson ->
+            nativeRemoteLayout(projectRoot, evidenceJson)
+        },
     ): EditorLayout? {
         val resolve = {
             resolveRemoteLayout(snapshot, nativeFold)
@@ -1307,12 +1289,12 @@ object LayoutDetector {
             } else {
                 resolve()
             }
-        if (resolution == null || resolution.columns.isEmpty()) {
+        if (resolution.columns.isEmpty()) {
             logUnknownRemoteLayout(
                 snapshot.focusedSessionFiles,
                 snapshot.clients.map { it.selected },
                 visibleSelections = snapshot.clients.map { it.visible },
-                reason = resolution?.reason ?: "no_unique_client_split_set",
+                reason = resolution.reason ?: "no_unique_client_split_set",
             )
             return null
         }
@@ -1354,25 +1336,46 @@ object LayoutDetector {
     private fun resolveRemoteLayout(
         snapshot: RemoteLayoutSnapshot,
         nativeFold: (String, String) -> String?,
-    ): RemoteLayoutResolution? {
+    ): RemoteLayoutResolution {
         // GH #134: resolve through the shared native fold (`#ffi-first`), which keeps the previous
-        // split per project. Without native support, retain the memoryless compatibility fallback.
+        // split per project. GH #326 phase 4: the plugin keeps no Kotlin copy of that rule, so with
+        // no native answer the layout is unknown (structurally inert, GH #105).
         val evidenceJson = remoteLayoutEvidenceJson(snapshot.clients, snapshot.focusedSessionFiles)
-        nativeFold(snapshot.projectRoot, evidenceJson)
-            ?.let(::parseRemoteLayoutResolution)
-            ?.let { return it }
-        // Older native libraries are memoryless, but must still keep focus
-        // evidence out of the visible split set (GH #175).
-        val fallback = uniqueRemoteSplitSelection(snapshot.clients.map { it.visible })
-            ?: uniqueRemoteSplitSelection(snapshot.clients.map { it.selected })
-            ?: return null
-        return RemoteLayoutResolution(
-            columns = buildColumnsFromSnapshots(headlessSelectionSnapshots(fallback)),
-            source = "remote_client_split_without_native",
-            columnOrder = "unknown",
-            reason = null,
-        )
+        return nativeFold(snapshot.projectRoot, evidenceJson)?.let(::parseRemoteLayoutResolution)
+            ?: NO_NATIVE_REMOTE_LAYOUT
     }
+
+    /** `reason` of the unknown Remote Dev layout when no native generation answers the fold. */
+    internal const val NO_NATIVE_REMOTE_LAYOUT_REASON = "native_remote_layout_unavailable"
+
+    private val NO_NATIVE_REMOTE_LAYOUT =
+        RemoteLayoutResolution(
+            columns = emptyList(),
+            source = "unknown",
+            columnOrder = "unknown",
+            reason = NO_NATIVE_REMOTE_LAYOUT_REASON,
+        )
+
+    /**
+     * GH #326 phase 4: the Remote Dev fold, asked through the `remote_layout` derivation of the
+     * hot-reloaded native library. A library that predates the derivation is asked through the
+     * pre-#326 `agent_doc_editor_surface_resolve_remote_layout_json` symbol, which folds into the
+     * same per-project memory. `null` when neither answers. Never call it on the EDT.
+     */
+    internal fun nativeRemoteLayout(
+        projectRoot: String,
+        evidenceJson: String,
+        derivation: EditorDerivation = EditorDerivation.Native,
+        legacyFold: (String, String) -> String? = NativeAdminControls::resolveRemoteLayout,
+    ): String? =
+        derivation.derive("remote_layout", remoteLayoutDerivationInput(projectRoot, evidenceJson))
+            ?: legacyFold(projectRoot, evidenceJson)
+
+    /** The `remote_layout` input: the fold evidence keyed by the project root its memory uses. */
+    internal fun remoteLayoutDerivationInput(projectRoot: String, evidenceJson: String): String =
+        com.google.gson.JsonParser.parseString(evidenceJson).asJsonObject
+            .apply { addProperty("project_root", projectRoot) }
+            .toString()
 
     internal fun remoteLayoutEvidenceJson(
         clients: List<RemoteClientSessionEditors>,

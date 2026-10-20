@@ -270,6 +270,25 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   refuse an unreadable split (GH #154), or refuse a foreground split that omits
   the focused document. The order label passes through as a string, so a label
   a newer layout derivation adds is kept.
+- `remote_layout` (phase 4): the GH #134 Remote Dev fold. Evidence is the
+  project root the fold remembers its split under, each Remote Dev client's
+  visible/selected/open session documents, and the backend-focused session
+  documents. Native owns detection, retention, and order (GH #134/#175/#185/#234)
+  and keeps the per-project memory it shares with `surface_projection` and with
+  the pre-#326 `agent_doc_editor_surface_resolve_remote_layout_json` symbol, so
+  every channel continues one history. The plugin asks this derivation first and
+  that symbol only when the loaded library predates the derivation.
+- `remote_client_surface` (phase 4): what the 262/263 backend's
+  `RemoteClientLayoutForwarder` publishes for a JetBrains Client's measured main
+  window. Evidence is the project base path, the measured columns and selected
+  document (the `client_measured_layout` answer), and that document's own project
+  root as the forwarder resolved it on its worker. Native owns the root that
+  spans the layout and the paths normalized against it (the `sync_layout` rules,
+  so the forward, the manual sync, and the automatic surface agree on the root)
+  and the `editor_surface` payload: `editor` order provenance and
+  `preserve_focus`, because the snapshot names each split's selected document but
+  not which split has keyboard focus. The payload stays JSON, so a field a newer
+  library adds reaches the controller without a plugin generation.
 - `capabilities`: the derivations the loaded library answers.
 
 **Threads.** Native calls stay forbidden on the EDT. The automatic surface
@@ -296,7 +315,9 @@ preparing the terminal, and then prepares the terminal and submits. A direct
 EDT caller of `window_layout` (Run Agent Doc's `--col` fallback, claim,
 terminal and layout-change detectors) marshals only the immutable evidence to
 a worker and waits at most 250 ms. The measured-layout forwarder already runs
-on its own worker.
+on its own worker, where it also resolves the focused document's root and asks
+`remote_client_surface`. The Remote Dev fold runs on whichever worker holds the
+captured client evidence; a direct EDT caller marshals only that evidence.
 
 **Compatibility.** After a hot reload the library is newer than the plugin
 generation calling it, so a shipped derivation is never removed or renamed,
@@ -309,24 +330,44 @@ plugin uses a **frozen** Kotlin copy of the GH #320 rules (`frozenWindowLayout`,
 pre-#326 `SurfaceReport` / `SelectionProjectionSettling` rules, and
 `SyncLayoutSnapshot.frozen` over the pre-#326 `SyncLayoutAction` rules
 `chooseSyncProjectRoot`, `normalizeEditorLayout`, `absolutizeEditorLayout`,
-`undetectedLayoutColumns`, and `exactVisibleSyncDecision`). It is a
-compatibility floor, never extended: new rules land only in the native
+`undetectedLayoutColumns`, and `exactVisibleSyncDecision`, and
+`RemoteClientSurfacePayload.frozen` over the pre-#326 forward rules: those
+`SyncLayoutAction` root and path rules, then `SurfaceReport.buildSurface`). It is
+a compatibility floor, never extended: new rules land only in the native
 derivation. One parity file per derivation under
 `editors/jetbrains/src/test/resources/editor-derivations/` (`window_layout.json`,
-`surface_projection.json`, `sync_layout.json`) is answered by both the Rust
-derivation and the frozen floor, so a divergence is always a deliberate fixture
-edit. `sync_layout.json` maps each visible document to its nearest project root
-in place of the filesystem.
+`surface_projection.json`, `sync_layout.json`, `remote_client_surface.json`) is
+answered by both the Rust derivation and the frozen floor, so a divergence is
+always a deliberate fixture edit. `sync_layout.json` and
+`remote_client_surface.json` map each document to its nearest project root in
+place of the filesystem; the 262/263 backend's test resources include the
+directory so its floor answers the same file.
+
+**The Remote Dev fold has no frozen copy.** It has been native since GH #134;
+the plugin's only Kotlin rule for it was a memoryless fallback
+(`uniqueRemoteSplitSelection`: one client naming two or more visible, else
+selected, documents) for a library without the fold symbol. Phase 4 retired it.
+With no native answer, through neither `remote_layout` nor the pre-#326 symbol,
+the Remote Dev layout is unknown (`[layout-detect] unknown ...
+reason=native_remote_layout_unavailable`), which is structurally inert (an
+observation without columns, GH #105): the automatic surface publishes no
+columns, so it may select the focused document's pane but never changes pane
+membership, and Sync Tmux Layout refuses the unreadable split (GH #154). Only a
+plugin with no loaded library, or one beside a library older than v0.35.454 (the
+first with the fold symbol), reaches that answer.
+`remote_layout.json` is therefore a contract file, not a parity file: the Rust
+fold answers its steps in order from an empty memory, and `LayoutDetectorTest`
+pins that the plugin sends each step's input exactly and publishes each answer.
 
 **Still restart-bound.** Changing the *evidence* a derivation needs (a new
 IntelliJ fact to capture), adding a call site, `plugin.xml`/action/UI changes,
 and logic not yet behind the boundary still ship as a plugin generation. The
-largest remaining Kotlin rule sets are the Remote Dev client-evidence capture
-and forwarded payload (whose forwarder still calls the frozen `SyncLayoutAction`
-root and path rules), Run Agent Doc's `--col` fallback
-(`TerminalUtil.editorSnapshotRouteLayout`, which normalizes against the route's
-own root), the `TmuxPaneFocusSync` candidate-root probe, and the CRDT replica,
-patch-watch, and route clients.
+Remote Dev client-evidence capture (which client editors are visible, selected,
+and open; the frontend snapshot's windows) reads IntelliJ state and stays in
+Kotlin by design. The largest remaining Kotlin rule sets are Run Agent Doc's
+`--col` fallback (`TerminalUtil.editorSnapshotRouteLayout`, which normalizes
+against the route's own root), the `TmuxPaneFocusSync` candidate-root probe, and
+the CRDT replica, patch-watch, and route clients.
 The automatic surface's settling loop itself (how many EDT re-reads, the
 pending-slot ordering) is orchestration and stays in Kotlin. Each remaining rule
 set moves behind `agent_doc_editor_derive_json` the same way.
@@ -534,13 +575,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   backend happens to expose an incidental local window (for example a source/Find Usages window);
   backend window count is not remote-layout authority. Remote client-selected files name only the
   focused document, so the plugin reports per-client `visible` (the Remote Dev editor tracker's active client editors),
-  `selected`, and `open` session documents to the shared native fold
-  `agent_doc_editor_surface_resolve_remote_layout_json` (GH #134). The plugin snapshots those
+  `selected`, and `open` session documents to the shared native fold (GH #134): the
+  `remote_layout` derivation, or `agent_doc_editor_surface_resolve_remote_layout_json` on a
+  library that predates it (GH #326 phase 4). The plugin snapshots those
   client/editor collections and the backend-focused files on the EDT, then runs the fold from the
   generation-fenced surface delivery worker; direct synchronous detection also marshals only the
   immutable fold off the EDT. The native bridge's EDT guard therefore remains intact and a
-  selection observation can use retained split memory instead of silently taking the memoryless
-  fallback (GH #157). One client naming two or
+  selection observation uses retained split memory (GH #157). The plugin keeps no memoryless
+  Kotlin fallback: with no native answer the layout is unknown. One client naming two or
   more visible documents is a detected split; `selected` remains separate focus evidence and is
   never unioned into that visible set. Remote Dev can leave the text half of a hidden
   Editor/Preview tab active, so when the sole visible-set addition is also the newly selected

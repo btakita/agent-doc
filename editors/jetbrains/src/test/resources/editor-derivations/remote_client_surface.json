@@ -1,0 +1,432 @@
+{
+  "derivation": "remote_client_surface",
+  "about": "GH #326 phase 4 parity cases. The Rust `remote_client_surface` derivation (agent-doc-editor-surface-io) and the 262/263 backend's frozen Kotlin floor (RemoteClientMeasuredLayoutTest) both answer every case. `nearest_roots` maps a document to its nearest `.agent-doc` project root (absent: none); it stands in for the filesystem. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "cases": [
+    {
+      "name": "a measured split keeps its editor order and preserves focus",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/a.md",
+        "columns": [
+          [
+            "/repo/b.md"
+          ],
+          [
+            "/repo/a.md"
+          ]
+        ]
+      },
+      "nearest_roots": {
+        "/repo/a.md": "/repo",
+        "/repo/b.md": "/repo"
+      },
+      "expected": {
+        "project_root": "/repo",
+        "surface": {
+          "focused": "/repo/a.md",
+          "visible": [
+            "/repo/b.md",
+            "/repo/a.md"
+          ],
+          "open": [
+            "/repo/a.md",
+            "/repo/b.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/b.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/a.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "a single-root split addresses that root",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/app",
+        "focused": "/repo/src/app/tasks/a.md",
+        "columns": [
+          [
+            "/repo/src/app/tasks/a.md"
+          ],
+          [
+            "/repo/src/app/tasks/b.md"
+          ]
+        ]
+      },
+      "nearest_roots": {
+        "/repo/src/app/tasks/a.md": "/repo/src/app",
+        "/repo/src/app/tasks/b.md": "/repo/src/app"
+      },
+      "expected": {
+        "project_root": "/repo/src/app",
+        "surface": {
+          "focused": "/repo/src/app/tasks/a.md",
+          "visible": [
+            "/repo/src/app/tasks/a.md",
+            "/repo/src/app/tasks/b.md"
+          ],
+          "open": [
+            "/repo/src/app/tasks/a.md",
+            "/repo/src/app/tasks/b.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/src/app/tasks/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/src/app/tasks/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "a cross-root split addresses the workspace root",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/one",
+        "focused": "/repo/src/one/a.md",
+        "columns": [
+          [
+            "/repo/src/one/a.md"
+          ],
+          [
+            "/repo/src/two/b.md"
+          ]
+        ]
+      },
+      "nearest_roots": {
+        "/repo/src/one/a.md": "/repo/src/one",
+        "/repo/src/two/b.md": "/repo/src/two"
+      },
+      "expected": {
+        "project_root": "/repo",
+        "surface": {
+          "focused": "/repo/src/one/a.md",
+          "visible": [
+            "/repo/src/one/a.md",
+            "/repo/src/two/b.md"
+          ],
+          "open": [
+            "/repo/src/one/a.md",
+            "/repo/src/two/b.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/src/one/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/src/two/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "a headless cross-root split keeps the focused root",
+      "input": {
+        "fallback_root": "/repo/src/one",
+        "focused": "/repo/src/one/a.md",
+        "columns": [
+          [
+            "/repo/src/one/a.md"
+          ],
+          [
+            "/repo/src/two/b.md"
+          ]
+        ]
+      },
+      "nearest_roots": {
+        "/repo/src/one/a.md": "/repo/src/one",
+        "/repo/src/two/b.md": "/repo/src/two"
+      },
+      "expected": {
+        "project_root": "/repo/src/one",
+        "surface": {
+          "focused": "/repo/src/one/a.md",
+          "visible": [
+            "/repo/src/one/a.md",
+            "/repo/src/two/b.md"
+          ],
+          "open": [
+            "/repo/src/one/a.md",
+            "/repo/src/two/b.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/src/one/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/src/two/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "rootless documents outside the focused root use the base path",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/app",
+        "focused": "/repo/src/app/a.md",
+        "columns": [
+          [
+            "/repo/src/app/a.md"
+          ],
+          [
+            "/elsewhere/b.md"
+          ]
+        ]
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "surface": {
+          "focused": "/repo/src/app/a.md",
+          "visible": [
+            "/repo/src/app/a.md",
+            "/elsewhere/b.md"
+          ],
+          "open": [
+            "/repo/src/app/a.md",
+            "/elsewhere/b.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/src/app/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/elsewhere/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "a stacked column keeps its documents top to bottom without repeats",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/c.md",
+        "columns": [
+          [
+            "/repo/a.md",
+            "/repo/b.md",
+            "/repo/a.md"
+          ],
+          [
+            "/repo/c.md"
+          ]
+        ]
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "surface": {
+          "focused": "/repo/c.md",
+          "visible": [
+            "/repo/a.md",
+            "/repo/b.md",
+            "/repo/c.md"
+          ],
+          "open": [
+            "/repo/c.md",
+            "/repo/a.md",
+            "/repo/b.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/a.md",
+                "/repo/b.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/c.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "a focused document outside the columns still leads the open documents",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/z.md",
+        "columns": [
+          [
+            "/repo/a.md"
+          ],
+          [
+            "/repo/b.md"
+          ]
+        ]
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "surface": {
+          "focused": "/repo/z.md",
+          "visible": [
+            "/repo/a.md",
+            "/repo/b.md"
+          ],
+          "open": [
+            "/repo/z.md",
+            "/repo/a.md",
+            "/repo/b.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "a single measured column is published as one column",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/a.md",
+        "columns": [
+          [
+            "/repo/a.md"
+          ]
+        ]
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "surface": {
+          "focused": "/repo/a.md",
+          "visible": [
+            "/repo/a.md"
+          ],
+          "open": [
+            "/repo/a.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/a.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "an empty layout publishes no columns",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/a.md",
+        "columns": []
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "surface": {
+          "focused": "/repo/a.md",
+          "visible": [],
+          "open": [
+            "/repo/a.md"
+          ],
+          "columns": [],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "an empty observation still answers",
+      "input": {},
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "",
+        "surface": {
+          "focused": "",
+          "visible": [],
+          "open": [],
+          "columns": [],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    }
+  ]
+}

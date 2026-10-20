@@ -71,35 +71,6 @@ class LayoutDetectorTest {
     }
 
     @Test
-    fun `memoryless remote fallback does not append selected file to visible splits`() {
-        val detected = LayoutDetector.detectEditorLayout(
-            LayoutDetector.RemoteLayoutSnapshot(
-                projectRoot = "/repo",
-                clients = listOf(
-                    LayoutDetector.RemoteClientSessionEditors(
-                        visible = listOf("tasks/a.md", "tasks/b.md"),
-                        selected = listOf("tasks/c.md"),
-                        open = listOf("tasks/a.md", "tasks/b.md", "tasks/c.md"),
-                    ),
-                ),
-                focusedSessionFiles = listOf("tasks/c.md"),
-            ),
-            nativeFold = { _, _ -> null },
-        )
-
-        assertEquals(
-            EditorLayout(
-                listOf(
-                    LayoutColumn(listOf("tasks/a.md")),
-                    LayoutColumn(listOf("tasks/b.md")),
-                ),
-                columnOrder = "unknown",
-            ),
-            detected,
-        )
-    }
-
-    @Test
     fun `buildColumnsFromSnapshots keeps screen order when focused window is listed first`() {
         val columns = LayoutDetector.buildColumnsFromSnapshots(
             listOf(
@@ -223,59 +194,117 @@ class LayoutDetectorTest {
         )
     }
 
-    @Test
-    fun `a backend with no editor windows accepts one remote client's split set`() {
-        // GH #97: the backend-local selection is only the focused file. A
-        // client-scoped manager may prove the visible split set, but separate
-        // clients' focused files must never be combined into one layout.
-        val selected = LayoutDetector.uniqueRemoteSplitSelection(
-            listOf(listOf("tasks/laptop.md", "tasks/1099.md", "tasks/laptop.md")),
-        )
-        assertEquals(
-            listOf("tasks/laptop.md", "tasks/1099.md"),
-            selected,
-        )
-        assertEquals(
-            listOf(LayoutColumn(listOf("tasks/laptop.md")), LayoutColumn(listOf("tasks/1099.md"))),
-            LayoutDetector.buildColumnsFromSnapshots(
-                LayoutDetector.headlessSelectionSnapshots(selected!!),
-            ),
+    private fun remoteLayoutCases(): List<com.google.gson.JsonObject> {
+        val stream = javaClass.classLoader.getResourceAsStream("editor-derivations/remote_layout.json")
+            ?: error("GH #326 remote layout contract fixture not on the test classpath")
+        val raw = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        return com.google.gson.JsonParser.parseString(raw).asJsonObject.getAsJsonArray("cases")
+            .map { it.asJsonObject }
+    }
+
+    /** The EDT snapshot a contract step's input describes. */
+    private fun remoteSnapshotOf(input: com.google.gson.JsonObject): LayoutDetector.RemoteLayoutSnapshot {
+        fun strings(array: com.google.gson.JsonArray?) = array?.map { it.asString }.orEmpty()
+        return LayoutDetector.RemoteLayoutSnapshot(
+            projectRoot = input.get("project_root")?.asString ?: "",
+            clients = input.getAsJsonArray("clients")?.map { client ->
+                val fields = client.asJsonObject
+                LayoutDetector.RemoteClientSessionEditors(
+                    visible = strings(fields.getAsJsonArray("visible")),
+                    selected = strings(fields.getAsJsonArray("selected")),
+                    open = strings(fields.getAsJsonArray("open")),
+                )
+            }.orEmpty(),
+            focusedSessionFiles = strings(input.getAsJsonArray("focused")),
         )
     }
 
     @Test
-    fun `a focused file without client split evidence is unknown`() {
-        assertEquals(
-            null,
-            LayoutDetector.uniqueRemoteSplitSelection(listOf(listOf("tasks/laptop.md"))),
-        )
-        assertEquals(
-            null,
-            LayoutDetector.uniqueRemoteSplitSelection(
-                listOf(listOf("tasks/laptop.md"), listOf("tasks/1099.md")),
-            ),
-        )
-        assertEquals(
-            null,
-            LayoutDetector.uniqueRemoteSplitSelection(
-                listOf(
-                    listOf("tasks/laptop.md", "tasks/1099.md"),
-                    listOf("tasks/guest-left.md", "tasks/guest-right.md"),
-                ),
-            ),
-        )
+    fun `GH 326 the plugin sends each remote_layout contract step and publishes its answer`() {
+        // The same file pins the native fold in Rust
+        // (gh326_remote_layout_answers_the_shared_contract_cases).
+        val cases = remoteLayoutCases()
+        assertTrue("the contract file lost cases", cases.size >= 8)
+        for (case in cases) {
+            val name = case.get("name").asString
+            for (step in case.getAsJsonArray("steps").map { it.asJsonObject }) {
+                val input = step.getAsJsonObject("input")
+                val expected = step.getAsJsonObject("expected")
+                var sent: com.google.gson.JsonObject? = null
+                val layout = LayoutDetector.detectEditorLayout(remoteSnapshotOf(input)) { root, evidenceJson ->
+                    LayoutDetector.nativeRemoteLayout(root, evidenceJson, { derivation, inputJson ->
+                        assertEquals(name, "remote_layout", derivation)
+                        sent = com.google.gson.JsonParser.parseString(inputJson).asJsonObject
+                        expected.toString()
+                    }) { _, _ -> error("$name: the legacy fold is asked only without the derivation") }
+                }
+                if (input.has("project_root")) assertEquals(name, input, sent)
+                val columns = expected.getAsJsonArray("columns").map { column ->
+                    LayoutColumn(column.asJsonObject.getAsJsonArray("files").map { it.asString })
+                }
+                assertEquals(
+                    name,
+                    columns.takeIf { it.isNotEmpty() }?.let {
+                        EditorLayout(it, expected.get("column_order").asString)
+                    },
+                    layout,
+                )
+            }
+        }
+    }
 
+    @Test
+    fun `GH 326 with no native answer the Remote Dev layout is unknown`() {
+        // Phase 4 retired the memoryless Kotlin fallback: a split the fold would detect is not
+        // re-derived in Kotlin. The layout stays unknown, which is structurally inert (GH #105).
+        for (case in remoteLayoutCases()) {
+            for (step in case.getAsJsonArray("steps").map { it.asJsonObject }) {
+                val layout = LayoutDetector.detectEditorLayout(remoteSnapshotOf(step.getAsJsonObject("input"))) { root, json ->
+                    LayoutDetector.nativeRemoteLayout(root, json, EditorDerivation.Unavailable) { _, _ -> null }
+                }
+                assertEquals(case.get("name").asString, null, layout)
+            }
+        }
         val line = LayoutDetector.unknownRemoteLayoutLine(
             focusedSessionFiles = listOf("tasks/laptop.md"),
-            remoteSelections = listOf(listOf("tasks/laptop.md")),
+            remoteSelections = listOf(listOf("tasks/laptop.md", "tasks/1099.md")),
+            reason = LayoutDetector.NO_NATIVE_REMOTE_LAYOUT_REASON,
         )
         assertEquals(
             "[layout-detect] unknown windows=0 source=remote_client_selected_files " +
-                "focused=[tasks/laptop.md] remote_clients=1 selections=[0:[tasks/laptop.md]] " +
-                "reason=no_unique_client_split_set",
+                "focused=[tasks/laptop.md] remote_clients=1 selections=[0:[tasks/laptop.md,tasks/1099.md]] " +
+                "reason=native_remote_layout_unavailable",
             line,
         )
-        assertFalse(line.contains("columns=1"))
+        assertFalse(line.contains("columns="))
+    }
+
+    @Test
+    fun `GH 326 the remote_layout derivation is asked before the pre-326 fold symbol`() {
+        val evidence = LayoutDetector.remoteLayoutEvidenceJson(
+            listOf(LayoutDetector.RemoteClientSessionEditors(listOf("a.md", "b.md"), listOf("a.md"), listOf("a.md"))),
+            focusedSessionFiles = listOf("a.md"),
+        )
+        val answer = """{"columns":[{"files":["a.md"]},{"files":["b.md"]}],"source":"remote_client_visible_editors"}"""
+        var legacyAsked: Pair<String, String>? = null
+        val legacy = { root: String, json: String ->
+            legacyAsked = root to json
+            answer
+        }
+        assertEquals(answer, LayoutDetector.nativeRemoteLayout("/repo", evidence, { _, _ -> answer }, legacy))
+        assertEquals("a library that answers the derivation never reaches the symbol", null, legacyAsked)
+
+        assertEquals(answer, LayoutDetector.nativeRemoteLayout("/repo", evidence, EditorDerivation.Unavailable, legacy))
+        assertEquals("/repo" to evidence, legacyAsked)
+
+        val input = com.google.gson.JsonParser.parseString(
+            LayoutDetector.remoteLayoutDerivationInput("/repo", evidence),
+        ).asJsonObject
+        assertEquals("/repo", input.get("project_root").asString)
+        assertEquals(
+            listOf("a.md", "b.md"),
+            input.getAsJsonArray("clients")[0].asJsonObject.getAsJsonArray("visible").map { it.asString },
+        )
     }
 
     @Test
@@ -325,16 +354,12 @@ class LayoutDetectorTest {
     }
 
     @Test
-    fun `one local editor window is known while one remote selection stays unknown`() {
+    fun `one local editor window is a known one-column layout`() {
         assertEquals(
             EditorLayout(listOf(LayoutColumn(listOf("tasks/local.md")))),
             LayoutDetector.knownSingleWindowLayout("tasks/local.md"),
         )
         assertEquals(null, LayoutDetector.knownSingleWindowLayout(null))
-        assertEquals(
-            null,
-            LayoutDetector.uniqueRemoteSplitSelection(listOf(listOf("tasks/remote.md"))),
-        )
     }
 
     @Test

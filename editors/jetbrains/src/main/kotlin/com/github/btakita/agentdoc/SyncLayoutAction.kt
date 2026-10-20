@@ -174,13 +174,18 @@ class SyncLayoutAction : AnAction(), DumbAware {
             .map { it.path }
             .distinct()
 
+        /**
+         * GH #326 phase 3: frozen compatibility copy of the native `sync_layout` root choice
+         * ([SyncLayoutSnapshot]). Never extend it; change the native derivation instead.
+         */
         internal fun chooseSyncProjectRoot(
             basePath: String?,
             fallbackRoot: String,
             visibleMarkdownFiles: List<String>,
+            nearestRoot: (String) -> String? = TerminalUtil::nearestAgentDocProjectRoot,
         ): String {
             val visibleRoots = visibleMarkdownFiles
-                .mapNotNull { TerminalUtil.nearestAgentDocProjectRoot(it) }
+                .mapNotNull(nearestRoot)
                 .distinct()
             if (visibleRoots.size <= 1) {
                 if (
@@ -202,6 +207,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
             return fallbackRoot
         }
 
+        /** GH #326 phase 3: frozen copy of the native `sync_layout` normalization. Never extend it. */
         internal fun normalizeEditorLayout(
             basePath: String?,
             projectRoot: String,
@@ -235,6 +241,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
             }
         }
 
+        /** GH #326 phase 3: frozen copy of the native `sync_layout` absolutization. Never extend it. */
         internal fun absolutizeEditorLayout(
             projectRoot: String,
             editorLayout: EditorLayout?,
@@ -292,6 +299,8 @@ class SyncLayoutAction : AnAction(), DumbAware {
          * pane whose occupant swapped on every document switch while the sibling's pane stayed
          * in the stash window. Each visible document therefore gets its own column, in the order
          * observed.
+         *
+         * GH #326 phase 3: frozen copy of the native `sync_layout` rule. Never extend it.
          */
         internal fun undetectedLayoutColumns(visibleMdFiles: List<String>): List<String> =
             visibleMdFiles.filter(String::isNotBlank).distinct()
@@ -324,6 +333,8 @@ class SyncLayoutAction : AnAction(), DumbAware {
          * GH #154: exact-visible is structural authority, so an unreadable editor layout cannot
          * be replaced by the focused-file fallback. That fallback is useful only for legacy
          * command shapes without an exact-visible authority claim.
+         *
+         * GH #326 phase 3: frozen copy of the native `sync_layout` decision. Never extend it.
          */
         internal fun exactVisibleSyncDecision(
             visibleMdFiles: List<String>,
@@ -379,6 +390,11 @@ class SyncLayoutAction : AnAction(), DumbAware {
          * Source. [allowSurfaceReference] `false` is the rollout fallback that sends the editor's
          * `--col` snapshot instead (an older controller, or a surface this listener cannot
          * publish to the sync's controller).
+         *
+         * GH #326 phase 3: the EDT only reads editor state (the focused and visible session
+         * documents, and the command surface or the split layout evidence). The root choice, the
+         * layout derivation, and the `--col` decisions are the native `sync_layout` derivation
+         * ([SyncLayoutSnapshot]) on the background thread.
          */
     fun syncLayout(
         project: com.intellij.openapi.project.Project,
@@ -411,8 +427,6 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         if (notify) TerminalUtil.showHint(project, "No agent-doc session document focused")
                         return
                     }
-            val focusedFile = focusedVFile.path
-            val failureAction = if (noAutostart) "sync the tmux layout" else "open the tmux pane"
             val visibleMdFiles = collectVisibleMarkdownFiles(
                 (listOf(focusedVFile) + manager.selectedFiles).toTypedArray(),
                 AgentDocSessionFiles::isSessionDocument,
@@ -421,29 +435,22 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 if (notify) TerminalUtil.showHint(project, "No .md files open")
                 return
             }
-            val basePath = project.basePath
-            val (focusedProjectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
-            val projectRoot = chooseSyncProjectRoot(
-                basePath,
-                focusedProjectRoot,
-                visibleMdFiles,
+            val request = SyncRequest(
+                project = project,
+                notify = notify,
+                noAutostart = noAutostart,
+                callerKind = callerKind,
+                terminalPrepared = terminalPrepared,
+                allowSurfaceReference = allowSurfaceReference,
+                basePath = project.basePath,
+                focusedFile = focusedVFile.path,
+                visibleMdFiles = visibleMdFiles,
             )
             if (allowSurfaceReference) {
                 val listener = EditorTabSyncListener.forProject(project)
                 val commandSurface = listener?.captureCommandSurface(project, focusedVFile)
                 if (listener != null && commandSurface != null) {
-                    syncLayoutBySurfaceReference(
-                        project = project,
-                        notify = notify,
-                        noAutostart = noAutostart,
-                        callerKind = callerKind,
-                        terminalPrepared = terminalPrepared,
-                        listener = listener,
-                        commandSurface = commandSurface,
-                        projectRoot = projectRoot,
-                        focusedFile = focusedFile,
-                        failureAction = failureAction,
-                    )
+                    syncLayoutBySurfaceReference(request, listener, commandSurface)
                     return
                 }
                 LOG.warn(
@@ -452,214 +459,185 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         "; sending the --col snapshot",
                 )
             }
-            // IDEA component state is captured on the EDT exactly once. The
-            // controller/socket work below owns the background portion.
-        val editorLayout = absolutizeEditorLayout(
-                projectRoot,
-                normalizeEditorLayout(
-                    basePath,
-                    projectRoot,
-                    LayoutDetector.detectEditorLayout(
-                        project,
-                        manager.openFiles
-                            .filter(AgentDocSessionFiles::isSessionDocument)
-                            .map { it.path }
-                            .toSet(),
-                    ),
-                ),
-        )
-        val exactVisibleColumns =
-            when (
-                val decision = exactVisibleSyncDecision(
-                    visibleMdFiles,
-                    editorLayout,
-                    focusedFile,
-                    foreground = !noAutostart,
-                )
-            ) {
-                is ExactVisibleSyncDecision.Publish -> decision.columns
-                ExactVisibleSyncDecision.RefuseUnknownLayout -> {
-                    val message =
-                        "Editor split could not be read; the retained tmux layout was not changed."
-                    LOG.warn("[sync] refusing exact-visible layout because editor columns are unknown")
-                    if (notify) {
-                        TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, message)
-                        TerminalUtil.notifyError(project, message)
-                    }
-                    return
-                }
-                ExactVisibleSyncDecision.RefuseStaleFocusProjection -> {
-                    val message =
-                        "Editor focus changed while the split layout was being read; retry after the selection settles."
-                    LOG.warn(
-                        "[sync] refusing exact-visible layout because focused file is absent " +
-                            "focus=$focusedFile visible=$visibleMdFiles layout=$editorLayout",
-                    )
-                    if (notify) {
-                        TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, message)
-                        TerminalUtil.notifyError(project, message)
-                    }
-                    return
-                }
-            }
-
-        if (!terminalPrepared && !noAutostart) {
-            val relativeFocusedFile = java.io.File(projectRoot).toPath()
-                .relativize(java.io.File(focusedFile).toPath())
-                .toString()
-            IdeTerminalCoordinator.ensureAndAttach(
-                project = project,
-                cwd = projectRoot,
-                relativePath = relativeFocusedFile,
-                onReady = {
-                    syncLayout(
-                        project = project,
-                        notify = notify,
-                        noAutostart = noAutostart,
-                        callerKind = callerKind,
-                        terminalPrepared = true,
-                        allowSurfaceReference = allowSurfaceReference,
-                    )
-                },
-                onFailure = { message ->
-                    if (notify) {
-                        val detail = "Failed to prepare agent-doc tmux session: $message"
-                        TerminalUtil.showEditorFailureStatus(
-                            project,
-                            focusedFile,
-                            failureAction,
-                            detail,
-                        )
-                        TerminalUtil.notifyError(
-                            project,
-                            detail,
-                        )
-                    }
-                },
+            // IDEA component state is captured on the EDT exactly once; the layout it implies is
+            // derived on the background thread below.
+            val layoutEvidence = LayoutDetector.captureEditorLayoutEvidence(
+                project,
+                manager.openFiles
+                    .filter(AgentDocSessionFiles::isSessionDocument)
+                    .map { it.path }
+                    .toSet(),
             )
-            return
+            syncLayoutBySnapshot(request, layoutEvidence)
         }
 
-        Thread {
-                try {
-                    if (!NativeReloadCoordinator.awaitReady()) {
-                        if (notify) {
-                            val detail =
-                                "Sync deferred because the native-generation handoff did not " +
-                                    "finish within ${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds."
-                            TerminalUtil.showEditorFailureStatus(
-                                project,
-                                focusedFile,
-                                failureAction,
-                                detail,
-                            )
-                            TerminalUtil.notifyError(
-                                project,
-                                detail,
-                            )
-                        }
-                        return@Thread
-                    }
-                    val receipt = CpRouteClient.submitSyncTmuxLayout(
-                        projectRoot = projectRoot,
-                        columnsJson = GSON.toJson(exactVisibleColumns),
-                        window = null,
-                        focus = focusedFile,
-                        noAutostart = noAutostart,
-                        exactVisible = true,
-                        callerKind = syncCallerKind(noAutostart, callerKind),
-                        columnOrder = syncColumnOrder(editorLayout),
-                    )
-                    if (receipt.exitCode != 0) {
-                        LOG.warn("[sync] Project Controller projection failed projectRoot=$projectRoot focus=$focusedFile columns=$exactVisibleColumns output=${receipt.output}")
-                        if (notify) {
-                            val detail = syncFailureMessage(receipt.output)
-                            TerminalUtil.showEditorFailureStatus(
-                                project,
-                                focusedFile,
-                                failureAction,
-                                detail,
-                            )
-                            TerminalUtil.notifyError(
-                                project,
-                                detail,
-                            )
-                        }
-                    } else {
-                        LOG.info("[sync] Project Controller projection completed: ${receipt.output.take(500)}")
-                    }
-                } catch (ex: Exception) {
-                    if (notify) {
-                        val detail = "Failed to sync layout: ${ex.message}"
-                        TerminalUtil.showEditorFailureStatus(
-                            project,
-                            focusedFile,
-                            failureAction,
-                            detail,
-                        )
-                        TerminalUtil.notifyError(project, detail)
-                    }
-                }
-            }.start()
+    /** What one Sync Tmux Layout read from the editor on the EDT. */
+    private class SyncRequest(
+        val project: com.intellij.openapi.project.Project,
+        val notify: Boolean,
+        val noAutostart: Boolean,
+        val callerKind: String?,
+        val terminalPrepared: Boolean,
+        val allowSurfaceReference: Boolean,
+        val basePath: String?,
+        val focusedFile: String,
+        val visibleMdFiles: List<String>,
+    ) {
+        val failureAction: String
+            get() = if (noAutostart) "sync the tmux layout" else "open the tmux pane"
+
+        fun notifyFailure(detail: String) {
+            if (!notify) return
+            TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
+            TerminalUtil.notifyError(project, detail)
         }
+    }
+
+    /**
+     * GH #326 phase 3: the native `sync_layout` derivation of [request] over [editorLayout]. Off
+     * the EDT: resolving the focused document's own root reads the filesystem.
+     */
+    private fun deriveSyncLayout(request: SyncRequest, editorLayout: EditorLayout?): SyncLayoutSnapshot.Result {
+        val (focusedProjectRoot, _) = TerminalUtil.resolveProject(request.project, request.focusedFile)
+        return SyncLayoutSnapshot.derive(
+            SyncLayoutSnapshot.evidence(
+                basePath = request.basePath,
+                fallbackRoot = focusedProjectRoot,
+                focused = request.focusedFile,
+                visible = request.visibleMdFiles,
+                editorLayout = editorLayout,
+                foreground = !request.noAutostart,
+            ),
+        )
+    }
+
+    /**
+     * Prepare the agent-doc tmux session at [projectRoot] when this caller asked for it, then
+     * re-read the editor and sync again. `false` when the terminal was already prepared.
+     */
+    private fun prepareTerminalFirst(request: SyncRequest, projectRoot: String): Boolean {
+        if (request.terminalPrepared || request.noAutostart) return false
+        val relativeFocusedFile = java.io.File(projectRoot).toPath()
+            .relativize(java.io.File(request.focusedFile).toPath())
+            .toString()
+        IdeTerminalCoordinator.ensureAndAttach(
+            project = request.project,
+            cwd = projectRoot,
+            relativePath = relativeFocusedFile,
+            onReady = {
+                syncLayout(
+                    project = request.project,
+                    notify = request.notify,
+                    noAutostart = request.noAutostart,
+                    callerKind = request.callerKind,
+                    terminalPrepared = true,
+                    allowSurfaceReference = request.allowSurfaceReference,
+                )
+            },
+            onFailure = { message ->
+                request.notifyFailure("Failed to prepare agent-doc tmux session: $message")
+            },
+        )
+        return true
+    }
+
+    /** `false` (after telling the user) when the native-generation handoff did not finish. */
+    private fun awaitNativeGeneration(request: SyncRequest): Boolean {
+        if (NativeReloadCoordinator.awaitReady()) return true
+        request.notifyFailure(
+            "Sync deferred because the native-generation handoff did not " +
+                "finish within ${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds.",
+        )
+        return false
+    }
+
+    /**
+     * The `--col` snapshot half of [syncLayout]. Background thread: derive the layout from the
+     * EDT's [layoutEvidence], ask `sync_layout` for the root, columns and exact-visible decision,
+     * refuse an unknown split or a stale focus projection, prepare the terminal, then submit.
+     */
+    private fun syncLayoutBySnapshot(
+        request: SyncRequest,
+        layoutEvidence: LayoutDetector.EditorLayoutEvidence?,
+    ) {
+        Thread {
+            try {
+                if (request.project.isDisposed) return@Thread
+                val snapshot = deriveSyncLayout(
+                    request,
+                    layoutEvidence?.let { LayoutDetector.detectEditorLayout(it) },
+                )
+                val projectRoot = snapshot.projectRoot
+                val exactVisibleColumns =
+                    when (val decision = snapshot.decision) {
+                        is ExactVisibleSyncDecision.Publish -> decision.columns
+                        ExactVisibleSyncDecision.RefuseUnknownLayout -> {
+                            LOG.warn("[sync] refusing exact-visible layout because editor columns are unknown")
+                            request.notifyFailure(
+                                "Editor split could not be read; the retained tmux layout was not changed.",
+                            )
+                            return@Thread
+                        }
+                        ExactVisibleSyncDecision.RefuseStaleFocusProjection -> {
+                            LOG.warn(
+                                "[sync] refusing exact-visible layout because focused file is absent " +
+                                    "focus=${request.focusedFile} visible=${request.visibleMdFiles} " +
+                                    "layout=${snapshot.editorLayout}",
+                            )
+                            request.notifyFailure(
+                                "Editor focus changed while the split layout was being read; " +
+                                    "retry after the selection settles.",
+                            )
+                            return@Thread
+                        }
+                    }
+                if (prepareTerminalFirst(request, projectRoot)) return@Thread
+                if (!awaitNativeGeneration(request)) return@Thread
+                val receipt = CpRouteClient.submitSyncTmuxLayout(
+                    projectRoot = projectRoot,
+                    columnsJson = GSON.toJson(exactVisibleColumns),
+                    window = null,
+                    focus = request.focusedFile,
+                    noAutostart = request.noAutostart,
+                    exactVisible = true,
+                    callerKind = syncCallerKind(request.noAutostart, request.callerKind),
+                    columnOrder = snapshot.columnOrder,
+                )
+                if (receipt.exitCode != 0) {
+                    LOG.warn(
+                        "[sync] Project Controller projection failed projectRoot=$projectRoot " +
+                            "focus=${request.focusedFile} columns=$exactVisibleColumns output=${receipt.output}",
+                    )
+                    request.notifyFailure(syncFailureMessage(receipt.output))
+                } else {
+                    LOG.info("[sync] Project Controller projection completed: ${receipt.output.take(500)}")
+                }
+            } catch (ex: Exception) {
+                request.notifyFailure("Failed to sync layout: ${ex.message}")
+            }
+        }.start()
+    }
 
     /**
      * The surface-reference half of [syncLayout]: prepare the terminal like the snapshot path,
      * then publish the captured surface and submit `sync_tmux_layout` naming it. The controller
      * owns the exact-visible decisions the snapshot path makes in the plugin (an unknown split or
-     * a focus outside the columns is refused there, with the same message).
+     * a focus outside the columns is refused there, with the same message). Background thread:
+     * the root is the `sync_layout` derivation's.
      */
     private fun syncLayoutBySurfaceReference(
-        project: com.intellij.openapi.project.Project,
-        notify: Boolean,
-        noAutostart: Boolean,
-        callerKind: String?,
-        terminalPrepared: Boolean,
+        request: SyncRequest,
         listener: EditorTabSyncListener,
         commandSurface: EditorTabSyncListener.CommandSurfaceCapture,
-        projectRoot: String,
-        focusedFile: String,
-        failureAction: String,
     ) {
-        if (!terminalPrepared && !noAutostart) {
-            val relativeFocusedFile = java.io.File(projectRoot).toPath()
-                .relativize(java.io.File(focusedFile).toPath())
-                .toString()
-            IdeTerminalCoordinator.ensureAndAttach(
-                project = project,
-                cwd = projectRoot,
-                relativePath = relativeFocusedFile,
-                onReady = {
-                    syncLayout(
-                        project = project,
-                        notify = notify,
-                        noAutostart = noAutostart,
-                        callerKind = callerKind,
-                        terminalPrepared = true,
-                    )
-                },
-                onFailure = { message ->
-                    if (notify) {
-                        val detail = "Failed to prepare agent-doc tmux session: $message"
-                        TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
-                        TerminalUtil.notifyError(project, detail)
-                    }
-                },
-            )
-            return
-        }
+        val project = request.project
+        val focusedFile = request.focusedFile
         Thread {
             try {
-                if (!NativeReloadCoordinator.awaitReady()) {
-                    if (notify) {
-                        val detail =
-                            "Sync deferred because the native-generation handoff did not " +
-                                "finish within ${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds."
-                        TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
-                        TerminalUtil.notifyError(project, detail)
-                    }
-                    return@Thread
-                }
+                if (project.isDisposed) return@Thread
+                val projectRoot = deriveSyncLayout(request, editorLayout = null).projectRoot
+                if (prepareTerminalFirst(request, projectRoot)) return@Thread
+                if (!awaitNativeGeneration(request)) return@Thread
                 when (val publication = listener.publishCommandSurface(commandSurface, projectRoot)) {
                     is EditorTabSyncListener.CommandSurfacePublication.Unavailable -> {
                         LOG.warn(
@@ -670,9 +648,9 @@ class SyncLayoutAction : AnAction(), DumbAware {
                             if (!project.isDisposed) {
                                 syncLayout(
                                     project = project,
-                                    notify = notify,
-                                    noAutostart = noAutostart,
-                                    callerKind = callerKind,
+                                    notify = request.notify,
+                                    noAutostart = request.noAutostart,
+                                    callerKind = request.callerKind,
                                     terminalPrepared = true,
                                     allowSurfaceReference = false,
                                 )
@@ -686,9 +664,9 @@ class SyncLayoutAction : AnAction(), DumbAware {
                             columnsJson = "[]",
                             window = null,
                             focus = focusedFile,
-                            noAutostart = noAutostart,
+                            noAutostart = request.noAutostart,
                             exactVisible = true,
-                            callerKind = syncCallerKind(noAutostart, callerKind),
+                            callerKind = syncCallerKind(request.noAutostart, request.callerKind),
                             surfaceReference = reference,
                         )
                         if (receipt.exitCode != 0) {
@@ -697,13 +675,10 @@ class SyncLayoutAction : AnAction(), DumbAware {
                                     "surface=${reference.surfaceId} min_sequence=${reference.minSequence} " +
                                     "output=${receipt.output}",
                             )
-                            if (notify) {
-                                val detail =
-                                    SurfaceCommandReference.refusalMessage(receipt.output)
-                                        ?: syncFailureMessage(receipt.output)
-                                TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
-                                TerminalUtil.notifyError(project, detail)
-                            }
+                            request.notifyFailure(
+                                SurfaceCommandReference.refusalMessage(receipt.output)
+                                    ?: syncFailureMessage(receipt.output),
+                            )
                         } else {
                             LOG.info(
                                 "[sync] Project Controller projection completed by surface reference " +
@@ -714,11 +689,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                     }
                 }
             } catch (ex: Exception) {
-                if (notify) {
-                    val detail = "Failed to sync layout: ${ex.message}"
-                    TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
-                    TerminalUtil.notifyError(project, detail)
-                }
+                request.notifyFailure("Failed to sync layout: ${ex.message}")
             }
         }.start()
     }
@@ -856,7 +827,46 @@ object LayoutDetector {
         project: com.intellij.openapi.project.Project,
         sessionDocumentPaths: Set<String>? = null,
         surfaceWindows: List<com.intellij.openapi.fileEditor.impl.EditorWindow>? = null,
-    ): EditorLayout? {
+    ): EditorLayout? =
+        try {
+            captureEditorLayoutEvidence(project, sessionDocumentPaths, surfaceWindows)
+                ?.let { detectEditorLayout(it) }
+        } catch (e: Exception) {
+            LOG.warn("[layout-detect] editor layout detection failed: ${e.message}", e)
+            null
+        }
+
+    /**
+     * GH #326 phase 3: the editor layout evidence one EDT turn reads. Its derivation
+     * ([detectEditorLayout]) runs later, off the EDT, on whichever thread holds the evidence.
+     */
+    internal sealed interface EditorLayoutEvidence {
+        /** Local editor windows of the mirrored frame (`window_layout`). */
+        data class Windows(val evidence: WindowLayoutEvidence) : EditorLayoutEvidence
+
+        /** Remote Dev client sessions (the native Remote Dev fold, GH #134/#157). */
+        data class Remote(val snapshot: RemoteLayoutSnapshot) : EditorLayoutEvidence
+    }
+
+    /** The layout [evidence] implies. Off the EDT this pays no dispatch and no budget. */
+    internal fun detectEditorLayout(
+        evidence: EditorLayoutEvidence,
+        derivation: EditorDerivation = EditorDerivation.Native,
+    ): EditorLayout? =
+        when (evidence) {
+            is EditorLayoutEvidence.Windows -> detectEditorLayout(evidence.evidence, derivation)
+            is EditorLayoutEvidence.Remote -> detectEditorLayout(evidence.snapshot)
+        }
+
+    /**
+     * Capture what the editor layout IS, on the caller's (EDT) turn. No layout rule runs here;
+     * `null` when the frame's windows cannot be measured or the editor state is unreadable.
+     */
+    internal fun captureEditorLayoutEvidence(
+        project: com.intellij.openapi.project.Project,
+        sessionDocumentPaths: Set<String>? = null,
+        surfaceWindows: List<com.intellij.openapi.fileEditor.impl.EditorWindow>? = null,
+    ): EditorLayoutEvidence? {
         try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
             val windows = surfaceWindows ?: run {
@@ -894,15 +904,14 @@ object LayoutDetector {
                 // split set comes from the Remote Dev editor tracker, and the shared
                 // native fold retains a known split across single-selection
                 // observations instead of answering `unknown` forever.
-                return detectEditorLayout(snapshotRemoteLayout(project, sessionDocumentPaths))
+                return EditorLayoutEvidence.Remote(snapshotRemoteLayout(project, sessionDocumentPaths))
             }
             // GH #326: capture what each window IS on this thread; the hot-reloaded native library
             // derives the layout from it (`window_layout`), off the EDT.
-            val evidence = captureWindowLayoutEvidence(project, windows, sessionDocumentPaths)
-                ?: return null
-            return detectEditorLayout(evidence)
+            return captureWindowLayoutEvidence(project, windows, sessionDocumentPaths)
+                ?.let(EditorLayoutEvidence::Windows)
         } catch (e: Exception) {
-            LOG.warn("[layout-detect] editor layout detection failed: ${e.message}", e)
+            LOG.warn("[layout-detect] editor layout capture failed: ${e.message}", e)
             return null
         }
     }

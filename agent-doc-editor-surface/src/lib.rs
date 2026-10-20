@@ -37,6 +37,7 @@ pub mod pane_placement;
 pub mod remote_layout;
 pub mod surface_layout_reference;
 pub mod surface_projection;
+pub mod sync_layout;
 pub mod terminal_ownership;
 pub mod window_layout;
 
@@ -81,6 +82,10 @@ pub use surface_layout_reference::{
 pub use surface_projection::{
     RemoteSurfaceEvidence, SurfaceLayoutSource, SurfaceProjection, SurfaceProjectionEvidence,
     SurfaceProjectionOutcome, project_surface,
+};
+pub use sync_layout::{
+    SyncEditorLayout, SyncLayoutColumn, SyncLayoutDecision, SyncLayoutEvidence, SyncLayoutSnapshot,
+    derive_sync_layout,
 };
 pub use window_layout::{
     COLUMN_X_TOLERANCE_PX, ClientMeasuredLayout, ClientMeasuredLayoutEvidence,

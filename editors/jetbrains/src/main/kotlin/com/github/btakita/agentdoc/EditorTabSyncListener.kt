@@ -1340,8 +1340,8 @@ internal data class CapturedSurface(
 
     /**
      * Derive and route one capture. Off the EDT: the native `surface_projection` derivation decides
-     * the surface; this adds only the filesystem root choice, which spans the visible layout, and the
-     * path normalization against it.
+     * the surface, and the native `sync_layout` derivation (GH #326 phase 3) chooses the filesystem
+     * root that spans the visible layout and normalizes the columns against it.
      */
     private fun resolveSurface(captured: CapturedSurface): SurfaceResolution {
         val surface =
@@ -1358,19 +1358,6 @@ internal data class CapturedSurface(
         val visibleMdFiles = strings("visible")
         val (focusedProjectRoot, focusedRelativePath) =
             TerminalUtil.resolveProject(captured.project, focusedFile)
-        // One root keys the surface graph, and it has to be the one that spans
-        // the whole visible layout — a surface is the layout, not one document.
-        val surfaceProjectRoot =
-            SyncLayoutAction.chooseSyncProjectRoot(
-                captured.projectBasePath,
-                focusedProjectRoot,
-                visibleMdFiles,
-            )
-        val knownControllerRoots =
-            (
-                strings("open").mapNotNull(TerminalUtil::nearestAgentDocProjectRoot) +
-                    surfaceProjectRoot
-            ).distinct()
         val derivedLayout =
             surface.getAsJsonArray("columns")
                 ?.map { column ->
@@ -1385,15 +1372,27 @@ internal data class CapturedSurface(
                         surface.get("column_order")?.takeIf { !it.isJsonNull }?.asString ?: "editor",
                     )
                 }
-        val absoluteEditorLayout =
-            SyncLayoutAction.absolutizeEditorLayout(
-                surfaceProjectRoot,
-                SyncLayoutAction.normalizeEditorLayout(
-                    captured.projectBasePath,
-                    surfaceProjectRoot,
-                    derivedLayout,
+        // One root keys the surface graph, and it has to be the one that spans
+        // the whole visible layout — a surface is the layout, not one document.
+        // The surface carries its own focus, so no exact-visible refusal applies.
+        val rooted =
+            SyncLayoutSnapshot.derive(
+                SyncLayoutSnapshot.evidence(
+                    basePath = captured.projectBasePath,
+                    fallbackRoot = focusedProjectRoot,
+                    focused = focusedFile,
+                    visible = visibleMdFiles,
+                    editorLayout = derivedLayout,
+                    foreground = false,
                 ),
             )
+        val surfaceProjectRoot = rooted.projectRoot
+        val knownControllerRoots =
+            (
+                strings("open").mapNotNull(TerminalUtil::nearestAgentDocProjectRoot) +
+                    surfaceProjectRoot
+            ).distinct()
+        val absoluteEditorLayout = rooted.editorLayout
         surface.add(
             "columns",
             GSON.toJsonTree(

@@ -253,6 +253,23 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   library and runs only for a projection that is ready, so a deferred capture
   never advances it. The plugin keeps the payload as JSON, so a payload field a
   newer library adds reaches the controller without a plugin generation.
+- `sync_layout` (phase 3): the manual Sync Tmux Layout `--col` snapshot
+  decisions, and the root choice and path normalization the automatic surface
+  applies to the `surface_projection` payload. Evidence is the project base
+  path, the focused document's own project root as the plugin resolved it, the
+  focused and visible session documents, the detected split layout (absent when
+  unreadable), and whether a foreground action asks. Native owns the root that
+  spans the visible layout (the shared root of the visible documents, else the
+  workspace base path for a cross-root layout or for rootless documents outside
+  the focused root, else the focused root), the nearest `.agent-doc` root of
+  each visible document (a filesystem read the IO crate makes off the EDT), the
+  layout's rewrite into that root and to absolute paths (an empty column keeps
+  its pane, an all-empty layout is none), the `--col` columns (one per detected
+  column of a multi-column layout, else one per visible document, GH #81), their
+  order label (GH #112/#185/#320), and the exact-visible decision: publish,
+  refuse an unreadable split (GH #154), or refuse a foreground split that omits
+  the focused document. The order label passes through as a string, so a label
+  a newer layout derivation adds is kept.
 - `capabilities`: the derivations the loaded library answers.
 
 **Threads.** Native calls stay forbidden on the EDT. The automatic surface
@@ -265,14 +282,21 @@ retires surface endpoints the capture proved closed. Because the slot is now hel
 until the worker answers, a lower-authority edge that arrives meanwhile, which
 the ordering still refuses to let replace the pending observation, re-reads that
 observation on a later EDT turn instead of being dropped against a stale
-capture. After the derivation, the worker adds only the filesystem root choice
-that spans the visible documents and the path normalization against it. Run
-Agent Doc and Sync Tmux Layout capture the same evidence and derive it on their
+capture. After the derivation, the worker asks `sync_layout` for the root that
+spans the visible documents and the columns normalized against it. Run Agent
+Doc and Sync Tmux Layout capture the same evidence and derive it on their
 background thread; a deferral there is `surface_capture_deferred reason=...`
-and the command keeps its `--col` snapshot. A direct EDT caller of
-`window_layout` (manual `--col` snapshot, claim, terminal and layout-change
-detectors) marshals only the immutable evidence to a worker and waits at most
-250 ms. The measured-layout forwarder already runs on its own worker.
+and the command keeps its `--col` snapshot. Sync Tmux Layout reads only editor
+state on the EDT (the focused and visible session documents, then the command
+surface or, for the `--col` snapshot, the split layout evidence:
+`LayoutDetector.captureEditorLayoutEvidence`). Its background thread resolves
+the focused root, derives the layout from that evidence (`window_layout` or the
+Remote Dev fold, with no EDT budget), asks `sync_layout`, refuses before
+preparing the terminal, and then prepares the terminal and submits. A direct
+EDT caller of `window_layout` (Run Agent Doc's `--col` fallback, claim,
+terminal and layout-change detectors) marshals only the immutable evidence to
+a worker and waits at most 250 ms. The measured-layout forwarder already runs
+on its own worker.
 
 **Compatibility.** After a hot reload the library is newer than the plugin
 generation calling it, so a shipped derivation is never removed or renamed,
@@ -282,20 +306,27 @@ library without the symbol is remembered per native generation, so the next
 hot-reloaded library is asked again. Whenever no native generation answers, the
 plugin uses a **frozen** Kotlin copy of the GH #320 rules (`frozenWindowLayout`,
 `RemoteClientMeasuredLayout.frozenDerive`, and `SurfaceProjection.frozen` over the
-pre-#326 `SurfaceReport` / `SelectionProjectionSettling` rules). It is a
+pre-#326 `SurfaceReport` / `SelectionProjectionSettling` rules, and
+`SyncLayoutSnapshot.frozen` over the pre-#326 `SyncLayoutAction` rules
+`chooseSyncProjectRoot`, `normalizeEditorLayout`, `absolutizeEditorLayout`,
+`undetectedLayoutColumns`, and `exactVisibleSyncDecision`). It is a
 compatibility floor, never extended: new rules land only in the native
 derivation. One parity file per derivation under
 `editors/jetbrains/src/test/resources/editor-derivations/` (`window_layout.json`,
-`surface_projection.json`) is answered by both the Rust derivation and the frozen
-floor, so a divergence is always a deliberate fixture edit.
+`surface_projection.json`, `sync_layout.json`) is answered by both the Rust
+derivation and the frozen floor, so a divergence is always a deliberate fixture
+edit. `sync_layout.json` maps each visible document to its nearest project root
+in place of the filesystem.
 
 **Still restart-bound.** Changing the *evidence* a derivation needs (a new
 IntelliJ fact to capture), adding a call site, `plugin.xml`/action/UI changes,
 and logic not yet behind the boundary still ship as a plugin generation. The
-largest remaining Kotlin rule sets are the manual sync column decisions in
-`SyncLayoutAction` (including the surface root choice and path normalization the
-automatic surface still applies after `surface_projection`), the Remote Dev
-client-evidence capture, and the CRDT replica, patch-watch, and route clients.
+largest remaining Kotlin rule sets are the Remote Dev client-evidence capture
+and forwarded payload (whose forwarder still calls the frozen `SyncLayoutAction`
+root and path rules), Run Agent Doc's `--col` fallback
+(`TerminalUtil.editorSnapshotRouteLayout`, which normalizes against the route's
+own root), the `TmuxPaneFocusSync` candidate-root probe, and the CRDT replica,
+patch-watch, and route clients.
 The automatic surface's settling loop itself (how many EDT re-reads, the
 pending-slot ordering) is orchestration and stays in Kotlin. Each remaining rule
 set moves behind `agent_doc_editor_derive_json` the same way.

@@ -236,11 +236,30 @@ class SurfaceCommandReferenceTest {
         assertFalse(byReference.contains("detectEditorLayout"))
         assertTrue(byReference.contains("allowSurfaceReference = false"))
 
-        val sync = source.substringAfter("fun syncLayout(").substringBefore("private fun syncLayoutBySurfaceReference(")
+        val sync = source.substringAfter("fun syncLayout(").substringBefore("private class SyncRequest(")
+        val capture = sync.indexOf("captureCommandSurface(project, focusedVFile)")
         assertTrue(
             "the reference path is chosen before the plugin reads its own split",
-            sync.indexOf("captureCommandSurface(project, focusedVFile)") <
-                sync.indexOf("LayoutDetector.detectEditorLayout("),
+            capture in 0 until sync.indexOf("LayoutDetector.captureEditorLayoutEvidence("),
         )
+        // GH #326 phase 3: the EDT reads editor state only; the layout and the sync decisions are
+        // derived on the background thread.
+        for (rule in listOf(
+            "LayoutDetector.detectEditorLayout(",
+            "chooseSyncProjectRoot(",
+            "normalizeEditorLayout(",
+            "absolutizeEditorLayout(",
+            "exactVisibleSyncDecision(",
+            "TerminalUtil.resolveProject(",
+            "SyncLayoutSnapshot.derive(",
+        )) {
+            assertFalse("GH #326 phase 3: the EDT half of syncLayout must not run $rule", sync.contains(rule))
+        }
+        val snapshot = source.substringAfter("private fun syncLayoutBySnapshot(")
+            .substringBefore("private fun syncLayoutBySurfaceReference(")
+        val thread = snapshot.indexOf("Thread {")
+        assertTrue(thread in 0 until snapshot.indexOf("LayoutDetector.detectEditorLayout("))
+        assertTrue(snapshot.indexOf("deriveSyncLayout(") in thread until snapshot.indexOf("CpRouteClient.submitSyncTmuxLayout("))
+        assertTrue(byReference.indexOf("Thread {") in 0 until byReference.indexOf("deriveSyncLayout("))
     }
 }

@@ -388,3 +388,68 @@ fn rerun_against_a_marked_target_that_lost_exchange_turns_refuses_and_keeps_the_
         "{ops_log}"
     );
 }
+
+/// GH #324 gap: the extract already stripped the source, then the destination
+/// lost the moved turns while its `[#legal1]` list items survived. The re-run
+/// derives a new operation ID and moves nothing, and selector coverage alone
+/// reported `already_applied`. It now verifies the target against the first
+/// operation's recovery copy and refuses, naming the lost node IDs and the
+/// recovery copy, with both documents unchanged and the loss logged.
+#[test]
+fn rerun_after_a_stripped_source_refuses_when_the_target_lost_recorded_turns() {
+    let dir = tempfile::TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let source = dir.path().join("sdk.md");
+    let target = dir.path().join("sdk-legal.md");
+    fs::write(&source, source_document()).unwrap();
+    git_fixture(dir.path(), "sdk.md");
+
+    let applied = apply_legal_extract(dir.path(), &source, &target).success();
+    let preview: serde_json::Value = serde_json::from_slice(&applied.get_output().stdout).unwrap();
+    let operation_id = preview["operation_id"].as_str().unwrap().to_string();
+    let recovery = dir
+        .path()
+        .join(".agent-doc/archives/extract")
+        .join(format!("{operation_id}.md"));
+    assert!(recovery.exists(), "recovery copy written on apply");
+
+    let source_stripped = fs::read_to_string(&source).unwrap();
+    assert!(!source_stripped.contains("Counsel requires an age gate"));
+    let lost_turns = "❯ Decide the legal policy [#legal1]\n### Re: Legal\n\nCounsel requires an age gate for #legal1.\n";
+    let target_applied = fs::read_to_string(&target).unwrap();
+    assert!(target_applied.contains(lost_turns));
+    let target_lost = target_applied.replacen(lost_turns, "", 1);
+    assert!(
+        target_lost.contains("- [ ] [#legal1] Ask counsel"),
+        "surviving list items still mention the selector"
+    );
+    fs::write(&target, &target_lost).unwrap();
+
+    let refused = apply_legal_extract(dir.path(), &source, &target)
+        .failure()
+        .stdout(predicate::str::contains("\"already_applied\": true").not())
+        .stderr(predicate::str::contains(format!(
+            "focused-extract operation {operation_id} already removed this selection"
+        )))
+        .stderr(predicate::str::contains("exchange:r:"))
+        .stderr(predicate::str::contains("exchange:p:"))
+        .stderr(predicate::str::contains("no documents were changed"));
+    let stderr = String::from_utf8_lossy(&refused.get_output().stderr).to_string();
+    assert!(
+        stderr.contains(&format!(".agent-doc/archives/extract/{operation_id}.md")),
+        "{stderr}"
+    );
+
+    assert_eq!(fs::read_to_string(&source).unwrap(), source_stripped);
+    assert_eq!(fs::read_to_string(&target).unwrap(), target_lost);
+    let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains(&format!(
+            "focused_extract_target_lost_nodes operation={operation_id} "
+        )) && ops_log.contains(&format!(
+            "recovery_copy={}",
+            recovery.canonicalize().unwrap().display()
+        )),
+        "{ops_log}"
+    );
+}

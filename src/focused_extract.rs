@@ -139,10 +139,25 @@ pub struct FocusedExtractTargetLostNodes {
     /// `component:id` labels: exchange node IDs, tracked item IDs, archive
     /// locators, or a whole component with no stable IDs.
     pub missing: Vec<String>,
+    /// Set when the loss was found by verifying the target against an earlier
+    /// operation's recovery copy because the source was already stripped (the
+    /// re-run derived a new operation ID, so the target carries no marker for
+    /// it). `None` for the marked-target resume check.
+    pub recovery_copy: Option<PathBuf>,
 }
 
 impl std::fmt::Display for FocusedExtractTargetLostNodes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(recovery_copy) = &self.recovery_copy {
+            return write!(
+                f,
+                "focused-extract operation {} already removed this selection from the source into {}, but the target no longer holds: {}; refusing to report the extract as already applied (no documents were changed). Restore the missing content in the target from the recovery copy {} before re-running",
+                self.operation_id,
+                self.target.display(),
+                self.missing.join(", "),
+                recovery_copy.display()
+            );
+        }
         write!(
             f,
             "focused-extract operation {} is already marked in {}, but the target no longer holds: {}; refusing to remove that content from the source again (no documents were changed). Restore the missing content in the target or recover it from the source's history before re-running",
@@ -157,12 +172,16 @@ impl std::error::Error for FocusedExtractTargetLostNodes {}
 
 impl FocusedExtractTargetLostNodes {
     fn ops_log_line(&self) -> String {
-        format!(
+        let mut line = format!(
             "focused_extract_target_lost_nodes operation={} target={} node_ids={}",
             self.operation_id,
             self.target.display(),
             self.missing.join(",")
-        )
+        );
+        if let Some(recovery_copy) = &self.recovery_copy {
+            line.push_str(&format!(" recovery_copy={}", recovery_copy.display()));
+        }
+        line
     }
 }
 
@@ -1159,6 +1178,205 @@ fn prepare(
     source_fm: &frontmatter::Frontmatter,
     request: &FocusedExtractRequest,
 ) -> Result<PreparedExtract> {
+    prepare_with_recovery(
+        source,
+        target,
+        source_content,
+        target_content,
+        source_fm,
+        request,
+        &|operation_id: &str| read_recovery_archive(source, operation_id),
+    )
+}
+
+/// Loads one earlier operation's recovery copy by operation ID, returning its
+/// path and text, or `None` when no copy exists.
+type RecoveryLoader<'a> = &'a dyn Fn(&str) -> Option<(PathBuf, String)>;
+
+fn read_recovery_archive(source: &Path, operation_id: &str) -> Option<(PathBuf, String)> {
+    let path = recovery_archive_path(source, operation_id);
+    let text = std::fs::read_to_string(&path).ok()?;
+    Some((path, text))
+}
+
+/// One labelled section of a recovery copy: the exact bytes one transfer
+/// removed from the source, with the IDs the transfer recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecoverySection {
+    component: String,
+    ids: Vec<String>,
+    node_ids: Vec<String>,
+    removed: String,
+}
+
+const RECOVERY_SECTION_OPEN: &str = "<!-- agent-doc-extract-removed ";
+const RECOVERY_SECTION_CLOSE: &str = "<!-- /agent-doc-extract-removed -->\n";
+
+fn recovery_header_attr(header: &str, name: &str) -> Option<String> {
+    let needle = format!(" {name}=\"");
+    let start = header.find(&needle)? + needle.len();
+    let len = header[start..].find('"')?;
+    Some(header[start..start + len].to_string())
+}
+
+fn split_recorded_list(raw: Option<String>) -> Vec<String> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Parse the sections `render_recovery_archive` wrote. A truncated trailing
+/// section (no closing marker) is ignored rather than guessed at.
+fn parse_recovery_sections(text: &str) -> Vec<RecoverySection> {
+    let mut sections = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find(RECOVERY_SECTION_OPEN) {
+        let after_open = &rest[open..];
+        let Some(header_end) = after_open.find("-->\n") else {
+            break;
+        };
+        let header = &after_open[..header_end];
+        let body = &after_open[header_end + "-->\n".len()..];
+        let Some(close) = body.find(RECOVERY_SECTION_CLOSE) else {
+            break;
+        };
+        sections.push(RecoverySection {
+            component: recovery_header_attr(header, "component").unwrap_or_default(),
+            ids: split_recorded_list(recovery_header_attr(header, "ids")),
+            node_ids: split_recorded_list(recovery_header_attr(header, "node_ids")),
+            removed: body[..close].to_string(),
+        });
+        rest = &body[close + RECOVERY_SECTION_CLOSE.len()..];
+    }
+    sections
+}
+
+fn marker_operation_ids(content: &str, prefix: &str, suffix: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix(prefix)?
+                .strip_suffix(suffix)
+                .filter(|operation_id| !operation_id.is_empty() && !operation_id.contains('"'))
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+/// Operation IDs of earlier extracts from this source into this target, from
+/// the source's destination pointers and the target's operation markers, in
+/// first-seen order. The source pointer survives a stripped source even when
+/// the target lost its marker.
+fn recorded_operation_ids(
+    source_content: &str,
+    target_content: &str,
+    source_identity: &Path,
+    target_identity: &Path,
+) -> Vec<String> {
+    let pointer_suffix = format!("\" target=\"{}\" -->", target_identity.display());
+    let marker_suffix = format!("\" source=\"{}\" -->", source_identity.display());
+    let mut seen = BTreeSet::new();
+    marker_operation_ids(
+        source_content,
+        "<!-- agent-doc-extract-destination operation=\"",
+        &pointer_suffix,
+    )
+    .into_iter()
+    .chain(marker_operation_ids(
+        target_content,
+        "<!-- agent-doc-extract operation=\"",
+        &marker_suffix,
+    ))
+    .filter(|operation_id| seen.insert(operation_id.clone()))
+    .collect()
+}
+
+fn recovery_section_selected(
+    section: &RecoverySection,
+    ids: &BTreeSet<String>,
+    explicit_nodes: &BTreeSet<String>,
+) -> bool {
+    section.ids.iter().any(|id| ids.contains(&normalize_id(id)))
+        || section
+            .node_ids
+            .iter()
+            .any(|node_id| explicit_nodes.contains(node_id))
+        || ids
+            .iter()
+            .any(|id| content_mentions_id(&section.removed, id))
+}
+
+/// For a re-run whose source holds none of the selection, verify the target
+/// against the recovery copy of every earlier operation of this source/target
+/// pair: each recorded section the current selectors select must still be held
+/// by the target under the marked-target holding rules (exchange turns by
+/// recorded node ID, tracked items by ID in their component or `done`).
+/// Returns the first operation, in recorded order, whose moved nodes the target
+/// lost. `None` when nothing is lost or no recovery copy exists (an extract
+/// that predates recovery copies keeps the selector-coverage answer).
+fn recorded_target_losses(
+    source_content: &str,
+    target_content: &str,
+    source_identity: &Path,
+    target_identity: &Path,
+    ids: &BTreeSet<String>,
+    explicit_nodes: &BTreeSet<String>,
+    load_recovery: RecoveryLoader<'_>,
+) -> Result<Option<FocusedExtractTargetLostNodes>> {
+    if ids.is_empty() && explicit_nodes.is_empty() {
+        return Ok(None);
+    }
+    for operation_id in recorded_operation_ids(
+        source_content,
+        target_content,
+        source_identity,
+        target_identity,
+    ) {
+        let Some((path, text)) = load_recovery(&operation_id) else {
+            continue;
+        };
+        let mut missing = Vec::new();
+        for section in parse_recovery_sections(&text)
+            .iter()
+            .filter(|section| recovery_section_selected(section, ids, explicit_nodes))
+        {
+            for label in marked_target_missing(
+                target_content,
+                &section.component,
+                &section.removed,
+                &section.node_ids,
+                &section.ids,
+            )? {
+                if !missing.contains(&label) {
+                    missing.push(label);
+                }
+            }
+        }
+        if !missing.is_empty() {
+            return Ok(Some(FocusedExtractTargetLostNodes {
+                operation_id,
+                target: target_identity.to_path_buf(),
+                missing,
+                recovery_copy: Some(path),
+            }));
+        }
+    }
+    Ok(None)
+}
+
+fn prepare_with_recovery(
+    source: &Path,
+    target: &Path,
+    source_content: String,
+    target_content: Option<String>,
+    source_fm: &frontmatter::Frontmatter,
+    request: &FocusedExtractRequest,
+    load_recovery: RecoveryLoader<'_>,
+) -> Result<PreparedExtract> {
     let ids: BTreeSet<String> = request
         .ids
         .iter()
@@ -1507,6 +1725,7 @@ fn prepare(
             operation_id,
             target: target.to_path_buf(),
             missing: target_lost,
+            recovery_copy: None,
         }
         .into());
     }
@@ -1546,6 +1765,25 @@ fn prepare(
     }
     if transfers.is_empty() {
         if already_marked || target_already_covers_selectors {
+            // Selector coverage only proves the target mentions each ID
+            // somewhere. When an earlier operation already stripped the source,
+            // its recovery copy records exactly what moved; the target must
+            // still hold every recorded node before this counts as applied.
+            if let Some(lost) = recorded_target_losses(
+                &source_content,
+                &target_after,
+                &source_identity,
+                &target_identity,
+                &ids,
+                &explicit_nodes,
+                load_recovery,
+            )? {
+                return Err(FocusedExtractTargetLostNodes {
+                    target: target.to_path_buf(),
+                    ..lost
+                }
+                .into());
+            }
             return Ok(PreparedExtract {
                 preview: FocusedExtractPreview {
                     operation_id,
@@ -2965,5 +3203,290 @@ mod tests {
                     prepared.preview.operation_id
                 ))
         );
+    }
+
+    /// The recovery copy of `first`, served by operation ID the way
+    /// `read_recovery_archive` serves `.agent-doc/archives/extract/<id>.md`.
+    fn recovery_loader(
+        copies: Vec<&PreparedExtract>,
+    ) -> impl Fn(&str) -> Option<(PathBuf, String)> {
+        let copies: Vec<(String, String)> = copies
+            .into_iter()
+            .map(|prepared| {
+                (
+                    prepared.preview.operation_id.clone(),
+                    render_recovery_archive(prepared).expect("a move removes content"),
+                )
+            })
+            .collect();
+        move |operation_id: &str| {
+            copies
+                .iter()
+                .find(|(id, _)| id == operation_id)
+                .map(|(id, text)| {
+                    (
+                        PathBuf::from(format!(".agent-doc/archives/extract/{id}.md")),
+                        text.clone(),
+                    )
+                })
+        }
+    }
+
+    fn no_recovery_copy(_: &str) -> Option<(PathBuf, String)> {
+        None
+    }
+
+    fn rerun_stripped(
+        first: &PreparedExtract,
+        target_content: String,
+        load_recovery: RecoveryLoader<'_>,
+    ) -> Result<PreparedExtract> {
+        prepare_with_recovery(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            first.source_after.clone(),
+            Some(target_content),
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+            load_recovery,
+        )
+    }
+
+    fn lost_legal_turns(target: &str) -> String {
+        remove_once(
+            &remove_once(target, "❯ Decide [#legal1]\n"),
+            "### Re: Legal\n\nDecision for #legal1.\n",
+        )
+    }
+
+    #[test]
+    fn recovery_sections_round_trip_each_transfer_label() {
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            source_doc(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+        )
+        .unwrap();
+        let sections = parse_recovery_sections(&render_recovery_archive(&first).unwrap());
+        assert_eq!(sections.len(), first.preview.transfers.len());
+        for ((section, transfer), removed) in sections
+            .iter()
+            .zip(&first.preview.transfers)
+            .zip(&first.source_removals)
+        {
+            assert_eq!(section.component, transfer.component);
+            assert_eq!(section.ids, transfer.ids);
+            assert_eq!(section.node_ids, transfer.node_ids);
+            let removed = removed.as_deref().unwrap();
+            assert_eq!(section.removed.trim_end(), removed.trim_end());
+        }
+    }
+
+    /// GH #324 gap: once the source was stripped, a re-run derives a new
+    /// operation ID and moves nothing, so only selector coverage was checked.
+    /// Surviving `[#legal1]` list items vouched for the lost exchange turns
+    /// and the re-run reported `already_applied`. The recovery copy's recorded
+    /// node IDs now decide.
+    #[test]
+    fn stripped_source_rerun_refuses_when_target_lost_recorded_turns() {
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            source_doc(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+        )
+        .unwrap();
+        let node_ids = first
+            .preview
+            .transfers
+            .iter()
+            .find(|transfer| transfer.mode == "selected_nodes")
+            .expect("the legal exchange pair moves")
+            .node_ids
+            .clone();
+        let lost_target = lost_legal_turns(&first.target_after);
+        assert!(lost_target.contains("- [ ] [#legal1] Ask counsel\n"));
+
+        // Without a recovery copy (an extract that predates them) selector
+        // coverage still answers, which is exactly the loose answer this
+        // check replaces.
+        let legacy = rerun_stripped(&first, lost_target.clone(), &no_recovery_copy).unwrap();
+        assert!(legacy.preview.already_applied);
+        assert_ne!(legacy.preview.operation_id, first.preview.operation_id);
+
+        let loader = recovery_loader(vec![&first]);
+        let error = rerun_stripped(&first, lost_target, &loader).unwrap_err();
+        let lost = error
+            .downcast_ref::<FocusedExtractTargetLostNodes>()
+            .expect("typed lost-node refusal");
+        assert_eq!(
+            lost.operation_id, first.preview.operation_id,
+            "the refusal names the operation that moved the turns"
+        );
+        assert_eq!(
+            lost.missing,
+            node_ids
+                .iter()
+                .map(|node_id| format!("exchange:{node_id}"))
+                .collect::<Vec<_>>()
+        );
+        let recovery_copy = PathBuf::from(format!(
+            ".agent-doc/archives/extract/{}.md",
+            first.preview.operation_id
+        ));
+        assert_eq!(lost.recovery_copy.as_deref(), Some(recovery_copy.as_path()));
+        assert!(
+            lost.ops_log_line()
+                .ends_with(&format!(" recovery_copy={}", recovery_copy.display())),
+            "{}",
+            lost.ops_log_line()
+        );
+        let message = error.to_string();
+        assert!(message.contains("refusing to report the extract as already applied"));
+        assert!(message.contains("no documents were changed"));
+        assert!(message.contains(&recovery_copy.display().to_string()));
+    }
+
+    #[test]
+    fn stripped_source_rerun_refuses_when_target_lost_a_recorded_item() {
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            source_doc(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+        )
+        .unwrap();
+        // Sibling legal1 items survive elsewhere; they must not vouch for the
+        // lost review item.
+        let lost_target = remove_once(&first.target_after, "- [/] [#legal1] Await approval\n");
+        let loader = recovery_loader(vec![&first]);
+        let error = rerun_stripped(&first, lost_target, &loader).unwrap_err();
+        let lost = error
+            .downcast_ref::<FocusedExtractTargetLostNodes>()
+            .expect("typed lost-node refusal");
+        assert_eq!(lost.missing, vec!["review:#legal1".to_string()]);
+    }
+
+    /// The source's destination pointer survives the strip, so the recovery
+    /// copy is still found when the target lost its operation marker too.
+    #[test]
+    fn stripped_source_rerun_finds_the_recovery_copy_without_the_target_marker() {
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            source_doc(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+        )
+        .unwrap();
+        let marker = operation_marker(
+            &first.preview.operation_id,
+            &Path::new("source.md")
+                .canonicalize()
+                .unwrap_or_else(|_| lexical_absolute(Path::new("source.md"))),
+        );
+        let lost_target = lost_legal_turns(&remove_once(&first.target_after, &marker));
+        let loader = recovery_loader(vec![&first]);
+        let error = rerun_stripped(&first, lost_target, &loader).unwrap_err();
+        let lost = error
+            .downcast_ref::<FocusedExtractTargetLostNodes>()
+            .expect("typed lost-node refusal");
+        assert_eq!(lost.operation_id, first.preview.operation_id);
+        assert_eq!(lost.missing.len(), 2);
+    }
+
+    #[test]
+    fn stripped_source_rerun_with_a_holding_target_stays_already_applied() {
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            source_doc(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+        )
+        .unwrap();
+        let loader = recovery_loader(vec![&first]);
+        let intact = rerun_stripped(&first, first.target_after.clone(), &loader).unwrap();
+        assert!(intact.preview.already_applied);
+        assert!(intact.preview.transfers.is_empty());
+        assert_eq!(intact.source_after, first.source_after);
+        assert_eq!(intact.target_after, first.target_after);
+
+        // A target that completed its todo item still holds it via `done`.
+        let completed = remove_once(&first.target_after, "- [ ] [#legal1] Ask counsel\n").replace(
+            "<!-- agent:done -->\n",
+            "<!-- agent:done -->\n- 2026-10-19 [#legal1] Ask counsel\n",
+        );
+        let resumed = rerun_stripped(&first, completed, &loader).unwrap();
+        assert!(resumed.preview.already_applied);
+    }
+
+    /// A loss under another operation the current selectors do not select
+    /// does not block this selection's idempotent re-run.
+    #[test]
+    fn stripped_source_rerun_ignores_losses_from_unselected_operations() {
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            source_doc(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+        )
+        .unwrap();
+        let dev = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            first.source_after.clone(),
+            Some(first.target_after.clone()),
+            &frontmatter::Frontmatter::default(),
+            &FocusedExtractRequest {
+                ids: vec!["dev1".into()],
+                ..legal_request()
+            },
+        )
+        .unwrap();
+        assert!(!dev.preview.already_applied);
+        let lost_dev_item = remove_once(&dev.target_after, "- [ ] [#dev1] Ship SDK\n");
+        let loader = recovery_loader(vec![&first, &dev]);
+        let legal_rerun = prepare_with_recovery(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            dev.source_after.clone(),
+            Some(lost_dev_item.clone()),
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+            &loader,
+        )
+        .unwrap();
+        assert!(legal_rerun.preview.already_applied);
+
+        let dev_error = prepare_with_recovery(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            dev.source_after.clone(),
+            Some(lost_dev_item),
+            &frontmatter::Frontmatter::default(),
+            &FocusedExtractRequest {
+                ids: vec!["dev1".into()],
+                ..legal_request()
+            },
+            &loader,
+        )
+        .unwrap_err();
+        let lost = dev_error
+            .downcast_ref::<FocusedExtractTargetLostNodes>()
+            .expect("typed lost-node refusal");
+        assert_eq!(lost.operation_id, dev.preview.operation_id);
+        assert_eq!(lost.missing, vec!["todo:#dev1".to_string()]);
     }
 }

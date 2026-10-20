@@ -23,6 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
+📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
 <!-- status:sync -->
@@ -323,10 +324,6 @@ The proposed behavior is:
 - An overdue reminder appears at the next tool boundary.
 
 A hook cannot interrupt one continuously running eight-hour tool call; that would require timer-callback support from the harness. But during a normal long turn containing many tool calls, it can refresh status throughout the turn rather than waiting for closeout.
-
-### Re: Subagent completed: `subagent:issue316` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/316” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=1bab0222e16a2e68e3155888d977f99f3b6c066e740060088c37de681342dd53 -->
 > **Chat prompt (#chatprompt):** The interval should default to off. There should only be the loop interval when there is a value for the interval attribute
 
 > **Chat prompt (#chatprompt):** Perhaps sync can run with hooks? My issue was long running turns that had 1 or even 2 releases would not update agent:status until the very end of the turn. Today I had a turn last >8h.
@@ -346,7 +343,41 @@ The handoff records the intended Lazily design, exact worktrees and branch state
 Issue #316 is fixed in pushed commit `188fad6374b1d1cd2f79dac9fc708b4d77a1fcfb` and the issue is closed, but that commit still awaits integration. The interval work remains safely preserved and uncommitted in `/home/brian/worktrees/agent-doc-status-sync-interval-20261019`; its subagent was stopped to avoid concurrent edits during the Claude Code transfer.
 
 The intended behavior is now explicit: `sync` alone remains preflight-only; an explicit `interval` opts into mid-turn checks; the controller-owned Lazily graph derives and consumes the due edge; a harness hook only supplies/delivers safe-boundary observations; SQLite does not arbitrate live cadence. A single uninterrupted tool call still cannot be interrupted, but a long turn containing ordinary tool boundaries can receive the due sync prompt during the turn.
-<!-- agent:boundary:bb5db3da -->
+
+### Re: Subagent completed: `subagent:sync_interval` returned work for queue item “Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=96766067717093fe2e973920387c81ecd43b242734cc696b9f1d0b0737d03028 -->
+> **Chat prompt (#chatprompt):** continue, updating the handoff, until you run out of tokens.
+
+> **Chat prompt (#chatprompt):** do we still have tokens?
+
+> **Chat prompt (#chatprompt):** Still going?
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/316
+
+> **Queue prompt:** Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?
+
+### Re: Reactive status sync and issue 316 completed — gpt-5 · 2026-10-19T23:04-04:00
+
+Completed and pushed both queue tasks to agent-doc `main` at `9646a2b934a6eb58906394b01ec37b4e89cd2a2d`.
+
+Issue #316 is fixed and closed. The closeout path now accepts an exact ledger-derived late reported-handoff status projection only for `WriteApplied`/`Committed` cycles, while unrelated status edits still fail closed.
+
+Periodic status synchronization now defaults to off. `agent:status sync="..."` continues to supply the instruction at preflight; repeated in-turn reminders require an explicit `interval=...`. Durations accept unitless seconds or compound `s`/`m`/`h`/`d` values with a one-minute minimum. Bare, blank, duplicate, malformed, overflowing, sub-minute, or orphaned status intervals fail closed.
+
+The timing decision is controller-owned Lazily state: keyed Sources retain the cycle/cadence observation and receipt, a Computed derives `status_sync_due`, and the controller atomically consumes the due edge. SQLite live arbitration was removed. Claude Code and Codex `PostToolUse` hooks only transport completed owner-tool boundary observations and deliver the reminder; they do not own cadence or write status. A single continuously running tool call cannot be interrupted, but an overdue reminder is delivered at the next supported boundary. Ordinary steering remains additive.
+
+Verification:
+
+- Focused status-sync tests and targeted Clippy with warnings denied passed.
+- Combined `make check` passed: 11,116 Rust tests, 202 VS Code tests, cross-editor simulation, all JetBrains variants, 8 bootstrap tests, docs audit, and cached TLA proof.
+- Combined `make tmux-ci` passed, including the previously failing two-IDE lane case.
+- `make install` completed once; installed CLI reports `agent-doc 0.35.525`.
+- Integration worktree is clean and `origin/main` contains the changes.
+- GitHub CI/Book/Pages runs were queued after push; no release was published.
+
+The durable, fully updated transfer record remains at [agent-doc-bugs-claude-handoff-2026-10-19.md](agent-doc-bugs-claude-handoff-2026-10-19.md), committed in the workspace as `a66f1714a1`.
+<!-- agent:boundary:b0bf624b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -354,8 +385,8 @@ The intended behavior is now explicit: `sync` alone remains preflight-only; an e
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/316
-- 🚧 Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/316~~
+- 📥 Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?
 <!-- /agent:queue -->
 
 ## Queue: Issues

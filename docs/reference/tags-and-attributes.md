@@ -166,6 +166,8 @@ Only `agent:queue` accepts the full queue vocabulary.
 | `preset` | One or more whitespace-separated prompt-preset references. Quote a multi-reference value. `preset=""` explicitly selects no component default. |
 | `presets` | Compatibility alias for `preset`; a nonempty canonical `preset` wins when both appear. |
 | `subagents`, `fan-out` | Bare dispatches every eligible head to subagents; `=N` sets a positive concurrency cap. If both aliases appear, the most restrictive valid cap wins. On `agent:exchange`, only the bare form is valid because one prompt is dispatched at a time. |
+| `model` | Optional model override for subagents dispatched from this queue. It takes precedence over structured preset metadata and frontmatter `subagent_model`. |
+| `effort` | Optional reasoning-effort override for subagents dispatched from this queue. It takes precedence over structured preset metadata and frontmatter `subagent_effort`. |
 | `priority` | Bare priority ordering, as described above. |
 | `interval` | Schedule interval: a bare integer in seconds or a compound duration such as `30s`, `5m`, `1h30m`, or `1d`. Values below the scheduler floor are clamped with a warning. |
 | `time` | One or more comma-separated local times in `HH:MM` form. It may be combined with `interval`; the earlier next deadline wins. |

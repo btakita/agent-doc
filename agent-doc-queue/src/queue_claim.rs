@@ -129,6 +129,10 @@ pub struct QueueClaim {
     /// `owner` are coordinator-chosen and are not worker-liveness evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<QueueWorkerBinding>,
+    /// Resolved subagent launch policy captured when this attempt was claimed.
+    /// `None` preserves the historical inherit-the-coordinator behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch_policy: Option<SubagentDispatchPolicy>,
     pub claimed_at_secs: u64,
     pub expires_at_secs: u64,
     /// The coordinator session that made (or last adopted) the claim
@@ -153,6 +157,15 @@ pub struct QueueClaim {
     /// worker was handed still find the claim after an operator edit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub followed_from: Vec<String>,
+}
+
+/// Optional per-dispatch harness launch overrides recorded for cost attribution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentDispatchPolicy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 /// Positive acknowledgement that one concrete harness worker accepted one
@@ -766,6 +779,7 @@ impl QueueClaimLedger {
             generation: 1,
             state: QueueClaimState::Claimed,
             worker: None,
+            dispatch_policy: None,
             claimed_at_secs: now_secs,
             expires_at_secs,
             owner_session,
@@ -2304,6 +2318,7 @@ mod tests {
                     generation: 0,
                     state: QueueClaimState::Claimed,
                     worker: None,
+                    dispatch_policy: None,
                     claimed_at_secs: 1,
                     expires_at_secs: 50,
                     owner_session: None,
@@ -2317,6 +2332,7 @@ mod tests {
                     generation: 0,
                     state: QueueClaimState::Claimed,
                     worker: None,
+                    dispatch_policy: None,
                     claimed_at_secs: 2,
                     expires_at_secs: 90,
                     owner_session: None,

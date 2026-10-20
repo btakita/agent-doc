@@ -14,6 +14,8 @@ Frontmatter fields:
 - `claude_model`: Per-harness model override for Claude Code sessions. Takes precedence over `model` when running under Claude Code. The short alias `opus` is **deferred**: agent-doc passes it through verbatim as `claude --model opus` so Claude Code resolves its current latest opus, and response attribution is self-stamped by the running agent rather than a pinned version. Explicit concrete ids (e.g. `claude-opus-4-8`) pass through unchanged for users who want to pin a version.
 - `codex_model`: Per-harness model override for Codex sessions. Takes precedence over `model` when running under Codex.
 - `opencode_model`: Per-harness model override for OpenCode sessions. Takes precedence over `model` when running under OpenCode.
+- `subagent_model`: Default model override for queue-dispatched subagents. A selected queue's `model=` attribute, then applicable structured preset metadata, takes precedence.
+- `subagent_effort`: Default reasoning-effort override for queue-dispatched subagents. A selected queue's `effort=` attribute, then applicable structured preset metadata, takes precedence.
 - `branch`: Reserved for branch tracking
 - `terminal_host`: Terminal presentation override — `auto`, `ide`, `external`, or `none`. Resolution then falls back to project and global `[terminal].host`; it does not name the tmux session.
 - `agent_args`: Additional CLI arguments for the active agent process (space-separated string)

@@ -17,6 +17,8 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
     "stop",
     "id",
     "after",
+    "model",
+    "effort",
     crate::queue_auto_clear::QUEUE_DISABLE_AUTO_CLEAR_ATTR,
     crate::queue_schedule::QUEUE_TIME_ATTR,
     crate::queue_schedule::QUEUE_LOOP_ATTR,

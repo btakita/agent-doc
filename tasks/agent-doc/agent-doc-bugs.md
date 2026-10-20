@@ -299,8 +299,8 @@ The complete post-release stack is pushed through `d0b87395c3` and installed loc
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
 - ~~If an issue was added, also add `- release + publish`~~
-- 📥 Should `agent-doc-subagent-completion` tags be replaced with the response? sdk-demo.md has some lingering `agent-doc-subagent-completion` tags.
-- 📥 subagent operator request should have its own id: instead of [agent-doc]. Remove ` (#waypostrequest)`. Make the Editor Plugin syntax highlighting color code the id tag the same as in todo + backlog + queue + icebox + review.
+- ~~Should `agent-doc-subagent-completion` tags be replaced with the response? sdk-demo.md has some lingering `agent-doc-subagent-completion` tags.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~subagent operator request should have its own id: instead of [agent-doc]. Remove ` (#waypostrequest)`. Make the Editor Plugin syntax highlighting color code the id tag the same as in todo + backlog + queue + icebox + review.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues

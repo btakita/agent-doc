@@ -15,6 +15,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   pre-submit pane check fences the same case. Operator Run Agent Doc steering is
   unchanged.
 
+- **The controller orphan drain re-reads queue claims before it dispatches
+  (GH #319 claim visibility).** The sweep decided on a claim-ledger read taken at the
+  top of its per-document pass and never looked again, so a claim committed
+  during the pass (supervisor `/proc` scan, lease reads) or while the route
+  waited on the single orphan-drain worker was invisible: GH #319's preset
+  head `#upgrade` was claimed at 04:25:00 and dispatched at 04:25:02. The
+  sweep's commit point and the route worker now re-read the ledger and stop
+  with `reason=queue_claim_landed_after_snapshot` when a claim landed after
+  the decision; the next sweep re-decides from the fresh ledger.
+
 ## 0.35.527
 
 - **Residual-work lists reach the operator-todo advisory, and one
@@ -27,16 +37,6 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   text that matched (stderr and `ops.log`). Signals match on word boundaries
   and skip headings and fenced code, so a `### Re: ... reply posted` heading
   no longer fires as `reply post`.
-- **The controller orphan drain re-reads queue claims before it dispatches
-  (GH #319 claim visibility).** The sweep decided on a claim-ledger read taken at the
-  top of its per-document pass and never looked again, so a claim committed
-  during the pass (supervisor `/proc` scan, lease reads) or while the route
-  waited on the single orphan-drain worker was invisible: GH #319's preset
-  head `#upgrade` was claimed at 04:25:00 and dispatched at 04:25:02. The
-  sweep's commit point and the route worker now re-read the ledger and stop
-  with `reason=queue_claim_landed_after_snapshot` when a claim landed after
-  the decision; the next sweep re-decides from the fresh ledger.
-
 - **A blocking subagent operator request becomes an `agent:todo` item
   (`#packettodo`).** A closeout response that presents a blocking
   `[#subagent-operator-request]` packet without its own `--todo-add` or

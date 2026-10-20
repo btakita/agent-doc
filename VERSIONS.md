@@ -18,6 +18,18 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   proven from the state ledger's `preflight_started` and `response_captured`
   facts, so agent-authored text is attributed by its capture provenance
   rather than by blockquote prefix.
+- **Response echoes no longer replay as operator steering after a commit
+  booked under a `synthetic-*` cycle (`#assistantsteeringlineage`).** On
+  0.35.528 a preflight-admitted turn ran mid-turn `queue claim`/`queue start`,
+  the supervisor's empty-preflight reclaim probe abandoned the still-live
+  cycle, and `respond` then captured its response under that abandoned cycle.
+  The commit cannot advance an abandoned cycle, so it was recorded under a
+  fresh `synthetic-*` cycle whose commit fact reset the projected capture
+  lineage; the steering scan read "latest cycle captured nothing" as
+  "nothing is agent-authored" and surfaced all six `> **Queue prompt:**`
+  echoes as new operator prompts dispatched to subagents. The scan now
+  consults every response captured since the watermark cycle opened even
+  when the projected cycle carries no capture of its own.
 
 ## 0.35.528
 

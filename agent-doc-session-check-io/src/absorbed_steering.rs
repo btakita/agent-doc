@@ -186,6 +186,11 @@ fn is_absorbable(item: &SteeringItem) -> bool {
 /// same `(cycle_id, capture_id, response_sha256)` lineage, this returns an
 /// error. Callers must not surface or acknowledge the ambiguous items. Missing
 /// provenance cannot turn agent output into an operator instruction.
+///
+/// `captured_response(c)` is every content-bearing capture recorded since the
+/// watermark cycle `c` opened, not only the projected cycle's capture: the
+/// projected cycle may be a later auto-reopen or a `synthetic-*` commit cycle
+/// that carries no capture lineage of its own.
 pub(crate) fn retain_operator_lineage(
     file: &Path,
     cycle_id: &str,
@@ -204,64 +209,79 @@ pub(crate) fn retain_operator_lineage(
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(0);
     };
-    let has_response_lineage = state.capture_id.is_some() || state.response_sha256.is_some();
-    if !has_response_lineage {
-        return Ok(0);
-    }
     // A consumer watermark can legitimately lag behind a later response cycle.
     // The current response lineage still proves which observed text is binary-
     // authored; `cycle_id` remains the steering lineage recorded in diagnostics.
     let response_cycle_id = state.cycle_id.as_str();
-    let (Some(capture_id), Some(response_sha256)) = (
-        state.capture_id.as_deref(),
-        state.response_sha256.as_deref(),
-    ) else {
-        bail!(
-            "incomplete captured-response lineage for {} cycle {} (#assistantsteeringlineage)",
-            file.display(),
-            cycle_id,
-        );
-    };
-    let Some(capture) =
-        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
-    else {
-        bail!(
-            "missing captured-response body for {} cycle {} capture {} (#assistantsteeringlineage)",
-            file.display(),
-            cycle_id,
-            capture_id,
-        );
-    };
-    if capture.cycle_id != response_cycle_id || capture.response_sha256 != response_sha256 {
-        bail!(
-            "mismatched captured-response lineage for {} cycle {} capture {} (#assistantsteeringlineage)",
-            file.display(),
-            cycle_id,
-            capture_id,
-        );
+    let has_response_lineage = state.capture_id.is_some() || state.response_sha256.is_some();
+    let mut response_bodies = Vec::new();
+    let mut latest_response_sha256 = None;
+    if has_response_lineage {
+        let (Some(capture_id), Some(response_sha256)) = (
+            state.capture_id.as_deref(),
+            state.response_sha256.as_deref(),
+        ) else {
+            bail!(
+                "incomplete captured-response lineage for {} cycle {} (#assistantsteeringlineage)",
+                file.display(),
+                cycle_id,
+            );
+        };
+        let Some(capture) =
+            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+        else {
+            bail!(
+                "missing captured-response body for {} cycle {} capture {} (#assistantsteeringlineage)",
+                file.display(),
+                cycle_id,
+                capture_id,
+            );
+        };
+        if capture.cycle_id != response_cycle_id || capture.response_sha256 != response_sha256 {
+            bail!(
+                "mismatched captured-response lineage for {} cycle {} capture {} (#assistantsteeringlineage)",
+                file.display(),
+                cycle_id,
+                capture_id,
+            );
+        }
+        response_bodies.push(capture.response_body);
+        latest_response_sha256 = Some(response_sha256);
     }
 
-    // A steering watermark that lags the response cycle (an auto-reopened
-    // `respond` opens a fresh cycle without re-seeding steering) also observes
-    // every EARLIER response committed since its own cycle opened. Those are
-    // binary-authored by the same capture provenance; subtracting only the
-    // newest response re-reads the earlier ones as operator prompts (the
-    // v0.35.527 `> **Queue prompt:**` echo replay).
-    let mut response_bodies = vec![capture.response_body];
+    // A steering watermark that lags the projected cycle also observes every
+    // response the binary captured since its own cycle opened. Those are
+    // binary-authored by the same capture provenance whatever cycle the
+    // commit was later booked under:
+    // - an auto-reopened `respond` opens a fresh cycle without re-seeding
+    //   steering, so subtracting only the newest response re-reads the earlier
+    //   ones as operator prompts (the v0.35.527 `> **Queue prompt:**` echo
+    //   replay);
+    // - a response captured under a cycle the reclaim probe had already
+    //   abandoned commits under a fresh `synthetic-*` cycle whose
+    //   `CommitObserved` resets the projected capture lineage, so the newest
+    //   projection carries no capture at all (the v0.35.528 replay). "The
+    //   latest cycle captured nothing" is not "nothing is agent-authored".
     if cycle_id != response_cycle_id
-        && let Some(earlier) = agent_doc_cycle_state_io::load_captured_responses_since_cycle(
+        && let Some(lineage) = agent_doc_cycle_state_io::load_captured_responses_since_cycle(
             file,
             cycle_id,
             RESPONSE_LINEAGE_WINDOW,
         )?
     {
         response_bodies.extend(
-            earlier
+            lineage
                 .into_iter()
-                .filter(|checkpoint| checkpoint.response_sha256 != response_sha256)
+                .filter(|checkpoint| {
+                    latest_response_sha256 != Some(checkpoint.response_sha256.as_str())
+                })
                 .map(|checkpoint| checkpoint.response_body),
         );
     }
+    if response_bodies.is_empty() {
+        return Ok(0);
+    }
+    let capture_id = state.capture_id.as_deref().unwrap_or("none");
 
     let before = items.len();
     items.retain(|item| {

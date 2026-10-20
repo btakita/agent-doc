@@ -1911,6 +1911,117 @@ mod tests {
         assert_eq!(hook.items[0].verbatim, operator_prompt);
     }
 
+    /// v0.35.528 dogfood failure (built from the lineage fix above): a
+    /// preflight-admitted cycle ran mid-turn `queue claim`/`queue start`
+    /// projections, the supervisor's empty-preflight reclaim probe then
+    /// abandoned the still-live cycle, and `respond` captured its response
+    /// under that abandoned cycle. `mark_committed` cannot advance an
+    /// abandoned cycle, so the commit was recorded under a fresh
+    /// `synthetic-*` cycle whose `CommitObserved` reset the projection's
+    /// capture lineage. The steering consumer read "latest cycle has no
+    /// capture" as "nothing is agent-authored" and surfaced all six
+    /// `> **Queue prompt:**` echoes as new operator exchange prompts. The
+    /// captured-response facts recorded since the watermark cycle opened are
+    /// the authority, whatever cycle id the commit was booked under.
+    #[test]
+    fn response_echoes_are_not_operator_steering_after_synthetic_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = concat!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n",
+            "<!-- agent:queue id=\"main\" subagents -->\n",
+            "- fix https://github.com/example/repo/issues/321\n",
+            "- fix https://github.com/example/repo/issues/322\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\nOperator request.\n<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, None, Vec::new()).unwrap();
+
+        // Mid-turn `queue claim` then `queue start` projections rewrite the
+        // queue markers while the turn runs; the hook observes each one.
+        let claimed = baseline
+            .replace(
+                "- fix https://github.com/example/repo/issues/321",
+                "- 🟡 fix https://github.com/example/repo/issues/321",
+            )
+            .replace(
+                "- fix https://github.com/example/repo/issues/322",
+                "- 🟡 fix https://github.com/example/repo/issues/322",
+            );
+        std::fs::write(&file, &claimed).unwrap();
+        let _ = observe(&file, CONSUMER_HOOK, false).unwrap();
+        let started = claimed.replace("- 🟡 ", "- 🚧 ");
+        std::fs::write(&file, &started).unwrap();
+        let _ = observe(&file, CONSUMER_HOOK, false).unwrap();
+
+        // The reclaim probe abandons the still-live preflight cycle.
+        agent_doc_cycle_state_io::mark_abandoned(
+            &file,
+            "cancel_preflight_cycle_abandoned",
+            Some(&started),
+            Some(&started),
+        )
+        .unwrap();
+
+        let body = concat!(
+            "> **Chat prompt (#chatprompt):** subagent: fix the nested status sync\n\n",
+            "> **Queue prompt:** There was 1 tmux pane with 2 editor panes.\n\n",
+            "> **Queue prompt:** route: a background orphan-drain dispatch types into a pane\n\n",
+            "> **Queue prompt:** investigate: preset head upgrade was dispatched early\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/example/repo/issues/320\n\n",
+            "> **Queue prompt:** steering: echo blockquotes surfaced as operator prompts\n\n",
+            "> **Queue prompt:** release + publish including PR #317-#320.\n\n",
+            "### Re: closeout\n\n",
+            "Fixed, verified, and committed.\n",
+        );
+        let response =
+            format!("<!-- patch:exchange mode=\"append\" -->\n{body}<!-- /patch:exchange -->\n");
+        let applied = started.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{body}<!-- /agent:exchange -->"),
+        );
+        std::fs::write(&file, &applied).unwrap();
+        // `respond` captures under the abandoned preflight cycle ...
+        capture_response_body(&file, &response, &started);
+        let captured = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(captured.cycle_id, cycle.cycle_id);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &applied,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        // ... and the commit lands under a synthetic cycle without lineage.
+        close_cycle(&file, &applied);
+        let committed = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert!(
+            committed.cycle_id.starts_with("synthetic-"),
+            "fixture must reproduce the synthetic commit: {committed:?}"
+        );
+        assert!(committed.capture_id.is_none() && committed.response_sha256.is_none());
+
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap();
+        assert!(
+            hook.as_ref().is_none_or(|report| report.items.is_empty()),
+            "agent-authored echoes surfaced as operator steering: {hook:?}"
+        );
+        assert!(
+            crate::absorbed_steering::unanswered_prompts(&file)
+                .unwrap()
+                .is_empty(),
+            "agent-authored echoes must not enter the absorbed-steering ledger"
+        );
+    }
+
     #[test]
     fn captured_response_filter_preserves_adjacent_operator_edit() {
         let dir = tempfile::tempdir().unwrap();

@@ -344,9 +344,13 @@ object TerminalUtil {
      * relative to `projectRoot`, suitable for passing to `agent-doc` commands
      * run from that directory.
      */
-    fun resolveProject(project: Project, file: VirtualFile): Pair<String, String> {
+    fun resolveProject(project: Project, file: VirtualFile): Pair<String, String> =
+        resolveProject(project, file.path)
+
+    /** [resolveProject] for a plain path (GH #326: the surface projection carries paths, not files). */
+    fun resolveProject(project: Project, filePath: String): Pair<String, String> {
         val basePath = project.basePath
-        val resolved = resolveProjectPath(basePath, file.path)
+        val resolved = resolveProjectPath(basePath, filePath)
         if (basePath != null && resolved.first != basePath) {
             // Register resolved root with PatchWatcher on-demand. This handles submodule
             // roots that weren't present at startup (e.g. user opens a file in a freshly

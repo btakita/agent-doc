@@ -233,18 +233,46 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   selected session document, whether it holds any session document, and its
   measured origin. The schema-version and main-surface checks stay with the RPC
   contract in Kotlin.
+- `surface_projection` (phase 2): the automatic editor surface that
+  `EditorTabSyncListener` publishes. Evidence is what one EDT turn reads: the
+  surface frame's windows (`window_layout` evidence plus whether the frame could be
+  measured), the backend window count, `FileEditorManager.selectedFiles`, every
+  open session document, the Remote Dev clients' visible/selected/open session
+  documents and backend focus, whether a measured client layout owns the project
+  (`RemoteClientLayoutAuthority`), the anchor window's and selected text editor's
+  session document, the triggering event's preferred/previous document, its
+  authority and remaining settling passes, and its `force_reconcile` /
+  `preserve_focus` flags. Native owns the remote-client authority decision
+  (GH #154/#177), every readiness deferral (`capture deferred reason=...`), the
+  `#stickymdpane` visible-document union including the GH #320 Remote Dev union,
+  active-document resolution, open-tab proximity, stale-selection settling (the
+  exhausted-pass old-to-new edge, on visible documents and columns), the local or
+  Remote Dev layout and its withholding when it omits the preferred document,
+  the `[layout-detect]` lines, and the controller payload including
+  `column_order`. The Remote Dev fold keeps its per-project memory in the native
+  library and runs only for a projection that is ready, so a deferred capture
+  never advances it. The plugin keeps the payload as JSON, so a payload field a
+  newer library adds reaches the controller without a plugin generation.
 - `capabilities`: the derivations the loaded library answers.
 
 **Threads.** Native calls stay forbidden on the EDT. The automatic surface
-captures window evidence on the EDT and resolves `window_layout` on the
-generation-owned surface delivery worker beside the Remote Dev fold (GH #157).
-The layout half of the EDT readiness check runs there too: a resolved local
-layout that omits the preferred document is withheld (published as unknown
-columns, `[layout-sync] layout withheld reason=preferred_document_not_in_layout`)
-rather than published stale. A direct EDT caller (manual `--col` snapshot,
-claim, terminal and layout-change detectors) marshals only the immutable
-evidence to a worker and waits at most 250 ms. The measured-layout forwarder
-already runs on its own worker.
+captures evidence on the EDT and derives `surface_projection` on the
+generation-owned surface delivery worker; the EDT runs no surface rule. A
+deferred projection keeps its observation in the pending slot (it is released
+only once a ready projection goes to delivery) and the worker schedules the next
+bounded EDT re-read, or, with no settling pass left, retains the observation and
+retires surface endpoints the capture proved closed. Because the slot is now held
+until the worker answers, a lower-authority edge that arrives meanwhile, which
+the ordering still refuses to let replace the pending observation, re-reads that
+observation on a later EDT turn instead of being dropped against a stale
+capture. After the derivation, the worker adds only the filesystem root choice
+that spans the visible documents and the path normalization against it. Run
+Agent Doc and Sync Tmux Layout capture the same evidence and derive it on their
+background thread; a deferral there is `surface_capture_deferred reason=...`
+and the command keeps its `--col` snapshot. A direct EDT caller of
+`window_layout` (manual `--col` snapshot, claim, terminal and layout-change
+detectors) marshals only the immutable evidence to a worker and waits at most
+250 ms. The measured-layout forwarder already runs on its own worker.
 
 **Compatibility.** After a hot reload the library is newer than the plugin
 generation calling it, so a shipped derivation is never removed or renamed,
@@ -253,21 +281,24 @@ ignores output fields it does not know. An unknown derivation is an error. A
 library without the symbol is remembered per native generation, so the next
 hot-reloaded library is asked again. Whenever no native generation answers, the
 plugin uses a **frozen** Kotlin copy of the GH #320 rules (`frozenWindowLayout`,
-`RemoteClientMeasuredLayout.frozenDerive`). It is a compatibility floor, never
-extended: new rules land only in the native derivation. One parity file,
-`editors/jetbrains/src/test/resources/editor-derivations/window_layout.json`,
-is answered by both the Rust derivation and the frozen floor, so a divergence is
-always a deliberate fixture edit.
+`RemoteClientMeasuredLayout.frozenDerive`, and `SurfaceProjection.frozen` over the
+pre-#326 `SurfaceReport` / `SelectionProjectionSettling` rules). It is a
+compatibility floor, never extended: new rules land only in the native
+derivation. One parity file per derivation under
+`editors/jetbrains/src/test/resources/editor-derivations/` (`window_layout.json`,
+`surface_projection.json`) is answered by both the Rust derivation and the frozen
+floor, so a divergence is always a deliberate fixture edit.
 
 **Still restart-bound.** Changing the *evidence* a derivation needs (a new
 IntelliJ fact to capture), adding a call site, `plugin.xml`/action/UI changes,
 and logic not yet behind the boundary still ship as a plugin generation. The
-largest remaining Kotlin rule sets are the surface projection in
-`EditorTabSyncListener.captureSurface` (visible-document union, readiness,
-active-document resolution, open-tab proximity, stale-selection settling,
-payload assembly), the manual sync column decisions in `SyncLayoutAction`, the
-Remote Dev client-evidence capture, and the CRDT replica, patch-watch, and route
-clients. Each moves behind `agent_doc_editor_derive_json` the same way.
+largest remaining Kotlin rule sets are the manual sync column decisions in
+`SyncLayoutAction` (including the surface root choice and path normalization the
+automatic surface still applies after `surface_projection`), the Remote Dev
+client-evidence capture, and the CRDT replica, patch-watch, and route clients.
+The automatic surface's settling loop itself (how many EDT re-reads, the
+pending-slot ordering) is orchestration and stays in Kotlin. Each remaining rule
+set moves behind `agent_doc_editor_derive_json` the same way.
 
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is

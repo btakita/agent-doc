@@ -777,14 +777,32 @@ class EditorTabSyncListenerTest {
                 .substringAfter("private fun captureSurface(")
                 .substringBefore("private fun resolveSurface(")
 
-        assertTrue(
-            capture.indexOf("LayoutDetector.snapshotRemoteLayout(") <
-                capture.indexOf("SurfaceReport.windowSelectionReadiness("),
-        )
-        assertTrue(capture.contains("LayoutDetector.shouldUseRemoteClientLayout("))
+        // GH #326 phase 2: the EDT capture never defers; the derivation decides readiness on the
+        // delivery worker, which logs every deferral with the same INFO line.
+        assertTrue(capture.contains("LayoutDetector.snapshotRemoteLayout("))
         assertFalse(capture.contains("return null"))
-        assertTrue(capture.contains("return captureDeferred("))
+        assertFalse(capture.contains("captureDeferred("))
+        assertFalse(capture.contains("SurfaceReport.windowSelectionReadiness("))
+        val worker =
+            source
+                .substringAfter("private fun deliverCapturedSurface(")
+                .substringBefore("private fun retireClosedSurfaceEndpoints(")
+        assertTrue(worker.contains("is SurfaceResolution.Deferred ->"))
+        assertTrue(worker.contains("captureDeferred(resolution.reason)"))
         assertTrue(source.contains("LOG.info(\"[layout-sync] capture deferred reason=\$reason\")"))
+        // The frozen floor keeps the GH #177 order: remote authority before backend readiness.
+        val frozen =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/SurfaceProjection.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SurfaceProjection.kt",
+                    ),
+            ).substringAfter("internal fun frozen(")
+        assertTrue(
+            frozen.indexOf("LayoutDetector.shouldUseRemoteClientLayout(") <
+                frozen.indexOf("report.windowSelectionReadiness("),
+        )
     }
 
     @Test
@@ -1653,12 +1671,17 @@ previousSelectionPath = "/repo/tasks/tsift.md",
         val source =
             Files.readString(Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"))
         val capture = source.substringAfter("private fun captureSurface(").substringBefore("private fun resolveSurface(")
-        assertTrue(capture.contains("LayoutDetector.captureWindowLayoutEvidence("))
-        assertFalse(
-            "the native layout derivation must not run on the EDT capture",
-            capture.contains("LayoutDetector.detectEditorLayout("),
-        )
-        val resolve = source.substringAfter("private fun resolveSurface(")
-        assertTrue(resolve.contains("LayoutDetector.detectEditorLayout(evidence)"))
+        assertTrue(capture.contains("LayoutDetector.captureEditorWindows("))
+        for (rule in listOf(
+            "LayoutDetector.detectEditorLayout(",
+            "SurfaceReport.",
+            "SelectionProjectionSettling.reconcileEventEdge(",
+            "SurfaceProjection.derive(",
+        )) {
+            assertFalse("GH #326 phase 2: the EDT capture must not run $rule", capture.contains(rule))
+        }
+        val resolve = source.substringAfter("private fun resolveSurface(").substringBefore("internal class CommandSurfaceCapture")
+        assertTrue(resolve.contains("SurfaceProjection.derive(captured.evidence)"))
+        assertFalse(resolve.contains("SurfaceReport.buildSurface("))
     }
 }

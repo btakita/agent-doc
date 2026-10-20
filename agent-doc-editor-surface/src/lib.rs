@@ -36,6 +36,7 @@ pub mod navigation_lane;
 pub mod pane_placement;
 pub mod remote_layout;
 pub mod surface_layout_reference;
+pub mod surface_projection;
 pub mod terminal_ownership;
 pub mod window_layout;
 
@@ -76,6 +77,10 @@ pub use surface_layout_reference::{
     CONTROLLER_SURFACE_CAPABILITIES, RetainedEditorSurface, SURFACE_LAYOUT_REFERENCE_CAPABILITY,
     SurfaceLayoutReference, SurfaceReferenceRefusal, SurfaceRouteLayout, SurfaceSyncLayout,
     resolve_surface_reference, route_layout_from_surface, sync_layout_from_surface,
+};
+pub use surface_projection::{
+    RemoteSurfaceEvidence, SurfaceLayoutSource, SurfaceProjection, SurfaceProjectionEvidence,
+    SurfaceProjectionOutcome, project_surface,
 };
 pub use window_layout::{
     COLUMN_X_TOLERANCE_PX, ClientMeasuredLayout, ClientMeasuredLayoutEvidence,

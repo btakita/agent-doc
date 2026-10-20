@@ -612,29 +612,24 @@ private data class PendingSurface(
  * Immutable editor-only snapshot captured on the EDT. Project-root discovery, filesystem walks,
  * patch-watch registration, JSON construction, and controller delivery all happen later on the
  * serialized background lane.
+ *
+ * GH #326 phase 2: the capture holds evidence only. What the evidence means (visible documents,
+ * readiness, active document, open-tab proximity, stale-selection settling, layout, payload) is the
+ * native `surface_projection` derivation's answer on the delivery worker ([SurfaceProjection]).
  */
 internal data class CapturedSurface(
     val project: Project,
     val projectBasePath: String?,
     val surfaceId: String,
     val liveSurfaceIds: Set<String>?,
-    val focusedFile: VirtualFile,
-    val visibleMdFiles: List<String>,
-    val openMdFiles: List<String>,
-    val editorLayout: EditorLayout?,
-    /**
-     * GH #326: the local windows' layout evidence, captured on the EDT. The hot-reloaded native
-     * `window_layout` derivation resolves it on the delivery worker, beside the Remote Dev fold.
-     */
-    val windowLayoutEvidence: LayoutDetector.WindowLayoutEvidence?,
-    val remoteLayoutSnapshot: LayoutDetector.RemoteLayoutSnapshot?,
-    val reconcileStaleSelection: Boolean,
-    val preferredFilePath: String?,
-    val previousFilePath: String?,
-    val forceReconcile: Boolean,
-    val preserveFocus: Boolean,
+    val evidence: SurfaceProjection.SurfaceProjectionEvidence,
 )
 
+    /**
+     * GH #326 phase 2: the pre-#326 surface rules, now the frozen compatibility floor that
+     * [SurfaceProjection.frozen] composes when no native generation answers `surface_projection`.
+     * Never extend them; change the native derivation and its parity fixture instead.
+     */
     internal object SurfaceReport {
         enum class ProjectionReadiness {
             Current,
@@ -862,9 +857,9 @@ internal data class CapturedSurface(
         LOG.debug("[layout-sync] $msg")
     }
 
-    private fun captureDeferred(reason: String): CapturedSurface? {
+    /** A projection the derivation deferred: the editor has not settled into a publishable surface. */
+    private fun captureDeferred(reason: String) {
         LOG.info("[layout-sync] capture deferred reason=$reason")
-        return null
     }
 
     /** Call only while holding [lifecycleLock]. */
@@ -888,6 +883,7 @@ internal data class CapturedSurface(
         observation: PendingSurfaceObservation,
         requiredFocusGeneration: Long? = null,
     ) {
+        var retainedPending = false
         synchronized(lifecycleLock) {
             if (closed) return
             if (
@@ -915,14 +911,19 @@ internal data class CapturedSurface(
                     if (requiredFocusGeneration != null) {
                         invalidateFocusProjection(requiredFocusGeneration)
                     }
-                    return
+                    // GH #326: the pending observation stays in the slot until the delivery worker
+                    // derives a ready projection, so its capture may predate this edge. Re-read it.
+                    retainedPending = true
+                    break
                 }
                 if (latestSurfaceObservation.compareAndSet(current, observation)) break
             }
-            if (requiredFocusGeneration == null && !observation.preserveFocus) {
-                // Only an admitted focus-authoritative observation may supersede the focus effect.
-                // Passive layout facts neither cancel nor replace explicit pane selection.
-                invalidateFocusProjection()
+            if (!retainedPending) {
+                if (requiredFocusGeneration == null && !observation.preserveFocus) {
+                    // Only an admitted focus-authoritative observation may supersede the focus
+                    // effect. Passive layout facts neither cancel nor replace explicit pane selection.
+                    invalidateFocusProjection()
+                }
             }
         }
         val requested = generation.incrementAndGet()
@@ -981,198 +982,219 @@ internal data class CapturedSurface(
                     return@invokeLater
                 }
                 val observation = latestSurfaceObservation.get() ?: return@invokeLater
-            val captured =
-                captureSurface(
-                    project = observation.project,
-                    preferredFile = observation.preferredFile,
-                    previousFile = observation.previousFile,
-                    forceReconcile = observation.forceReconcile,
-                    preserveFocus = observation.preserveFocus,
-                    reconcileStaleSelection =
-                        observation.authority == ObservationAuthority.DocumentSelection &&
-                            remainingSelectionPasses == 0,
-                )
-                        ?: run {
-                            // The selection event can precede IDEA's visible-editor projection.
-                            // Re-read on a bounded later EDT turn so a single tab switch is a
-                            // complete reactive edge even when IDEA emits no follow-up event.
-                            if (
-                                SelectionProjectionSettling.shouldReproject(
-                                    authority = observation.authority,
-                                    remainingPasses = remainingSelectionPasses,
-                                )
-                            ) {
-                                log(
-                                    "observe: editor projection settling; remaining=" +
-                                        "$remainingSelectionPasses",
-                                )
-                                projectLatestSurfaceOnEditorThread(
-                                    requestedGeneration,
-                                    remainingSelectionPasses - 1,
-                                )
-                            } else {
-                                val missingEndpoints =
-                                    JetBrainsEditorSurfaces.liveSurfaceIds(observation.project)
-                                        ?.let(surfaceEndpoints::missing)
-                                        .orEmpty()
-                                if (missingEndpoints.isNotEmpty()) {
-                                    surfaceDeliveryExecutor.execute {
-                                        retireClosedSurfaceEndpoints(
-                                            observation.project,
-                                            missingEndpoints,
-                                        )
-                                    }
-                                }
-                                log("observe: retained until editor-surface dependency changes")
-                            }
-                            return@invokeLater
-                        }
-                if (
-                    !ObservationDeliveryOwnership.releaseForDelivery(
-                        latestSurfaceObservation,
-                        observation,
+                // GH #326: the EDT only captures evidence; the delivery worker derives what it means.
+                val captured =
+                    captureSurface(
+                        project = observation.project,
+                        preferredFile = observation.preferredFile,
+                        previousFile = observation.previousFile,
+                        forceReconcile = observation.forceReconcile,
+                        preserveFocus = observation.preserveFocus,
+                        authority = observation.authority,
+                        remainingSelectionPasses = remainingSelectionPasses,
                     )
-                ) {
-                    log("socket delivery: observation superseded before enqueue gen=$requestedGeneration")
-                    return@invokeLater
-                }
-            val requestedAuthorityEpoch = projectionAuthorityEpoch.get()
-            surfaceDeliveryExecutor.execute {
-                if (generation.get() != requestedGeneration) {
-                    log("socket delivery: superseded gen=$requestedGeneration")
-                    return@execute
-                }
-                val pending =
+                val requestedAuthorityEpoch = projectionAuthorityEpoch.get()
+                surfaceDeliveryExecutor.execute {
                     try {
-                        resolveSurface(captured)
+                        deliverCapturedSurface(
+                            captured = captured,
+                            observation = observation,
+                            requestedGeneration = requestedGeneration,
+                            requestedAuthorityEpoch = requestedAuthorityEpoch,
+                            remainingSelectionPasses = remainingSelectionPasses,
+                        )
                     } catch (e: Exception) {
-                        LOG.warn("[layout-sync] background surface resolution failed: ${e.message}")
-                        return@execute
+                        LOG.warn("[layout-sync] surface delivery failed: ${e.message}", e)
                     }
-                synchronized(lifecycleLock) {
-                        if (closed) return@execute
-                        surfaceRoots.recordAttempts(pending.knownControllerRoots)
-                    }
-                    val rootsToRetire =
-                        synchronized(lifecycleLock) {
-                            if (closed) {
-                                emptyList()
-                            } else {
-                                surfaceRoots.rootsToRetireBeforePublishing(pending.projectRoot)
-                            }
-                        }
-            for (obsoleteRoot in rootsToRetire) {
-                val surfaceForgotten = CpRouteClient.forgetEditorSurface(obsoleteRoot)
-                CpRouteClient.forgetEditorFocus(obsoleteRoot)
-                if (surfaceForgotten) {
-                            surfaceRoots.markForgotten(obsoleteRoot)
-                            log(
-                                "observe: retired superseded surface root before publish " +
-                                    "root=$obsoleteRoot active=${pending.projectRoot}",
-                            )
-                        } else {
-                            log(
-                                "observe: pre-publish surface root retirement deferred root=" +
-                                    "$obsoleteRoot active=${pending.projectRoot}",
-                            )
-                        }
-                    }
-                    val receipt =
-                        CpRouteClient.observeEditorSurface(
-                            projectRoot = pending.projectRoot,
-                            surfaceJson = pending.surfaceJson,
-                            surfaceId = pending.surfaceId,
-                            mayReregister = ::projectionLive,
-                        )
-                    if (receipt.exitCode != 0) {
-                        val retained =
-                            if (generation.get() == requestedGeneration) {
-                                ObservationDeliveryOwnership.retainAfterFailure(
-                                    latestSurfaceObservation,
-                                    observation,
-                                )
-                            } else {
-                                false
-                            }
-                        LOG.warn(
-                            "[layout-sync] surface observation unavailable for " +
-                                "${pending.relativePath}: ${receipt.output}",
-                        )
-                        if (retained || latestSurfaceObservation.get() === observation) {
-                            scheduleRetainedSurfaceRetry(requestedGeneration, observation)
-                        }
-                        return@execute
-                    }
-                    surfaceDeliveryRetryAttempt.set(0)
-                    val publishedEndpoint = SurfaceEndpoint(pending.projectRoot, pending.surfaceId)
-                    // Decide under the lock that retireControllerProjection drains under: either
-                    // this endpoint is recorded before the drain (and the handoff forgets it), or
-                    // the handoff already happened and this delivery retires its own endpoint.
-                    val retiredEndpoints =
-                        synchronized(lifecycleLock) {
-                            when (
-                                InFlightSurfaceDelivery.decide(
-                                    requestedAuthorityEpoch = requestedAuthorityEpoch,
-                                    currentAuthorityEpoch = projectionAuthorityEpoch.get(),
-                                )
-                            ) {
-                                InFlightSurfaceDelivery.Decision.RetireEndpoint -> null
-                                InFlightSurfaceDelivery.Decision.RecordEndpoint ->
-                                    surfaceEndpoints.markPublished(
-                                        publishedEndpoint,
-                                        pending.liveSurfaceIds,
-                                    )
-                            }
-                        }
-                    if (retiredEndpoints == null) {
-                        // A frontend-authority handoff retired this listener's projection while
-                        // the controller call was in flight; the handoff's own drain could not see
-                        // this endpoint, so retire it here before the frontend source proceeds.
-                        CpRouteClient.forgetEditorSurface(pending.projectRoot, pending.surfaceId)
-                        CpRouteClient.forgetEditorFocus(pending.projectRoot, pending.surfaceId)
-                        log(
-                            "observe: retired in-flight endpoint after authority handoff " +
-                                "root=${pending.projectRoot} surface=${pending.surfaceId}",
-                        )
-                        return@execute
-                    }
-                    retireClosedSurfaceEndpoints(observation.project, retiredEndpoints)
-                    val obsoleteRoots =
-                        synchronized(lifecycleLock) {
-                            if (closed) {
-                                null
-                            } else {
-                                surfaceRoots.markPublished(pending.projectRoot)
-                            }
-                        }
-            if (obsoleteRoots == null) {
-                CpRouteClient.forgetEditorSurface(pending.projectRoot)
-                CpRouteClient.forgetEditorFocus(pending.projectRoot)
-                surfaceRoots.markForgotten(pending.projectRoot)
-                return@execute
-            }
-            for (obsoleteRoot in obsoleteRoots) {
-                val surfaceForgotten = CpRouteClient.forgetEditorSurface(obsoleteRoot)
-                CpRouteClient.forgetEditorFocus(obsoleteRoot)
-                if (surfaceForgotten) {
-                            surfaceRoots.markForgotten(obsoleteRoot)
-                            log(
-                                "observe: retired superseded surface root=$obsoleteRoot " +
-                                    "active=${pending.projectRoot}",
-                            )
-                        } else {
-                            log(
-                                "observe: superseded surface root retirement deferred root=" +
-                                    "$obsoleteRoot active=${pending.projectRoot}",
-                            )
-                        }
-                    }
-                    log("observe: published file=${pending.relativePath}")
                 }
             } catch (e: Exception) {
                 LOG.warn("[layout-sync] observation failed: ${e.message}")
             }
         }
+    }
+
+    /**
+     * The delivery worker's half of one projection pass: derive the surface, settle a deferral, or
+     * publish. A deferred projection keeps the observation pending (it was never released), so the
+     * next pass re-reads the editor on a later EDT turn exactly as the EDT capture used to.
+     */
+    private fun deliverCapturedSurface(
+        captured: CapturedSurface,
+        observation: PendingSurfaceObservation,
+        requestedGeneration: Long,
+        requestedAuthorityEpoch: Long,
+        remainingSelectionPasses: Int,
+    ) {
+        if (generation.get() != requestedGeneration) {
+            log("socket delivery: superseded gen=$requestedGeneration")
+            return
+        }
+        val pending =
+            when (
+                val resolution =
+                    try {
+                        resolveSurface(captured)
+                    } catch (e: Exception) {
+                        LOG.warn("[layout-sync] background surface resolution failed: ${e.message}")
+                        return
+                    }
+            ) {
+                is SurfaceResolution.Ready -> resolution.pending
+                is SurfaceResolution.Deferred -> {
+                    captureDeferred(resolution.reason)
+                    // The selection event can precede IDEA's visible-editor projection. Re-read on a
+                    // bounded later EDT turn so a single tab switch is a complete reactive edge even
+                    // when IDEA emits no follow-up event.
+                    if (
+                        SelectionProjectionSettling.shouldReproject(
+                            authority = observation.authority,
+                            remainingPasses = remainingSelectionPasses,
+                        )
+                    ) {
+                        log("observe: editor projection settling; remaining=$remainingSelectionPasses")
+                        projectLatestSurfaceOnEditorThread(
+                            requestedGeneration,
+                            remainingSelectionPasses - 1,
+                        )
+                    } else {
+                        val missingEndpoints =
+                            captured.liveSurfaceIds?.let(surfaceEndpoints::missing).orEmpty()
+                        if (missingEndpoints.isNotEmpty()) {
+                            retireClosedSurfaceEndpoints(observation.project, missingEndpoints)
+                        }
+                        log("observe: retained until editor-surface dependency changes")
+                    }
+                    return
+                }
+            }
+        if (
+            !ObservationDeliveryOwnership.releaseForDelivery(
+                latestSurfaceObservation,
+                observation,
+            )
+        ) {
+            log("socket delivery: observation superseded before delivery gen=$requestedGeneration")
+            return
+        }
+        synchronized(lifecycleLock) {
+            if (closed) return
+            surfaceRoots.recordAttempts(pending.knownControllerRoots)
+        }
+        val rootsToRetire =
+            synchronized(lifecycleLock) {
+                if (closed) {
+                    emptyList()
+                } else {
+                    surfaceRoots.rootsToRetireBeforePublishing(pending.projectRoot)
+                }
+            }
+        for (obsoleteRoot in rootsToRetire) {
+            val surfaceForgotten = CpRouteClient.forgetEditorSurface(obsoleteRoot)
+            CpRouteClient.forgetEditorFocus(obsoleteRoot)
+            if (surfaceForgotten) {
+                surfaceRoots.markForgotten(obsoleteRoot)
+                log(
+                    "observe: retired superseded surface root before publish " +
+                        "root=$obsoleteRoot active=${pending.projectRoot}",
+                )
+            } else {
+                log(
+                    "observe: pre-publish surface root retirement deferred root=" +
+                        "$obsoleteRoot active=${pending.projectRoot}",
+                )
+            }
+        }
+        val receipt =
+            CpRouteClient.observeEditorSurface(
+                projectRoot = pending.projectRoot,
+                surfaceJson = pending.surfaceJson,
+                surfaceId = pending.surfaceId,
+                mayReregister = ::projectionLive,
+            )
+        if (receipt.exitCode != 0) {
+            val retained =
+                if (generation.get() == requestedGeneration) {
+                    ObservationDeliveryOwnership.retainAfterFailure(
+                        latestSurfaceObservation,
+                        observation,
+                    )
+                } else {
+                    false
+                }
+            LOG.warn(
+                "[layout-sync] surface observation unavailable for " +
+                    "${pending.relativePath}: ${receipt.output}",
+            )
+            if (retained || latestSurfaceObservation.get() === observation) {
+                scheduleRetainedSurfaceRetry(requestedGeneration, observation)
+            }
+            return
+        }
+        surfaceDeliveryRetryAttempt.set(0)
+        val publishedEndpoint = SurfaceEndpoint(pending.projectRoot, pending.surfaceId)
+        // Decide under the lock that retireControllerProjection drains under: either this endpoint is
+        // recorded before the drain (and the handoff forgets it), or the handoff already happened and
+        // this delivery retires its own endpoint.
+        val retiredEndpoints =
+            synchronized(lifecycleLock) {
+                when (
+                    InFlightSurfaceDelivery.decide(
+                        requestedAuthorityEpoch = requestedAuthorityEpoch,
+                        currentAuthorityEpoch = projectionAuthorityEpoch.get(),
+                    )
+                ) {
+                    InFlightSurfaceDelivery.Decision.RetireEndpoint -> null
+                    InFlightSurfaceDelivery.Decision.RecordEndpoint ->
+                        surfaceEndpoints.markPublished(
+                            publishedEndpoint,
+                            pending.liveSurfaceIds,
+                        )
+                }
+            }
+        if (retiredEndpoints == null) {
+            // A frontend-authority handoff retired this listener's projection while the controller
+            // call was in flight; the handoff's own drain could not see this endpoint, so retire it
+            // here before the frontend source proceeds.
+            CpRouteClient.forgetEditorSurface(pending.projectRoot, pending.surfaceId)
+            CpRouteClient.forgetEditorFocus(pending.projectRoot, pending.surfaceId)
+            log(
+                "observe: retired in-flight endpoint after authority handoff " +
+                    "root=${pending.projectRoot} surface=${pending.surfaceId}",
+            )
+            return
+        }
+        retireClosedSurfaceEndpoints(observation.project, retiredEndpoints)
+        val obsoleteRoots =
+            synchronized(lifecycleLock) {
+                if (closed) {
+                    null
+                } else {
+                    surfaceRoots.markPublished(pending.projectRoot)
+                }
+            }
+        if (obsoleteRoots == null) {
+            CpRouteClient.forgetEditorSurface(pending.projectRoot)
+            CpRouteClient.forgetEditorFocus(pending.projectRoot)
+            surfaceRoots.markForgotten(pending.projectRoot)
+            return
+        }
+        for (obsoleteRoot in obsoleteRoots) {
+            val surfaceForgotten = CpRouteClient.forgetEditorSurface(obsoleteRoot)
+            CpRouteClient.forgetEditorFocus(obsoleteRoot)
+            if (surfaceForgotten) {
+                surfaceRoots.markForgotten(obsoleteRoot)
+                log(
+                    "observe: retired superseded surface root=$obsoleteRoot " +
+                        "active=${pending.projectRoot}",
+                )
+            } else {
+                log(
+                    "observe: superseded surface root retirement deferred root=" +
+                        "$obsoleteRoot active=${pending.projectRoot}",
+                )
+            }
+        }
+        log("observe: published file=${pending.relativePath}")
     }
 
     private fun retireClosedSurfaceEndpoints(
@@ -1200,17 +1222,24 @@ internal data class CapturedSurface(
         }
     }
 
+    /**
+     * GH #326 phase 2: read what the editor IS on this EDT turn, and nothing more. Every rule that
+     * turns this evidence into a surface runs on the delivery worker through the hot-reloaded
+     * native `surface_projection` derivation ([SurfaceProjection.derive]).
+     */
     private fun captureSurface(
         project: Project,
         preferredFile: VirtualFile? = null,
         previousFile: VirtualFile? = null,
         forceReconcile: Boolean = false,
         preserveFocus: Boolean = false,
-        reconcileStaleSelection: Boolean = false,
-    ): CapturedSurface? {
+        authority: ObservationAuthority? = null,
+        remainingSelectionPasses: Int? = null,
+    ): CapturedSurface {
         val manager = FileEditorManager.getInstance(project)
         val managerEx = FileEditorManagerEx.getInstanceEx(project)
         val editorWindows = managerEx.windows
+        // Which frame this observation reads: the window the event selected, else the current one.
         val anchorWindow =
             managerEx.currentWindow
                 ?.takeIf { current ->
@@ -1230,300 +1259,159 @@ internal data class CapturedSurface(
             } ?: editorWindows.toList()
         val allOpenSessionFiles = manager.openFiles.filter(AgentDocSessionFiles::isSessionDocument)
         val allSessionDocumentPaths = allOpenSessionFiles.map { it.path }.toSet()
-        // GH #177: capture remote-client evidence before consulting backend-window readiness.
-        // Remote Dev may expose an incidental backend window whose selected file is null; that
-        // window must not gate the frontend-owned layout.
+        // GH #177: Remote Dev client evidence is captured with the backend windows; the derivation
+        // decides which of the two owns the layout.
         val remoteLayoutCandidate =
             LayoutDetector.snapshotRemoteLayout(project, allSessionDocumentPaths)
-        val useRemoteClientLayout =
-            LayoutDetector.shouldUseRemoteClientLayout(
-                backendWindowCount = editorWindows.size,
-                remoteClientSessionCount = remoteLayoutCandidate.clients.size,
-            )
-        // GH #320 option B: the JetBrains Client's measured columns (forwarded by the modular
-        // backend as `column_order=editor`) own the Remote Dev layout; the membership fold below
-        // stays the fallback for classic and one-sided installs only.
-        if (useRemoteClientLayout && RemoteClientLayoutAuthority.isActive(project)) {
-            return captureDeferred("frontend_measured_layout_authority")
-        }
-        val openSessionFiles =
-            if (useRemoteClientLayout) {
-                allOpenSessionFiles
-            } else {
-                surfaceWindows
-                    .flatMap { it.fileList.toList() }
-                    .distinctBy { it.path }
-                    .filter(AgentDocSessionFiles::isSessionDocument)
-            }
-        val sessionDocumentPaths = openSessionFiles.map { it.path }.toSet()
-        val selectedWindowPaths =
-            SurfaceReport.splitSelections(
-                if (useRemoteClientLayout) {
-                    emptyList()
-                } else {
-                    surfaceWindows.map { it.selectedFile?.path }
-                },
-                manager.selectedFiles.map { it.path },
-            )
-        if (
-            SurfaceReport.windowSelectionReadiness(
-                selectedWindowFiles = selectedWindowPaths,
-                useRemoteClientLayout = useRemoteClientLayout,
-            ) == SurfaceReport.WindowSelectionReadiness.AwaitingBackendWindowSelection
-        ) {
-            return captureDeferred(
-                "backend_window_selection_incomplete " +
-                    "windows=${surfaceWindows.size} selected=${selectedWindowPaths.size}",
-            )
-        }
-        val windowVisibleMdFiles =
-            SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
-                selectedWindowPaths,
-                // `#stickymdpane`: keep a window that has switched to a source
-                // file standing for the last document it showed. A backend with no
-                // editor windows (GH #88) has no per-window tab history to consult.
-                surfaceWindows.map { window ->
-                    LayoutDetector.stickyMarkdownForWindow(
-                        selectedPath = window.selectedFile?.path,
-                        windowMarkdownTabsMruLast =
-                        LayoutDetector.markdownTabsMruLast(
-                            project,
-                            window.fileList
-                                .map { it.path }
-                                .filter(sessionDocumentPaths::contains),
+        val windows =
+            try {
+                LayoutDetector.captureEditorWindows(project, surfaceWindows, sessionDocumentPaths = null)
+            } catch (e: Exception) {
+                LOG.warn("[layout-detect] editor window evidence unavailable: ${e.message}", e)
+                LayoutDetector.CapturedEditorWindows(
+                    evidence =
+                        LayoutDetector.WindowLayoutEvidence(
+                            basePath = project.basePath,
+                            windows =
+                                surfaceWindows.map { window ->
+                                    LayoutDetector.EditorWindowEvidence(
+                                        x = null,
+                                        y = null,
+                                        selected = window.selectedFile?.path,
+                                        sessionTabs =
+                                            window.fileList
+                                                .filter(AgentDocSessionFiles::isSessionDocument)
+                                                .map { it.path },
+                                    )
+                                },
+                            history = emptyList(),
                         ),
-                    )
-                },
-                sessionDocumentPaths,
-            )
-        // GH #320: on a Remote Dev backend the remote clients' visible/selected documents are the
-        // observed state; never defer on the backend's own (often empty) selection.
-        val rawVisibleMdFiles =
-            if (useRemoteClientLayout) {
-                SurfaceReport.remoteClientVisibleSessionFiles(
-                    backendVisible = windowVisibleMdFiles,
-                    clientVisible = remoteLayoutCandidate.clients.map { it.visible },
-                    clientSelected = remoteLayoutCandidate.clients.map { it.selected },
-                    absoluteByRelative =
-                        allOpenSessionFiles.associate { file ->
-                            TerminalUtil.relativePath(project, file) to file.path
-                        },
-                )
-            } else {
-                windowVisibleMdFiles
-            }
-        // GH #157: capture Remote Dev client/editor state on this EDT turn, but defer its native
-        // retained-split fold to the generation-owned surface delivery worker below.
-        val remoteLayoutSnapshot =
-            if (useRemoteClientLayout || surfaceWindows.isEmpty()) {
-                remoteLayoutCandidate
-            } else {
-                null
-            }
-        // GH #326: capture the local windows' evidence on this EDT turn; the native layout
-        // derivation runs on the delivery worker, exactly like the Remote Dev fold (GH #157).
-        val windowLayoutEvidence =
-            if (remoteLayoutSnapshot != null) {
-                null
-            } else {
-                try {
-                    LayoutDetector.captureWindowLayoutEvidence(
-                        project,
-                        surfaceWindows,
-                        sessionDocumentPaths,
-                    )
-                } catch (e: Exception) {
-                    LOG.warn("[layout-detect] editor window evidence unavailable: ${e.message}", e)
-                    null
-                }
-            }
-        // No layout is resolved on the EDT any more: both the local and the Remote Dev layout
-        // resolve on the delivery worker, so the settled EDT projection carries visible files only.
-        val rawEditorLayout: EditorLayout? = null
-        val settledProjection =
-            if (reconcileStaleSelection) {
-                SelectionProjectionSettling.reconcileEventEdge(
-                    preferredFile = preferredFile?.path,
-                    previousFile = previousFile?.path,
-                    visibleMdFiles = rawVisibleMdFiles,
-                    editorLayout = rawEditorLayout,
-                )
-            } else {
-                SelectionProjectionSettling.SettledProjection(
-                    visibleMdFiles = rawVisibleMdFiles,
-                    editorLayout = rawEditorLayout,
+                    geometryUnavailable = true,
                 )
             }
-        val visibleMdFiles = settledProjection.visibleMdFiles
-        if (visibleMdFiles.isEmpty()) {
-            return captureDeferred("no_visible_session_documents")
-        }
-        val openMarkdownFiles = openSessionFiles
-        val preferredMarkdownFile = preferredFile?.takeIf { candidate ->
-            candidate.isValid &&
-                AgentDocSessionFiles.isSessionDocument(candidate) &&
-                openMarkdownFiles.any { it.path == candidate.path }
-        }
-        if (preferredFile != null && preferredMarkdownFile == null) {
-            return captureDeferred("preferred_file_not_open_session_document")
-        }
-        if (
-            SurfaceReport.projectionReadiness(
-                preferredActiveFile = preferredMarkdownFile?.path,
-                visibleMdFiles = visibleMdFiles,
-                layoutMdFiles =
-                    settledProjection.editorLayout
-                        ?.columns
-                        ?.flatMap(LayoutColumn::files),
-            ) != SurfaceReport.ProjectionReadiness.Current
-        ) {
-            return captureDeferred("preferred_document_not_in_current_projection")
-        }
-        val selectedEditorFile =
-            if (useRemoteClientLayout) {
-                manager.selectedTextEditor?.virtualFile
-                    ?.takeIf(AgentDocSessionFiles::isSessionDocument)
-            } else {
-                anchorWindow?.selectedFile?.takeIf(AgentDocSessionFiles::isSessionDocument)
-            }
-        val activeFilePath =
-            SurfaceReport.resolveActiveFilePath(
-                preferredActiveFile = preferredMarkdownFile?.path,
-                selectedEditorFile = selectedEditorFile?.path,
-                visibleMdFiles = visibleMdFiles,
-            ) ?: return captureDeferred("active_session_document_unresolved")
-        val file =
-            sequenceOf(
-                preferredMarkdownFile,
-                selectedEditorFile,
-                openSessionFiles.firstOrNull { it.path == activeFilePath },
-                )
-                .filterNotNull()
-                .firstOrNull { it.path == activeFilePath }
-                ?: return captureDeferred("active_virtual_file_unresolved")
-        val focusedWindowTabs =
-            surfaceWindows
-                .firstOrNull { it.selectedFile?.path == activeFilePath }
-                ?.fileList
-                ?.filter(AgentDocSessionFiles::isSessionDocument)
-                ?.map { it.path }
-                .orEmpty()
-        val openMdFiles =
-            SurfaceReport.prioritizeOpenDocuments(
-                focusedFile = activeFilePath,
-                nearbyTabs =
-                    SurfaceReport.tabsByProximity(
-                        focusedFile = activeFilePath,
-                        tabs = focusedWindowTabs,
+        val evidence =
+            SurfaceProjection.SurfaceProjectionEvidence(
+                basePath = project.basePath,
+                backendWindowCount = editorWindows.size,
+                windows = windows.evidence.windows,
+                windowGeometryUnavailable = windows.geometryUnavailable,
+                history = windows.evidence.history,
+                managerSelected = manager.selectedFiles.map { it.path },
+                openSessionDocuments = allOpenSessionFiles.map { it.path },
+                remote =
+                    SurfaceProjection.RemoteSurfaceEvidence(
+                        projectRoot = remoteLayoutCandidate.projectRoot,
+                        clients = remoteLayoutCandidate.clients,
+                        focused = remoteLayoutCandidate.focusedSessionFiles,
                     ),
-                visibleMdFiles = visibleMdFiles,
-                openMdFiles = openMarkdownFiles.map { it.path },
+                measuredLayoutAuthority = RemoteClientLayoutAuthority.isActive(project),
+                anchorSelectedSession =
+                    anchorWindow?.selectedFile
+                        ?.takeIf(AgentDocSessionFiles::isSessionDocument)
+                        ?.path,
+                selectedTextEditorSession =
+                    manager.selectedTextEditor?.virtualFile
+                        ?.takeIf(AgentDocSessionFiles::isSessionDocument)
+                        ?.path,
+                preferred = preferredFile?.path,
+                preferredSessionDocument =
+                    preferredFile?.let { it.isValid && AgentDocSessionFiles.isSessionDocument(it) } == true,
+                previous = previousFile?.path,
+                authority = authority?.let(SurfaceProjection::wireAuthority),
+                remainingSelectionPasses = remainingSelectionPasses,
+                forceReconcile = forceReconcile,
+                preserveFocus = preserveFocus,
             )
-
         return CapturedSurface(
             project = project,
             projectBasePath = project.basePath,
             surfaceId = editorSurface.surfaceId,
             liveSurfaceIds = liveSurfaceIds,
-            focusedFile = file,
-            visibleMdFiles = visibleMdFiles,
-            openMdFiles = openMdFiles,
-            editorLayout = settledProjection.editorLayout,
-            windowLayoutEvidence = windowLayoutEvidence,
-            remoteLayoutSnapshot = remoteLayoutSnapshot,
-            reconcileStaleSelection = reconcileStaleSelection,
-            preferredFilePath = preferredFile?.path,
-            previousFilePath = previousFile?.path,
-            forceReconcile = forceReconcile,
-            preserveFocus = preserveFocus,
+            evidence = evidence,
         )
     }
 
-    private fun resolveSurface(captured: CapturedSurface): PendingSurface {
+    /** What the delivery worker derived from one capture. */
+    private sealed interface SurfaceResolution {
+        data class Ready(val pending: PendingSurface) : SurfaceResolution
+
+        data class Deferred(val reason: String) : SurfaceResolution
+    }
+
+    /**
+     * Derive and route one capture. Off the EDT: the native `surface_projection` derivation decides
+     * the surface; this adds only the filesystem root choice, which spans the visible layout, and the
+     * path normalization against it.
+     */
+    private fun resolveSurface(captured: CapturedSurface): SurfaceResolution {
+        val surface =
+            when (val projection = SurfaceProjection.derive(captured.evidence)) {
+                is SurfaceProjection.Result.Deferred -> return SurfaceResolution.Deferred(projection.reason)
+                is SurfaceProjection.Result.Ready -> projection.surface.deepCopy()
+            }
+        fun strings(name: String): List<String> =
+            surface.getAsJsonArray(name)?.map { it.asString }.orEmpty()
+        val focusedFile = surface.get("focused")?.takeIf { !it.isJsonNull }?.asString.orEmpty()
+        if (focusedFile.isBlank()) {
+            return SurfaceResolution.Deferred("surface_projection_without_focused_document")
+        }
+        val visibleMdFiles = strings("visible")
         val (focusedProjectRoot, focusedRelativePath) =
-            TerminalUtil.resolveProject(captured.project, captured.focusedFile)
+            TerminalUtil.resolveProject(captured.project, focusedFile)
         // One root keys the surface graph, and it has to be the one that spans
         // the whole visible layout — a surface is the layout, not one document.
         val surfaceProjectRoot =
             SyncLayoutAction.chooseSyncProjectRoot(
                 captured.projectBasePath,
                 focusedProjectRoot,
-                captured.visibleMdFiles,
+                visibleMdFiles,
             )
         val knownControllerRoots =
             (
-                captured.openMdFiles.mapNotNull(TerminalUtil::nearestAgentDocProjectRoot) +
+                strings("open").mapNotNull(TerminalUtil::nearestAgentDocProjectRoot) +
                     surfaceProjectRoot
             ).distinct()
-        val localEditorLayout =
-            captured.windowLayoutEvidence?.let { evidence ->
-                val relative = LayoutDetector.detectEditorLayout(evidence)
-                captured.projectBasePath
-                    ?.let { basePath -> SyncLayoutAction.absolutizeEditorLayout(basePath, relative) }
-                    ?: relative
-            }
-        val resolvedEditorLayout =
-            captured.editorLayout
-                ?: localEditorLayout
-                ?: captured.remoteLayoutSnapshot?.let(LayoutDetector::detectEditorLayout)
-        val reconciledEditorLayout =
-            if (captured.reconcileStaleSelection) {
-                SelectionProjectionSettling.reconcileEventEdge(
-                    preferredFile = captured.preferredFilePath,
-                    previousFile = captured.previousFilePath,
-                    visibleMdFiles = captured.visibleMdFiles,
-                    editorLayout = resolvedEditorLayout,
-                ).editorLayout
-            } else {
-                resolvedEditorLayout
-            }
-        // The EDT capture checked the preferred document against the visible set; the local
-        // layout now resolves here, so its half of that readiness check runs here too. A layout
-        // that omits the preferred document is withheld (published as unknown columns, which
-        // carry no structural authority) rather than published stale.
-        val settledEditorLayout =
-            if (captured.windowLayoutEvidence != null) {
-                SurfaceReport.layoutForPreferredDocument(
-                    preferredActiveFile = captured.preferredFilePath,
-                    editorLayout = reconciledEditorLayout,
-                ) ?: run {
-                    if (reconciledEditorLayout != null) {
-                        LOG.info(
-                            "[layout-sync] layout withheld reason=preferred_document_not_in_layout " +
-                                "preferred=${captured.preferredFilePath}",
-                        )
-                    }
-                    null
+        val derivedLayout =
+            surface.getAsJsonArray("columns")
+                ?.map { column ->
+                    LayoutColumn(
+                        column.asJsonObject.getAsJsonArray("files")?.map { it.asString }.orEmpty(),
+                    )
                 }
-            } else {
-                reconciledEditorLayout
-            }
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { columns ->
+                    EditorLayout(
+                        columns,
+                        surface.get("column_order")?.takeIf { !it.isJsonNull }?.asString ?: "editor",
+                    )
+                }
         val absoluteEditorLayout =
             SyncLayoutAction.absolutizeEditorLayout(
                 surfaceProjectRoot,
                 SyncLayoutAction.normalizeEditorLayout(
                     captured.projectBasePath,
                     surfaceProjectRoot,
-                    settledEditorLayout,
+                    derivedLayout,
                 ),
             )
-        return PendingSurface(
-            projectRoot = surfaceProjectRoot,
-            relativePath = focusedRelativePath,
-            surfaceId = captured.surfaceId,
-            surfaceJson =
-                GSON.toJson(
-                    SurfaceReport.buildSurface(
-                        focusedFile = captured.focusedFile.path,
-                        visibleMdFiles = captured.visibleMdFiles,
-                        openMdFiles = captured.openMdFiles,
-                        editorLayout = absoluteEditorLayout,
-                        forceReconcile = captured.forceReconcile,
-                        preserveFocus = captured.preserveFocus,
-                    ),
-                ),
-            knownControllerRoots = knownControllerRoots,
-            liveSurfaceIds = captured.liveSurfaceIds,
+        surface.add(
+            "columns",
+            GSON.toJsonTree(
+                absoluteEditorLayout?.columns
+                    ?.map { SurfaceColumnPayload(it.files) }
+                    ?.filter { it.files.isNotEmpty() }
+                    .orEmpty(),
+            ),
+        )
+        return SurfaceResolution.Ready(
+            PendingSurface(
+                projectRoot = surfaceProjectRoot,
+                relativePath = focusedRelativePath,
+                surfaceId = captured.surfaceId,
+                surfaceJson = GSON.toJson(surface),
+                knownControllerRoots = knownControllerRoots,
+                liveSurfaceIds = captured.liveSurfaceIds,
+            ),
         )
     }
 
@@ -1546,16 +1434,15 @@ internal data class CapturedSurface(
     /**
      * Capture the current surface for an explicit command. EDT only: this reads the same editor
      * state, through the same [captureSurface], as the automatic capture. Null when this listener
-     * no longer owns its projection (a Remote Dev frontend surface took authority) or the editor
-     * projection is not settled yet.
+     * no longer owns its projection (a Remote Dev frontend surface took authority). An editor
+     * projection that has not settled yet is [publishCommandSurface]'s `surface_capture_deferred`.
      */
     internal fun captureCommandSurface(
         project: Project,
         preferredFile: VirtualFile?,
     ): CommandSurfaceCapture? {
         if (!projectionLive()) return null
-        return captureSurface(project = project, preferredFile = preferredFile)
-            ?.let(::CommandSurfaceCapture)
+        return CommandSurfaceCapture(captureSurface(project = project, preferredFile = preferredFile))
     }
 
     /**
@@ -1577,7 +1464,13 @@ internal data class CapturedSurface(
         val captured = capture.captured
         val pending =
             try {
-                resolveSurface(captured)
+                when (val resolution = resolveSurface(captured)) {
+                    is SurfaceResolution.Ready -> resolution.pending
+                    is SurfaceResolution.Deferred ->
+                        return CommandSurfacePublication.Unavailable(
+                            "surface_capture_deferred reason=${resolution.reason}",
+                        )
+                }
             } catch (e: Exception) {
                 return CommandSurfacePublication.Unavailable("surface_resolution_failed: ${e.message}")
             }

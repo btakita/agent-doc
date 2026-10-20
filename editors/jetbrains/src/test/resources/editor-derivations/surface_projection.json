@@ -1,0 +1,750 @@
+{
+  "derivation": "surface_projection",
+  "about": "GH #326 phase 2 parity cases. The Rust `surface_projection` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (SurfaceProjectionTest) both answer every case. `remote_fold` is the Remote Dev fold's answer for a case whose layout is the remote one. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "cases": [
+    {
+      "name": "a two-window split publishes absolute columns with proximity-ordered open tabs",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 2,
+        "windows": [
+          {
+            "x": 0,
+            "y": 0,
+            "selected": "/repo/a.md",
+            "session_tabs": [
+              "/repo/a.md",
+              "/repo/c.md"
+            ]
+          },
+          {
+            "x": 640,
+            "y": 0,
+            "selected": "/repo/b.md",
+            "session_tabs": [
+              "/repo/b.md"
+            ]
+          }
+        ],
+        "history": [],
+        "manager_selected": [
+          "/repo/b.md"
+        ],
+        "open_session_documents": [
+          "/repo/a.md",
+          "/repo/b.md",
+          "/repo/c.md",
+          "/repo/d.md"
+        ],
+        "anchor_selected_session": "/repo/b.md",
+        "selected_text_editor_session": "/repo/b.md",
+        "preferred": "/repo/b.md",
+        "preferred_session_document": true,
+        "authority": "document_selection",
+        "remaining_selection_passes": 3
+      },
+      "expected": {
+        "outcome": "ready",
+        "reason": null,
+        "layout_source": "windows",
+        "surface": {
+          "focused": "/repo/b.md",
+          "visible": [
+            "/repo/a.md",
+            "/repo/b.md"
+          ],
+          "open": [
+            "/repo/b.md",
+            "/repo/a.md",
+            "/repo/c.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": false
+        }
+      }
+    },
+    {
+      "name": "a restored window without a selection defers",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 2,
+        "windows": [
+          {
+            "x": 0,
+            "y": 0,
+            "selected": "/repo/a.md",
+            "session_tabs": [
+              "/repo/a.md"
+            ]
+          },
+          {
+            "x": 640,
+            "y": 0,
+            "session_tabs": [
+              "/repo/b.md"
+            ]
+          }
+        ],
+        "open_session_documents": [
+          "/repo/a.md",
+          "/repo/b.md"
+        ]
+      },
+      "expected": {
+        "outcome": "deferred",
+        "reason": "backend_window_selection_incomplete windows=2 selected=2",
+        "layout_source": "none",
+        "surface": null
+      }
+    },
+    {
+      "name": "a measured client layout owns the Remote Dev surface",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [
+            {
+              "visible": [
+                "a.md"
+              ],
+              "selected": [
+                "a.md"
+              ],
+              "open": [
+                "a.md"
+              ]
+            }
+          ],
+          "focused": [
+            "a.md"
+          ]
+        },
+        "windows": [],
+        "manager_selected": [
+          "/repo/a.md"
+        ],
+        "open_session_documents": [
+          "/repo/a.md"
+        ],
+        "measured_layout_authority": true
+      },
+      "expected": {
+        "outcome": "deferred",
+        "reason": "frontend_measured_layout_authority",
+        "layout_source": "none",
+        "surface": null
+      }
+    },
+    {
+      "name": "a preferred file that is not an open session document defers",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 1,
+        "windows": [
+          {
+            "selected": "/repo/a.md",
+            "session_tabs": [
+              "/repo/a.md"
+            ]
+          }
+        ],
+        "open_session_documents": [
+          "/repo/a.md"
+        ],
+        "anchor_selected_session": "/repo/a.md",
+        "preferred": "/repo/Main.kt",
+        "preferred_session_document": false,
+        "authority": "document_selection",
+        "remaining_selection_passes": 3
+      },
+      "expected": {
+        "outcome": "deferred",
+        "reason": "preferred_file_not_open_session_document",
+        "layout_source": "none",
+        "surface": null
+      }
+    },
+    {
+      "name": "a selection the editor has not projected yet waits while settling passes remain",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 2,
+        "windows": [
+          {
+            "x": 0,
+            "y": 0,
+            "selected": "/repo/old.md",
+            "session_tabs": [
+              "/repo/old.md",
+              "/repo/new.md"
+            ]
+          },
+          {
+            "x": 640,
+            "y": 0,
+            "selected": "/repo/right.md",
+            "session_tabs": [
+              "/repo/right.md"
+            ]
+          }
+        ],
+        "history": [],
+        "manager_selected": [
+          "/repo/old.md",
+          "/repo/right.md"
+        ],
+        "open_session_documents": [
+          "/repo/old.md",
+          "/repo/new.md",
+          "/repo/right.md"
+        ],
+        "anchor_selected_session": "/repo/old.md",
+        "preferred": "/repo/new.md",
+        "preferred_session_document": true,
+        "previous": "/repo/old.md",
+        "authority": "document_selection",
+        "remaining_selection_passes": 2
+      },
+      "expected": {
+        "outcome": "deferred",
+        "reason": "preferred_document_not_in_current_projection",
+        "layout_source": "none",
+        "surface": null
+      }
+    },
+    {
+      "name": "a spent selection edge replaces the stale document in visible and columns",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 2,
+        "windows": [
+          {
+            "x": 0,
+            "y": 0,
+            "selected": "/repo/old.md",
+            "session_tabs": [
+              "/repo/old.md",
+              "/repo/new.md"
+            ]
+          },
+          {
+            "x": 640,
+            "y": 0,
+            "selected": "/repo/right.md",
+            "session_tabs": [
+              "/repo/right.md"
+            ]
+          }
+        ],
+        "history": [],
+        "manager_selected": [
+          "/repo/old.md",
+          "/repo/right.md"
+        ],
+        "open_session_documents": [
+          "/repo/old.md",
+          "/repo/new.md",
+          "/repo/right.md"
+        ],
+        "anchor_selected_session": "/repo/old.md",
+        "preferred": "/repo/new.md",
+        "preferred_session_document": true,
+        "previous": "/repo/old.md",
+        "authority": "document_selection",
+        "remaining_selection_passes": 0
+      },
+      "expected": {
+        "outcome": "ready",
+        "reason": null,
+        "layout_source": "windows",
+        "surface": {
+          "focused": "/repo/new.md",
+          "visible": [
+            "/repo/new.md",
+            "/repo/right.md"
+          ],
+          "open": [
+            "/repo/new.md",
+            "/repo/right.md",
+            "/repo/old.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/new.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/right.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": false
+        }
+      }
+    },
+    {
+      "name": "a local layout that omits the preferred document is withheld",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 2,
+        "windows": [
+          {
+            "x": 0,
+            "y": 0,
+            "selected": "/repo/a.txt",
+            "session_tabs": [
+              "/repo/a.txt"
+            ]
+          },
+          {
+            "x": 640,
+            "y": 0,
+            "selected": "/repo/b.md",
+            "session_tabs": [
+              "/repo/b.md"
+            ]
+          }
+        ],
+        "open_session_documents": [
+          "/repo/a.txt",
+          "/repo/b.md"
+        ],
+        "anchor_selected_session": "/repo/a.txt",
+        "preferred": "/repo/a.txt",
+        "preferred_session_document": true,
+        "authority": "document_selection",
+        "remaining_selection_passes": 3
+      },
+      "expected": {
+        "outcome": "ready",
+        "reason": null,
+        "layout_source": "windows",
+        "surface": {
+          "focused": "/repo/a.txt",
+          "visible": [
+            "/repo/a.txt",
+            "/repo/b.md"
+          ],
+          "open": [
+            "/repo/a.txt",
+            "/repo/b.md"
+          ],
+          "columns": [],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": false
+        }
+      }
+    },
+    {
+      "name": "Remote Dev joins the clients' visible documents and folds their split",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [
+            {
+              "visible": [
+                "a.md",
+                "b.md"
+              ],
+              "selected": [
+                "a.md"
+              ],
+              "open": [
+                "a.md",
+                "b.md",
+                "c.md"
+              ]
+            }
+          ],
+          "focused": [
+            "a.md"
+          ]
+        },
+        "backend_window_count": 0,
+        "windows": [],
+        "manager_selected": [
+          "/repo/a.md"
+        ],
+        "open_session_documents": [
+          "/repo/a.md",
+          "/repo/b.md",
+          "/repo/c.md"
+        ],
+        "selected_text_editor_session": "/repo/a.md",
+        "preferred": "/repo/a.md",
+        "preferred_session_document": true,
+        "authority": "document_selection",
+        "remaining_selection_passes": 3
+      },
+      "remote_fold": {
+        "columns": [
+          {
+            "files": [
+              "a.md"
+            ]
+          },
+          {
+            "files": [
+              "b.md"
+            ]
+          }
+        ],
+        "source": "remote_client_visible_editors",
+        "column_order": "retained"
+      },
+      "expected": {
+        "outcome": "ready",
+        "reason": null,
+        "layout_source": "remote",
+        "surface": {
+          "focused": "/repo/a.md",
+          "visible": [
+            "/repo/a.md",
+            "/repo/b.md"
+          ],
+          "open": [
+            "/repo/a.md",
+            "/repo/b.md",
+            "/repo/c.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "a.md"
+              ]
+            },
+            {
+              "files": [
+                "b.md"
+              ]
+            }
+          ],
+          "column_order": "retained",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": false
+        }
+      }
+    },
+    {
+      "name": "Remote Dev without split evidence publishes no columns",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [
+            {
+              "visible": [
+                "a.md"
+              ],
+              "selected": [
+                "a.md"
+              ],
+              "open": [
+                "a.md",
+                "b.md"
+              ]
+            }
+          ],
+          "focused": [
+            "a.md"
+          ]
+        },
+        "backend_window_count": 0,
+        "windows": [],
+        "manager_selected": [
+          "/repo/a.md"
+        ],
+        "open_session_documents": [
+          "/repo/a.md",
+          "/repo/b.md"
+        ],
+        "selected_text_editor_session": "/repo/a.md",
+        "authority": "layout",
+        "remaining_selection_passes": 3,
+        "preserve_focus": true
+      },
+      "remote_fold": {
+        "columns": [],
+        "source": "unknown",
+        "column_order": "unknown",
+        "reason": "no_unique_client_split_set"
+      },
+      "expected": {
+        "outcome": "ready",
+        "reason": null,
+        "layout_source": "remote",
+        "surface": {
+          "focused": "/repo/a.md",
+          "visible": [
+            "/repo/a.md"
+          ],
+          "open": [
+            "/repo/a.md",
+            "/repo/b.md"
+          ],
+          "columns": [],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "an unmeasured split keeps window order as unknown",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 2,
+        "windows": [
+          {
+            "selected": "/repo/b.md",
+            "session_tabs": [
+              "/repo/b.md"
+            ]
+          },
+          {
+            "selected": "/repo/a.md",
+            "session_tabs": [
+              "/repo/a.md"
+            ]
+          }
+        ],
+        "open_session_documents": [
+          "/repo/a.md",
+          "/repo/b.md"
+        ],
+        "anchor_selected_session": "/repo/b.md",
+        "authority": "layout",
+        "remaining_selection_passes": 3,
+        "preserve_focus": true
+      },
+      "expected": {
+        "outcome": "ready",
+        "reason": null,
+        "layout_source": "windows",
+        "surface": {
+          "focused": "/repo/b.md",
+          "visible": [
+            "/repo/b.md",
+            "/repo/a.md"
+          ],
+          "open": [
+            "/repo/b.md",
+            "/repo/a.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/b.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/a.md"
+              ]
+            }
+          ],
+          "column_order": "unknown",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "a frame that cannot be measured publishes membership without columns",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 2,
+        "windows": [
+          {
+            "selected": "/repo/b.md",
+            "session_tabs": [
+              "/repo/b.md"
+            ]
+          },
+          {
+            "selected": "/repo/a.md",
+            "session_tabs": [
+              "/repo/a.md"
+            ]
+          }
+        ],
+        "open_session_documents": [
+          "/repo/a.md",
+          "/repo/b.md"
+        ],
+        "anchor_selected_session": "/repo/b.md",
+        "authority": "layout",
+        "remaining_selection_passes": 3,
+        "preserve_focus": true,
+        "window_geometry_unavailable": true
+      },
+      "expected": {
+        "outcome": "ready",
+        "reason": null,
+        "layout_source": "none",
+        "surface": {
+          "focused": "/repo/b.md",
+          "visible": [
+            "/repo/b.md",
+            "/repo/a.md"
+          ],
+          "open": [
+            "/repo/b.md",
+            "/repo/a.md"
+          ],
+          "columns": [],
+          "column_order": "editor",
+          "force_reconcile": false,
+          "focus_only": false,
+          "preserve_focus": true
+        }
+      }
+    },
+    {
+      "name": "a single window is a known one-column layout",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 1,
+        "windows": [
+          {
+            "selected": "/repo/a.md",
+            "session_tabs": [
+              "/repo/a.md",
+              "/repo/b.md"
+            ]
+          }
+        ],
+        "open_session_documents": [
+          "/repo/a.md",
+          "/repo/b.md"
+        ],
+        "anchor_selected_session": "/repo/a.md",
+        "force_reconcile": true
+      },
+      "expected": {
+        "outcome": "ready",
+        "reason": null,
+        "layout_source": "windows",
+        "surface": {
+          "focused": "/repo/a.md",
+          "visible": [
+            "/repo/a.md"
+          ],
+          "open": [
+            "/repo/a.md",
+            "/repo/b.md"
+          ],
+          "columns": [
+            {
+              "files": [
+                "/repo/a.md"
+              ]
+            }
+          ],
+          "column_order": "editor",
+          "force_reconcile": true,
+          "focus_only": false,
+          "preserve_focus": false
+        }
+      }
+    },
+    {
+      "name": "a window showing only source files has no visible session document",
+      "input": {
+        "base_path": "/repo",
+        "remote": {
+          "project_root": "/repo",
+          "clients": [],
+          "focused": []
+        },
+        "backend_window_count": 1,
+        "windows": [
+          {
+            "selected": "/repo/Main.kt",
+            "session_tabs": []
+          }
+        ],
+        "open_session_documents": [
+          "/repo/a.md"
+        ]
+      },
+      "expected": {
+        "outcome": "deferred",
+        "reason": "no_visible_session_documents",
+        "layout_source": "none",
+        "surface": null
+      }
+    }
+  ]
+}

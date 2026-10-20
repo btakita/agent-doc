@@ -3,30 +3,9 @@ use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+mod backlog_signals;
 pub mod chat_prompt;
 pub mod harness_prompt;
-
-const BACKLOG_SIGNALS: &[&str] = &[
-    "tasks",
-    "todo",
-    "backlog",
-    "what's next",
-    "what should we do",
-    "what do we need",
-    "recommendations",
-    "recommend",
-    "next steps",
-    "action items",
-    "what's left",
-    "what remains",
-    "what else",
-    "add to backlog",
-    "add to pending",
-    "follow-up backlog",
-    "follow up backlog",
-    "follow-up items",
-    "follow up items",
-];
 
 pub fn prompt_requests_plan_work(
     prompt_targets: &[String],
@@ -45,7 +24,7 @@ pub fn prompt_requests_backlog_work(
 ) -> bool {
     effective_prompt_texts(prompt_targets, added_diff_lines, prompt_presets)
         .iter()
-        .any(|text| text_requests_backlog_work(text))
+        .any(|text| backlog_signals::text_requests_backlog_work(text))
 }
 
 pub fn requested_prompt_presets(
@@ -470,11 +449,6 @@ fn extract_hashtag_tokens(text: &str) -> Vec<String> {
     }
 
     tokens
-}
-
-fn text_requests_backlog_work(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    BACKLOG_SIGNALS.iter().any(|signal| lower.contains(signal))
 }
 
 fn text_requests_plan_work(text: &str) -> bool {

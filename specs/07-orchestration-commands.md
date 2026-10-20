@@ -40,7 +40,7 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 - The implementation reuses the same prompt/diff classifiers that power `preflight`.
 - `pending_mutations.resolve_existing` signals that a matching open backlog/icebox item will need `--done <id>` if completed this cycle.
 - For explicit `do #id` / `do [#id]` directives that resolve an existing tracked-work item, the planned finalize command includes the matching `--done <id>` argument so the harness closeout path does not rely on the agent remembering that flag manually.
-- `pending_mutations.expect_add` signals that the response likely needs new backlog capture.
+- `pending_mutations.expect_add` signals that the response likely needs new backlog capture. It uses the same backlog-request signals as the preflight capture gate, matched as whole prose words so a `tasks/...` path, a `todo_list.rs` file name, a `#todo-id` or a code span never sets it (SPEC.md).
 - `execution_scope=plan_backlog_only` suppresses repo implementation work for report/planning contracts such as `#agent-doc-bug`.
 - Lower-agent routing fields are deterministic structural hints, not authority
   to skip parent review. `dispatch_candidate=true` means the prompt is shaped

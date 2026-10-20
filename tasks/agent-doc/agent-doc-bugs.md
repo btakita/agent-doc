@@ -323,7 +323,30 @@ The proposed behavior is:
 - An overdue reminder appears at the next tool boundary.
 
 A hook cannot interrupt one continuously running eight-hour tool call; that would require timer-callback support from the harness. But during a normal long turn containing many tool calls, it can refresh status throughout the turn rather than waiting for closeout.
-<!-- agent:boundary:80584e35 -->
+
+### Re: Subagent completed: `subagent:issue316` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/316” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=1bab0222e16a2e68e3155888d977f99f3b6c066e740060088c37de681342dd53 -->
+> **Chat prompt (#chatprompt):** The interval should default to off. There should only be the loop interval when there is a value for the interval attribute
+
+> **Chat prompt (#chatprompt):** Perhaps sync can run with hooks? My issue was long running turns that had 1 or even 2 releases would not update agent:status until the very end of the turn. Today I had a turn last >8h.
+
+> **Chat prompt (#chatprompt):** Can agent-doc have hooks that occur during the turn?
+
+> **Chat prompt (#chatprompt):** I'm talking about agent-doc's lazily state. Can there be hooks or some states that can trigger sync?
+
+> **Chat prompt (#chatprompt):** Prepare a handoff document for Claude Code. We are nearly out of tokens.
+
+### Re: Claude Code handoff — gpt-5 · 2026-10-19T22:22-04:00
+
+Prepared the durable handoff at [agent-doc-bugs-claude-handoff-2026-10-19.md](agent-doc-bugs-claude-handoff-2026-10-19.md).
+
+The handoff records the intended Lazily design, exact worktrees and branch state, completed issue #316 commit and closure, the uncommitted interval implementation checkpoint, remaining tests and documentation work, serial integration order, install/push requirements, current release facts, queue claim state, and final agent-doc closeout procedure.
+
+Issue #316 is fixed in pushed commit `188fad6374b1d1cd2f79dac9fc708b4d77a1fcfb` and the issue is closed, but that commit still awaits integration. The interval work remains safely preserved and uncommitted in `/home/brian/worktrees/agent-doc-status-sync-interval-20261019`; its subagent was stopped to avoid concurrent edits during the Claude Code transfer.
+
+The intended behavior is now explicit: `sync` alone remains preflight-only; an explicit `interval` opts into mid-turn checks; the controller-owned Lazily graph derives and consumes the due edge; a harness hook only supplies/delivers safe-boundary observations; SQLite does not arbitrate live cadence. A single uninterrupted tool call still cannot be interrupted, but a long turn containing ordinary tool boundaries can receive the due sync prompt during the turn.
+<!-- agent:boundary:bb5db3da -->
 <!-- /agent:exchange -->
 
 <!--
@@ -331,7 +354,7 @@ A hook cannot interrupt one continuously running eight-hour tool call; that woul
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/316
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/316
 - 🚧 Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?
 <!-- /agent:queue -->
 

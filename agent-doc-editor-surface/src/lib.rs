@@ -94,6 +94,41 @@ impl SurfaceColumn {
     }
 }
 
+/// Where an [`EditorSurface`]'s left-to-right column order came from (GH #320).
+///
+/// The order is part of the observed state, so it carries its own provenance:
+/// only `Editor` (positive split geometry the editor measured) may order tmux.
+/// `Unknown` is membership without geometry (JetBrains Remote Dev, whose
+/// backend has no client split structure, or a local layout whose windows
+/// could not be measured); `Retained` is an order an upstream fold kept from
+/// its own memory, never measured. The controller derives the tmux order for
+/// both from the layout it already retains, exactly as for a `--col` route
+/// publication with the same label. The serde default is `Editor`, so a
+/// plugin that predates the field keeps its previous meaning on the wire.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceColumnOrder {
+    #[default]
+    Editor,
+    Unknown,
+    Retained,
+}
+
+impl SurfaceColumnOrder {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Unknown => "unknown",
+            Self::Retained => "retained",
+        }
+    }
+
+    /// Whether the column order is measured split geometry.
+    pub fn is_geometry(self) -> bool {
+        matches!(self, Self::Editor)
+    }
+}
+
 /// What the editor looks like right now, as reported by a plugin.
 ///
 /// This is an **observation**: every field is something the editor saw, never
@@ -119,6 +154,10 @@ pub struct EditorSurface {
     /// effect, but it must not change tmux pane membership or count.
     #[serde(default)]
     pub columns: Vec<SurfaceColumn>,
+    /// Provenance of `columns`' left-to-right order (GH #320). Absent means
+    /// `editor`, the pre-#320 meaning.
+    #[serde(default)]
+    pub column_order: SurfaceColumnOrder,
     /// The operator asked for a reconcile explicitly, so skip the unchanged-
     /// observation shortcut.
     #[serde(default)]
@@ -267,9 +306,14 @@ impl EditorSurface {
     /// Derived from the columns when the layout was detected, because column
     /// membership is what tmux mirrors; otherwise from the sorted, de-duplicated
     /// visible set, which is useful only as a non-structural observation identity.
+    ///
+    /// GH #320: when the column order is not measured geometry
+    /// ([`SurfaceColumnOrder::is_geometry`]), the order is not part of the
+    /// observation's identity, so a permutation of the same columns is the
+    /// same layout and implies no structural sync.
     pub fn visible_signature(&self) -> String {
         if !self.columns.is_empty() {
-            return column_signature(&self.columns);
+            return self.layout_signature();
         }
         let mut files: Vec<&String> = Vec::new();
         for file in &self.visible {
@@ -283,6 +327,22 @@ impl EditorSurface {
             .cloned()
             .collect::<Vec<_>>()
             .join(&COLUMN_SEPARATOR.to_string())
+    }
+
+    /// The column signature this surface can assert: ordered when the order is
+    /// geometry, otherwise the sorted set of column signatures (GH #320).
+    fn layout_signature(&self) -> String {
+        if self.column_order.is_geometry() {
+            return column_signature(&self.columns);
+        }
+        let mut columns: Vec<String> = self
+            .columns
+            .iter()
+            .map(|column| column_signature(std::slice::from_ref(column)))
+            .filter(|column| !column.is_empty())
+            .collect();
+        columns.sort();
+        columns.join(&COLUMN_SEPARATOR.to_string())
     }
 
     /// The columns a `Sync` should lay out.
@@ -311,12 +371,24 @@ impl EditorSurface {
 /// The editor side is compared column-wise only when the editor detected a
 /// layout; with no detected layout there is nothing to mirror, so the answer is
 /// unknown rather than "mismatched".
+///
+/// GH #320: an editor that does not know its split order cannot prove that
+/// tmux's order drifted, so without geometry only membership and the column
+/// shape are compared.
 pub fn layout_matches(surface: &EditorSurface, tmux: Option<&TmuxLayout>) -> Option<bool> {
     let tmux = tmux?;
     if surface.columns.is_empty() {
         return None;
     }
-    Some(column_signature(&surface.columns) == tmux.signature())
+    if surface.column_order.is_geometry() {
+        return Some(column_signature(&surface.columns) == tmux.signature());
+    }
+    let unordered = EditorSurface {
+        columns: tmux.columns.clone(),
+        column_order: surface.column_order,
+        ..EditorSurface::default()
+    };
+    Some(surface.layout_signature() == unordered.layout_signature())
 }
 
 /// What tmux should do about the current editor surface.
@@ -335,6 +407,11 @@ pub enum SurfaceIntent {
         columns: Vec<SurfaceColumn>,
         document: String,
         preserve_focus: bool,
+        /// Provenance of `columns`' order, copied from the observation
+        /// (GH #320). The controller orders a non-`editor` value against the
+        /// layout it retains instead of applying it verbatim.
+        #[serde(default)]
+        column_order: SurfaceColumnOrder,
     },
 }
 
@@ -509,6 +586,7 @@ impl SurfaceTracking {
                     columns: surface.sync_columns(),
                     document: surface.focused.clone(),
                     preserve_focus,
+                    column_order: surface.column_order,
                 },
             );
         }
@@ -532,6 +610,7 @@ impl SurfaceTracking {
                 columns: surface.sync_columns(),
                 document: surface.focused.clone(),
                 preserve_focus,
+                column_order: surface.column_order,
             },
         )
     }
@@ -551,6 +630,7 @@ mod tests {
             .flat_map(|column| column.files.iter().cloned())
             .collect::<Vec<_>>();
         EditorSurface {
+            column_order: Default::default(),
             focused: focused.to_string(),
             open: visible.clone(),
             visible,
@@ -574,11 +654,81 @@ mod tests {
         assert_eq!(tracking.focused_document.as_deref(), Some("/a.md"));
     }
 
+    /// GH #320, state propagation: a local surface with measured geometry
+    /// that changes from `[A | B]` to `[B | A]` is a new layout state, so it
+    /// derives a `Sync` carrying the new order and its `editor` provenance.
+    /// Nothing but the two states is involved.
+    #[test]
+    fn gh320_a_geometry_state_swap_derives_a_sync_in_the_new_order() {
+        let (tracking, _) = SurfaceTracking::default()
+            .advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
+        let swapped = surface("/a.md", &[&["/b.md"], &["/a.md"]]);
+        assert_eq!(swapped.column_order, SurfaceColumnOrder::Editor);
+        let (_, intent) = tracking.advance(&swapped, MATCHES);
+        assert_eq!(
+            intent,
+            SurfaceIntent::Sync {
+                columns: vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"])],
+                document: "/a.md".to_string(),
+                preserve_focus: false,
+                column_order: SurfaceColumnOrder::Editor,
+            }
+        );
+        // tmux still showing the old order is drift for a geometry surface.
+        let tmux = TmuxLayout {
+            columns: vec![SurfaceColumn::new(["/a.md"]), SurfaceColumn::new(["/b.md"])],
+        };
+        assert_eq!(layout_matches(&swapped, Some(&tmux)), Some(false));
+    }
+
+    /// GH #320, Remote Dev: the same two states without geometry are one
+    /// membership, so the order permutation implies no structural sync and
+    /// tmux in either order is not drift. The surface never claims an order
+    /// it cannot know; the controller keeps the order it retains.
+    #[test]
+    fn gh320_a_remote_state_without_geometry_never_claims_an_order() {
+        let remote = |columns: &[&[&str]]| EditorSurface {
+            column_order: SurfaceColumnOrder::Unknown,
+            ..surface("/a.md", columns)
+        };
+        let before = remote(&[&["/a.md"], &["/b.md"]]);
+        let after = remote(&[&["/b.md"], &["/a.md"]]);
+        assert_eq!(before.visible_signature(), after.visible_signature());
+        let (tracking, first) = SurfaceTracking::default().advance(&before, MATCHES);
+        assert!(matches!(
+            first,
+            SurfaceIntent::Sync {
+                column_order: SurfaceColumnOrder::Unknown,
+                ..
+            }
+        ));
+        let (_, intent) = tracking.advance(&after, MATCHES);
+        assert_eq!(intent, SurfaceIntent::Idle);
+        let tmux = TmuxLayout {
+            columns: vec![SurfaceColumn::new(["/a.md"]), SurfaceColumn::new(["/b.md"])],
+        };
+        assert_eq!(layout_matches(&after, Some(&tmux)), Some(true));
+        // Membership and width still count: a different document is drift.
+        let other = TmuxLayout {
+            columns: vec![SurfaceColumn::new(["/a.md"]), SurfaceColumn::new(["/c.md"])],
+        };
+        assert_eq!(layout_matches(&after, Some(&other)), Some(false));
+        // A plugin that predates the field is read as geometry (`editor`).
+        let legacy: EditorSurface = serde_json::from_value(serde_json::json!({
+            "focused": "/a.md",
+            "visible": ["/a.md"],
+            "columns": [{"files": ["/a.md"]}],
+        }))
+        .unwrap();
+        assert_eq!(legacy.column_order, SurfaceColumnOrder::Editor);
+    }
+
     #[test]
     fn an_undetected_layout_never_changes_pane_membership() {
         // GH #105: visible files are not structural authority. Remote Dev can
         // report one focused file while hiding any number of frontend splits.
         let undetected = EditorSurface {
+            column_order: Default::default(),
             focused: "/b.md".to_string(),
             visible: vec![
                 "/b.md".to_string(),

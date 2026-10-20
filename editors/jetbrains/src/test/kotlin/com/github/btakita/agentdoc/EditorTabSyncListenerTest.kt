@@ -1286,6 +1286,65 @@ previousSelectionPath = "/repo/tasks/tsift.md",
 )
 }
 
+    /**
+     * GH #320: the issue's Remote Dev trace. The backend's own selection names no session
+     * document (`activeWindow=<none>`), but the remote client reports `visible=[b,a]`
+     * `selected=[b]`. The capture must keep that state instead of deferring with
+     * `no_visible_session_documents`.
+     */
+    @Test
+    fun `remote dev capture keeps the remote client state when the backend selection is empty`() {
+        val absolute =
+            mapOf(
+                "tasks/a.md" to "/repo/tasks/a.md",
+                "tasks/b.md" to "/repo/tasks/b.md",
+            )
+        assertEquals(
+            listOf("/repo/tasks/b.md", "/repo/tasks/a.md"),
+            EditorTabSyncListener.SurfaceReport.remoteClientVisibleSessionFiles(
+                backendVisible = emptyList(),
+                clientVisible = listOf(listOf("tasks/b.md", "tasks/a.md")),
+                clientSelected = listOf(listOf("tasks/b.md")),
+                absoluteByRelative = absolute,
+            ),
+        )
+        // The backend's own selection still counts, and a path that is not an open session
+        // document is never invented into the surface.
+        assertEquals(
+            listOf("/repo/tasks/a.md", "/repo/tasks/b.md"),
+            EditorTabSyncListener.SurfaceReport.remoteClientVisibleSessionFiles(
+                backendVisible = listOf("/repo/tasks/a.md"),
+                clientVisible = listOf(listOf("tasks/b.md", "tasks/gone.md")),
+                clientSelected = emptyList(),
+                absoluteByRelative = absolute,
+            ),
+        )
+    }
+
+    /** GH #320: the surface state names its column order provenance on the wire. */
+    @Test
+    fun `surface payload carries the layout column order provenance`() {
+        val columns = listOf(LayoutColumn(listOf("/repo/a.md")), LayoutColumn(listOf("/repo/b.md")))
+        val remote =
+            JsonParser.parseString(
+                surfaceJson(
+                    focusedFile = "/repo/a.md",
+                    visibleMdFiles = listOf("/repo/a.md", "/repo/b.md"),
+                    editorLayout = EditorLayout(columns, "unknown"),
+                ),
+            ).asJsonObject
+        assertEquals("unknown", remote.get("column_order").asString)
+        val local =
+            JsonParser.parseString(
+                surfaceJson(
+                    focusedFile = "/repo/a.md",
+                    visibleMdFiles = listOf("/repo/a.md", "/repo/b.md"),
+                    editorLayout = EditorLayout(columns),
+                ),
+            ).asJsonObject
+        assertEquals("editor", local.get("column_order").asString)
+    }
+
     @Test
     fun `editor snapshot leaves project root and controller work off the EDT`() {
         val source =

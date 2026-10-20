@@ -657,6 +657,7 @@ mod tests {
             .flat_map(|column| column.files.iter().cloned())
             .collect::<Vec<_>>();
         EditorSurface {
+            column_order: Default::default(),
             focused: focused.to_string(),
             open: visible.clone(),
             visible,

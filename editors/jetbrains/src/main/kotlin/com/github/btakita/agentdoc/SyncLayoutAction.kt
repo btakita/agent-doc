@@ -835,8 +835,11 @@ object LayoutDetector {
 
             // Return layout if at least 2 columns exist (even if some are empty).
             // Empty columns tell sync to leave that tmux pane position alone.
+            // GH #320: windows that share an origin were never measured, so their order is
+            // window-list order, not geometry. Label it so the controller orders it against the
+            // layout it retains instead of applying it verbatim.
             return if (columns.size >= 2) {
-                EditorLayout(columns)
+                EditorLayout(columns, measuredColumnOrder(snapshots))
             } else {
                 LOG.debug("[layout-detect] fewer than 2 columns after grouping; treating as single-column layout")
                 null
@@ -1177,6 +1180,14 @@ object LayoutDetector {
                 "(${it.x},${it.y}) ${it.file ?: "<none>"}"
             } + "] columns=" + columns.size + " [" +
             columns.joinToString(" | ") { it.files.joinToString(",").ifEmpty { "<empty>" } } + "]"
+
+    /**
+     * GH #320: the order provenance of columns built from [snapshots]. Only windows laid out at
+     * distinct origins are measured geometry (`editor`); a shared origin (a Remote Dev backend, or
+     * any unlaid-out splitter) leaves window-list order, which is `unknown`.
+     */
+    internal fun measuredColumnOrder(snapshots: List<LayoutWindowSnapshot>): String =
+        if (sharesOrigin(snapshots)) "unknown" else "editor"
 
     private fun sharesOrigin(snapshots: List<LayoutWindowSnapshot>): Boolean =
         snapshots.groupBy { it.x to it.y }.any { (_, atOrigin) -> atOrigin.size > 1 }

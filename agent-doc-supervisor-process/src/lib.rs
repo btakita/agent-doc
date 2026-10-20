@@ -61,6 +61,13 @@ pub const REEXEC_HARNESS_ENV: &str = "AGENT_DOC_REEXEC_HARNESS";
 /// replacement proves it is that image (not a subprocess that inherited the
 /// handoff environment) before its `#reexecptybridge` touches the master fd.
 pub const REEXEC_SUPERVISOR_PID_ENV: &str = "AGENT_DOC_REEXEC_SUPERVISOR_PID";
+/// The outgoing idle watch's queue auto-clear baseline (`#autoclearbaseline`),
+/// encoded by `QueueAutoClearGenerationBaseline::encode_reexec_handoff`. The
+/// adopted child keeps its context across `execve`, so the replacement image
+/// continues this baseline instead of recording a fresh one. Absent from an
+/// older outgoing image (or an oversized one): the replacement records a
+/// fresh baseline, as before.
+pub const REEXEC_QUEUE_AUTO_CLEAR_BASELINE_ENV: &str = "AGENT_DOC_REEXEC_QUEUE_AUTO_CLEAR_BASELINE";
 pub const ROUTE_BIN_ENV: &str = "AGENT_DOC_ROUTE_BIN";
 
 /// Start purpose the supervisor runs under after (re)entry.

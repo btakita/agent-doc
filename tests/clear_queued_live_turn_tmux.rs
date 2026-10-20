@@ -22,7 +22,9 @@
 //! Queue auto-clear (`#bgclearpolicy`) runs on the same harness: between two
 //! `go` queue items the supervisor types `/clear` into the same live process
 //! (once, after the first item's committed closeout), and `disable-auto-clear`
-//! drains both items without one.
+//! drains both items without one. A supervisor re-`execve` that adopts the
+//! live harness between the items keeps that pending clear
+//! (`#autoclearbaseline`).
 //!
 //! Live tmux: `#[ignore]`, run through `make tmux-ci`.
 
@@ -1037,6 +1039,84 @@ fn queue_auto_clear_counts_an_item_committed_before_the_watch_first_observes() {
         scenario.triggers() == 2
     });
     std::thread::sleep(Duration::from_secs(2));
+    scenario.assert_one_auto_clear_between_items(&harness, &background);
+}
+
+/// `#autoclearbaseline`: item one commits, and before the supervisor's idle
+/// watch acts on that boundary the supervisor re-`execve`s itself onto its
+/// binary, adopting the live harness (`via=execve_preserve_child`). The adopted
+/// harness is the same context, so the replacement image continues the
+/// outgoing baseline: item one's completion is still due its `/clear`, and item
+/// two goes to a fresh context. A baseline re-recorded by the replacement
+/// already contained item one's committed cycle and item two's head, so item
+/// two went to the same context with no clear.
+///
+/// Ordered by handshake, not timing: the watch's queue observation is held in
+/// both images (the hold survives the `execve` in the environment), the
+/// recycle is requested only after item one's `write --commit` returned, and
+/// the hold is released only once the replacement image has logged the
+/// baseline it carried.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec() {
+    let scenario = LiveClearScenario::start_with(
+        "queue-auto-clear-reexec-baseline",
+        &auto_clear_queue_doc("<!-- agent:queue go -->"),
+        true,
+    );
+    scenario.route_dispatch_turn();
+    let harness = scenario.harness_pids();
+    let background = scenario.background_pids();
+    scenario.answer_head("answer item one");
+    assert_eq!(
+        (scenario.triggers(), scenario.clears()),
+        (1, 0),
+        "the held watch has dispatched nothing: {:?}",
+        scenario.inputs()
+    );
+
+    // An explicit recycle request: the held watch re-execs at its next safe
+    // checkpoint, preserving the harness child.
+    agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
+        &scenario.doc,
+        "test_reexec_auto_clear_baseline",
+    )
+    .unwrap();
+    scenario.wait_until(
+        "the replacement image continued the outgoing auto-clear baseline",
+        || {
+            scenario.ops_log().lines().any(|line| {
+                line.contains("] queue_auto_clear_generation_baseline ")
+                    && line.contains("source=carried_across_reexec")
+            })
+        },
+    );
+    let ops = scenario.ops_log();
+    assert!(
+        ops.lines().any(
+            |line| line.contains("supervisor_binary_stale_self_recycled ")
+                && line.contains("via=execve_preserve_child")
+        ),
+        "the supervisor hot-reloaded in place: {}",
+        scenario.ops_log_tail()
+    );
+    assert_eq!(
+        scenario.harness_pids(),
+        harness,
+        "the re-exec adopted the live harness: {:?}",
+        scenario.inputs()
+    );
+    assert_eq!(
+        (scenario.triggers(), scenario.clears()),
+        (1, 0),
+        "nothing was dispatched across the re-exec: {:?}",
+        scenario.inputs()
+    );
+
+    scenario.release_queue_observation();
+    scenario.wait_until("the supervisor dispatched item two", || {
+        scenario.triggers() == 2
+    });
     scenario.assert_one_auto_clear_between_items(&harness, &background);
 }
 

@@ -702,6 +702,92 @@ pub(super) fn queue_auto_clear_generation_baseline(
     queue_auto_clear_baseline_now(path, head.as_deref())
 }
 
+/// Where a harness generation's queue auto-clear baseline came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum QueueAutoClearGenerationBaselineSource {
+    /// Recorded now, before the child is spawned or adopted.
+    Recorded,
+    /// Continued from the outgoing image across a preserved-child `execve`.
+    CarriedAcrossReexec,
+    /// A handoff arrived but the preserved child did not survive to be
+    /// adopted: the new child is a fresh context, so it was recorded instead.
+    CarriedDiscardedForFreshChild,
+}
+
+impl QueueAutoClearGenerationBaselineSource {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Recorded => "recorded",
+            Self::CarriedAcrossReexec => "carried_across_reexec",
+            Self::CarriedDiscardedForFreshChild => "carried_discarded_fresh_child",
+        }
+    }
+}
+
+/// `#autoclearbaseline`: the baseline a harness generation's watch starts from.
+///
+/// The baseline belongs to the harness CONTEXT. An adopted child (the
+/// supervisor re-`execve`d itself, `via=execve_preserve_child`) is the same
+/// context, so the outgoing image's baseline — refined or not — continues: an
+/// item that committed just before the re-exec but was not cleared yet is
+/// still unseen in it. Recording a fresh one here would take that item's
+/// committed cycle and the next head as already seen, and the next head would
+/// be dispatched without its clear. A spawned child is a fresh context and
+/// always gets a freshly recorded baseline.
+pub(super) fn queue_auto_clear_generation_start(
+    path: &Path,
+    carried: Option<agent_doc_queue::queue_auto_clear::QueueAutoClearGenerationBaseline>,
+    adopting_preserved_child: bool,
+) -> (
+    agent_doc_queue::queue_auto_clear::QueueAutoClearGenerationBaseline,
+    QueueAutoClearGenerationBaselineSource,
+) {
+    match carried {
+        Some(carried) if adopting_preserved_child => (
+            carried,
+            QueueAutoClearGenerationBaselineSource::CarriedAcrossReexec,
+        ),
+        carried => (
+            agent_doc_queue::queue_auto_clear::QueueAutoClearGenerationBaseline::recorded(
+                queue_auto_clear_generation_baseline(path),
+            ),
+            if carried.is_some() {
+                QueueAutoClearGenerationBaselineSource::CarriedDiscardedForFreshChild
+            } else {
+                QueueAutoClearGenerationBaselineSource::Recorded
+            },
+        ),
+    }
+}
+
+/// `#autoclearbaseline`: encode the watch's current baseline for a
+/// preserved-child `execve`. `None` (the replacement records a fresh baseline)
+/// when there is none or it is too large to pass through the environment.
+fn queue_auto_clear_reexec_handoff(
+    path: &Path,
+    baseline: Option<&agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline>,
+    refined: bool,
+) -> Option<String> {
+    let state = agent_doc_queue::queue_auto_clear::QueueAutoClearGenerationBaseline {
+        baseline: baseline?.clone(),
+        refined,
+    };
+    match state.encode_reexec_handoff() {
+        Ok(encoded) => Some(encoded),
+        Err(len) => {
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "queue_auto_clear_baseline_not_carried file={} reason=handoff_oversize bytes={len} max_bytes={} (#autoclearbaseline)",
+                    path.display(),
+                    agent_doc_queue::queue_auto_clear::QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_MAX_BYTES,
+                ),
+            );
+            None
+        }
+    }
+}
+
 /// `#autoclearbaseline`: fold the watch's first resolved queue observation into
 /// the generation baseline. A cycle that committed in between is kept unseen.
 fn refine_queue_auto_clear_generation_baseline(
@@ -1875,7 +1961,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
     file: String,
     harness: agent_doc_harness::HarnessConfig,
     mut session_log: Option<agent_doc_start_io::SessionLog>,
-    generation_auto_clear_baseline: agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline,
+    generation_auto_clear_baseline: agent_doc_queue::queue_auto_clear::QueueAutoClearGenerationBaseline,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("idle-queue-watch".into())
@@ -2029,8 +2115,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // The first resolved observation only refines its head.
             let mut auto_clear_baseline: Option<
                 agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline,
-            > = Some(generation_auto_clear_baseline);
-            let mut auto_clear_baseline_refined = false;
+            > = Some(generation_auto_clear_baseline.baseline);
+            // A baseline carried across a preserved-child `execve` may already
+            // have been refined by the outgoing image's watch.
+            let mut auto_clear_baseline_refined = generation_auto_clear_baseline.refined;
             let mut auto_clear_logged_key: Option<String> = None;
             // `#fbwire` Phase 2: the instant the convergence gate FIRST deferred the
             // current pending inter-item dispatch. `None` ⇒ not currently deferring;
@@ -4354,7 +4442,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 "[agent-doc] warning: failed to publish recycle-inflight before restart reexec: {err:#}"
                             );
                         }
-                        match supervisor_perform_reexec(&shared, true) {
+                        let queue_auto_clear_handoff = queue_auto_clear_reexec_handoff(
+                            &path,
+                            auto_clear_baseline.as_ref(),
+                            auto_clear_baseline_refined,
+                        );
+                        match supervisor_perform_reexec(
+                            &shared,
+                            true,
+                            queue_auto_clear_handoff.as_deref(),
+                        ) {
                             Ok(never) => match never {},
                             Err(SupervisorReexecError::Refused(refusal)) => {
                                 log_reexec_child_refusal(
@@ -5156,9 +5253,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // process (now serving the current binary) does not immediately
                         // re-recycle in a loop.
                         agent_doc_supervisor_io::recycle_request::clear_recycle_request(&file);
+                        let queue_auto_clear_handoff = queue_auto_clear_reexec_handoff(
+                            &path,
+                            auto_clear_baseline.as_ref(),
+                            auto_clear_baseline_refined,
+                        );
                         match supervisor_perform_reexec(
                             &shared,
                             !open_cycle_preserved_child_refresh,
+                            queue_auto_clear_handoff.as_deref(),
                         ) {
                             Ok(never) => match never {},
                             Err(SupervisorReexecError::Refused(refusal)) => {
@@ -8546,6 +8649,144 @@ mod tests {
             queue_auto_clear_boundary(&doc, &shared, &harness, &refined, &head_b),
             QueueAutoClearDecision::SkipComposerUnobservable,
             "A's completion is due a clear; only the composer gate remains"
+        );
+    }
+
+    /// `#autoclearbaseline`: the supervisor re-`execve`s itself and adopts the
+    /// live harness child (`via=execve_preserve_child`) after item A committed
+    /// but before its watch reached A's boundary. The adopted child is the
+    /// same context, so the replacement image continues the outgoing
+    /// baseline; re-recording one at reentry swallowed A's clear.
+    #[test]
+    fn queue_auto_clear_generation_start_carries_the_baseline_across_a_preserved_child_reexec() {
+        use agent_doc_queue::queue_auto_clear::{
+            QueueAutoClearDecision, QueueAutoClearGenerationBaseline,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("task.md");
+        let both = "<!-- agent:queue go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n";
+        let advanced = "<!-- agent:queue go -->\n- do [#b]\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, both).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            both,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "claude",
+            None,
+            None,
+            None,
+        );
+        let harness = agent_doc_harness::HarnessConfig::claude();
+        let head_a = supervisor_drainable_head(&doc, both).unwrap();
+        let head_b = supervisor_drainable_head(&doc, advanced).unwrap();
+
+        // The outgoing image: its generation baseline, refined by the watch's
+        // first observation while item A was the head.
+        let (outgoing, source) = queue_auto_clear_generation_start(&doc, None, false);
+        assert_eq!(source, QueueAutoClearGenerationBaselineSource::Recorded);
+        let outgoing = QueueAutoClearGenerationBaseline {
+            baseline: refine_queue_auto_clear_generation_baseline(
+                &doc,
+                outgoing.baseline,
+                Some(&head_a),
+            ),
+            refined: true,
+        };
+
+        // Item A commits; the supervisor re-execs before its watch acts on it.
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(both), Some(both)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(both),
+            Some(advanced),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(advanced),
+            Some(advanced),
+        )
+        .unwrap();
+        std::fs::write(&doc, advanced).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            advanced,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let handoff = queue_auto_clear_reexec_handoff(&doc, Some(&outgoing.baseline), true)
+            .expect("a small baseline is carried");
+        let carried = QueueAutoClearGenerationBaseline::decode_reexec_handoff(&handoff);
+
+        // The replacement adopts the preserved child: the baseline continues,
+        // already refined, and A's completion is still due its clear.
+        let (continued, source) = queue_auto_clear_generation_start(&doc, carried.clone(), true);
+        assert_eq!(
+            source,
+            QueueAutoClearGenerationBaselineSource::CarriedAcrossReexec
+        );
+        assert_eq!(continued, outgoing);
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &continued.baseline, &head_b),
+            QueueAutoClearDecision::SkipComposerUnobservable,
+            "A's completion is due a clear; only the composer gate remains"
+        );
+
+        // A baseline re-recorded at reentry (the pre-fix behavior) — and
+        // refined at the replacement watch's first observation — swallows it.
+        let (rerecorded, _) = queue_auto_clear_generation_start(&doc, None, true);
+        let rerecorded =
+            refine_queue_auto_clear_generation_baseline(&doc, rerecorded.baseline, Some(&head_b));
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &rerecorded, &head_b),
+            QueueAutoClearDecision::SkipNoCompletedItem
+        );
+
+        // The preserved child died across the exec: the new child is a fresh
+        // context and gets a freshly recorded baseline, never the carried one.
+        let (fresh, source) = queue_auto_clear_generation_start(&doc, carried, false);
+        assert_eq!(
+            source,
+            QueueAutoClearGenerationBaselineSource::CarriedDiscardedForFreshChild
+        );
+        assert!(!fresh.refined);
+        assert_eq!(fresh.baseline, queue_auto_clear_generation_baseline(&doc));
+    }
+
+    /// `#autoclearbaseline`: a head too large for one environment string is
+    /// not carried (an `E2BIG` exec would disable the hot-reload); the
+    /// replacement records a fresh baseline instead.
+    #[test]
+    fn queue_auto_clear_reexec_handoff_refuses_an_oversized_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(&doc, "").unwrap();
+        assert_eq!(queue_auto_clear_reexec_handoff(&doc, None, false), None);
+        let huge = agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline {
+            committed_cycle_id: None,
+            head: Some("x".repeat(
+                agent_doc_queue::queue_auto_clear::QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_MAX_BYTES,
+            )),
+        };
+        assert_eq!(
+            queue_auto_clear_reexec_handoff(&doc, Some(&huge), true),
+            None
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("queue_auto_clear_baseline_not_carried")
+                && ops.contains("reason=handoff_oversize"),
+            "{ops}"
         );
     }
 

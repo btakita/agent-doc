@@ -937,6 +937,25 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   an externally dispatched item committed), the generation-start baseline is
   kept, so that completion still earns its clear instead of being counted as
   already seen (CI 39463326025 dispatched item two with no `/clear` that way).
+  A harness generation is the harness CONTEXT, not the supervisor process: when
+  the supervisor re-`execve`s itself and adopts the live child
+  (`via=execve_preserve_child`, a stale-binary/explicit recycle or a
+  restart-drain reexec), the outgoing image hands its current baseline and
+  whether it was already refined to the replacement through
+  `AGENT_DOC_REEXEC_QUEUE_AUTO_CLEAR_BASELINE`, and the replacement's watch
+  continues it instead of recording a new one. An item that committed just
+  before the re-exec but had not been cleared yet therefore still earns its
+  clear; a baseline re-recorded at reentry would already contain that item's
+  committed cycle and the next head. The replacement logs
+  `queue_auto_clear_generation_baseline source=carried_across_reexec`. The
+  handoff is consumed at every start (it never reaches a harness child) and is
+  honored only when the preserved child is actually adopted: a child that died
+  across the exec, or a harness change, starts a fresh context and records a
+  fresh baseline (`source=carried_discarded_fresh_child`). An unreadable
+  handoff, an older outgoing image without one, or a baseline whose encoding
+  exceeds 64 KiB (an oversized environment string would fail the `execve` with
+  `E2BIG` and disable the hot-reload; `queue_auto_clear_baseline_not_carried
+  reason=handoff_oversize`) falls back to recording a fresh baseline.
   The baseline is re-taken whenever a clear is sent or settles, so a boundary is
   cleared at most once and a failed or unobserved clear is never retried into
   the pane. It never clears mid-turn

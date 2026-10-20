@@ -14,7 +14,8 @@ use agent_doc_supervisor::{
 use agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState;
 use agent_doc_supervisor_process::{
     REEXEC_CAPABILITY_PROOF_CONTRACT_ENV, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV,
-    REEXEC_REDISPATCH_IF_CHILD_DIED_ENV, REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV, ReexecState,
+    REEXEC_QUEUE_AUTO_CLEAR_BASELINE_ENV, REEXEC_REDISPATCH_IF_CHILD_DIED_ENV,
+    REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV, ReexecState,
     io_threads::{spawn_reader_thread, spawn_writer_thread},
     reentry_route_owned_start_purpose, resize,
 };
@@ -1154,6 +1155,28 @@ pub fn run_with_reap_policy_resume_and_harness(
             .as_deref(),
     );
     unsafe { std::env::remove_var(REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV) };
+    // `#autoclearbaseline`: the outgoing image's queue auto-clear baseline. It
+    // is continued only if the preserved child is actually adopted (below), and
+    // is consumed here on every start so it never reaches a harness child.
+    let carried_auto_clear_env = std::env::var(REEXEC_QUEUE_AUTO_CLEAR_BASELINE_ENV).ok();
+    unsafe { std::env::remove_var(REEXEC_QUEUE_AUTO_CLEAR_BASELINE_ENV) };
+    let mut carried_auto_clear_baseline = carried_auto_clear_env.as_deref().and_then(|value| {
+        let decoded =
+            agent_doc_queue::queue_auto_clear::QueueAutoClearGenerationBaseline::decode_reexec_handoff(
+                value,
+            );
+        if decoded.is_none() {
+            agent_doc_ops_log_io::log_op(
+                &reentry_file,
+                &format!(
+                    "queue_auto_clear_baseline_not_carried file={} reason=handoff_unreadable bytes={} (#autoclearbaseline)",
+                    reentry_file.display(),
+                    value.len(),
+                ),
+            );
+        }
+        decoded
+    });
     if pending_adopt.is_some() {
         unsafe {
             std::env::remove_var(REEXEC_CHILD_PID_ENV);
@@ -2052,7 +2075,37 @@ pub fn run_with_reap_policy_resume_and_harness(
         // `#autoclearbaseline`: record the queue auto-clear baseline before the
         // child exists, so an item dispatched to this generation (Run Agent
         // Doc, an operator prompt) cannot complete before it is taken.
-        let generation_auto_clear_baseline = idle_watch::queue_auto_clear_generation_baseline(file);
+        // On a preserved-child reentry the adopted child is the same context, so
+        // the outgoing image's baseline continues instead.
+        let (generation_auto_clear_baseline, auto_clear_baseline_source) =
+            idle_watch::queue_auto_clear_generation_start(
+                file,
+                carried_auto_clear_baseline.take(),
+                adopting_preserved_child,
+            );
+        if auto_clear_baseline_source
+            != idle_watch::QueueAutoClearGenerationBaselineSource::Recorded
+        {
+            let event = format!(
+                "queue_auto_clear_generation_baseline file={} source={} refined={} committed_cycle={} head_sha256={} (#autoclearbaseline)",
+                file.display(),
+                auto_clear_baseline_source.as_str(),
+                generation_auto_clear_baseline.refined,
+                generation_auto_clear_baseline
+                    .baseline
+                    .committed_cycle_id
+                    .as_deref()
+                    .unwrap_or("<none>"),
+                generation_auto_clear_baseline
+                    .baseline
+                    .head
+                    .as_deref()
+                    .map(agent_doc_hash::content_hash)
+                    .unwrap_or_else(|| "<none>".to_string()),
+            );
+            log_event(&mut session_log, &event);
+            agent_doc_ops_log_io::log_op(file, &event);
+        }
 
         // Build PtySpawnConfig and spawn child under pty
         let cfg = PtySpawnConfig {

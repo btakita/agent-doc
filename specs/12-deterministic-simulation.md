@@ -182,9 +182,17 @@ until that margin holds.
 
 A transport deadline compiled short for tests (the 2s test-mode controller RPC
 deadline) exists so that an absent or silent peer fails fast. Against a peer
-the test has proven live, it is only a hang ceiling. Controller RPCs to a socket
+the test has proven live, it is only a hang ceiling. Requests to a socket
 served by an in-process test state actor (`start_state_actor_for_tests`) wait
-up to 30s. Fixtures serve their RPCs from such a warm actor, not from a
+up to 30s on both actor transports: the controller RPC client and the direct
+state-wire transport (`send_ndjson_request_to_actor`, which carries the 250ms
+editor-op projection and checkpoint budgets). The warm-socket registry and the
+one deadline policy (`actor_response_timeout`) live in `agent-doc-state-wire`
+so the two transports cannot drift; a registry only the controller client
+consulted let a loaded `make check` fail a binary-owned capture resume with
+`no response from Lazily actor within 250ms` from a live warm actor. Every
+other socket, and every build without `test-support`, keeps the production
+budget. Fixtures serve their RPCs from such a warm actor, not from a
 cold-launched detached controller. Test setup that only needs a fact recorded
 uses the retaining or state-deciding production path (`record_editor_ops_retaining`
 plus `wait_for_retained_editor_ops`, `consume_replayed_editor_op_epoch`). It does

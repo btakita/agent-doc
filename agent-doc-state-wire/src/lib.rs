@@ -421,16 +421,91 @@ fn is_recv_timeout(err: &std::io::Error) -> bool {
 
 impl std::error::Error for ActorRequestError {}
 
+/// Sockets currently served by an in-process test state actor
+/// (`agent_doc_controller_io::project_controller::start_state_actor_for_tests`).
+///
+/// The registry lives here, below controller I/O, because two transports reach
+/// a Lazily actor: the controller RPC client and
+/// [`send_ndjson_request_to_actor`]. Both must apply one live-peer policy
+/// ([`actor_response_timeout`]); a registry only the controller client
+/// consulted left this transport failing a warm actor at its short production
+/// budget (the 250ms editor-op projection read) under host load.
+#[cfg(any(test, feature = "test-support"))]
+pub mod warm_test_actor_sockets {
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    /// The hang ceiling that replaces a shorter response deadline for a socket
+    /// a warm test actor serves. It stays well under nextest's 180s per-test
+    /// guard, so a genuinely wedged actor still fails the test.
+    pub const RESPONSE_HANG_CEILING: Duration = Duration::from_secs(30);
+
+    static SOCKETS: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+    fn key(socket: &Path) -> PathBuf {
+        socket
+            .canonicalize()
+            .unwrap_or_else(|_| socket.to_path_buf())
+    }
+
+    fn sockets() -> std::sync::MutexGuard<'static, BTreeSet<PathBuf>> {
+        SOCKETS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Register `socket` as served by a live in-process test actor. Call it
+    /// after the listener is bound so the path canonicalizes to the key the
+    /// clients' lookups compute. Returns that key for [`unregister`].
+    pub fn register(socket: &Path) -> PathBuf {
+        let key = key(socket);
+        sockets().insert(key.clone());
+        key
+    }
+
+    pub fn unregister(key: &Path) {
+        sockets().remove(key);
+    }
+
+    pub fn serves(socket: &Path) -> bool {
+        let sockets = sockets();
+        !sockets.is_empty() && sockets.contains(&key(socket))
+    }
+}
+
+/// The response deadline for one request to the Lazily actor on `socket`.
+///
+/// `#remainingwallclock`: a short transport deadline exists so that an absent
+/// or silent actor fails fast. A socket served by an in-process test state
+/// actor is known to be live, so a slow answer there is host load, not absence,
+/// and the deadline is only a hang ceiling
+/// ([`warm_test_actor_sockets::RESPONSE_HANG_CEILING`]). Every other socket,
+/// and every build without the `test-support` feature, keeps `timeout`.
+pub fn actor_response_timeout(socket: &Path, timeout: Duration) -> Duration {
+    #[cfg(any(test, feature = "test-support"))]
+    if warm_test_actor_sockets::serves(socket) {
+        return timeout.max(warm_test_actor_sockets::RESPONSE_HANG_CEILING);
+    }
+    let _ = socket;
+    timeout
+}
+
 /// Send one state-wire NDJSON request to an explicitly addressed Lazily actor.
 ///
 /// Protocol envelopes remain owned by the caller. Keeping this transport below
 /// controller I/O lets state producers update a live actor without introducing
 /// a dependency cycle back to the controller runtime.
+///
+/// `response_timeout` passes through [`actor_response_timeout`], so a warm
+/// in-process test actor is waited on up to its hang ceiling.
 pub fn send_ndjson_request_to_actor(
     socket_path: &Path,
     message: &serde_json::Value,
     response_timeout: Duration,
 ) -> Result<String, ActorRequestError> {
+    let response_timeout = actor_response_timeout(socket_path, response_timeout);
     let name = socket_path
         .to_fs_name::<GenericFilePath>()
         .map_err(|err| ActorRequestError::Protocol(err.into()))?;
@@ -1843,6 +1918,72 @@ mod tests {
             "Timeout Display must read as a timeout: {err}"
         );
         let _ = handle.join();
+    }
+
+    /// Serve one request on a fresh socket, answering only after `delay` has
+    /// passed since the request was read. The client's recv window opens before
+    /// it writes the request, so with `delay` above the client's budget the
+    /// answer can only arrive after that budget expired, whatever the host load.
+    fn late_answering_actor(
+        dir: &Path,
+        delay: Duration,
+    ) -> (std::path::PathBuf, std::thread::JoinHandle<()>) {
+        use interprocess::local_socket::{ListenerOptions, ToFsName, traits::Listener as _};
+
+        let socket_path = dir.join("actor.sock");
+        let name = socket_path.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let handle = std::thread::spawn(move || {
+            let Ok(stream) = listener.accept() else {
+                return;
+            };
+            let (reader_half, mut writer_half) = stream.split();
+            let mut request = String::new();
+            let _ = BufReader::new(reader_half).read_line(&mut request);
+            std::thread::sleep(delay);
+            let _ = writer_half.write_all(b"{\"ok\":true}\n");
+            let _ = writer_half.flush();
+        });
+        (socket_path, handle)
+    }
+
+    /// `#remainingwallclock` applies to this transport too: against a socket a
+    /// warm in-process test actor serves, a short production budget (the 250ms
+    /// editor-op projection read) is only a hang ceiling. Before the registry
+    /// moved here, only the controller RPC client consulted it, and a loaded
+    /// `make check` failed `binary_owned_resume_commits_one_durable_capture_exactly_once`
+    /// with `no response from Lazily actor within 250ms` from a live warm actor.
+    ///
+    /// The control half proves the same late answer still times out on an
+    /// unregistered socket, so the registered half is not vacuous and the
+    /// production fast-fail is unchanged.
+    #[test]
+    fn warm_test_actor_socket_waits_past_short_budget_others_fail_fast() {
+        let budget = Duration::from_millis(100);
+        let request = serde_json::json!({ "command": "document_state_projection" });
+
+        let warm_dir = tempfile::TempDir::new().unwrap();
+        let (warm_socket, warm_server) = late_answering_actor(warm_dir.path(), budget * 3);
+        let key = warm_test_actor_sockets::register(&warm_socket);
+        assert_eq!(
+            actor_response_timeout(&warm_socket, budget),
+            warm_test_actor_sockets::RESPONSE_HANG_CEILING
+        );
+        let answered = send_ndjson_request_to_actor(&warm_socket, &request, budget);
+        warm_test_actor_sockets::unregister(&key);
+        assert_eq!(
+            answered.expect("a warm test actor's late answer is awaited"),
+            "{\"ok\":true}"
+        );
+        warm_server.join().unwrap();
+
+        let cold_dir = tempfile::TempDir::new().unwrap();
+        let (cold_socket, cold_server) = late_answering_actor(cold_dir.path(), budget * 3);
+        assert_eq!(actor_response_timeout(&cold_socket, budget), budget);
+        let err = send_ndjson_request_to_actor(&cold_socket, &request, budget)
+            .expect_err("an unregistered socket keeps the short budget");
+        assert!(matches!(err, ActorRequestError::Timeout(_)), "{err:#}");
+        cold_server.join().unwrap();
     }
 
     /// `#ctrlselfrpc`: the controller identity must survive `thread::spawn`.

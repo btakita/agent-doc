@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_controller_io"
 
 [features]
-test-support = []
+test-support = ["agent-doc-state-wire/test-support"]
 
 [dependencies]
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.529" }

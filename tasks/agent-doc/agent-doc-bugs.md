@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 2
 <!-- status:sync -->
@@ -193,6 +193,16 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
    - close GH #321 and #322 on GitHub if they are still open (#323 is already closed).
 
 If the check fails, fix the cause in the integration worktree; never rerun it to green.
+
+### Re: v0.35.529 release blocked on a flaky tmux test — opus-5.5 · 2026-10-20T13:05-04:00
+
+**Not released yet.** The authoritative `make check` on the release tree passed: 11192/11192 nextest, exit 0. The release commit `2c210f307` `release: v0.35.529` is fast-forwarded onto `main`. But `make release` failed in its tmux-ci step (exit 2), so no tag was pushed and nothing was published. PyPI is still at 0.35.528.
+
+**The failure:** `sync::tests::find_live_owner_pane_prefers_latest_open_session_log_owner_over_stale_process_tree_match` panicked on its own fixture precondition (`sync.rs:8340`: "stale pane should expose a same-file process-tree match before session-log precedence is evaluated"). Run alone, it passes in 2.15s, so it depends on timing: it failed in the serial tmux-ci run while another subagent's `make check-fast` loaded the machine.
+
+**Per the fix-the-cause rule:** I didn't rerun it to green. A subagent on `fix/ownerpaneflake` (from `2c210f307`) is making the fixture wait for the observable process-tree event instead of a deadline, or fixing the production race if that is the real cause. It must prove the fix under CPU load. Then I re-run `make check` and `make release` as v0.35.529, since the tag is still unused. The release claim (`coordinator:release-0529`) is refreshed.
+
+**Also running:** `subagent:clauderesume` on `clauderesumeafterclear`.
 <!-- agent:boundary:232886f5 -->
 <!-- /agent:exchange -->
 
@@ -208,7 +218,7 @@ If the check fails, fix the cause in the integration worktree; never rerun it to
 - 📥 do [#sessioncrashnorestart]
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/323
 - 🚧 release + publish: Include PR #321-#323
-- do [#clauderesumeafterclear]
+- 🚧 do [#clauderesumeafterclear]
 <!-- /agent:queue -->
 
 ## Queue: Issues

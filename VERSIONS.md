@@ -27,6 +27,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.527
 
+- **Clear Session Context runs after it withdraws a never-submitted Run Agent
+  Doc trigger (GH #317).** A trigger typed into the Claude pane but never
+  submitted left its dispatch `accepted` with no turn-active lease, so every
+  clear was refused as `harness_turn_live` (`evidence=dispatch_turn_pending`)
+  until the 120 s turn-start limit. When the clear's cancelled-trigger step
+  withdraws the trigger and no lease appears within a 1 s window, it now settles
+  exactly the oldest accepted, never-started dispatch
+  (`lease=none reason=trigger_never_submitted`) and the clear proceeds; a
+  started dispatch, a newer queued Run, or a late lease still holds the clear.
 - **Residual-work lists reach the operator-todo advisory, and one
   `--todo-add` no longer silences it (GH #318).** The `#operatortodo` response
   advisory now treats each item of a bolded `**Still stale:**`,

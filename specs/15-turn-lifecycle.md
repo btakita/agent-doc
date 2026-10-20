@@ -812,9 +812,58 @@ was identified), or `claude_session_start_resume_record_failed ... error=`;
 refusals also go to the hook's stderr. The hook never fails the harness.
 
 The capture moves the document pointer, which a relaunch and Restart Agent
-(which re-validates current frontmatter) both read. A crash restart inside the
-same supervisor still uses the supervisor's in-memory lineage, which never
-refreshes from frontmatter (`specs/supervisor.md`).
+(which re-validates current frontmatter) both read.
+
+#### Crash respawn adopts the exited child's capture (`#claudecrashresumeafterclear`)
+
+A crash restart (or any other non-operator continue restart: Stop Agent then
+Enter, a controller-requested continue restart) inside the same supervisor
+resumes the supervisor's in-memory lineage, which never refreshes from
+frontmatter (`specs/supervisor.md`). That lineage is the id the supervisor
+minted or resumed at launch, so before this rule a crash after a `/clear`
+resumed the pre-clear conversation even though the hook had already moved
+`resume.claude`.
+
+The hook therefore also persists its proof. Before the frontmatter write (so a
+stalled or failed write cannot strand it), a proven capture is upserted as a
+`document_runtime_state` row of kind `claude_session_start_capture`, keyed by
+the actor's controller `document_id`
+(`agent_doc_supervisor::session_lineage::ClaudeSessionStartCapture`):
+`session_id`, `source`, the proven `supervisor_pid`, the current `generation`
+whose lease named it, the direct `harness_pid` that ran the hook, and that
+child's kernel start time (`/proc/<pid>/stat` field 22,
+`harness_start_ticks`). If the start time is unreadable no row is written
+(`claude_session_start_provenance_unrecorded ... reason=`), and the frontmatter
+write proceeds as before.
+
+The supervisor samples each hosted child's `(pid, start_ticks)` while it is
+alive. At the respawn edge of a Claude child, unless the restart is an operator
+Restart Agent (which takes current frontmatter instead), it reads the row once
+and adopts its `session_id` into the lineage only when every link of the hook's
+proof still holds
+(`claude_respawn_session_start_adoption`; each failure is a stable reason):
+
+- the row names this supervisor process (`capture_from_other_supervisor`);
+- this supervisor still holds the document's CURRENT-generation lease — the
+  same join the hook proved against — so a re-registration under a later
+  generation with the same pid still qualifies, but a lost lease does not
+  (`supervisor_not_current_lease_owner`);
+- the exited child's identity was sampled (`exited_child_identity_unknown`),
+  and the row names exactly that child, pid AND start time, so an earlier
+  child's capture or a recycled pid never qualifies
+  (`capture_from_other_harness_child`);
+- the id is non-empty (`capture_session_id_empty`).
+
+No row is the common, silent case. Adoption logs
+`claude_respawn_resume_adopted id= prior= source=session_start_capture` and a
+refusal `claude_respawn_resume_refused capture_id= reason=
+note=keeping_running_lineage` to the session log and ops.log; an unreadable
+`state.db` is a refusal (`reason=state_db_unreadable`). The adoption is a single
+read at the child-lifecycle edge, alongside the respawn's existing frontmatter
+and hook-projection reads, not a poll. A nested `claude -p` never writes the
+row, so it can never redirect a respawn. A respawned child that crashes again
+without a `/clear` is refused (`capture_from_other_harness_child`), which is
+correct: the lineage already holds the adopted id.
 
 Observed 2026-10-20 on agent-doc-bugs.md: the 14:28Z `/clear` started
 `e62ea89f`, the document kept `resume: ba846c4c`, and both the 15:25Z manual

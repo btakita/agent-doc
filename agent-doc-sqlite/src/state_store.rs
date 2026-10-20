@@ -2904,7 +2904,23 @@ pub struct PaneActorSupervisor {
     pub document_id: String,
     pub canonical_path: String,
     pub harness_id: String,
+    /// The actor's CURRENT generation (the one the lease was joined on).
+    pub generation: u64,
     pub supervisor_pid: Option<u32>,
+}
+
+fn pane_actor_supervisor_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<PaneActorSupervisor> {
+    let generation: i64 = row.get(3)?;
+    let pid: Option<i64> = row.get(4)?;
+    Ok(PaneActorSupervisor {
+        document_id: row.get(0)?,
+        canonical_path: row.get(1)?,
+        harness_id: row.get(2)?,
+        generation: u64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        supervisor_pid: pid.and_then(|pid| u32::try_from(pid).ok()),
+    })
 }
 
 /// Every non-`closed` actor whose current pane is `pane_id`, joined to the
@@ -2916,7 +2932,7 @@ pub fn load_pane_actor_supervisors_from_db(
 ) -> Result<Vec<PaneActorSupervisor>> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT d.document_id, d.canonical_path, d.harness_id, l.supervisor_pid
+        SELECT d.document_id, d.canonical_path, d.harness_id, d.generation, l.supervisor_pid
         FROM documents d
         LEFT JOIN supervisor_leases l
             ON l.document_id = d.document_id AND l.generation = d.generation
@@ -2924,17 +2940,33 @@ pub fn load_pane_actor_supervisors_from_db(
         ORDER BY d.document_id
         "#,
     )?;
-    let rows = stmt.query_map(params![pane_id], |row| {
-        let pid: Option<i64> = row.get(3)?;
-        Ok(PaneActorSupervisor {
-            document_id: row.get(0)?,
-            canonical_path: row.get(1)?,
-            harness_id: row.get(2)?,
-            supervisor_pid: pid.and_then(|pid| u32::try_from(pid).ok()),
-        })
-    })?;
+    let rows = stmt.query_map(params![pane_id], pane_actor_supervisor_from_row)?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .context("failed to load pane actor supervisors from controller state")
+}
+
+/// The non-`closed` actor for `document_id`, joined to its CURRENT generation's
+/// supervisor lease — the same join [`load_pane_actor_supervisors_from_db`]
+/// proves a `SessionStart` hook against, keyed by document instead of pane
+/// (`#claudecrashresumeafterclear`: a respawning supervisor re-checks it still
+/// owns that lease before adopting the hook's capture).
+pub fn load_document_actor_supervisor_from_db(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<Option<PaneActorSupervisor>> {
+    conn.query_row(
+        r#"
+        SELECT d.document_id, d.canonical_path, d.harness_id, d.generation, l.supervisor_pid
+        FROM documents d
+        LEFT JOIN supervisor_leases l
+            ON l.document_id = d.document_id AND l.generation = d.generation
+        WHERE d.document_id = ?1 AND d.actor_state != 'closed'
+        "#,
+        params![document_id],
+        pane_actor_supervisor_from_row,
+    )
+    .optional()
+    .context("failed to load document actor supervisor from controller state")
 }
 
 /// Rekey controller-owned document/session projections after a proven path

@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 9 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 2
 <!-- status:sync -->
@@ -261,7 +261,24 @@ The sdk-dev Codex turn itself is fine: it should answer `#tdue4decisions` in its
 - GH #324 and #325: reported; waiting to be integrated.
 - GH #326 and #327: still running.
 - v0.35.529: still waiting on the GitHub Release workflow.
-<!-- agent:boundary:27df8bc2 -->
+
+### Re: Subagent completed: `subagent:gh327` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/327” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=c5b5a269fbbeaabc1d5b161cd3807c26a0889cdf091af760fc0c0adcb0d62f0e -->
+
+### Re: Subagent completed: `subagent:gh326` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/326” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=77b361abfd695727759a55d7e318582ce8aba430623ffbee8fa6f5f404ab2233 -->
+> **Chat prompt (#chatprompt):** Will this release include fixes for PR #324-#327?
+
+### Re: Which release carries #324–#327
+
+**No, not the one publishing now.** v0.35.529 was tagged from `181bd291b2` before the #324–#327 subagents started, so it ships only #321–#323, the session-crash fixes, `#clauderesumeafterclear` and `#ownerpaneflake`. Its GitHub Release workflow is still waiting on the Intel macOS build.
+
+**#324–#327 will ship as v0.35.530**, the "release + publish: Include PR #324-#327" item you queued. All four are merged into `integrate/batch0530`, and `make check` is running on it. One thing gates that release: the main CI test `queue_auto_clear_types_clear_between_items_into_the_same_harness` failed on GitHub's runner, and `make release` runs the same tmux suite. The supervisor-heartbeat subagent is checking whether it's the same bug. I'll release v0.35.530 once that fix is merged too, or once it's shown to be separate and fixed on its own.
+
+Note on #326: v0.35.530 carries only its first part, the layout rules moved into the hot-reloaded library. Four more parts follow as queue items.
+<!-- agent:boundary:4c518cb0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -275,12 +292,12 @@ The sdk-dev Codex turn itself is fine: it should answer `#tdue4decisions` in its
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/322
 - 📥 do [#sessioncrashnorestart]
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/323
-- 🚧 release + publish: Include PR #321-#323
+- 🚧 release + publish: Include PR #321-#327
 - 📥 do [#clauderesumeafterclear]
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/324
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/325
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/326
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/327
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/326
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/327
 - release + publish: Include PR #324-#327
 - 🚧 [from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)
 <!-- /agent:queue -->

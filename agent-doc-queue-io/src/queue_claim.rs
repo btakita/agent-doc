@@ -461,6 +461,12 @@ pub fn claim_with_session(
     // never a bare string: the CLI reports it as-is instead of wrapping it in
     // the generic turn-failure notice.
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim")?;
+    let authorization = crate::subagent_dispatch::subagent_authorization_for_item(file, &target)?;
+    let dispatch_policy = (authorization.model.is_some() || authorization.effort.is_some())
+        .then_some(agent_doc_queue::queue_claim::SubagentDispatchPolicy {
+            model: authorization.model,
+            effort: authorization.effort,
+        });
     let identity = claim_identity(&target);
     // `#queueeffectidentity`: preflight annotates intentional repeated effects,
     // so an exact identity normally names one occurrence. Keep the count in the
@@ -477,11 +483,11 @@ pub fn claim_with_session(
         log_followed(file, &ledger.follow_edits(now, &heads));
         let stored = ledger
             .claims
-            .iter()
+            .iter_mut()
             .find(|claim| claim.identity == identity)
-            .cloned()
             .context("claimed item missing from the ledger after claim")?;
-        Ok((outcome, stored))
+        stored.dispatch_policy = dispatch_policy.clone();
+        Ok((outcome, stored.clone()))
     })?;
     if result.0 == ClaimOutcome::HeldByOther {
         bail!(
@@ -494,7 +500,7 @@ pub fn claim_with_session(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_claim outcome={:?} owner={} generation={} state={:?} expires_at={} item_bytes={} occurrences={occurrences} owner_session={}",
+            "queue_claim outcome={:?} owner={} generation={} state={:?} expires_at={} item_bytes={} occurrences={occurrences} owner_session={} model={} effort={}",
             result.0,
             result.1.owner,
             result.1.generation,
@@ -502,6 +508,18 @@ pub fn claim_with_session(
             result.1.expires_at_secs,
             result.1.item_text.len(),
             owner_session_log_token(result.1.owner_session.as_ref()),
+            result
+                .1
+                .dispatch_policy
+                .as_ref()
+                .and_then(|policy| policy.model.as_deref())
+                .unwrap_or("-"),
+            result
+                .1
+                .dispatch_policy
+                .as_ref()
+                .and_then(|policy| policy.effort.as_deref())
+                .unwrap_or("-"),
         ),
     );
     Ok(result)
@@ -1309,6 +1327,37 @@ mod tests {
             pinned,
             "the inner pin restores the outer one"
         );
+    }
+
+    #[test]
+    fn claim_records_resolved_subagent_dispatch_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nsession: sid\nagent_doc_format: template\n",
+                "subagent_model: default-model\nsubagent_effort: medium\n---\n\n",
+                "## Queue\n\n<!-- agent:queue subagents model=queue-model effort=high go -->\n",
+                "- fix policy\n<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        let (_, claimed) = claim(&doc, "fix policy", "subagent:policy", 3600).unwrap();
+        let policy = claimed.dispatch_policy.as_ref().unwrap();
+        assert_eq!(policy.model.as_deref(), Some("queue-model"));
+        assert_eq!(policy.effort.as_deref(), Some("high"));
+        let started = start_attempt(
+            &doc,
+            "fix policy",
+            "subagent:policy",
+            "worker:policy",
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        assert_eq!(started.dispatch_policy, claimed.dispatch_policy);
     }
 
     /// `#claimownerliveness`: the claiming session comes from the harness

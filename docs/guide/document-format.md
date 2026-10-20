@@ -58,6 +58,8 @@ presets:
   "#release":
     prompt: Prepare and publish the release.
     runbook: runbooks/release.md
+    model: opus
+    effort: high
 ---
 
 # Agent Doc project defaults
@@ -67,6 +69,10 @@ Invoke a preset by writing its name wherever you would submit a prompt. For
 example, add `#review` to the session's exchange, or add `- #review` to an active
 `agent:queue`. Agent Doc expands the name to its instruction during preflight;
 an associated runbook is loaded only when that preset is invoked.
+Structured presets may also declare `model` and `effort` for queue-dispatched
+subagents. Queue-marker overrides win, then item-specific and queue presets,
+then the session's `subagent_model` / `subagent_effort` defaults. Omitted policy
+inherits the harness coordinator settings.
 
 Project presets are live defaults, not a copied project template. Changes to
 `.agent-doc/project.md` apply to existing session documents without rewriting

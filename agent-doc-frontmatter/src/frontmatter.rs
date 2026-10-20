@@ -545,6 +545,14 @@ pub struct Frontmatter {
     /// When running under OpenCode, this takes precedence over `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opencode_model: Option<String>,
+    /// Default model for queue-dispatched subagents. A queue-local `model=`
+    /// attribute or structured prompt-preset `model:` overrides this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_model: Option<String>,
+    /// Default reasoning effort for queue-dispatched subagents. A queue-local
+    /// `effort=` attribute or structured prompt-preset `effort:` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     /// **Deprecated.** Tmux session name for pane affinity (e.g., "claude").
@@ -1111,11 +1119,11 @@ impl PromptPresets {
                 .into_iter()
                 .flat_map(|m| m.keys())
                 .filter_map(|k| k.as_str().map(str::to_string))
-                .filter(|k| k != "prompt" && k != "runbook")
+                .filter(|k| k != "prompt" && k != "runbook" && k != "model" && k != "effort")
                 .collect();
             if !ignored.is_empty() {
                 out.push(format!(
-                    "prompt_presets.{key}: supported fields are `prompt` and `runbook`; ignored field(s): {}",
+                    "prompt_presets.{key}: supported fields are `prompt`, `runbook`, `model`, and `effort`; ignored field(s): {}",
                     ignored.join(", ")
                 ));
             }
@@ -1131,6 +1139,27 @@ impl PromptPresets {
         raw.as_mapping()?
             .get(serde_yaml::Value::from("runbook"))?
             .as_str()
+    }
+
+    /// Optional subagent model declared by a structured preset.
+    pub fn model(&self, key: &str) -> Option<&str> {
+        self.structured_string_field(key, "model")
+    }
+
+    /// Optional subagent reasoning effort declared by a structured preset.
+    pub fn effort(&self, key: &str) -> Option<&str> {
+        self.structured_string_field(key, "effort")
+    }
+
+    fn structured_string_field(&self, key: &str, field: &str) -> Option<&str> {
+        let PresetValue::Structured(raw) = self.entries.get(key)?.as_ref()? else {
+            return None;
+        };
+        raw.as_mapping()?
+            .get(serde_yaml::Value::from(field))?
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
     }
 
     /// Associate an existing resolved preset with a project-relative runbook.
@@ -1476,6 +1505,8 @@ impl Frontmatter {
             || self.claude_model.is_some()
             || self.codex_model.is_some()
             || self.opencode_model.is_some()
+            || self.subagent_model.is_some()
+            || self.subagent_effort.is_some()
             || self.agent_args.is_some()
             || self.claude_args.is_some()
             || self.codex_args.is_some()
@@ -2587,6 +2618,8 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
             "claude_model" => fm.claude_model = val_str(),
             "codex_model" => fm.codex_model = val_str(),
             "opencode_model" => fm.opencode_model = val_str(),
+            "subagent_model" => fm.subagent_model = val_str(),
+            "subagent_effort" => fm.subagent_effort = val_str(),
             "branch" => fm.branch = val_str(),
             "tmux_session" => fm.tmux_session = val_str(),
             "agent_doc_mode" | "mode" | "response_mode" => fm.mode = val_str(),
@@ -4141,6 +4174,8 @@ mod tests {
             claude_model: None,
             codex_model: None,
             opencode_model: None,
+            subagent_model: None,
+            subagent_effort: None,
             branch: Some("dev".to_string()),
             tmux_session: None,
             terminal_host: None,

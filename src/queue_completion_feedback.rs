@@ -312,6 +312,7 @@ mod tests {
                 worker_id: "worker:sdk-feedback".into(),
                 started_at_secs: 10,
             }),
+            dispatch_policy: None,
             claimed_at_secs: 10,
             expires_at_secs: 20,
             owner_session: None,

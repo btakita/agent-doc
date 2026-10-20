@@ -868,6 +868,12 @@ pub struct QueueSubagentDispatch {
     /// The command that re-prints [`Self::authorization`]'s preamble later
     /// (`agent-doc queue brief`), e.g. after the claim.
     pub brief_command: String,
+    /// Resolved harness model override. Omitted to inherit harness defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Resolved harness reasoning-effort override. Omitted to inherit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// The operator's authorization for this item, resolved from the document
     /// (`#waypostauthorization`): the verbatim item, the backlog text an id
     /// head names, and the queue/item preset bodies. Its
@@ -887,6 +893,10 @@ pub fn queue_subagent_dispatch_entries(
     items
         .iter()
         .map(|item| {
+            let authorization =
+                agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content(
+                    file, content, item,
+                )?;
             Ok(QueueSubagentDispatch {
                 item: item.clone(),
                 claim_command: agent_doc_queue_io::subagent_dispatch::claim_command(
@@ -898,10 +908,9 @@ pub fn queue_subagent_dispatch_entries(
                 brief_command: agent_doc_queue_io::subagent_dispatch::brief_command(
                     &document, item,
                 ),
-                authorization:
-                    agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content(
-                        file, content, item,
-                    )?,
+                model: authorization.model.clone(),
+                effort: authorization.effort.clone(),
+                authorization,
             })
         })
         .collect()
@@ -917,7 +926,10 @@ in the claim's printed generation and that returned identity; this binary acknow
 `authorization.subagent_prompt_preamble` VERBATIM at the top of \
 the subagent prompt (`#waypostauthorization`): it quotes the operator's authorization (item, \
 backlog text, preset body) and the coordinator rules; never paraphrase it, and when its \
-`authorization.status` is `unresolved_preset` do not add authorization it lacks. Do NOT execute \
+`authorization.status` is `unresolved_preset` do not add authorization it lacks. \
+Pass an entry's optional `model` and `effort` to the harness subagent launch (Claude Code Agent \
+`model` / `effort`; Codex `spawn_agent` `model` / `reasoning_effort`). Omitted fields inherit the \
+harness defaults. Do NOT execute \
 them inline in queue order; they are excluded from `selected_queue_prompts`. If a worker sends a \
 `[#subagent-operator-request]` packet, copy the complete packet (request, context, and every choice) verbatim \
 into `agent:exchange`, present it from the main session, and return the operator's answer to the \
@@ -10281,6 +10293,9 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("🟡 dispatching to 🚧 running"));
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json["authorization"]["subagent_prompt_preamble"].is_string());
+        assert!(json.get("model").is_none(), "unset launch policy must be omitted");
+        assert!(json.get("effort").is_none(), "unset launch policy must be omitted");
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("`reasoning_effort`"));
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
             state.selected_queue_prompts,
@@ -10361,6 +10376,28 @@ mod tests {
                 .contains("No queue preset applies"),
             "{auth:?}"
         );
+    }
+
+    #[test]
+    fn queue_subagent_dispatch_emits_resolved_launch_policy() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue subagents model=opus effort=high go -->\n",
+            "- review docs\n<!-- /agent:queue -->\n",
+        );
+        let entries = queue_subagent_dispatch_entries(
+            &doc,
+            content,
+            &["review docs".to_string()],
+        )
+        .unwrap();
+        assert_eq!(entries[0].model.as_deref(), Some("opus"));
+        assert_eq!(entries[0].effort.as_deref(), Some("high"));
+        let json = serde_json::to_value(&entries[0]).unwrap();
+        assert_eq!(json["model"], "opus");
+        assert_eq!(json["effort"], "high");
     }
 
     /// Move every stored claim on `doc` to an already-lapsed TTL, writing the

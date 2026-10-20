@@ -64,6 +64,12 @@ pub struct PresetAuthorization {
     /// The preset's declared runbook path, as written in frontmatter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runbook: Option<String>,
+    /// Optional model policy carried by this structured preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Optional reasoning-effort policy carried by this structured preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 /// One tracked item an id-backed head names.
@@ -95,6 +101,12 @@ pub struct SubagentAuthorization {
     /// Presets that apply to the item (queue-scoped first, then item tokens).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presets: Vec<PresetAuthorization>,
+    /// Resolved harness model override for this dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Resolved harness reasoning-effort override for this dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// Paste this verbatim at the top of the subagent's prompt.
     pub subagent_prompt_preamble: String,
 }
@@ -189,12 +201,14 @@ pub fn subagent_authorization_with_presets(
         if presets.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) {
             return;
         }
-        let (body, runbook) = match &key {
+        let (body, runbook, model, effort) = match &key {
             Some(key) => (
                 presets_map.get(key.as_str()).cloned(),
                 presets_map.runbook(key).map(str::to_string),
+                presets_map.model(key).map(str::to_string),
+                presets_map.effort(key).map(str::to_string),
             ),
-            None => (None, None),
+            None => (None, None, None, None),
         };
         presets.push(PresetAuthorization {
             name,
@@ -202,6 +216,8 @@ pub fn subagent_authorization_with_presets(
             resolved: body.is_some(),
             body,
             runbook,
+            model,
+            effort,
         });
     };
     for (name, source) in queue_preset_names(content, components) {
@@ -251,6 +267,39 @@ pub fn subagent_authorization_with_presets(
     let queue_id = crate::queue_graph::QueueSet::parse(content, components)
         .ok()
         .and_then(|queues| queues.selected().map(|queue| queue.id.clone()));
+    let queue_policy = crate::queue_set::selected_component(content, components)
+        .ok()
+        .flatten()
+        .map(|queue| {
+            (
+                queue.attrs.get("model").map(String::as_str),
+                queue.attrs.get("effort").map(String::as_str),
+            )
+        });
+    let frontmatter = agent_doc_frontmatter::frontmatter::parse(content)
+        .ok()
+        .map(|(fm, _)| fm)
+        .unwrap_or_default();
+    let preset_policy = |field: fn(&PresetAuthorization) -> Option<&String>| {
+        presets
+            .iter()
+            .filter(|preset| preset.source == PresetSource::Item)
+            .chain(presets.iter().filter(|preset| preset.source != PresetSource::Item))
+            .find_map(field)
+            .map(String::as_str)
+    };
+    let clean = |value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let model = clean(queue_policy.and_then(|policy| policy.0))
+        .or_else(|| clean(preset_policy(|preset| preset.model.as_ref())))
+        .or_else(|| clean(frontmatter.subagent_model.as_deref()));
+    let effort = clean(queue_policy.and_then(|policy| policy.1))
+        .or_else(|| clean(preset_policy(|preset| preset.effort.as_ref())))
+        .or_else(|| clean(frontmatter.subagent_effort.as_deref()));
     let mut authorization = SubagentAuthorization {
         status,
         item: item.trim().to_string(),
@@ -258,6 +307,8 @@ pub fn subagent_authorization_with_presets(
         tracked_items,
         unresolved_ids,
         presets,
+        model,
+        effort,
         subagent_prompt_preamble: String::new(),
     };
     authorization.subagent_prompt_preamble = render_preamble(document, &authorization);
@@ -385,6 +436,18 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
                 preset.name
             ));
         }
+    }
+    if auth.model.is_some() || auth.effort.is_some() {
+        out.push_str("\nResolved subagent launch policy:\n");
+        if let Some(model) = &auth.model {
+            out.push_str(&format!("> model: {model}\n"));
+        }
+        if let Some(effort) = &auth.effort {
+            out.push_str(&format!("> effort: {effort}\n"));
+        }
+        out.push_str(
+            "Pass these values to the harness subagent launch: Claude Code Agent `model` / `effort`, or Codex `spawn_agent` `model` / `reasoning_effort`. Omit any value not listed here.\n",
+        );
     }
     if auth.status != AuthorizationStatus::UnresolvedPreset {
         out.push('\n');
@@ -514,6 +577,49 @@ mod tests {
         assert!(p.contains("without asking the operator to repeat those words"));
         assert!(p.contains("does not itself grant a harness-native tool permission"));
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
+    }
+
+    #[test]
+    fn dispatch_policy_resolves_queue_then_preset_then_frontmatter() {
+        let frontmatter = concat!(
+            "subagent_model: default-model\n",
+            "subagent_effort: medium\n",
+            "prompt_presets:\n",
+            "  '#review':\n",
+            "    prompt: review it\n",
+            "    model: preset-model\n",
+            "    effort: high\n",
+        );
+        let queue = doc(
+            frontmatter,
+            "subagents preset=#review model=queue-model effort=xhigh",
+            &["fix it"],
+            &[],
+        );
+        let auth = subagent_authorization("doc.md", &queue, "fix it");
+        assert_eq!(auth.model.as_deref(), Some("queue-model"));
+        assert_eq!(auth.effort.as_deref(), Some("xhigh"));
+        assert!(auth.subagent_prompt_preamble.contains("> model: queue-model"));
+        assert!(auth.subagent_prompt_preamble.contains("> effort: xhigh"));
+        assert!(auth.subagent_prompt_preamble.contains("Codex `spawn_agent`"));
+
+        let preset = queue
+            .replace(" model=queue-model effort=xhigh", "")
+            .replace("subagent_model: default-model\n", "")
+            .replace("subagent_effort: medium\n", "");
+        let auth = subagent_authorization("doc.md", &preset, "fix it");
+        assert_eq!(auth.model.as_deref(), Some("preset-model"));
+        assert_eq!(auth.effort.as_deref(), Some("high"));
+
+        let defaults = doc(
+            "subagent_model: default-model\nsubagent_effort: medium\n",
+            "subagents",
+            &["fix it"],
+            &[],
+        );
+        let auth = subagent_authorization("doc.md", &defaults, "fix it");
+        assert_eq!(auth.model.as_deref(), Some("default-model"));
+        assert_eq!(auth.effort.as_deref(), Some("medium"));
     }
 
     #[test]

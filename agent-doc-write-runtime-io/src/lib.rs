@@ -2881,6 +2881,61 @@ fn await_deferred_tracked_work_commit(file: &Path, force_disk: bool) -> Result<(
     }
 }
 
+/// Land a closeout's `--status` that a retained tracked-work transaction held
+/// back, before the closeout continues to its commit.
+///
+/// `apply_pending_and_status_mutations_with_mode` applies `--status` only after
+/// the tracked-work transaction returns. When that transaction is retained by
+/// the lazy delivery projection, the error propagates first and the status is
+/// never written by this command. The deferral then awaited the envelope and
+/// continued to commit, so the closeout sealed without its own status, and the
+/// captured-finalize replay landed it through the live editor seconds after Git
+/// had already committed (2026-10-20, `tasks/agent-doc/agent-doc-bugs.md`,
+/// `cycle-1792520608189`). The status projection is idempotent, so re-landing
+/// one that already reached the authority is a no-op.
+fn land_held_back_status_after_tracked_work_deferral(
+    file: &Path,
+    status: Option<&str>,
+    force_disk: bool,
+) -> Result<()> {
+    land_held_back_status(
+        status,
+        |text| set_status_with_options(file, text, force_disk),
+        || await_deferred_tracked_work_commit(file, force_disk),
+        |event| {
+            agent_doc_ops_log_io::log_op(file, &format!("{event} file={}", file.display()));
+        },
+    )
+}
+
+/// The I/O-free core of [`land_held_back_status_after_tracked_work_deferral`].
+///
+/// A status write the editor-aware transport itself retains is already in the
+/// authority; await its delivery like the envelope before the commit runs.
+fn land_held_back_status(
+    status: Option<&str>,
+    set: impl FnOnce(&str) -> Result<()>,
+    await_delivery: impl FnOnce() -> Result<()>,
+    mut log: impl FnMut(&str),
+) -> Result<()> {
+    let Some(text) = status else {
+        return Ok(());
+    };
+    match set(text) {
+        Ok(()) => {
+            log("tracked_work_deferral_held_back_status_landed transport=direct");
+            Ok(())
+        }
+        Err(err) if error_requests_retry_without_disk(&err) => {
+            log("tracked_work_deferral_held_back_status_landed transport=retained_await_delivery");
+            await_delivery()
+        }
+        Err(err) => Err(err.context(
+            "the closeout's --status was held back by a retained tracked-work transaction and could not land before the commit",
+        )),
+    }
+}
+
 /// `#mutonlyretry`: the open cycle recorded tracked work and it is now visible
 /// in the authority. Reads the cycle state first so an ordinary flagless write
 /// (the common respond path) never pays for the document resolve.
@@ -3668,6 +3723,14 @@ fn run_command_inner_within_pass(
                         &options.pending_done,
                         &options.pending_gate,
                         &pending_kept_open_ids,
+                    )?;
+                    // The retained transaction returned before `--status`
+                    // ran. Land it now, so the commit below seals the cycle's
+                    // own status instead of racing a later replay of it.
+                    land_held_back_status_after_tracked_work_deferral(
+                        file,
+                        options.status.as_deref(),
+                        options.force_disk,
                     )?;
                     PendingStatusMutationOutcome {
                         queue_completion_projected: true,
@@ -5065,6 +5128,130 @@ mod gh131_pending_only_tests;
 // editor replica.
 #[cfg(test)]
 mod binary_owned_cli_write_tests;
+
+#[cfg(test)]
+mod held_back_status_tests {
+    //! A retained tracked-work transaction returns before `--status` runs; the
+    //! deferral must land that status before the closeout continues to commit
+    //! (2026-10-20, `cycle-1792520608189`).
+    use super::*;
+    use std::cell::RefCell;
+
+    fn retained() -> anyhow::Error {
+        anyhow::anyhow!(
+            "visible document write for doc.md is retained by the lazy delivery projection; retry_without_disk_write"
+        )
+    }
+
+    #[test]
+    fn a_held_back_status_lands_before_the_closeout_continues() {
+        let steps = RefCell::new(Vec::new());
+        land_held_back_status(
+            Some("closing status"),
+            |text| {
+                steps.borrow_mut().push(format!("set:{text}"));
+                Ok(())
+            },
+            || {
+                steps.borrow_mut().push("await".to_string());
+                Ok(())
+            },
+            |event| steps.borrow_mut().push(event.to_string()),
+        )
+        .unwrap();
+        steps.borrow_mut().push("commit".to_string());
+        assert_eq!(
+            *steps.borrow(),
+            vec![
+                "set:closing status".to_string(),
+                "tracked_work_deferral_held_back_status_landed transport=direct".to_string(),
+                "commit".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_retained_status_write_is_awaited_before_the_commit() {
+        let steps = RefCell::new(Vec::new());
+        land_held_back_status(
+            Some("closing status"),
+            |_| {
+                steps.borrow_mut().push("set".to_string());
+                Err(retained())
+            },
+            || {
+                // The delivery receipt is the only way out of this call.
+                steps.borrow_mut().push("delivery_receipt".to_string());
+                Ok(())
+            },
+            |_| {},
+        )
+        .unwrap();
+        steps.borrow_mut().push("commit".to_string());
+        assert_eq!(*steps.borrow(), vec!["set", "delivery_receipt", "commit"]);
+
+        // An unconverged delivery keeps the commit from running at all.
+        let err = land_held_back_status(
+            Some("closing status"),
+            |_| Err(retained()),
+            || anyhow::bail!("tracked-work delivery did not converge"),
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("did not converge"), "{err:#}");
+    }
+
+    #[test]
+    fn no_status_is_a_no_op_and_other_failures_refuse_the_commit() {
+        land_held_back_status(
+            None,
+            |_| panic!("no --status was requested"),
+            || panic!("nothing to await"),
+            |_| panic!("nothing to log"),
+        )
+        .unwrap();
+        let err = land_held_back_status(
+            Some("closing status"),
+            |_| anyhow::bail!("document has no status component"),
+            || panic!("a non-retained failure is never awaited"),
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("held back by a retained tracked-work transaction"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn landing_the_held_back_status_on_a_detached_document_is_idempotent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "## Status\n\n",
+                "<!-- agent:status patch=replace -->\n",
+                "old status\n",
+                "<!-- /agent:status -->\n",
+            ),
+        )
+        .unwrap();
+
+        land_held_back_status_after_tracked_work_deferral(&doc, Some("closing status"), false)
+            .unwrap();
+        let landed = std::fs::read_to_string(&doc).unwrap();
+        assert!(landed.contains("closing status"), "{landed}");
+        assert!(!landed.contains("old status"), "{landed}");
+
+        // A status the retained transaction had already landed is re-landed as
+        // a byte-identical no-op.
+        land_held_back_status_after_tracked_work_deferral(&doc, Some("closing status"), false)
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), landed);
+    }
+}
 
 #[cfg(test)]
 mod closeout_owner_network_tests {

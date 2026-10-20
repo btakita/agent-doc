@@ -112,6 +112,31 @@ queue-neutral normalization cannot substitute for that proof. If projection is
 deferred for editor delivery, the retained delivery frontier re-drives the same
 Effect and no second response/finalize payload is admitted.
 
+The closeout commit is therefore ordered after the open cycle's own late
+projections, from receipts rather than elapsed time. The controller's
+`commit_document` seals only when the relay barrier is ready, the editor has
+saved the exact converged canonical (`disk_projection_ready`), and, after it
+publishes the pre-commit queue authority, the answered free-text strike that
+observation projects carries its exact application receipt
+(`answered_free_text_strike_applied` equals the projection id). Each refusal is
+stamped `recovery=await_live_projection_then_retry_controller_commit`
+(`controller_commit_strike_receipt_pending` logs the strike case). While a cycle
+is open, the closing command does not fall back to a local commit on such a
+refusal: it awaits the delivery-convergence frontier and asks the controller
+again (`controller_commit_awaiting_live_projection`, then
+`controller_commit_live_projection_landed`). Only a document with no open cycle,
+a refusal that is not a pending projection, or an exhausted bounded budget
+(`controller_commit_live_projection_wait_exhausted`) takes the local commit, and
+the composed late-projection proof stays the backstop for that last case. A
+`--status` that a retained tracked-work transaction held back is landed by the
+closing command itself once the deferral converges
+(`tracked_work_deferral_held_back_status_landed`), so it is in the canonical the
+controller seals rather than in a later captured-finalize replay. On 2026-10-20
+(`cycle-1792520608189`) the immediate local fallback sealed the response two
+seconds before the held-back status and four answered free-text strike nodes
+landed through the live editor, and the terminal retry refused the cycle's own
+projections as typed-component drift.
+
 If an older binary nevertheless records terminal response proof before that
 strike reaches `HEAD`, recovery may commit forward only when replaying the
 terminal cycle's durable captured response against committed `HEAD` derives the

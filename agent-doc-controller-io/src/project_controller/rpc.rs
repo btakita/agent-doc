@@ -10028,6 +10028,29 @@ fn commit_barrier_for_closeout(runtime: &ControllerRuntime, canonical: &Path) ->
     Ok(ready)
 }
 
+/// Stamped on every `commit_document` refusal that means "the live projection
+/// this commit must seal has not landed yet": the editor has not saved the
+/// converged canonical, or the closing cycle's own answered-free-text strike has
+/// no application receipt. The caller must await the delivery frontier and ask
+/// again; sealing the same document through a local fallback commit would
+/// publish a cut that is missing the cycle's own late projections.
+pub const CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN: &str =
+    "recovery=await_live_projection_then_retry_controller_commit";
+
+/// Whether a `commit_document` refusal asks the caller to await the live
+/// projection and retry rather than fall back to a local commit.
+///
+/// Reads the stamped token. The two legacy phrasings are accepted too, so a
+/// newer client talking to a controller built before the token existed still
+/// orders its commit after the projection.
+pub fn controller_commit_refusal_awaits_projection(error: &anyhow::Error) -> bool {
+    let rendered = format!("{error:#}");
+    rendered.contains(CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN)
+        || rendered.contains("live editor commit projection is not durable yet")
+        || rendered.contains("answered free-text queue projection is not durable yet")
+        || rendered.contains("answered free-text queue projection was not applied")
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ControllerCommitDocumentPayload {
     #[serde(default)]
@@ -10163,10 +10186,11 @@ fn handle_commit_document_rpc(
     );
     if !barrier_ready || !disk_projection_ready {
         anyhow::bail!(
-            "live editor commit projection is not durable yet for {} (barrier_ready={} disk_projection_ready={}); native editor save/reconciliation remains pending",
+            "live editor commit projection is not durable yet for {} (barrier_ready={} disk_projection_ready={}); native editor save/reconciliation remains pending {}",
             canonical.display(),
             barrier_ready,
             disk_projection_ready,
+            CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN,
         );
     }
     // Publish the exact pre-commit authority frontier into the queue graph.
@@ -10183,11 +10207,32 @@ fn handle_commit_document_rpc(
             )
         })?,
     };
-    runtime.document_queue_authority_observe(
-        &agent_doc_hash::document_id_for_path(&canonical),
-        &canonical,
-        queue_authority,
-    )?;
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    // A published adapter failure ("... was not applied") surfaces here; the
+    // strike Effect retries it on the next delivery frontier, so the caller
+    // classifies it as awaitable too.
+    runtime.document_queue_authority_observe(&document_hash, &canonical, queue_authority)?;
+    // The observation admits the strike to its asynchronous adapter; admission
+    // is not application. Sealing now would commit the response without the
+    // strike this same cycle owes, and the strike would then land through the
+    // live editor as post-HEAD drift that only the composed late-projection
+    // recovery can commit. Refuse until the adapter's application receipt
+    // matches the projection; the caller awaits the delivery frontier and asks
+    // again, so the next observation reads the struck authority.
+    if runtime.document_answered_free_text_strike_receipt_pending(&document_hash) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_commit_strike_receipt_pending file={} decision=await_application_receipt",
+                canonical.display(),
+            ),
+        );
+        anyhow::bail!(
+            "answered free-text queue projection is not durable yet for {} (strike_receipt=pending); the closing cycle's own queue strike has not been applied {}",
+            canonical.display(),
+            CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN,
+        );
+    }
     // The queue strike advances the relay canonical after the first save proof.
     // Fence and save that new exact revision before git observes the document.
     let strike_barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
@@ -10195,10 +10240,11 @@ fn handle_commit_document_rpc(
         controller_commit_projection_is_saved(&canonical, strike_barrier_ready)?;
     if !strike_barrier_ready || !strike_disk_projection_ready {
         anyhow::bail!(
-            "answered free-text queue projection is not durable yet for {} (barrier_ready={} disk_projection_ready={})",
+            "answered free-text queue projection is not durable yet for {} (barrier_ready={} disk_projection_ready={}) {}",
             canonical.display(),
             strike_barrier_ready,
             strike_disk_projection_ready,
+            CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN,
         );
     }
     // The controller process lives in a host pane that is not the document

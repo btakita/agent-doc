@@ -162,6 +162,210 @@ pub fn exchange_after_head_entry(exchange: &str, anchor: Option<&str>) -> String
     }
 }
 
+/// Why a [`LoopPassEchoWalk`] anchored where it did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopPassEchoAnchorKind {
+    /// The newest committed version that already held an echo written about
+    /// another queue's copy of the same head: that write retired the head in
+    /// the other queue and left this queue's copy live.
+    OtherQueueEcho,
+    /// The newest version committed at or before the current pass opened.
+    PassOpened,
+    /// The head (re-)entered this queue after that version
+    /// ([`FreeTextHeadEntryWalk`]'s anchor).
+    HeadEntry,
+    /// The walk reached its history limit with the head still live.
+    HistoryLimit,
+}
+
+impl LoopPassEchoAnchorKind {
+    /// Stable ops-log label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OtherQueueEcho => "other_queue_echo",
+            Self::PassOpened => "pass_opened",
+            Self::HeadEntry => "head_entry",
+            Self::HistoryLimit => "history_limit",
+        }
+    }
+}
+
+/// The exchange text an answering echo must be newer than
+/// ([`crate::queue_response::exchange_text_newer_than`]), and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopPassEchoAnchor {
+    pub exchange: String,
+    pub kind: LoopPassEchoAnchorKind,
+}
+
+/// GH #327 pass 4: which echoes may answer a live head
+/// of a `loop` queue whose pass is open.
+///
+/// A `loop` head is a standing program: every pass restores it, so the
+/// committed exchange always holds the echoes of earlier passes, and a sibling
+/// queue may hold the same text. Only an echo written for THIS pass's run of
+/// THIS queue's head answers it. The walk keeps the
+/// [`FreeTextHeadEntryWalk`] entry scope and narrows it twice:
+///
+/// - **Pass opening.** An echo committed at or before the pass opened belongs
+///   to an earlier run (an earlier pass, or another queue's cycle); the newest
+///   version committed at or before `opened_secs` is an anchor.
+/// - **Another queue's head.** A write that added an echo of the head while it
+///   struck that head in another queue, or consumed it from another queue,
+///   answered that queue's copy. The written version is an anchor, so the echo
+///   and everything before it stay history for this queue.
+///
+/// Feed each committed version newest first with its commit time to
+/// [`Self::visit`] (`None` content for a commit where the path is absent)
+/// until it returns `false`, then read the anchor with [`Self::finish`]. The
+/// walk starts from `current_content` so an uncommitted echo is attributed
+/// too. The newest anchor found wins, because each check runs at each step in
+/// newest-first order.
+#[derive(Debug, Clone)]
+pub struct LoopPassEchoWalk {
+    queue_id: String,
+    head_text: String,
+    head_identity: String,
+    opened_secs: u64,
+    newer: String,
+    anchor: Option<LoopPassEchoAnchor>,
+    oldest: Option<String>,
+    visited: usize,
+}
+
+impl LoopPassEchoWalk {
+    pub fn new(queue_id: &str, head_text: &str, opened_secs: u64, current_content: &str) -> Self {
+        Self {
+            queue_id: queue_id.to_string(),
+            head_text: head_text.to_string(),
+            head_identity: free_text_head_entry_identity(head_text),
+            opened_secs,
+            newer: current_content.to_string(),
+            anchor: None,
+            oldest: None,
+            visited: 0,
+        }
+    }
+
+    /// Visit the next-older committed version, committed at `committed_secs`;
+    /// `false` stops the walk.
+    pub fn visit(&mut self, committed_secs: u64, content: Option<&str>) -> bool {
+        self.visited += 1;
+        let Some(content) = content else {
+            self.anchor = Some(LoopPassEchoAnchor {
+                exchange: String::new(),
+                kind: LoopPassEchoAnchorKind::HeadEntry,
+            });
+            return false;
+        };
+        if self.newer_echo_answers_another_queue(content) {
+            self.anchor = Some(LoopPassEchoAnchor {
+                exchange: exchange_component_text(&self.newer),
+                kind: LoopPassEchoAnchorKind::OtherQueueEcho,
+            });
+            return false;
+        }
+        if committed_secs <= self.opened_secs {
+            self.anchor = Some(LoopPassEchoAnchor {
+                exchange: exchange_component_text(content),
+                kind: LoopPassEchoAnchorKind::PassOpened,
+            });
+            return false;
+        }
+        if !free_text_head_live_in_queue(content, &self.queue_id, &self.head_identity) {
+            self.anchor = Some(LoopPassEchoAnchor {
+                exchange: exchange_component_text(content),
+                kind: LoopPassEchoAnchorKind::HeadEntry,
+            });
+            return false;
+        }
+        self.oldest = Some(exchange_component_text(content));
+        self.newer = content.to_string();
+        true
+    }
+
+    /// Whether the step from `older` to the version visited before it added an
+    /// echo of the head while retiring the same head in another queue.
+    fn newer_echo_answers_another_queue(&self, older: &str) -> bool {
+        let added = crate::queue_response::exchange_text_newer_than(
+            &exchange_component_text(&self.newer),
+            &exchange_component_text(older),
+        );
+        if !crate::queue_response::free_text_head_answered_by_response(&added, &self.head_text) {
+            return false;
+        }
+        let before = head_rows_in_other_queues(older, &self.queue_id, &self.head_identity);
+        let after = head_rows_in_other_queues(&self.newer, &self.queue_id, &self.head_identity);
+        let ids: std::collections::BTreeSet<&String> = before.keys().chain(after.keys()).collect();
+        ids.into_iter().any(|id| {
+            let was = before.get(id).copied().unwrap_or_default();
+            let now = after.get(id).copied().unwrap_or_default();
+            (now.completed && !was.completed) || (was.live && !now.live)
+        })
+    }
+
+    /// The exchange an answering echo must be newer than, or `None` when every
+    /// echo counts (no history, or every committed version postdates the pass
+    /// opening with the head live and no other queue's echo).
+    pub fn finish(self, limit: usize) -> Option<LoopPassEchoAnchor> {
+        if self.anchor.is_some() {
+            return self.anchor;
+        }
+        if self.visited >= limit {
+            return self.oldest.map(|exchange| LoopPassEchoAnchor {
+                exchange,
+                kind: LoopPassEchoAnchorKind::HistoryLimit,
+            });
+        }
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct HeadRows {
+    live: bool,
+    completed: bool,
+}
+
+/// Per queue id other than `queue_id`: whether that queue holds a live or a
+/// struck row with entry identity `head_identity`.
+fn head_rows_in_other_queues(
+    content: &str,
+    queue_id: &str,
+    head_identity: &str,
+) -> std::collections::BTreeMap<String, HeadRows> {
+    let mut rows = std::collections::BTreeMap::new();
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return rows;
+    };
+    let Ok(graph) = crate::queue_graph::QueueGraph::parse(content, &components) else {
+        return rows;
+    };
+    for block in graph.blocks() {
+        if block.id == queue_id {
+            continue;
+        }
+        let mut state = HeadRows::default();
+        for entry in &block.entries {
+            match entry {
+                QueueEntry::Prompt(prompt)
+                    if free_text_head_entry_identity(&prompt.text) == head_identity =>
+                {
+                    state.live = true;
+                }
+                QueueEntry::Completed(prompt)
+                    if free_text_head_entry_identity(&prompt.text) == head_identity =>
+                {
+                    state.completed = true;
+                }
+                _ => {}
+            }
+        }
+        rows.insert(block.id.clone(), state);
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +438,121 @@ mod tests {
             scoped.contains("New.") && !scoped.contains("Old."),
             "{scoped}"
         );
+    }
+
+    /// GH #327 pass 4 fixture: a priority `go` queue and a `loop` queue, both
+    /// in one document.
+    fn two_queue_doc(exchange: &str, main: &str, looped: &str) -> String {
+        format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue priority id=queue-1 go -->\n{main}<!-- /agent:queue -->\n\n<!-- agent:queue loop interval=\"1h\" id=queue-2 -->\n{looped}<!-- /agent:queue -->\n"
+        )
+    }
+
+    const LOOP_HEAD: &str = "#upgrade";
+    const OPENED: u64 = 1_800_000_000;
+
+    fn upgrade_echo() -> String {
+        format!("### Re: upgrade\n\n> **Queue prompt:** {LOOP_HEAD}\n\nUpgraded.\n\n")
+    }
+
+    /// The measured pass 4: the echo was committed 94 s before the pass
+    /// opened. The newest version committed at or before the opening anchors,
+    /// so the echo is history for this pass.
+    #[test]
+    fn loop_walk_anchors_at_the_version_committed_before_the_pass_opened() {
+        let echo = upgrade_echo();
+        let live = format!("- {LOOP_HEAD}\n");
+        let answered = two_queue_doc(&echo, &format!("- ~~{LOOP_HEAD}~~\n"), &live);
+        let mut walk = LoopPassEchoWalk::new("queue-2", LOOP_HEAD, OPENED, &answered);
+        assert!(!walk.visit(OPENED - 94, Some(&answered)));
+        let anchor = walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT).unwrap();
+        assert_eq!(anchor.kind, LoopPassEchoAnchorKind::PassOpened);
+        let newer = crate::queue_response::exchange_text_newer_than(
+            &exchange_component_text(&answered),
+            &anchor.exchange,
+        );
+        assert!(
+            !crate::queue_response::free_text_head_answered_by_response(&newer, LOOP_HEAD),
+            "an echo committed before the pass opened must not answer the loop head: {newer:?}"
+        );
+    }
+
+    /// An echo written after the pass opened, by a write that struck the same
+    /// head in another queue and left the loop queue's copy live, answered the
+    /// other queue's head.
+    #[test]
+    fn loop_walk_anchors_after_an_echo_that_struck_another_queues_head() {
+        let echo = upgrade_echo();
+        let live = format!("- {LOOP_HEAD}\n");
+        for retired in [
+            format!("- ~~{LOOP_HEAD}~~ — auto-struck: answered this cycle (#ftstrike)\n"),
+            String::new(),
+        ] {
+            let before = two_queue_doc("", &live, &live);
+            let answered = two_queue_doc(&echo, &retired, &live);
+            let mut walk = LoopPassEchoWalk::new("queue-2", LOOP_HEAD, OPENED, &answered);
+            assert!(walk.visit(OPENED + 30, Some(&answered)));
+            assert!(!walk.visit(OPENED + 10, Some(&before)));
+            let anchor = walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT).unwrap();
+            assert_eq!(
+                anchor.kind,
+                LoopPassEchoAnchorKind::OtherQueueEcho,
+                "{retired:?}"
+            );
+            assert_eq!(anchor.exchange, echo, "{retired:?}");
+        }
+    }
+
+    /// Positive control: the loop pass's own cycle answered the loop head
+    /// after the pass opened, and no other queue held it. Every committed
+    /// version postdates the opening, so the echo counts.
+    #[test]
+    fn loop_walk_counts_the_passes_own_echo() {
+        let echo = upgrade_echo();
+        let live = format!("- {LOOP_HEAD}\n");
+        let before = two_queue_doc("", "", &live);
+        let answered = two_queue_doc(&echo, "", &live);
+        let mut walk = LoopPassEchoWalk::new("queue-2", LOOP_HEAD, OPENED, &answered);
+        assert!(walk.visit(OPENED + 30, Some(&answered)));
+        assert!(!walk.visit(OPENED - 600, Some(&before)));
+        let anchor = walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT).unwrap();
+        assert_eq!(anchor.kind, LoopPassEchoAnchorKind::PassOpened);
+        let newer = crate::queue_response::exchange_text_newer_than(
+            &exchange_component_text(&answered),
+            &anchor.exchange,
+        );
+        assert!(crate::queue_response::free_text_head_answered_by_response(
+            &newer, LOOP_HEAD
+        ));
+    }
+
+    /// An uncommitted write is attributed too: the walk starts from the
+    /// current content.
+    #[test]
+    fn loop_walk_attributes_an_uncommitted_other_queue_echo() {
+        let echo = upgrade_echo();
+        let live = format!("- {LOOP_HEAD}\n");
+        let committed = two_queue_doc("", &live, &live);
+        let current = two_queue_doc(&echo, &format!("- ~~{LOOP_HEAD}~~\n"), &live);
+        let mut walk = LoopPassEchoWalk::new("queue-2", LOOP_HEAD, OPENED, &current);
+        assert!(!walk.visit(OPENED + 10, Some(&committed)));
+        let anchor = walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT).unwrap();
+        assert_eq!(anchor.kind, LoopPassEchoAnchorKind::OtherQueueEcho);
+        assert_eq!(anchor.exchange, echo);
+    }
+
+    /// An old struck copy in another queue that the write did not touch does
+    /// not claim a new echo.
+    #[test]
+    fn loop_walk_ignores_another_queues_old_struck_row() {
+        let echo = upgrade_echo();
+        let live = format!("- {LOOP_HEAD}\n");
+        let struck = format!("- ~~{LOOP_HEAD}~~\n");
+        let before = two_queue_doc("", &struck, &live);
+        let answered = two_queue_doc(&echo, &struck, &live);
+        let mut walk = LoopPassEchoWalk::new("queue-2", LOOP_HEAD, OPENED, &answered);
+        assert!(walk.visit(OPENED + 30, Some(&answered)));
+        assert!(walk.visit(OPENED + 10, Some(&before)));
+        assert_eq!(walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT), None);
     }
 }

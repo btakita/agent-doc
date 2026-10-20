@@ -5905,6 +5905,43 @@ pub fn run_queue_maintenance_with_coin_gate(
             )
         };
         let mut predating_echo_heads = 0usize;
+        // GH #327 pass 4: a `loop` queue's head is a
+        // standing program the pass restores, so the committed exchange always
+        // holds earlier runs' echoes, and a sibling queue may hold the same
+        // text. Only an echo written after the current pass opened, and not
+        // about another queue's copy of the head, answers it. With no pass
+        // open (or no readable schedule state) the head is held and nothing
+        // in this pass can have answered it.
+        let selected_queue_loop_window: Option<Option<u64>> =
+            agent_doc_element::element::parse(&current_content)
+                .ok()
+                .and_then(|comps| {
+                    agent_doc_queue::queue_set::component_for_id(
+                        &current_content,
+                        &comps,
+                        &selected_queue_id,
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|q| agent_doc_queue::queue_schedule::queue_retains_struck_heads(&q.attrs))
+                })
+                .unwrap_or(false)
+                .then(|| {
+                    agent_doc_controller_io::queue_scheduler::load_schedule_state_for_queue(
+                        file,
+                        &selected_queue_id,
+                    )
+                    .ok()
+                    .flatten()
+                    .and_then(|state| match state.window {
+                        agent_doc_queue::queue_schedule::ScheduleWindow::Open {
+                            opened_secs,
+                            ..
+                        } => Some(opened_secs),
+                        agent_doc_queue::queue_schedule::ScheduleWindow::Closed => None,
+                    })
+                });
+        let mut loop_scope_skips: Vec<&'static str> = Vec::new();
         let mut struck_claimed_heads: Vec<String> = Vec::new();
         let mut struck_count = 0usize;
         let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
@@ -5929,24 +5966,52 @@ pub fn run_queue_maintenance_with_coin_gate(
                                 // after the head (re-)entered the queue
                                 // answers it. An echo of an earlier, already
                                 // answered copy of the same text is history.
-                                && match agent_doc_git_io::revision::free_text_head_entry_anchor_exchange(
-                                    file,
-                                    &selected_queue_id,
-                                    &p.text,
-                                ) {
-                                    None => true,
-                                    Some(anchor) => {
-                                        let newer = agent_doc_queue::queue_response::exchange_text_newer_than(
-                                            &exchange_text,
-                                            &anchor,
-                                        );
-                                        let answered_after_entry =
-                                            answered_residue_in(&newer, &p.text);
-                                        if !answered_after_entry {
-                                            predating_echo_heads += 1;
+                                && match selected_queue_loop_window {
+                                    None => match agent_doc_git_io::revision::free_text_head_entry_anchor_exchange(
+                                        file,
+                                        &selected_queue_id,
+                                        &p.text,
+                                    ) {
+                                        None => true,
+                                        Some(anchor) => {
+                                            let newer = agent_doc_queue::queue_response::exchange_text_newer_than(
+                                                &exchange_text,
+                                                &anchor,
+                                            );
+                                            let answered_after_entry =
+                                                answered_residue_in(&newer, &p.text);
+                                            if !answered_after_entry {
+                                                predating_echo_heads += 1;
+                                            }
+                                            answered_after_entry
                                         }
-                                        answered_after_entry
+                                    },
+                                    // GH #327 pass 4: no open pass.
+                                    Some(None) => {
+                                        loop_scope_skips.push("no_open_pass");
+                                        false
                                     }
+                                    Some(Some(opened_secs)) => match agent_doc_git_io::revision::loop_pass_head_echo_anchor_exchange(
+                                        file,
+                                        &selected_queue_id,
+                                        &p.text,
+                                        opened_secs,
+                                        &current_content,
+                                    ) {
+                                        None => true,
+                                        Some(anchor) => {
+                                            let newer = agent_doc_queue::queue_response::exchange_text_newer_than(
+                                                &exchange_text,
+                                                &anchor.exchange,
+                                            );
+                                            let answered_in_pass =
+                                                answered_residue_in(&newer, &p.text);
+                                            if !answered_in_pass {
+                                                loop_scope_skips.push(anchor.kind.label());
+                                            }
+                                            answered_in_pass
+                                        }
+                                    },
                                 } =>
                 {
                     struck_count += 1;
@@ -5980,6 +6045,18 @@ pub fn run_queue_maintenance_with_coin_gate(
                 &format!(
                     "preflight_freetext_residue_strike_skipped_echo_predates_head_entry file={} heads={predating_echo_heads} (#qheadresiduescope)",
                     file.display(),
+                ),
+            );
+        }
+        if !loop_scope_skips.is_empty() {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_freetext_residue_strike_skipped_loop_echo_outside_pass file={} queue_id={} heads={} anchors={} (GH #327)",
+                    file.display(),
+                    selected_queue_id,
+                    loop_scope_skips.len(),
+                    loop_scope_skips.join(","),
                 ),
             );
         }
@@ -18236,6 +18313,322 @@ mod tests {
         assert!(
             active.iter().any(|t| t.contains("do [#beta]")),
             "the unanswered id-backed head stays live: {active:?}"
+        );
+    }
+
+    /// GH #327 pass 4 fixture: a priority `go` queue and
+    /// an hourly `loop` queue in one session document.
+    fn loop_scope_doc(exchange: &str, main: &str, looped: &str) -> String {
+        format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue subagents priority id=queue-1 go -->\n{main}<!-- /agent:queue -->\n\n<!-- agent:queue loop interval=\"1h\" id=queue-2 -->\n{looped}<!-- /agent:queue -->\n"
+        )
+    }
+
+    const LOOP_SCOPE_HEAD: &str = "#upgrade";
+    const LOOP_SCOPE_T0: u64 = 1_800_000_000;
+
+    /// Commit `content` as `session.md` with committer and author time
+    /// `committed_secs`, then make it the committed snapshot.
+    fn loop_scope_commit(dir: &Path, doc: &Path, content: &str, committed_secs: u64) {
+        std::fs::write(doc, content).unwrap();
+        let date = format!("@{committed_secs} +0000");
+        for args in [
+            vec!["add", "session.md"],
+            vec!["-c", "commit.gpgsign=false", "commit", "-q", "-m", "cycle"],
+        ] {
+            let out = Command::new("git")
+                .current_dir(dir)
+                .env("GIT_COMMITTER_DATE", &date)
+                .env("GIT_AUTHOR_DATE", &date)
+                .args(&args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+    }
+
+    /// Persist queue-2's schedule row, as the controller's scheduler does.
+    fn loop_scope_store_window(
+        dir: &Path,
+        doc: &Path,
+        window: agent_doc_queue::queue_schedule::ScheduleWindow,
+    ) {
+        let state = agent_doc_queue::queue_schedule::QueueScheduleState {
+            owner_queue_id: Some("queue-2".to_string()),
+            cadence: "interval=3600".to_string(),
+            anchor_secs: LOOP_SCOPE_T0 - 7200,
+            last_fired_due_secs: None,
+            last_fired_at_secs: None,
+            passes_completed: 3,
+            last_pass_completed_secs: None,
+            window,
+            restore_pending: None,
+            coalesced_ticks: 0,
+            failures: 0,
+            backoff_until_secs: None,
+        };
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: agent_doc_hash::path_hash(doc).unwrap(),
+                state_kind: format!(
+                    "{}:queue-2",
+                    agent_doc_queue::queue_schedule::QUEUE_SCHEDULE_STATE_KIND
+                ),
+                canonical_path: doc.canonicalize().unwrap().to_string_lossy().into_owned(),
+                payload_json: serde_json::to_string(&state).unwrap(),
+                updated_at_secs: LOOP_SCOPE_T0,
+            },
+        )
+        .unwrap();
+        let loaded =
+            agent_doc_controller_io::queue_scheduler::load_schedule_state_for_queue(doc, "queue-2")
+                .unwrap()
+                .expect("the fixture's schedule row is readable");
+        assert_eq!(loaded, state);
+    }
+
+    fn loop_scope_open(opened_secs: u64) -> agent_doc_queue::queue_schedule::ScheduleWindow {
+        agent_doc_queue::queue_schedule::ScheduleWindow::Open {
+            pass: 4,
+            opened_secs,
+            roster: vec![LOOP_SCOPE_HEAD.to_string()],
+            ran: Vec::new(),
+        }
+    }
+
+    /// Queue `queue_id`'s live and struck rows, with the cosmetic `🚧`
+    /// in-progress marker (`set_first_prompt_in_progress`) stripped.
+    fn loop_scope_rows(doc: &Path, queue_id: &str) -> (Vec<String>, Vec<String>) {
+        let text = std::fs::read_to_string(doc).unwrap();
+        let unmarked = |rows: Vec<String>| -> Vec<String> {
+            rows.iter()
+                .map(|row| strip_in_progress_marker(row))
+                .collect()
+        };
+        (
+            unmarked(
+                agent_doc_queue::queue_schedule::live_heads_for_queue(&text, queue_id).unwrap(),
+            ),
+            unmarked(
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(&text, queue_id)
+                    .unwrap(),
+            ),
+        )
+    }
+
+    fn loop_scope_echo() -> String {
+        format!("### Re: upgrade\n\n> **Queue prompt:** {LOOP_SCOPE_HEAD}\n\nUpgraded.\n\n")
+    }
+
+    /// The committed history GH #327 pass 4 had: both queues held `#upgrade`;
+    /// a queue-1 cycle answered queue-1's copy and finalize struck it there
+    /// (`#ftstrike`), leaving queue-2's copy live.
+    fn loop_scope_history(dir: &Path, doc: &Path, answered_secs: u64) {
+        let live = format!("- {LOOP_SCOPE_HEAD}\n");
+        loop_scope_commit(dir, doc, &loop_scope_doc("", &live, &live), LOOP_SCOPE_T0);
+        loop_scope_commit(
+            dir,
+            doc,
+            &loop_scope_doc(
+                &loop_scope_echo(),
+                &format!(
+                    "- ~~{LOOP_SCOPE_HEAD}~~ — auto-struck: answered this cycle (#ftstrike)\n"
+                ),
+                &live,
+            ),
+            answered_secs,
+        );
+    }
+
+    fn loop_scope_ops(dir: &Path) -> String {
+        std::fs::read_to_string(dir.join(".agent-doc/logs/ops.log")).unwrap_or_default()
+    }
+
+    /// GH #327 pass 4 (measured): the echo was committed
+    /// before pass 4 opened, and it answered queue-1's copy of `#upgrade`. The
+    /// loop-dispatched cycle's preflight struck queue-2's live head with it, so
+    /// pass 4 never ran the item. Only an echo written after the pass opened
+    /// may answer a `loop` head. Two histories: the measured one (echo and
+    /// queue-1 strike in one commit), and one where queue-1's strike landed in
+    /// a later commit, so only the pass opening tells the echo is history.
+    #[test]
+    fn residue_strike_keeps_a_loop_head_whose_echo_predates_the_pass() {
+        for strike_in_later_commit in [false, true] {
+            let dir = setup_project();
+            let doc = dir.path().join("session.md");
+            if strike_in_later_commit {
+                let live = format!("- {LOOP_SCOPE_HEAD}\n");
+                loop_scope_commit(
+                    dir.path(),
+                    &doc,
+                    &loop_scope_doc("", &live, &live),
+                    LOOP_SCOPE_T0,
+                );
+                loop_scope_commit(
+                    dir.path(),
+                    &doc,
+                    &loop_scope_doc(&loop_scope_echo(), &live, &live),
+                    LOOP_SCOPE_T0 + 100,
+                );
+                loop_scope_commit(
+                    dir.path(),
+                    &doc,
+                    &loop_scope_doc(
+                        &loop_scope_echo(),
+                        &format!("- ~~{LOOP_SCOPE_HEAD}~~\n"),
+                        &live,
+                    ),
+                    LOOP_SCOPE_T0 + 150,
+                );
+            } else {
+                loop_scope_history(dir.path(), &doc, LOOP_SCOPE_T0 + 100);
+            }
+            loop_scope_store_window(dir.path(), &doc, loop_scope_open(LOOP_SCOPE_T0 + 200));
+
+            let _ = run_queue_maintenance(&doc, None).unwrap();
+
+            let (live, completed) = loop_scope_rows(&doc, "queue-2");
+            assert_eq!(
+                live,
+                vec![LOOP_SCOPE_HEAD.to_string()],
+                "strike_in_later_commit={strike_in_later_commit}: an echo committed before \
+                 the pass opened must not strike the loop head (completed={completed:?}):\n{}",
+                std::fs::read_to_string(&doc).unwrap()
+            );
+            let ops = loop_scope_ops(dir.path());
+            assert!(
+                ops.contains("preflight_freetext_residue_strike_skipped_loop_echo_outside_pass")
+                    && ops.contains("anchors=pass_opened"),
+                "strike_in_later_commit={strike_in_later_commit}: the skipped strike must be \
+                 logged with its anchor:\n{ops}"
+            );
+            assert!(
+                !ops.contains("preflight_freetext_residue_strike file="),
+                "strike_in_later_commit={strike_in_later_commit}: nothing may be struck:\n{ops}"
+            );
+        }
+    }
+
+    /// GH #327 pass 4: an echo written after the pass opened, by a write
+    /// that struck the same head in another queue, answered that queue's head.
+    /// It does not strike the loop queue's copy.
+    #[test]
+    fn residue_strike_keeps_a_loop_head_answered_for_another_queue() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        loop_scope_history(dir.path(), &doc, LOOP_SCOPE_T0 + 100);
+        loop_scope_store_window(dir.path(), &doc, loop_scope_open(LOOP_SCOPE_T0 + 50));
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let (live, completed) = loop_scope_rows(&doc, "queue-2");
+        assert_eq!(
+            live,
+            vec![LOOP_SCOPE_HEAD.to_string()],
+            "an echo about queue-1's head must not strike queue-2's copy \
+             (completed={completed:?}):\n{}",
+            std::fs::read_to_string(&doc).unwrap()
+        );
+        let ops = loop_scope_ops(dir.path());
+        assert!(
+            ops.contains("anchors=other_queue_echo"),
+            "the skipped strike must name the other-queue anchor:\n{ops}"
+        );
+    }
+
+    /// GH #327 pass 4: with no pass open the scheduler holds the loop
+    /// head, so no echo can have answered it in this pass. A strike here would
+    /// lose the item for good: no roster exists to restore it.
+    #[test]
+    fn residue_strike_keeps_a_loop_head_while_no_pass_is_open() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let live = format!("- {LOOP_SCOPE_HEAD}\n");
+        loop_scope_commit(
+            dir.path(),
+            &doc,
+            &loop_scope_doc("", "", &live),
+            LOOP_SCOPE_T0,
+        );
+        loop_scope_commit(
+            dir.path(),
+            &doc,
+            &loop_scope_doc(&loop_scope_echo(), "", &live),
+            LOOP_SCOPE_T0 + 100,
+        );
+        for stored in [false, true] {
+            if stored {
+                loop_scope_store_window(
+                    dir.path(),
+                    &doc,
+                    agent_doc_queue::queue_schedule::ScheduleWindow::Closed,
+                );
+            }
+            let _ = run_queue_maintenance(&doc, None).unwrap();
+            let (live_rows, completed) = loop_scope_rows(&doc, "queue-2");
+            assert_eq!(
+                live_rows,
+                vec![LOOP_SCOPE_HEAD.to_string()],
+                "stored={stored}: a held loop head must not be struck \
+                 (completed={completed:?}):\n{}",
+                std::fs::read_to_string(&doc).unwrap()
+            );
+        }
+        assert!(
+            loop_scope_ops(dir.path()).contains("anchors=no_open_pass"),
+            "{}",
+            loop_scope_ops(dir.path())
+        );
+    }
+
+    /// GH #327 pass 4 positive control: the loop pass's own cycle answered
+    /// the loop head after the pass opened, and no other queue held it. The
+    /// catch-up still strikes it, and the drained `loop` queue keeps the struck
+    /// row for the restore (GH #327).
+    #[test]
+    fn residue_strike_strikes_a_loop_head_answered_in_its_own_pass() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let live = format!("- {LOOP_SCOPE_HEAD}\n");
+        loop_scope_commit(
+            dir.path(),
+            &doc,
+            &loop_scope_doc("", "", &live),
+            LOOP_SCOPE_T0,
+        );
+        loop_scope_commit(
+            dir.path(),
+            &doc,
+            &loop_scope_doc(&loop_scope_echo(), "", &live),
+            LOOP_SCOPE_T0 + 100,
+        );
+        loop_scope_store_window(dir.path(), &doc, loop_scope_open(LOOP_SCOPE_T0 + 50));
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let (live_rows, completed) = loop_scope_rows(&doc, "queue-2");
+        assert!(
+            live_rows.is_empty(),
+            "the pass's own echo answers the loop head:\n{}",
+            std::fs::read_to_string(&doc).unwrap()
+        );
+        assert_eq!(completed, vec![LOOP_SCOPE_HEAD.to_string()]);
+        assert!(
+            loop_scope_ops(dir.path()).contains("preflight_freetext_residue_strike file="),
+            "{}",
+            loop_scope_ops(dir.path())
         );
     }
 

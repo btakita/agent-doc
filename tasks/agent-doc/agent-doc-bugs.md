@@ -294,7 +294,22 @@ The complete post-release stack is pushed through `d0b87395c3` and installed loc
 ### Re: agent:status freshness — Codex
 
 It was partially stale. The published release number and times were correct, but the managed sync block omitted the JetBrains package versions and still described the extraction blocker as open. I refreshed it with the verified v0.35.525/PyPI timestamps, JetBrains 0.2.720/0.2.721/0.2.722 asset timestamps, and the current backlog/review state.
-<!-- agent:boundary:205bb14b -->
+> **Chat prompt (#chatprompt):** The drift has been around for a while. In a subagent, make status run more often by adding more checkpoints during the turn?
+
+> **Chat prompt (#chatprompt):** implement in a subagent
+
+### Re: periodic status-sync checkpoints — gpt-5 · 2026-10-19T20:46-04:00
+
+Implemented in the requested subagent, integrated, pushed to `origin/main` as `6aa595da2d`, and installed locally.
+
+Open owner turns with `agent:status sync="..."` now get a PostToolUse checkpoint after a full 60 seconds from preflight and then no more than once per true 60-second interval. The checkpoint is additive to ordinary steering, excluded from subagent tool calls, and suppressed after the response cycle is captured or closed. Its generation-keyed next-due edge is atomically claimed; ordinary not-due tool calls only read state and do not churn SQLite.
+
+The new focused command `agent-doc status set FILE --text "<current result>"` safely refreshes only the status component during an open turn. It honors additive or replace sync mode, attributes the landed delta to the agent baseline, and does not capture, seal, append a response, mutate queues, or commit the active response cycle.
+
+The current `agent:status` is up to date. The latest published release remains v0.35.525; this checkpoint implementation is post-release on `main`, so no newer release was published.
+
+Verification passed: the authoritative combined `make check` ran 11,116 Rust tests with zero failures, 202 VS Code tests, cross-editor simulation, JetBrains classic/262/263 builds, Python/bootstrap checks, documentation audit, and the unchanged cached TLA proof. `make install` completed; the CLI help exposes `agent-doc status set`, and repository state is clean.
+<!-- agent:boundary:80584e35 -->
 <!-- /agent:exchange -->
 
 <!--

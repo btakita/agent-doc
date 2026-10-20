@@ -269,7 +269,21 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   order label (GH #112/#185/#320), and the exact-visible decision: publish,
   refuse an unreadable split (GH #154), or refuse a foreground split that omits
   the focused document. The order label passes through as a string, so a label
-  a newer layout derivation adds is kept.
+  a newer layout derivation adds is kept. Phase 3b moved the last two callers of
+  these rules onto the derivation. An optional `chosen_root` input is a root the
+  caller already chose. When it is present and not blank, the snapshot addresses
+  it instead of the spanning root and normalizes the layout against it. Two output
+  fields were added. `layout_mode` is what the columns assert (GH #111): `exact`
+  for a detected multi-column layout, otherwise `ensure`. `candidate_roots` lists
+  the controller roots that may own the tmux focus, most specific first: the
+  focused root, the spanning root (only with a focused root and visible
+  documents), each visible document's own root (its nearest `.agent-doc` root,
+  else the base path, else its directory), then the base path. Run Agent Doc's
+  `--col` fallback (`TerminalUtil.editorSnapshotRouteLayout`) passes the route's
+  own root as `chosen_root` and sends the derived columns, order label, and
+  layout mode. The plugin's only step is the wire shape: the one empty column
+  answered for an observation with no visible document becomes no `--col`. The
+  `TmuxPaneFocusSync` poll asks the controllers in `candidate_roots`.
 - `remote_layout` (phase 4): the GH #134 Remote Dev fold. Evidence is the
   project root the fold remembers its split under, each Remote Dev client's
   visible/selected/open session documents, and the backend-focused session
@@ -312,10 +326,13 @@ surface or, for the `--col` snapshot, the split layout evidence:
 the focused root, derives the layout from that evidence (`window_layout` or the
 Remote Dev fold, with no EDT budget), asks `sync_layout`, refuses before
 preparing the terminal, and then prepares the terminal and submits. A direct
-EDT caller of `window_layout` (Run Agent Doc's `--col` fallback, claim,
-terminal and layout-change detectors) marshals only the immutable evidence to
-a worker and waits at most 250 ms. The measured-layout forwarder already runs
-on its own worker, where it also resolves the focused document's root and asks
+EDT caller of `window_layout` (claim, terminal and layout-change detectors)
+marshals only the immutable evidence to a worker and waits at most 250 ms. Run
+Agent Doc's `--col` fallback reads only editor state on the EDT (the visible and
+focused documents and the split layout evidence); its route thread derives the
+layout from that evidence and asks `sync_layout`. The `TmuxPaneFocusSync` poll
+resolves the focused root and asks `sync_layout` on its own poll thread. The
+measured-layout forwarder already runs on its own worker, where it also resolves the focused document's root and asks
 `remote_client_surface`. The Remote Dev fold runs on whichever worker holds the
 captured client evidence; a direct EDT caller marshals only that evidence.
 
@@ -330,7 +347,9 @@ plugin uses a **frozen** Kotlin copy of the GH #320 rules (`frozenWindowLayout`,
 pre-#326 `SurfaceReport` / `SelectionProjectionSettling` rules, and
 `SyncLayoutSnapshot.frozen` over the pre-#326 `SyncLayoutAction` rules
 `chooseSyncProjectRoot`, `normalizeEditorLayout`, `absolutizeEditorLayout`,
-`undetectedLayoutColumns`, and `exactVisibleSyncDecision`, and
+`undetectedLayoutColumns`, and `exactVisibleSyncDecision`, plus, since phase
+3b, the pre-#326 Run Agent Doc fallback for a chosen root, `routeLayoutMode`, and
+the `TmuxPaneFocusSync.candidateProjectRoots` probe, and
 `RemoteClientSurfacePayload.frozen` over the pre-#326 forward rules: those
 `SyncLayoutAction` root and path rules, then `SurfaceReport.buildSurface`). It is
 a compatibility floor, never extended: new rules land only in the native
@@ -338,7 +357,10 @@ derivation. One parity file per derivation under
 `editors/jetbrains/src/test/resources/editor-derivations/` (`window_layout.json`,
 `surface_projection.json`, `sync_layout.json`, `remote_client_surface.json`) is
 answered by both the Rust derivation and the frozen floor, so a divergence is
-always a deliberate fixture edit. `sync_layout.json` and
+always a deliberate fixture edit. A library older than phase 3b ignores
+`chosen_root`. An answer that addresses another root therefore takes the floor,
+and an answer without `layout_mode` or `candidate_roots` gets them from the
+floor's rules. `sync_layout.json` and
 `remote_client_surface.json` map each document to its nearest project root in
 place of the filesystem; the 262/263 backend's test resources include the
 directory so its floor answers the same file.
@@ -364,10 +386,9 @@ IntelliJ fact to capture), adding a call site, `plugin.xml`/action/UI changes,
 and logic not yet behind the boundary still ship as a plugin generation. The
 Remote Dev client-evidence capture (which client editors are visible, selected,
 and open; the frontend snapshot's windows) reads IntelliJ state and stays in
-Kotlin by design. The largest remaining Kotlin rule sets are Run Agent Doc's
-`--col` fallback (`TerminalUtil.editorSnapshotRouteLayout`, which normalizes
-against the route's own root), the `TmuxPaneFocusSync` candidate-root probe, and
-the CRDT replica, patch-watch, and route clients.
+Kotlin by design. The largest remaining Kotlin rule sets are the CRDT replica,
+patch-watch, and route clients (phase 5). Run Agent Doc's `--col` fallback and the
+`TmuxPaneFocusSync` candidate-root probe moved behind `sync_layout` in phase 3b.
 The automatic surface's settling loop itself (how many EDT re-reads, the
 pending-slot ordering) is orchestration and stays in Kotlin. Each remaining rule
 set moves behind `agent_doc_editor_derive_json` the same way.

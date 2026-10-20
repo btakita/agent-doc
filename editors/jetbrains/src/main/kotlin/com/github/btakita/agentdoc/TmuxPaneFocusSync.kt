@@ -362,31 +362,29 @@ class TmuxPaneFocusSync private constructor(
             return value.asBoolean
         }
 
+        /**
+         * The controllers that may own this project's tmux focus, most specific first. Poll
+         * thread, never the EDT: the focused document's own root is a filesystem read, and the
+         * candidates are the native `sync_layout` derivation's `candidate_roots` (GH #326 phase
+         * 3b), with the frozen floor only when no native library answers.
+         */
         private fun candidateProjectRoots(project: Project): List<String> {
-            val roots = linkedSetOf<String>()
             val manager = FileEditorManager.getInstance(project)
             val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
             val focused = manager.selectedTextEditor?.virtualFile
                 ?.takeIf { it.name.endsWith(".md") }
                 ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }
-
             val focusedRoot = focused?.let { TerminalUtil.resolveProject(project, it).first }
-            focusedRoot?.let { roots.add(it) }
-
-            if (visibleMdFiles.isNotEmpty() && focusedRoot != null) {
-                roots.add(
-                    SyncLayoutAction.chooseSyncProjectRoot(
-                        project.basePath,
-                        focusedRoot,
-                        visibleMdFiles,
-                    ),
-                )
-            }
-            visibleMdFiles
-                .map { TerminalUtil.resolveProjectPath(project.basePath, it).first }
-                .forEach { roots.add(it) }
-            project.basePath?.let { roots.add(it) }
-            return roots.toList()
+            return SyncLayoutSnapshot.derive(
+                SyncLayoutSnapshot.evidence(
+                    basePath = project.basePath,
+                    fallbackRoot = focusedRoot,
+                    focused = focused?.path,
+                    visible = visibleMdFiles,
+                    editorLayout = null,
+                    foreground = false,
+                ),
+            ).candidateRoots
         }
 
         private fun focusedDocumentPath(projectRoots: List<String>): String? {

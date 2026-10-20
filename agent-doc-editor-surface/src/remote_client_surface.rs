@@ -103,6 +103,7 @@ pub fn derive_remote_client_surface(
                 column_order: SurfaceColumnOrder::Editor.as_str().to_string(),
             }),
             foreground: Some(false),
+            chosen_root: None,
         },
         nearest_root,
     );

@@ -15,6 +15,14 @@
 //! The automatic surface applies the same root choice and path normalization
 //! to the payload `surface_projection` derives, so it asks this derivation too.
 //!
+//! Phase 3b moved the last two callers of these rules here. Run Agent Doc's
+//! `--col` fallback (`TerminalUtil.editorSnapshotRouteLayout`) addresses the
+//! route's own root, which it chose before it read the split, so it passes that
+//! root as [`SyncLayoutEvidence::chosen_root`] and reads the columns and the
+//! route's layout mode ([`SyncLayoutSnapshot::layout_mode`], GH #111). The
+//! `TmuxPaneFocusSync` poll asks which controllers may own the tmux focus and
+//! reads [`SyncLayoutSnapshot::candidate_roots`].
+//!
 //! [`derive_sync_layout`] is pure except for the nearest `.agent-doc` project
 //! root of a visible document, a filesystem fact the IO crate injects. The
 //! plugin keeps a frozen Kotlin copy of these rules for a native library that
@@ -87,6 +95,14 @@ pub struct SyncLayoutEvidence {
     /// a layout that omits the focused document. Absent means foreground.
     #[serde(default)]
     pub foreground: Option<bool>,
+    /// The root the caller already chose (GH #326 phase 3b): Run Agent Doc
+    /// routes to the focused document's own root before it reads the split.
+    /// When present and not blank, the snapshot addresses this root instead of
+    /// choosing the one that spans the visible layout, and normalizes the
+    /// layout against it. Absent (an older plugin generation, or a caller that
+    /// lets the derivation choose) keeps the phase 3 choice.
+    #[serde(default)]
+    pub chosen_root: Option<String>,
 }
 
 /// Whether the exact-visible `--col` snapshot may be published (GH #154).
@@ -121,6 +137,31 @@ pub struct SyncLayoutSnapshot {
     /// for a multi-column layout, otherwise `unknown`.
     pub column_order: String,
     pub decision: SyncLayoutDecision,
+    /// What the columns assert to the controller (GH #111): `exact` when they
+    /// are a detected multi-column layout, a positive observation of the whole
+    /// visible layout; otherwise `ensure`, which only asks that each named
+    /// document has a column and keeps the retained layout around it. A string,
+    /// so a mode a newer library adds passes through.
+    #[serde(default = "ensure_layout_mode")]
+    pub layout_mode: String,
+    /// The controller roots that may own this observation's tmux focus, most
+    /// specific first and without repeats (the `TmuxPaneFocusSync` probe): the
+    /// focused document's own root, then [`Self::project_root`] when there are
+    /// visible documents, then each visible document's own root (its nearest
+    /// `.agent-doc` root, else the base path, else its directory), then the
+    /// base path. The spanning root is listed only when a fallback root was
+    /// reported, as the plugin's probe did.
+    #[serde(default)]
+    pub candidate_roots: Vec<String>,
+}
+
+/// [`SyncLayoutSnapshot::layout_mode`] for columns that only name documents.
+pub const LAYOUT_MODE_ENSURE: &str = "ensure";
+/// [`SyncLayoutSnapshot::layout_mode`] for a detected multi-column layout.
+pub const LAYOUT_MODE_EXACT: &str = "exact";
+
+fn ensure_layout_mode() -> String {
+    LAYOUT_MODE_ENSURE.to_string()
 }
 
 fn distinct<'a>(items: impl IntoIterator<Item = &'a String>) -> Vec<String> {
@@ -279,14 +320,55 @@ fn sync_columns(visible: &[String], layout: Option<&SyncEditorLayout>) -> Vec<St
     }
 }
 
+/// `TmuxPaneFocusSync.candidateProjectRoots`: the roots a tmux focus probe
+/// asks, most specific first.
+fn candidate_roots(
+    evidence: &SyncLayoutEvidence,
+    project_root: &str,
+    nearest_root: &mut impl FnMut(&str) -> Option<String>,
+) -> Vec<String> {
+    let base_path = evidence.base_path.as_deref();
+    let fallback_root = evidence
+        .fallback_root
+        .as_deref()
+        .filter(|root| !root.trim().is_empty());
+    let mut roots: Vec<String> = Vec::new();
+    roots.extend(fallback_root.map(str::to_string));
+    if fallback_root.is_some() && !evidence.visible.is_empty() {
+        roots.push(project_root.to_string());
+    }
+    for file in &evidence.visible {
+        let own = nearest_root(file)
+            .or_else(|| base_path.map(str::to_string))
+            .unwrap_or_else(|| {
+                std::path::Path::new(file)
+                    .parent()
+                    .map(|parent| parent.to_string_lossy().into_owned())
+                    .filter(|parent| !parent.is_empty())
+                    .unwrap_or_else(|| "/".to_string())
+            });
+        roots.push(own);
+    }
+    roots.extend(base_path.map(str::to_string));
+    distinct(roots.iter().filter(|root| !root.trim().is_empty()))
+}
+
 /// Derive the Sync Tmux Layout snapshot from one observation.
 ///
 /// `nearest_root` answers the nearest `.agent-doc` project root of a visible
-/// document, or `None` when it has none.
+/// document, or `None` when it has none. It is asked at most once per document.
 pub fn derive_sync_layout(
     evidence: &SyncLayoutEvidence,
-    nearest_root: impl FnMut(&str) -> Option<String>,
+    mut probe_root: impl FnMut(&str) -> Option<String>,
 ) -> SyncLayoutSnapshot {
+    let mut known: std::collections::HashMap<String, Option<String>> =
+        std::collections::HashMap::new();
+    let mut nearest_root = |file: &str| -> Option<String> {
+        known
+            .entry(file.to_string())
+            .or_insert_with(|| probe_root(file))
+            .clone()
+    };
     let base_path = evidence.base_path.as_deref();
     let fallback_root = evidence
         .fallback_root
@@ -294,18 +376,36 @@ pub fn derive_sync_layout(
         .filter(|root| !root.trim().is_empty())
         .or(base_path)
         .unwrap_or_default();
-    let project_root =
-        choose_sync_project_root(base_path, fallback_root, &evidence.visible, nearest_root);
+    let project_root = match evidence
+        .chosen_root
+        .as_deref()
+        .filter(|root| !root.trim().is_empty())
+    {
+        Some(chosen) => chosen.to_string(),
+        None => choose_sync_project_root(
+            base_path,
+            fallback_root,
+            &evidence.visible,
+            &mut nearest_root,
+        ),
+    };
     let layout = evidence
         .layout
         .clone()
         .and_then(|layout| normalize_layout(base_path, &project_root, layout))
         .and_then(|layout| absolutize_layout(&project_root, layout));
     let columns = sync_columns(&evidence.visible, layout.as_ref());
+    let multi_column = matches!(&layout, Some(layout) if layout.columns.len() > 1);
     let column_order = match &layout {
-        Some(layout) if layout.columns.len() > 1 => layout.column_order.clone(),
+        Some(layout) if multi_column => layout.column_order.clone(),
         _ => "unknown".to_string(),
     };
+    let layout_mode = if multi_column {
+        LAYOUT_MODE_EXACT
+    } else {
+        LAYOUT_MODE_ENSURE
+    }
+    .to_string();
     let focused = evidence
         .focused
         .as_deref()
@@ -322,12 +422,15 @@ pub fn derive_sync_layout(
         }
         (Some(_), _) => SyncLayoutDecision::Publish,
     };
+    let candidate_roots = candidate_roots(evidence, &project_root, &mut nearest_root);
     SyncLayoutSnapshot {
         project_root,
         layout,
         columns,
         column_order,
         decision,
+        layout_mode,
+        candidate_roots,
     }
 }
 
@@ -480,6 +583,123 @@ mod tests {
         assert_eq!(snapshot.columns, [""]);
         assert_eq!(snapshot.column_order, "unknown");
         assert_eq!(snapshot.decision, SyncLayoutDecision::RefuseUnknownLayout);
+    }
+
+    #[test]
+    fn a_chosen_root_is_addressed_instead_of_the_spanning_root() {
+        // GH #326 phase 3b: Run Agent Doc routes to the focused document's own
+        // root, so a cross-root split is normalized against that root and its
+        // workspace documents stay absolute.
+        let evidence = SyncLayoutEvidence {
+            base_path: Some("/repo".into()),
+            fallback_root: Some("/repo/src/one".into()),
+            chosen_root: Some("/repo/src/one".into()),
+            focused: Some("/repo/src/one/a.md".into()),
+            visible: strings(&["/repo/src/one/a.md", "/repo/src/two/b.md"]),
+            layout: Some(layout(&[&["src/one/a.md"], &["src/two/b.md"]], "retained")),
+            foreground: Some(false),
+        };
+        let roots = |file: &str| Some(file.rsplit_once('/').unwrap().0.to_string());
+        let snapshot = derive_sync_layout(&evidence, roots);
+        assert_eq!(snapshot.project_root, "/repo/src/one");
+        assert_eq!(
+            snapshot.columns,
+            ["/repo/src/one/a.md", "/repo/src/two/b.md"]
+        );
+        assert_eq!(snapshot.column_order, "retained");
+        assert_eq!(snapshot.layout_mode, LAYOUT_MODE_EXACT);
+        let chosen_by_rule = derive_sync_layout(
+            &SyncLayoutEvidence {
+                chosen_root: Some(" ".into()),
+                ..evidence
+            },
+            roots,
+        );
+        assert_eq!(chosen_by_rule.project_root, "/repo");
+    }
+
+    #[test]
+    fn only_a_detected_multi_column_layout_asserts_the_exact_layout() {
+        let mut evidence = SyncLayoutEvidence {
+            base_path: Some("/repo".into()),
+            fallback_root: Some("/repo".into()),
+            focused: Some("/repo/a.md".into()),
+            visible: strings(&["/repo/a.md", "/repo/b.md"]),
+            layout: Some(layout(&[&["a.md"]], "editor")),
+            ..Default::default()
+        };
+        let single = derive_sync_layout(&evidence, no_root);
+        assert_eq!(single.layout_mode, LAYOUT_MODE_ENSURE);
+        assert_eq!(single.columns, ["/repo/a.md", "/repo/b.md"]);
+        evidence.layout = None;
+        assert_eq!(
+            derive_sync_layout(&evidence, no_root).layout_mode,
+            LAYOUT_MODE_ENSURE
+        );
+    }
+
+    #[test]
+    fn candidate_roots_run_from_the_focused_root_to_the_base_path() {
+        let evidence = SyncLayoutEvidence {
+            base_path: Some("/repo".into()),
+            fallback_root: Some("/repo/src/one".into()),
+            focused: Some("/repo/src/one/a.md".into()),
+            visible: strings(&["/repo/src/one/a.md", "/repo/src/two/b.md", "/repo/c.md"]),
+            ..Default::default()
+        };
+        let snapshot = derive_sync_layout(&evidence, |file| {
+            (!file.starts_with("/repo/c")).then(|| file.rsplit_once('/').unwrap().0.to_string())
+        });
+        assert_eq!(
+            snapshot.candidate_roots,
+            ["/repo/src/one", "/repo", "/repo/src/two"]
+        );
+        // Without a focused root the spanning root is not a candidate; without
+        // a base path a rootless document's own directory is.
+        let unfocused = derive_sync_layout(
+            &SyncLayoutEvidence {
+                visible: strings(&["/elsewhere/notes/x.md"]),
+                ..Default::default()
+            },
+            no_root,
+        );
+        assert_eq!(unfocused.candidate_roots, ["/elsewhere/notes"]);
+        assert!(
+            derive_sync_layout(&SyncLayoutEvidence::default(), no_root)
+                .candidate_roots
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn each_document_is_probed_for_its_root_once() {
+        let mut probes = Vec::new();
+        derive_sync_layout(
+            &SyncLayoutEvidence {
+                base_path: Some("/repo".into()),
+                fallback_root: Some("/repo".into()),
+                visible: strings(&["/repo/a.md", "/repo/b.md", "/repo/a.md"]),
+                ..Default::default()
+            },
+            |file: &str| {
+                probes.push(file.to_string());
+                None
+            },
+        );
+        assert_eq!(probes, ["/repo/a.md", "/repo/b.md"]);
+    }
+
+    #[test]
+    fn an_answer_without_the_phase_3b_fields_still_parses() {
+        let parsed: SyncLayoutSnapshot = serde_json::from_str(
+            r#"{"project_root":"/r","columns":["/r/a.md"],"column_order":"unknown","decision":"publish"}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.layout_mode, LAYOUT_MODE_ENSURE);
+        assert!(parsed.candidate_roots.is_empty());
+        let evidence: SyncLayoutEvidence =
+            serde_json::from_str(r#"{"visible":["/r/a.md"]}"#).unwrap();
+        assert_eq!(evidence.chosen_root, None);
     }
 
     #[test]

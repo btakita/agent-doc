@@ -17,6 +17,20 @@ import org.junit.Test
  */
 class SurfaceCommandReferenceTest {
 
+    /** GH #326 phase 3b: Run Agent Doc's `--col` fallback for [root], answered by the frozen floor. */
+    private fun routeSnapshot(
+        root: String,
+        visible: List<String>,
+        layout: EditorLayout?,
+        focused: String?,
+    ): TerminalUtil.RouteLayoutRequest =
+        TerminalUtil.RouteLayoutRequest.fromSyncLayout(
+            SyncLayoutSnapshot.frozen(
+                SyncLayoutSnapshot.evidence(root, root, focused, visible, layout, foreground = false, chosenRoot = root),
+            ) { null },
+            focused,
+        )
+
     private val capableReceipt =
         """{"intent":"Idle","idle":true,"capabilities":["surface_layout_reference_v1"]}"""
 
@@ -180,13 +194,9 @@ class SurfaceCommandReferenceTest {
         val layout = EditorLayout(
             listOf(LayoutColumn(listOf("/proj/a.md")), LayoutColumn(listOf("/proj/b.md"))),
         )
-        val snapshot = TerminalUtil.RouteLayoutRequest.fromEditorSnapshot(
-            visibleMdFiles = listOf("/proj/a.md", "/proj/b.md"),
-            editorLayout = layout,
-            focusedFile = "/proj/a.md",
-        )
+        val snapshot = routeSnapshot("/proj", listOf("/proj/a.md", "/proj/b.md"), layout, "/proj/a.md")
         assertEquals(
-            TerminalUtil.buildRouteLayoutArgs(listOf("/proj/a.md", "/proj/b.md"), layout, "/proj/a.md"),
+            listOf("--col", "/proj/a.md", "--col", "/proj/b.md", "--focus", "/proj/a.md"),
             snapshot.layoutArgs,
         )
         assertEquals("editor", snapshot.columnOrder)
@@ -209,7 +219,8 @@ class SurfaceCommandReferenceTest {
         val send = source.substringAfter("internal fun sendToTerminal(")
             .substringBefore("internal fun routePaneNotVisibleNotice(")
         assertFalse(send.contains("LayoutDetector.detectEditorLayout"))
-        assertFalse(send.contains("buildRouteLayoutArgs("))
+        assertFalse(send.contains("fromSyncLayout("))
+        assertFalse(send.contains("SyncLayoutSnapshot.derive("))
         assertTrue(send.contains("captureCommandSurface(project, file)"))
         assertTrue(send.contains("surfaceReference = routeLayout.surfaceReference"))
 

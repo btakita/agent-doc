@@ -457,12 +457,55 @@ within its hosting epoch, so delayed Markdown projection, polling, or a stale
 `Selected` observation cannot reactivate the item. Queue/backlog/done text
 projects that lifecycle and may be reconciled lazily after the fact is durable.
 
+## State Propagation, Not Effect Inference
+
+Every consequence (tmux pane order, focus, queue dispatch, editor delivery) is a
+pure derivation of propagated state. The surface that can observe a state
+publishes it as a Source, and the owning graph derives the consequence from
+that Source's current value. Effects only *apply* a derived value; they never
+decide it.
+
+- **Publish the state, not a hint about it.** An editor publishes its actual
+  layout: split columns in geometric order, plus the visible and selected
+  documents in each. Downstream code must not reconstruct that layout from an
+  event sequence, for example "editor removed, then reopened with
+  `reuseOpen=false`, so treat it as a reorder". It must not reconstruct it from
+  a previous fold's memory either. An event can trigger a re-publish of state,
+  but it is never itself evidence of the state.
+- **The current Source alone determines the derivation.** When the true state
+  is observable, the derived value must not depend on how it was reached. Two
+  states with the same content derive the same consequence: `[A | B]` followed
+  by `[B | A]` yields tmux order `B, A` with no event history involved.
+  Carry-over memory, such as the order-preserving fold in
+  `RemoteLayoutMemory`, is allowed only for state the publisher marks as
+  unknown.
+- **Label unknown state; never guess it.** If a publisher cannot observe part
+  of the state, it publishes that part as explicitly unknown (for example
+  `geometry=unknown` for a JetBrains Remote Dev backend that cannot see the
+  client's split geometry). The consumer then keeps its last derived value or
+  fails closed, and the spec for that surface names the limit and the manual
+  remedy. A plausible guess presented as state is a defect, even when it
+  happens to be right.
+- **Never drop observed state on a local precondition.** A publisher must not
+  discard state it did observe because some other local view is empty, as in
+  GH #320, where the remote-client visible editors were dropped because the
+  backend's `selectedFiles` was empty. It publishes what it has and labels
+  the rest unknown.
+- **Prefer the reactive path over shelling out to the CLI** for state that a
+  long-lived surface already holds. Re-deriving editor state per command, for
+  example `--col` arguments on a CLI route, is a snapshot of the state, not
+  propagation. It must reach the same derivation and must not become a second
+  source of truth.
+
 ## Regression Rule
 
-New state-bearing behavior must answer two questions in the same change:
+New state-bearing behavior must answer three questions in the same change:
 
 - Which owner emits the typed event?
 - Which projection reduces it into current state?
+- Is every consequence derived from propagated state, rather than inferred from
+  an event sequence or an effect's history (see State Propagation, Not Effect
+  Inference)?
 
 Adding another tactical `reason=...`, `proof=...`, ad hoc boolean, or log-only
 string in a hot path is not enough unless the change also explains why that fact

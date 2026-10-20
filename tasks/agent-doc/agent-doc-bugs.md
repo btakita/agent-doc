@@ -23,9 +23,9 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
-v0.35.530 is published. The v0.35.531 batch (GH 326 phases 3, 3b, 4 and 5, the Codex queued-clear fix and the capture-gate fixes) passed make check; GH 326 phase 5b and the mid-cycle capture-claim fix are running.
+Main is at fa3a54b1aa and installed locally: every GH 326 phase (3, 3b, 4, 5, 5b, 5c), the Codex queued-clear fix and four capture-gate fixes. Unreleased; queue "release + publish" to tag v0.35.531. The main queue is empty.
 
 <!-- status:sync -->
 Latest published release: [v0.35.530](https://github.com/btakita/agent-doc/releases/tag/v0.35.530) (GH #324 extract re-run safety, GH #325 done-archive resolver, GH #326 phases 1–2 hot-reloaded editor derivations, GH #327 loop queues restore consumed items, live-supervisor drain readiness, queue auto-clear baseline, Claude crash-restart resume id, live-session run guard, closeout ordering, GH #317 regression coverage), published on GitHub at 2026-10-20 20:54:49 UTC (15 assets); PyPI 0.35.530 followed at 2026-10-20 20:55:37 UTC; installed locally (agent-doc 0.35.530). JetBrains packages in v0.35.530: 0.2.735 (classic), 0.2.736 (IDE 262), 0.2.737 (IDE 263), published with the release at 2026-10-20 20:54:49 UTC. VS Code extension 0.2.83.
@@ -462,6 +462,25 @@ These nine items are on main (`ecb87c02ac`) and installed with `make install`. `
 **Running (🚧):** GH 326 phase 5c folds the text normalization into the native containment and rebase calls. It touches the CRDT path, so it goes into the next batch.
 
 No new actionable follow-up items this cycle.
+
+### Re: GH 326 phase 5c on main and installed; GH #326 closed; the queue is empty
+
+> **Queue prompt:** GH 326 phase 5c (after 5b): fold withoutBinaryOwnedMarkersUtil and the single-splice shaping into the native containment/rebase calls (NativePatching.capturedSplicesContained / rebaseCapturedSplices) so their text normalization stops needing a plugin release
+
+**Phase 5c** is on main at `fa3a54b1aa` and installed with `make install`. `make check` passed: 11,366 tests run, 11,366 passed, 177 skipped.
+- **What changed:** the containment and rebase FFI calls take an optional `registration` input, so marker stripping and single-splice shaping now run natively.
+- **Compatibility:** no symbol changed. The plugin uses the native path only when `capabilities` advertises it; otherwise its frozen copy shapes the request exactly as before.
+- **Proof:** a shared fixture covers 33 normalization cases and 14 registrations, including CRLF, lone CR, U+2028, composed vs. decomposed accents and emoji. Rust and Kotlin give byte-identical results on every case.
+
+The local plugins are now 0.2.753 (classic), 0.2.754 (IDE 262) and 0.2.755 (IDE 263). **Restart the IDE once to load them.**
+
+**GH #326 is closed.** The subagent's comment summarizes phases 1 through 5c. What stays in Kotlin was judged restart-bound by design in the phase 5 audit: evidence capture, orchestration, native-reload decisions, keystroke-path capture, and the low-churn `PatchWatcher` and `CpRouteClient` code.
+
+**One open choice for you:** the plugin's marker stripping (now native as `registration_operator_text`) and the controller's `without_binary_owned_markers` are different rules, and a doc comment claimed they were the same. The comment is fixed. Unifying the two rules would be a separate change; queue it if you want it.
+
+**The main queue is empty.** Everything since v0.35.530 is on main and installed but untagged. Queue "release + publish" to ship v0.35.531.
+
+No new actionable follow-up items this cycle.
 <!-- agent:boundary:811a7087 -->
 <!-- /agent:exchange -->
 
@@ -470,36 +489,6 @@ No new actionable follow-up items this cycle.
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~crash auto-restart of the Claude supervisor still resumes the pre-/clear session id held in supervisor memory; re-read the SessionStart-recorded resume id before respawn~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/324~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~focused extract follow-up (GH 324 gap): when the source was already stripped, the transfers.is_empty() path still reports already_applied via target_covers_selectors, which counts an id covered if any list mentions it; verify the target against the recovery copy under .agent-doc/archives/extract/ and its recorded node ids~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/325~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~queue_recovery done_archive_paths joins the raw archive= value onto the document dir, bypassing resolve_done_archive_target (same class as GH 325), so recover-lost can miss archived ids; move it onto the shared reader and fix its archive=done.md tests~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released depends on wall-clock: its unacknowledged setup claim trips DISPATCH_EVIDENCE_GRACE_SECS (10s) under check-fast load and the second finalize fails the no-worker-acknowledgement pre-write gate; make the grace deterministic (injectable clock) instead of relying on run speed~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/326~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~GH 326 phase 2: move EditorTabSyncListener.captureSurface surface projection behind agent_doc_editor_derive_json as a surface_projection derivation on the delivery worker (visible-document union incl. GH 320 Remote Dev union, readiness, active-document resolution, open-tab proximity, stale-selection settling, payload incl. column_order)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~GH 326 phase 3 (after phase 2): move manual Sync Tmux Layout --col snapshot column decisions (exactVisibleSyncDecision, undetectedLayoutColumns, normalizeEditorLayout, absolutizeEditorLayout, chooseSyncProjectRoot) behind a derivation and take that layout read off the EDT~~
-- ~~GH 326 phase 3b (after phase 4): move Run Agent Doc --col fallback (TerminalUtil.editorSnapshotRouteLayout) and the TmuxPaneFocusSync candidate-root probe onto the sync_layout derivation (add an optional root-already-chosen input)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~GH 326 phase 4 (after phase 3): move RemoteClientSurfacePayload.build and the uniqueRemoteSplitSelection Kotlin remote fallback behind derivations, then retire the Kotlin fallback~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~GH 326 phase 5 (after phase 4): audit pure decisions in CrdtReplicaManager, PatchWatcher and CpRouteClient (CrdtReplicaManager changed in 14 releases this month) and move them behind derivations~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~GH 326 phase 5b (after 3b+5 integrate): move attach-failure diagnosis (attachFailureRemedy, attachFailureStatusToken, retainedProjectionHoldNeedsOperatorSurfaceUtil, registerFailureNeedsLivenessRepublishUtil, retainedProjectionHoldMessageUtil) behind a derivation, first moving the EDT recordRegisterFailure callers (register retry timer, native-reload target collection) and Compact Exchange remedy formatting onto a worker~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 GH 326 phase 5c (after 5b): fold withoutBinaryOwnedMarkersUtil and the single-splice shaping into the native containment/rebase calls (NativePatching.capturedSplicesContained / rebaseCapturedSplices) so their text normalization stops needing a plugin release
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/327~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~preflight residue strike must not strike a loop head from an echo written before the current pass opened or about another queue head (GH 327 pass 4 wasted a pass)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~continuation answered-head skip (syntheticstrike) still uses only the head-entry rule; apply the GH 327 pass 4 loop-pass echo scope to loop queue heads so it agrees with the preflight residue strike~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: Include PR #324-#327 ⟦effect:1⟧~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~[from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~[from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~queue auto-clear: carry the pending baseline across the supervisor's self-re-exec so an item committed just before the re-exec still gets its clear~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: Include PR #324-#327 ⟦effect:2⟧~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~[from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~closeout commit ordering: the controller committed locally before the cycle held-back --status and free-text strikes landed through the live editor; wait for the cycle own late projections before committing instead of relying on the composed-drift recovery~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/317~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md pane %12, epoch 139, queued 16:16:27Z on 0.35.528) never fired after that turn closed out at 16:24:06Z; the operator cleared by hand at 16:29:56Z~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~[from:coordinator] binary_owned_resume_commits_one_durable_capture_exactly_once fails under make check load: resume_captured_finalize returns RetryableEffect (no response from Lazily actor within 250ms); make the actor readiness or retry deterministic instead of depending on a 250ms wall-clock window~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~[from:coordinator] closeout pre_write_guard blocked pending_capture_required on a queue-dispatch cycle (cycle-1792527508436, 20:19:45Z, 0.35.529): preflight offered GH 326 phase 5 in queue_subagent_dispatch and the coordinator claimed and started it; follow-ups were added via queue follow-up, not backlog flags, so the guard saw no backlog mutation (regression of the capturegatedispatched class)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~backlog-capture signal list matches bare substrings (tasks, todo), so any tasks/... path in prompt text arms the capture gate; match words, not substrings~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~capture gate (after the word-match fix): a head the coordinator claims mid-cycle that preflight did not list for dispatch still arms requires_backlog_capture because the requirement is fixed at preflight; record the heads behind the requirement and release it when all are worker-claimed at closeout~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues

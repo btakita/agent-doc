@@ -27815,6 +27815,7 @@ fn focus_escalation_columns(
             columns: main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &supplied),
             source: "editor_surface",
             replaced: None,
+            choice: None,
             basis_generation: None,
             provisional_order_basis: None,
         });
@@ -27888,29 +27889,28 @@ fn focus_escalation_columns(
             columns: retained,
             source: basis_source,
             replaced: None,
+            choice: None,
             basis_generation,
             provisional_order_basis,
         });
     }
-    let (merged, _, _) = merge_editor_route_columns_within(
-        EditorRouteLayoutMode::Ensure,
+    // GH #322: the slot is chosen against the editor's propagated visible
+    // set, so a focus never evicts the document another IDE split still
+    // shows; the latest focus decides only among columns of equal standing.
+    let editor_visible = runtime.pane_layout_graph().editor_visible();
+    let slot = crate::project_controller::focus_escalation_replace_index(
         &retained,
         retained_focus.as_deref(),
-        &[document.to_string()],
-        Some(document),
-        EnsureRouteWidening::PluginSplitHolds,
+        editor_visible.as_deref(),
     );
-    let replaced = retained
-        .iter()
-        .zip(&merged)
-        .find(|(before, after)| before != after)
-        .map(|(before, _)| before.clone());
-    if merged.len() != retained.len() || replaced.is_none() {
-        // Unreachable by `merge_editor_route_columns_within`'s contract for a
-        // routed focus column over a non-empty layout; refuse rather than
-        // publish a layout that grew or does not hold the document.
+    let mut merged = retained.clone();
+    let replaced = merged.get(slot.index).cloned();
+    let Some(target) = merged.get_mut(slot.index) else {
+        // Unreachable for a non-empty layout; refuse rather than publish a
+        // layout that grew or does not hold the document.
         return Err("document_outside_retained_layout");
-    }
+    };
+    *target = document.to_string();
     Ok(FocusEscalationColumns {
         columns: merged,
         source: if basis_source == "live_tmux_layout" {
@@ -27919,6 +27919,7 @@ fn focus_escalation_columns(
             "retained_focus_column"
         },
         replaced,
+        choice: Some(slot.choice),
         basis_generation,
         provisional_order_basis: Some(provisional_order_basis.unwrap_or(retained)),
     })
@@ -27933,6 +27934,9 @@ struct FocusEscalationColumns {
     source: &'static str,
     /// The retained column the document replaced, for `retained_focus_column`.
     replaced: Option<String>,
+    /// Why that column (GH #322): `not_editor_visible`, `latest_focus` or
+    /// `rightmost`.
+    choice: Option<&'static str>,
     /// Retained desired generation used to derive `columns`; zero means there
     /// was no desired generation and the live tmux observation was the basis.
     basis_generation: Option<u64>,
@@ -27984,6 +27988,7 @@ fn escalate_focus_to_structural_layout_ordered(
         columns,
         source,
         replaced,
+        choice,
         basis_generation,
         provisional_order_basis,
     } = match focus_escalation_columns(bootstrap, runtime, document, columns) {
@@ -28001,11 +28006,14 @@ fn escalate_focus_to_structural_layout_ordered(
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}{}",
+            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}{}{}",
             columns.len(),
             replaced
                 .as_ref()
                 .map(|column| format!(" replaced={column}"))
+                .unwrap_or_default(),
+            choice
+                .map(|choice| format!(" choice={choice}"))
                 .unwrap_or_default()
         ),
     );
@@ -28054,6 +28062,13 @@ fn escalate_focus_to_structural_layout_ordered(
     );
     match published {
         Ok((desired, published_invocation)) => {
+            if source == "editor_surface" {
+                // GH #322: the surface's own columns are a positive
+                // observation of what the editor shows.
+                runtime
+                    .pane_layout_graph()
+                    .record_editor_visible(&derived_columns);
+            }
             let rebased = published_invocation.columns != derived_columns;
             if rebased {
                 agent_doc_ops_log_io::log_op(
@@ -47906,6 +47921,137 @@ mod tests {
             vec![fixture.id("alpha"), fixture.id("gamma")]
         );
         assert_eq!(fixture.desired_focus(), Some(fixture.id("gamma")));
+    }
+
+    /// GH #322 (#311 mirrored): Remote Dev, every observation `focus_only`.
+    /// The plugin's `exact` route named both IDE splits `[a | b]`. The
+    /// operator focused the right split and opened `c` there, then went back
+    /// to `a` and reopened `b` over `c`, and from then on alternated `a`/`b`.
+    /// Each focus escalation used to replace the LATEST focus's column, which
+    /// is the split the operator just left, so `a` and `b` replaced each other
+    /// on one side while the other pane held `c` (no split showing it) forever.
+    #[test]
+    fn gh322_alternating_focus_across_two_ide_splits_never_evicts_the_other_split() {
+        let fixture = RouteLayoutFixture::new(&["a", "b", "c"]);
+        let (a, b, c) = (fixture.id("a"), fixture.id("b"), fixture.id("c"));
+        let routed = fixture.route("a", &["a", "b"], Some("exact")).unwrap();
+        assert_eq!(routed.exit_code, 0);
+        assert_eq!(fixture.desired_columns(), vec![a.clone(), b.clone()]);
+        let graph = fixture.runtime.pane_layout_graph();
+        assert_eq!(graph.editor_visible(), Some(vec![a.clone(), b.clone()]));
+        let focus = |document: &str| {
+            if fixture
+                .desired_columns()
+                .iter()
+                .any(|column| column == document)
+            {
+                // A covered document is focused in place: `focus_only`.
+                graph.record_focus_outcome(document);
+            } else {
+                assert!(escalate_focus_to_structural_layout(
+                    &fixture.bootstrap,
+                    fixture.runtime.as_ref(),
+                    document,
+                    &[],
+                    "actor_pane_not_visible",
+                ));
+            }
+        };
+
+        // The right split gets focus and `c` opens in it: every column holds
+        // an editor-visible document, so GH #278's latest-focus rule decides.
+        focus(&b);
+        focus(&c);
+        assert_eq!(fixture.desired_columns(), vec![a.clone(), c.clone()]);
+
+        // Back to the left split, then `b` reopened over `c` on the right.
+        // `c` is in no split the editor reported, so its column is replaced,
+        // not the left split the operator just left.
+        focus(&a);
+        focus(&b);
+        assert_eq!(fixture.desired_columns(), vec![a.clone(), b.clone()]);
+
+        // The reported alternation: from here on it is a fixed point.
+        for document in [&a, &b, &a, &b, &a, &b, &a, &b] {
+            focus(document);
+            assert_eq!(
+                fixture.desired_columns(),
+                vec![a.clone(), b.clone()],
+                "focusing {document} must not evict the other IDE split"
+            );
+        }
+
+        let ops = fixture.ops_log();
+        let escalations = ops
+            .lines()
+            .filter(|line| line.contains("controller_editor_surface_focus_escalated"))
+            .collect::<Vec<_>>();
+        assert_eq!(escalations.len(), 2, "{escalations:#?}");
+        assert!(
+            escalations[0].contains(&format!(
+                "document={c} reason=actor_pane_not_visible columns=2 \
+                 source=retained_focus_column replaced={b} choice=latest_focus"
+            )),
+            "{escalations:#?}"
+        );
+        assert!(
+            escalations[1].contains(&format!(
+                "document={b} reason=actor_pane_not_visible columns=2 \
+                 source=retained_focus_column replaced={c} choice=not_editor_visible"
+            )),
+            "{escalations:#?}"
+        );
+    }
+
+    /// GH #322, the issue's last records: the route's `incoming=[a, b]` was
+    /// reordered to `[b, a]`, then a focus on `c` took `a`'s column. A later
+    /// focus on `a` must take back `c`'s column, not `b`'s, which the IDE
+    /// still shows.
+    #[test]
+    fn gh322_a_focus_takes_back_the_column_of_a_document_no_split_shows() {
+        let fixture = RouteLayoutFixture::new(&["a", "b", "c"]);
+        let (a, b, c) = (fixture.id("a"), fixture.id("b"), fixture.id("c"));
+        fixture.route("b", &["b", "a"], Some("exact")).unwrap();
+        fixture.runtime.pane_layout_graph().record_focus_outcome(&a);
+        assert!(escalate_focus_to_structural_layout(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            &c,
+            &[],
+            "actor_pane_not_visible",
+        ));
+        assert_eq!(fixture.desired_columns(), vec![b.clone(), c.clone()]);
+        fixture.runtime.pane_layout_graph().record_focus_outcome(&b);
+        assert!(escalate_focus_to_structural_layout(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            &a,
+            &[],
+            "actor_pane_not_visible",
+        ));
+        assert_eq!(fixture.desired_columns(), vec![b, a]);
+    }
+
+    /// GH #322: derived publications (an `ensure` route, a focus escalation)
+    /// never become the editor's visible set; only a positive split
+    /// observation does.
+    #[test]
+    fn gh322_only_a_positive_editor_split_observation_sets_the_visible_set() {
+        let fixture = RouteLayoutFixture::new(&["a", "b", "c"]);
+        let (a, b, c) = (fixture.id("a"), fixture.id("b"), fixture.id("c"));
+        let graph = fixture.runtime.pane_layout_graph();
+        fixture.route("a", &["a"], Some("ensure")).unwrap();
+        assert_eq!(graph.editor_visible(), None);
+        fixture.plugin(&["a", "b"], "a", 100);
+        assert_eq!(graph.editor_visible(), Some(vec![a.clone(), b.clone()]));
+        assert!(escalate_focus_to_structural_layout(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            &c,
+            &[],
+            "actor_pane_not_visible",
+        ));
+        assert_eq!(graph.editor_visible(), Some(vec![a, b]));
     }
 
     /// `layoutpublisherarbiter` (GH #120 asks 2-3): the route publisher and

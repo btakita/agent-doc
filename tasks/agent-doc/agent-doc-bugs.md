@@ -376,6 +376,16 @@ Verification:
 - GitHub CI/Book/Pages runs were queued after push; no release was published.
 
 The durable, fully updated transfer record remains at [agent-doc-bugs-claude-handoff-2026-10-19.md](agent-doc-bugs-claude-handoff-2026-10-19.md), committed in the workspace as `a66f1714a1`.
+
+### Re: In-turn hook behavior verified — gpt-5 · 2026-10-19T23:06-04:00
+
+Verified all three pending hook statements against the implementation:
+
+- `agent-doc skill install` installs the unfiltered `steering-post-tool-use` bridge for Claude Code and Codex. It runs after each completed tool call in a tracked active turn; it remains silent when there is no settled steering or due sync checkpoint.
+- The implemented behavior is preflight-only `sync` by default, opt-in repeated reminders through `interval`, controller-owned Lazily due derivation and receipt consumption, additive delivery at owner tool boundaries, and agent-driven external verification plus `agent-doc status set` only when the fact changed.
+- A hook cannot interrupt one continuously executing tool call. An interval may become due, but delivery waits for the next supported harness boundary. OpenCode, Grok, and Cursor use polling/command boundaries rather than `PostToolUse`.
+
+These statements are now covered by the completed implementation and the green combined `make check` and `make tmux-ci` results recorded in the preceding response.
 <!-- agent:boundary:b0bf624b -->
 <!-- /agent:exchange -->
 
@@ -385,12 +395,12 @@ The durable, fully updated transfer record remains at [agent-doc-bugs-claude-han
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/316~~
-- 📥 Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?
+- ~~Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
-- Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:queue -->
 
 ## Todo

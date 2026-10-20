@@ -4,6 +4,7 @@ package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.AgentDocSessionFiles
 import com.github.btakita.agentdoc.CpRouteClient
+import com.github.btakita.agentdoc.EditorDerivation
 import com.github.btakita.agentdoc.EditorLayout
 import com.github.btakita.agentdoc.EditorTabSyncListener
 import com.github.btakita.agentdoc.LayoutColumn
@@ -19,6 +20,7 @@ import com.intellij.openapi.client.ClientSessionsManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.google.gson.annotations.SerializedName
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -26,10 +28,11 @@ import java.util.concurrent.Executors
 /**
  * GH #320 option B: the main window's layout as the JetBrains Client measured it.
  *
- * The frontend publishes each editor window's on-screen bounds (state). The backend derives the
- * left-to-right columns from them with the classic grouping
- * ([LayoutDetector.buildColumnsFromSnapshots]) and its order provenance
- * ([LayoutDetector.measuredColumnOrder]); nothing is inferred from editor events.
+ * The frontend publishes each editor window's on-screen bounds (state). The backend reports each
+ * main-frame window's ordinal, selected session document, and measured origin to the
+ * hot-reloaded native `client_measured_layout` derivation (GH #326), which owns the grouping and
+ * the order provenance; nothing is inferred from editor events. The Kotlin derivation below is
+ * the frozen compatibility floor for a native library that cannot answer.
  */
 internal sealed interface MeasuredMainLayout {
     /** Columns (absolute paths) in measured left-to-right order, plus the selected document. */
@@ -43,30 +46,85 @@ internal sealed interface MeasuredMainLayout {
 }
 
 internal object RemoteClientMeasuredLayout {
+    private val LOG = Logger.getInstance(RemoteClientMeasuredLayout::class.java)
+    private val GSON = com.google.gson.Gson()
+
+    /** GH #326: one main-frame window as observed. Wire shape of Rust `ClientWindowEvidence`. */
+    internal data class ClientWindowEvidence(
+        val ordinal: Int,
+        @SerializedName("selected_session") val selectedSession: String?,
+        @SerializedName("holds_session_document") val holdsSessionDocument: Boolean,
+        val x: Int?,
+        val y: Int?,
+    )
+
+    internal data class ClientMeasuredLayoutEvidence(val windows: List<ClientWindowEvidence>)
+
     fun derive(
         snapshot: FrontendSurfaceSnapshot,
         isSessionDocument: (String) -> Boolean,
+        derivation: EditorDerivation = EditorDerivation.Native,
     ): MeasuredMainLayout {
         if (snapshot.schemaVersion < SURFACE_SNAPSHOT_SCHEMA_VERSION) {
             return MeasuredMainLayout.Unavailable("schema_${snapshot.schemaVersion}_without_geometry")
         }
         val main = snapshot.surfaces.singleOrNull { it.role == SurfaceRole.MAIN }
             ?: return MeasuredMainLayout.Unavailable("no_main_surface")
+        val evidence = ClientMeasuredLayoutEvidence(
+            main.windows.map { window ->
+                ClientWindowEvidence(
+                    ordinal = window.ordinal,
+                    selectedSession = window.selectedPath?.takeIf(isSessionDocument),
+                    holdsSessionDocument = window.openPaths.any(isSessionDocument),
+                    x = window.bounds?.x,
+                    y = window.bounds?.y,
+                )
+            },
+        )
+        return derivation.derive("client_measured_layout", GSON.toJson(evidence))
+            ?.let(::parseMeasuredLayout)
+            ?: frozenDerive(evidence)
+    }
+
+    /** Parse the native `client_measured_layout` output (`outcome` = `measured` | `unavailable`). */
+    internal fun parseMeasuredLayout(json: String): MeasuredMainLayout? = try {
+        val root = com.google.gson.JsonParser.parseString(json).asJsonObject
+        when (root.get("outcome")?.asString) {
+            "measured" -> MeasuredMainLayout.Measured(
+                columns = root.getAsJsonArray("columns").map { column ->
+                    column.asJsonArray.map { it.asString }
+                },
+                focused = root.get("focused").asString,
+            )
+            "unavailable" -> MeasuredMainLayout.Unavailable(root.get("reason")?.asString ?: "unknown")
+            else -> null
+        }
+    } catch (e: Exception) {
+        LOG.warn("[rd-layout] native measured layout unreadable: ${e.message}")
+        null
+    }
+
+    /**
+     * GH #326 compatibility floor: the GH #320 option B rules, frozen. Used only when no native
+     * generation answers. Never extend it; change the native derivation instead.
+     */
+    internal fun frozenDerive(evidence: ClientMeasuredLayoutEvidence): MeasuredMainLayout {
         val measured = mutableListOf<LayoutDetector.LayoutWindowSnapshot>()
-        for (window in main.windows.sortedBy { it.ordinal }) {
-            val selected = window.selectedPath?.takeIf(isSessionDocument)
+        for (window in evidence.windows.sortedBy { it.ordinal }) {
+            val selected = window.selectedSession
             if (selected == null) {
                 // `#stickymdpane`: a split showing a source tab next to its session documents is
                 // still on screen; its column is unknown, not gone. Keep the last forwarded layout
                 // rather than collapse it. A window that holds no session document contributes no
                 // column, so closing a split still collapses the layout.
-                if (window.openPaths.any(isSessionDocument)) {
+                if (window.holdsSessionDocument) {
                     return MeasuredMainLayout.Unavailable("split_shows_non_session_tab")
                 }
                 continue
             }
-            val bounds = window.bounds ?: return MeasuredMainLayout.Unavailable("window_unmeasured")
-            measured += LayoutDetector.LayoutWindowSnapshot(bounds.x, bounds.y, selected)
+            val x = window.x ?: return MeasuredMainLayout.Unavailable("window_unmeasured")
+            val y = window.y ?: return MeasuredMainLayout.Unavailable("window_unmeasured")
+            measured += LayoutDetector.LayoutWindowSnapshot(x, y, selected)
         }
         if (measured.isEmpty()) return MeasuredMainLayout.Unavailable("no_session_documents")
         if (LayoutDetector.measuredColumnOrder(measured) != "editor") {

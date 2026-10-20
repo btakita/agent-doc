@@ -44,5 +44,6 @@ Enable debug output: IDEA → `Help > Diagnostic Tools > Debug Log Settings` →
 - Submit/route waits for the markdown typing debounce before saving and dispatching, and stays silent on progress and success.
 - Repeating `Run Agent Doc` should supersede any stale plugin-spawned route process and dispatch again immediately.
 - Error feedback is routed to the IDE Event Log / notification tool window instead of bottom-right balloon popups.
+- **Rules behind the hot-reloaded native boundary (GH #326):** a Kotlin rule change forces an IDE restart on exact-263; a native one does not. Capture IntelliJ evidence in Kotlin and derive through `agent_doc_editor_derive_json` (`EditorDerivation`). Never extend the frozen Kotlin fallbacks (`frozenWindowLayout`, `RemoteClientMeasuredLayout.frozenDerive`); change the native derivation and its parity fixture instead. See `SPEC.md` "Restart-free logic upgrades".
 - `plugin.xml` action IDs are stable — only change `text` attributes for renames.
 - **No prompt poller:** do not reintroduce the defensive `PromptPoller` / `PromptPanel` path. JetBrains must not poll `agent-doc prompt --all`, auto-save tracked documents, refresh tracked files, or merge/reload editor buffers from a prompt UI timer.

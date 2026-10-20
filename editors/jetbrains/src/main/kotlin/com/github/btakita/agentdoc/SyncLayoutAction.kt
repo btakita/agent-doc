@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import com.google.gson.Gson
+import com.google.gson.annotations.SerializedName
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -809,8 +810,20 @@ object LayoutDetector {
     internal fun markdownTabsMruLast(
         project: com.intellij.openapi.project.Project,
         windowTabPaths: List<String>,
-    ): List<String> {
-        val history = try {
+    ): List<String> = markdownTabsMruLast(windowTabPaths, editorHistoryPaths(project))
+
+    /** Frozen compatibility copy of the native `session_tabs_mru_last` (GH #326). */
+    internal fun markdownTabsMruLast(
+        windowTabPaths: List<String>,
+        history: List<String>,
+    ): List<String> =
+        windowTabPaths
+            .filter { it.endsWith(".md") }
+            .sortedBy { history.indexOf(it) }
+
+    /** The IDE's own selection history, least recently used first. */
+    private fun editorHistoryPaths(project: com.intellij.openapi.project.Project): List<String> =
+        try {
             com.intellij.openapi.fileEditor.impl.EditorHistoryManager
                 .getInstance(project)
                 .fileList
@@ -819,10 +832,6 @@ object LayoutDetector {
             LOG.debug("[layout-detect] editor history unavailable: ${e.message}")
             emptyList()
         }
-        return windowTabPaths
-            .filter { it.endsWith(".md") }
-            .sortedBy { history.indexOf(it) }
-    }
 
     /**
      * `#clearnoticeverify`: the editor windows of the frame the operator is looking
@@ -887,121 +896,231 @@ object LayoutDetector {
                 // observations instead of answering `unknown` forever.
                 return detectEditorLayout(snapshotRemoteLayout(project, sessionDocumentPaths))
             }
-            if (windows.size < 2) {
-                val selectedFile = windows.singleOrNull()?.selectedFile
-                val selectedSessionFile = selectedFile?.takeIf { file ->
-                    val path = file.path
-                    sessionDocumentPaths?.contains(path)
-                        ?: AgentDocSessionFiles.isSessionDocument(file)
-                }
-                val selectedSessionPath = selectedSessionFile?.let { TerminalUtil.relativePath(project, it) }
-                val layout = knownSingleWindowLayout(selectedSessionPath)
-                val columns = layout?.columns.orEmpty()
-                LOG.debug("[layout-detect] single editor window (count=${windows.size}); columns=${columns.size}")
-                logObservedLayout(
-                    windows.size,
-                    windows.map { LayoutWindowSnapshot(0, 0, selectedSessionPath) },
-                    columns,
-                )
-                return layout
-            }
-
-            val splitters = windows.firstOrNull()?.owner ?: managerEx.splitters
-            val splittersComponent = splitters as? java.awt.Component
-            if (splittersComponent == null) {
-                LOG.debug("[layout-detect] ${windows.size} editor windows but splitters component unavailable; cannot resolve columns")
-                return null
-            }
-
-            val classifiedSessionPaths = sessionDocumentPaths ?: windows
-                .flatMap { it.fileList.toList() }
-                .filter(AgentDocSessionFiles::isSessionDocument)
-                .map { it.path }
-                .toSet()
-            val snapshots = windows.map { window ->
-                // `#stickymdpane`: a window showing a source file still stands
-                // for the last document it showed, so the mirrored column
-                // survives a detour into source.
-                val stickyPath = stickyMarkdownForWindow(
-                    selectedPath = window.selectedFile?.path,
-                    windowMarkdownTabsMruLast = markdownTabsMruLast(
-                        project,
-                        window.fileList
-                            .map { it.path }
-                            .filter(classifiedSessionPaths::contains),
-                    ),
-                )
-                val file = stickyPath
-                    ?.let { path -> window.fileList.firstOrNull { it.path == path } }
-                    ?.let { TerminalUtil.relativePath(project, it) }
-                // GH #81: a window whose bounds cannot be read (a headless or remote
-                // backend component) means geometry is unavailable for the whole layout,
-                // never that the layout does not exist.
-                val bounds = try {
-                    val component = window.tabbedPane.component
-                    component.parent?.let { parent ->
-                        SwingUtilities.convertRectangle(parent, component.bounds, splittersComponent)
-                    } ?: component.bounds
-                } catch (e: Exception) {
-                    LOG.debug("[layout-detect] editor window bounds unavailable: ${e.message}")
-                    null
-                }
-                Triple(bounds?.x, bounds?.y, file)
-            }.let { measured ->
-                // Any unmeasured window collapses every window onto one origin, which
-                // `buildColumnsFromSnapshots` reads as "keep each window its own column".
-                val geometryKnown = measured.all { it.first != null && it.second != null }
-                measured.map { (x, y, file) ->
-                    LayoutWindowSnapshot(
-                        x = if (geometryKnown) x!! else 0,
-                        y = if (geometryKnown) y!! else 0,
-                        file = file,
-                    )
-                }
-            }
-            LOG.debug(
-                "[layout-detect] ${windows.size} editor window(s): " +
-                    snapshots.joinToString(", ") { "x=${it.x} y=${it.y} file=${it.file ?: "<none>"}" }
-            )
-            if (snapshots.none { it.file != null }) {
-                LOG.debug("[layout-detect] no .md file selected in any editor window; no layout to mirror")
-                return null
-            }
-            if (sharesOrigin(snapshots)) {
-                // GH #77: surfaced at info so a live run shows whether this IDE lays its
-                // splitters out at all (a Remote Dev backend does not).
-                LOG.info(
-                    "[layout-detect] ${windows.size} editor windows share an origin; " +
-                        "geometry unavailable, keeping each window as its own column"
-                )
-            }
-
-            val columns = buildColumnsFromSnapshots(snapshots)
-            LOG.debug(
-                "[layout-detect] grouped into ${columns.size} column(s): " +
-                    columns.joinToString(" | ") { col ->
-                        "[" + col.files.joinToString(", ").ifEmpty { "<empty>" } + "]"
-                    }
-            )
-
-            logObservedLayout(windows.size, snapshots, columns)
-
-            // Return layout if at least 2 columns exist (even if some are empty).
-            // Empty columns tell sync to leave that tmux pane position alone.
-            // GH #320: windows that share an origin were never measured, so their order is
-            // window-list order, not geometry. Label it so the controller orders it against the
-            // layout it retains instead of applying it verbatim.
-            return if (columns.size >= 2) {
-                EditorLayout(columns, measuredColumnOrder(snapshots))
-            } else {
-                LOG.debug("[layout-detect] fewer than 2 columns after grouping; treating as single-column layout")
-                null
-            }
+            // GH #326: capture what each window IS on this thread; the hot-reloaded native library
+            // derives the layout from it (`window_layout`), off the EDT.
+            val evidence = captureWindowLayoutEvidence(project, windows, sessionDocumentPaths)
+                ?: return null
+            return detectEditorLayout(evidence)
         } catch (e: Exception) {
             LOG.warn("[layout-detect] editor layout detection failed: ${e.message}", e)
             return null
         }
     }
+
+    /** GH #326: one local editor window as observed. Wire shape of Rust `EditorWindowEvidence`. */
+    internal data class EditorWindowEvidence(
+        val x: Int?,
+        val y: Int?,
+        val selected: String?,
+        @SerializedName("session_tabs") val sessionTabs: List<String>,
+    )
+
+    /** GH #326: the local windows of the mirrored frame. Wire shape of Rust `WindowLayoutEvidence`. */
+    internal data class WindowLayoutEvidence(
+        @SerializedName("base_path") val basePath: String?,
+        val windows: List<EditorWindowEvidence>,
+        val history: List<String>,
+    )
+
+    /** The layout the `window_layout` derivation answered, and what to log about it. */
+    internal data class WindowLayoutResolution(
+        val layout: EditorLayout?,
+        val observedLine: String?,
+        val diagnostic: String?,
+        val reason: String?,
+    )
+
+    /** How long a direct EDT caller waits for the off-EDT native derivation before the fallback. */
+    internal const val EDT_DERIVATION_BUDGET_MS = 250L
+
+    private val GSON = Gson()
+
+    /**
+     * GH #326: what each editor window IS, read on the caller's (EDT) turn: its origin in the
+     * frame's splitter coordinates (null when unreadable, GH #81), its selected tab, and its
+     * session-document tabs. No layout rule runs here; `null` only when two or more windows exist
+     * but their frame has no splitter component to measure against.
+     */
+    internal fun captureWindowLayoutEvidence(
+        project: com.intellij.openapi.project.Project,
+        windows: List<com.intellij.openapi.fileEditor.impl.EditorWindow>,
+        sessionDocumentPaths: Set<String>?,
+    ): WindowLayoutEvidence? {
+        val splittersComponent =
+            if (windows.size >= 2) {
+                val splitters = windows.firstOrNull()?.owner
+                    ?: FileEditorManagerEx.getInstanceEx(project).splitters
+                (splitters as? java.awt.Component) ?: run {
+                    LOG.debug(
+                        "[layout-detect] ${windows.size} editor windows but splitters component " +
+                            "unavailable; cannot resolve columns",
+                    )
+                    return null
+                }
+            } else {
+                null
+            }
+        val sessionPaths = sessionDocumentPaths ?: windows
+            .flatMap { it.fileList.toList() }
+            .filter(AgentDocSessionFiles::isSessionDocument)
+            .map { it.path }
+            .toSet()
+        val evidence = windows.map { window ->
+            val bounds = splittersComponent?.let { target ->
+                try {
+                    val component = window.tabbedPane.component
+                    component.parent?.let { parent ->
+                        SwingUtilities.convertRectangle(parent, component.bounds, target)
+                    } ?: component.bounds
+                } catch (e: Exception) {
+                    LOG.debug("[layout-detect] editor window bounds unavailable: ${e.message}")
+                    null
+                }
+            }
+            EditorWindowEvidence(
+                x = bounds?.x,
+                y = bounds?.y,
+                selected = window.selectedFile?.path,
+                sessionTabs = window.fileList.map { it.path }.filter(sessionPaths::contains),
+            )
+        }
+        val tabs = evidence.flatMap(EditorWindowEvidence::sessionTabs).toSet()
+        return WindowLayoutEvidence(
+            basePath = project.basePath,
+            windows = evidence,
+            history = editorHistoryPaths(project).filter(tabs::contains),
+        )
+    }
+
+    /**
+     * GH #326: the layout [evidence] implies, derived by the hot-reloaded native library. A direct
+     * EDT caller marshals only the immutable evidence to a worker and waits at most
+     * [EDT_DERIVATION_BUDGET_MS]; the surface delivery worker calls this off the EDT and pays no
+     * dispatch.
+     */
+    internal fun detectEditorLayout(
+        evidence: WindowLayoutEvidence,
+        derivation: EditorDerivation = EditorDerivation.Native,
+    ): EditorLayout? {
+        val resolution = resolveWindowLayout(evidence, derivation)
+        resolution.diagnostic?.let { LOG.info(it) }
+        resolution.observedLine?.let(::logLayoutObservation)
+        if (resolution.layout == null) {
+            LOG.debug("[layout-detect] no layout reason=${resolution.reason ?: "<none>"}")
+        }
+        return resolution.layout
+    }
+
+    internal fun resolveWindowLayout(
+        evidence: WindowLayoutEvidence,
+        derivation: EditorDerivation,
+    ): WindowLayoutResolution {
+        val inputJson = GSON.toJson(evidence)
+        val native = { derivation.derive("window_layout", inputJson) }
+        val answer =
+            if (SwingUtilities.isEventDispatchThread()) {
+                try {
+                    CompletableFuture.supplyAsync(native)
+                        .get(EDT_DERIVATION_BUDGET_MS, TimeUnit.MILLISECONDS)
+                } catch (e: java.util.concurrent.TimeoutException) {
+                    LOG.warn(
+                        "[layout-detect] native window_layout exceeded ${EDT_DERIVATION_BUDGET_MS}ms " +
+                            "on an EDT caller; using the compatibility fallback",
+                    )
+                    null
+                } catch (e: Exception) {
+                    LOG.warn("[layout-detect] native window_layout failed: ${e.message}")
+                    null
+                }
+            } else {
+                native()
+            }
+        return answer?.let(::parseWindowLayoutResolution) ?: frozenWindowLayout(evidence)
+    }
+
+    /** Parse the native `window_layout` output. Empty columns inside a layout are kept. */
+    internal fun parseWindowLayoutResolution(json: String): WindowLayoutResolution? = try {
+        val root = com.google.gson.JsonParser.parseString(json).asJsonObject
+        fun string(name: String): String? =
+            root.get(name)?.takeIf { !it.isJsonNull }?.asString
+        val columns = root.getAsJsonArray("columns")
+            ?.map { column ->
+                LayoutColumn(
+                    column.asJsonObject.getAsJsonArray("files")
+                        ?.map { it.asString }
+                        ?.filter(String::isNotBlank)
+                        .orEmpty(),
+                )
+            }
+            .orEmpty()
+        WindowLayoutResolution(
+            layout = columns.takeIf { it.isNotEmpty() }?.let {
+                EditorLayout(it, string("column_order") ?: "unknown")
+            },
+            observedLine = string("observed_line"),
+            diagnostic = string("diagnostic"),
+            reason = string("reason"),
+        )
+    } catch (e: Exception) {
+        LOG.warn("[layout-detect] native window layout unreadable: ${e.message}")
+        null
+    }
+
+    /**
+     * GH #326 compatibility floor: the GH #320 `window_layout` rules, frozen. Used only when no
+     * native generation answers. Never extend it; change the native derivation instead.
+     */
+    internal fun frozenWindowLayout(evidence: WindowLayoutEvidence): WindowLayoutResolution {
+        val windows = evidence.windows
+        fun relative(path: String): String = projectRelativePath(evidence.basePath, path)
+        if (windows.size < 2) {
+            val selected = windows.firstOrNull()?.let { window ->
+                window.selected?.takeIf(window.sessionTabs::contains)?.let(::relative)
+            }
+            val snapshots = windows.map { LayoutWindowSnapshot(0, 0, selected) }
+            val layout = knownSingleWindowLayout(selected)
+            return WindowLayoutResolution(
+                layout = layout,
+                observedLine =
+                    observedLayoutLine(windows.size, snapshots, layout?.columns.orEmpty()) +
+                        " source=windows",
+                diagnostic = null,
+                reason = if (layout == null) "no_selected_session_document" else null,
+            )
+        }
+        val geometryKnown = windows.all { it.x != null && it.y != null }
+        val snapshots = windows.map { window ->
+            LayoutWindowSnapshot(
+                x = if (geometryKnown) window.x!! else 0,
+                y = if (geometryKnown) window.y!! else 0,
+                file = stickyMarkdownForWindow(
+                    selectedPath = window.selected,
+                    windowMarkdownTabsMruLast = markdownTabsMruLast(window.sessionTabs, evidence.history),
+                )?.let(::relative),
+            )
+        }
+        if (snapshots.none { it.file != null }) {
+            return WindowLayoutResolution(null, null, null, "no_session_document_in_any_window")
+        }
+        val diagnostic =
+            if (sharesOrigin(snapshots)) {
+                "[layout-detect] ${windows.size} editor windows share an origin; " +
+                    "geometry unavailable, keeping each window as its own column"
+            } else {
+                null
+            }
+        val columns = buildColumnsFromSnapshots(snapshots)
+        val line = observedLayoutLine(windows.size, snapshots, columns) + " source=windows"
+        return if (columns.size >= 2) {
+            WindowLayoutResolution(EditorLayout(columns, measuredColumnOrder(snapshots)), line, diagnostic, null)
+        } else {
+            WindowLayoutResolution(null, line, diagnostic, "fewer_than_two_columns")
+        }
+    }
+
+    /** [TerminalUtil.relativePath]'s rule over a plain path. */
+    internal fun projectRelativePath(basePath: String?, path: String): String =
+        if (basePath != null && path.startsWith(basePath)) path.removePrefix("$basePath/") else path
 
     @Volatile private var lastObservedLayout: String? = null
 
@@ -1258,25 +1377,6 @@ object LayoutDetector {
     /** Log a changed observation, and an unchanged one on every [OBSERVED_LAYOUT_HEARTBEAT]th run. */
     internal fun shouldLogObservedLayout(changed: Boolean, observation: Long): Boolean =
         changed || observation % OBSERVED_LAYOUT_HEARTBEAT == 0L
-
-    /**
-     * GH #81 discriminator: what this IDE reported, before the controller sees it.
-     *
-     * A single-document observation has two possible causes that the controller log cannot
-     * tell apart -- the IDE exposing one editor window, or a lossy join downstream. This line
-     * names the window count, each window's origin and document, and the columns built from
-     * them. It is logged at info only when it changes, since detection runs on every surface
-     * observation.
-     */
-    private fun logObservedLayout(
-        windowCount: Int,
-        snapshots: List<LayoutWindowSnapshot>,
-        columns: List<LayoutColumn>,
-        source: String = "windows",
-    ) {
-        val line = observedLayoutLine(windowCount, snapshots, columns) + " source=$source"
-        logLayoutObservation(line)
-    }
 
     private fun logUnknownRemoteLayout(
         focusedSessionFiles: List<String>,

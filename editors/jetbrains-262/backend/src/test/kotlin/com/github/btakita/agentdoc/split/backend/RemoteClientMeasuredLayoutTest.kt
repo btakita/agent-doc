@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc.split.backend
 
+import com.github.btakita.agentdoc.EditorDerivation
 import com.github.btakita.agentdoc.split.EditorWindowBounds
 import com.github.btakita.agentdoc.split.EditorWindowSnapshot
 import com.github.btakita.agentdoc.split.FrontendSurface
@@ -18,6 +19,10 @@ import kotlin.test.assertTrue
 /**
  * GH #320 option B: Remote Dev pane order comes from the JetBrains Client's measured editor-window
  * bounds, grouped exactly like the classic `LayoutDetector.buildColumnsFromSnapshots`.
+ *
+ * GH #326: the native `client_measured_layout` derivation owns these rules (pinned by the Rust
+ * `window_layout` tests with the same cases); the cases here pin the frozen Kotlin floor a native
+ * library that cannot answer falls back to, and that a native answer is used when present.
  */
 class RemoteClientMeasuredLayoutTest {
     private val projectId = ProjectId(UID.random())
@@ -33,7 +38,7 @@ class RemoteClientMeasuredLayoutTest {
         )
         assertEquals(
             MeasuredMainLayout.Measured(listOf(listOf("/repo/a.md"), listOf("/repo/b.md")), "/repo/b.md"),
-            RemoteClientMeasuredLayout.derive(before, isSession),
+            deriveFrozen(before, isSession),
         )
 
         // The operator moves a.md to the opposite split (the GH #320 trace): same membership,
@@ -44,7 +49,7 @@ class RemoteClientMeasuredLayoutTest {
         )
         assertEquals(
             listOf(listOf("/repo/b.md"), listOf("/repo/a.md")),
-            (RemoteClientMeasuredLayout.derive(moved, isSession) as MeasuredMainLayout.Measured).columns,
+            (deriveFrozen(moved, isSession) as MeasuredMainLayout.Measured).columns,
         )
     }
 
@@ -57,7 +62,7 @@ class RemoteClientMeasuredLayoutTest {
         )
         assertEquals(
             listOf(listOf("/repo/a.md", "/repo/b.md"), listOf("/repo/c.md")),
-            (RemoteClientMeasuredLayout.derive(stacked, isSession) as MeasuredMainLayout.Measured).columns,
+            (deriveFrozen(stacked, isSession) as MeasuredMainLayout.Measured).columns,
         )
     }
 
@@ -70,7 +75,7 @@ class RemoteClientMeasuredLayoutTest {
         ).forSchema(LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION)
         assertEquals(
             MeasuredMainLayout.Unavailable("schema_1_without_geometry"),
-            RemoteClientMeasuredLayout.derive(legacy, isSession),
+            deriveFrozen(legacy, isSession),
         )
     }
 
@@ -78,14 +83,14 @@ class RemoteClientMeasuredLayoutTest {
     fun unmeasuredOrSharedOriginWindowsNeverClaimEditorOrder() {
         assertEquals(
             MeasuredMainLayout.Unavailable("window_unmeasured"),
-            RemoteClientMeasuredLayout.derive(
+            deriveFrozen(
                 snapshot(window(0, "/repo/a.md", x = 0), window(1, "/repo/b.md", bounds = null)),
                 isSession,
             ),
         )
         assertEquals(
             MeasuredMainLayout.Unavailable("shared_origin"),
-            RemoteClientMeasuredLayout.derive(
+            deriveFrozen(
                 snapshot(window(0, "/repo/a.md", x = 0), window(1, "/repo/b.md", x = 0)),
                 isSession,
             ),
@@ -103,12 +108,12 @@ class RemoteClientMeasuredLayoutTest {
         )
         assertEquals(
             MeasuredMainLayout.Unavailable("split_shows_non_session_tab"),
-            RemoteClientMeasuredLayout.derive(snapshot(window(0, "/repo/a.md", x = 0), sourceTab), isSession),
+            deriveFrozen(snapshot(window(0, "/repo/a.md", x = 0), sourceTab), isSession),
         )
         val sourceOnly = sourceTab.copy(openPaths = listOf("/repo/Main.kt"))
         assertEquals(
             listOf(listOf("/repo/a.md")),
-            (RemoteClientMeasuredLayout.derive(snapshot(window(0, "/repo/a.md", x = 0), sourceOnly), isSession)
+            (deriveFrozen(snapshot(window(0, "/repo/a.md", x = 0), sourceOnly), isSession)
                 as MeasuredMainLayout.Measured).columns,
         )
     }
@@ -123,7 +128,7 @@ class RemoteClientMeasuredLayoutTest {
             false,
             listOf(window(0, "/repo/b.md", x = 1800)),
         )
-        val layout = RemoteClientMeasuredLayout.derive(
+        val layout = deriveFrozen(
             FrontendSurfaceSnapshot(
                 frontendInstanceId = "frontend-1",
                 sequence = 3,
@@ -165,6 +170,48 @@ class RemoteClientMeasuredLayoutTest {
     fun eachFrontendConnectionPublishesItsOwnEndpoint() {
         assertEquals("remote-client:client-a:7", remoteClientSurfaceId("client-a", 7))
         assertTrue(remoteClientSurfaceId("client-a", 7) != remoteClientSurfaceId("client-a", 8))
+    }
+
+    /** The frozen compatibility floor: no native generation answers. */
+    private fun deriveFrozen(
+        snapshot: FrontendSurfaceSnapshot,
+        isSessionDocument: (String) -> Boolean,
+    ) = RemoteClientMeasuredLayout.derive(snapshot, isSessionDocument, EditorDerivation.Unavailable)
+
+    @Test
+    fun nativeDerivationReceivesWindowEvidenceAndItsAnswerWins() {
+        var asked: String? = null
+        var evidence: String? = null
+        val layout = RemoteClientMeasuredLayout.derive(
+            snapshot(window(0, "/repo/b.md", x = 640), window(1, "/repo/a.md", x = 0)),
+            isSession,
+        ) { derivation, inputJson ->
+            asked = derivation
+            evidence = inputJson
+            """{"outcome":"measured","columns":[["/repo/b.md"],["/repo/a.md"]],"focused":"/repo/a.md"}"""
+        }
+        assertEquals("client_measured_layout", asked)
+        val window = JsonParser.parseString(evidence).asJsonObject.getAsJsonArray("windows")[0].asJsonObject
+        assertEquals(0, window.get("ordinal").asInt)
+        assertEquals("/repo/b.md", window.get("selected_session").asString)
+        assertTrue(window.get("holds_session_document").asBoolean)
+        assertEquals(640, window.get("x").asInt)
+        assertEquals(
+            MeasuredMainLayout.Measured(listOf(listOf("/repo/b.md"), listOf("/repo/a.md")), "/repo/a.md"),
+            layout,
+        )
+    }
+
+    @Test
+    fun anUnreadableOrUnknownNativeAnswerFallsBackToTheFrozenFloor() {
+        val split = snapshot(window(0, "/repo/b.md", x = 640), window(1, "/repo/a.md", x = 0))
+        val expected = MeasuredMainLayout.Measured(listOf(listOf("/repo/a.md"), listOf("/repo/b.md")), "/repo/b.md")
+        assertEquals(expected, RemoteClientMeasuredLayout.derive(split, isSession) { _, _ -> """{"outcome":"later"}""" })
+        assertEquals(expected, RemoteClientMeasuredLayout.derive(split, isSession) { _, _ -> "not json" })
+        assertEquals(
+            MeasuredMainLayout.Unavailable("shared_origin"),
+            RemoteClientMeasuredLayout.parseMeasuredLayout("""{"outcome":"unavailable","reason":"shared_origin"}"""),
+        )
     }
 
     private fun window(

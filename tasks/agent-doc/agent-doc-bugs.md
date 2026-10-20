@@ -159,7 +159,41 @@ To lose nothing at all, wait until the pane footer's `← N agents` count drops.
 - Then `release + publish: Include PR #321-#323` once #323 lands. It is unclaimed, so the next cycle picks it up.
 
 **Clearing:** yes, you can clear. Every live item is either claimed by a running or resumed worker, or reported with its branch named in the queue, so a fresh session can integrate from the document. The running workers keep going after a clear, but their completion reports will land in the cleared context. The next coordinator should check `agent-doc queue claims` and each worker's branch rather than wait for a report.
-<!-- agent:boundary:1d99bc2a -->
+
+### Re: Subagent completed: `subagent:gh323` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/323” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=8609f9b8859d899d1eb9b71d5fc105c90fbaf8218325fdc7f736eb33a03d5a78 -->
+
+### Re: Subagent completed: `subagent:sessioncrashnorestart` returned work for queue item “do [#sessioncrashnorestart]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=1685e25a07197fe126e3ea09ca248cdbe87c016b006d74eb0f5e0af7c2ba330a -->
+> **Chat prompt (#chatprompt):** Can I clear this session?
+
+### Re: v0.35.529 release handoff — opus-5.5 · 2026-10-20T12:20-04:00
+
+**Clearing is safe once this handoff is committed.** The in-flight v0.35.529 release is coordinator-owned (`coordinator:release-0529`, generation 1, worker `coordinator-ba846c4c`) and is recorded here, so a fresh session can finish it.
+
+**State at handoff:**
+- **Integration worktree:** `~/worktrees/agent-doc-batch0529-20261020`, branch `integrate/batch0529`, HEAD `2c210f307` `release: v0.35.529`, which fast-forwards from origin/main `2d5944fb0e`.
+- **Merged:** `fix/gh321-20261020` (GH #321), `fix/gh322-20261020` (GH #322), `feat/lazilyroute-20261020` (surface path), `feat/rdgeometry-20261020` (GH 320 option B), `fix/gh323` (GH #323), and `fix/sessioncrashnorestart`.
+- **Conflicts resolved:**
+  - `VERSIONS.md`: kept both entries.
+  - `SPEC.md` and `editors/jetbrains/SPEC.md`: took the option B Remote Dev text, then appended the surface-reference bullet.
+  - Plugin generations re-bumped with `scripts/check_plugin_versions.py --bump`: classic 0.2.729, 262 0.2.730, 263 0.2.731.
+- **Release metadata:** VERSIONS.md now has a 0.35.529 entry, with GH #321/#322/#323 notes added, plus a release-parity row.
+- **Check:** the authoritative `make check` is running in the background. Its log is `~/worktrees/agent-doc-batch0529-20261020/make-check-0529.log`, which ends with `EXIT=<code>`.
+
+**To finish:**
+1. Confirm `EXIT=0` and no `result: FAILED` in that log, then delete the log (it is untracked).
+2. `git push origin HEAD:main`, fast-forward only.
+3. `make release` in that worktree, and verify the GitHub Release v0.35.529 assets, PyPI 0.35.529, and the installed `agent-doc --version`.
+4. Close the shipped heads:
+   - `--done sessioncrashnorestart`;
+   - echo-strike the free-text heads for GH #321, #322 and #323, the GH 320 option B follow-up, the surface-path move, and this `release + publish` head;
+   - close GH #321 and #322 on GitHub if they are still open (#323 is already closed).
+
+If the check fails, fix the cause in the integration worktree; never rerun it to green.
+<!-- agent:boundary:232886f5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -171,9 +205,10 @@ To lose nothing at all, wait until the pane footer's `← N agents` count drops.
 - 📥 Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/321
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/322
-- 🚧 do [#sessioncrashnorestart]
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/323
-- release + publish: Include PR #321-#323
+- 📥 do [#sessioncrashnorestart]
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/323
+- 🚧 release + publish: Include PR #321-#323
+- do [#clauderesumeafterclear]
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -192,6 +227,7 @@ To lose nothing at all, wait until the pane footer's `← N agents` count drops.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#clauderesumeafterclear] [agent-doc] After an operator /clear in a Claude Code session, agent-doc never updates the session document's resume: field, so every later restart resumes the pre-clear conversation. Observed 2026-10-20: agent-doc-bugs.md kept resume ba846c4c after the 14:28Z /clear started e62ea89f, and both the 15:25Z manual relaunch and the 15:39Z Restart Agent resumed ba846c4c. Codex already tracks its new conversation id; do the same for Claude (SessionStart source=clear/startup hook payload carries the new session id) through the binary-owned frontmatter write, with a regression test.
 - [ ] 🚧 [#sessioncrashnorestart] [agent-doc] Integrate the crashed-session-no-restart fix: a background subagent (dispatched 2026-10-20 ~15:27Z from pane %2) is diagnosing why the agent-doc-bugs.md Claude session (agent-doc session 3f069c68, Claude resume ba846c4c) crashed some time between ~14:16Z and ~15:25Z and the supervisor did not restart it. It pushes branch fix/sessioncrashnorestart (worktree ~/worktrees/agent-doc-sessioncrash-20261020, based on origin/main 2d5944fb0e). When that branch has a commit: review the diagnosis in the commit and spec changes, merge it with the next batch, run make check plus make install, and close this item. If the branch has no commit and the worktree is idle, re-dispatch the investigation.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->

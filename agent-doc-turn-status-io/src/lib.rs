@@ -1040,6 +1040,15 @@ pub struct ClaudeResumeCapture {
     pub document: PathBuf,
     pub session_id: String,
     pub source: &'static str,
+    /// Provenance of the proof (`#claudecrashresumeafterclear`): the owning
+    /// actor's controller `document_id`, the current generation whose lease
+    /// named the supervisor, that supervisor, and its direct harness child
+    /// that ran the hook. A respawning supervisor re-checks these before it
+    /// adopts the capture.
+    pub document_id: String,
+    pub generation: u64,
+    pub supervisor_pid: u32,
+    pub harness_pid: u32,
 }
 
 /// Why a hook payload did not produce a [`ClaudeResumeCapture`].
@@ -1097,14 +1106,17 @@ pub fn resolve_claude_session_start_resume(
         .map_err(|_| skip("state_db_unreadable", Some(candidate.clone()), None))?;
     let proven: Vec<_> = actors
         .into_iter()
-        .filter(|actor| {
-            actor.supervisor_pid.is_some_and(|pid| {
-                agent_doc_turn::turn_status::hook_harness_child_of_supervisor(ancestors, pid)
-                    .is_ok()
-            })
+        .filter_map(|actor| {
+            let supervisor_pid = actor.supervisor_pid?;
+            let harness_pid = agent_doc_turn::turn_status::hook_harness_child_of_supervisor(
+                ancestors,
+                supervisor_pid,
+            )
+            .ok()?;
+            Some((actor, supervisor_pid, harness_pid))
         })
         .collect();
-    let actor = match proven.as_slice() {
+    let (actor, supervisor_pid, harness_pid) = match proven.as_slice() {
         [] => {
             return Err(skip(
                 "hook_not_from_pane_supervisor_harness",
@@ -1112,7 +1124,7 @@ pub fn resolve_claude_session_start_resume(
                 None,
             ));
         }
-        [actor] => actor,
+        [(actor, supervisor_pid, harness_pid)] => (actor, *supervisor_pid, *harness_pid),
         _ => return Err(skip("ambiguous_pane_document", Some(candidate), None)),
     };
     let document = PathBuf::from(&actor.canonical_path);
@@ -1130,6 +1142,10 @@ pub fn resolve_claude_session_start_resume(
         document,
         session_id: candidate.session_id,
         source: candidate.source,
+        document_id: actor.document_id.clone(),
+        generation: actor.generation,
+        supervisor_pid,
+        harness_pid,
     })
 }
 
@@ -1144,6 +1160,24 @@ fn proc_stat_ppid_comm(stat: &str) -> Option<(u32, String)> {
     let comm = head.get(open + 1..)?.to_string();
     let ppid = rest.split_whitespace().nth(1)?.parse().ok()?;
     Some((ppid, comm))
+}
+
+/// `/proc/<pid>/stat` field 22 (`starttime`, clock ticks since boot): with the
+/// pid, a process identity that survives pid reuse.
+fn proc_stat_start_ticks(stat: &str) -> Option<u64> {
+    let (_, rest) = stat.rsplit_once(')')?;
+    // `rest` starts at field 3 (`state`), so field 22 is the 20th entry.
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// Kernel start time of `pid` (`#claudecrashresumeafterclear`). `None` where
+/// `/proc` is unavailable or the process is gone, which fails every identity
+/// proof closed.
+pub fn process_start_ticks(pid: u32) -> Option<u64> {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .as_deref()
+        .and_then(proc_stat_start_ticks)
 }
 
 /// This process's ancestry as `(pid, comm)`, from its parent upward. Empty
@@ -2586,6 +2620,10 @@ mod tests {
                 document: doc.clone(),
                 session_id: "e62ea89f".into(),
                 source: "clear",
+                document_id: doc.to_string_lossy().into_owned(),
+                generation: 7,
+                supervisor_pid: 1605424,
+                harness_pid: 2909304,
             }
         );
         let startup = resolve_claude_session_start_resume(
@@ -2730,6 +2768,14 @@ mod tests {
             Some((7, "a) b (c)".to_string()))
         );
         assert_eq!(proc_stat_ppid_comm("garbage"), None);
+        // `#claudecrashresumeafterclear`: field 22 is the kernel start time,
+        // counted after the LAST `)` so a hostile comm cannot shift it.
+        let stat = "42 (a) b (c)) S 7 42 42 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 1000 10";
+        assert_eq!(proc_stat_start_ticks(stat), Some(987654));
+        assert_eq!(proc_stat_start_ticks("42 (a) S 7"), None);
+        let own = std::process::id();
+        assert!(process_start_ticks(own).is_some());
+        assert_eq!(process_start_ticks(own), process_start_ticks(own));
         // The live ancestry starts at the parent and is never this process.
         let own = std::process::id();
         assert!(hook_process_ancestors().iter().all(|(pid, _)| *pid != own));

@@ -2347,6 +2347,58 @@ fn test_turn_status_idle_session_start_clear_records_new_claude_resume_id() {
         "the /clear conversation becomes the document's resume target"
     );
     assert!(fs::read_to_string(&doc).unwrap().ends_with("# Session\n"));
+
+    // `#claudecrashresumeafterclear`: the real hook also persisted its `/proc`
+    // proof, naming this process (the harness) by pid and kernel start time,
+    // so a crash respawn by the supervisor resumes `e62ea89f`, not the
+    // supervisor's pre-clear in-memory lineage.
+    let document_id = doc.to_string_lossy().into_owned();
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+    let capture =
+        agent_doc_start_runtime_io::load_claude_session_start_from_db(&conn, &document_id)
+            .unwrap()
+            .expect("the proven hook records its provenance");
+    let harness = agent_doc_supervisor::session_lineage::HarnessChildIdentity {
+        pid: std::process::id(),
+        start_ticks: agent_doc_turn_status_io::process_start_ticks(std::process::id())
+            .expect("own start time"),
+    };
+    assert_eq!(
+        (
+            capture.session_id.as_str(),
+            capture.source.as_str(),
+            capture.supervisor_pid,
+            capture.generation,
+            capture.harness_pid,
+            capture.harness_start_ticks,
+        ),
+        (
+            "e62ea89f",
+            "clear",
+            parent_pid(),
+            5,
+            harness.pid,
+            harness.start_ticks
+        )
+    );
+    let mut lineage = agent_doc_supervisor::session_lineage::HarnessSessionLineage::new(
+        Some("ba846c4c".into()),
+        None,
+    );
+    assert_eq!(
+        agent_doc_start_runtime_io::claude_respawn_session_start(
+            &root,
+            &document_id,
+            parent_pid(),
+            Some(harness),
+            &mut lineage,
+        ),
+        agent_doc_start_runtime_io::ClaudeRespawnSessionStart::Adopted {
+            id: "e62ea89f".into(),
+            prior: Some("ba846c4c".into()),
+            changed: true,
+        }
+    );
 }
 
 #[test]

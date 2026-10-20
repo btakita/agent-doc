@@ -206,7 +206,12 @@ controller recycles never refresh lineage from frontmatter. A Claude `/clear` or
 startup moves `resume.claude` to the new conversation through the
 `SessionStart` hook (`#clauderesumeafterclear`,
 `specs/15-turn-lifecycle.md` § Claude conversation-id capture), so the next
-Restart Agent or relaunch adopts it.
+Restart Agent or relaunch adopts it. A crash (or other non-operator continue)
+respawn of a Claude child instead re-reads the hook's durable, provenance-bearing
+capture (`document_runtime_state` kind `claude_session_start_capture`) and
+adopts its id only when it names this supervisor, this supervisor still holds
+the document's current-generation lease, and it names the exact exited child
+by pid and kernel start time (`#claudecrashresumeafterclear`, same section).
 - On the cold-start path a Restart Agent authorizes `RestartLiveHarness` even in
   continue mode. The foreign-pane guard is unchanged: only a pane running *this
   document's* harness is replaceable.

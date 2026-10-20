@@ -9,7 +9,7 @@ use agent_doc_supervisor::{
     lifecycle::{BootResumeAction, boot_resume_action},
     route_owned::RouteOwnedStartPurpose,
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
-    session_lineage::HarnessSessionLineage,
+    session_lineage::{HarnessChildIdentity, HarnessSessionLineage},
 };
 use agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState;
 use agent_doc_supervisor_process::{
@@ -1589,8 +1589,16 @@ pub fn run_with_reap_policy_resume_and_harness(
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     let mut failed_restart_tracker = FailedRestartTracker::default();
     let mut child_launch_count: u32 = 0;
+    // `#claudecrashresumeafterclear`: the kernel identity of the harness child
+    // currently (or most recently) hosted, sampled while it lived, and the
+    // controller document id its `SessionStart` capture is keyed by.
+    let mut hosted_harness_child: Option<HarnessChildIdentity> = None;
+    let session_start_document_id = actor_record.document_id.clone();
     let _actor_context = agent_doc_run_context_io::actor_context(canonical.clone());
     let supervisor_exit_reason = loop {
+        // An operator Restart Agent re-resolves `resume.<harness>` from current
+        // frontmatter below; every other continue restart keeps lineage.
+        let operator_restart_refresh = refresh_resume_from_frontmatter;
         if let Some(open_file_descriptors) = agent_doc_fs::open_file_descriptor_count() {
             log_event(
                 &mut session_log,
@@ -1883,6 +1891,22 @@ pub fn run_with_reap_policy_resume_and_harness(
         let auto_trigger = launch_plan.auto_trigger;
         let mut attempted_exact_resume_id = None;
         let args = if launch_plan.restart_requested {
+            // `#claudecrashresumeafterclear`: a `/clear` inside the exited child
+            // started a conversation this supervisor's lineage never saw. Adopt
+            // the id that child itself reported through `SessionStart`, but only
+            // when the hook's recorded provenance names exactly that child and
+            // this supervisor still owns the document's current lease. An
+            // operator Restart Agent already took current frontmatter above.
+            if harness.binary == "claude" && !operator_restart_refresh {
+                adopt_exited_claude_child_session_start(
+                    &project_root,
+                    file,
+                    &session_start_document_id,
+                    hosted_harness_child,
+                    &mut session_lineage,
+                    &mut session_log,
+                );
+            }
             if session_lineage.active_id().is_none()
                 && let Some(projected) = latest_codex_session_projection(&canonical, &harness)
                 && session_lineage.observe_projected_id(Some(&projected.session_id))
@@ -2276,6 +2300,10 @@ pub fn run_with_reap_policy_resume_and_harness(
         // at the removal rung.
         let status = {
             let child_pid = session.process_id();
+            hosted_harness_child = child_pid.and_then(|pid| {
+                agent_doc_turn_status_io::process_start_ticks(pid)
+                    .map(|start_ticks| HarnessChildIdentity { pid, start_ticks })
+            });
             let pty_child = PtySupervisedChild::monitor(
                 session
                     .take_child()
@@ -3040,6 +3068,40 @@ pub fn run_with_reap_policy_resume_and_harness(
     Ok(())
 }
 
+/// `#claudecrashresumeafterclear`: respawn-edge adoption of the exited Claude
+/// child's own `SessionStart` capture, logged to the session log and ops.log.
+fn adopt_exited_claude_child_session_start(
+    project_root: &std::path::Path,
+    file: &std::path::Path,
+    document_id: &str,
+    exited_child: Option<HarnessChildIdentity>,
+    lineage: &mut HarnessSessionLineage,
+    session_log: &mut Option<SessionLog>,
+) {
+    let line = match crate::claude_respawn_session_start(
+        project_root,
+        document_id,
+        std::process::id(),
+        exited_child,
+        lineage,
+    ) {
+        crate::ClaudeRespawnSessionStart::NoCapture => return,
+        crate::ClaudeRespawnSessionStart::Adopted { changed: false, .. } => return,
+        crate::ClaudeRespawnSessionStart::Adopted { id, prior, .. } => format!(
+            "claude_respawn_resume_adopted id={id} prior={} source=session_start_capture",
+            prior.as_deref().unwrap_or("none")
+        ),
+        crate::ClaudeRespawnSessionStart::Refused { reason, capture_id } => format!(
+            "claude_respawn_resume_refused capture_id={capture_id} reason={reason} note=keeping_running_lineage"
+        ),
+        crate::ClaudeRespawnSessionStart::Unreadable(error) => format!(
+            "claude_respawn_resume_refused reason=state_db_unreadable error={error} note=keeping_running_lineage"
+        ),
+    };
+    log_event(session_log, &line);
+    agent_doc_ops_log_io::log_op(file, &format!("{line} file={}", file.display()));
+}
+
 /// `#gh133sigterm` (GH #133 follow-up): make a deliberate `SIGTERM` durable.
 ///
 /// Without a handler the controller watchdog cannot tell a `kill <pid>` from a
@@ -3472,6 +3534,44 @@ mod tests {
             .find(concat!("apply_reexec_pty_bridge", "_report("))
             .expect("the handoff report is applied");
         assert!(adopt < apply && apply < reader && apply < writer);
+    }
+
+    /// `#claudecrashresumeafterclear`: the supervisor loop samples each hosted
+    /// child's kernel identity while it lives, and every non-operator continue
+    /// respawn re-reads the exited child's `SessionStart` capture BEFORE it
+    /// builds the exact-resume args from the lineage. An operator Restart Agent
+    /// keeps its own current-frontmatter refresh, so the flag is captured
+    /// before that refresh clears it.
+    #[test]
+    fn continue_respawn_adopts_the_exited_claude_childs_session_start_before_resuming() {
+        let source = include_str!("run.rs");
+        let body = &source[source
+            .find(concat!("let supervisor_exit_reason", " = loop {"))
+            .expect("supervisor restart loop")..];
+        let find = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("{needle}"));
+        let captured = find(concat!(
+            "let operator_restart_refresh = ",
+            "refresh_resume_from_frontmatter;"
+        ));
+        let cleared = find(concat!("refresh_resume_from_frontmatter", " = false;"));
+        assert!(
+            captured < cleared,
+            "capture the operator flag before it is cleared"
+        );
+        let branch = find(concat!("let args = if launch_plan", ".restart_requested {"));
+        let gate = find(concat!(
+            "if harness.binary == \"claude\" && ",
+            "!operator_restart_refresh {"
+        ));
+        let adopt = find(concat!("adopt_exited_claude_child", "_session_start("));
+        let exact = find(concat!("harness.exact_resume_args", "(&base_args"));
+        assert!(branch < gate && gate < adopt && adopt < exact);
+        let sample = find(concat!("hosted_harness_child = ", "child_pid.and_then("));
+        let monitor = find(concat!("PtySupervisedChild::", "monitor("));
+        assert!(
+            sample < monitor,
+            "sample the child identity while it is alive"
+        );
     }
 
     #[test]

@@ -3113,8 +3113,9 @@ mod tests {
     use agent_doc_hooks_io::fire_doc_hooks;
     use agent_doc_project_config_io as project_config_io;
     use agent_doc_start_io::{
-        existing_session_pane_action_from_entry, format_existing_pane_conflict_error,
-        rebind_project_tmux_session_if_expected_dead, relocate_if_wrong_session,
+        StartRelocationOutcome, existing_session_pane_action_from_entry,
+        format_existing_pane_conflict_error, rebind_project_tmux_session_if_expected_dead,
+        relocate_if_wrong_session, relocate_pane_into_session,
     };
     use agent_doc_supervisor::ipc_protocol::IpcMethod;
     use agent_doc_supervisor::session_owner::ExistingSessionPaneAction;
@@ -3824,6 +3825,51 @@ mod tests {
         let sess = iso.pane_session(&pane_b).unwrap();
         assert_eq!(sess, "sess-a", "pane should be in sess-a after relocation");
     }
+    /// Pane-count drift (2026-10-20): a pane parked in another session's
+    /// stash is relocated into the expected session's stash, never joined
+    /// beside its active pane in the visible window.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn relocate_keeps_a_stashed_pane_out_of_the_visible_window() {
+        let iso = agent_doc_tmux_io::isolated_test_tmux("start-reloc-stash");
+        let visible = iso
+            .new_session("sess-a", std::path::Path::new("/tmp"))
+            .unwrap();
+        let visible_window = iso.pane_window(&visible).unwrap();
+        let anchor_b = iso
+            .new_session("sess-b", std::path::Path::new("/tmp"))
+            .unwrap();
+        let parked = iso
+            .split_window(&anchor_b, std::path::Path::new("/tmp"), "-h")
+            .unwrap();
+        iso.stash_pane(&parked, "sess-b").unwrap();
+        assert_eq!(
+            agent_doc_tmux_io::target_window_name(&iso, &parked).as_deref(),
+            Some("stash")
+        );
+
+        let outcome = relocate_pane_into_session(&iso, &parked, "sess-a");
+
+        assert_eq!(
+            outcome,
+            StartRelocationOutcome::Relocated {
+                from_session: "sess-b".to_string(),
+                placement: agent_doc_start_io::StartRelocationPlacement::ExpectedSessionStash,
+            }
+        );
+        assert_eq!(iso.pane_session(&parked).unwrap(), "sess-a");
+        assert_eq!(
+            agent_doc_tmux_io::target_window_name(&iso, &parked).as_deref(),
+            Some("stash"),
+            "the relocated pane stays parked"
+        );
+        assert_eq!(
+            iso.list_window_panes(&visible_window).unwrap(),
+            vec![visible],
+            "the visible window gains no column the editor did not ask for"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn relocate_fails_gracefully_when_no_anchor() {

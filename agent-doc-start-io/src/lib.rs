@@ -1829,7 +1829,12 @@ fn prepare_start_runtime_with_admission(
     if let Some(target) = start_target
         && main_layout_relocation_allowed
         && !in_navigation_lane
-        && !relocate_if_wrong_session(&tmux, &pane_id, &target.session)
+        && !log_start_relocation(
+            &canonical,
+            &pane_id,
+            &target.session,
+            relocate_pane_into_session(&tmux, &pane_id, &target.session),
+        )
         && target.authority == agent_doc_sync::LayoutSessionAuthority::ScopedProject
         && pane_session
             .as_deref()
@@ -2238,22 +2243,129 @@ pub fn format_existing_pane_conflict_error(
     })
 }
 
+pub use agent_doc_sync::StartRelocationPlacement;
+
+/// What [`relocate_pane_into_session`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartRelocationOutcome {
+    /// Already in the expected session, or tmux could not say where the pane is.
+    NotNeeded,
+    Relocated {
+        from_session: String,
+        placement: agent_doc_sync::StartRelocationPlacement,
+    },
+    Failed {
+        from_session: String,
+        placement: agent_doc_sync::StartRelocationPlacement,
+        error: String,
+    },
+}
+
+impl StartRelocationOutcome {
+    /// True when the pane now lives in the expected session.
+    pub fn in_expected_session(&self) -> bool {
+        !matches!(self, Self::Failed { .. })
+    }
+}
+
+/// Record a start relocation in ops.log (pane-count drift): it changes the tmux
+/// topology outside the layout plane, and before this it was visible only on
+/// the supervisor's stderr. Returns whether the pane is in the expected session.
+fn log_start_relocation(
+    file: &Path,
+    pane_id: &str,
+    expected_session: &str,
+    outcome: StartRelocationOutcome,
+) -> bool {
+    match &outcome {
+        StartRelocationOutcome::NotNeeded => {}
+        StartRelocationOutcome::Relocated {
+            from_session,
+            placement,
+        } => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "start_pane_session_relocated file={} pane={pane_id} from_session={from_session} to_session={expected_session} placement={}",
+                file.display(),
+                placement.label(),
+            ),
+        ),
+        StartRelocationOutcome::Failed {
+            from_session,
+            placement,
+            error,
+        } => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "start_pane_session_relocation_failed file={} pane={pane_id} from_session={from_session} to_session={expected_session} placement={} error={error:?}",
+                file.display(),
+                placement.label(),
+            ),
+        ),
+    }
+    outcome.in_expected_session()
+}
+
 pub fn relocate_if_wrong_session(
     tmux: &tmux_router::Tmux,
     pane_id: &str,
     expected_session: &str,
 ) -> bool {
+    relocate_pane_into_session(tmux, pane_id, expected_session).in_expected_session()
+}
+
+/// Move a starting pane into the expected session, preserving its visibility
+/// class ([`agent_doc_sync::start_relocation_placement`]): a pane
+/// parked in a stash window moves into the expected session's stash and stays
+/// out of the visible layout; a visible pane joins beside the expected
+/// session's active pane as before.
+pub fn relocate_pane_into_session(
+    tmux: &tmux_router::Tmux,
+    pane_id: &str,
+    expected_session: &str,
+) -> StartRelocationOutcome {
     let actual_session = match tmux.pane_session(pane_id) {
         Ok(s) => s,
-        Err(_) => return true,
+        Err(_) => return StartRelocationOutcome::NotNeeded,
     };
     if actual_session == expected_session {
-        return true;
+        return StartRelocationOutcome::NotNeeded;
     }
-    eprintln!(
-        "[start] pane {} is in session '{}', expected '{}' — auto-relocating to project session",
-        pane_id, actual_session, expected_session
+    let placement = agent_doc_sync::start_relocation_placement(
+        agent_doc_sync_io::sync::pane_in_stash_window(tmux, pane_id),
     );
+    eprintln!(
+        "[start] pane {} is in session '{}', expected '{}' — auto-relocating to project session ({})",
+        pane_id,
+        actual_session,
+        expected_session,
+        placement.label()
+    );
+    if placement == agent_doc_sync::StartRelocationPlacement::ExpectedSessionStash {
+        return match tmux.stash_pane(pane_id, expected_session) {
+            Ok(()) => {
+                eprintln!(
+                    "[start] relocated stashed pane {} → session '{}' stash",
+                    pane_id, expected_session
+                );
+                StartRelocationOutcome::Relocated {
+                    from_session: actual_session,
+                    placement,
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[start] WARNING: stash relocation failed ({}); pane {} will register in session '{}'",
+                    e, pane_id, actual_session
+                );
+                StartRelocationOutcome::Failed {
+                    from_session: actual_session,
+                    placement,
+                    error: format!("{e:#}"),
+                }
+            }
+        };
+    }
     if let Some(anchor) = tmux.active_pane(expected_session) {
         match tmux_router::PaneMoveOp::new(tmux, pane_id, &anchor)
             .allow_cross_session("auto-relocate to project session on start")
@@ -2264,14 +2376,21 @@ pub fn relocate_if_wrong_session(
                     "[start] relocated pane {} → session '{}'",
                     pane_id, expected_session
                 );
-                true
+                StartRelocationOutcome::Relocated {
+                    from_session: actual_session,
+                    placement,
+                }
             }
             Err(e) => {
                 eprintln!(
                     "[start] WARNING: relocation failed ({}); pane {} will register in session '{}'",
                     e, pane_id, actual_session
                 );
-                false
+                StartRelocationOutcome::Failed {
+                    from_session: actual_session,
+                    placement,
+                    error: format!("{e:#}"),
+                }
             }
         }
     } else {
@@ -2280,7 +2399,11 @@ pub fn relocate_if_wrong_session(
              pane {} will register in session '{}'",
             expected_session, pane_id, actual_session
         );
-        false
+        StartRelocationOutcome::Failed {
+            from_session: actual_session,
+            placement,
+            error: "no_active_pane_in_expected_session".to_string(),
+        }
     }
 }
 

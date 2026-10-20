@@ -1883,6 +1883,242 @@ mod multi_tmux_session_model {
     }
 }
 
+/// Pane-count drift reference model (operator report 2026-10-20: "1 tmux pane
+/// with 2 editor panes", then "3 tmux panes").
+///
+/// Two tmux sessions each hold an `agent-doc` window: the project pin `0`
+/// (the window the operator watches and the controller's convergence observer
+/// reads) and `2`, where a cross-root document's pane had been placed. The
+/// editor shows two splits. Each step drives the production pure decisions:
+/// the session selection (`select_layout_session`), the structural effect's
+/// window (`agent_doc_controller::pane_layout::structural_effect_window`), and
+/// `start`'s relocation placement (`agent_doc_sync::start_relocation_placement`).
+/// Two mutations restore the pre-fix behavior and must reproduce both reports.
+mod pane_count_drift_model {
+    use agent_doc_controller::pane_layout::structural_effect_window;
+    use agent_doc_sync::{
+        LayoutSessionCandidates, StartRelocationPlacement, select_layout_session,
+        start_relocation_placement,
+    };
+    use std::collections::BTreeMap;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Window {
+        AgentDoc(&'static str),
+        Stash(&'static str),
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    struct Mutations {
+        /// Pre-fix effect: windowless, so the focused pane's session wins.
+        ambient_effect_window: bool,
+        /// Pre-fix start: every relocation joins beside the active pane.
+        relocate_beside_active: bool,
+    }
+
+    const FIXED: Mutations = Mutations {
+        ambient_effect_window: false,
+        relocate_beside_active: false,
+    };
+
+    struct World {
+        pin: &'static str,
+        multi_session: bool,
+        panes: BTreeMap<&'static str, Window>,
+    }
+
+    impl World {
+        fn session_of(&self, doc: &str) -> &'static str {
+            match self.panes[doc] {
+                Window::AgentDoc(session) | Window::Stash(session) => session,
+            }
+        }
+
+        /// The controller's convergence observer: single-session projects read
+        /// the pinned session's `agent-doc` window.
+        fn observed_session(&self) -> &'static str {
+            self.pin
+        }
+
+        /// The structural effect: select a session, then make the editor's
+        /// columns the only visible panes of that session's `agent-doc` window,
+        /// stashing displaced panes in the same session.
+        fn sync(&mut self, columns: &[&'static str], focus: &'static str, m: Mutations) {
+            let pin = self.pin;
+            let explicit = if m.ambient_effect_window {
+                None
+            } else {
+                structural_effect_window(None, false, self.multi_session, || {
+                    Some(format!("@{pin}"))
+                })
+            };
+            // `focused_actor_session_from_bindings`: the focused actor when it is
+            // visible in an `agent-doc` window, else a desired sibling visible
+            // in one, else the focused actor's session.
+            let visible_session = |doc: &str| match self.panes.get(doc) {
+                Some(Window::AgentDoc(session)) => Some(session.to_string()),
+                _ => None,
+            };
+            let focused_actor = visible_session(focus)
+                .or_else(|| columns.iter().find_map(|doc| visible_session(doc)))
+                .or_else(|| Some(self.session_of(focus).to_string()));
+            let decision = select_layout_session(LayoutSessionCandidates {
+                explicit: explicit.map(|window| window.trim_start_matches('@').to_string()),
+                focused_actor,
+                document_binding: None,
+                current_agent_doc: Some(pin.to_string()),
+                scoped_project: Some(pin.to_string()),
+                fallback: None,
+            })
+            .unwrap();
+            let session: &'static str = if decision.session == pin { pin } else { "2" };
+            for (doc, window) in self.panes.iter_mut() {
+                if columns.contains(doc) {
+                    *window = Window::AgentDoc(session);
+                } else if *window == Window::AgentDoc(session) {
+                    *window = Window::Stash(session);
+                }
+            }
+        }
+
+        /// A supervisor (re)start: `start` relocates its pane into the pin.
+        fn start(&mut self, doc: &'static str, m: Mutations) {
+            let pin = self.pin;
+            let window = self.panes[doc];
+            if self.session_of(doc) == pin {
+                return;
+            }
+            let placement = if m.relocate_beside_active {
+                StartRelocationPlacement::BesideExpectedActivePane
+            } else {
+                start_relocation_placement(matches!(window, Window::Stash(_)))
+            };
+            self.panes.insert(
+                doc,
+                match placement {
+                    StartRelocationPlacement::ExpectedSessionStash => Window::Stash(pin),
+                    StartRelocationPlacement::BesideExpectedActivePane => Window::AgentDoc(pin),
+                },
+            );
+        }
+
+        /// Panes the operator sees: the observed session's `agent-doc` window.
+        fn visible(&self) -> usize {
+            let observed = Window::AgentDoc(self.observed_session());
+            self.panes
+                .values()
+                .filter(|window| **window == observed)
+                .count()
+        }
+    }
+
+    fn reported_world() -> World {
+        let mut panes = BTreeMap::new();
+        panes.insert("bugs.md", Window::AgentDoc("0"));
+        panes.insert("sdk.md", Window::AgentDoc("0"));
+        panes.insert("upgrade.md", Window::Stash("0"));
+        // The cross-root document's pane sits alone in session 2's window.
+        panes.insert("sdk-demo.md", Window::AgentDoc("2"));
+        World {
+            pin: "0",
+            multi_session: false,
+            panes,
+        }
+    }
+
+    /// The reported sequence: the editor shows [bugs | sdk-demo] (focus on
+    /// sdk-demo), briefly [upgrade | sdk-demo], back to [bugs | sdk-demo];
+    /// later the upgrade supervisor re-execs onto a fresh binary.
+    fn run(m: Mutations) -> (usize, usize) {
+        let mut world = reported_world();
+        world.sync(&["bugs.md", "sdk-demo.md"], "sdk-demo.md", m);
+        let after_first_sync = world.visible();
+        world.sync(&["upgrade.md", "sdk-demo.md"], "upgrade.md", m);
+        world.sync(&["bugs.md", "sdk-demo.md"], "bugs.md", m);
+        // The operator's manual sync without focus pulls the window back.
+        world.sync(
+            &["bugs.md", "sdk-demo.md"],
+            "bugs.md",
+            Mutations {
+                ambient_effect_window: false,
+                ..m
+            },
+        );
+        world.start("upgrade.md", m);
+        (after_first_sync, world.visible())
+    }
+
+    #[test]
+    fn visible_pane_count_follows_the_editor_split_count() {
+        assert_eq!(
+            run(FIXED),
+            (2, 2),
+            "both editor splits are visible in the observed window throughout"
+        );
+    }
+
+    #[test]
+    fn ambient_effect_window_mutation_reproduces_one_visible_pane() {
+        let (after_first_sync, _) = run(Mutations {
+            ambient_effect_window: true,
+            relocate_beside_active: false,
+        });
+        assert_eq!(
+            after_first_sync, 1,
+            "the effect arranged session 2 while the operator watched session 0"
+        );
+    }
+
+    #[test]
+    fn both_pre_fix_mutations_reproduce_three_visible_panes() {
+        let (_, after_restart) = run(Mutations {
+            ambient_effect_window: true,
+            relocate_beside_active: true,
+        });
+        assert_eq!(
+            after_restart, 3,
+            "a pane stashed in session 2 was joined beside session 0's active pane"
+        );
+        // The start fix alone already keeps the count at the split count.
+        let (_, start_fix_only) = run(Mutations {
+            ambient_effect_window: true,
+            relocate_beside_active: false,
+        });
+        assert_eq!(start_fix_only, 2);
+    }
+
+    #[test]
+    fn effect_and_observer_name_the_same_session_for_every_placement() {
+        let placements = [
+            Window::AgentDoc("0"),
+            Window::AgentDoc("2"),
+            Window::Stash("0"),
+            Window::Stash("2"),
+        ];
+        for focus_window in placements {
+            for other_window in placements {
+                let mut world = reported_world();
+                world.panes.insert("bugs.md", other_window);
+                world.panes.insert("sdk-demo.md", focus_window);
+                world.sync(&["bugs.md", "sdk-demo.md"], "sdk-demo.md", FIXED);
+                assert_eq!(
+                    world.visible(),
+                    2,
+                    "focus={focus_window:?} other={other_window:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn multi_session_projects_keep_the_actor_driven_selection() {
+        assert_eq!(
+            structural_effect_window(None, false, true, || Some("@0".to_string())),
+            None
+        );
+    }
+}
+
 /// `#ideriderindependentnav` / `#idefocusowner` reference model: two JetBrains
 /// installations (IntelliJ IDEA and Rider) plus an unscoped editor publish
 /// focus claims, passive layout heartbeats, and explicit claims (`Sync Tmux

@@ -32593,6 +32593,21 @@ fn pane_layout_effect_worker(
         }
         let mut guarded_invocation = desired.invocation.clone();
         guarded_invocation.actor_bindings = actor_bindings.clone();
+        // pane-count drift: the effect arranges the window this generation's
+        // observer reads, never the window the focused pane happens to live in.
+        guarded_invocation.window = agent_doc_controller::pane_layout::structural_effect_window(
+            desired.invocation.window.as_deref(),
+            lane_observation_session.is_some(),
+            project_is_multi_tmux_session(&bootstrap.project_root),
+            || {
+                pane_layout_target_window_id_for_lane(
+                    &bootstrap.project_root,
+                    &lane_tmux,
+                    None,
+                    lane_observation_session.as_deref(),
+                )
+            },
+        );
         let focus_suppressed = suppress_inactive_automatic_layout_focus(
             &mut guarded_invocation,
             desktop_editor_focus_state(),

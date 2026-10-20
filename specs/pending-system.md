@@ -290,7 +290,12 @@ and the preflight done-strike — read through
 `done_archive::read_done_archive_sources` (GH #325; a raw `root.join(value)`
 read the project root directory for a bare `archive` and the literal
 `<root>/document:x.done.md` for an anchored value, so every externally archived
-item looked never done). A file at `<document dir>/<project-relative path of the
+item looked never done). `agent-doc queue recover-lost` reads its
+id-coverage text through the same `read_done_archive_sources` (it had joined the
+raw value onto the document directory, so an id archived through a
+project-relative, bare, or `document:`/`project:` value was reported lost and
+offered for restore); an invalid declared target fails the audit rather than
+under-reporting coverage. A file at `<document dir>/<project-relative path of the
 resolved archive>`, left by 0.35.521–0.35.523's document-relative resolution of
 unprefixed values, is not completed history: preflight names it once in a
 `[preflight] done archive:` advisory and a `legacy_done_archive_advisory`

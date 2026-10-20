@@ -817,12 +817,65 @@ pub enum AuthoritativeActorDispatchAction {
     FailClosed,
     DispatchOnlyDirectPane,
     ManagedSupervisorIpc,
+    /// GH #319: an automated background dispatch found the
+    /// authoritative actor mid-turn (`busy`) or awaiting operator input
+    /// (`waiting_input`). Submit nothing, preserve focus/layout, and report a
+    /// deferral so the automated caller retries after its own backoff.
+    DeferAutomatedBehindLiveTurn,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthoritativeActorDispatchIntent {
     PromptAware,
     PlainTrigger,
+}
+
+/// Who asked for a routed dispatch (GH #319).
+///
+/// The plain-trigger busy pass-through (`route --dispatch-only --plain-trigger`
+/// into a `busy`/`waiting_input` actor) is real-time steering: the operator
+/// clicked Run Agent Doc while watching the turn and chose to send. An automated
+/// background caller (the controller orphan drain) has no operator watching the
+/// pane and no steering intent, so the same transport would type a trigger into
+/// a running turn. The origin is therefore part of the dispatch facts, not a
+/// property of the trigger text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthoritativeActorDispatchOrigin {
+    /// An operator-initiated route (editor Run Agent Doc, CLI `agent-doc route`).
+    #[default]
+    Operator,
+    /// Controller-originated recovery work (orphan drain) with no operator
+    /// watching the pane. It must defer behind a live turn, never submit into it.
+    AutomatedBackground,
+}
+
+impl AuthoritativeActorDispatchOrigin {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Operator => "operator",
+            Self::AutomatedBackground => "automated_background",
+        }
+    }
+}
+
+/// GH #319: whether an automated background dispatch must defer instead of
+/// submitting because the actor is running a turn or waiting on the operator.
+///
+/// Only `busy` and `waiting_input` are claimed here: those are exactly the
+/// states the operator plain-trigger pass-through would otherwise type into.
+/// `starting`, `blocked`, `closed`, and `missing` keep their existing
+/// fail-closed/start handling, and `ready` dispatches normally.
+pub const fn automated_dispatch_defers_behind_live_turn(
+    origin: AuthoritativeActorDispatchOrigin,
+    actor_state: ActorDispatchState,
+) -> bool {
+    matches!(
+        origin,
+        AuthoritativeActorDispatchOrigin::AutomatedBackground
+    ) && matches!(
+        actor_state,
+        ActorDispatchState::Busy | ActorDispatchState::WaitingInput
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -866,11 +919,17 @@ pub struct AuthoritativeActorDispatchActionFacts {
     pub has_prompt_bearing_work: bool,
     pub reopen_decision: RouteDecision,
     pub intent: AuthoritativeActorDispatchIntent,
+    pub origin: AuthoritativeActorDispatchOrigin,
 }
 
 pub fn classify_authoritative_actor_dispatch_action(
     facts: AuthoritativeActorDispatchActionFacts,
 ) -> AuthoritativeActorDispatchAction {
+    // GH #319: checked before the plain-trigger pass-through,
+    // which is operator steering only. An automated caller never inherits it.
+    if automated_dispatch_defers_behind_live_turn(facts.origin, facts.actor_state) {
+        return AuthoritativeActorDispatchAction::DeferAutomatedBehindLiveTurn;
+    }
     if facts.mode == ReopenMode::DispatchOnly
         && facts.intent == AuthoritativeActorDispatchIntent::PlainTrigger
         && matches!(
@@ -6578,6 +6637,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::ReuseReady,
                 intent: AuthoritativeActorDispatchIntent::PromptAware,
+                origin: AuthoritativeActorDispatchOrigin::Operator,
             }),
             AuthoritativeActorDispatchAction::DispatchOnlyDirectPane
         );
@@ -6588,6 +6648,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::ReuseReady,
                 intent: AuthoritativeActorDispatchIntent::PromptAware,
+                origin: AuthoritativeActorDispatchOrigin::Operator,
             }),
             AuthoritativeActorDispatchAction::ManagedSupervisorIpc
         );
@@ -6598,6 +6659,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::ReuseReady,
                 intent: AuthoritativeActorDispatchIntent::PromptAware,
+                origin: AuthoritativeActorDispatchOrigin::Operator,
             }),
             AuthoritativeActorDispatchAction::ManagedSupervisorQueue
         );
@@ -6608,6 +6670,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::FailClosed,
                 intent: AuthoritativeActorDispatchIntent::PromptAware,
+                origin: AuthoritativeActorDispatchOrigin::Operator,
             }),
             AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue
         );
@@ -6618,6 +6681,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::FailClosed,
                 intent: AuthoritativeActorDispatchIntent::PromptAware,
+                origin: AuthoritativeActorDispatchOrigin::Operator,
             }),
             AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput
         );
@@ -6628,6 +6692,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 has_prompt_bearing_work: false,
                 reopen_decision: RouteDecision::FailClosed,
                 intent: AuthoritativeActorDispatchIntent::PromptAware,
+                origin: AuthoritativeActorDispatchOrigin::Operator,
             }),
             AuthoritativeActorDispatchAction::FocusOnly
         );
@@ -6644,11 +6709,197 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                         has_prompt_bearing_work: false,
                         reopen_decision: RouteDecision::FailClosed,
                         intent: AuthoritativeActorDispatchIntent::PlainTrigger,
+                        origin: AuthoritativeActorDispatchOrigin::Operator,
                     }
                 ),
                 AuthoritativeActorDispatchAction::DispatchOnlyDirectPane
             );
         }
+    }
+
+    /// GH #319: exhaustive world sweep over every dispatch fact.
+    /// An automated background origin must never resolve to a submitting
+    /// action while the actor is `busy` or `waiting_input`, whatever the mode,
+    /// intent, prompt-bearing work, or reopen decision; an operator origin keeps
+    /// the exact pre-GH-#319 classification (the plain-trigger steering
+    /// pass-through stays operator-only).
+    #[test]
+    fn automated_background_dispatch_never_submits_into_a_live_turn_world_sweep() {
+        let states = [
+            ActorDispatchState::Ready,
+            ActorDispatchState::Starting,
+            ActorDispatchState::Busy,
+            ActorDispatchState::WaitingInput,
+            ActorDispatchState::Blocked,
+            ActorDispatchState::Closed,
+            ActorDispatchState::Missing,
+        ];
+        let decisions = [
+            RouteDecision::ReuseReady,
+            RouteDecision::WaitForReady,
+            RouteDecision::FreshRestart,
+            RouteDecision::StartNew,
+            RouteDecision::FailClosed,
+        ];
+        let submits = |action: AuthoritativeActorDispatchAction| {
+            matches!(
+                action,
+                AuthoritativeActorDispatchAction::DispatchOnlyDirectPane
+                    | AuthoritativeActorDispatchAction::ManagedSupervisorIpc
+                    | AuthoritativeActorDispatchAction::ManagedSupervisorQueue
+                    | AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput
+                    | AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue
+            )
+        };
+        let mut worlds = 0;
+        for mode in [ReopenMode::DispatchOnly, ReopenMode::Managed] {
+            for actor_state in states {
+                for has_prompt_bearing_work in [false, true] {
+                    for reopen_decision in decisions {
+                        for intent in [
+                            AuthoritativeActorDispatchIntent::PromptAware,
+                            AuthoritativeActorDispatchIntent::PlainTrigger,
+                        ] {
+                            worlds += 1;
+                            let facts = |origin| AuthoritativeActorDispatchActionFacts {
+                                mode,
+                                actor_state,
+                                has_prompt_bearing_work,
+                                reopen_decision,
+                                intent,
+                                origin,
+                            };
+                            let operator = classify_authoritative_actor_dispatch_action(facts(
+                                AuthoritativeActorDispatchOrigin::Operator,
+                            ));
+                            let automated = classify_authoritative_actor_dispatch_action(facts(
+                                AuthoritativeActorDispatchOrigin::AutomatedBackground,
+                            ));
+                            assert_ne!(
+                                operator,
+                                AuthoritativeActorDispatchAction::DeferAutomatedBehindLiveTurn,
+                                "operator routes never take the automated deferral: {:?}",
+                                facts(AuthoritativeActorDispatchOrigin::Operator)
+                            );
+                            let live_turn = matches!(
+                                actor_state,
+                                ActorDispatchState::Busy | ActorDispatchState::WaitingInput
+                            );
+                            if live_turn {
+                                assert_eq!(
+                                    automated,
+                                    AuthoritativeActorDispatchAction::DeferAutomatedBehindLiveTurn,
+                                    "automated dispatch into a live turn must defer: {:?}",
+                                    facts(AuthoritativeActorDispatchOrigin::AutomatedBackground)
+                                );
+                                assert!(!submits(automated));
+                            } else {
+                                assert_eq!(
+                                    automated,
+                                    operator,
+                                    "origin only changes live-turn worlds: {:?}",
+                                    facts(AuthoritativeActorDispatchOrigin::AutomatedBackground)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(worlds, 2 * 7 * 2 * 5 * 2, "sweep covered every world");
+    }
+
+    /// Replay of the GH #319 ops-log sequence: the controller orphan
+    /// drain (`dispatch_only`, `plain_trigger`, automated origin) read a
+    /// `ready` actor record whose live pane showed `✽ Proofing… (1m 28s …)`.
+    /// Route downgrades the stale ready record to busy
+    /// (`route_dispatch_only_ready_actor_active_turn_blocked`), skips the
+    /// ready-wait (`route_dispatch_only_busy_active_turn_skip_wait`), and then
+    /// used to classify the plain trigger as `DispatchOnlyDirectPane` and type
+    /// it in (`tmux_text_enter`). It must now defer.
+    #[test]
+    fn gh319_orphan_drain_replay_defers_instead_of_typing_into_the_live_turn() {
+        // Step 1: the probe runs because the record says ready.
+        assert!(dispatch_only_should_probe_active_turn_cue(
+            true,
+            DispatchActorState::Ready,
+            false,
+            false,
+        ));
+        // Step 2: a live cue downgrades the record to busy; the cue skips the wait.
+        let effective_state = ActorDispatchState::Busy;
+        assert!(!dispatch_only_busy_should_wait_for_ready(
+            true,
+            DispatchActorState::Busy,
+            false,
+            true,
+        ));
+        // Step 3: busy dispatch-only reopen fails closed at the reopen decision.
+        let reopen = decide_authoritative_reopen(RoutedReopenFacts {
+            actor_state: effective_state,
+            prompt_ready: false,
+            has_prompt_bearing_work: false,
+            mode: ReopenMode::DispatchOnly,
+            degraded_authority: false,
+            dispatch_eligible: true,
+        });
+        assert_eq!(reopen.decision, RouteDecision::FailClosed);
+        // Step 4: classification by origin.
+        let facts = |origin| AuthoritativeActorDispatchActionFacts {
+            mode: ReopenMode::DispatchOnly,
+            actor_state: effective_state,
+            has_prompt_bearing_work: false,
+            reopen_decision: reopen.decision,
+            intent: AuthoritativeActorDispatchIntent::PlainTrigger,
+            origin,
+        };
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(facts(
+                AuthoritativeActorDispatchOrigin::AutomatedBackground
+            )),
+            AuthoritativeActorDispatchAction::DeferAutomatedBehindLiveTurn,
+            "the orphan drain must not type into the running turn"
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(facts(
+                AuthoritativeActorDispatchOrigin::Operator
+            )),
+            AuthoritativeActorDispatchAction::DispatchOnlyDirectPane,
+            "an operator Run Agent Doc keeps the documented real-time steering pass-through"
+        );
+    }
+
+    #[test]
+    fn automated_dispatch_defer_predicate_claims_only_live_turn_states() {
+        for state in [
+            ActorDispatchState::Ready,
+            ActorDispatchState::Starting,
+            ActorDispatchState::Busy,
+            ActorDispatchState::WaitingInput,
+            ActorDispatchState::Blocked,
+            ActorDispatchState::Closed,
+            ActorDispatchState::Missing,
+        ] {
+            assert!(!automated_dispatch_defers_behind_live_turn(
+                AuthoritativeActorDispatchOrigin::Operator,
+                state
+            ));
+            assert_eq!(
+                automated_dispatch_defers_behind_live_turn(
+                    AuthoritativeActorDispatchOrigin::AutomatedBackground,
+                    state
+                ),
+                matches!(
+                    state,
+                    ActorDispatchState::Busy | ActorDispatchState::WaitingInput
+                ),
+                "{state:?}"
+            );
+        }
+        assert_eq!(
+            AuthoritativeActorDispatchOrigin::default(),
+            AuthoritativeActorDispatchOrigin::Operator
+        );
     }
 
     #[test]

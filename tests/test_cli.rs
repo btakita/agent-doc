@@ -10586,6 +10586,9 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
             && orphan_drain.contains("pane: Some(record.pane_id.clone())")
             && orphan_drain.contains("prune_before_lookup: false")
             && orphan_drain.contains("background_existing_pane_only: true")
+            && orphan_drain.contains(
+                "agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin::AutomatedBackground",
+            )
             && orphan_drain
                 .contains("background_recovered_actor_fallback: recovered_actor_fallback")
             && orphan_drain.contains("orphan_drain_same_attempt(last_dispatch.as_ref()"),
@@ -10644,6 +10647,19 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
             && authoritative_dispatch
                 .contains("route_authoritative_background_stash_rescue_skipped"),
         "recovered-supervisor orphan dispatch must preserve background pane topology and focus (GH #307)"
+    );
+    assert!(
+        authoritative_dispatch.contains("let dispatch_origin = crate::invocation::dispatch_origin();")
+            && authoritative_dispatch.contains("origin: dispatch_origin,")
+            && authoritative_dispatch
+                .contains("AuthoritativeActorDispatchAction::DeferAutomatedBehindLiveTurn =>")
+            && authoritative_dispatch.contains("route_automated_dispatch_deferred_live_turn"),
+        "an automated orphan drain that reads a live-turn cue must defer, never type into the running turn (GH #319)"
+    );
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main_source.contains("DispatchOriginGuard::set(invocation.dispatch_origin)"),
+        "the controller route runtime must scope the invocation's dispatch origin (GH #319)"
     );
 }
 

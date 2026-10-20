@@ -37,9 +37,10 @@ use crate::restart_handoff::wait_for_busy_restart_handoff;
 use crate::startup_ready::{pane_composer_projection, wait_for_agent_ready_outcome};
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
-    AgentAddressedComposerRefusalFacts, AuthoritativeActorDispatchIntent, BusyPaneAutoFixOutcome,
-    DirectPaneSubmitPolicy, DispatchOnlyBlockerRecoveryHintFacts,
-    DispatchOnlyReadyProbeResolutionFacts, DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
+    AgentAddressedComposerRefusalFacts, AuthoritativeActorDispatchIntent,
+    AuthoritativeActorDispatchOrigin, BusyPaneAutoFixOutcome, DirectPaneSubmitPolicy,
+    DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyReadyProbeResolutionFacts,
+    DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
     DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneDraftMessageFacts,
     DispatchOnlyStartingPaneNotReadyMessageFacts, RoutedReopenGuardReason, StartingPaneBlocker,
     agent_addressed_composer_refusal_message, classify_direct_pane_submit_policy,
@@ -257,8 +258,28 @@ enum DispatchOnlyBlockerAction {
     AlreadyQueuedTrigger,
     StopHookOwnsQueueContinuation,
     SubmitPlainTrigger,
+    /// GH #319: an automated origin found a live active turn where
+    /// an operator plain trigger would steer. Submit nothing and defer.
+    DeferAutomatedActiveTurn,
     QueuePrompt(&'static str),
     Refuse,
+}
+
+/// GH #319: the active-turn plain-trigger submit is operator
+/// real-time steering. An automated (controller-originated) route reaching the
+/// same pane-level blocker defers instead, so the pre-submit capture is a second
+/// fence behind the authoritative-actor classification.
+fn gate_dispatch_only_blocker_action_by_origin(
+    origin: AuthoritativeActorDispatchOrigin,
+    action: DispatchOnlyBlockerAction,
+) -> DispatchOnlyBlockerAction {
+    match (origin, action) {
+        (
+            AuthoritativeActorDispatchOrigin::AutomatedBackground,
+            DispatchOnlyBlockerAction::SubmitPlainTrigger,
+        ) => DispatchOnlyBlockerAction::DeferAutomatedActiveTurn,
+        (_, action) => action,
+    }
 }
 
 fn classify_dispatch_only_blocker(
@@ -841,15 +862,40 @@ pub fn dispatch_only_send_reopen(
                 reason
             ),
         );
-        match classify_dispatch_only_blocker(
-            options.intent,
-            &harness.binary,
-            &reason,
-            options.queue_prompt_text.is_some(),
-            dispatch_only_starting_pane_blocker(&pre_submit_projection, &route_trigger)
-                == StartingPaneBlocker::StrandedTrigger,
-            active_auto_queue_owns_codex_stop,
+        let dispatch_origin = crate::invocation::dispatch_origin();
+        match gate_dispatch_only_blocker_action_by_origin(
+            dispatch_origin,
+            classify_dispatch_only_blocker(
+                options.intent,
+                &harness.binary,
+                &reason,
+                options.queue_prompt_text.is_some(),
+                dispatch_only_starting_pane_blocker(&pre_submit_projection, &route_trigger)
+                    == StartingPaneBlocker::StrandedTrigger,
+                active_auto_queue_owns_codex_stop,
+            ),
         ) {
+            DispatchOnlyBlockerAction::DeferAutomatedActiveTurn => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_automated_dispatch_deferred_live_turn file={} pane={} harness={} blocker={} origin={} action=retry_after_backoff focus_effect=preserved pane_effect=none",
+                        file.display(),
+                        dispatch_pane,
+                        harness.binary,
+                        reason,
+                        dispatch_origin.as_str(),
+                    ),
+                );
+                crate::invocation::record_route_deferral(format!(
+                    "[route] automated dispatch for {} deferred: pane {} is on an active {} turn ({}); no trigger was typed into the live turn, the caller retries after its backoff",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    reason,
+                ));
+                return Ok(dispatch_pane);
+            }
             DispatchOnlyBlockerAction::AlreadyQueuedTrigger => {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1659,6 +1705,65 @@ mod tests {
             ),
             DispatchOnlyBlockerAction::Refuse,
         );
+    }
+
+    /// GH #319: every blocker classification an automated origin
+    /// can reach keeps its meaning, except the operator-only active-turn plain
+    /// trigger submit, which becomes a deferral. Operator origin is untouched.
+    #[test]
+    fn automated_origin_defers_where_operator_plain_trigger_would_steer_into_active_turn() {
+        let actions = [
+            DispatchOnlyBlockerAction::AlreadyQueuedTrigger,
+            DispatchOnlyBlockerAction::StopHookOwnsQueueContinuation,
+            DispatchOnlyBlockerAction::SubmitPlainTrigger,
+            DispatchOnlyBlockerAction::DeferAutomatedActiveTurn,
+            DispatchOnlyBlockerAction::QueuePrompt("dispatch_only_claude_active_turn"),
+            DispatchOnlyBlockerAction::Refuse,
+        ];
+        for action in actions {
+            assert_eq!(
+                gate_dispatch_only_blocker_action_by_origin(
+                    AuthoritativeActorDispatchOrigin::Operator,
+                    action
+                ),
+                action
+            );
+            let automated = gate_dispatch_only_blocker_action_by_origin(
+                AuthoritativeActorDispatchOrigin::AutomatedBackground,
+                action,
+            );
+            assert_ne!(automated, DispatchOnlyBlockerAction::SubmitPlainTrigger);
+            if action != DispatchOnlyBlockerAction::SubmitPlainTrigger {
+                assert_eq!(automated, action);
+            }
+        }
+        for (harness, reason) in [
+            ("claude", "active claude turn"),
+            ("codex", "active codex turn"),
+            ("opencode", "opencode active turn"),
+        ] {
+            let classified = classify_dispatch_only_blocker(
+                AuthoritativeActorDispatchIntent::PlainTrigger,
+                harness,
+                reason,
+                false,
+                false,
+                false,
+            );
+            assert_eq!(
+                classified,
+                DispatchOnlyBlockerAction::SubmitPlainTrigger,
+                "{harness}: fixture must reach the operator steering submit it gates"
+            );
+            assert_eq!(
+                gate_dispatch_only_blocker_action_by_origin(
+                    AuthoritativeActorDispatchOrigin::AutomatedBackground,
+                    classified
+                ),
+                DispatchOnlyBlockerAction::DeferAutomatedActiveTurn,
+                "{harness}: an automated plain trigger must not type into the active turn"
+            );
+        }
     }
 
     #[test]

@@ -303,6 +303,9 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             agent_doc_route_io::invocation::BackgroundRecoveredActorFallbackGuard::set(
                 invocation.background_recovered_actor_fallback,
             );
+        // GH #319: an automated origin defers behind a live turn.
+        let _dispatch_origin =
+            agent_doc_route_io::invocation::DispatchOriginGuard::set(invocation.dispatch_origin);
         let _layout_owned_by_controller =
             agent_doc_route_io::invocation::LayoutOwnedByControllerGuard::set(
                 invocation.layout_owned_by_controller,

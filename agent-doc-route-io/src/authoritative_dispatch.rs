@@ -310,6 +310,9 @@ pub fn route_via_authoritative_actor(
     } else {
         AuthoritativeActorDispatchIntent::PromptAware
     };
+    // GH #319: the plain-trigger busy pass-through is operator
+    // steering. A controller-originated (automated) route must defer instead.
+    let dispatch_origin = crate::invocation::dispatch_origin();
     // A plain editor trigger is transport-only after route admission. It never
     // inherits prompt-bearing work derived before this authoritative boundary,
     // but it still drains any prior open closeout before transport begins.
@@ -722,19 +725,21 @@ pub fn route_via_authoritative_actor(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_dispatch_only_busy_active_turn_skip_wait file={} pane={} harness={} generation={} cue={:?}",
+                "route_dispatch_only_busy_active_turn_skip_wait file={} pane={} harness={} generation={} origin={} cue={:?}",
                 file.display(),
                 dispatch_pane,
                 harness.binary,
                 actor.record.generation,
+                dispatch_origin.as_str(),
                 cue
             ),
         );
         eprintln!(
-            "[route] authoritative actor for {} is busy on an active {} turn ({}); skipping the busy ready-wait and refusing immediately so the IDE shows the session-still-running notification without a {}s stall",
+            "[route] authoritative actor for {} is busy on an active {} turn ({}); skipping the busy ready-wait (origin {}) instead of a {}s stall",
             file.display(),
             harness.binary,
             cue,
+            dispatch_origin.as_str(),
             dispatch_only_busy_refusal_wait_secs(
                 (effects.wait_for_ready_override)(),
                 dispatch_only_starting_pane_recovery_timeout_for_binary(
@@ -1088,13 +1093,46 @@ pub fn route_via_authoritative_actor(
             has_prompt_bearing_work: prompt_bearing_marker.is_some(),
             reopen_decision: reopen_outcome.decision,
             intent: dispatch_intent,
+            origin: dispatch_origin,
         });
 
-    if actor_dispatch_blocker_reason(actor_dispatch_state).is_some() {
+    if action != AuthoritativeActorDispatchAction::DeferAutomatedBehindLiveTurn
+        && actor_dispatch_blocker_reason(actor_dispatch_state).is_some()
+    {
         crate::route_focus::focus_route_pane(tmux, file, &dispatch_pane, "dispatch_blocked");
     }
 
     match action {
+        AuthoritativeActorDispatchAction::DeferAutomatedBehindLiveTurn => {
+            // GH #319: the controller orphan drain read the live
+            // active-turn cue, then typed its plain trigger into the running
+            // turn anyway because the plain-trigger busy pass-through is
+            // origin-blind. An automated origin has no operator steering
+            // intent: submit nothing, leave focus/layout alone, and report a
+            // deferral so the drain retries after its durable backoff.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_automated_dispatch_deferred_live_turn file={} pane={} harness={} generation={} actor_state={} origin={} cue={:?} action=retry_after_backoff focus_effect=preserved pane_effect=none",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation,
+                    actor_state.as_str(),
+                    dispatch_origin.as_str(),
+                    active_turn_busy_cue.as_deref().unwrap_or("none"),
+                ),
+            );
+            crate::invocation::record_route_deferral(format!(
+                "[route] automated dispatch for {} deferred: authoritative actor generation {} on pane {} is {} ({}); no trigger was typed into the live turn, the caller retries after its backoff",
+                file.display(),
+                actor.record.generation,
+                dispatch_pane,
+                actor_state.as_str(),
+                active_turn_busy_cue.as_deref().unwrap_or("no live cue"),
+            ));
+            Ok(dispatch_pane)
+        }
         AuthoritativeActorDispatchAction::FocusOnly => {
             // A plain dispatch-only reopen (IDE `Run Agent Doc`) against a busy
             // authoritative actor focuses the pane but never injects the trigger.

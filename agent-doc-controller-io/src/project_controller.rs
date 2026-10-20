@@ -148,6 +148,11 @@ pub struct ControllerEditorRouteInvocation {
     /// recovered after the controller sweep. The next attempt may use the
     /// authoritative actor as the bounded fallback instead of yielding again.
     pub background_recovered_actor_fallback: bool,
+    /// GH #319: who asked for this route. Controller-originated
+    /// recovery (the orphan drain) is `AutomatedBackground` and must defer
+    /// behind a live turn instead of inheriting the operator plain-trigger
+    /// steering pass-through.
+    pub dispatch_origin: agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin,
     /// `#routelaterescue`: the controller already projected and observed this
     /// route's layout, so the layout plane owns tmux topology for the rest of
     /// the route. Route must not raw-join a stashed pane back into view.

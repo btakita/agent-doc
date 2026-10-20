@@ -303,6 +303,23 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   `preserve_focus`, because the snapshot names each split's selected document but
   not which split has keyboard focus. The payload stays JSON, so a field a newer
   library adds reaches the controller without a plugin generation.
+- `registration_projection` (phase 5): the direction a CRDT replica
+  registration projects (`CrdtReplicaManager.forwarderFor`). Evidence is facts,
+  never text: whether a captured local delta owns the buffer, whether the
+  controller retained a canonical projection or awaits a fresh-controller reseed,
+  whether canonical covers the cached native frontier, which of the settled
+  shadow, the live buffer, and the canonical are present, which of them are
+  equal, and the answers of the native containment proof and clean three-way
+  merge. The plugin compares the three texts itself over the exact UTF-16 text it
+  holds, so no document crosses the boundary and no encoding can make two
+  different buffers equal. Native owns the action (adopt canonical, publish the
+  buffer from its proven shadow, merge forward, defer to the captured delta, or
+  hold) and the hold reason the failure records
+  (`ambiguous-retained-projection`, `retained-reseed-missing-settled-shadow`,
+  `ambiguous-reregister-projection`). Executing the action, the
+  publication-edge rechecks, and the order of their effects stay in Kotlin. An
+  action this plugin generation cannot execute takes the frozen floor, so a new
+  action needs a plugin generation; a new hold reason does not.
 - `capabilities`: the derivations the loaded library answers.
 
 **Threads.** Native calls stay forbidden on the EDT. The automatic surface
@@ -392,6 +409,70 @@ patch-watch, and route clients (phase 5). Run Agent Doc's `--col` fallback and t
 The automatic surface's settling loop itself (how many EDT re-reads, the
 pending-slot ordering) is orchestration and stays in Kotlin. Each remaining rule
 set moves behind `agent_doc_editor_derive_json` the same way.
+
+**Phase 5 audit: the CRDT replica, patch-watch, and route clients.** Phase 5
+listed every pure decision in `CrdtReplicaManager`, `PatchWatcher`, and
+`CpRouteClient` (the 262/263 backends compile these classic sources; they have
+no counterparts of their own) and ranked them by `git log` since 2026-09-20:
+46 commits touched `CrdtReplicaManager`, 16 `PatchWatcher`, 13 `CpRouteClient`.
+Most of that churn is in orchestration, not in pure decisions: `forwarderFor`,
+`ensureOpenDocumentReplica`, and `forwardLocalEditsFromShadow` in the replica
+manager, and the intent dispatch in `PatchWatcher.handleSocketMessageV2`. Those
+order registration, deregistration, IntelliJ document mutation, and receipts,
+so they stay in Kotlin by design.
+
+*Moved.* The registration direction
+(`retainedRegistrationProjectionActionForAttachUtil`,
+`retainedRegistrationProjectionActionUtil`, and the hold reason) changed in six
+commits between 2026-09-24 and 2026-10-07, more than any other pure decision in
+the three classes. It is the `registration_projection` derivation, asked on the
+replica worker that already runs the socket registration and the native
+containment and merge proofs. `RegistrationProjection.frozen` composes those
+pre-#326 rules and is never extended. The shared parity file
+`registration_projection.json` holds named cases with real document text (the
+plugin's fact capture is checked against them, including composed versus
+decomposed accents, CRLF, and astral text) and an exhaustive table of all 5184
+combinations of the facts. Both the Rust derivation and the frozen floor answer
+every entry.
+
+*Still restart-bound, and why.*
+- Native-reload decisions (`nativeReloadReplicaRestartReport`,
+  `settledNativeReloadReplicaRestartReport`, `mergeReplicaRestartReports`,
+  `dynamicLoadReattachReceipt`, `nativeReloadCheckpointTarget`,
+  `nativeReloadRegistrationStateUtil`, and the GH #297 recovery-capture miss
+  `replicaRecoveryCaptureMissReasonUtil` /
+  `replicaRecoveryCaptureMissIsDeferredUtil`) answer while the native library is
+  being handed off or the dynamic plugin load reattaches. They cannot depend on
+  the library they describe, so they stay in Kotlin.
+- The attach-failure diagnosis (`attachFailureRemedy`,
+  `attachFailureStatusToken`, `retainedProjectionHoldNeedsOperatorSurfaceUtil`,
+  `registerFailureNeedsLivenessRepublishUtil`, `retainedProjectionHoldMessageUtil`)
+  is a candidate, but `recordRegisterFailure` also runs on the EDT (the register
+  retry timer and the native-reload target collection call it there), and Compact
+  Exchange formats the remedy inside `invokeLater`. It moves once those callers
+  take the diagnosis on a worker.
+- Local-edit capture (`prepareLocalEditorEditsUtil`,
+  `reconstructCapturedLocalEditorBatchUtil`, `currentEpochCapturedEditsUtil`,
+  `singleSpliceCapturedEditUtil`, `singleSpliceBatchUtil`) maps IntelliJ UTF-16
+  document offsets on the keystroke path. The rebase that consumes it is already
+  native (`agent-doc-merge` captured splices).
+- `withoutBinaryOwnedMarkersUtil` and `cleanRegistrationMergeUtil` shape the text
+  passed to the native containment proof and merge. Moving them means sending
+  document text across the derivation channel; they belong inside those native
+  calls instead.
+- `closingDocumentCutRequiresTextUtil` / `closingDocumentCutRequiresReplicaUtil`
+  changed because the read-permit order on close changed (GH #287/#298), which is
+  ordering, not a rule.
+- `PatchWatcher`: no pure decision changed more than twice. Its text utilities
+  (boundary reposition, exchange prefix repair, replay detection) are stable, and
+  `extractResumeDecision` is a three-way operation-id match added once.
+- `CpRouteClient`: the most changed functions build the controller request
+  (`editorRoutePayload`, `editorRouteRequest`, `editorCommandSubmitRequest`, five
+  commits each). Every change added a captured field the controller reads (order
+  provenance, layout mode, navigation lane, surface reference). A new captured
+  field needs a plugin generation anyway, and the controller already derives the
+  route from the payload (`surface_layout_reference_v1`), so the builders stay
+  wire formatting.
 
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is

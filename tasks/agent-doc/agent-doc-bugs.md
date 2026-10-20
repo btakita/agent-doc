@@ -562,6 +562,7 @@ Real Remote Dev geometry (option B) becomes a follow-up queue item. #320 still s
 - ~~[#yvt3]: done~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~[#8ph6]: done~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/320
+- 🚧 steering: the agent's own committed `> **Queue prompt:** <line>` echo blockquotes in agent:exchange were surfaced to the same turn as 5 NEW operator exchange prompts (source=exchange change=added dispatch=subagent) right after closeout on 0.35.527; agent-authored response cells must never be read back as operator steering
 - release + publish including PR #317-#320.
 <!-- /agent:queue -->
 

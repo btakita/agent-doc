@@ -23,6 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
+📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
 <!-- status:sync -->
@@ -434,6 +435,26 @@ The fix (worker `subagent:packettodo`) is commit `4dd943bcf7`, fast-forwarded to
 - **fpe.md:** already has its todo (`[#apipendingorphans]`, added at 23:44), so it needs no change.
 
 The exchange is large (353 lines across 38 sections). The queue is active, so I am not stopping to compact.
+
+### Re: Subagent completed: `subagent:gh319` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/319” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=207bfa15fe1f6ed63a2289acd96a906277a07a513e3c0933b0291ba8ef806be0 -->
+
+### Re: Subagent completed: `subagent:gh318` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/318” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=789850c6b8adb14e513fa66ea2943da3be235ad14876bed60f0d3e9efe07f1c1 -->
+
+### Re: Subagent completed: `subagent:gh317` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/317” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=fe356ba2b718b42c29b9d0f0c11b4913d1e46b463e87e91b57ef8601fb334303 -->
+
+### Re: Subagent completed: `subagent:busycue` returned work for queue item “route: a background orphan-drain dispatch types into a pane right after reading its busy-turn cue (route_dispatch_only_busy_active_turn_skip_wait then tmux_text_enter; from GH 319)” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=62f7da6542426f80d3a0ea794f0b101a4433e8a9487c9c8fa7ef5f09fb381bef -->
+
+### Re: Subagent completed: `subagent:claimvis` returned work for queue item “investigate: preset head upgrade was dispatched 2 s after its claim landed (GH 319 "also seen"; likely claim-visibility timing in the controller state.db read)” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=fb2f46b1b1c141f9c3d04edb8445635d689db23d488ba246d15001abfab58d0d -->
 <!-- agent:boundary:b0bf624b -->
 <!-- /agent:exchange -->
 
@@ -442,8 +463,17 @@ The exchange is large (353 lines across 38 sections). The queue is active, so I 
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~In fpe.md: "What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)": This choice should have been added into `agent:todo`.~~ — auto-struck: answered this cycle (#ftstrike)
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/317
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/318
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/319
+- There was 1 tmux pane with 2 editor panes.
+- 📥 route: a background orphan-drain dispatch types into a pane right after reading its busy-turn cue (route_dispatch_only_busy_active_turn_skip_wait then tmux_text_enter; from GH 319)
+- 📥 investigate: preset head upgrade was dispatched 2 s after its claim landed (GH 319 "also seen"; likely claim-visibility timing in the controller state.db read)
+- There is 
+- [#yvt3]: done
+- [#8ph6]: done
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/320
+- release + publish including PR #317-#320.
 <!-- /agent:queue -->
 
 ## Queue: Issues

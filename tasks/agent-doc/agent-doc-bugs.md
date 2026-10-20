@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 9 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 11 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 2
 <!-- status:sync -->
@@ -278,6 +278,18 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 **#324–#327 will ship as v0.35.530**, the "release + publish: Include PR #324-#327" item you queued. All four are merged into `integrate/batch0530`, and `make check` is running on it. One thing gates that release: the main CI test `queue_auto_clear_types_clear_between_items_into_the_same_harness` failed on GitHub's runner, and `make release` runs the same tmux suite. The supervisor-heartbeat subagent is checking whether it's the same bug. I'll release v0.35.530 once that fix is merged too, or once it's shown to be separate and fixed on its own.
 
 Note on #326: v0.35.530 carries only its first part, the layout rules moved into the hot-reloaded library. Four more parts follow as queue items.
+
+### Re: Your edit "release + publish: Include PR #321-#327"; heartbeat fix done; CI flake dispatched
+
+**Release item.** v0.35.529 was already tagged from `181bd291b2` and is publishing; a published tag can't take more commits. So I'm keeping your edited item 🚧 and will close it with **v0.35.530**, which adds #324–#327 on top of 0.35.529's #321–#323. The separate "release + publish: Include PR #324-#327" item closes with it.
+
+**Supervisor heartbeat (sdk-dev pane `%22`) fixed** on `fix/codexstoplabel` (`08dad88263`), reported 📥.
+- **The bug:** a supervisor writes its heartbeat only on state changes, never while a turn runs. Any Codex turn longer than 60s therefore read as "heartbeat stale", the Stop hook kept the queue in the pane, and the fresh-restart path never ran. The sdk-dev turn's heartbeat was 503s old.
+- **The fix:** a live supervisor on the current binary whose `agent-doc start` command line names the document now counts as ready, whatever its heartbeat age. A supervisor that never drains is still caught by the existing 300s overdue check. Preflight, session-check and the Stop hook all use this check.
+- **Tests:** 3 new regression tests replay the incident's real timestamps, and they fail with the fix disabled. `make check-fast` passed.
+- **The 17:30 `no_longer_live` line is normal:** the supervisor had already re-exec'd onto the new binary, so the second install request had nothing left to do.
+
+**The CI failure has a different cause.** The supervisor's own auto-clear doesn't consult the heartbeat. The likely cause is a startup race: on a slow runner, the supervisor records its "before" point after item one has already committed, so item one never counts as finished and no `/clear` is typed. I've dispatched a subagent to reproduce this deterministically and fix it in the product, not by lengthening timeouts, on `fix/autoclearbaseline` (🚧). v0.35.530 waits for it, because `make release` runs the same tmux suite.
 <!-- agent:boundary:4c518cb0 -->
 <!-- /agent:exchange -->
 
@@ -299,7 +311,8 @@ Note on #326: v0.35.530 carries only its first part, the layout rules moved into
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/326
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/327
 - release + publish: Include PR #324-#327
-- 🚧 [from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)
+- 📥 [from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)
+- 🚧 [from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)
 <!-- /agent:queue -->
 
 ## Queue: Issues

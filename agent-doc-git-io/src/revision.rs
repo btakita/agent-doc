@@ -49,6 +49,16 @@ pub fn walk_file_revisions(
     limit: usize,
     mut visit: impl FnMut(Option<&str>) -> bool,
 ) -> Result<usize> {
+    walk_file_revisions_with_time(file, limit, |_, content| visit(content))
+}
+
+/// [`walk_file_revisions`] that also hands `visit` each commit's committer
+/// time (Unix seconds).
+pub fn walk_file_revisions_with_time(
+    file: &Path,
+    limit: usize,
+    mut visit: impl FnMut(u64, Option<&str>) -> bool,
+) -> Result<usize> {
     let (super_root, resolved) = resolve_to_git_root(file)?;
     let (git_root, _) = narrow_to_submodule(&super_root, &resolved);
     let rel_path = relative_path_for_git_show(&resolved, &git_root);
@@ -59,7 +69,7 @@ pub fn walk_file_revisions(
         .args([
             "log",
             &format!("-{limit}"),
-            "--format=%H",
+            "--format=%H %ct",
             "--",
             rel.as_str(),
         ])
@@ -68,11 +78,19 @@ pub fn walk_file_revisions(
         return Ok(0);
     }
     let mut visited = 0usize;
-    for sha in String::from_utf8_lossy(&output.stdout)
+    for line in String::from_utf8_lossy(&output.stdout)
         .lines()
         .map(str::trim)
-        .filter(|sha| !sha.is_empty())
+        .filter(|line| !line.is_empty())
     {
+        let mut fields = line.split_whitespace();
+        let Some(sha) = fields.next() else {
+            continue;
+        };
+        let committed_secs = fields
+            .next()
+            .and_then(|secs| secs.parse::<u64>().ok())
+            .unwrap_or(0);
         let shown = Command::new("git")
             .current_dir(&git_root)
             .args(["show", &format!("{sha}:{rel}")])
@@ -82,7 +100,7 @@ pub fn walk_file_revisions(
             .status
             .success()
             .then(|| String::from_utf8_lossy(&shown.stdout).to_string());
-        if !visit(content.as_deref()) {
+        if !visit(committed_secs, content.as_deref()) {
             break;
         }
     }
@@ -116,6 +134,34 @@ pub fn free_text_head_entry_anchor_exchange(
     let _ = walk_file_revisions(file, FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT, |content| {
         walk.visit(content)
     });
+    walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT)
+}
+
+/// GH #327 pass 4: the exchange an echo must be newer
+/// than to answer the live head `head_text` of the `loop` queue `queue_id`,
+/// whose current pass opened at `opened_secs`, or `None` when every echo
+/// counts.
+///
+/// Walks the document's committed versions newest first (at most
+/// [`FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT`]) through
+/// [`agent_doc_queue::queue_head_entry::LoopPassEchoWalk`], which owns the
+/// decisions, starting from `current_content`. A git failure leaves the walk
+/// as far as it got.
+///
+/// [`FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT`]: agent_doc_queue::queue_head_entry::FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT
+pub fn loop_pass_head_echo_anchor_exchange(
+    file: &Path,
+    queue_id: &str,
+    head_text: &str,
+    opened_secs: u64,
+    current_content: &str,
+) -> Option<agent_doc_queue::queue_head_entry::LoopPassEchoAnchor> {
+    use agent_doc_queue::queue_head_entry::{FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT, LoopPassEchoWalk};
+    let mut walk = LoopPassEchoWalk::new(queue_id, head_text, opened_secs, current_content);
+    let _ =
+        walk_file_revisions_with_time(file, FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT, |secs, content| {
+            walk.visit(secs, content)
+        });
     walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT)
 }
 

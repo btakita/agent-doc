@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **Residual-work lists reach the operator-todo advisory, and one
+  `--todo-add` no longer silences it (GH #318).** The `#operatortodo` response
+  advisory now treats each item of a bolded `**Still stale:**`,
+  `**Also stale:**`, `**Not done:**`, `**Still open:**`, `**Open:**`, or
+  `**Remaining:**` list as an operator ask, counts asks against the
+  closeout's `--todo-add` items and open `agent:todo` actions instead of
+  switching off on any add, and quotes every unrecorded ask with the exact
+  text that matched (stderr and `ops.log`). Signals match on word boundaries
+  and skip headings and fenced code, so a `### Re: ... reply posted` heading
+  no longer fires as `reply post`.
+
 - **A blocking subagent operator request becomes an `agent:todo` item
   (`#packettodo`).** A closeout response that presents a blocking
   `[#subagent-operator-request]` packet without its own `--todo-add` or

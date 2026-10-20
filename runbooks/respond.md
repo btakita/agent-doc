@@ -660,6 +660,14 @@ A response that presents a blocking `[#subagent-operator-request]` packet still
 owes `--todo-add` (`#wayposttodo`); if you omit it, the binary derives the todo
 from the packet's `request:` and choices and layers it on the one gated id
 (`[todo] blocking operator request packet (#packettodo)`).
+Every operator ask in the response needs its own todo: an explicit request
+(`Say \`post\``, `needs your ok`), an unpublished draft path, and each item of
+a bolded residual-work list (`**Still stale:**`, `**Also stale:**`,
+`**Not done:**`, `**Still open:**`, `**Open:**`, `**Remaining:**`). Add one
+`--todo-add` per ask that `agent:todo` does not already hold; one add does not
+cover a whole list. Otherwise the write prints `[todo] advisory (#operatortodo):
+this closeout response leaves N operator actions pending ...` quoting each ask
+no todo matches (GH #318); record them next cycle.
 When a closeout resolves work (`--done`, `--review-resolve`), an OPEN todo that
 owns that id is checked off in the same closeout (`[todo] auto-done`); one that
 only cites it gets `[todo] advisory (#tododone)` with the exact `--todo-done`

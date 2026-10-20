@@ -405,12 +405,32 @@ is id-based; a gate blocked on CI or an external party rather than the operator
 simply needs no todo.
 
 After the response and same-cycle todo mutations converge, closeout also checks
-the captured response for conservative, deterministic operator-action signals:
-an explicit post/publish decision request, or an unpublished/not-posted draft
-that cites a concrete Markdown path. If such a response supplies no
-`--todo-add`, the write prints the same non-blocking advisory class and logs
-`operator_todo_response_advisory`. Supplying `--todo-add` suppresses this
-response advisory. Neither advisory writes a todo by itself or fails closeout.
+the captured response for conservative, deterministic operator asks (GH #314,
+GH #318):
+
+- an explicit post/publish decision request (`say \`post\``, `needs your ok`,
+  `should I publish`, ...), one ask per line;
+- an unpublished/not-posted draft whose paragraph cites a concrete Markdown
+  path;
+- each top-level item of a list introduced by a bolded residual-work label
+  ending in a colon: `Still stale`, `Also stale`, `Not done`, `Still open`,
+  `Open`, or `Remaining`, optionally qualified (`**Also stale, not drafted:**`,
+  `**Open questions:**`). A label with inline text and no list is one ask; an
+  empty report (`**Remaining:** none.`) is none.
+
+Signals match on word boundaries (`reply posted` is not `reply post`), and
+Markdown headings and fenced code never count. Asks are counted, not
+reduced to a boolean: an ask is recorded when at least half of its content
+words appear in one of this closeout's `--todo-add` texts or in an open
+`agent:todo` item, and a `--todo-add` that matches no ask is taken to record
+one ask in other words. When more asks remain unrecorded than such unmatched
+adds, the write prints the same non-blocking advisory class — the ask and
+add counts, then each unrecorded ask quoted with its signal and the exact
+matched text — and logs `operator_todo_response_advisory ... signal=<first
+signal> asks=<n> todo_adds=<n> unrecorded=<n> matched=[...] items=[...]`.
+Four asks and two unrelated adds still advise; an ask already open in
+`agent:todo` does not re-fire. Neither advisory writes a todo by itself or
+fails closeout.
 
 **Blocking operator request todo (`#packettodo`).** A blocking
 `[#subagent-operator-request]` packet in a closeout response is a pending

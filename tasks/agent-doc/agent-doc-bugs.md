@@ -146,7 +146,20 @@ I dispatched this to a background subagent on branch `fix/sessioncrashnorestart`
 **Yes, it's safe now.** `/clear` does not stop the background subagent: it keeps working in its own worktree and pushes `fix/sessioncrashnorestart` when done. What a clear loses is the report back, which would land in a fresh context with no memory of the dispatch. To cover that, I added backlog item `sessioncrashnorestart` to the queue. It names the branch, the worktree and the integration steps, so whichever coordinator picks it up merges the fix with the next batch.
 
 To lose nothing at all, wait until the pane footer's `← N agents` count drops. Otherwise, clear whenever you like.
-<!-- agent:boundary:2785f7ec -->
+> **Chat prompt (#chatprompt):** Can I clear this session?
+
+### Re: dispatch + clear handoff — opus-5.5 · 2026-10-20T11:45-04:00
+
+**Dispatched this cycle:**
+- GH #323, the 263 status bar not showing, possibly caused by the nested `status:sync`: `subagent:gh323` on `fix/gh323`, generation 1, started.
+- `sessioncrashnorestart`: its subagent was interrupted by this session's restart and has been resumed. Its partial changes are uncommitted in `~/worktrees/agent-doc-sessioncrash-20261020`, and it will also use this session's 15:30–15:40Z restart as evidence.
+
+**Waiting on the next coordinator cycle:**
+- Integrate the four reported (📥) items: GH 320 option B (`subagent:gh320b`), the Lazily surface path (`subagent:surfacepath`), GH #321 and GH #322. They are reported but not yet merged.
+- Then `release + publish: Include PR #321-#323` once #323 lands. It is unclaimed, so the next cycle picks it up.
+
+**Clearing:** yes, you can clear. Every live item is either claimed by a running or resumed worker, or reported with its branch named in the queue, so a fresh session can integrate from the document. The running workers keep going after a clear, but their completion reports will land in the cleared context. The next coordinator should check `agent-doc queue claims` and each worker's branch rather than wait for a report.
+<!-- agent:boundary:1d99bc2a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -158,7 +171,9 @@ To lose nothing at all, wait until the pane footer's `← N agents` count drops.
 - 📥 Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/321
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/322
-- do [#sessioncrashnorestart]
+- 🚧 do [#sessioncrashnorestart]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/323
+- release + publish: Include PR #321-#323
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -167,7 +182,6 @@ To lose nothing at all, wait until the pane footer's `← N agents` count drops.
 <!-- /agent:queue -->
 
 ## Todo
-
 <!-- agent:todo -->
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).

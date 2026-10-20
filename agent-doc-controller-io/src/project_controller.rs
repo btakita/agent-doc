@@ -1044,6 +1044,85 @@ pub(crate) fn latest_layout_focus(
         .or_else(|| current.invocation.focus.clone())
 }
 
+/// GH #322: which retained column an uncovered focused document replaces.
+///
+/// A `focus_only` observation names the focused document and nothing about
+/// which editor split it is in, so the escalation must choose a slot. GH #278
+/// Ask 3 chose the latest focus's column. With two IDE splits that is the
+/// split the operator just left, which the editor is still showing: Remote Dev
+/// alternating `A`/`B` across two splits evicted the other one every time and
+/// never chose the column holding `C`, a document no split showed any more.
+///
+/// The editor propagates what it shows: every positive split observation (an
+/// `exact` route's columns, a plugin publication, an editor-surface split, an
+/// explicit sync command) names its visible documents, and the layout graph
+/// retains the latest set ([`ControllerPaneLayoutGraph::editor_visible`]). A
+/// column holding none of those documents is stale, so it is the one replaced.
+/// Only when every column holds an editor-visible document (the focused
+/// document opened as a tab in the focused split), or no editor has reported
+/// a visible set, does the GH #278 latest-focus rule decide.
+///
+/// Within the eligible columns: the latest focus's column, else the rightmost.
+/// `columns` must be non-empty.
+pub(crate) fn focus_escalation_replace_index(
+    columns: &[String],
+    latest_focus: Option<&str>,
+    editor_visible: Option<&[String]>,
+) -> FocusEscalationSlot {
+    let column_documents = |column: &str| {
+        column
+            .split(',')
+            .map(str::trim)
+            .filter(|document| !document.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let stale: Vec<usize> = editor_visible
+        .filter(|visible| !visible.is_empty())
+        .map(|visible| {
+            (0..columns.len())
+                .filter(|index| {
+                    !column_documents(&columns[*index])
+                        .iter()
+                        .any(|document| visible.contains(document))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let focus_index = latest_focus.and_then(|focused| {
+        columns
+            .iter()
+            .position(|column| column_documents(column).iter().any(|d| d == focused))
+    });
+    if let Some(last_stale) = stale.last().copied() {
+        let index = focus_index
+            .filter(|index| stale.contains(index))
+            .unwrap_or(last_stale);
+        return FocusEscalationSlot {
+            index,
+            choice: "not_editor_visible",
+        };
+    }
+    match focus_index {
+        Some(index) => FocusEscalationSlot {
+            index,
+            choice: "latest_focus",
+        },
+        None => FocusEscalationSlot {
+            index: columns.len().saturating_sub(1),
+            choice: "rightmost",
+        },
+    }
+}
+
+/// The slot [`focus_escalation_replace_index`] chose and why (GH #322).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FocusEscalationSlot {
+    pub(crate) index: usize,
+    /// `not_editor_visible`, `latest_focus` or `rightmost`.
+    pub(crate) choice: &'static str,
+}
+
 /// Rebase a focus escalation that was derived from an older desired generation.
 ///
 /// Escalations carry a semantic intent (make `focus` visible), not authority to
@@ -1055,6 +1134,7 @@ fn rebase_stale_focus_escalation(
     claim: &mut PaneLayoutClaim,
     current: Option<&PaneLayoutDesired>,
     focus_outcome: Option<&PaneLayoutFocusOutcome>,
+    editor_visible: Option<&[String]>,
 ) -> ControllerTmuxLayoutSyncInvocation {
     if claim.publisher != PaneLayoutPublisher::Escalation {
         return invocation;
@@ -1080,20 +1160,12 @@ fn rebase_stale_focus_escalation(
                 .clone()
                 .unwrap_or_else(|| current.invocation.columns.clone()),
         );
-        // GH #278 Ask 3: the latest applied focus, not only the published one.
+        // GH #278 Ask 3: the latest applied focus, not only the published one;
+        // GH #322: never in place of a column the editor still shows.
         let latest_focus = latest_layout_focus(current, focus_outcome);
-        let replace_index = latest_focus
-            .as_deref()
-            .and_then(|focused| {
-                columns.iter().position(|column| {
-                    column
-                        .split(',')
-                        .map(str::trim)
-                        .any(|candidate| candidate == focused)
-                })
-            })
-            .unwrap_or(columns.len() - 1);
-        columns[replace_index] = document;
+        let slot =
+            focus_escalation_replace_index(&columns, latest_focus.as_deref(), editor_visible);
+        columns[slot.index] = document;
     } else {
         claim.provisional_order_basis = current.provenance.provisional_order_basis.clone();
     }
@@ -1593,6 +1665,11 @@ struct ControllerPaneLayoutGraph {
     /// no desired generation, so the retained layout's `focus` goes stale the
     /// moment the operator moves focus without changing the layout.
     focus_outcome: Mutex<Option<PaneLayoutFocusOutcome>>,
+    /// GH #322: the documents the editor last positively reported visible
+    /// (the columns of the latest accepted editor split observation). A
+    /// focus escalation never replaces a column holding one of them while a
+    /// column holding none remains.
+    editor_visible: Mutex<Option<Vec<String>>>,
     /// `#stalecontrollerhotupdate` (b)/(d): per-generation attempt count,
     /// retirement, and window-claim stamp. Held by the graph, not the worker
     /// thread, so a restarted worker cannot re-apply a retired generation or
@@ -1859,6 +1936,7 @@ impl ControllerPaneLayoutGraph {
             published_generation: Arc::new(AtomicU64::new(0)),
             width_memory: Mutex::new(PaneLayoutWidthMemory::default()),
             focus_outcome: Mutex::new(None),
+            editor_visible: Mutex::new(None),
             attempt_ledger: Mutex::new(Default::default()),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
@@ -1965,11 +2043,13 @@ impl ControllerPaneLayoutGraph {
         }
         let current = self.ctx.get(&self.desired);
         let focus_outcome = self.focus_outcome.lock().clone();
+        let editor_visible = self.editor_visible();
         invocation = rebase_stale_focus_escalation(
             invocation,
             &mut claim,
             current.as_ref(),
             focus_outcome.as_ref(),
+            editor_visible.as_deref(),
         );
         if let Some(version) = source_plane_version {
             // A deferred or refused frame still counts as seen; wake a route
@@ -2053,6 +2133,12 @@ impl ControllerPaneLayoutGraph {
         let publisher = claim.publisher;
         let provisional_order_basis = claim.provisional_order_basis.clone();
         let editor_publication = current_pane_layout_editor_publication();
+        // GH #322: a positive editor split observation propagates the set of
+        // documents the editor shows; a derived publication (escalation,
+        // `ensure` route, recycle or lane republish) only reconstructs one.
+        let observes_editor_split = publisher != PaneLayoutPublisher::Unattributed
+            && claim.width_authority()
+                == agent_doc_controller::pane_layout::LayoutWidthAuthority::EditorSplitObservation;
         if publication == PaneLayoutPublication::CoalesceIdentical
             && let Some(mut current) = self.ctx.get(&self.desired)
             && current.invocation == invocation
@@ -2080,6 +2166,9 @@ impl ControllerPaneLayoutGraph {
             );
             if source_plane_version > current.source_plane_version {
                 current.source_plane_version = source_plane_version;
+            }
+            if observes_editor_split {
+                self.record_editor_visible(&invocation.columns);
             }
             // Republish the identical value without manufacturing a generation.
             // A converged Computed stays inert; a retained NeedsEffect projection
@@ -2109,6 +2198,9 @@ impl ControllerPaneLayoutGraph {
                 displaced,
             } => (plane_basis, structure_owner, displaced),
         };
+        if observes_editor_split {
+            self.record_editor_visible(&invocation.columns);
+        }
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
         if let Some(mut displaced) = displaced {
             displaced.winner_generation = Some(generation);
@@ -2389,6 +2481,27 @@ impl ControllerPaneLayoutGraph {
     /// publication and still in its columns, else `current`'s own focus.
     pub(crate) fn latest_focus(&self, current: &PaneLayoutDesired) -> Option<String> {
         latest_layout_focus(current, self.focus_outcome.lock().as_ref())
+    }
+
+    /// GH #322: record the documents of a positive editor split observation
+    /// as the editor's visible set, replacing the previous one.
+    pub(crate) fn record_editor_visible(&self, columns: &[String]) {
+        let documents = columns
+            .iter()
+            .flat_map(|column| column.split(','))
+            .map(str::trim)
+            .filter(|document| !document.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if documents.is_empty() {
+            return;
+        }
+        *self.editor_visible.lock() = Some(documents);
+    }
+
+    /// GH #322: the documents the editor last positively reported visible.
+    pub(crate) fn editor_visible(&self) -> Option<Vec<String>> {
+        self.editor_visible.lock().clone()
     }
 
     /// `#stalecontrollerhotupdate` (b): admit the next projection attempt for
@@ -25555,6 +25668,7 @@ mod gh278_latest_focus_tests {
             &mut claim,
             Some(&current),
             Some(&outcome("b.md", 9)),
+            None,
         );
         assert_eq!(
             rebased.columns,
@@ -25565,10 +25679,79 @@ mod gh278_latest_focus_tests {
             &mut claim,
             Some(&current),
             None,
+            None,
         );
         assert_eq!(
             without_outcome.columns,
             vec!["d.md".to_string(), "b.md".to_string()]
+        );
+    }
+
+    /// GH #322, the #224 rebase path: with the editor showing `[c | d]`, a
+    /// stale escalation for `d` rebased onto `[c | b]` replaces `b` (no split
+    /// shows it), even though `c` is the latest focus.
+    #[test]
+    fn gh322_a_stale_escalation_rebases_into_the_column_the_editor_no_longer_shows() {
+        let current = desired(9, &["c.md", "b.md"], "c.md");
+        let mut claim =
+            PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).derived_from(Some(8));
+        let visible = vec!["c.md".to_string(), "d.md".to_string()];
+        let rebased = rebase_stale_focus_escalation(
+            invocation(&["d.md", "b.md"], Some("d.md")),
+            &mut claim,
+            Some(&current),
+            Some(&outcome("c.md", 9)),
+            Some(&visible),
+        );
+        assert_eq!(
+            rebased.columns,
+            vec!["c.md".to_string(), "d.md".to_string()]
+        );
+    }
+
+    /// GH #322: the slot an uncovered focus replaces. A column whose
+    /// documents no editor split shows goes first; the latest focus decides
+    /// only among equals, and with no visible set GH #278's rule stands.
+    #[test]
+    fn gh322_focus_escalation_slot_prefers_the_column_the_editor_no_longer_shows() {
+        let columns = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        let visible = columns(&["a.md", "b.md"]);
+        let slot = |cols: &[&str], focus: Option<&str>, visible: Option<&[String]>| {
+            focus_escalation_replace_index(&columns(cols), focus, visible)
+        };
+        let chose = |index, choice| FocusEscalationSlot { index, choice };
+        // The reported shape: tmux [a | c], the IDE shows a | b, latest focus a.
+        assert_eq!(
+            slot(&["a.md", "c.md"], Some("a.md"), Some(&visible)),
+            chose(1, "not_editor_visible")
+        );
+        // Mirrored: c on the left is the stale one.
+        assert_eq!(
+            slot(&["c.md", "b.md"], Some("b.md"), Some(&visible)),
+            chose(0, "not_editor_visible")
+        );
+        // Every column visible (a tab opened in the focused split): latest focus.
+        assert_eq!(
+            slot(&["a.md", "b.md"], Some("a.md"), Some(&visible)),
+            chose(0, "latest_focus")
+        );
+        // Several stale columns: the latest focus among them, else the rightmost.
+        assert_eq!(
+            slot(&["x.md", "a.md", "y.md"], Some("x.md"), Some(&visible)),
+            chose(0, "not_editor_visible")
+        );
+        assert_eq!(
+            slot(&["x.md", "a.md", "y.md"], Some("a.md"), Some(&visible)),
+            chose(2, "not_editor_visible")
+        );
+        // No visible set: GH #278 Ask 3 unchanged.
+        assert_eq!(
+            slot(&["a.md", "c.md"], Some("a.md"), None),
+            chose(0, "latest_focus")
+        );
+        assert_eq!(
+            slot(&["a.md", "c.md"], None, Some(&[])),
+            chose(1, "rightmost")
         );
     }
 }

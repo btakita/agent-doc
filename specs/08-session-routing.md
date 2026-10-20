@@ -405,7 +405,10 @@ Sync Tmux Layout or a tab switch back — refused
 escalation puts the document into the retained focus column (the `ensure` rule
 above, `source=retained_focus_column replaced=<column>`) instead of skipping
 with `cause=document_outside_retained_layout`. The escalation keeps the column
-count and therefore the plugin's `structure_owner`.
+count and therefore the plugin's `structure_owner`. The replaced column is chosen
+against the editor-visible set the last positive split observation propagated, so
+a column no editor split shows is replaced before the latest focus's column
+(GH #322; see `07-session-tmux-commands.md`).
 
 **Cross-document child-route boundary:** A route with no layout columns that is
 invoked from explicit live tmux process context inside a pane owned by another

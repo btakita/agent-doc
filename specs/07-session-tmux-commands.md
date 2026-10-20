@@ -570,6 +570,22 @@ by the guess, its `unknown` order is resolved against that pre-escalation basis;
 publication that confirms the guessed membership retires the provisional basis. Read-only clients
 that anchor layout memory receive the same positive basis while the guess is outstanding, including
 after a client restart, so the guessed order cannot become a durable pane reversal.
+Which slot that guess replaces is derived from propagated editor state, never from
+the focus sequence alone (GH #322). Every positive editor split observation (an
+`exact` route, a plugin publication, an editor-surface split escalation, an explicit
+sync command) records its documents as the layout graph's **editor-visible set**;
+derived publications (an escalation over retained columns, an `ensure` route, a
+recycle or lane republish) never change it. The uncovered document replaces, in
+order of preference: a column holding no editor-visible document (the latest
+focus's column among those, else the rightmost); else the latest focus's column
+(GH #278 Ask 3, a tab opened in the focused split); else the rightmost column. So a
+focus never evicts the document another IDE split still shows while tmux holds a
+column for a document no split shows. Before GH #322 the latest-focus column always
+lost: on Remote Dev, alternating `A`/`B` across two splits with tmux `[A | C]`
+replaced the split the operator had just left every time, and `C`'s pane never
+changed. The same rule applies when the #224 rebase replaces a column. The
+`controller_editor_surface_focus_escalated` line names the rule as
+`choice=not_editor_visible|latest_focus|rightmost`.
 - Realising a column is audited after tmux-router runs (GH #109). A column pane
 that moved windows (a stash → layout promotion), runs another document, or
 whose route-owned supervisor maps a superseded binary gets one

@@ -2,6 +2,8 @@
 //!
 //! ## Spec
 //! - Replaces content in a named `<!-- agent:name -->` component within a markdown document by default.
+//! - An optional opener `id=` selector targets the matching occurrence when a component name repeats;
+//!   omitting it preserves the legacy first-occurrence behavior.
 //! - `--mode append|prepend` is an explicit override for callers that intentionally want cumulative mutation.
 //! - Component config still contributes `timestamp`, `max_entries`, `pre_patch`, and `post_patch`, but the
 //!   component's configured `patch=` mode no longer changes `agent-doc patch` default behavior.
@@ -19,7 +21,9 @@
 //!   before replacing the component. Other structural corruption still fails closed.
 //!
 //! ## Agentic Contracts
-//! - `run(file, component_name, content)` — returns `Err` if the file is missing, the component is not found, or any hook fails.
+//! - `run(file, component_name, mode, content)` preserves the first-occurrence behavior.
+//! - `run_with_id(file, component_name, component_id, mode, content)` selects an occurrence by opener `id=` when provided.
+//! - Both entry points return `Err` if the file is missing, the selected component is not found, or any hook fails.
 //! - The typed baseline is always updated after a successful patch; no filesystem document sidecar is emitted.
 //! - `pre_patch` hook failure (non-zero exit) aborts the patch and returns `Err`; no partial write occurs.
 //! - `post_patch` hook failure never aborts the patch; stderr warning only.
@@ -92,6 +96,17 @@ pub fn run(
     mode: PatchMode,
     content: Option<&str>,
 ) -> Result<()> {
+    run_with_id(file, component_name, None, mode, content)
+}
+
+/// Patch a named component, optionally selecting an occurrence by its opener `id=` attribute.
+pub fn run_with_id(
+    file: &Path,
+    component_name: &str,
+    component_id: Option<&str>,
+    mode: PatchMode,
+    content: Option<&str>,
+) -> Result<()> {
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
@@ -128,13 +143,25 @@ pub fn run(
 
     let comp = components
         .iter()
-        .find(|c| c.name == component_name)
+        .find(|c| {
+            c.name == component_name
+                && component_id.is_none_or(|id| c.attrs.get("id").map(String::as_str) == Some(id))
+        })
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "component '{}' not found in {}",
-                component_name,
-                file.display()
-            )
+            if let Some(id) = component_id {
+                anyhow::anyhow!(
+                    "component '{}' with id '{}' not found in {}",
+                    component_name,
+                    id,
+                    file.display()
+                )
+            } else {
+                anyhow::anyhow!(
+                    "component '{}' not found in {}",
+                    component_name,
+                    file.display()
+                )
+            }
         })?;
 
     let configs = load_configs_with_context(file, Some(&rc)).unwrap_or_default();
@@ -219,12 +246,22 @@ pub fn run(
         run_post_hook(script, component_name, file);
     }
 
-    eprintln!(
-        "Patched component '{}' in {} (mode: {})",
-        component_name,
-        file.display(),
-        mode_name
-    );
+    if let Some(id) = component_id {
+        eprintln!(
+            "Patched component '{}' with id '{}' in {} (mode: {})",
+            component_name,
+            id,
+            file.display(),
+            mode_name
+        );
+    } else {
+        eprintln!(
+            "Patched component '{}' in {} (mode: {})",
+            component_name,
+            file.display(),
+            mode_name
+        );
+    }
     Ok(())
 }
 
@@ -359,6 +396,71 @@ mod tests {
         assert!(result.contains("<!-- agent:status -->"));
         assert!(result.contains("<!-- /agent:status -->"));
         assert!(result.contains("Footer"));
+    }
+
+    #[test]
+    fn id_selector_patches_matching_component_occurrence() {
+        let dir = setup_project();
+        let doc = write_doc(
+            dir.path(),
+            "test.md",
+            "<!-- agent:queue id=main -->\n- main\n<!-- /agent:queue -->\n\n<!-- agent:queue id=issues -->\n- issue\n<!-- /agent:queue -->\n",
+        );
+
+        run_with_id(
+            &doc,
+            "queue",
+            Some("issues"),
+            PatchMode::Replace,
+            Some("- restored watcher\n"),
+        )
+        .unwrap();
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("<!-- agent:queue id=main -->\n- main\n"));
+        assert!(result.contains("<!-- agent:queue id=issues -->\n- restored watcher\n"));
+        assert!(!result.contains("- issue\n"));
+    }
+
+    #[test]
+    fn omitted_id_selector_preserves_first_occurrence_behavior() {
+        let dir = setup_project();
+        let doc = write_doc(
+            dir.path(),
+            "test.md",
+            "<!-- agent:queue id=main -->\n- main\n<!-- /agent:queue -->\n\n<!-- agent:queue id=issues -->\n- issue\n<!-- /agent:queue -->\n",
+        );
+
+        run(&doc, "queue", PatchMode::Replace, Some("- replacement\n")).unwrap();
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("<!-- agent:queue id=main -->\n- replacement\n"));
+        assert!(result.contains("<!-- agent:queue id=issues -->\n- issue\n"));
+    }
+
+    #[test]
+    fn missing_id_selector_reports_the_requested_id() {
+        let dir = setup_project();
+        let doc = write_doc(
+            dir.path(),
+            "test.md",
+            "<!-- agent:queue id=main -->\n- main\n<!-- /agent:queue -->\n",
+        );
+
+        let error = run_with_id(
+            &doc,
+            "queue",
+            Some("issues"),
+            PatchMode::Replace,
+            Some("- replacement\n"),
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("component 'queue' with id 'issues' not found")
+        );
     }
 
     #[test]

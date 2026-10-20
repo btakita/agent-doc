@@ -2647,6 +2647,9 @@ enum Commands {
         file: PathBuf,
         /// Component name (e.g. "status", "log")
         component: String,
+        /// Select the component occurrence whose opening tag has this id attribute
+        #[arg(long)]
+        id: Option<String>,
         /// Patch mode override. Defaults to replace.
         #[arg(long, value_enum, default_value = "replace")]
         mode: PatchMode,
@@ -5800,9 +5803,13 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Patch {
             file,
             component,
+            id,
             mode,
             content,
-        } => patch::run(&file, &component, mode, content.as_deref()),
+        } => match id.as_deref() {
+            Some(id) => patch::run_with_id(&file, &component, Some(id), mode, content.as_deref()),
+            None => patch::run(&file, &component, mode, content.as_deref()),
+        },
         Commands::Watch {
             stop,
             status,
@@ -8474,6 +8481,33 @@ mod recycle_force_tests {
                 assert_eq!(remove, ["time"]);
             }
             _ => panic!("expected queue attr subcommand"),
+        }
+    }
+
+    #[test]
+    fn patch_parses_optional_component_id_selector() {
+        match parse(&[
+            "agent-doc",
+            "patch",
+            "tasks/session.md",
+            "queue",
+            "--id",
+            "issues",
+        ]) {
+            Commands::Patch {
+                file,
+                component,
+                id,
+                mode,
+                content,
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert_eq!(component, "queue");
+                assert_eq!(id.as_deref(), Some("issues"));
+                assert!(matches!(mode, PatchMode::Replace));
+                assert_eq!(content, None);
+            }
+            _ => panic!("expected patch subcommand"),
         }
     }
 

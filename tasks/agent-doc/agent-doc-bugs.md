@@ -3,7 +3,7 @@ agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
   codex: 01a1545a-f42c-7aa1-b9a0-aeafeba96910
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -26,7 +26,7 @@ queue: go
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
 <!-- status:sync -->
-Latest published release: [v0.35.525](https://github.com/btakita/agent-doc/releases/tag/v0.35.525), published on GitHub at 2026-10-19 22:23:24 UTC; PyPI 0.35.525 followed at 2026-10-19 22:24:09 UTC. The same release published JetBrains packages 0.2.720 (classic), 0.2.721 (IDE 262), and 0.2.722 (IDE 263); their assets were uploaded at 2026-10-19 22:23:22–24 UTC. Release, CI, and PyPI verification are green. The coordinated sdk-dev → sdk-demo transfer itself remains unapplied, but its projection_changed blocker is fixed post-release on main and is no longer an open backlog item. Current open work is gh299-live-263-proof; two review items remain gated: jb262dynlauncherrecommen needs an operator decision, and pypiquotarecheck needs an external PyPI reply.
+Latest published release: [v0.35.526](https://github.com/btakita/agent-doc/releases/tag/v0.35.526), published on GitHub at 2026-10-20 04:16:57 UTC (15 assets); PyPI 0.35.526 followed at 2026-10-20 04:17:50 UTC. JetBrains packages are unchanged at 0.2.720 (classic), 0.2.721 (IDE 262), and 0.2.722 (IDE 263), because the plugin sources were byte-identical; this release re-attached them at 2026-10-20 04:16:55–56 UTC. Post-release on main: 4dd943bcf7 (the binary records blocking subagent operator requests in agent:todo) is installed locally; CI for it is still in progress. Two review items remain gated: jb262dynlauncherrecommen needs an operator decision, and pypiquotarecheck needs an external PyPI reply.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -386,6 +386,54 @@ Verified all three pending hook statements against the implementation:
 - A hook cannot interrupt one continuously executing tool call. An interval may become due, but delivery waits for the next supported harness boundary. OpenCode, Grok, and Cursor use polling/command boundaries rather than `PostToolUse`.
 
 These statements are now covered by the completed implementation and the green combined `make check` and `make tmux-ci` results recorded in the preceding response.
+
+### Re: v0.35.526 release, and blocking operator requests now land in agent:todo — opus-5.5 · 2026-10-20T00:41-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.526 is fully published.**
+
+- **Published:** [GitHub Release](https://github.com/btakita/agent-doc/releases/tag/v0.35.526) at 2026-10-20 04:16:57 UTC with 15 assets; PyPI wheel `agent_doc-0.35.526-py3-none-any.whl` at 04:17:50 UTC.
+- **Release driver:** `release summary: tag_publish_handoff=complete local_install_full=complete public_publication=complete`, exit 0.
+- **What shipped:** the 10 commits since v0.35.525, including:
+  - status sync `interval=` and `agent-doc status set`
+  - late queue handoff status at closeout (GH #316)
+  - free-text consumption across the queue graph
+  - retiring integrated subagent completion feedback
+  - the `[#subagent-operator-request]` tracked id
+  - `agent-doc patch --id`
+  - CRDT authority during focused extract
+- **JetBrains:** plugins stay at 0.2.720 / 0.2.721 / 0.2.722 because their sources were byte-identical; the release re-attached them.
+
+Getting there:
+
+- **Stale checkout:** the `src/agent-doc` checkout was 977 commits behind, so I cut the release from a fresh worktree on `origin/main` (`/home/brian/agent-doc-release-0.35.526`).
+- **First run:** release preflight stopped on a missing `editors/release-parity.tsv` row for 0.35.526. I added the row.
+- **Second run:** `make check` passed, but the release gate said the repository had changed since the check. My `release.log` was an untracked file inside the worktree, and the full-check fingerprint counts untracked files. The third run kept its log outside the repository and went through.
+
+> **Queue prompt:** In fpe.md: "What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)": This choice should have been added into `agent:todo`.
+
+**Confirmed and fixed. The binary now writes this todo itself.**
+
+What happened in haiven-dev `tasks/fpe.md`:
+- **23:00 (`3ad3e23c`):** a closeout presented a blocking `[#subagent-operator-request]` packet (the five STG pending-message choices) and gated `#apipendingorphans`. It passed no `--todo-add`, so `agent:todo` got nothing.
+- **23:44:** the todo appeared only after you queued "Add a todo." That cycle then wrongly said the todo "already exists from last cycle."
+- **Why nothing caught it:** the rule (`#wayposttodo`) existed only as guidance. Neither the GH #314 advisory nor the review-gate todo advisory covered it.
+
+The fix (worker `subagent:packettodo`) is commit `4dd943bcf7`, fast-forwarded to main and installed locally:
+- **Detection:** at closeout, the binary looks for blocking packets by structure: the marker line, then `kind:`, `blocking: true`, and `request:`. It ignores `blocking: false`, fenced, quoted, or indented examples, and the protocol template's placeholder.
+- **What it writes:** if a closeout presents one and passes no `--todo-add` (and no `patch:todo`), the binary adds a todo derived from the packet, for example: `Answer the blocking subagent question for #apipendingorphans in agent:exchange: <request> (choices: withdraw, resubmit, release, leave)`. It goes in the same transaction as the rest of the closeout, so a retry or replay does not duplicate it.
+- **Which id it uses:** the one id this closeout gated wins. Otherwise it uses the one id the response cites, and otherwise it mints a new id.
+- **Ordering change I accepted:** `--todo-*` operations now run after the closeout's backlog adds, ungates, and gates. A todo layered on an item gated in the same closeout now names `agent:review` as its source instead of `agent:backlog`. Manual `--todo-add` ordering changes the same way; the todo operations' order among themselves does not.
+- **Tests:**
+  - 5 unit tests and 1 wiring test.
+  - 4 integration tests: the `3ad3e23c` shape now gets `- [ ] [#apipendingorphans] … (source: agent:review …)` with no duplicate on replay; an explicit `--todo-add` is not duplicated; fenced, quoted, or non-blocking packets are ignored; with no tracked id, a new id is minted.
+  - Full `make check` passed: 11126 of 11126 nextest tests, exit 0.
+  - CI for `4dd943bcf7` is still in progress.
+- **Release:** the fix is not in v0.35.526; it ships in the next release.
+- **fpe.md:** already has its todo (`[#apipendingorphans]`, added at 23:44), so it needs no change.
+
+The exchange is large (353 lines across 38 sections). The queue is active, so I am not stopping to compact.
 <!-- agent:boundary:b0bf624b -->
 <!-- /agent:exchange -->
 
@@ -395,6 +443,7 @@ These statements are now covered by the completed implementation and the green c
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 release + publish
+- 📥 In fpe.md: "What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)": This choice should have been added into `agent:todo`.
 <!-- /agent:queue -->
 
 ## Queue: Issues

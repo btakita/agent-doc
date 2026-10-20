@@ -1,0 +1,735 @@
+{
+  "derivation": "registration_projection",
+  "about": "GH #326 phase 5 parity cases. The Rust `registration_projection` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (RegistrationProjectionTest) both answer every case. `texts` are the three generations the plugin holds (null: unavailable); the plugin turns them into the presence and equality facts in `input`, which is all the derivation sees, and the Kotlin test checks that capture. The frozen floor decides from `texts`; the derivation decides from `input`. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "cases": [
+    {
+      "name": "a fresh-controller reseed publishes a proven live buffer instead of the temporary empty canonical",
+      "texts": {
+        "published_shadow": "# Session\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        "buffer": "# Session\n\n<!-- agent:queue -->\n- operator prompt\n<!-- /agent:queue -->\n",
+        "canonical": ""
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": true,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "publish_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "a fresh-controller reseed without a settled ancestor holds with its own reason",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# Session\n\noperator text\n",
+        "canonical": ""
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": true,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "retained-reseed-missing-settled-shadow"
+      }
+    },
+    {
+      "name": "a reseed whose published replica already is the live buffer adopts it",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# Session\n\noperator-visible text\n",
+        "canonical": "# Session\n\noperator-visible text\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": true,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": true,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "pending captured edits defer a fresh bootstrap even without a retained delivery",
+      "texts": {
+        "published_shadow": "old response and queue",
+        "buffer": "old response and edited queue",
+        "canonical": "new response and queue"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": true,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "defer_canonical_projection",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "the first captured local delta defers a retained canonical projection",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# doc\n\noperator deleted the backlog item\n",
+        "canonical": "# doc\n\n- [ ] stale backlog item\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": true,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "defer_canonical_projection",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "a retained canonical that is the exact shadow publishes the live buffer",
+      "texts": {
+        "published_shadow": "# doc\n\nlast published state\n",
+        "buffer": "# doc\n\nlast published state\n\ndo the thing I just typed\n",
+        "canonical": "# doc\n\nlast published state\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": true,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "publish_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "three divergent retained generations hold without overwriting the operator",
+      "texts": {
+        "published_shadow": "# doc\n\nlast published state\n",
+        "buffer": "# doc\n\nlast published state\n\ndo the thing I just typed\n",
+        "canonical": "# doc\n\na different remote generation\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-retained-projection"
+      }
+    },
+    {
+      "name": "a clean three-way merge carries a retained buffer forward instead of holding",
+      "texts": {
+        "published_shadow": "# doc\n\nlast published state\n",
+        "buffer": "# doc\n\nlast published state\ndo the thing I just typed\n",
+        "canonical": "# doc\nagent write\n\nlast published state\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": true
+      },
+      "expected": {
+        "action": "merge_forward",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "a proven rebase adopts canonical ahead of a clean merge",
+      "texts": {
+        "published_shadow": "# doc\n\nFix api.md issue\n",
+        "buffer": "# doc\n\nFix api.md issue\ntyped\n",
+        "canonical": "# doc\n\nFix api.md issue\ntyped\n\n### Re: replayed\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": true,
+        "clean_merge_available": true
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "canonical proven to contain the operator edits ends a retained hold",
+      "texts": {
+        "published_shadow": "# doc\n\nFix api.md issue\n",
+        "buffer": "# doc\n\nFix api.md issue\n```\npasted log\n```\n",
+        "canonical": "# doc\n\nFix api.md issue\n```\npasted log\n```\n\n### Re: replayed\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": true,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "a library-reload re-register publishes text typed while detached",
+      "texts": {
+        "published_shadow": "<!-- agent:queue go -->\n- Does PR 591 have a contracts\n<!-- /agent:queue -->\n",
+        "buffer": "<!-- agent:queue go -->\n- Does PR 591 have a contracts PR? Also check SDK.\n<!-- /agent:queue -->\n",
+        "canonical": "<!-- agent:queue go -->\n- Does PR 591 have a contracts\n<!-- /agent:queue -->\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": true,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "publish_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "a library-reload re-register adopts remote writes when the operator typed nothing",
+      "texts": {
+        "published_shadow": "# doc\n\nbefore\n",
+        "buffer": "# doc\n\nbefore\n",
+        "canonical": "# doc\n\nagent response\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": true,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "a library-reload re-register over three divergent generations holds",
+      "texts": {
+        "published_shadow": "# doc\n\nbase\n",
+        "buffer": "# doc\n\nbase plus operator\n",
+        "canonical": "# doc\n\nbase plus agent\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-reregister-projection"
+      }
+    },
+    {
+      "name": "a library-reload re-register over three divergent generations adopts canonical that contains the edits",
+      "texts": {
+        "published_shadow": "# doc\n\nbase\n",
+        "buffer": "# doc\n\nbase plus operator\n",
+        "canonical": "# doc\n\nbase plus agent\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": true,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "a library-reload re-register over three divergent generations merges forward when the merge is clean",
+      "texts": {
+        "published_shadow": "# doc\n\nbase\n",
+        "buffer": "# doc\n\nbase plus operator\n",
+        "canonical": "# doc\n\nbase plus agent\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": true
+      },
+      "expected": {
+        "action": "merge_forward",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "a restarted IDE has no shadow, so retained adoption stays the recovery",
+      "texts": {
+        "published_shadow": null,
+        "buffer": "# doc\n\nanything at all\n",
+        "canonical": "# doc\n\ncontroller state\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": false,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "an unacknowledged local shadow cannot authorize an older retained overwrite",
+      "texts": {
+        "published_shadow": "# doc\n\noperator edit\n",
+        "buffer": "# doc\n\noperator edit\n",
+        "canonical": "# doc\n\nolder replacement controller snapshot\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": true,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-retained-projection"
+      }
+    },
+    {
+      "name": "a causally covered settled buffer accepts retained canonical recovery",
+      "texts": {
+        "published_shadow": "# doc\n\nsettled\n",
+        "buffer": "# doc\n\nsettled\n",
+        "canonical": "# doc\n\nnewer retained controller projection\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": true,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": true,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "an uncovered settled buffer keeps the retained ambiguity hold",
+      "texts": {
+        "published_shadow": "# doc\n\nsettled\n",
+        "buffer": "# doc\n\nsettled\n",
+        "canonical": "# doc\n\nolder replacement controller projection\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": false,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": true,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-retained-projection"
+      }
+    },
+    {
+      "name": "a replacement canonical that catches the live buffer ends the hold",
+      "texts": {
+        "published_shadow": "# doc\n\nolder settled projection\n",
+        "buffer": "# doc\n\noperator edit\n",
+        "canonical": "# doc\n\noperator edit\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": true,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "an unreadable buffer is not divergence",
+      "texts": {
+        "published_shadow": "# doc\n",
+        "buffer": null,
+        "canonical": "# doc\n\ncontroller response\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": true,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": false,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "equality is exact: a decomposed accent typed over a composed one is operator text",
+      "texts": {
+        "published_shadow": "café\n",
+        "buffer": "café\n",
+        "canonical": "café\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": true,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "publish_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "equality is exact: a CRLF buffer over an LF shadow is operator text",
+      "texts": {
+        "published_shadow": "line\n",
+        "buffer": "line\r\n",
+        "canonical": "line\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": true,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "publish_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "astral text compares by its exact code units",
+      "texts": {
+        "published_shadow": "a🌍 fix bug\n",
+        "buffer": "a🌍 fix the bug\n",
+        "canonical": "a🌍 fix bug\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": null,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": true,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null
+      },
+      "expected": {
+        "action": "publish_operator_buffer",
+        "hold_reason": null
+      }
+    }
+  ],
+  "exhaustive": {
+    "about": "Every combination of the dimensions below, outermost first (the last dimension varies fastest). The three text dimensions are literal texts: the frozen floor decides from them and the derivation from the facts the plugin captures from them. Every other dimension is an `input` field. `answers` holds one code per combination, in order; `codes` maps each code to the expected answer.",
+    "dimensions": [
+      {
+        "name": "defer_canonical_projection_for_pending_local",
+        "values": [
+          false,
+          true
+        ]
+      },
+      {
+        "name": "canonical_projection_retained",
+        "values": [
+          false,
+          true
+        ]
+      },
+      {
+        "name": "retained_replica_reseed_pending",
+        "values": [
+          false,
+          true
+        ]
+      },
+      {
+        "name": "canonical_covers_retained_frontier",
+        "values": [
+          null,
+          false,
+          true
+        ]
+      },
+      {
+        "name": "canonical_contains_operator_edits",
+        "values": [
+          null,
+          false,
+          true
+        ]
+      },
+      {
+        "name": "clean_merge_available",
+        "values": [
+          null,
+          false,
+          true
+        ]
+      },
+      {
+        "name": "published_shadow",
+        "values": [
+          null,
+          "s"
+        ]
+      },
+      {
+        "name": "buffer",
+        "values": [
+          null,
+          "s",
+          "b"
+        ]
+      },
+      {
+        "name": "canonical",
+        "values": [
+          null,
+          "s",
+          "b",
+          "c"
+        ]
+      }
+    ],
+    "codes": {
+      "A": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      },
+      "P": {
+        "action": "publish_operator_buffer",
+        "hold_reason": null
+      },
+      "D": {
+        "action": "defer_canonical_projection",
+        "hold_reason": null
+      },
+      "M": {
+        "action": "merge_forward",
+        "hold_reason": null
+      },
+      "r": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-retained-projection"
+      },
+      "s": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "retained-reseed-missing-settled-shadow"
+      },
+      "g": {
+        "action": "hold_operator_buffer",
+        "hold_reason": "ambiguous-reregister-projection"
+      }
+    },
+    "answers": "AAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAgPAgAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAArArrrPArAAAAAAAAAAAAAAAAMAMMMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAArPArAAAAAAAAAAAAAAAAAAAAMPAMAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAPAAsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPsssssAssssAsrrrrPAPPPPAPDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+  }
+}

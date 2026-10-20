@@ -4051,30 +4051,37 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val publishedShadowAtRegistration =
             settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]
         val bufferTextAtRegistration = editorBufferText(filePath) ?: initialEditorText
-        val retainedProjectionAction =
-            retainedRegistrationProjectionActionForAttachUtil(
-                deferCanonicalProjectionForPendingLocal = deferCanonicalProjectionForPendingLocal,
-                canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
-                retainedReplicaReseedPending = forwarder.retainedReplicaReseedPending,
-                canonicalCoversRetainedFrontier = forwarder.canonicalCoversRetainedFrontier,
-                publishedShadow = publishedShadowAtRegistration,
-                bufferText = bufferTextAtRegistration,
-                canonicalText = forwarder.replicaText(),
-                cleanMergeAvailable =
-                    cleanRegistrationMerge(
-                        publishedShadowAtRegistration,
-                        bufferTextAtRegistration,
-                        forwarder.replicaText(),
-                    ) != null,
-                canonicalContainsOperatorEdits =
-                    canonicalContainsOperatorEditsAtRegistration(
-                        filePath = filePath,
-                        canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
-                        publishedShadow = publishedShadowAtRegistration,
-                        bufferText = bufferTextAtRegistration,
-                        canonicalText = forwarder.replicaText(),
-                    ),
+        // GH #326 phase 5: the facts are captured here, in the same order as before; which
+        // direction they imply is the native `registration_projection` derivation
+        // ([RegistrationProjection], frozen floor when no native generation answers). Executing
+        // the answer, and the order of its effects, stays below.
+        val registrationProjection =
+            RegistrationProjection.decide(
+                RegistrationProjection.Observation(
+                    deferCanonicalProjectionForPendingLocal = deferCanonicalProjectionForPendingLocal,
+                    canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
+                    retainedReplicaReseedPending = forwarder.retainedReplicaReseedPending,
+                    canonicalCoversRetainedFrontier = forwarder.canonicalCoversRetainedFrontier,
+                    publishedShadow = publishedShadowAtRegistration,
+                    bufferText = bufferTextAtRegistration,
+                    canonicalText = forwarder.replicaText(),
+                    cleanMergeAvailable =
+                        cleanRegistrationMerge(
+                            publishedShadowAtRegistration,
+                            bufferTextAtRegistration,
+                            forwarder.replicaText(),
+                        ) != null,
+                    canonicalContainsOperatorEdits =
+                        canonicalContainsOperatorEditsAtRegistration(
+                            filePath = filePath,
+                            canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
+                            publishedShadow = publishedShadowAtRegistration,
+                            bufferText = bufferTextAtRegistration,
+                            canonicalText = forwarder.replicaText(),
+                        ),
+                ),
             )
+        val retainedProjectionAction = registrationProjection.action
         if (forwarder.canonicalProjectionRetained || forwarder.retainedReplicaReseedPending) {
             // Controller state survives an IDEA/plugin restart; this local set
             // does not. Restore the fail-closed baseline before any whole-editor
@@ -4115,8 +4122,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "[crdt-replica] registration retained the exact published shadow for " +
                             "${File(filePath).name} while the live buffer holds unpublished operator text; " +
                             "publishing the buffer from that proven base. " +
-                            "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
-                            "buffer_hash=${contentHash(bufferTextAtRegistration!!)} " +
+                            "shadow_hash=${publishedShadowAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                            "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
                             "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
                     )
                     retainedCanonicalProjectionPaths.remove(filePath)
@@ -4139,10 +4146,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     retainedProjectionHoldPaths.add(filePath)
                     recordRegisterFailure(
                         filePath,
-                        retainedRegistrationHoldReasonUtil(
-                            retainedReplicaReseedPending = forwarder.retainedReplicaReseedPending,
-                            publishedShadow = publishedShadowAtRegistration,
-                        ),
+                        registrationProjection.holdReason
+                            ?: retainedRegistrationHoldReasonUtil(
+                                retainedReplicaReseedPending = forwarder.retainedReplicaReseedPending,
+                                publishedShadow = publishedShadowAtRegistration,
+                            ),
                     )
                     return cached
                 }
@@ -4158,8 +4166,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     log.warn(
                         "[crdt-replica] registration merging the live operator buffer forward onto the " +
                             "controller canonical for ${File(filePath).name}; " +
-                            "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
-                            "buffer_hash=${contentHash(bufferTextAtRegistration!!)} " +
+                            "shadow_hash=${publishedShadowAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                            "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
                             "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
                     )
                     retainedCanonicalProjectionPaths.remove(filePath)
@@ -4171,20 +4179,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             log.warn(
                 "[crdt-replica] refusing re-register projection for ${File(filePath).name}; " +
                     "the live buffer holds operator text typed after its settled shadow. " +
-                    "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
-                    "buffer_hash=${contentHash(bufferTextAtRegistration!!)} " +
+                    "shadow_hash=${publishedShadowAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                    "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
                     "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
             )
             forwarder.deregister()
             retainedProjectionHoldPaths.add(filePath)
-            recordRegisterFailure(filePath, "ambiguous-reregister-projection")
+            recordRegisterFailure(
+                filePath,
+                registrationProjection.holdReason ?: RegistrationProjection.AMBIGUOUS_REREGISTER_PROJECTION,
+            )
             return cached
         } else if (retainedProjectionAction == RetainedRegistrationProjectionAction.PublishOperatorBuffer) {
             log.warn(
                 "[crdt-replica] re-register found unpublished operator text for ${File(filePath).name}; " +
                     "publishing the buffer from its settled shadow instead of projecting canonical over it. " +
-                    "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
-                    "buffer_hash=${contentHash(bufferTextAtRegistration!!)}",
+                    "shadow_hash=${publishedShadowAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                    "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"}",
             )
         }
         if (bootstrapFromControllerCanonical) {

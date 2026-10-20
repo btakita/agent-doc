@@ -412,6 +412,7 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "sync_layout",
     "remote_layout",
     "remote_client_surface",
+    "registration_projection",
 ];
 
 #[derive(serde::Deserialize)]
@@ -489,6 +490,17 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             serde_json::to_value(agent_doc_editor_surface::derive_remote_client_surface(
                 &evidence,
                 nearest_agent_doc_root,
+            ))?
+        }
+        "registration_projection" => {
+            // GH #326 phase 5: the CRDT replica registration direction
+            // (`CrdtReplicaManager.forwarderFor`). The plugin reports presence
+            // and equality facts about its three text generations, never the
+            // text itself.
+            let evidence: agent_doc_editor_surface::RegistrationProjectionEvidence =
+                serde_json::from_value(input).context("parse registration projection evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::derive_registration_projection(
+                &evidence,
             ))?
         }
         other => anyhow::bail!(
@@ -956,6 +968,99 @@ mod tests {
         assert_eq!(empty["output"]["columns"], serde_json::json!([]));
         assert_eq!(empty["output"]["source"], "unknown");
         remote_layout_memory().remove(Path::new(""));
+    }
+
+    /// GH #326 phase 5: the native `registration_projection` derivation
+    /// answers every shared parity case through the derivation channel: the
+    /// named cases and the exhaustive table. The plugin's frozen Kotlin floor
+    /// answers the same file in `RegistrationProjectionTest`, so the two cannot
+    /// drift silently.
+    #[test]
+    fn gh326_registration_projection_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/registration_projection.json"
+        ))
+        .unwrap();
+        let derive = |input: serde_json::Value| {
+            let request =
+                serde_json::json!({"derivation": "registration_projection", "input": input});
+            derive_editor_from_json(&request.to_string()).unwrap()["output"].clone()
+        };
+        // The facts the plugin captures from its three texts.
+        let facts = |shadow: &serde_json::Value,
+                     buffer: &serde_json::Value,
+                     canonical: &serde_json::Value| {
+            let both = |a: &serde_json::Value, b: &serde_json::Value| {
+                a.as_str().is_some() && a.as_str() == b.as_str()
+            };
+            serde_json::json!({
+                "has_published_shadow": shadow.is_string(),
+                "has_buffer": buffer.is_string(),
+                "has_canonical": canonical.is_string(),
+                "buffer_equals_canonical": both(buffer, canonical),
+                "buffer_equals_shadow": both(buffer, shadow),
+                "canonical_equals_shadow": both(canonical, shadow),
+            })
+        };
+
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 24, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let texts = &case["texts"];
+            let captured = facts(
+                &texts["published_shadow"],
+                &texts["buffer"],
+                &texts["canonical"],
+            );
+            for (field, value) in captured.as_object().unwrap() {
+                assert_eq!(&case["input"][field], value, "{name}: {field}");
+            }
+            assert_eq!(derive(case["input"].clone()), case["expected"], "{name}");
+        }
+
+        let table = &fixture["exhaustive"];
+        let dimensions = table["dimensions"].as_array().unwrap();
+        let answers: Vec<char> = table["answers"].as_str().unwrap().chars().collect();
+        let combinations: usize = dimensions
+            .iter()
+            .map(|dimension| dimension["values"].as_array().unwrap().len())
+            .product();
+        assert_eq!(answers.len(), combinations, "one answer per combination");
+        assert!(combinations >= 5184, "the exhaustive table lost dimensions");
+        let text_dimensions = ["published_shadow", "buffer", "canonical"];
+        for (index, code) in answers.iter().enumerate() {
+            // Odometer: the last dimension varies fastest.
+            let mut rest = index;
+            let mut chosen = serde_json::Map::new();
+            for dimension in dimensions.iter().rev() {
+                let values = dimension["values"].as_array().unwrap();
+                chosen.insert(
+                    dimension["name"].as_str().unwrap().to_string(),
+                    values[rest % values.len()].clone(),
+                );
+                rest /= values.len();
+            }
+            let mut input = serde_json::Map::new();
+            for (name, value) in &chosen {
+                if !text_dimensions.contains(&name.as_str()) {
+                    input.insert(name.clone(), value.clone());
+                }
+            }
+            let captured = facts(
+                &chosen["published_shadow"],
+                &chosen["buffer"],
+                &chosen["canonical"],
+            );
+            input.extend(captured.as_object().unwrap().clone());
+            let expected = &table["codes"][code.to_string()];
+            assert!(expected.is_object(), "unknown answer code {code}");
+            assert_eq!(
+                &derive(serde_json::Value::Object(input)),
+                expected,
+                "combination {index}: {chosen:?}"
+            );
+        }
     }
 
     /// GH #326 phase 4: the native `remote_client_surface` derivation answers

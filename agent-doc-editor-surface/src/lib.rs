@@ -36,6 +36,7 @@ pub mod navigation_lane;
 pub mod pane_placement;
 pub mod remote_client_surface;
 pub mod remote_layout;
+pub mod replica_registration;
 pub mod surface_layout_reference;
 pub mod surface_projection;
 pub mod sync_layout;
@@ -77,6 +78,10 @@ pub use remote_client_surface::{
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,
     RemoteLayoutSource,
+};
+pub use replica_registration::{
+    RegistrationProjection, RegistrationProjectionAction, RegistrationProjectionEvidence,
+    derive_registration_projection,
 };
 pub use surface_layout_reference::{
     CONTROLLER_SURFACE_CAPABILITIES, RetainedEditorSurface, SURFACE_LAYOUT_REFERENCE_CAPABILITY,

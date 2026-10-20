@@ -2,7 +2,7 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
-## Unreleased
+## 0.35.528
 
 - **A Remote Dev split change reaches the controller as state, and pane order
   never claims geometry it does not have (GH #320).** On a JetBrains Remote Dev

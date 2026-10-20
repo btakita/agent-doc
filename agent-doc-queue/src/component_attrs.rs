@@ -278,7 +278,7 @@ mod tests {
             component_attr_warning(misplaced)
                 .unwrap()
                 .message_body()
-                .contains("queue-only attribute")
+                .contains("queue-or-status attribute")
         );
     }
 

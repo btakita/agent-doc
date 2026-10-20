@@ -916,11 +916,16 @@ pub fn supervisor_lease_holds_against_takeover(
 /// queue sat until a human re-triggered it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisorDrainReadiness {
-    /// A live supervisor with a fresh heartbeat on the installed binary.
+    /// A live supervisor on the installed binary that is provably this
+    /// document's supervisor: its lease heartbeat is fresh, or its command line
+    /// still names this document (`#codexstoplabel`).
     Ready { supervisor_pid: u32 },
     /// No lease row, no recorded pid, or the recorded pid is dead.
     NoLiveSupervisor,
-    /// The supervisor process is alive but its lease heartbeat is stale.
+    /// The recorded pid is alive, but its lease heartbeat is stale AND its
+    /// command line does not name this document (pid reuse, a re-exec onto
+    /// another document, or an unreadable `/proc`), so nothing proves it is
+    /// still this document's supervisor.
     HeartbeatStale { supervisor_pid: u32 },
     /// The supervisor maps a stale agent-doc binary; it must recycle before it
     /// can be trusted to drain, and that recycle is not guaranteed to happen.
@@ -953,9 +958,22 @@ impl SupervisorDrainReadiness {
 
 /// Classify supervisor drain readiness from already-observed facts. Fail-closed:
 /// missing evidence is never read as readiness.
+///
+/// `#codexstoplabel`: the lease heartbeat is refreshed only on register,
+/// lifecycle transitions and status reconcile, never periodically, so a live
+/// supervisor reads stale whenever its agent's turn outlasts `stale_after`
+/// (the sdk-dev Codex Stop at 17:51:16 came 8m23s after the last `ready`
+/// transition, and was kept in-pane as `supervisor_heartbeat_stale` while pid
+/// 1728757 was alive on the installed binary). Heartbeat age is a timer, not
+/// evidence (`#netadv5` R6), so it is consulted only when positive evidence is
+/// missing: an alive pid whose command line still names this document is a
+/// receiver regardless of heartbeat age. A supervisor that is alive and owns
+/// the document but never drains is caught by the falsifiable undrained
+/// hand-off check (`#supdrainyieldfalsifiable`), not by this timer.
 pub fn classify_supervisor_drain_readiness(
     supervisor_pid: Option<u32>,
     supervisor_process_alive: bool,
+    supervisor_process_owns_document: bool,
     last_heartbeat: Option<u64>,
     now: u64,
     stale_after: Duration,
@@ -967,7 +985,9 @@ pub fn classify_supervisor_drain_readiness(
     if binary_stale {
         return SupervisorDrainReadiness::StaleBinary { supervisor_pid };
     }
-    if !supervisor_lease_is_fresh_and_alive(last_heartbeat, true, now, stale_after) {
+    if !supervisor_process_owns_document
+        && !supervisor_lease_is_fresh_and_alive(last_heartbeat, true, now, stale_after)
+    {
         return SupervisorDrainReadiness::HeartbeatStale { supervisor_pid };
     }
     SupervisorDrainReadiness::Ready { supervisor_pid }
@@ -1388,6 +1408,7 @@ mod tests {
             classify_supervisor_drain_readiness(
                 pid,
                 alive,
+                false,
                 heartbeat,
                 1_000,
                 stale_after,
@@ -1423,6 +1444,76 @@ mod tests {
         );
         assert!(!stale.is_ready());
         assert_eq!(stale.reason(), "supervisor_binary_stale");
+    }
+
+    /// `#codexstoplabel`: the sdk-dev Codex Stop at 2026-10-20T17:51:16Z kept the
+    /// queue in-pane as `supervisor_heartbeat_stale` although supervisor pid
+    /// 1728757 was alive, re-exec'd onto the installed binary, and still named
+    /// `tasks/sdk/sdk-dev.md` on its command line. Its lease heartbeat was last
+    /// written by the 17:42:53 `ready` transition: 503 s old, past the 60 s
+    /// window, because nothing refreshes it during a turn. Heartbeat age is a
+    /// timer, not evidence; positive document ownership makes it a receiver.
+    #[test]
+    fn supervisor_drain_readiness_trusts_document_ownership_over_heartbeat_age() {
+        let stale_after = Duration::from_secs(60);
+        let last_ready_transition = 1_792_518_173;
+        let codex_stop = 1_792_518_676;
+        assert_eq!(codex_stop - last_ready_transition, 503);
+        let classify = |owns_document, heartbeat, binary_stale| {
+            classify_supervisor_drain_readiness(
+                Some(1_728_757),
+                true,
+                owns_document,
+                heartbeat,
+                codex_stop,
+                stale_after,
+                binary_stale,
+            )
+        };
+
+        // The incident: alive, owns the document, installed binary, idle lease.
+        let incident = classify(true, Some(last_ready_transition), false);
+        assert_eq!(
+            incident,
+            SupervisorDrainReadiness::Ready {
+                supervisor_pid: 1_728_757
+            }
+        );
+        assert_eq!(incident.reason(), "ready");
+        // Ownership needs no heartbeat row at all.
+        assert!(classify(true, None, false).is_ready());
+
+        // Without ownership proof the stale heartbeat still fails closed: a
+        // reused pid or a supervisor re-exec'd onto another document is not a
+        // receiver.
+        assert_eq!(
+            classify(false, Some(last_ready_transition), false),
+            SupervisorDrainReadiness::HeartbeatStale {
+                supervisor_pid: 1_728_757
+            }
+        );
+        // A fresh heartbeat alone remains sufficient.
+        assert!(classify(false, Some(codex_stop - 60), false).is_ready());
+
+        // Ownership never overrides a stale binary or a dead pid.
+        assert_eq!(
+            classify(true, Some(codex_stop), true),
+            SupervisorDrainReadiness::StaleBinary {
+                supervisor_pid: 1_728_757
+            }
+        );
+        assert_eq!(
+            classify_supervisor_drain_readiness(
+                Some(1_728_757),
+                false,
+                true,
+                Some(codex_stop),
+                codex_stop,
+                stale_after,
+                false,
+            ),
+            SupervisorDrainReadiness::NoLiveSupervisor
+        );
     }
 
     fn identity(version: &str, len: u64) -> ControllerBinaryIdentity {

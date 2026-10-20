@@ -5168,6 +5168,40 @@ fn classify_editor_route_supervisor_warning(
 /// binding, lease, pid, or unreadable binary identity reads as "no live supervisor",
 /// never as readiness.
 pub fn supervisor_drain_readiness_for_doc(file: &Path) -> status::SupervisorDrainReadiness {
+    supervisor_drain_readiness_for_doc_with(
+        file,
+        timestamp_secs(),
+        process_is_alive,
+        |pid| supervisor_process_owns_document(pid, file),
+        |pid| {
+            current_binary_identity()
+                .ok()
+                .and_then(|current| host_supervisor_binary_is_stale(pid, &current.path))
+                // No installed identity to compare against: cannot vouch for it.
+                .unwrap_or(true)
+        },
+    )
+}
+
+/// `#codexstoplabel`: positive ownership evidence for drain readiness — the
+/// pid's `agent-doc start` command line (resolved against its own cwd) names
+/// `file`. A supervisor that re-exec'd in place keeps its pid and argv, so it
+/// still owns the document; a reused pid or one re-exec'd onto another
+/// document does not.
+fn supervisor_process_owns_document(pid: u32, file: &Path) -> bool {
+    crate::process::open_supervisor_document(pid)
+        .is_some_and(|document| same_document_path(&document, file))
+}
+
+/// [`supervisor_drain_readiness_for_doc`] with the clock and the `/proc`
+/// probes injected, so the lease read is testable against a recorded incident.
+fn supervisor_drain_readiness_for_doc_with(
+    file: &Path,
+    now: u64,
+    process_alive: impl Fn(u32) -> bool,
+    process_owns_document: impl Fn(u32) -> bool,
+    binary_stale: impl Fn(u32) -> bool,
+) -> status::SupervisorDrainReadiness {
     let lease = agent_doc_project_root_io::project_root_containing(file).and_then(|root| {
         let record = durable_actor_binding(&root, file).ok().flatten()?;
         let conn = open_state_db(&root).ok()?;
@@ -5178,21 +5212,15 @@ pub fn supervisor_drain_readiness_for_doc(file: &Path) -> status::SupervisorDrai
     let Some(lease) = lease else {
         return status::SupervisorDrainReadiness::NoLiveSupervisor;
     };
-    let alive = lease.supervisor_pid.is_some_and(process_is_alive);
-    let binary_stale = lease.supervisor_pid.filter(|_| alive).is_some_and(|pid| {
-        current_binary_identity()
-            .ok()
-            .and_then(|current| host_supervisor_binary_is_stale(pid, &current.path))
-            // No installed identity to compare against: cannot vouch for it.
-            .unwrap_or(true)
-    });
+    let live_pid = lease.supervisor_pid.filter(|pid| process_alive(*pid));
     status::classify_supervisor_drain_readiness(
         lease.supervisor_pid,
-        alive,
+        live_pid.is_some(),
+        live_pid.is_some_and(&process_owns_document),
         lease.last_heartbeat,
-        timestamp_secs(),
+        now,
         crate::project_controller::SUPERVISOR_LEASE_GUARD_STALE_AFTER,
-        binary_stale,
+        live_pid.is_some_and(&binary_stale),
     )
 }
 
@@ -59338,6 +59366,115 @@ mod tests {
         );
 
         assert_eq!(outcome, (1, 0));
+    }
+
+    /// `#codexstoplabel`: replays the sdk-dev incident through the real lease
+    /// read. The current-generation lease row names a live supervisor on the
+    /// installed binary whose heartbeat was last written by the `ready`
+    /// transition 503 s before the Codex Stop. Drain readiness used to read it
+    /// as `supervisor_heartbeat_stale`, so the Stop hook kept the queue
+    /// in-pane instead of taking the `#bgclearpolicy` restart.
+    #[test]
+    fn drain_readiness_reads_idle_lease_of_owning_live_supervisor_as_ready() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/sdk")).unwrap();
+        let doc = dir.path().join("tasks/sdk/sdk-dev.md");
+        std::fs::write(&doc, "body\n").unwrap();
+
+        let bootstrap = test_bootstrap(&dir);
+        let document_id = doc.to_string_lossy().to_string();
+        let actor =
+            ready_actor_for_start_alias_test(&bootstrap, &document_id, "session", 9, "%22", "@1");
+        store_actor_record(&bootstrap.project_root, None, &actor).unwrap();
+        upsert_supervisor_lease(
+            &bootstrap.project_root,
+            &actor,
+            Some(1_728_757),
+            Some("/run/user/1000/agent-doc/sdk-dev.sock"),
+            "ready",
+        )
+        .unwrap();
+        let heartbeat = {
+            let conn = open_state_db(&bootstrap.project_root).unwrap();
+            load_supervisor_lease_from_db(&conn, &document_id, 9)
+                .unwrap()
+                .unwrap()
+                .last_heartbeat
+                .unwrap()
+        };
+        let codex_stop = heartbeat + 503;
+        let readiness = |owns_document: bool| {
+            supervisor_drain_readiness_for_doc_with(
+                &doc,
+                codex_stop,
+                |pid| pid == 1_728_757,
+                |pid| {
+                    assert_eq!(pid, 1_728_757, "ownership is probed for the lease pid");
+                    owns_document
+                },
+                |_| false,
+            )
+        };
+
+        assert_eq!(
+            readiness(true),
+            status::SupervisorDrainReadiness::Ready {
+                supervisor_pid: 1_728_757
+            },
+            "an idle lease of the live owning supervisor is a receiver"
+        );
+        assert_eq!(
+            readiness(false),
+            status::SupervisorDrainReadiness::HeartbeatStale {
+                supervisor_pid: 1_728_757
+            },
+            "without ownership proof the stale heartbeat still fails closed"
+        );
+        assert_eq!(
+            supervisor_drain_readiness_for_doc_with(
+                &doc,
+                codex_stop,
+                |_| false,
+                |_| panic!("a dead pid is never probed for ownership"),
+                |_| panic!("a dead pid is never probed for its binary"),
+            ),
+            status::SupervisorDrainReadiness::NoLiveSupervisor
+        );
+    }
+
+    /// `#codexstoplabel`: the ownership probe reads the live supervisor's real
+    /// command line. The fake process carries the incident's argv shape
+    /// (`start --route-owned --route-owned-reap-policy auto --resume=<id> -- <doc>`).
+    #[test]
+    fn supervisor_process_owns_document_reads_route_owned_start_argv() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/sdk")).unwrap();
+        let doc = dir.path().join("tasks/sdk/sdk-dev.md");
+        let other = dir.path().join("tasks/sdk/sdk-dev-loop.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        std::fs::write(&other, "body\n").unwrap();
+        let doc_arg = doc.to_string_lossy().to_string();
+        let mut supervisor = crate::process::tests::spawn_fake_agent_doc_process(
+            std::path::Path::new("agent-doc"),
+            &[
+                "start",
+                "--route-owned",
+                "--route-owned-reap-policy",
+                "auto",
+                "--resume=01a14b6f-8fde-7c52-b3c2-bfe17115b507",
+                "--",
+                &doc_arg,
+            ],
+        );
+        let pid = supervisor.id();
+        let owns_doc = supervisor_process_owns_document(pid, &doc);
+        let owns_other = supervisor_process_owns_document(pid, &other);
+        let _ = supervisor.kill();
+        let _ = supervisor.wait();
+
+        assert!(owns_doc, "the supervisor's argv names its document");
+        assert!(!owns_other, "a supervisor never owns a sibling document");
     }
 
     #[test]

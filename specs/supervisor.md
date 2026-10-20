@@ -951,6 +951,24 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
     Codex Stop hook allows the stop (`codex_stop_queue_continuation_yield`)
     instead of continuing in-pane. Otherwise the in-session drain continues in
     the same context — never a stall.
+  - Drain readiness (`supervisor_drain_readiness_for_doc`) reads the
+    current-generation supervisor lease and fails closed on missing evidence:
+    no lease, pid, or live pid is `no_live_supervisor`; a live pid that does
+    not map the installed binary is `supervisor_binary_stale`. Otherwise the
+    supervisor is `ready` when its lease heartbeat is fresh OR the live pid's
+    `agent-doc start` command line still names this document
+    (`#codexstoplabel`). The lease heartbeat is written only on register,
+    lifecycle transitions, and status reconcile, never periodically, so an
+    owning supervisor reads heartbeat-stale whenever its agent's turn outlasts
+    the 60 s window; heartbeat age is a timer, not evidence (`#netadv5` R6).
+    `supervisor_heartbeat_stale` is reserved for a live pid with a stale
+    heartbeat whose command line does not name the document (pid reuse, a
+    re-exec onto another document, unreadable `/proc`). An owning supervisor
+    that is alive but never drains is caught by the overdue hand-off gate
+    below, not by heartbeat age. A `supervisor_recycle_request_settled_without_reexec
+    ... cause=no_longer_live` line is unrelated: it means the recycle
+    request's cause (for `install_fanout`, a stale binary) no longer holds
+    because the supervisor already re-exec'd, not that the supervisor is gone.
   - A hand-off names the head the supervisor will actually dispatch
     (`#claimeddrainwarn`): the first supervisor-drainable head that no worker
     claims, skipping claimed and subagent-held heads exactly as the

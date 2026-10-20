@@ -409,6 +409,13 @@ a closed actor record is replaceable through the stale-authority path.
   diagnostic with `reason=queue_head_claimed`. Claim state is independent of the
   document revision, so a memoized document head is rechecked against the claim
   ledger before every dispatch attempt; a claim read failure fails closed.
+  Claims are matched by the head's prompt text (`[#beyp]: approved`,
+  `do [#beyp]`), never by the bare tracked id the drain dispatches and logs
+  (`head=beyp`): a claim keys on the line's work identity, and a bare id reads
+  as unrelated free text. The revision memo therefore caches the prompt text
+  beside the routing name, so the fresh and memoized paths make the same
+  comparison (GH #319; missing it re-dispatched a subagent-claimed id-backed
+  head every drain interval, once into a busy turn).
 - If an orphan-drain route finds that the authoritative supervisor recovered
   after the sweep, its first attempt fails closed and yields one bounded
   backoff interval to the recovered idle watch. That preserves the idle

@@ -18861,12 +18861,25 @@ fn enqueue_orphan_drain_route(invocation: ControllerEditorRouteInvocation) -> Re
 /// them would make "no head this tick" indistinguishable from "not cached", and
 /// the drain would re-materialize the document on every quiescent tick, which is
 /// the whole cost being removed.
+///
+/// The memo keeps the head's prompt text beside its routing name (GH #319): a
+/// claim recheck on a cache hit must key on the line (`[#beyp]: approved`),
+/// never on the bare tracked id (`beyp`) the drain dispatches.
 #[derive(Clone)]
-pub(crate) struct OrphanDrainHead(Option<String>);
+pub(crate) struct OrphanDrainHead(
+    Option<agent_doc_queue::queue_continuation::DrainableContinuationHead>,
+);
 
 impl OrphanDrainHead {
     fn into_head(self) -> Option<String> {
+        self.0.map(|entry| entry.head)
+    }
+
+    /// Whether the cached head is held by a claim in `claimed`.
+    fn is_claimed_by(&self, claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems) -> bool {
         self.0
+            .as_ref()
+            .is_some_and(|entry| claimed.claims(&entry.prompt_text))
     }
 }
 
@@ -18902,7 +18915,7 @@ fn orphan_drain_memoized_head(
 fn orphan_drain_memoize_head(
     file: &Path,
     revision: agent_doc_crdt_relay_io::CurrentRevision,
-    head: Option<String>,
+    head: Option<agent_doc_queue::queue_continuation::DrainableContinuationHead>,
 ) {
     orphan_drain_head_memo()
         .lock()
@@ -18923,26 +18936,37 @@ fn orphan_drain_active_claims(
     ledger.claimed_items(now_secs, live.as_ref())
 }
 
+/// The orphan drain's head for `content`: the unfiltered drainable head (what
+/// the revision memo caches), the claim-filtered head to dispatch, and whether
+/// the unfiltered head was skipped because a live claim holds it.
+///
+/// GH #319: the claim check keys on the head's PROMPT TEXT. The dispatch name
+/// of an id-backed head is its bare tracked id (`beyp`), and
+/// `claim_identity("beyp")` is free text `beyp`, never the identity of the
+/// claimed line `[#beyp]: approved`, so checking the bare id let a
+/// subagent-claimed id-backed head re-dispatch every drain interval.
 fn orphan_drain_head_for_content(
     content: &str,
     queue_unresolved_prompts: Option<usize>,
     claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
-) -> (Option<String>, Option<String>, bool) {
+) -> (
+    Option<agent_doc_queue::queue_continuation::DrainableContinuationHead>,
+    Option<String>,
+    bool,
+) {
     let scope = agent_doc_queue::queue_continuation::DrainScope::Supervisor;
     let unfiltered = if queue_unresolved_prompts == Some(0) {
         None
     } else {
-        agent_doc_queue::queue_continuation::live_drainable_continuation_head(content, scope)
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head_entry(content, scope)
     };
-    let claimed_head_skipped = unfiltered
-        .as_deref()
-        .is_some_and(|head| claimed.claims(head));
+    let claimed_head_skipped = OrphanDrainHead(unfiltered.clone()).is_claimed_by(claimed);
     let drainable = if claimed_head_skipped {
         agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
             content, scope, claimed,
         )
     } else {
-        unfiltered.clone()
+        unfiltered.as_ref().map(|entry| entry.head.clone())
     };
     (unfiltered, drainable, claimed_head_skipped)
 }
@@ -19008,19 +19032,116 @@ mod orphan_drain_attempt_tests {
         let second = "unclaimed second".to_string();
         let first_claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads([&first]);
-        let all_claimed = agent_doc_queue::queue_claim::ClaimedQueueItems::none()
-            .with_heads([&first, &second]);
+        let all_claimed =
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads([&first, &second]);
 
         let (unfiltered, drainable, skipped) =
             orphan_drain_head_for_content(content, None, &first_claimed);
-        assert_eq!(unfiltered.as_deref(), Some(first.as_str()));
+        assert_eq!(
+            unfiltered.as_ref().map(|entry| entry.head.as_str()),
+            Some(first.as_str())
+        );
         assert_eq!(drainable.as_deref(), Some(second.as_str()));
         assert!(skipped);
 
-        let (_, drainable, skipped) =
-            orphan_drain_head_for_content(content, None, &all_claimed);
+        let (_, drainable, skipped) = orphan_drain_head_for_content(content, None, &all_claimed);
         assert_eq!(drainable, None);
         assert!(skipped);
+    }
+
+    const GH319_NOW: u64 = 1_000;
+
+    fn gh319_content(claimed_line: &str) -> String {
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+## Queue\n\n<!-- agent:queue auto go -->\n- {claimed_line}\n- do [#c3d4]\n<!-- /agent:queue -->\n\n\
+## Backlog\n\n<!-- agent:backlog -->\n- [ ] [#beyp] Claimed item\n- [ ] [#c3d4] Next item\n<!-- /agent:backlog -->\n"
+        )
+    }
+
+    fn gh319_ledger(item: &str) -> agent_doc_queue::queue_claim::QueueClaimLedger {
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(item, "subagent:gh316-edit", GH319_NOW, 3_600);
+        ledger
+    }
+
+    /// GH #319: an id-backed head is dispatched by its bare tracked id
+    /// (`beyp`), but a claim keys on the line. Checking the bare id read it as
+    /// free text `beyp`, missed the subagent's claim, and re-dispatched the
+    /// claimed head every drain interval. Both id-backed shapes — the
+    /// operator-annotated `[#beyp]: approved` (free-text identity) and the
+    /// directive `do [#beyp]` (id identity) — must be skipped on the fresh path.
+    #[test]
+    fn orphan_drain_skips_claimed_id_backed_heads_by_prompt_text() {
+        for claimed_line in ["[#beyp]: approved", "do [#beyp]"] {
+            let content = gh319_content(claimed_line);
+            let claimed =
+                orphan_drain_active_claims(&gh319_ledger(claimed_line), Some(&content), GH319_NOW);
+            assert!(
+                !claimed.claims("beyp"),
+                "precondition: the bare id is not the claim's identity ({claimed_line})"
+            );
+
+            let (unfiltered, drainable, skipped) =
+                orphan_drain_head_for_content(&content, None, &claimed);
+            let unfiltered = unfiltered.expect("claimed head is the unfiltered head");
+            assert_eq!(unfiltered.head, "beyp", "{claimed_line}");
+            assert_eq!(unfiltered.prompt_text, claimed_line);
+            assert!(
+                skipped,
+                "claimed id-backed head must be skipped: {claimed_line}"
+            );
+            assert_eq!(drainable.as_deref(), Some("c3d4"), "{claimed_line}");
+
+            // Unclaimed, the same head still drains under its routing name.
+            let (_, drainable, skipped) = orphan_drain_head_for_content(
+                &content,
+                None,
+                &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+            );
+            assert!(!skipped);
+            assert_eq!(drainable.as_deref(), Some("beyp"), "{claimed_line}");
+        }
+    }
+
+    /// GH #319, memoized path: an unchanged revision reuses the cached head
+    /// and rechecks it against the claim ledger alone (`active_claims(None)`).
+    /// That recheck must key on the cached prompt text, so a claim landing
+    /// after the head was memoized forces re-materialization and the skip.
+    #[test]
+    fn memoized_orphan_drain_head_rechecks_claims_by_prompt_text() {
+        for claimed_line in ["[#beyp]: approved", "do [#beyp]", "claimed free text"] {
+            let content = gh319_content(claimed_line);
+            let file = PathBuf::from(format!(
+                "/gh319-memo/{}.md",
+                agent_doc_hash::content_hash(claimed_line)
+            ));
+            let revision = agent_doc_crdt_relay_io::CurrentRevision::Detached;
+            let (unfiltered, _, _) = orphan_drain_head_for_content(
+                &content,
+                None,
+                &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+            );
+            orphan_drain_memoize_head(&file, revision.clone(), unfiltered);
+            let memoized =
+                orphan_drain_memoized_head(&file, &revision).expect("memo hit on same revision");
+
+            let claimed = orphan_drain_active_claims(&gh319_ledger(claimed_line), None, GH319_NOW);
+            assert!(
+                memoized.is_claimed_by(&claimed),
+                "memoized head must be rechecked by prompt text: {claimed_line}"
+            );
+            let unrelated =
+                orphan_drain_active_claims(&gh319_ledger("do [#c3d4]"), None, GH319_NOW);
+            assert!(!memoized.is_claimed_by(&unrelated), "{claimed_line}");
+
+            let expected_head = if claimed_line.contains("[#beyp]") {
+                "beyp"
+            } else {
+                claimed_line
+            };
+            assert_eq!(memoized.into_head().as_deref(), Some(expected_head));
+        }
     }
 }
 
@@ -19122,9 +19243,11 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                     &document_hash,
                     agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
                 )? {
-                    Some(record) => agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
-                        &record.payload_json,
-                    )?,
+                    Some(record) => {
+                        agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
+                            &record.payload_json,
+                        )?
+                    }
                     None => agent_doc_queue::queue_claim::QueueClaimLedger::default(),
                 };
                 Ok(orphan_drain_active_claims(&ledger, content, now))
@@ -19132,10 +19255,11 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         let memoized_head = gate_revision
             .as_ref()
             .and_then(|revision| orphan_drain_memoized_head(&file, revision));
+        // GH #319: recheck the cached head by its prompt text, not its bare id.
         let memoized_head_is_claimed = match memoized_head.as_ref() {
-            Some(head) => match head.0.as_deref() {
-                Some(head) => match active_claims(None) {
-                    Ok(claimed) => claimed.claims(head),
+            Some(head) => match head.0.as_ref() {
+                Some(_) => match active_claims(None) {
+                    Ok(claimed) => head.is_claimed_by(&claimed),
                     Err(err) => {
                         log_orphan_drain_event(
                             &file,
@@ -19162,9 +19286,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             (None, _) | (Some(_), true) => {
                 match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
                     Ok(agent_doc_crdt_relay_io::CurrentText::Current {
-                        text,
-                        semantics,
-                        ..
+                        text, semantics, ..
                     }) => (
                         text,
                         semantics.map(|semantics| semantics.queue_unresolved_prompts),
@@ -19202,11 +19324,8 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                         continue;
                     }
                 };
-                let (unfiltered, head, claimed_head_skipped) = orphan_drain_head_for_content(
-                    &content,
-                    queue_unresolved_prompts,
-                    &claimed,
-                );
+                let (unfiltered, head, claimed_head_skipped) =
+                    orphan_drain_head_for_content(&content, queue_unresolved_prompts, &claimed);
                 if let Some(revision) = gate_revision.clone() {
                     // Cache the document-derived answer, never the claim-filtered
                     // projection: claims change without moving the CRDT revision.
@@ -19226,11 +19345,8 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                         continue;
                     }
                 };
-                let (_, head, claimed_head_skipped) = orphan_drain_head_for_content(
-                    &content,
-                    queue_unresolved_prompts,
-                    &claimed,
-                );
+                let (_, head, claimed_head_skipped) =
+                    orphan_drain_head_for_content(&content, queue_unresolved_prompts, &claimed);
                 (head, claimed_head_skipped)
             }
         };

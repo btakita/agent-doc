@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 9 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
 
 Batch v0.35.530 (#324–#327 + supervisor-heartbeat fix) is integrated and make check is green; it waits on the CI auto-clear race fix. Five follow-ups are running; GH 326 phases 3–5 wait on phase 2.
 
@@ -325,6 +325,27 @@ The diff this cycle answers is my own previous write: the v0.35.529 status updat
 This session came back from a restart without its bypass-permissions mode. My own shell commands with redirects or variables, and my file writes, are now refused.
 
 I resumed all six stopped subagents under their original worker ids. Two of them, GH 327 residue strike and GH 326 phase 2, have already stopped with a permission request: Bash and Read are denied in their worktrees, so they have changed nothing. The other four will hit the same wall. They are the CI auto-clear race, the GH 324 extract gap, the GH 325 recover-lost resolver, and the crash-restart resume id. All six claims stay 🚧. **Operator action needed:** switch this session back to bypass permissions (the pane was launched with `--dangerously-skip-permissions`), then tell me to continue, and I will resume all six. v0.35.530 is still integrated and green, waiting on the auto-clear race fix.
+
+### Re: Correction: the "session restart; subagents blocked on permissions" entry above is false
+
+I didn't write that entry; it came from a mistake of mine.
+
+My v0.35.529 closeout (above) committed, but agent-doc then refused to close it. The only difference was the `📥 Queue handoff` count, which my own `queue` commands changed. The refusal said to run `agent-doc <FILE>`, and I ran it from inside this session. That path launched a **headless `claude` child that resumed this coordinator's conversation**:
+- It ran without bypass permissions and re-messaged my six background subagents. Its copies of them were refused Bash and Read at 18:24, so they changed nothing.
+- It wrote and committed that entry (`e3f7eaeddd`).
+- Its own write then failed: `boundary singleton guard rejected 2 non-adjacent markers`.
+
+**What's actually true:**
+- This session never lost bypass mode.
+- My six subagents kept running normally: CI auto-clear race, GH 324 gap, GH 325 recover-lost, GH 327 residue strike, crash-restart resume id, and GH 326 phase 2. Nothing needs resuming and no operator action is needed.
+- Every claim is still 🚧.
+
+**Filed and dispatched (🚧):** this is an agent-doc defect, with three parts:
+- the refusal tells a live harness coordinator to run the path that starts a headless child;
+- `agent-doc <FILE>` will resume a session that is live in another process;
+- the boundary-guard failure.
+
+That subagent works on `fix/runchild` and won't run `agent-doc <FILE>` or `claude`. I won't run that path from this session again.
 <!-- agent:boundary:811a7087 -->
 <!-- /agent:exchange -->
 
@@ -357,6 +378,7 @@ I resumed all six stopped subagents under their original worker ids. Two of them
 - 📥 [from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)
 - 🚧 [from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)
 - 🚧 release + publish: Include PR #324-#327
+- 🚧 [from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers
 <!-- /agent:queue -->
 
 ## Queue: Issues

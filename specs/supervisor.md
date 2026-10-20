@@ -464,6 +464,21 @@ authoritative document/session/pane binding to match and remain non-closed,
 retain its generation and runtime state, and refresh only the supervisor
 pid/socket lease. It must not emit `session_start`, fire session-start hooks, or
 publish an ownership transition. A missing or mismatched binding fails closed.
+- The adopted child's run state propagates across the hot-reexec (GH #321).
+The reentry still writes a `<harness>_start mode=exact_resume` session-log line
+before it adopts the child, followed by `supervisor_reexec_adopted_child`
+(`agent_doc_supervisor::startup_miss::REEXEC_ADOPTED_CHILD_EVENT`, shared by the
+writer and the classifier). The session-log classifier
+(`session_log_status_from_content`) reads that pair as transport reentry, not a
+launch: the latest run, its anchor timestamp, and its committed-cycle
+readiness proof stay those of the run that was open before the recycle, and
+facts the reentry window itself observed are OR-ed in. An adopted run that was
+never proven ready stays unproven. With no open prior run (none logged, or it
+already exited), the reentry's own line stays the anchor and route fails
+closed. Without this, every upgrade recycle reset the run to "still booting",
+so a dispatch-only reopen demanded a ready-prompt capture that a stashed
+1-row pane can never show, and the orphan drain was refused every ~90s forever
+with an unsatisfiable `wait_for_dispatch_ready_prompt`.
 - Prompt observation reports `ready` with reason `prompt_ready`. This happens on
 the first prompt for a child and after later `busy` dispatches return to an
 idle prompt.

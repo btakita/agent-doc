@@ -39,6 +39,10 @@ class TurnStateBannerProvider : EditorNotificationProvider, DumbAware {
         if (PluginGeneration.retired) return null
         val refresher = TurnStateBannerRefresher.getInstance(project)
         refresher.start()
+        // GH #323: this collection edge runs for every editor that shows the file, including a
+        // Remote Dev client's, whose open/selection edges never reach the project
+        // FileEditorManager topic. Admit the document here so its controller frames render.
+        refresher.observeDisplayed(file, "editor-notification")
         // Empty label == idle / not-an-agent-doc-turn → no banner.
         val presentation = refresher.cachedPresentationFor(file.path)
         val label = presentation.label

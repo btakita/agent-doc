@@ -3373,6 +3373,11 @@ mod tests {
     /// no answer; an unclaimed selected head still trips the gate.
     #[test]
     fn claimed_selected_free_text_head_passes_the_evidence_gate() {
+        // The claim stays unacknowledged on purpose; pin the claim clock so it
+        // stays inside the dispatch grace however slow the run is (`#finalgrace`).
+        let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        );
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("agent-doc-bugs.md");
@@ -3500,6 +3505,11 @@ mod tests {
     /// Claims are read-only evidence at this gate and must survive admission.
     #[test]
     fn durable_empty_selection_does_not_fall_back_to_visible_queue_heads() {
+        // The claims stay unacknowledged on purpose; pin the claim clock so they
+        // stay inside the dispatch grace however slow the run is (`#finalgrace`).
+        let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        );
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("agent-doc-bugs.md");

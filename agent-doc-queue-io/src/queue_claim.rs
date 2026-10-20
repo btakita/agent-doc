@@ -30,11 +30,65 @@ use anyhow::{Context, Result, bail};
 
 use agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND;
 
-fn now_secs() -> u64 {
+/// Debug-build test seam (`#finalgrace`): an `agent-doc` process built with
+/// debug assertions reads the claim-ledger clock from this variable when it is
+/// set to whole epoch seconds. An integration test pins it on every CLI command
+/// it spawns, so claim timestamps, TTL expiry, and the
+/// [`DISPATCH_EVIDENCE_GRACE_SECS`](agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS)
+/// age of an unacknowledged claim do not depend on how fast the test ran.
+/// Optimized (release) builds ignore it.
+pub const TEST_CLAIM_CLOCK_ENV: &str = "AGENT_DOC_TEST_QUEUE_CLAIM_NOW_SECS";
+
+thread_local! {
+    static PINNED_CLAIM_CLOCK: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Restores the previous thread pin when dropped; see
+/// [`pin_claim_clock_for_current_thread`].
+#[must_use = "the claim clock is pinned only while the guard is alive"]
+pub struct PinnedClaimClock {
+    previous: Option<u64>,
+}
+
+impl Drop for PinnedClaimClock {
+    fn drop(&mut self) {
+        PINNED_CLAIM_CLOCK.with(|pinned| pinned.set(self.previous));
+    }
+}
+
+/// In-process form of [`TEST_CLAIM_CLOCK_ENV`] for unit tests (`#finalgrace`).
+/// Process environment is shared by every test thread, so an in-process test
+/// pins the claim clock for its own thread instead. Debug builds only.
+#[doc(hidden)]
+pub fn pin_claim_clock_for_current_thread(now_secs: u64) -> PinnedClaimClock {
+    PinnedClaimClock {
+        previous: PINNED_CLAIM_CLOCK.with(|pinned| pinned.replace(Some(now_secs))),
+    }
+}
+
+/// The clock every claim-ledger timestamp and dispatch-acknowledgement age is
+/// measured on. Production reads the system clock; a debug build honours a
+/// thread pin, then [`TEST_CLAIM_CLOCK_ENV`].
+pub fn claim_clock_now_secs() -> u64 {
+    if cfg!(debug_assertions) {
+        if let Some(pinned) = PINNED_CLAIM_CLOCK.with(std::cell::Cell::get) {
+            return pinned;
+        }
+        if let Some(pinned) = std::env::var(TEST_CLAIM_CLOCK_ENV)
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+        {
+            return pinned;
+        }
+    }
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or(0)
+}
+
+fn now_secs() -> u64 {
+    claim_clock_now_secs()
 }
 
 /// The harness session the current process runs in (`#claimownerliveness`),
@@ -1188,6 +1242,44 @@ mod tests {
         )
         .unwrap();
         doc
+    }
+
+    /// `#finalgrace`: a pinned claim clock stamps the claim and measures its
+    /// dispatch-acknowledgement age, so an unacknowledged claim stays inside
+    /// the grace however long the test takes; advancing the pin past the grace
+    /// raises the obligation, and dropping the guard restores the prior pin.
+    #[test]
+    fn pinned_claim_clock_makes_the_dispatch_grace_independent_of_run_speed() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#pinned]"]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let pinned = 1_000_000;
+        let _outer = pin_claim_clock_for_current_thread(pinned);
+        let (_, claim) = claim(&doc, "#pinned", "subagent:pinned", 3600).unwrap();
+        assert_eq!(claim.claimed_at_secs, pinned);
+        assert!(
+            dispatch_acknowledgement_obligations_for_content(&doc, &content)
+                .unwrap()
+                .is_empty(),
+            "an unacknowledged claim inside the grace is not yet an obligation"
+        );
+        {
+            let _later = pin_claim_clock_for_current_thread(
+                pinned + agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
+            );
+            assert_eq!(
+                dispatch_acknowledgement_obligations_for_content(&doc, &content)
+                    .unwrap()
+                    .len(),
+                1,
+                "the same claim past the grace is a coordinator obligation"
+            );
+        }
+        assert_eq!(
+            claim_clock_now_secs(),
+            pinned,
+            "the inner pin restores the outer one"
+        );
     }
 
     /// `#claimownerliveness`: the claiming session comes from the harness

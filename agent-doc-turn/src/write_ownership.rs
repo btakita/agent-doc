@@ -670,6 +670,36 @@ pub fn editor_holds_unmerged_visible_text_remedy(file: &str) -> String {
 }
 
 /// When `admin reload-lib` is sanctioned, stated once for every remedy that
+/// How an unanswered document edit is answered, stated once for every caller
+/// of the [`RetainedWriteVerdict::UnansweredEditPending`] remedy
+/// (`#runchildresumesowner`).
+///
+/// The remedy used to say "run `agent-doc <FILE>` to open the next cycle". That
+/// is right from a plain shell and wrong from inside a running harness turn,
+/// which is where a `--origin skill` closeout renders it: there `agent-doc
+/// <FILE>` is the headless `run` path, and on 2026-10-20 a live Claude Code
+/// coordinator that obeyed it launched a `claude` child resuming its OWN
+/// conversation. The child had no bypass permissions, re-drove the
+/// coordinator's background subagents, committed a fabricated exchange entry,
+/// and then failed its own write. The text is rendered by the project
+/// controller, which cannot see the caller's harness, so it names both
+/// audiences explicitly and puts the in-harness move first.
+pub fn unanswered_edit_answer_instruction(file: &str) -> String {
+    format!(
+        "Answer it in the NEXT cycle. From inside a running harness turn (a `/agent-doc` skill \
+         closeout, `--origin skill`, or a subagent of that session), END THIS TURN: the edit \
+         stays live, and the next `/agent-doc {file}` cycle (the operator's next invocation, \
+         or the supervisor's idle dispatch) reads it as its prompt and commits it. Do NOT run \
+         `agent-doc {file}` or `agent-doc run {file}` from inside a harness turn — that is the \
+         headless run path, it launches a second harness child that resumes this same live \
+         session, and it refuses to. Only from a plain shell with no live harness session on \
+         this document does `agent-doc run {file}` open that cycle. Do NOT run `agent-doc \
+         commit {file}` — every commit path refuses a fresh unanswered edit on purpose, \
+         because committing it would swallow the next turn's prompt — and do NOT force disk, \
+         which clobbers the live edits"
+    )
+}
+
 /// otherwise tells the agent to wait (GH #131).
 ///
 /// The deferral's do-NOT list exists because sessions invented recoveries that
@@ -775,11 +805,8 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
              queue or backlog line the live buffer has and the disk projection does not). It is \
              either operator steering or an earlier `agent-doc write` whose own commit refused; \
              this check compares components and cannot tell which, so it does not guess. Either \
-             way it is not a failed closeout. Answer it: run `agent-doc {file}` to open the next \
-             cycle, which reads that edit as its prompt and commits it. Do NOT run `agent-doc \
-             commit {file}` — every commit path refuses a fresh unanswered edit on purpose, \
-             because committing it would swallow the next turn's prompt — and do NOT force disk, \
-             which clobbers the live edits"
+             way it is not a failed closeout, and the edit is safe left uncommitted. {}",
+            unanswered_edit_answer_instruction(file)
         ),
     }
 }

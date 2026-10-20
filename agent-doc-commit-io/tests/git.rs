@@ -2864,8 +2864,24 @@ Duplicate replay should stay live.
             "the refusal must classify the drift, not just decline: {err}"
         );
         assert!(
-            err.contains(&format!("run `agent-doc {}`", doc.display())),
-            "the refusal must name the command that actually clears it: {err}"
+            err.contains(&format!("the next `/agent-doc {}` cycle", doc.display()))
+                && err.contains("END THIS TURN"),
+            "the refusal must name the in-harness way to answer the edit: {err}"
+        );
+        // `#runchildresumesowner`: from a live harness turn the bare/run path
+        // launches a headless child resuming that same session. The remedy
+        // may name it only as forbidden there, and as the plain-shell route.
+        assert!(
+            err.contains(&format!(
+                "Do NOT run `agent-doc {}` or `agent-doc run {}` from inside a harness turn",
+                doc.display(),
+                doc.display()
+            )),
+            "the remedy must not send a live harness turn to the run path: {err}"
+        );
+        assert!(
+            !err.contains(&format!("Answer it: run `agent-doc {}`", doc.display())),
+            "the unconditional run-path instruction is the defect: {err}"
         );
         assert!(
             err.contains(&format!("Do NOT run `agent-doc commit {}`", doc.display())),
@@ -3308,6 +3324,164 @@ Duplicate replay should stay live.
             log.contains("commit_reconciled_late_reported_queue_status")
                 && log.contains("reported_count=1"),
             "recovery must record the exact ledger-derived status proof:\n{log}"
+        );
+    }
+
+    /// `#runchildresumesowner` (agent-doc-bugs.md 2026-10-20 18:23): a skill
+    /// closeout's commit landed before its retained tracked-work half. The
+    /// captured plan's `--status` and the `#ftstrike` answered-head strike then
+    /// converged TOGETHER through the live editor. Each single-projection proof
+    /// demands the other be absent, so the terminal retry refused the binary's
+    /// own projections as an unanswered operator edit — and the live
+    /// coordinator that obeyed that remedy launched a headless child resuming
+    /// its own session. The composition must commit forward; any byte that is
+    /// not one of the committed cycle's own projections must still refuse.
+    #[test]
+    fn commit_recovers_late_plan_status_composed_with_free_text_strike() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let response = concat!(
+            "### Re: finish the plan — gpt-5\n\n",
+            "> **Queue prompt:** finish the plan\n\n",
+            "Finished and verified.\n",
+        );
+        let committed = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:status patch=replace sync=\"Track the latest release.\" -->\n",
+                "Old prose.\n\n",
+                "<!-- status:sync -->\nOld release.\n<!-- /status:sync -->\n",
+                "<!-- /agent:status -->\n\n",
+                "<!-- agent:exchange patch=append -->\n{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n- finish the plan\n<!-- /agent:queue -->\n",
+            ),
+            response,
+        );
+        commit_file(
+            root,
+            "session.md",
+            &committed,
+            "response without its late tracked-work half",
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan_status = "New prose.\n\n<!-- status:sync -->\nNew release.\n<!-- /status:sync -->";
+        let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
+            is_template: true,
+            status: Some(plan_status.to_string()),
+            ..Default::default()
+        };
+        let plan_json = serde_json::to_string(&plan).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+            .unwrap();
+        let captured_response =
+            format!("<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n");
+        let capture =
+            agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+                &doc,
+                &captured_response,
+                &committed,
+                None,
+                Some(&plan_json),
+            )
+            .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+
+        let with_status =
+            agent_doc_document::status_projection::update_status_content(&committed, plan_status)
+                .unwrap();
+        assert_ne!(
+            with_status, committed,
+            "fixture plan must change the status"
+        );
+        let composed = agent_doc_queue::queue_consume::project_answered_free_text_strike(
+            &with_status,
+            response,
+            None,
+        )
+        .unwrap()
+        .expect("fixture response must own its free-text queue head")
+        .target_content;
+        assert!(
+            composed.contains("New release.") && !composed.contains("- finish the plan\n"),
+            "fixture must carry both late projections:\n{composed}"
+        );
+
+        // A status the captured plan never carried is operator text, even
+        // beside the binary's own strike: the strict refusal must hold.
+        let operator_status = agent_doc_document::status_projection::update_status_content(
+            &committed,
+            "Operator-authored status.",
+        )
+        .unwrap();
+        let operator_composed = agent_doc_queue::queue_consume::project_answered_free_text_strike(
+            &operator_status,
+            response,
+            None,
+        )
+        .unwrap()
+        .expect("fixture response must own its free-text queue head")
+        .target_content;
+        fs::write(&doc, &operator_composed).unwrap();
+        let err = commit(&doc).expect_err("a non-plan status must remain blocked");
+        assert_eq!(
+            agent_doc_commit_io::retained_write_commit_refusal_verdict(&err),
+            Some(agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending),
+        );
+
+        // An operator byte beside the exact composition must also hold.
+        let extended = composed.replace(
+            "<!-- /agent:queue -->",
+            "- a fresh operator prompt\n<!-- /agent:queue -->",
+        );
+        assert_ne!(extended, composed);
+        fs::write(&doc, &extended).unwrap();
+        commit(&doc).expect_err("an operator queue line beside the composition must stay blocked");
+
+        fs::write(&doc, &composed).unwrap();
+        let did_commit =
+            commit(&doc).expect("the committed cycle's own composed projections must commit");
+        assert!(did_commit);
+        let landed = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed document");
+        assert!(
+            landed.contains("New release.")
+                && landed.contains("New prose.")
+                && !landed.contains("- finish the plan\n")
+                && !landed.contains("a fresh operator prompt"),
+            "the commit must land exactly the composed projection:\n{landed}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_reconciled_late_binary_owned_projection")
+                && log.contains("parts=plan_status+answered_free_text_strike")
+                && log.contains(&capture.capture_id),
+            "recovery must record which owned projections it proved:\n{log}"
         );
     }
 

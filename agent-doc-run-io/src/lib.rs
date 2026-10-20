@@ -306,6 +306,21 @@ pub fn run_once(
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    // `#runchildresumesowner`: refuse before any diff, pre-commit, snapshot,
+    // normalization, or cycle effect when this run would resume the harness
+    // session it is running inside.
+    if !dry_run
+        && let Some(refusal) = live_session_resume_refusal_for_file(
+            file,
+            agent_name,
+            config,
+            force_fresh_agent_session,
+            |key| std::env::var(key).ok(),
+        )?
+    {
+        log_live_session_resume_refused(file);
+        anyhow::bail!("{refusal}");
+    }
     let _ = agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
         file,
         "generation_cycle_start",
@@ -423,6 +438,23 @@ pub fn run_once(
     let run_mode = RunMode::from_frontmatter(&prompt_fm);
     let agent_config = config.agents.get(agent_name);
     let resume_id = prompt_fm.resume_for_harness(&harness);
+    // `#runchildresumesowner` backstop: the early guard read the disk
+    // frontmatter; this one checks the exact id the child would resume.
+    if !dry_run
+        && let Some(conflict) = agent_doc_turn::live_session_resume::live_session_resume_conflict(
+            &harness,
+            resume_id,
+            |key| std::env::var(key).ok(),
+        )
+    {
+        let refusal = agent_doc_turn::live_session_resume::live_session_resume_refusal(
+            &file.display().to_string(),
+            agent_name,
+            &conflict,
+        );
+        log_live_session_resume_refused(file);
+        anyhow::bail!("{refusal}");
+    }
     let resolved_model = model
         .or(fm.resolve_harness_model(&harness))
         .map(|m| agent_doc_model_tier::canonical_model_name(m, &harness, &config.model));
@@ -881,12 +913,16 @@ pub fn apply_template_response_with_authority(
         }
     } else if use_crdt {
         eprintln!("File was modified during run. CRDT merging changes...");
+        // `#runchildresumesowner` (c): this used to send `base_state` to the
+        // controller's disk-demotion reconcile. That command takes the live
+        // replica's encoded text ops (`projection_bytes`); `encode_state` is the
+        // document's plain UTF-8 text, so the controller failed every call with
+        // `decode legacy JSON text ops: invalid number at line 1 column 2` (the
+        // frontmatter's leading `---`). Even correctly encoded, a replica minted
+        // from text carries fresh ops and the reconcile is additive, so it could
+        // only duplicate the document. `content_current` already reads the live
+        // authority, so there is nothing to reconcile here.
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(baseline).encode_state();
-        if let Err(e) = agent_doc_controller_io::project_controller::
-            reconcile_disk_projection_via_controller_model_for_doc(file, &base_state)
-        {
-            eprintln!("[crdt] disk-demotion reconcile failed (non-fatal): {e}");
-        }
         let (merged, _pre_normalization_state) = agent_doc_merge::merge_contents_crdt(
             Some(&base_state),
             &content_ours,
@@ -1651,6 +1687,65 @@ pub fn owner_pane_queue_edit_deferred_outcome(
         queue_synthetic_diff,
         queue_consumption: None,
     }
+}
+
+/// `#runchildresumesowner`: the refusal for a run that would resume the live
+/// harness session the caller runs inside, read from the document's disk
+/// frontmatter before the run path performs any effect.
+///
+/// Returns `Ok(None)` when the run starts a fresh session, the document has no
+/// resume id for the resolved harness, or the frontmatter cannot be read here
+/// (the normal path then reports that failure itself).
+pub fn live_session_resume_refusal_for_file(
+    file: &Path,
+    agent_name: Option<&str>,
+    config: &agent_doc_config::Config,
+    force_fresh_agent_session: bool,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<Option<String>> {
+    if force_fresh_agent_session {
+        return Ok(None);
+    }
+    // Observation only: the guard must not record a disk authority claim
+    // before it decides whether the run may proceed at all.
+    let Ok(content) = agent_doc_document_realtime_io::peek_disk_document_content(
+        file,
+        "run_live_session_resume_guard",
+    ) else {
+        return Ok(None);
+    };
+    let Ok((fm, _)) = frontmatter::parse(&content) else {
+        return Ok(None);
+    };
+    let agent_name = agent_name
+        .or(fm.agent.as_deref())
+        .or(config.default_agent.as_deref())
+        .unwrap_or("claude");
+    let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
+    let Some(conflict) = agent_doc_turn::live_session_resume::live_session_resume_conflict(
+        &harness,
+        fm.resume_for_harness(&harness),
+        env,
+    ) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        agent_doc_turn::live_session_resume::live_session_resume_refusal(
+            &file.display().to_string(),
+            agent_name,
+            &conflict,
+        ),
+    ))
+}
+
+fn log_live_session_resume_refused(file: &Path) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "run_refused_live_session_resume file={} reason=resume_target_is_live_caller_session",
+            file.display()
+        ),
+    );
 }
 
 pub fn recursive_codex_direct_invocation_diagnostic(

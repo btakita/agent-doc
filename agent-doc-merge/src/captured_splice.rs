@@ -956,7 +956,9 @@ fn insertion_splices(at: usize, theirs: &[char], ours: &[char]) -> Vec<CapturedS
 /// agent-doc writes: boundary-marker lines and the transient ` (HEAD)` heading
 /// suffix. A controller disk projection and canonical place them differently
 /// without anyone typing, so a containment proof must not count them as edits.
-/// The JetBrains plugin's `withoutBinaryOwnedMarkersUtil` applies the same rule.
+/// Registration's containment proof uses the stricter rule the JetBrains
+/// plugin froze ([`crate::captured_splice_request::registration_operator_text`]):
+/// it differs in which boundary ids, headings, and line terminators it accepts.
 pub fn without_binary_owned_markers(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {

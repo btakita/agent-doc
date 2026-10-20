@@ -5448,6 +5448,13 @@ mod tests {
                 .contains(&serde_json::json!("attach_failure_diagnosis")),
             "GH #326 phase 5b: the attach-failure diagnosis is a shipped derivation"
         );
+        assert!(
+            listed["output"]["captured_splice_inputs"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("registration")),
+            "GH #326 phase 5c: the captured-splice calls shape a registration natively"
+        );
         let unknown = CString::new(r#"{"derivation":"later_rule"}"#).unwrap();
         let result = unsafe { agent_doc_editor_derive_json(unknown.as_ptr()) };
         assert!(result.json.is_null(), "an unknown derivation is an error");

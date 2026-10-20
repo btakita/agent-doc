@@ -1885,6 +1885,37 @@ object NativeAdminControls {
         inputJson: String,
     ): String? {
         val lib = AgentDocLib.get() ?: return null
+        return deriveEditorOn(lib, derivation, inputJson)
+    }
+
+    /**
+     * GH #326 phase 5c: the optional captured-splice FFI inputs [lib] accepts (the `capabilities`
+     * derivation's `captured_splice_inputs`). Empty for a library that answers without the field;
+     * `null` when [lib] gave no answer at all, so the caller asks again later.
+     */
+    internal fun capturedSpliceInputs(lib: AgentDocLib): Set<String>? {
+        val answer = deriveEditorOn(lib, "capabilities", "{}") ?: return null
+        return try {
+            val inputs = com.google.gson.JsonParser.parseString(answer).asJsonObject.get("captured_splice_inputs")
+            if (inputs == null || !inputs.isJsonArray) {
+                emptySet()
+            } else {
+                inputs.asJsonArray
+                    .mapNotNull { it.takeIf { e -> e.isJsonPrimitive && e.asJsonPrimitive.isString }?.asString }
+                    .toSet()
+            }
+        } catch (e: Exception) {
+            LOG.warn("[native] editor_derive capabilities answer unreadable: ${e.message}")
+            null
+        }
+    }
+
+    /** [deriveEditor] against one loaded native generation. */
+    private fun deriveEditorOn(
+        lib: AgentDocLib,
+        derivation: String,
+        inputJson: String,
+    ): String? {
         if (editorDeriveUnavailableFor === lib) return null
         val request =
             com.google.gson.JsonObject().apply {
@@ -2517,6 +2548,52 @@ object NativePatching {
                 return null
             }
             return result.text?.readNativeUtf8()?.toBooleanStrictOrNull()
+        } finally {
+            lib.agent_doc_free_string(result.error)
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /** The native generation whose `captured_splice_inputs` were last read, and those inputs. */
+    @Volatile private var capturedSpliceInputsProbe: Pair<AgentDocLib, Set<String>>? = null
+
+    /**
+     * GH #326 phase 5c: ask the loaded native generation's captured-splice [call] with the
+     * `registration` input ([requestJson]) in place of a plugin-shaped batch. Returns `null` when no
+     * library is loaded or the loaded one does not advertise the input, so the caller shapes the
+     * batch with its frozen floor. The advertisement is read once per native generation, and the
+     * call goes to the same generation that advertised it.
+     */
+    internal fun askCapturedSplicesWithRegistration(
+        call: RegistrationSpliceShaping.Call,
+        base: String,
+        canonical: String,
+        requestJson: String,
+    ): RegistrationSpliceShaping.Answer? {
+        val lib = AgentDocLib.get() ?: return null
+        val inputs =
+            capturedSpliceInputsProbe?.takeIf { it.first === lib }?.second
+                ?: NativeAdminControls.capturedSpliceInputs(lib)?.also { capturedSpliceInputsProbe = lib to it }
+                ?: return null
+        if (RegistrationSpliceShaping.REGISTRATION_INPUT !in inputs) return null
+        val result =
+            try {
+                when (call) {
+                    RegistrationSpliceShaping.Call.CONTAINED ->
+                        lib.agent_doc_captured_splices_contained(base, canonical, requestJson)
+                    RegistrationSpliceShaping.Call.REBASE ->
+                        lib.agent_doc_rebase_captured_splices(base, canonical, requestJson)
+                }
+            } catch (error: UnsatisfiedLinkError) {
+                LOG.warn("[native] ${call.label} unavailable in this native generation", error)
+                return null
+            }
+        try {
+            if (result.error != null) {
+                LOG.warn("[native] ${call.label} retained: ${result.error!!.readNativeUtf8()}")
+                return RegistrationSpliceShaping.Answer(null)
+            }
+            return RegistrationSpliceShaping.Answer(result.text?.readNativeUtf8())
         } finally {
             lib.agent_doc_free_string(result.error)
             lib.agent_doc_free_string(result.text)

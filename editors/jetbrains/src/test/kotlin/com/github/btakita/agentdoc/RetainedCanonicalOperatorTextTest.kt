@@ -585,16 +585,20 @@ class RetainedCanonicalOperatorTextTest {
         val merge = manager
             .substringAfter("private fun cleanRegistrationMerge(")
             .substringBefore("private fun finalizeRegistrationProjection(")
-        assertTrue(
-            merge.contains(
-                "cleanRegistrationMergeUtil(shadow, buffer, canonical, NativePatching::rebaseCapturedSplices)",
-            ),
-        )
+        assertTrue(merge.contains("RegistrationSpliceShaping.cleanMerge(shadow, buffer, canonical)"))
+        // GH #326 phase 5c: native shapes the splice for the same rebase symbol; the frozen floor
+        // is the pre-5c util over the same native rebase.
+        val shaping = source("RegistrationSpliceShaping.kt")
+            .substringAfter("internal fun cleanMerge(")
+            .substringBefore("internal fun frozenOperatorEditsContained(")
+        assertTrue(shaping.contains("NativePatching::rebaseCapturedSplices"))
+        assertTrue(shaping.contains("Call.REBASE"))
+        assertTrue(shaping.contains("cleanRegistrationMergeUtil(shadow, buffer, canonical, frozenRebase)"))
         val util = manager
             .substringAfter("internal fun cleanRegistrationMergeUtil(")
             .substringBefore("internal fun singleSpliceBatchUtil(")
         assertTrue(util.contains("rebase(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))"))
-        for (code in listOf(merge, util.substringAfter("): String? {"))) {
+        for (code in listOf(merge, shaping, util.substringAfter("): String? {"))) {
             assertFalse("registration merge must not use the char-level reconcile", code.contains("reconcile"))
         }
         assertFalse(

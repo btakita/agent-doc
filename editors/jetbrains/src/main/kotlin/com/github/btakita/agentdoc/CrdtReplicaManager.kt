@@ -2446,23 +2446,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (bufferText == publishedShadow || canonicalText == bufferText || canonicalText == publishedShadow) {
             return null
         }
-        // `#ambiguousholdforever2`: prove containment over operator text only. A controller
-        // disk projection that the IDE reloaded carries binary-owned `(HEAD)` / boundary
-        // placement canonical does not share; left in, that bookkeeping change can never be
-        // "contained" and the hold had no exit (formal/tla/RetainedProjectionHold.tla).
-        val shadowOperatorText = withoutBinaryOwnedMarkersUtil(publishedShadow)
-        val bufferOperatorText = withoutBinaryOwnedMarkersUtil(bufferText)
-        val canonicalOperatorText = withoutBinaryOwnedMarkersUtil(canonicalText)
+        // `#ambiguousholdforever2`: the proof runs over operator text only (binary-owned
+        // `(HEAD)` / boundary placement removed). GH #326 phase 5c: native shapes it.
         val contained =
-            if (bufferOperatorText == shadowOperatorText || bufferOperatorText == canonicalOperatorText) {
-                true
-            } else {
-                NativePatching.capturedSplicesContained(
-                    shadowOperatorText,
-                    canonicalOperatorText,
-                    singleSpliceBatchUtil(shadowOperatorText, bufferOperatorText),
-                ) ?: return false
-            }
+            RegistrationSpliceShaping.operatorEditsContained(publishedShadow, bufferText, canonicalText)
         if (contained) {
             log.info(
                 "[crdt-replica] retained canonical already contains the operator buffer's edits for " +
@@ -4287,10 +4274,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * `#editorauth2`: the clean three-way merge of a registration's generations,
      * or null when any is missing, they need no merge, the native library is
      * unavailable, or the merge refuses (those stay held, never overwritten).
-     * See [cleanRegistrationMergeUtil].
+     * GH #326 phase 5c: native shapes the splice ([RegistrationSpliceShaping.cleanMerge]);
+     * the frozen floor is [cleanRegistrationMergeUtil].
      */
     private fun cleanRegistrationMerge(shadow: String?, buffer: String?, canonical: String?): String? =
-        cleanRegistrationMergeUtil(shadow, buffer, canonical, NativePatching::rebaseCapturedSplices)
+        RegistrationSpliceShaping.cleanMerge(shadow, buffer, canonical)
 
     /** Complete the causal projection decision only after this endpoint owns the map slot. */
     private fun finalizeRegistrationProjection(
@@ -6462,6 +6450,10 @@ private val BINARY_OWNED_HEAD_SUFFIX = Regex("""(?m)^(#{1,6} .*?) \(HEAD\)[ \t]*
  * marker lines and the transient ` (HEAD)` heading suffix. Their placement differs between a
  * controller disk projection and canonical without any operator having typed, so they are never
  * operator edits for a containment proof.
+ *
+ * GH #326 phase 5c: frozen floor. Native `registration_operator_text` applies this rule now; this
+ * copy shapes the proof only for a library that does not advertise the `registration` input. Never
+ * change it; change the native rule and `registration_splice_shaping.json` instead.
  */
 internal fun withoutBinaryOwnedMarkersUtil(text: String): String =
     text.replace(BINARY_OWNED_BOUNDARY_LINE, "").replace(BINARY_OWNED_HEAD_SUFFIX, "$1")
@@ -6485,6 +6477,9 @@ internal fun withoutBinaryOwnedMarkersUtil(text: String): String =
  * `#steerreplicachurn`: the rebase also merges the case where canonical already holds the first
  * part of a prompt the operator kept typing (its push was ingested but the receipt was lost),
  * inserting only what canonical lacks.
+ *
+ * GH #326 phase 5c: frozen floor of [RegistrationSpliceShaping.cleanMerge], which asks native to
+ * shape the splice. Never extend it.
  */
 internal fun cleanRegistrationMergeUtil(
     shadow: String?,
@@ -6497,7 +6492,13 @@ internal fun cleanRegistrationMergeUtil(
     return rebase(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))?.resultingText
 }
 
-/** One splice turning [before] into [after]: the common code-point prefix and suffix stay. */
+/**
+ * One splice turning [before] into [after]: the common code-point prefix and suffix stay.
+ *
+ * GH #326 phase 5c: registration's containment proof and clean merge ask native to shape this
+ * splice (`single_splice`); this copy is their frozen floor. The forwarder's replica alignment
+ * also uses it.
+ */
 internal fun singleSpliceBatchUtil(before: String, after: String): PreparedLocalEditorBatch {
     val old = before.codePoints().toArray()
     val new = after.codePoints().toArray()

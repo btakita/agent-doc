@@ -119,6 +119,51 @@ struct PreparedExtract {
     target_before: Option<String>,
     source_after: String,
     target_after: String,
+    /// Exact bytes each transfer removes from the source, in transfer order.
+    /// `None` for a non-destructive transfer (an archived-context copy).
+    source_removals: Vec<Option<String>>,
+}
+
+/// Typed refusal for an operation whose destination marker survived while the
+/// destination lost content that operation moved (GH #324).
+///
+/// The operation ID hashes the source bytes, so re-running an extract on an
+/// unchanged source re-derives the same marker. A marked target therefore
+/// means "already received" only while it still holds every selected node;
+/// otherwise removing the selection from the source again would destroy the
+/// only remaining live copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FocusedExtractTargetLostNodes {
+    pub operation_id: String,
+    pub target: PathBuf,
+    /// `component:id` labels: exchange node IDs, tracked item IDs, archive
+    /// locators, or a whole component with no stable IDs.
+    pub missing: Vec<String>,
+}
+
+impl std::fmt::Display for FocusedExtractTargetLostNodes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "focused-extract operation {} is already marked in {}, but the target no longer holds: {}; refusing to remove that content from the source again (no documents were changed). Restore the missing content in the target or recover it from the source's history before re-running",
+            self.operation_id,
+            self.target.display(),
+            self.missing.join(", ")
+        )
+    }
+}
+
+impl std::error::Error for FocusedExtractTargetLostNodes {}
+
+impl FocusedExtractTargetLostNodes {
+    fn ops_log_line(&self) -> String {
+        format!(
+            "focused_extract_target_lost_nodes operation={} target={} node_ids={}",
+            self.operation_id,
+            self.target.display(),
+            self.missing.join(",")
+        )
+    }
 }
 
 fn normalize_id(raw: &str) -> String {
@@ -1033,6 +1078,79 @@ fn target_covers_selectors(
         && covered_archive_locators == *archive_locators)
 }
 
+/// For an already-marked target, name every node of one transfer that the
+/// target no longer holds. Exchange turns are held by their stable node ID.
+/// Tracked items are held by their own component, or by `done` because a target
+/// may legitimately complete an extracted item before a resumed apply.
+fn marked_target_missing(
+    target: &str,
+    component_name: &str,
+    moved: &str,
+    node_ids: &[String],
+    item_ids: &[String],
+) -> Result<Vec<String>> {
+    if component_name == "exchange" {
+        let wanted: Vec<String> = if node_ids.is_empty() {
+            parse_exchange_nodes(moved)
+                .into_iter()
+                .filter(|node| !matches!(node.kind, ExchangeNodeKind::Salient { .. }))
+                .map(|node| node.node_id())
+                .collect()
+        } else {
+            node_ids.to_vec()
+        };
+        let held: HashSet<String> = match find_component(target, "exchange")? {
+            Some(exchange) => parse_exchange_nodes(exchange.content(target))
+                .into_iter()
+                .map(|node| node.node_id())
+                .collect(),
+            None => HashSet::new(),
+        };
+        return Ok(wanted
+            .into_iter()
+            .filter(|node_id| !held.contains(node_id))
+            .map(|node_id| format!("exchange:{node_id}"))
+            .collect());
+    }
+    if SELECTIVE_LIST_COMPONENTS.contains(&component_name) {
+        let wanted: Vec<String> = if item_ids.is_empty() {
+            tracked_ids(moved).into_iter().collect()
+        } else {
+            item_ids.to_vec()
+        };
+        if !wanted.is_empty() {
+            // Every item of one focused extract usually shares the selected
+            // ID, so "the ID appears somewhere in the target" would let one
+            // surviving item vouch for its lost siblings. An item is held only
+            // by its own component, or by `done` once the target completed it.
+            let mut held = BTreeSet::new();
+            for list in [component_name, "done"] {
+                if let Some(component) = find_component(target, list)? {
+                    held.extend(
+                        tracked_ids(component.content(target))
+                            .into_iter()
+                            .map(|id| id.to_ascii_lowercase()),
+                    );
+                }
+            }
+            return Ok(wanted
+                .into_iter()
+                .filter(|id| !held.contains(&id.to_ascii_lowercase()))
+                .map(|id| format!("{component_name}:#{id}"))
+                .collect());
+        }
+    }
+    // A component without stable IDs (status, notes, or an ID-less list) is
+    // held only when its moved bytes are still present in the target component.
+    let held = find_component(target, component_name)?
+        .is_some_and(|component| component.content(target).contains(moved.trim()));
+    Ok(if held {
+        Vec::new()
+    } else {
+        vec![format!("{component_name}:whole_component")]
+    })
+}
+
 fn prepare(
     source: &Path,
     target: &Path,
@@ -1122,6 +1240,9 @@ fn prepare(
     let already_marked = target_after.contains(&marker);
     let mut source_after = source_content.clone();
     let mut transfers = Vec::new();
+    let mut source_removals: Vec<Option<String>> = Vec::new();
+    // Selected content an already-marked target no longer holds (GH #324).
+    let mut target_lost: Vec<String> = Vec::new();
     let mut matched_ids = BTreeSet::new();
     let mut matched_explicit = BTreeSet::new();
     let mut matched_archive_locators = BTreeSet::new();
@@ -1181,7 +1302,16 @@ fn prepare(
         source_after = source_component.replace_content(&source_after, "\n");
         if !already_marked {
             target_after = append_to_component(&target_after, component_name, &moved)?;
+        } else {
+            target_lost.extend(marked_target_missing(
+                &target_after,
+                component_name,
+                &moved,
+                &[],
+                &[],
+            )?);
         }
+        source_removals.push(Some(moved.clone()));
         transfers.push(FocusedExtractTransfer {
             component: component_name.clone(),
             mode: "whole_component".to_string(),
@@ -1217,7 +1347,16 @@ fn prepare(
                     );
                 }
                 target_after = append_to_exchange_preserving_boundary(&target_after, &moved)?;
+            } else {
+                target_lost.extend(marked_target_missing(
+                    &target_after,
+                    "exchange",
+                    &moved,
+                    &node_ids,
+                    &[],
+                )?);
             }
+            source_removals.push(Some(moved.clone()));
             transfers.push(FocusedExtractTransfer {
                 component: "exchange".to_string(),
                 mode: "selected_nodes".to_string(),
@@ -1276,7 +1415,12 @@ fn prepare(
                     );
                 }
                 target_after = append_to_exchange_preserving_boundary(&target_after, &rendered)?;
+            } else {
+                // The operation marker survived but this copy's provenance
+                // marker did not: the target lost the archived context.
+                target_lost.push(format!("exchange:{}", selection.locator));
             }
+            source_removals.push(None);
             transfers.push(FocusedExtractTransfer {
                 component: "exchange".to_string(),
                 mode: "archived_context_copy".to_string(),
@@ -1338,7 +1482,16 @@ fn prepare(
                 );
             }
             target_after = append_to_component(&target_after, component_name, &moved)?;
+        } else {
+            target_lost.extend(marked_target_missing(
+                &target_after,
+                component_name,
+                &moved,
+                &[],
+                &found,
+            )?);
         }
+        source_removals.push(Some(moved.clone()));
         transfers.push(FocusedExtractTransfer {
             component: component_name.to_string(),
             mode: "selected_items".to_string(),
@@ -1347,6 +1500,15 @@ fn prepare(
             archive_locators: Vec::new(),
             bytes: moved.len(),
         });
+    }
+
+    if !target_lost.is_empty() {
+        return Err(FocusedExtractTargetLostNodes {
+            operation_id,
+            target: target.to_path_buf(),
+            missing: target_lost,
+        }
+        .into());
     }
 
     let unmatched_ids: Vec<String> = ids.difference(&matched_ids).cloned().collect();
@@ -1403,6 +1565,7 @@ fn prepare(
                 target_before,
                 source_after: source_content,
                 target_after,
+                source_removals: Vec::new(),
             });
         }
         bail!("focused-extract selectors matched no movable content");
@@ -1437,7 +1600,74 @@ fn prepare(
         target_before,
         source_after,
         target_after,
+        source_removals,
     })
+}
+
+/// Recovery copies live in a subdirectory so the compact-archive index, which
+/// scans only the top level of `.agent-doc/archives`, never parses them as
+/// compacted exchange history.
+const RECOVERY_ARCHIVE_DIR: &str = ".agent-doc/archives/extract";
+
+fn recovery_archive_path(source: &Path, operation_id: &str) -> PathBuf {
+    let canonical = source
+        .canonicalize()
+        .unwrap_or_else(|_| lexical_absolute(source));
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)
+        .or_else(|| canonical.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."));
+    root.join(RECOVERY_ARCHIVE_DIR)
+        .join(format!("{operation_id}.md"))
+}
+
+/// Render every byte the operation removes from the source, keyed by operation
+/// ID and labelled with the transfer that moved it. `None` when the operation
+/// removes nothing (an archived-context copy only).
+fn render_recovery_archive(prepared: &PreparedExtract) -> Option<String> {
+    let preview = &prepared.preview;
+    let mut sections = String::new();
+    for (transfer, removed) in preview.transfers.iter().zip(&prepared.source_removals) {
+        let Some(removed) = removed else {
+            continue;
+        };
+        sections.push_str(&format!(
+            "<!-- agent-doc-extract-removed component=\"{}\" mode=\"{}\" ids=\"{}\" node_ids=\"{}\" -->\n",
+            transfer.component,
+            transfer.mode,
+            transfer.ids.join(","),
+            transfer.node_ids.join(",")
+        ));
+        sections.push_str(removed);
+        if !removed.ends_with('\n') {
+            sections.push('\n');
+        }
+        sections.push_str("<!-- /agent-doc-extract-removed -->\n\n");
+    }
+    if sections.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "---\nkind: focused-extract-recovery\noperation: {}\nsource: {}\ntarget: {}\n---\n\n# Focused extract {}: content removed from the source\n\n{}",
+        preview.operation_id,
+        preview.source.display(),
+        preview.target.display(),
+        preview.operation_id,
+        sections
+    ))
+}
+
+fn write_recovery_archive(prepared: &PreparedExtract, source: &Path) -> Result<Option<PathBuf>> {
+    let Some(rendered) = render_recovery_archive(prepared) else {
+        return Ok(None);
+    };
+    let path = recovery_archive_path(source, &prepared.preview.operation_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    agent_doc_fs::write_atomic(&path, rendered.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(Some(path))
 }
 
 fn rollback(
@@ -1524,14 +1754,24 @@ pub fn run(
         target_fm.as_ref(),
     )?;
 
-    let prepared = prepare(
+    let prepared = match prepare(
         source,
         target,
         source_content,
         target_content,
         &source_fm,
         &request,
-    )?;
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            if let Some(lost) = error.downcast_ref::<FocusedExtractTargetLostNodes>() {
+                // Attributed to the destination: it is the document that lost
+                // the nodes, while the source was deliberately left unchanged.
+                agent_doc_ops_log_io::log_op(target, &lost.ops_log_line());
+            }
+            return Err(error);
+        }
+    };
     println!("{}", serde_json::to_string_pretty(&prepared.preview)?);
     if !apply || prepared.preview.already_applied {
         if !apply {
@@ -1607,6 +1847,25 @@ pub fn run(
             );
         }
 
+        // Keep a recovery copy of everything this operation removes from the
+        // source before either document changes, so a destination that later
+        // loses the moved nodes is recoverable without git archaeology.
+        if let Some(path) = write_recovery_archive(&prepared, source)
+            .context("failed to write focused-extract recovery copy; no documents were changed")?
+        {
+            agent_doc_ops_log_io::log_op(
+                source,
+                &format!(
+                    "focused_extract_recovery_archived operation={} path={}",
+                    operation_id,
+                    path.display()
+                ),
+            );
+            eprintln!(
+                "[extract] recovery copy of removed source content: {}",
+                path.display()
+            );
+        }
         if let Some(parent) = target.parent()
             && !parent.exists()
         {
@@ -2504,6 +2763,207 @@ mod tests {
             resumed.target_after.matches("Ask counsel").count(),
             1,
             "retry must not append the selected content twice"
+        );
+    }
+
+    fn legal_request() -> FocusedExtractRequest {
+        FocusedExtractRequest {
+            focus: Some("legal".into()),
+            rationale: Some("separate legal work".into()),
+            ids: vec!["legal1".into()],
+            exchange_node_ids: Vec::new(),
+            archive_locators: Vec::new(),
+            components: Vec::new(),
+        }
+    }
+
+    fn remove_once(doc: &str, needle: &str) -> String {
+        assert_eq!(
+            doc.matches(needle).count(),
+            1,
+            "fixture must contain {needle:?} once"
+        );
+        doc.replacen(needle, "", 1)
+    }
+
+    /// GH #324: the target kept this operation's marker but lost the moved
+    /// exchange turns. A re-run on the unchanged source re-derives the same
+    /// operation ID, so the old planner stripped the source again and appended
+    /// nothing, leaving the turns in neither document.
+    #[test]
+    fn marked_target_that_lost_exchange_turns_refuses_to_strip_the_source_again() {
+        let original_source = source_doc();
+        let request = legal_request();
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            original_source.clone(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &request,
+        )
+        .unwrap();
+        let exchange_node_ids = first
+            .preview
+            .transfers
+            .iter()
+            .find(|transfer| transfer.mode == "selected_nodes")
+            .expect("the legal exchange pair moves")
+            .node_ids
+            .clone();
+        assert_eq!(
+            exchange_node_ids.len(),
+            2,
+            "prompt and response move together"
+        );
+
+        let lost_target = remove_once(
+            &remove_once(&first.target_after, "❯ Decide [#legal1]\n"),
+            "### Re: Legal\n\nDecision for #legal1.\n",
+        );
+        assert!(
+            lost_target.contains(&operation_marker(
+                &first.preview.operation_id,
+                &Path::new("source.md")
+                    .canonicalize()
+                    .unwrap_or_else(|_| lexical_absolute(Path::new("source.md")))
+            ))
+        );
+
+        let error = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            original_source,
+            Some(lost_target),
+            &frontmatter::Frontmatter::default(),
+            &request,
+        )
+        .unwrap_err();
+        let lost = error
+            .downcast_ref::<FocusedExtractTargetLostNodes>()
+            .expect("typed lost-node refusal");
+        assert_eq!(lost.operation_id, first.preview.operation_id);
+        let expected = exchange_node_ids
+            .iter()
+            .map(|node_id| format!("exchange:{node_id}"))
+            .collect::<Vec<_>>();
+        assert_eq!(lost.missing, expected, "only the lost turns are named");
+        assert!(
+            lost.ops_log_line().starts_with(&format!(
+                "focused_extract_target_lost_nodes operation={} ",
+                first.preview.operation_id
+            )),
+            "{}",
+            lost.ops_log_line()
+        );
+        assert!(error.to_string().contains("no documents were changed"));
+    }
+
+    #[test]
+    fn marked_target_that_lost_a_tracked_item_refuses_and_names_it() {
+        let original_source = source_doc();
+        let request = legal_request();
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            original_source.clone(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &request,
+        )
+        .unwrap();
+        // Sibling legal1 items survive in todo/queue/backlog; they must not
+        // vouch for the lost review item.
+        let lost_target = remove_once(&first.target_after, "- [/] [#legal1] Await approval\n");
+        assert!(lost_target.contains("- [ ] [#legal1] Ask counsel\n"));
+        let error = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            original_source,
+            Some(lost_target),
+            &frontmatter::Frontmatter::default(),
+            &request,
+        )
+        .unwrap_err();
+        let lost = error
+            .downcast_ref::<FocusedExtractTargetLostNodes>()
+            .expect("typed lost-node refusal");
+        assert_eq!(lost.missing, vec!["review:#legal1".to_string()]);
+    }
+
+    #[test]
+    fn marked_target_item_moved_to_done_still_resumes_source_removal() {
+        let original_source = source_doc();
+        let request = legal_request();
+        let first = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            original_source.clone(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &request,
+        )
+        .unwrap();
+        // The target legitimately completed its todo item after the extract.
+        let completed_target = remove_once(&first.target_after, "- [ ] [#legal1] Ask counsel\n")
+            .replace(
+                "<!-- agent:done -->\n",
+                "<!-- agent:done -->\n- 2026-10-19 [#legal1] Ask counsel\n",
+            );
+        let resumed = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            original_source,
+            Some(completed_target.clone()),
+            &frontmatter::Frontmatter::default(),
+            &request,
+        )
+        .unwrap();
+        assert_eq!(resumed.target_after, completed_target);
+        assert!(!resumed.source_after.contains("Ask counsel"));
+    }
+
+    #[test]
+    fn recovery_archive_holds_every_byte_removed_from_the_source() {
+        let prepared = prepare(
+            Path::new("source.md"),
+            Path::new("target.md"),
+            source_doc(),
+            None,
+            &frontmatter::Frontmatter::default(),
+            &legal_request(),
+        )
+        .unwrap();
+        assert_eq!(
+            prepared.source_removals.len(),
+            prepared.preview.transfers.len()
+        );
+        let archive = render_recovery_archive(&prepared).expect("a move removes content");
+        assert!(archive.contains(&format!("operation: {}", prepared.preview.operation_id)));
+        for removed in [
+            "❯ Decide [#legal1]",
+            "### Re: Legal\n\nDecision for #legal1.",
+            "- [ ] [#legal1] Ask counsel",
+            "- [ ] [#legal1] : Draft request",
+            "- [/] [#legal1] Privacy decision",
+            "- [/] [#legal1] Await approval",
+        ] {
+            assert!(
+                archive.contains(removed),
+                "missing {removed:?} in\n{archive}"
+            );
+            assert!(!prepared.source_after.contains(removed));
+        }
+        assert!(
+            !archive.contains("Unrelated."),
+            "kept content is not archived"
+        );
+        assert!(
+            recovery_archive_path(Path::new("source.md"), &prepared.preview.operation_id)
+                .ends_with(format!(
+                    ".agent-doc/archives/extract/{}.md",
+                    prepared.preview.operation_id
+                ))
         );
     }
 }

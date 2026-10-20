@@ -74,7 +74,14 @@ command because tmux/layout already uses “split” terminology.
 
 The destination is initialized when absent. The operation records provenance in
 both documents, rejects collisions and unmatched selectors, and can resume a
-target-first interrupted apply without duplicating target content. Relative
+target-first interrupted apply without duplicating target content. That resume
+removes selected content from the source only while the marked destination
+still holds every selected exchange turn and item; if the destination kept the
+marker but lost any of them, apply refuses with no documents changed, names
+the missing `component:id` values, and logs
+`focused_extract_target_lost_nodes` (GH #324). Every apply that removes source
+content first writes a recovery copy of the removed bytes to
+`.agent-doc/archives/extract/<operation>.md`. Relative
 linked-resource paths are rebased when the destination directory differs.
 Extraction does not auto-claim or start the destination: the source normally
 already owns the invoking pane, so rebinding that pane would orphan the source

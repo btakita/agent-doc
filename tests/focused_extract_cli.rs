@@ -287,3 +287,104 @@ fn focused_extract_apply_preserves_the_source_claim_without_claiming_the_target(
         "extract must not auto-claim its destination"
     );
 }
+
+fn git_fixture(dir: &std::path::Path, tracked: &str) {
+    for args in [
+        vec!["init", "--quiet"],
+        vec!["config", "user.email", "test@example.com"],
+        vec!["config", "user.name", "Test User"],
+        vec!["add", tracked],
+        vec!["commit", "--quiet", "-m", "fixture", "--no-verify"],
+    ] {
+        assert!(
+            Command::new("git")
+                .current_dir(dir)
+                .args(&args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+}
+
+fn apply_legal_extract(
+    dir: &std::path::Path,
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> assert_cmd::assert::Assert {
+    cargo_bin_cmd!("agent-doc")
+        .current_dir(dir)
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .env(
+            "AGENT_DOC_TEST_CONTROLLER_LAUNCH_REASON",
+            "focused extract target-loss check",
+        )
+        .args([
+            "extract",
+            source.to_str().unwrap(),
+            target.to_str().unwrap(),
+            "--ids",
+            "legal1",
+            "--apply",
+            "--bypass-claim",
+        ])
+        .assert()
+}
+
+/// GH #324: the destination kept the operation marker but lost the moved
+/// exchange turns, and the source still held them (same bytes, so the same
+/// operation ID). Re-running the extract must not strip the source's only
+/// remaining copy; it refuses, names the lost node IDs, and logs the loss.
+/// The first apply also leaves a recovery copy keyed by operation ID.
+#[test]
+fn rerun_against_a_marked_target_that_lost_exchange_turns_refuses_and_keeps_the_source() {
+    let dir = tempfile::TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let source = dir.path().join("sdk.md");
+    let target = dir.path().join("sdk-legal.md");
+    fs::write(&source, source_document()).unwrap();
+    git_fixture(dir.path(), "sdk.md");
+
+    let applied = apply_legal_extract(dir.path(), &source, &target).success();
+    let preview: serde_json::Value = serde_json::from_slice(&applied.get_output().stdout).unwrap();
+    let operation_id = preview["operation_id"].as_str().unwrap().to_string();
+
+    let recovery = dir
+        .path()
+        .join(".agent-doc/archives/extract")
+        .join(format!("{operation_id}.md"));
+    let recovery_text = fs::read_to_string(&recovery).expect("recovery copy written on apply");
+    assert!(recovery_text.contains("Counsel requires an age gate for #legal1."));
+    assert!(recovery_text.contains("Ask counsel"));
+    assert!(!recovery_text.contains("The client build is unrelated."));
+
+    // Reproduce the incident state: the source still carries the turns, the
+    // target carries the marker and the list items but not the turns.
+    fs::write(&source, source_document()).unwrap();
+    let lost_turns = "❯ Decide the legal policy [#legal1]\n### Re: Legal\n\nCounsel requires an age gate for #legal1.\n";
+    let target_applied = fs::read_to_string(&target).unwrap();
+    assert!(target_applied.contains(lost_turns));
+    assert!(target_applied.contains(&format!("operation=\"{operation_id}\"")));
+    let target_lost = target_applied.replacen(lost_turns, "", 1);
+    fs::write(&target, &target_lost).unwrap();
+
+    apply_legal_extract(dir.path(), &source, &target)
+        .failure()
+        .stderr(predicate::str::contains(format!(
+            "focused-extract operation {operation_id} is already marked"
+        )))
+        .stderr(predicate::str::contains("exchange:r:"))
+        .stderr(predicate::str::contains("exchange:p:"))
+        .stderr(predicate::str::contains("no documents were changed"));
+
+    assert_eq!(fs::read_to_string(&source).unwrap(), source_document());
+    assert_eq!(fs::read_to_string(&target).unwrap(), target_lost);
+    let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains(&format!(
+            "focused_extract_target_lost_nodes operation={operation_id} "
+        )),
+        "{ops_log}"
+    );
+}

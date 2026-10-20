@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 21 reported items awaiting coordinator integration, verification, and closeout.
 
 Batch v0.35.530 (#324–#327 + supervisor-heartbeat fix) is integrated and make check is green; it waits on the CI auto-clear race fix. Five follow-ups are running; GH 326 phases 3–5 wait on phase 2.
 
@@ -346,6 +346,35 @@ My v0.35.529 closeout (above) committed, but agent-doc then refused to close it.
 - the boundary-guard failure.
 
 That subagent works on `fix/runchild` and won't run `agent-doc <FILE>` or `claude`. I won't run that path from this session again.
+
+### Re: v0.35.530 is publishing; GH 326 phases 3, 3b and 4 done; phase 5 dispatched
+
+This cycle's document changes are agent-doc's own completion records and queue-glyph updates, with nothing new from you.
+
+**v0.35.530 release:** the final `make check` passed and main is at `9c7127d5fc`. `make release` has tagged it and is watching the GitHub Release workflow; the plugin and binary builds are in progress.
+
+It ships:
+- GH #324, #325 and #327, each with its follow-ups;
+- GH 326 phases 1–2;
+- the live-supervisor heartbeat readiness fix;
+- the queue auto-clear starting point, recorded before the harness spawns and carried across a re-exec;
+- the Claude crash-restart resume id;
+- the guard that stops `agent-doc <FILE>` resuming a live session;
+- closeout sealing after the cycle's own late changes;
+- GH #317 regression coverage;
+- two test-timing fixes, for the 250 ms actor read and the 10 s claim grace.
+
+**The release item is listed twice.** "release + publish: Include PR #324-#327" appears twice in the queue (⟦effect:1⟧ and ⟦effect:2⟧). Releases are mine as coordinator, not a subagent's, so I'm not dispatching the second copy. Both close when v0.35.530 is verified.
+
+**Waiting for v0.35.531** (reported 📥):
+- **The held-back Codex clear that never fired:** the supervisor's screen copy dropped the faint styling of Codex's `› Ask a follow-up question` placeholder, so it read as typed text. A queued clear also typed `/clear`, which makes Codex exit; Codex now gets a supervised fresh restart instead.
+- **GH 326 phase 3:** `sync_layout` holds the manual `--col` decisions, and that layout read is off the EDT.
+- **GH 326 phase 4:** `remote_client_surface` and `remote_layout` are native, and the Kotlin remote split fallback is retired. With no native library, or one older than v0.35.454, the Remote Dev layout is now "unknown" and Sync refuses the split.
+- **GH 326 phase 3b:** Run Agent Doc's `--col` fallback and the `TmuxPaneFocusSync` root probe use `sync_layout`, through the new optional `chosen_root` input. Plugin versions are 0.2.744 (classic), 0.2.745 (262) and 0.2.746 (263).
+
+**Running (🚧):** GH 326 phase 5 audits `CrdtReplicaManager`, `PatchWatcher` and `CpRouteClient` and moves their frequently changing pure decisions behind derivations. It leaves anything entangled with document mutation, threading or side-effect order for a later item.
+
+No new actionable follow-up items this cycle: every follow-up so far is already in the queue as its own item.
 <!-- agent:boundary:811a7087 -->
 <!-- /agent:exchange -->
 
@@ -354,31 +383,31 @@ That subagent works on `fix/runchild` and won't run `agent-doc <FILE>` or `claud
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~GH 320 follow-up (option B): real Remote Dev split geometry. The 262/263 frontend module publishes the client measured editor-window columns (bump the shared surface snapshot contract) and the backend forwards them into the controller surface Source as editor order; the remembered-order fallback, labelled unknown, stays for classic and one-sided installs. Needs live JetBrains Client verification.~~
-- ~~Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/321~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/322~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#sessioncrashnorestart]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/323~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: Include PR #321-#323~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#clauderesumeafterclear]~~
-- 🚧 crash auto-restart of the Claude supervisor still resumes the pre-/clear session id held in supervisor memory; re-read the SessionStart-recorded resume id before respawn
+- 📥 crash auto-restart of the Claude supervisor still resumes the pre-/clear session id held in supervisor memory; re-read the SessionStart-recorded resume id before respawn
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/324
-- 🚧 focused extract follow-up (GH 324 gap): when the source was already stripped, the transfers.is_empty() path still reports already_applied via target_covers_selectors, which counts an id covered if any list mentions it; verify the target against the recovery copy under .agent-doc/archives/extract/ and its recorded node ids
+- 📥 focused extract follow-up (GH 324 gap): when the source was already stripped, the transfers.is_empty() path still reports already_applied via target_covers_selectors, which counts an id covered if any list mentions it; verify the target against the recovery copy under .agent-doc/archives/extract/ and its recorded node ids
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/325
-- 🚧 queue_recovery done_archive_paths joins the raw archive= value onto the document dir, bypassing resolve_done_archive_target (same class as GH 325), so recover-lost can miss archived ids; move it onto the shared reader and fix its archive=done.md tests
+- 📥 queue_recovery done_archive_paths joins the raw archive= value onto the document dir, bypassing resolve_done_archive_target (same class as GH 325), so recover-lost can miss archived ids; move it onto the shared reader and fix its archive=done.md tests
+- 📥 finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released depends on wall-clock: its unacknowledged setup claim trips DISPATCH_EVIDENCE_GRACE_SECS (10s) under check-fast load and the second finalize fails the no-worker-acknowledgement pre-write gate; make the grace deterministic (injectable clock) instead of relying on run speed
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/326
-- 🚧 GH 326 phase 2: move EditorTabSyncListener.captureSurface surface projection behind agent_doc_editor_derive_json as a surface_projection derivation on the delivery worker (visible-document union incl. GH 320 Remote Dev union, readiness, active-document resolution, open-tab proximity, stale-selection settling, payload incl. column_order)
-- GH 326 phase 3 (after phase 2): move manual Sync Tmux Layout --col snapshot column decisions (exactVisibleSyncDecision, undetectedLayoutColumns, normalizeEditorLayout, absolutizeEditorLayout, chooseSyncProjectRoot) behind a derivation and take that layout read off the EDT
-- GH 326 phase 4 (after phase 3): move RemoteClientSurfacePayload.build and the uniqueRemoteSplitSelection Kotlin remote fallback behind derivations, then retire the Kotlin fallback
-- GH 326 phase 5 (after phase 4): audit pure decisions in CrdtReplicaManager, PatchWatcher and CpRouteClient (CrdtReplicaManager changed in 14 releases this month) and move them behind derivations
+- 📥 GH 326 phase 2: move EditorTabSyncListener.captureSurface surface projection behind agent_doc_editor_derive_json as a surface_projection derivation on the delivery worker (visible-document union incl. GH 320 Remote Dev union, readiness, active-document resolution, open-tab proximity, stale-selection settling, payload incl. column_order)
+- 📥 GH 326 phase 3 (after phase 2): move manual Sync Tmux Layout --col snapshot column decisions (exactVisibleSyncDecision, undetectedLayoutColumns, normalizeEditorLayout, absolutizeEditorLayout, chooseSyncProjectRoot) behind a derivation and take that layout read off the EDT
+- 📥 GH 326 phase 3b (after phase 4): move Run Agent Doc --col fallback (TerminalUtil.editorSnapshotRouteLayout) and the TmuxPaneFocusSync candidate-root probe onto the sync_layout derivation (add an optional root-already-chosen input)
+- 📥 GH 326 phase 4 (after phase 3): move RemoteClientSurfacePayload.build and the uniqueRemoteSplitSelection Kotlin remote fallback behind derivations, then retire the Kotlin fallback
+- 🚧 GH 326 phase 5 (after phase 4): audit pure decisions in CrdtReplicaManager, PatchWatcher and CpRouteClient (CrdtReplicaManager changed in 14 releases this month) and move them behind derivations
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/327
-- 🚧 preflight residue strike must not strike a loop head from an echo written before the current pass opened or about another queue head (GH 327 pass 4 wasted a pass)
-- 🚧 release + publish: Include PR #324-#327
+- 📥 preflight residue strike must not strike a loop head from an echo written before the current pass opened or about another queue head (GH 327 pass 4 wasted a pass)
+- 📥 continuation answered-head skip (syntheticstrike) still uses only the head-entry rule; apply the GH 327 pass 4 loop-pass echo scope to loop queue heads so it agrees with the preflight residue strike
+- 🚧 release + publish: Include PR #324-#327 ⟦effect:1⟧
 - 📥 [from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)
-- 🚧 [from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)
-- 🚧 release + publish: Include PR #324-#327
-- 🚧 [from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers
+- 📥 [from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)
+- 📥 queue auto-clear: carry the pending baseline across the supervisor's self-re-exec so an item committed just before the re-exec still gets its clear
+- release + publish: Include PR #324-#327 ⟦effect:2⟧
+- 📥 [from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers
+- 📥 closeout commit ordering: the controller committed locally before the cycle held-back --status and free-text strikes landed through the live editor; wait for the cycle own late projections before committing instead of relying on the composed-drift recovery
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/317
+- 📥 a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md pane %12, epoch 139, queued 16:16:27Z on 0.35.528) never fired after that turn closed out at 16:24:06Z; the operator cleared by hand at 16:29:56Z
+- 📥 [from:coordinator] binary_owned_resume_commits_one_durable_capture_exactly_once fails under make check load: resume_captured_finalize returns RetryableEffect (no response from Lazily actor within 250ms); make the actor readiness or retry deterministic instead of depending on a 250ms wall-clock window
 <!-- /agent:queue -->
 
 ## Queue: Issues

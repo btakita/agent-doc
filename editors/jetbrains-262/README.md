@@ -113,6 +113,19 @@ adapter. Otherwise it remains false and controller policy freezes. A controller
 without the new atomic ingress rejects the command, so no detached surface
 reaches the legacy effect path.
 
+The main window's layout reaches pane layout only after that atomic request has
+been delivered (GH #320 option B). Surface snapshot schema 2 carries each editor
+window's measured on-screen bounds; the backend derives the main window's columns
+from them with the classic `LayoutDetector` grouping and forwards those columns
+into the controller surface Source (`editor_surface_observe`) labelled
+`column_order=editor`, on its own `jetbrains-rd@<installation>-pid:<pid>` family
+and one `remote-client:<clientId>:<connectionGeneration>` endpoint per frontend
+connection. While that forward is live, the backend's remote-client membership
+fold does not publish layout. Schema negotiation
+(`supportedSnapshotSchemaVersion()`) keeps mixed versions working: a backend that
+predates schema 2 never receives the bounds key, and a schema-1 frontend keeps the
+backend's `unknown`-labelled fallback.
+
 Every snapshot ingress writes `controller_editor_view_snapshot_observed` to
 `.agent-doc/logs/ops.log`, including client/generation/sequence, `accepted`, status,
 completeness, terminal capability, and surface count. Parse, identity, projection,

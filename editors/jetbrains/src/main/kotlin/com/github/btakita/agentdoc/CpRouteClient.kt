@@ -215,6 +215,23 @@ internal object CpRouteClient {
     private val editorFocusSequence = java.util.concurrent.atomic.AtomicLong(0)
 
     /**
+     * GH #320 option B: the Remote Dev backend forwards the JetBrains Client's measured main-window
+     * columns as its own surface family, `jetbrains-rd@<installation>-pid:<pid>`. It is the same
+     * installation as this IDE's surface and focus lanes (so the same navigation lane and focus
+     * owner), but a separate family with its own generation: the frontend authority handoff
+     * retires the whole classic `jetbrains@` family, and a re-registration here must never move
+     * the classic lane's generation past its retirement fence.
+     */
+    private val remoteClientSurfaceClientId =
+        editorSurfaceClientId("jetbrains-rd", editorInstallationId, ProcessHandle.current().pid())
+    private val remoteClientSurfaceGeneration =
+        java.util.concurrent.atomic.AtomicLong(System.nanoTime().coerceAtLeast(1L))
+    private val remoteClientSurfaceSequence = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** The forwarded surface is a latest-wins layout fact; a slow controller must not hold it. */
+    internal const val REMOTE_CLIENT_SURFACE_OBSERVE_TIMEOUT_MS = 2_000L
+
+    /**
      * Re-registration of a retired editor-surface endpoint (`#surfaceretireformal`, model:
      * `formal/tla/PassiveTmuxSyncRetireNet.tla`, action `EditorReregister`).
      *
@@ -337,6 +354,40 @@ internal object CpRouteClient {
             timeoutMs = EDITOR_FOCUS_OBSERVE_TIMEOUT_MS,
             selfHeal = true,
             mayReregister = mayReregister,
+        )
+
+    /**
+     * Publish the JetBrains Client's measured main-window layout, forwarded by the Remote Dev
+     * backend (GH #320 option B), on the `jetbrains-rd` family lane.
+     */
+    fun observeRemoteClientSurface(
+        projectRoot: String,
+        surfaceJson: String,
+        surfaceId: String,
+        mayReregister: () -> Boolean = { false },
+    ): CpEditorRouteResult =
+        observeEditorSurfaceWithClient(
+            projectRoot = projectRoot,
+            surfaceJson = surfaceJson,
+            surfaceId = surfaceId,
+            clientId = remoteClientSurfaceClientId,
+            generation = remoteClientSurfaceGeneration,
+            sequence = remoteClientSurfaceSequence,
+            logLabel = "rd-layout",
+            timeoutMs = REMOTE_CLIENT_SURFACE_OBSERVE_TIMEOUT_MS,
+            mayReregister = mayReregister,
+        )
+
+    /**
+     * Retire one forwarded Remote Dev surface, or (no [surfaceId]) every `jetbrains-rd` surface
+     * of this installation on [projectRoot] that a previous backend JVM left behind.
+     */
+    fun forgetRemoteClientSurface(projectRoot: String, surfaceId: String? = null): Boolean =
+        forgetEditorSurfaceClient(
+            projectRoot = projectRoot,
+            clientId = remoteClientSurfaceClientId,
+            generation = remoteClientSurfaceGeneration.get(),
+            surfaceId = surfaceId,
         )
 
     /**

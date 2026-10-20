@@ -1220,6 +1220,12 @@ internal data class CapturedSurface(
                 backendWindowCount = editorWindows.size,
                 remoteClientSessionCount = remoteLayoutCandidate.clients.size,
             )
+        // GH #320 option B: the JetBrains Client's measured columns (forwarded by the modular
+        // backend as `column_order=editor`) own the Remote Dev layout; the membership fold below
+        // stays the fallback for classic and one-sided installs only.
+        if (useRemoteClientLayout && RemoteClientLayoutAuthority.isActive(project)) {
+            return captureDeferred("frontend_measured_layout_authority")
+        }
         val openSessionFiles =
             if (useRemoteClientLayout) {
                 allOpenSessionFiles

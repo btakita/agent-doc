@@ -3,6 +3,7 @@
 package com.github.btakita.agentdoc.split.frontend
 
 import com.github.btakita.agentdoc.split.FrontendPresentationCapability
+import com.github.btakita.agentdoc.split.EditorWindowBounds
 import com.github.btakita.agentdoc.split.EditorWindowSnapshot
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
@@ -55,7 +56,7 @@ internal object FrontendSurfaceCollector {
         val tagged = editorWindows.mapNotNull { editorWindow ->
             val component = editorWindow.tabbedPane.component
             val frame = SwingUtilities.getWindowAncestor(component) ?: return@mapNotNull null
-            TaggedEditorWindow(frame, componentPosition(component), editorWindow)
+            TaggedEditorWindow(frame, componentPosition(component), measuredBounds(component), editorWindow)
         }
         val complete = mainFrame != null && tagged.size == editorWindows.size
         val grouped = tagged.groupBy(TaggedEditorWindow::frame).toMutableMap()
@@ -71,7 +72,10 @@ internal object FrontendSurfaceCollector {
                 identity.surfaceGeneration,
                 identity.role,
                 frame === activeFrame,
-                windows.mapIndexed { ordinal, taggedWindow -> editorWindowSnapshot(taggedWindow.editorWindow).copy(ordinal = ordinal) },
+                windows.mapIndexed { ordinal, taggedWindow ->
+                    editorWindowSnapshot(taggedWindow.editorWindow)
+                        .copy(ordinal = ordinal, bounds = taggedWindow.bounds)
+                },
             )
         }.sortedWith(compareBy({ it.role != SurfaceRole.MAIN }, FrontendSurface::paneId))
         val targets = ordered.associate { (identity, frameAndWindows) ->
@@ -109,6 +113,23 @@ internal object FrontendSurfaceCollector {
         return EditorWindowSnapshot(0, selectedPath, openPaths, listOfNotNull(selectedPath))
     }
 
+    /**
+     * GH #320 option B: the window's measured on-screen rectangle, the client-side state the
+     * backend derives Remote Dev column order from. Null unless the component is showing: an
+     * unrealized splitter has no screen geometry, and a parent-relative location is not one.
+     */
+    private fun measuredBounds(component: Component): EditorWindowBounds? =
+        if (!component.isShowing) {
+            null
+        } else {
+            try {
+                val origin = component.locationOnScreen
+                editorWindowBounds(origin.x, origin.y, component.width, component.height)
+            } catch (_: IllegalStateException) {
+                null
+            }
+        }
+
     private fun componentPosition(component: Component): Point =
         try {
             component.locationOnScreen
@@ -116,7 +137,12 @@ internal object FrontendSurfaceCollector {
             component.location
         }
 
-    private data class TaggedEditorWindow(val frame: Window, val position: Point, val editorWindow: EditorWindow)
+    private data class TaggedEditorWindow(
+        val frame: Window,
+        val position: Point,
+        val bounds: EditorWindowBounds?,
+        val editorWindow: EditorWindow,
+    )
 }
 
 internal data class CapturedFrontendSurfaces(
@@ -395,6 +421,10 @@ internal class Exact262DetachedPresentationAdapter private constructor(
 internal data class SurfaceIncarnation(val paneId: String, val surfaceGeneration: Long)
 
 private fun FrontendSurfaceTarget.incarnation() = SurfaceIncarnation(paneId, surfaceGeneration)
+
+/** Measured bounds, or null for a rectangle with no area (not laid out). */
+internal fun editorWindowBounds(x: Int, y: Int, width: Int, height: Int): EditorWindowBounds? =
+    if (width > 0 && height > 0) EditorWindowBounds(x, y, width, height) else null
 
 internal fun exactWindowIndex(windowPaths: List<Set<String>>, document: String): Int? =
     windowPaths.indices.filter { document in windowPaths[it] }.singleOrNull()

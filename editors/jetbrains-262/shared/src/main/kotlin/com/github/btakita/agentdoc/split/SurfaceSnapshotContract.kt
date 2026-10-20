@@ -8,9 +8,21 @@ import fleet.rpc.RemoteApi
 import fleet.rpc.Rpc
 import fleet.rpc.remoteApiDescriptor
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
-const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 1
+/**
+ * Current snapshot schema. Schema 2 (GH #320 option B) adds each editor window's measured
+ * on-screen [EditorWindowBounds]; schema 1 carries no geometry.
+ */
+const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 2
+
+/** The oldest snapshot schema a backend still accepts (a frontend that predates geometry). */
+const val LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 1
+
+fun isSupportedSurfaceSnapshotSchema(version: Int): Boolean =
+    version in LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION..SURFACE_SNAPSHOT_SCHEMA_VERSION
 const val MAIN_SURFACE_PANE_ID: String = "root"
 
 @Serializable
@@ -97,12 +109,34 @@ data class FrontendPresentationReceipt(
     val diagnostic: String? = null,
 )
 
+/**
+ * One editor window's measured on-screen rectangle in the JetBrains Client (schema 2).
+ *
+ * This is observed state, not an order: the backend derives left-to-right columns from it with
+ * the same grouping as the classic `LayoutDetector.buildColumnsFromSnapshots`.
+ */
+@Serializable
+data class EditorWindowBounds(
+    val x: Int,
+    val y: Int,
+    val width: Int,
+    val height: Int,
+)
+
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class EditorWindowSnapshot(
     val ordinal: Int,
     val selectedPath: String?,
     val openPaths: List<String>,
     val visiblePaths: List<String>,
+    /**
+     * Schema 2 measured bounds; null when the window was not showing or the peer predates
+     * geometry. Never encoded while null: Fleet RPC decodes with `ignoreUnknownKeys = false`, so
+     * a schema-1 backend must never see the key at all.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val bounds: EditorWindowBounds? = null,
 )
 
 @Serializable
@@ -126,6 +160,21 @@ data class FrontendSurfaceSnapshot(
         FrontendPresentationCapability.SNAPSHOT_ONLY,
     val surfaces: List<FrontendSurface>,
 )
+
+/**
+ * The same snapshot in an older schema the backend accepts. Schema 1 carries no geometry, so the
+ * window bounds are dropped (and, being null, are not encoded at all).
+ */
+fun FrontendSurfaceSnapshot.forSchema(version: Int): FrontendSurfaceSnapshot {
+    require(isSupportedSurfaceSnapshotSchema(version)) { "unsupported surface snapshot schema $version" }
+    if (version >= SURFACE_SNAPSHOT_SCHEMA_VERSION) return copy(schemaVersion = version)
+    return copy(
+        schemaVersion = version,
+        surfaces = surfaces.map { surface ->
+            surface.copy(windows = surface.windows.map { it.copy(bounds = null) })
+        },
+    )
+}
 
 @Serializable
 data class SurfaceIngressLease(
@@ -180,4 +229,11 @@ interface SurfaceSnapshotRpcApi : RemoteApi<Unit> {
         lease: SurfaceIngressLease,
         receipt: FrontendPresentationReceipt,
     ): SurfaceIngressAck
+
+    /**
+     * The newest snapshot schema this backend accepts (GH #320 option B). Added with schema 2: a
+     * backend that predates it fails the call, and the frontend then publishes schema 1 (no
+     * geometry), so an old peer keeps working without ever decoding a key it does not know.
+     */
+    suspend fun supportedSnapshotSchemaVersion(): Int
 }

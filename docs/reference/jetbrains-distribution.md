@@ -121,5 +121,10 @@ behavior, so before calling a release generally installable:
 5. On a 263 Remote Dev pair, add the 263 listing to both sides, confirm only the
    263 package is offered, and confirm a document detached with Open in New
    Window does not become a main-window tmux pane.
+   Then move a session document to the opposite main-window split and confirm
+   tmux pane order follows (GH #320 option B): the client logs
+   `[split-surface] snapshot schema negotiated version=2 ... geometry=measured`,
+   the backend logs `[rd-layout] forwarded measured columns ... column_order=editor`,
+   and ops.log has `pane_layout_desired_published ... column_order=editor`.
 6. After the tag workflow runs, confirm the release carries all three ZIPs and
    listings, and that each listing names its tag-pinned artifact and exact range.

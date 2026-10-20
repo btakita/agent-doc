@@ -2025,6 +2025,11 @@ pub fn run_with_reap_policy_resume_and_harness(
             clear_turn_status_title_for_owned_pane(&canonical, &shared);
         }
 
+        // `#autoclearbaseline`: record the queue auto-clear baseline before the
+        // child exists, so an item dispatched to this generation (Run Agent
+        // Doc, an operator prompt) cannot complete before it is taken.
+        let generation_auto_clear_baseline = idle_watch::queue_auto_clear_generation_baseline(file);
+
         // Build PtySpawnConfig and spawn child under pty
         let cfg = PtySpawnConfig {
             program: harness.binary.clone(),
@@ -2254,6 +2259,7 @@ pub fn run_with_reap_policy_resume_and_harness(
                 file.to_string_lossy().to_string(),
                 harness.clone(),
                 watch_log,
+                generation_auto_clear_baseline,
             )
         };
 

@@ -105,6 +105,42 @@ impl QueueAutoClearBaseline {
             head: head.map(str::to_string),
         }
     }
+
+    /// Refine a harness-generation baseline with the watch's first
+    /// authoritative queue observation (`#autoclearbaseline`).
+    ///
+    /// The supervisor records the generation baseline before the harness child
+    /// exists, so no item can complete in this context before it: the latest
+    /// committed cycle is exact, but the head is only the disk head (an attached
+    /// editor's buffer is authoritative and may differ). The watch's first
+    /// resolved observation can come arbitrarily later — a slow first tick, or
+    /// unavailable editor authority — and by then an externally dispatched item
+    /// (Run Agent Doc, an operator prompt) may already have committed and
+    /// advanced the head. Re-observing the baseline at that point counted the
+    /// completion as already seen, so the next head was dispatched without a
+    /// clear (CI 39463326025).
+    ///
+    /// So the observed head replaces the provisional one only while no cycle
+    /// has committed since the generation started; once one has, the
+    /// generation-start head is the best record of the item this context worked
+    /// on and is kept, and that committed cycle stays unseen.
+    pub fn refine_with_first_observation(
+        self,
+        latest_cycle: Option<LatestCycle<'_>>,
+        observed_head: Option<&str>,
+    ) -> Self {
+        let completed_since_generation_start = latest_cycle.is_some_and(|cycle| {
+            cycle.committed && self.committed_cycle_id.as_deref() != Some(cycle.cycle_id)
+        });
+        if completed_since_generation_start {
+            self
+        } else {
+            Self {
+                head: observed_head.map(str::to_string),
+                ..self
+            }
+        }
+    }
 }
 
 /// The document's latest cycle, as read from cycle state.
@@ -383,6 +419,73 @@ mod tests {
         assert_eq!(base.committed_cycle_id, None);
         assert_eq!(
             queue_auto_clear_decision(facts(&base, Some(COMMITTED_B), Some("do [#b]"))),
+            QueueAutoClearDecision::Clear
+        );
+    }
+
+    #[test]
+    fn a_completion_before_the_first_observation_is_not_lost() {
+        // CI 39463326025: the generation started with no committed cycle and
+        // item one at the head; item one was dispatched externally and committed
+        // before the watch's first resolved observation, which then saw cycle-b
+        // committed and item two at the head.
+        let generation = QueueAutoClearBaseline::observe(None, Some("do [#a]"));
+        let refined = generation
+            .clone()
+            .refine_with_first_observation(Some(COMMITTED_B), Some("do [#b]"));
+        assert_eq!(refined, generation, "the gap completion stays unseen");
+        assert_eq!(
+            queue_auto_clear_decision(facts(&refined, Some(COMMITTED_B), Some("do [#b]"))),
+            QueueAutoClearDecision::Clear
+        );
+
+        // The pre-fix baseline, re-observed at that first tick, lost it.
+        let late = QueueAutoClearBaseline::observe(Some(COMMITTED_B), Some("do [#b]"));
+        assert_eq!(
+            queue_auto_clear_decision(facts(&late, Some(COMMITTED_B), Some("do [#b]"))),
+            QueueAutoClearDecision::SkipNoCompletedItem
+        );
+    }
+
+    #[test]
+    fn the_first_observation_replaces_the_provisional_head_until_a_cycle_commits() {
+        // Nothing committed since the generation started (no cycle, the same
+        // committed cycle, or a turn still open): the authoritative head wins.
+        let generation = QueueAutoClearBaseline::observe(
+            Some(LatestCycle {
+                cycle_id: "cycle-a",
+                committed: true,
+            }),
+            Some("stale disk head"),
+        );
+        for latest in [
+            None,
+            Some(LatestCycle {
+                cycle_id: "cycle-a",
+                committed: true,
+            }),
+            Some(LatestCycle {
+                cycle_id: "cycle-b",
+                committed: false,
+            }),
+        ] {
+            let refined = generation
+                .clone()
+                .refine_with_first_observation(latest, Some("do [#a]"));
+            assert_eq!(refined.committed_cycle_id.as_deref(), Some("cycle-a"));
+            assert_eq!(refined.head.as_deref(), Some("do [#a]"));
+        }
+        // The turn open at the first observation is this context's work once
+        // it commits and advances the head.
+        let refined = generation.refine_with_first_observation(
+            Some(LatestCycle {
+                cycle_id: "cycle-b",
+                committed: false,
+            }),
+            Some("do [#a]"),
+        );
+        assert_eq!(
+            queue_auto_clear_decision(facts(&refined, Some(COMMITTED_B), Some("do [#b]"))),
             QueueAutoClearDecision::Clear
         );
     }

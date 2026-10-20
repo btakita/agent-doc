@@ -320,6 +320,18 @@ fn idle_watch_projection_reconcile_due(
     !queue_state_observed || delivery_edge_pending || revision_changed
 }
 
+/// `#autoclearbaseline` test seam: while
+/// `AGENT_DOC_TEST_HOLD_IDLE_WATCH_QUEUE_OBSERVATION` names a file that does not
+/// exist yet, the watch makes no queue observation at all, the way a slow first
+/// tick or unavailable editor authority delays it. The live tmux suite uses it
+/// to land an item's commit before the watch's first observation by handshake
+/// rather than by timing. Unavailable in optimized production builds.
+fn idle_watch_queue_observation_held_for_test() -> bool {
+    cfg!(debug_assertions)
+        && std::env::var_os("AGENT_DOC_TEST_HOLD_IDLE_WATCH_QUEUE_OBSERVATION")
+            .is_some_and(|gate| !Path::new(&gate).exists())
+}
+
 fn record_idle_watch_queue_observation_attempt(
     queue_state_observed: &mut bool,
     last_quiescent_maintenance: &mut Option<std::time::Instant>,
@@ -661,6 +673,44 @@ fn queue_auto_clear_baseline_now(
 ) -> agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline {
     let latest = queue_auto_clear_latest_cycle(path);
     agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline::observe(
+        latest.as_ref().map(|(cycle_id, committed)| {
+            agent_doc_queue::queue_auto_clear::LatestCycle {
+                cycle_id,
+                committed: *committed,
+            }
+        }),
+        head,
+    )
+}
+
+/// `#autoclearbaseline`: the queue auto-clear baseline for a harness
+/// generation, recorded by the supervisor BEFORE it spawns (or adopts) the
+/// child, so no item can be dispatched to — let alone complete in — this
+/// context first. The head is read from disk: it is provisional, and the
+/// watch's first authoritative observation replaces it unless a cycle has
+/// committed by then
+/// ([`QueueAutoClearBaseline::refine_with_first_observation`]).
+///
+/// [`QueueAutoClearBaseline::refine_with_first_observation`]: agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline::refine_with_first_observation
+pub(super) fn queue_auto_clear_generation_baseline(
+    path: &Path,
+) -> agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline {
+    let head = agent_doc_fs::read_optional_text(path)
+        .ok()
+        .flatten()
+        .and_then(|content| supervisor_drainable_head(path, &content));
+    queue_auto_clear_baseline_now(path, head.as_deref())
+}
+
+/// `#autoclearbaseline`: fold the watch's first resolved queue observation into
+/// the generation baseline. A cycle that committed in between is kept unseen.
+fn refine_queue_auto_clear_generation_baseline(
+    path: &Path,
+    baseline: agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline,
+    head: Option<&str>,
+) -> agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline {
+    let latest = queue_auto_clear_latest_cycle(path);
+    baseline.refine_with_first_observation(
         latest.as_ref().map(|(cycle_id, committed)| {
             agent_doc_queue::queue_auto_clear::LatestCycle {
                 cycle_id,
@@ -1825,6 +1875,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
     file: String,
     harness: agent_doc_harness::HarnessConfig,
     mut session_log: Option<agent_doc_start_io::SessionLog>,
+    generation_auto_clear_baseline: agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("idle-queue-watch".into())
@@ -1968,12 +2019,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // than at the next quiescent-maintenance probe.
             let mut deferred_clear_armed = false;
             // `#bgclearpolicy`: the context state this watch last saw as fresh
-            // (latest committed cycle + queue head), taken on the first observed
-            // tick and re-taken after every clear. Queue auto-clear fires once an
-            // item completes past it.
+            // (latest committed cycle + queue head), re-taken after every clear.
+            // Queue auto-clear fires once an item completes past it.
+            // `#autoclearbaseline`: it starts as the generation baseline the
+            // supervisor recorded before spawning the child, never as whatever
+            // the first observed tick sees: on a slow first tick an item
+            // dispatched externally may already have committed, and taking the
+            // baseline then counted that completion as seen (CI 39463326025).
+            // The first resolved observation only refines its head.
             let mut auto_clear_baseline: Option<
                 agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline,
-            > = None;
+            > = Some(generation_auto_clear_baseline);
+            let mut auto_clear_baseline_refined = false;
             let mut auto_clear_logged_key: Option<String> = None;
             // `#fbwire` Phase 2: the instant the convergence gate FIRST deferred the
             // current pending inter-item dispatch. `None` ⇒ not currently deferring;
@@ -3086,6 +3143,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let mut drain_completed = false;
                 let mut queue_head_settled = false;
                 'drain: {
+                if idle_watch_queue_observation_held_for_test() {
+                    break 'drain;
+                }
                 // The head and its delivery-transition state come out of ONE
                 // authority read (`#recycletransitionwedge`).
             record_idle_watch_queue_observation_attempt(
@@ -3159,9 +3219,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
             }
             last_dispatched =
                 rearm_queue_dispatch_dedup(last_dispatched, active_head.as_deref());
-            if auto_clear_baseline.is_none() && active_transition != IdleQueueTransition::Unresolved {
-                auto_clear_baseline =
-                    Some(queue_auto_clear_baseline_now(&path, active_head.as_deref()));
+            if !auto_clear_baseline_refined
+                && active_transition != IdleQueueTransition::Unresolved
+            {
+                auto_clear_baseline_refined = true;
+                auto_clear_baseline = auto_clear_baseline.take().map(|baseline| {
+                    refine_queue_auto_clear_generation_baseline(
+                        &path,
+                        baseline,
+                        active_head.as_deref(),
+                    )
+                });
             }
             queue_continuation_triggers.observe_head(
                 active_head.as_deref().map(agent_doc_hash::content_hash),
@@ -8397,6 +8465,87 @@ mod tests {
         assert_eq!(
             queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]"),
             QueueAutoClearDecision::SkipDisabled
+        );
+    }
+
+    /// `#autoclearbaseline` (CI 39463326025): the generation baseline is
+    /// recorded before the child exists; an item dispatched externally then
+    /// commits before the watch's first resolved observation. That observation
+    /// must not swallow the completion the way a baseline re-observed at that
+    /// tick did.
+    #[test]
+    fn queue_auto_clear_generation_baseline_keeps_a_completion_before_the_first_observation() {
+        use agent_doc_queue::queue_auto_clear::QueueAutoClearDecision;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("task.md");
+        let both = "<!-- agent:queue go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n";
+        let advanced = "<!-- agent:queue go -->\n- do [#b]\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, both).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            both,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "claude",
+            None,
+            None,
+            None,
+        );
+        let harness = agent_doc_harness::HarnessConfig::claude();
+
+        // Heads as the watch observes them.
+        let head_a = supervisor_drainable_head(&doc, both).unwrap();
+        let head_b = supervisor_drainable_head(&doc, advanced).unwrap();
+        assert_ne!(head_a, head_b);
+
+        let generation = queue_auto_clear_generation_baseline(&doc);
+        assert_eq!(generation.committed_cycle_id, None);
+        assert_eq!(generation.head.as_deref(), Some(head_a.as_str()));
+
+        // Item A runs and commits before the watch has observed the queue.
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(both), Some(both)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(both),
+            Some(advanced),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(advanced),
+            Some(advanced),
+        )
+        .unwrap();
+        std::fs::write(&doc, advanced).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            advanced,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        // The pre-fix first-tick baseline counted A as already seen.
+        let first_tick = queue_auto_clear_baseline_now(&doc, Some(&head_b));
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &first_tick, &head_b),
+            QueueAutoClearDecision::SkipNoCompletedItem
+        );
+
+        let refined =
+            refine_queue_auto_clear_generation_baseline(&doc, generation.clone(), Some(&head_b));
+        assert_eq!(refined, generation);
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &refined, &head_b),
+            QueueAutoClearDecision::SkipComposerUnobservable,
+            "A's completion is due a clear; only the composer gate remains"
         );
     }
 

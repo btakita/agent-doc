@@ -922,9 +922,19 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   committed and converged) and before the next head is submitted — the watch
   clears once when a cycle committed since its baseline AND the queue head moved
   past the head that cycle worked on. The baseline (latest committed cycle +
-  head) is taken on the watch's first observed tick and re-taken whenever a clear
-  is sent or settles, so a boundary is cleared at most once and a failed or
-  unobserved clear is never retried into the pane. It never clears mid-turn
+  head) is recorded per harness generation by the supervisor BEFORE it spawns or
+  adopts the child (`#autoclearbaseline`), so an item dispatched to that
+  generation — by the watch, Run Agent Doc, or the operator — can never complete
+  before it; its head is the disk head at that moment. The watch's first
+  resolved queue observation then replaces that provisional head with the
+  authoritative one only if no cycle has committed since the generation
+  started; if one has (a slow first tick, or editor authority unavailable while
+  an externally dispatched item committed), the generation-start baseline is
+  kept, so that completion still earns its clear instead of being counted as
+  already seen (CI 39463326025 dispatched item two with no `/clear` that way).
+  The baseline is re-taken whenever a clear is sent or settles, so a boundary is
+  cleared at most once and a failed or unobserved clear is never retried into
+  the pane. It never clears mid-turn
   (latest cycle open), over an operator draft in the composer, while settled
   exchange steering is unanswered, while a subagent claim on the document is in
   flight (the coordinator's context must survive to integrate it), or when the

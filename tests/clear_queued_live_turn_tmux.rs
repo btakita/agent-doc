@@ -131,6 +131,9 @@ struct LiveClearScenario {
     ceiling: PathBuf,
 }
 
+/// The file whose creation releases a held idle-watch queue observation.
+const QUEUE_OBSERVATION_RELEASE: &str = "release_queue_observation";
+
 const PLAIN_DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c1\nagent: claude\n---\n\n# Session\n\n## User\n\nhello\n";
 
 impl LiveClearScenario {
@@ -139,6 +142,14 @@ impl LiveClearScenario {
     }
 
     fn start_with_document(label: &str, document: &str) -> Self {
+        Self::start_with(label, document, false)
+    }
+
+    /// `hold_queue_observation`: the supervisor's idle watch makes no queue
+    /// observation until [`Self::release_queue_observation`] (the debug-build
+    /// `AGENT_DOC_TEST_HOLD_IDLE_WATCH_QUEUE_OBSERVATION` seam), so a test can
+    /// order work before the watch's first look at the queue by handshake.
+    fn start_with(label: &str, document: &str, hold_queue_observation: bool) -> Self {
         let tmp = tempfile::TempDir::new().unwrap();
         let controllers = agent_doc_test_support::ProjectControllerReaper::under(tmp.path());
         let root = tmp.path().canonicalize().unwrap().join("project");
@@ -197,10 +208,18 @@ impl LiveClearScenario {
         // unless that resolves to the fake: this test must never launch a real
         // harness.
         let run = root.join(".fake-bin/run-supervisor.sh");
+        let hold = if hold_queue_observation {
+            format!(
+                "export AGENT_DOC_TEST_HOLD_IDLE_WATCH_QUEUE_OBSERVATION={}\n",
+                shell_quote(&fake.join(QUEUE_OBSERVATION_RELEASE).to_string_lossy())
+            )
+        } else {
+            String::new()
+        };
         std::fs::write(
             &run,
             format!(
-                "#!/bin/sh\nexport PATH={path}\nexport HOME={home}\nexport FAKE_CLAUDE_DIR={fake}\nexport AGENT_DOC_TMUX_SOCKET={socket}\nexport AGENT_DOC_ROOT_CEILING_DIRECTORIES={ceiling}\nunset CLAUDECODE\nif [ \"$(command -v claude)\" != {claude} ]; then echo 'refusing: claude is not the fake harness'; sleep 600; exit 99; fi\ncd {root}\nexec agent-doc start {doc}\n",
+                "#!/bin/sh\nexport PATH={path}\nexport HOME={home}\nexport FAKE_CLAUDE_DIR={fake}\nexport AGENT_DOC_TMUX_SOCKET={socket}\nexport AGENT_DOC_ROOT_CEILING_DIRECTORIES={ceiling}\n{hold}unset CLAUDECODE\nif [ \"$(command -v claude)\" != {claude} ]; then echo 'refusing: claude is not the fake harness'; sleep 600; exit 99; fi\ncd {root}\nexec agent-doc start {doc}\n",
                 path = shell_quote(&path_env),
                 home = shell_quote(&home.to_string_lossy()),
                 fake = shell_quote(&fake.to_string_lossy()),
@@ -442,6 +461,11 @@ impl LiveClearScenario {
             agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(&self.doc)
                 .unwrap()
         );
+    }
+
+    /// Let a held idle watch make its first queue observation.
+    fn release_queue_observation(&self) {
+        std::fs::write(self.fake.join(QUEUE_OBSERVATION_RELEASE), "").unwrap();
     }
 
     /// The harness finishes its turn: `Stop` hook, then the idle frame.
@@ -974,42 +998,89 @@ fn queue_auto_clear_types_clear_between_items_into_the_same_harness() {
         || scenario.triggers() == 2,
     );
     std::thread::sleep(Duration::from_secs(2));
+    scenario.assert_one_auto_clear_between_items(&harness, &background);
+}
 
-    let inputs = scenario.inputs();
-    let first = inputs
-        .iter()
-        .position(|line| line.contains("agent-doc"))
-        .unwrap();
-    let second = inputs
-        .iter()
-        .rposition(|line| line.contains("agent-doc"))
-        .unwrap();
+/// `#autoclearbaseline` (CI 39463326025): item one is dispatched and commits
+/// before the supervisor's idle watch has observed the queue even once — a
+/// slow first tick on a loaded runner. The watch's first observation already
+/// sees item one's committed cycle and item two at the head; that completion
+/// is still this context's, so item two is dispatched only after one `/clear`.
+/// The ordering is forced by handshake: the watch's queue observation is held
+/// until item one's `write --commit` has returned.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn queue_auto_clear_counts_an_item_committed_before_the_watch_first_observes() {
+    let scenario = LiveClearScenario::start_with(
+        "queue-auto-clear-late-baseline",
+        &auto_clear_queue_doc("<!-- agent:queue go -->"),
+        true,
+    );
+    scenario.route_dispatch_turn();
+    let harness = scenario.harness_pids();
+    let background = scenario.background_pids();
+    scenario.answer_head("answer item one");
+    let committed = std::fs::read_to_string(&scenario.doc).unwrap();
+    assert!(
+        !committed.contains("- answer item one") && committed.contains("- answer item two"),
+        "item one is consumed before the watch observes: {committed}"
+    );
     assert_eq!(
-        inputs[first + 1..second]
+        (scenario.triggers(), scenario.clears()),
+        (1, 0),
+        "the held watch has dispatched nothing: {:?}",
+        scenario.inputs()
+    );
+
+    scenario.release_queue_observation();
+    scenario.wait_until("the supervisor dispatched item two", || {
+        scenario.triggers() == 2
+    });
+    std::thread::sleep(Duration::from_secs(2));
+    scenario.assert_one_auto_clear_between_items(&harness, &background);
+}
+
+impl LiveClearScenario {
+    /// Exactly one queue auto-clear sat between the two item triggers, typed
+    /// into the same harness process, whose background job survived.
+    fn assert_one_auto_clear_between_items(&self, harness: &[u32], background: &[u32]) {
+        let inputs = self.inputs();
+        let first = inputs
             .iter()
-            .filter(|line| *line == "/clear")
-            .count(),
-        1,
-        "exactly one /clear between the two items: {inputs:?}"
-    );
-    assert_eq!(scenario.clears(), 1, "{inputs:?}");
-    assert_eq!(
-        scenario.harness_pids(),
-        harness,
-        "the clear was typed into the SAME harness process, never a restart: {inputs:?}"
-    );
-    assert!(
-        process_alive(harness[0]) && process_alive(background[0]),
-        "the harness and its background job survived the clear"
-    );
-    let ops = scenario.ops_log();
-    assert!(
-        ops.lines().any(|line| line.contains("] queue_auto_clear ")
-            && line.contains("delivery=native_clear")
-            && line.contains("result=sent")),
-        "{}",
-        scenario.ops_log_tail()
-    );
+            .position(|line| line.contains("agent-doc"))
+            .unwrap();
+        let second = inputs
+            .iter()
+            .rposition(|line| line.contains("agent-doc"))
+            .unwrap();
+        assert_eq!(
+            inputs[first + 1..second]
+                .iter()
+                .filter(|line| *line == "/clear")
+                .count(),
+            1,
+            "exactly one /clear between the two items: {inputs:?}\n--- ops.log tail ---\n{}",
+            self.ops_log_tail()
+        );
+        assert_eq!(self.clears(), 1, "{inputs:?}");
+        assert_eq!(
+            self.harness_pids(),
+            harness,
+            "the clear was typed into the SAME harness process, never a restart: {inputs:?}"
+        );
+        assert!(
+            process_alive(harness[0]) && process_alive(background[0]),
+            "the harness and its background job survived the clear"
+        );
+        let ops = self.ops_log();
+        assert!(
+            ops.lines().any(|line| line.contains("] queue_auto_clear ")
+                && line.contains("delivery=native_clear")
+                && line.contains("result=sent")),
+            "{}",
+            self.ops_log_tail()
+        );
+    }
 }
 
 /// `#bgclearpolicy`: `disable-auto-clear` drains both items in one context.

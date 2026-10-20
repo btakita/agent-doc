@@ -1721,6 +1721,7 @@ fn supervisor_reexec_candidates() -> Vec<(PathBuf, &'static str)> {
 fn supervisor_perform_reexec(
     shared: &SupervisorShared,
     redispatch_if_child_died: bool,
+    queue_auto_clear_handoff: Option<&str>,
 ) -> Result<std::convert::Infallible, SupervisorReexecError> {
     use std::os::unix::process::CommandExt;
     // `#reexecdeadchild`: hold the reap gate from the liveness check through the
@@ -1823,6 +1824,16 @@ fn supervisor_perform_reexec(
             );
         } else {
             cmd.env_remove(agent_doc_supervisor_process::REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV);
+        }
+        // `#autoclearbaseline`: the adopted child keeps its context, so the
+        // replacement continues this image's queue auto-clear baseline.
+        if let Some(handoff) = queue_auto_clear_handoff {
+            cmd.env(
+                agent_doc_supervisor_process::REEXEC_QUEUE_AUTO_CLEAR_BASELINE_ENV,
+                handoff,
+            );
+        } else {
+            cmd.env_remove(agent_doc_supervisor_process::REEXEC_QUEUE_AUTO_CLEAR_BASELINE_ENV);
         }
         let err = cmd.exec();
         attempts.push(format!(
@@ -3573,7 +3584,7 @@ mod tests {
             shared.reexec_preserve_child_refusal(),
             Some(Refusal::ChildExited)
         );
-        match supervisor_perform_reexec(&shared, false) {
+        match supervisor_perform_reexec(&shared, false, None) {
             Err(SupervisorReexecError::Refused(Refusal::ChildExited)) => {}
             other => panic!("reexec must refuse a reaped child, got {other:?}"),
         }

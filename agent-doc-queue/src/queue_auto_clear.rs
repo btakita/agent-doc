@@ -143,6 +143,88 @@ impl QueueAutoClearBaseline {
     }
 }
 
+/// The queue auto-clear baseline a harness generation's idle watch holds
+/// (`#autoclearbaseline`): the baseline itself plus whether the watch's first
+/// authoritative queue observation has already refined it.
+///
+/// A harness generation is a harness CONTEXT, not a supervisor process. When
+/// the supervisor re-`execve`s itself and adopts the live harness child
+/// (`via=execve_preserve_child`), the context — and any item that completed
+/// in it without a clear yet — survives the image swap, so this state is
+/// handed to the replacement image ([`Self::encode_reexec_handoff`]) instead
+/// of being re-recorded there. A re-recorded baseline would already contain
+/// that completed item's committed cycle and the next head, and the next head
+/// would be dispatched without its clear.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QueueAutoClearGenerationBaseline {
+    pub baseline: QueueAutoClearBaseline,
+    /// The watch's first resolved queue observation has already been folded in
+    /// ([`QueueAutoClearBaseline::refine_with_first_observation`]); the
+    /// replacement image must not refine it a second time.
+    pub refined: bool,
+}
+
+/// Largest encoded re-exec handoff the supervisor passes through the
+/// environment. Linux rejects an `execve` whose single environment string
+/// exceeds `MAX_ARG_STRLEN` (128 KiB) with `E2BIG`, and every failed
+/// candidate turns the hot-reload into a disabled recycle; a queue head this
+/// large is not carried, and the replacement records a fresh baseline instead.
+pub const QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_MAX_BYTES: usize = 64 * 1024;
+
+const QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct QueueAutoClearReexecHandoffWire {
+    v: u32,
+    committed_cycle_id: Option<String>,
+    head: Option<String>,
+    refined: bool,
+}
+
+impl QueueAutoClearGenerationBaseline {
+    /// A baseline the supervisor just recorded for a new harness generation;
+    /// the watch's first resolved observation still refines it.
+    pub fn recorded(baseline: QueueAutoClearBaseline) -> Self {
+        Self {
+            baseline,
+            refined: false,
+        }
+    }
+
+    /// Encode this state for the replacement supervisor image. JSON keeps the
+    /// value free of raw control bytes (`execve` rejects an environment string
+    /// containing NUL). `Err(len)` when the encoding exceeds
+    /// [`QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_MAX_BYTES`].
+    pub fn encode_reexec_handoff(&self) -> Result<String, usize> {
+        let encoded = serde_json::to_string(&QueueAutoClearReexecHandoffWire {
+            v: QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_VERSION,
+            committed_cycle_id: self.baseline.committed_cycle_id.clone(),
+            head: self.baseline.head.clone(),
+            refined: self.refined,
+        })
+        .expect("a queue auto-clear handoff always serializes");
+        if encoded.len() > QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_MAX_BYTES {
+            Err(encoded.len())
+        } else {
+            Ok(encoded)
+        }
+    }
+
+    /// Decode a handoff written by [`Self::encode_reexec_handoff`]. `None` for
+    /// a malformed value or a version this image does not understand; the
+    /// caller then records a fresh baseline, as a pre-handoff image did.
+    pub fn decode_reexec_handoff(value: &str) -> Option<Self> {
+        let wire: QueueAutoClearReexecHandoffWire = serde_json::from_str(value).ok()?;
+        (wire.v == QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_VERSION).then_some(Self {
+            baseline: QueueAutoClearBaseline {
+                committed_cycle_id: wire.committed_cycle_id,
+                head: wire.head,
+            },
+            refined: wire.refined,
+        })
+    }
+}
+
 /// The document's latest cycle, as read from cycle state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LatestCycle<'a> {
@@ -488,6 +570,77 @@ mod tests {
             queue_auto_clear_decision(facts(&refined, Some(COMMITTED_B), Some("do [#b]"))),
             QueueAutoClearDecision::Clear
         );
+    }
+
+    #[test]
+    fn the_reexec_handoff_round_trips_the_baseline_and_its_refinement() {
+        for state in [
+            QueueAutoClearGenerationBaseline::recorded(baseline(None, Some("do [#a]"))),
+            QueueAutoClearGenerationBaseline {
+                baseline: baseline(Some("cycle-a"), Some("multi\nline \"head\"\t\u{0}é")),
+                refined: true,
+            },
+            QueueAutoClearGenerationBaseline::default(),
+        ] {
+            let encoded = state.encode_reexec_handoff().unwrap();
+            assert!(
+                !encoded.bytes().any(|byte| byte == 0 || byte == b'\n'),
+                "the environment value carries no raw NUL or newline: {encoded:?}"
+            );
+            assert_eq!(
+                QueueAutoClearGenerationBaseline::decode_reexec_handoff(&encoded),
+                Some(state)
+            );
+        }
+    }
+
+    #[test]
+    fn a_carried_baseline_keeps_the_completion_the_reexec_interrupted() {
+        // The outgoing image refined its generation baseline (cycle-a, item a),
+        // then item a committed as cycle-b and the head moved to item b; the
+        // supervisor re-exec'd before its watch reached that boundary.
+        let carried = QueueAutoClearGenerationBaseline {
+            baseline: baseline(Some("cycle-a"), Some("do [#a]")),
+            refined: true,
+        };
+        let handed = QueueAutoClearGenerationBaseline::decode_reexec_handoff(
+            &carried.encode_reexec_handoff().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            queue_auto_clear_decision(facts(&handed.baseline, Some(COMMITTED_B), Some("do [#b]"))),
+            QueueAutoClearDecision::Clear
+        );
+        // A baseline re-recorded by the replacement image already counts it.
+        let rerecorded = QueueAutoClearBaseline::observe(Some(COMMITTED_B), Some("do [#b]"));
+        assert_eq!(
+            queue_auto_clear_decision(facts(&rerecorded, Some(COMMITTED_B), Some("do [#b]"))),
+            QueueAutoClearDecision::SkipNoCompletedItem
+        );
+    }
+
+    #[test]
+    fn an_unknown_or_malformed_handoff_is_not_carried() {
+        for value in [
+            "",
+            "not json",
+            r#"{"v":2,"committed_cycle_id":null,"head":"do [#a]","refined":false}"#,
+            r#"{"committed_cycle_id":null,"head":"do [#a]","refined":false}"#,
+        ] {
+            assert_eq!(
+                QueueAutoClearGenerationBaseline::decode_reexec_handoff(value),
+                None,
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_oversized_handoff_is_refused_before_it_can_fail_the_execve() {
+        let head = "x".repeat(QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_MAX_BYTES);
+        let state = QueueAutoClearGenerationBaseline::recorded(baseline(None, Some(&head)));
+        let len = state.encode_reexec_handoff().unwrap_err();
+        assert!(len > QUEUE_AUTO_CLEAR_REEXEC_HANDOFF_MAX_BYTES);
     }
 
     #[test]

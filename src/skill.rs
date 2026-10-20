@@ -1363,7 +1363,8 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
         Some(CODEX_STOP_HOOK_TIMEOUT_SECS),
     );
     // `#midturn-steering`: Codex `PostToolUse` accepts the same
-    // `hookSpecificOutput.additionalContext` envelope as Claude Code.
+    // `hookSpecificOutput.additionalContext` envelope as Claude Code. The
+    // shared hook also carries throttled persistent status-sync checkpoints.
     ensure_codex_hook_command(
         hooks_map,
         "PostToolUse",
@@ -1391,8 +1392,10 @@ const PREFLIGHT_USER_PROMPT_COMMAND: &str = "agent-doc hook preflight-user-promp
 /// `#midturn-steering`. `PostToolUse` fires after every tool call, so the
 /// binary can hand the running turn operator edits to `agent:queue` and the
 /// exchange as soon as they settle, instead of at the next cycle boundary. The
-/// handler is silent with no active cycle or nothing new, short-circuits on an
-/// unchanged document stat, and never fails the tool call.
+/// same owner-only surface periodically re-prompts a persistent status-sync
+/// contract during long turns. The handler is silent with no active cycle or
+/// nothing due, short-circuits steering on an unchanged document stat, and
+/// never fails the tool call.
 pub(crate) const STEERING_POSTTOOLUSE_COMMAND: &str = "agent-doc hook steering-post-tool-use";
 /// Harness deadline for the steering hook. The hot path is a stat plus two
 /// `state.db` reads; the bound only covers a cold cycle-state lookup.

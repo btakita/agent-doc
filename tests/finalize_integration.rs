@@ -174,6 +174,94 @@ fn head_blob(root: &Path) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+#[test]
+fn status_set_updates_only_status_and_leaves_the_response_cycle_open() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\n",
+        "agent: codex\nmodel: gpt-5\n---\n\n",
+        "<!-- agent:exchange -->\n❯ investigate release\n",
+        "<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:status sync=\"Keep the published release current\" -->\n",
+        "operator note\n<!-- /agent:status -->\n\n",
+        "<!-- agent:queue -->\n- do [#release]\n<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n- [ ] [#release] publish\n<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), content);
+    let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content))
+        .expect("open response cycle");
+
+    let component_body = |text: &str, open: &str, close: &str| {
+        text.split_once(open)
+            .unwrap()
+            .1
+            .split_once(close)
+            .unwrap()
+            .0
+            .to_string()
+    };
+    let exchange_before = component_body(
+        content,
+        "<!-- agent:exchange -->",
+        "<!-- /agent:exchange -->",
+    );
+    let queue_before = component_body(content, "<!-- agent:queue -->", "<!-- /agent:queue -->");
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "status",
+            "set",
+            doc.to_str().unwrap(),
+            "--text",
+            "Published: v1.2.3",
+            "--force-disk",
+        ])
+        .assert()
+        .success();
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(after.contains("operator note"), "{after}");
+    assert!(
+        after.contains("<!-- status:sync -->\nPublished: v1.2.3\n<!-- /status:sync -->"),
+        "{after}"
+    );
+    assert_eq!(
+        component_body(
+            &after,
+            "<!-- agent:exchange -->",
+            "<!-- /agent:exchange -->"
+        ),
+        exchange_before
+    );
+    assert_eq!(
+        component_body(&after, "<!-- agent:queue -->", "<!-- /agent:queue -->"),
+        queue_before
+    );
+    assert!(!after.contains("### Re:"), "no response may be appended");
+
+    let still_open = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+        .unwrap()
+        .expect("cycle remains present");
+    assert_eq!(still_open.cycle_id, cycle.cycle_id);
+    assert_eq!(still_open.phase.as_str(), "preflight_started");
+    assert!(still_open.capture_id.is_none());
+    assert!(still_open.response_sha256.is_none());
+
+    // The standalone component write is agent-attributed, so the next
+    // preflight baseline sees no synthetic operator edit from this checkpoint.
+    assert_eq!(
+        agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .as_deref(),
+        Some(after.as_str())
+    );
+}
+
 fn enable_strict_pending_capture(doc: &Path) {
     let current = fs::read_to_string(doc).unwrap();
     let updated = current.replace(

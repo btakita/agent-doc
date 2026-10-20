@@ -1701,6 +1701,24 @@ enum ExchangeAction {
     },
 }
 
+/// Focused `agent:status` operations. These are deliberately separate from
+/// response writeback so a long-running open turn can refresh status without
+/// capturing or committing its response cycle.
+#[derive(Subcommand)]
+enum StatusAction {
+    /// Update only the status component while leaving the active cycle open
+    Set {
+        /// Path to the session document
+        file: PathBuf,
+        /// Current result of the status synchronization instruction
+        #[arg(long)]
+        text: String,
+        /// Bypass editor convergence and write directly to disk
+        #[arg(long)]
+        force_disk: bool,
+    },
+}
+
 /// Turn lifecycle actions for `agent-doc turn-status`
 /// (#claude-busy-status-during-active-turn).
 #[derive(Subcommand)]
@@ -2352,6 +2370,11 @@ enum Commands {
     Exchange {
         #[command(subcommand)]
         action: ExchangeAction,
+    },
+    /// Read or update the document status without closing the active turn
+    Status {
+        #[command(subcommand)]
+        action: StatusAction,
     },
     Reset {
         /// Path to the session document
@@ -5276,6 +5299,7 @@ fn try_main() -> anyhow::Result<()> {
             | Commands::Icebox { .. }
             | Commands::Review { .. }
             | Commands::Queue { .. }
+            | Commands::Status { .. }
     )
     .then(|| {
         agent_doc_write_converge_io::retained_cli_write::enter_binary_owned_cli_write(
@@ -5477,6 +5501,15 @@ fn try_main() -> anyhow::Result<()> {
                 anchor,
                 before,
             } => exchange::move_node(&file, &id, &anchor, before),
+        },
+        Commands::Status { action } => match action {
+            StatusAction::Set {
+                file,
+                text,
+                force_disk,
+            } => agent_doc_status_io::set_standalone_with_runtime_options(
+                &file, &text, force_disk,
+            ),
         },
         Commands::Reset {
             file,

@@ -2498,6 +2498,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-markdown-lossless",
  "agent-doc-ops-log-io",
+ "agent-doc-snapshot-io",
  "agent-doc-write-converge-io",
  "anyhow",
  "tempfile",

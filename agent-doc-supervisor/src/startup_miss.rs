@@ -141,6 +141,55 @@ pub fn registered_start_supersedes_miss(
     })
 }
 
+/// Session-log event a supervisor writes when its `execve` replacement image
+/// adopts the harness child preserved across the hot-reload
+/// (`execve_preserve_child`). The writer (`agent-doc-start-runtime-io`) and the
+/// run classifier below share this name so neither can drift from the other.
+pub const REEXEC_ADOPTED_CHILD_EVENT: &str = "supervisor_reexec_adopted_child";
+
+pub fn is_reexec_adopted_child_event(event: &str) -> bool {
+    event.split_whitespace().next() == Some(REEXEC_ADOPTED_CHILD_EVENT)
+}
+
+/// Facts about the latest harness run, as one unit so a preserved-child
+/// adoption can carry the adopted run's facts across the recycle (GH #321).
+#[derive(Debug, Clone, Default)]
+struct LatestRunFacts {
+    timestamp: Option<u64>,
+    event: Option<String>,
+    saw_committed_cycle: bool,
+    saw_process_exit: bool,
+    saw_session_end: bool,
+}
+
+impl LatestRunFacts {
+    fn open(&self) -> bool {
+        self.event.is_some() && !self.saw_process_exit && !self.saw_session_end
+    }
+
+    /// GH #321: a supervisor `execve` reentry logs a `<harness>_start` line on
+    /// its way to adopting the preserved child, but no harness launched — the
+    /// adopted child is the SAME run that was live before the recycle. Carry
+    /// that run's facts (anchor, committed-cycle readiness proof) forward
+    /// instead of treating the adoption as a fresh, still-booting run. Facts the
+    /// reentry window itself observed are kept (OR-ed), never dropped.
+    ///
+    /// Only an open prior run is carried: with no prior run, or one already
+    /// closed, the adoption's own line stays the anchor (fail closed).
+    fn carried_across_adoption(prior: Self, reentry: Self) -> Self {
+        if !prior.open() {
+            return reentry;
+        }
+        Self {
+            timestamp: prior.timestamp,
+            event: prior.event,
+            saw_committed_cycle: prior.saw_committed_cycle || reentry.saw_committed_cycle,
+            saw_process_exit: reentry.saw_process_exit,
+            saw_session_end: reentry.saw_session_end,
+        }
+    }
+}
+
 pub fn is_harness_run_start_event(event: &str) -> bool {
     matches!(
         event.split_whitespace().next(),
@@ -179,14 +228,14 @@ pub fn session_log_status_from_content(content: &str) -> Option<SessionLogStatus
     let mut saw_start = false;
     let mut latest_start_pane = None;
     let mut latest_start_timestamp = None;
-    let mut latest_run_timestamp = None;
-    let mut latest_run_event = None;
-    let mut saw_committed_cycle_after_latest_run = false;
+    let mut run = LatestRunFacts::default();
+    // The run that was latest before the most recent `<harness>_start` line,
+    // kept until that line is either confirmed as a launch or revealed as a
+    // preserved-child adoption (GH #321).
+    let mut run_before_latest_start: Option<LatestRunFacts> = None;
     let mut last_event = None;
     let mut saw_process_exit_after_latest_start = false;
     let mut saw_session_end_after_latest_start = false;
-    let mut saw_process_exit_after_latest_run = false;
-    let mut saw_session_end_after_latest_run = false;
 
     for raw_line in content.lines() {
         let line = raw_line.trim();
@@ -202,14 +251,11 @@ pub fn session_log_status_from_content(content: &str) -> Option<SessionLogStatus
             latest_start_pane = event
                 .split_whitespace()
                 .find_map(|part| part.strip_prefix("pane=").map(ToOwned::to_owned));
-            latest_run_timestamp = None;
-            latest_run_event = None;
-            saw_committed_cycle_after_latest_run = false;
+            run = LatestRunFacts::default();
+            run_before_latest_start = None;
             last_event = Some(event.to_string());
             saw_process_exit_after_latest_start = false;
             saw_session_end_after_latest_start = false;
-            saw_process_exit_after_latest_run = false;
-            saw_session_end_after_latest_run = false;
             continue;
         }
 
@@ -218,23 +264,33 @@ pub fn session_log_status_from_content(content: &str) -> Option<SessionLogStatus
         }
 
         if is_harness_run_start_event(event) {
-            latest_run_timestamp = timestamp.or(latest_start_timestamp);
-            latest_run_event = Some(event.to_string());
-            saw_committed_cycle_after_latest_run = false;
+            let prior = std::mem::replace(
+                &mut run,
+                LatestRunFacts {
+                    timestamp: timestamp.or(latest_start_timestamp),
+                    event: Some(event.to_string()),
+                    ..LatestRunFacts::default()
+                },
+            );
+            run_before_latest_start = Some(prior);
             last_event = Some(event.to_string());
-            saw_process_exit_after_latest_run = false;
-            saw_session_end_after_latest_run = false;
             continue;
         }
 
         last_event = Some(event.to_string());
-        if event.starts_with("document_cycle phase=committed ") && latest_run_timestamp.is_some() {
-            saw_committed_cycle_after_latest_run = true;
+        if is_reexec_adopted_child_event(event)
+            && let Some(prior) = run_before_latest_start.take()
+        {
+            run = LatestRunFacts::carried_across_adoption(prior, std::mem::take(&mut run));
+            continue;
+        }
+        if event.starts_with("document_cycle phase=committed ") && run.timestamp.is_some() {
+            run.saw_committed_cycle = true;
         }
         if event.contains("_exit code=") {
             saw_process_exit_after_latest_start = true;
-            if latest_run_timestamp.is_some() {
-                saw_process_exit_after_latest_run = true;
+            if run.timestamp.is_some() {
+                run.saw_process_exit = true;
             }
         }
         if event
@@ -243,8 +299,8 @@ pub fn session_log_status_from_content(content: &str) -> Option<SessionLogStatus
             .is_some_and(|token| token == "session_end")
         {
             saw_session_end_after_latest_start = true;
-            if latest_run_timestamp.is_some() {
-                saw_session_end_after_latest_run = true;
+            if run.timestamp.is_some() {
+                run.saw_session_end = true;
             }
         }
     }
@@ -252,14 +308,14 @@ pub fn session_log_status_from_content(content: &str) -> Option<SessionLogStatus
     saw_start.then_some(SessionLogStatus {
         latest_start_pane,
         latest_start_timestamp,
-        latest_run_timestamp,
-        latest_run_event,
-        saw_committed_cycle_after_latest_run,
+        latest_run_timestamp: run.timestamp,
+        latest_run_event: run.event,
+        saw_committed_cycle_after_latest_run: run.saw_committed_cycle,
         last_event,
         saw_process_exit_after_latest_start,
         saw_session_end_after_latest_start,
-        saw_process_exit_after_latest_run,
-        saw_session_end_after_latest_run,
+        saw_process_exit_after_latest_run: run.saw_process_exit,
+        saw_session_end_after_latest_run: run.saw_session_end,
     })
 }
 
@@ -910,6 +966,164 @@ mod tests {
             Some(&closed),
             "%42",
             "codex"
+        ));
+    }
+
+    /// GH #321: the exact event sequence a stale-binary `execve_preserve_child`
+    /// recycle writes (from a live session log): the reentry logs
+    /// `<harness>_start mode=exact_resume`, then adopts the SAME child. That line
+    /// is not a launch, so it must not reset the adopted run's readiness proof —
+    /// otherwise every later dispatch-only reopen demands a ready probe that a
+    /// stashed (1-row) pane can never satisfy, and is refused as `still booting`.
+    const READY_RUN_THEN_RECYCLE: &str = "[1] session_start file=test.md pane=%4 session=s generation=41\n\
+         [2] claude_start mode=exact_resume restart_count=0\n\
+         [3] document_cycle phase=committed cycle=cycle-1 event=commit_success\n\
+         [4] supervisor_reexec_session_reentry file=test.md pane=%4 session=s generation=41 state=ready lifecycle=preserved\n\
+         [5] supervisor_reexec_reentry detected\n\
+         [5] claude_start mode=exact_resume restart_count=0\n\
+         [5] supervisor_reexec_pty_bridge_handoff origin=cli_entry adopting=true serviced_ms=530\n\
+         [5] supervisor_reexec_adopted_child pid=2230931 master_fd=48\n";
+
+    #[test]
+    fn preserved_child_adoption_carries_the_adopted_runs_ready_proof() {
+        let status = session_log_status_from_content(READY_RUN_THEN_RECYCLE).expect("status");
+
+        assert!(status.saw_committed_cycle_after_latest_run);
+        assert_eq!(status.latest_run_timestamp, Some(2));
+        assert!(status.latest_session_open());
+        assert!(!dispatch_only_requires_ready_probe(
+            Some(&status),
+            "%4",
+            "claude"
+        ));
+        assert_eq!(
+            status.last_event.as_deref(),
+            Some("supervisor_reexec_adopted_child pid=2230931 master_fd=48")
+        );
+    }
+
+    #[test]
+    fn chained_preserved_child_adoptions_keep_carrying_the_original_run() {
+        let content = format!(
+            "{READY_RUN_THEN_RECYCLE}\
+             [9] supervisor_reexec_reentry detected\n\
+             [9] claude_start mode=exact_resume restart_count=0\n\
+             [9] supervisor_reexec_adopted_child pid=2230931 master_fd=49\n"
+        );
+        let status = session_log_status_from_content(&content).expect("status");
+
+        assert!(status.saw_committed_cycle_after_latest_run);
+        assert_eq!(status.latest_run_timestamp, Some(2));
+        assert!(!dispatch_only_requires_ready_probe(
+            Some(&status),
+            "%4",
+            "claude"
+        ));
+    }
+
+    #[test]
+    fn preserved_child_adoption_carries_an_unproven_run_as_unproven() {
+        // Adoption propagates the child's state; it does not invent readiness.
+        let status = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%4 session=s generation=1\n\
+             [2] claude_start mode=fresh restart_count=0\n\
+             [5] supervisor_reexec_reentry detected\n\
+             [5] claude_start mode=exact_resume restart_count=0\n\
+             [5] supervisor_reexec_adopted_child pid=7 master_fd=48\n",
+        )
+        .expect("status");
+
+        assert!(!status.saw_committed_cycle_after_latest_run);
+        assert_eq!(status.latest_run_timestamp, Some(2));
+        assert_eq!(
+            status.latest_run_event.as_deref(),
+            Some("claude_start mode=fresh restart_count=0")
+        );
+        assert!(dispatch_only_requires_ready_probe(
+            Some(&status),
+            "%4",
+            "claude"
+        ));
+    }
+
+    #[test]
+    fn adoption_without_an_open_prior_run_keeps_its_own_anchor() {
+        // No prior run to carry: fail closed on the reentry's own line.
+        let no_prior = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%4 session=s generation=1\n\
+             [5] claude_start mode=exact_resume restart_count=0\n\
+             [5] supervisor_reexec_adopted_child pid=7 master_fd=48\n",
+        )
+        .expect("status");
+        assert_eq!(no_prior.latest_run_timestamp, Some(5));
+        assert!(dispatch_only_requires_ready_probe(
+            Some(&no_prior),
+            "%4",
+            "claude"
+        ));
+
+        // A prior run that already exited is not the adopted child.
+        let closed_prior = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%4 session=s generation=1\n\
+             [2] claude_start mode=fresh restart_count=0\n\
+             [3] document_cycle phase=committed cycle=cycle-1 event=commit_success\n\
+             [4] claude_exit code=0 restart_count=0\n\
+             [5] claude_start mode=exact_resume restart_count=0\n\
+             [5] supervisor_reexec_adopted_child pid=7 master_fd=48\n",
+        )
+        .expect("status");
+        assert_eq!(closed_prior.latest_run_timestamp, Some(5));
+        assert!(!closed_prior.saw_committed_cycle_after_latest_run);
+        assert!(closed_prior.latest_session_open());
+    }
+
+    #[test]
+    fn a_real_relaunch_after_a_ready_run_still_requires_the_ready_probe() {
+        // Without the adoption event the `_start` line IS a new child.
+        let status = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%4 session=s generation=1\n\
+             [2] claude_start mode=fresh restart_count=0\n\
+             [3] document_cycle phase=committed cycle=cycle-1 event=commit_success\n\
+             [4] claude_restart requested_mode=continue effective_mode=exact_resume resume_id=x restart_count=1\n",
+        )
+        .expect("status");
+
+        assert!(!status.saw_committed_cycle_after_latest_run);
+        assert_eq!(status.latest_run_timestamp, Some(4));
+        assert!(dispatch_only_requires_ready_probe(
+            Some(&status),
+            "%4",
+            "claude"
+        ));
+    }
+
+    #[test]
+    fn adoption_after_a_session_end_does_not_resurrect_the_prior_session() {
+        let status = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%4 session=s generation=1\n\
+             [2] claude_start mode=fresh restart_count=0\n\
+             [3] document_cycle phase=committed cycle=cycle-1 event=commit_success\n\
+             [4] session_start file=test.md pane=%5 session=s generation=2\n\
+             [5] claude_start mode=exact_resume restart_count=0\n\
+             [5] supervisor_reexec_adopted_child pid=7 master_fd=48\n",
+        )
+        .expect("status");
+
+        assert_eq!(status.latest_start_pane.as_deref(), Some("%5"));
+        assert_eq!(status.latest_run_timestamp, Some(5));
+        assert!(!status.saw_committed_cycle_after_latest_run);
+    }
+
+    #[test]
+    fn reexec_adopted_child_event_classification_is_exact() {
+        assert!(is_reexec_adopted_child_event(
+            "supervisor_reexec_adopted_child pid=7 master_fd=48"
+        ));
+        assert!(!is_reexec_adopted_child_event(
+            "supervisor_reexec_adopt_skipped reason=unsupported_platform"
+        ));
+        assert!(!is_reexec_adopted_child_event(
+            "supervisor_recycle_resume_adopt_surviving_child reason=child_alive_owns_resume"
         ));
     }
 

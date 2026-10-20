@@ -880,6 +880,49 @@ mod tests {
         assert!(status.latest_session_open());
     }
 
+    /// GH #321: an upgrade recycle that adopts the live child must not make a
+    /// stashed pane re-prove readiness, even when the adopted run's readiness
+    /// proof sits in an older, compressed log segment.
+    #[test]
+    fn session_log_status_carries_ready_run_across_preserved_child_adoption() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let log_path = tmp.path().join(".agent-doc/logs/session-adopt.log");
+        std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &log_path,
+            "[1] session_start file=test.md pane=%4 session=session-adopt generation=41\n\
+             [2] claude_start mode=exact_resume restart_count=0\n\
+             [3] document_cycle phase=committed cycle=cycle-1 event=commit_success\n",
+        )
+        .unwrap();
+        assert!(agent_doc_fs::rotate_log_if_oversized(&log_path, 1).unwrap());
+        std::fs::write(
+            &log_path,
+            format!(
+                "[4] supervisor_reexec_reentry detected\n\
+                 [4] claude_start mode=exact_resume restart_count=0\n\
+                 [4] {} pid=2230931 master_fd=48\n",
+                agent_doc_supervisor::startup_miss::REEXEC_ADOPTED_CHILD_EVENT
+            ),
+        )
+        .unwrap();
+
+        let status = session_log_status(&doc, "session-adopt")
+            .unwrap()
+            .expect("session log status");
+        assert_eq!(status.latest_run_timestamp, Some(2));
+        assert!(status.saw_committed_cycle_after_latest_run);
+        assert!(status.latest_session_open());
+        assert!(
+            !agent_doc_supervisor::startup_miss::dispatch_only_requires_ready_probe(
+                Some(&status),
+                "%4",
+                "claude"
+            )
+        );
+    }
+
     #[test]
     fn session_log_event_after_latest_start_resets_on_new_start() {
         let tmp = tempfile::tempdir().unwrap();

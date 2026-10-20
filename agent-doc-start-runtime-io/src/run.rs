@@ -1989,6 +1989,9 @@ pub fn run_with_reap_policy_resume_and_harness(
                 route_owned,
                 format!("Starting {}...", harness.binary),
             );
+            // On an `execve` reentry this line precedes `REEXEC_ADOPTED_CHILD_EVENT`;
+            // the session-log classifier then carries the adopted run's facts
+            // forward instead of reading a fresh, still-booting run (GH #321).
             log_event(
                 &mut session_log,
                 &format!(
@@ -2054,8 +2057,10 @@ pub fn run_with_reap_policy_resume_and_harness(
                 log_event(
                     &mut session_log,
                     &format!(
-                        "supervisor_reexec_adopted_child pid={} master_fd={}",
-                        state.child_pid, state.master_fd
+                        "{} pid={} master_fd={}",
+                        agent_doc_supervisor::startup_miss::REEXEC_ADOPTED_CHILD_EVENT,
+                        state.child_pid,
+                        state.master_fd
                     ),
                 );
                 let adopted = agent_doc_supervisor_process::pty::PtySession::adopt(

@@ -4402,8 +4402,12 @@ mod tests {
     /// the bare `tasks` backlog signal armed `requires_backlog_capture` from
     /// agent-doc's own bookkeeping and the closeout pre-write gate refused
     /// the response with `pending_capture_required`.
-    const COMPLETION_ITEM: &str =
-        "a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md) never fired";
+    ///
+    /// Since signals match whole prose words, a path segment no longer arms
+    /// the gate at all, so the fixture item also carries a prose signal
+    /// ("next steps"). Without it the scoping test below would pass even with
+    /// the cell left in scope.
+    const COMPLETION_ITEM: &str = "a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md) never fired; list the next steps";
 
     #[test]
     fn a_worker_completion_cell_in_the_diff_does_not_require_backlog_capture() {
@@ -4436,10 +4440,45 @@ mod tests {
         let current = capture_scope_doc(
             "",
             &format!("- 📥 {COMPLETION_ITEM}\n"),
-            &format!("\n{cell}\n\nWhy did the clear in haiven-dev tasks/fpe.md never fire?\n"),
+            &format!(
+                "\n{cell}\n\nWhy did the clear in haiven-dev tasks/fpe.md never fire? Add a task for it.\n"
+            ),
         );
         let (parsed, requires) =
             capture_scope_preflight(&dir, &baseline, Some(COMPLETION_ITEM), &current);
+        assert!(requires, "{parsed:#}");
+    }
+
+    /// The backlog signals match whole prose words, so a drained
+    /// operator line that only names a `tasks/...` path, a `todo_list.rs`
+    /// file, a `#todo-id` or a code span does not arm the gate, while the same
+    /// line with a real request does.
+    #[test]
+    fn a_path_or_id_in_a_drained_prompt_does_not_require_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "", "");
+        let current = capture_scope_doc(
+            "",
+            "",
+            "\nWhy did the clear in haiven-dev tasks/fpe.md, src/todo_list.rs and #todo-id fail? See `tasks`.\n",
+        );
+        let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
+        assert!(
+            !requires,
+            "paths, ids and code spans are not backlog requests: {parsed:#}"
+        );
+    }
+
+    #[test]
+    fn a_real_request_beside_a_path_still_requires_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "", "");
+        let current = capture_scope_doc(
+            "",
+            "",
+            "\nWhy did the clear in haiven-dev tasks/fpe.md fail? Add these to the backlog.\n",
+        );
+        let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
         assert!(requires, "{parsed:#}");
     }
 

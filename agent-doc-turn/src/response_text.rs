@@ -275,6 +275,211 @@ pub fn operator_todo_response_signal(response: &str) -> Option<OperatorTodoRespo
     None
 }
 
+/// A blocking `[#subagent-operator-request]` packet a closeout response presents
+/// to the operator (`#packettodo`, `#wayposttodo`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockingOperatorRequestPacket {
+    /// `question` or `permission`.
+    pub kind: String,
+    /// The packet's `request:` line, trimmed.
+    pub request: String,
+    /// The label of every `- <label>: <effect>` choice line, in order.
+    pub choice_labels: Vec<String>,
+}
+
+const OPERATOR_REQUEST_TODO_SUMMARY_MAX_CHARS: usize = 200;
+const OPERATOR_REQUEST_TODO_CHOICE_MAX_CHARS: usize = 40;
+
+/// Every blocking `[#subagent-operator-request]` packet in `response`, parsed
+/// structurally (`#packettodo`).
+///
+/// A packet is the exact marker line (at most three leading spaces, so an
+/// indented code block never counts) followed, without a blank line, by
+/// `key: value` field lines. It counts only when it carries `kind: question`
+/// or `kind: permission`, `blocking: true`, and a concrete `request:` (not the
+/// `<...>` protocol placeholder). Lines inside fenced code blocks and
+/// blockquoted (`>`) lines are quoted prose, never a packet.
+pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperatorRequestPacket> {
+    let marker = agent_doc_queue::subagent_brief::SUBAGENT_OPERATOR_REQUEST_MARKER;
+    let lines: Vec<&str> = response.lines().collect();
+    let mut packets = Vec::new();
+    let mut fence: Option<(char, usize)> = None;
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        index += 1;
+        let trimmed_start = line.trim_start();
+        if let Some(open) = fence {
+            if is_closing_fence(trimmed_start, open) {
+                fence = None;
+            }
+            continue;
+        }
+        if let Some(open) = opening_fence(trimmed_start) {
+            fence = Some(open);
+            continue;
+        }
+        let indent = line.len() - trimmed_start.len();
+        if indent > 3 || line.trim() != marker {
+            continue;
+        }
+        let mut kind = None;
+        let mut blocking = None;
+        let mut request = None;
+        let mut choice_labels = Vec::new();
+        let mut in_choices = false;
+        while index < lines.len() {
+            let field = lines[index].trim();
+            if field.is_empty() || field == marker {
+                break;
+            }
+            index += 1;
+            if in_choices && let Some(choice) = field.strip_prefix("- ") {
+                let label = choice
+                    .split_once(':')
+                    .map_or(choice, |(label, _)| label)
+                    .trim();
+                if !label.is_empty() {
+                    choice_labels.push(label.to_string());
+                }
+                continue;
+            }
+            in_choices = false;
+            let Some((key, value)) = field.split_once(':') else {
+                continue;
+            };
+            let value = value.trim();
+            match key.trim().to_ascii_lowercase().as_str() {
+                "kind" => kind = Some(value.to_ascii_lowercase()),
+                "blocking" => blocking = Some(value.eq_ignore_ascii_case("true")),
+                "request" => request = Some(value.to_string()),
+                "choices" => in_choices = value.is_empty(),
+                _ => {}
+            }
+        }
+        let (Some(kind), Some(true), Some(request)) = (kind, blocking, request) else {
+            continue;
+        };
+        if !matches!(kind.as_str(), "question" | "permission")
+            || request.is_empty()
+            || (request.starts_with('<') && request.ends_with('>'))
+        {
+            continue;
+        }
+        packets.push(BlockingOperatorRequestPacket {
+            kind,
+            request,
+            choice_labels,
+        });
+    }
+    packets
+}
+
+fn opening_fence(trimmed_start: &str) -> Option<(char, usize)> {
+    let ch = trimmed_start.chars().next()?;
+    if ch != '`' && ch != '~' {
+        return None;
+    }
+    let run = trimmed_start.chars().take_while(|c| *c == ch).count();
+    (run >= 3).then_some((ch, run))
+}
+
+fn is_closing_fence(trimmed_start: &str, (ch, run): (char, usize)) -> bool {
+    let closing = trimmed_start.chars().take_while(|c| *c == ch).count();
+    closing >= run && trimmed_start[closing * ch.len_utf8()..].trim().is_empty()
+}
+
+/// The deterministic `agent:todo` action for a blocking operator request packet
+/// (`#packettodo`). It names the packet's place (`agent:exchange`), the first
+/// sentence of its `request:` line, and the offered choice labels, so the todo
+/// is understandable by itself and points at the full packet. `tracked_id`
+/// (the one tracked item this closeout gated or cited) is cited mid-sentence
+/// so `--todo-add` id layering (`#todoidlayer`) reuses it.
+pub fn blocking_operator_request_todo_text(
+    packet: &BlockingOperatorRequestPacket,
+    tracked_id: Option<&str>,
+) -> String {
+    let subject = if packet.kind == "permission" {
+        "permission request"
+    } else {
+        "question"
+    };
+    let target = tracked_id
+        .map(|id| format!(" for #{id}"))
+        .unwrap_or_default();
+    let summary = truncate_on_word(
+        first_sentence(&packet.request),
+        OPERATOR_REQUEST_TODO_SUMMARY_MAX_CHARS,
+    );
+    let mut text =
+        format!("Answer the blocking subagent {subject}{target} in agent:exchange: {summary}");
+    if !packet.choice_labels.is_empty() {
+        let labels = packet
+            .choice_labels
+            .iter()
+            .map(|label| truncate_on_word(label, OPERATOR_REQUEST_TODO_CHOICE_MAX_CHARS))
+            .collect::<Vec<_>>()
+            .join(", ");
+        text.push_str(&format!(" (choices: {labels})"));
+    }
+    text
+}
+
+fn first_sentence(text: &str) -> &str {
+    let text = text.trim();
+    for (at, ch) in text.char_indices() {
+        if matches!(ch, '?' | '.' | '!') {
+            let end = at + ch.len_utf8();
+            if text[end..].is_empty() || text[end..].starts_with(char::is_whitespace) {
+                return &text[..end];
+            }
+        }
+    }
+    text
+}
+
+fn truncate_on_word(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let cut = text
+        .char_indices()
+        .nth(max_chars)
+        .map_or(text.len(), |(at, _)| at);
+    let head = &text[..cut];
+    let head = head
+        .rfind(char::is_whitespace)
+        .filter(|at| *at > 0)
+        .map_or(head, |at| &head[..at]);
+    format!("{}…", head.trim_end())
+}
+
+/// Letter-led tracked-work ids a response cites as `#id` / `[#id]`, lowercase,
+/// distinct, in first-seen order (`#packettodo`). The packet marker's own
+/// `subagent-operator-request` token is not a citation.
+pub fn cited_tracked_ids_in_response(response: &str) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for (start, _) in response.match_indices('#') {
+        let preceding = response[..start].chars().next_back();
+        if preceding.is_some_and(|c| c.is_ascii_alphanumeric() || c == '&') {
+            continue;
+        }
+        let id: String = response[start + 1..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if !id.starts_with(|c: char| c.is_ascii_alphabetic())
+            || id == "subagent-operator-request"
+            || ids.contains(&id)
+        {
+            continue;
+        }
+        ids.push(id);
+    }
+    ids
+}
+
 const IMPERATIVE_STATUS_ONLY_SIGNALS: &[&str] = &[
     "in progress",
     "continuing",
@@ -839,5 +1044,134 @@ mod tests {
     fn imperative_trigger_truncation_preserves_char_boundaries() {
         assert_eq!(truncate_imperative_trigger("abcdef", 4), "abcd...");
         assert_eq!(truncate_imperative_trigger("ééé", 3), "é...");
+    }
+
+    /// The 3ad3e23c closeout shape: a blocking question packet with five choices.
+    const BLOCKING_PACKET_RESPONSE: &str = "\
+`#apipendingorphans` is gated on review of #733 and on your decision below.
+
+[#subagent-operator-request] subagent operator request
+kind: question
+blocking: true
+request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
+context: PR #733 stops new stuck rows.
+choices:
+- withdraw: soft-delete the stuck sends.
+- resubmit: send each stuck row to FPE again.
+- release: set the stuck rows to `allowed`.
+- leave: change nothing.
+
+**Recommendation:** withdraw.
+";
+
+    #[test]
+    fn packettodo_parses_a_blocking_packet_structurally() {
+        let packets = blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE);
+        assert_eq!(packets.len(), 1, "{packets:?}");
+        assert_eq!(packets[0].kind, "question");
+        assert!(packets[0].request.starts_with("What should happen"));
+        assert_eq!(
+            packets[0].choice_labels,
+            vec!["withdraw", "resubmit", "release", "leave"]
+        );
+    }
+
+    #[test]
+    fn packettodo_text_is_deterministic_and_cites_the_tracked_id() {
+        let packet = &blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE)[0];
+        let text = blocking_operator_request_todo_text(packet, Some("apipendingorphans"));
+        assert_eq!(
+            text,
+            "Answer the blocking subagent question for #apipendingorphans in agent:exchange: \
+             What should happen to the chat messages already stuck in `pending` on STG \
+             (including the rows from the 2026-10-20 incident)? \
+             (choices: withdraw, resubmit, release, leave)"
+        );
+        assert_eq!(
+            text,
+            blocking_operator_request_todo_text(packet, Some("apipendingorphans"))
+        );
+        let permission = BlockingOperatorRequestPacket {
+            kind: "permission".to_string(),
+            request: "Run `make deploy` against STG".to_string(),
+            choice_labels: Vec::new(),
+        };
+        assert_eq!(
+            blocking_operator_request_todo_text(&permission, None),
+            "Answer the blocking subagent permission request in agent:exchange: Run `make deploy` against STG"
+        );
+    }
+
+    #[test]
+    fn packettodo_ignores_nonblocking_fenced_quoted_and_placeholder_packets() {
+        let nonblocking = BLOCKING_PACKET_RESPONSE.replace("blocking: true", "blocking: false");
+        assert!(blocking_operator_request_packets(&nonblocking).is_empty());
+
+        let fenced = format!("Example:\n\n```text\n{BLOCKING_PACKET_RESPONSE}```\n");
+        assert!(blocking_operator_request_packets(&fenced).is_empty());
+
+        let tilde = format!("~~~~\n{BLOCKING_PACKET_RESPONSE}~~~~\n");
+        assert!(blocking_operator_request_packets(&tilde).is_empty());
+
+        let quoted = BLOCKING_PACKET_RESPONSE
+            .lines()
+            .map(|line| format!("> {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(blocking_operator_request_packets(&quoted).is_empty());
+
+        let indented = BLOCKING_PACKET_RESPONSE
+            .lines()
+            .map(|line| format!("    {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(blocking_operator_request_packets(&indented).is_empty());
+
+        assert!(
+            blocking_operator_request_packets(
+                agent_doc_queue::subagent_brief::SUBAGENT_OPERATOR_REQUEST_PROTOCOL
+            )
+            .is_empty(),
+            "the protocol template's `kind: question | permission` placeholder is not a packet"
+        );
+
+        let prose = "The worker would send `[#subagent-operator-request] subagent operator request` with blocking: true.";
+        assert!(blocking_operator_request_packets(prose).is_empty());
+
+        let gap = BLOCKING_PACKET_RESPONSE.replace(
+            "subagent operator request\nkind",
+            "subagent operator request\n\nkind",
+        );
+        assert!(blocking_operator_request_packets(&gap).is_empty());
+    }
+
+    #[test]
+    fn packettodo_long_requests_and_labels_truncate_on_word_boundaries() {
+        let packet = BlockingOperatorRequestPacket {
+            kind: "question".to_string(),
+            request: "word ".repeat(80),
+            choice_labels: vec![
+                "(separate question) reaper for future 504-accepted messages that are never decided"
+                    .to_string(),
+            ],
+        };
+        let text = blocking_operator_request_todo_text(&packet, None);
+        assert!(text.contains("word…"), "{text}");
+        assert!(
+            text.ends_with("(choices: (separate question) reaper for future…)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn packettodo_cited_ids_are_letter_led_and_skip_the_marker() {
+        assert_eq!(
+            cited_tracked_ids_in_response(BLOCKING_PACKET_RESPONSE),
+            vec!["apipendingorphans"]
+        );
+        assert_eq!(
+            cited_tracked_ids_in_response("### Re: x\n[#abc] and #abc, docs.md#frag, &#123;, #157"),
+            vec!["abc"]
+        );
     }
 }

@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **A blocking subagent operator request becomes an `agent:todo` item
+  (`#packettodo`).** A closeout response that presents a blocking
+  `[#subagent-operator-request]` packet without its own `--todo-add` or
+  `patch:todo` now records the operator decision itself: one deterministic
+  todo per packet, derived from the `request:` line and choice labels, in the
+  same replayable tracked-work transaction and layered on the one gated or
+  cited tracked id (else a surrogate). Retries fold into the existing todo;
+  non-blocking, fenced, and quoted packets record nothing. Todo mutations now
+  run after the envelope's adds and gates, so a todo on a freshly gated item
+  names `(source: agent:review [#id])`.
+
 ## 0.35.526
 
 - **Persistent status sync can re-surface mid-turn on an opt-in `interval`.**

@@ -677,7 +677,11 @@ presents a blocking packet MUST add one brief, concrete operator action to
 `agent:todo` with `--todo-add`. When the operator's answer and the continued
 worker result complete that action, the completion closeout MUST check it off
 with `--todo-done`; the handback path must neither omit the TODO nor leave a
-completed request open (`#wayposttodo`).
+completed request open (`#wayposttodo`). The binary enforces the first half:
+a closeout whose response presents a blocking packet without its own
+`--todo-add` gets a derived, id-layered `agent:todo` item from the packet's
+`request:` and choice labels in the same transaction (`#packettodo`,
+[§2](02-document-format.md)).
 
 Permission safety is stricter than question routing: a conversational answer is
 context, not a tool permission grant. The worker may retry a protected action

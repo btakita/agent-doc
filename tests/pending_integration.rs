@@ -2260,6 +2260,174 @@ fn write_response_request_without_todo_add_emits_operator_todo_advisory() {
     );
 }
 
+/// `#packettodo`: the 3ad3e23c closeout response — a blocking
+/// `[#subagent-operator-request]` packet beside a review gate.
+const BLOCKING_PACKET_RESPONSE: &str = "<!-- patch:exchange -->\n\
+`#apipendingorphans` is gated on review of #733 and on your decision below.\n\
+\n\
+[#subagent-operator-request] subagent operator request\n\
+kind: question\n\
+blocking: true\n\
+request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?\n\
+context: PR #733 stops new stuck rows for refused sends and edits.\n\
+choices:\n\
+- withdraw: soft-delete the stuck sends.\n\
+- resubmit: send each stuck row to FPE again.\n\
+- release: set the stuck rows to `allowed` without screening.\n\
+- leave: change nothing.\n\
+\n\
+**Recommendation:** withdraw, after STG gets migration `0022`.\n\
+<!-- /patch:exchange -->\n";
+
+const PACKET_TODO: &str = "Answer the blocking subagent question for #apipendingorphans in agent:exchange: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? (choices: withdraw, resubmit, release, leave)";
+
+fn write_packet_closeout(doc: &std::path::Path, extra: &[&str], response: &str) -> String {
+    let mut args = vec!["write", doc.to_str().unwrap(), "--force-disk"];
+    args.extend_from_slice(extra);
+    let assert_result = agent_doc()
+        .args(&args)
+        .write_stdin(response.to_string())
+        .assert()
+        .success();
+    String::from_utf8_lossy(&assert_result.get_output().stderr).into_owned()
+}
+
+/// `#packettodo` / `#wayposttodo`: a closeout presenting a blocking operator
+/// request packet and gating its item, but passing no `--todo-add`, still
+/// records the operator decision in `agent:todo`, layered on the gated id.
+#[test]
+fn write_blocking_operator_request_packet_records_layered_todo_without_todo_add() {
+    let (_tmp, doc) = setup_doc("- [ ] [#apipendingorphans] stuck pending chat messages");
+    let stderr = write_packet_closeout(
+        &doc,
+        &["--pending-gate", "apipendingorphans"],
+        BLOCKING_PACKET_RESPONSE,
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        component_body(&content, "review").contains("- [/] [#apipendingorphans]"),
+        "{content}"
+    );
+    assert_eq!(
+        component_body(&content, "todo"),
+        format!(
+            "- [ ] [#apipendingorphans] {PACKET_TODO} (source: agent:review [#apipendingorphans])"
+        ),
+        "{content}\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("[todo] blocking operator request packet (#packettodo)"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("this closeout gated #apipendingorphans in agent:review but agent:todo does not reference it"),
+        "the derived todo references the gate, so no unreferenced-gate advisory: {stderr}"
+    );
+
+    // Replay of the same packet (no new gate; the response still cites the
+    // item) folds into the open layered todo instead of duplicating it.
+    write_packet_closeout(&doc, &[], BLOCKING_PACKET_RESPONSE);
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        component_body(&content, "todo")
+            .matches("Answer the blocking subagent question")
+            .count(),
+        1,
+        "{content}"
+    );
+    assert_eq!(
+        component_body(&content, "todo").lines().count(),
+        1,
+        "{content}"
+    );
+}
+
+/// `#packettodo`: an explicit `--todo-add` is the closeout's own record of the
+/// operator decision; the binary adds no second, derived item.
+#[test]
+fn write_blocking_operator_request_packet_with_todo_add_adds_no_duplicate() {
+    let (_tmp, doc) = setup_doc("- [ ] [#apipendingorphans] stuck pending chat messages");
+    write_packet_closeout(
+        &doc,
+        &[
+            "--pending-gate",
+            "apipendingorphans",
+            "--todo-add",
+            "Decide what to do with the stuck STG pending rows [#apipendingorphans]",
+        ],
+        BLOCKING_PACKET_RESPONSE,
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    let todo = component_body(&content, "todo");
+    assert_eq!(todo.lines().count(), 1, "{content}");
+    assert!(
+        todo.contains("Decide what to do with the stuck STG pending rows"),
+        "{content}"
+    );
+    assert!(!todo.contains("Answer the blocking subagent"), "{content}");
+}
+
+/// `#packettodo`: a non-blocking packet, a packet quoted in a code fence, or a
+/// blockquoted packet is not a pending operator decision.
+#[test]
+fn write_nonblocking_or_quoted_operator_request_packet_records_no_todo() {
+    let nonblocking = BLOCKING_PACKET_RESPONSE.replace("blocking: true", "blocking: false");
+    let fenced = BLOCKING_PACKET_RESPONSE
+        .replace(
+            "[#subagent-operator-request] subagent operator request\n",
+            "```text\n[#subagent-operator-request] subagent operator request\n",
+        )
+        .replace(
+            "- leave: change nothing.\n",
+            "- leave: change nothing.\n```\n",
+        );
+    let quoted = BLOCKING_PACKET_RESPONSE
+        .lines()
+        .map(|line| {
+            if line.starts_with("<!--") {
+                line.to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    for response in [nonblocking, fenced, quoted] {
+        let (_tmp, doc) = setup_doc("- [ ] [#apipendingorphans] stuck pending chat messages");
+        let stderr = write_packet_closeout(&doc, &[], &response);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            !content.contains("agent:todo"),
+            "no todo for a non-blocking or quoted packet:\n{content}\nstderr: {stderr}"
+        );
+        assert!(!stderr.contains("#packettodo"), "stderr: {stderr}");
+    }
+}
+
+/// `#packettodo`: with no single tracked item to layer on, the derived todo
+/// gets a minted surrogate id.
+#[test]
+fn write_blocking_operator_request_packet_without_tracked_item_mints_surrogate_todo() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] unrelated backlog task");
+    let response = BLOCKING_PACKET_RESPONSE.replace(
+        "`#apipendingorphans` is gated on review of #733 and on your decision below.",
+        "The worker needs your decision below.",
+    );
+    write_packet_closeout(&doc, &[], &response);
+    let content = fs::read_to_string(&doc).unwrap();
+    let todo = component_body(&content, "todo");
+    assert_eq!(todo.lines().count(), 1, "{content}");
+    assert!(todo.starts_with("- [ ] [#"), "{content}");
+    assert!(
+        todo.contains(
+            "Answer the blocking subagent question in agent:exchange: What should happen to the chat messages"
+        ),
+        "{content}"
+    );
+    assert!(!todo.contains("[#open]"), "{content}");
+}
+
 /// `#operatortodo`: a `patch:todo` against a document without `agent:todo`
 /// creates the component instead of spilling the checklist into the exchange.
 #[test]

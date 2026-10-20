@@ -412,6 +412,30 @@ that cites a concrete Markdown path. If such a response supplies no
 `operator_todo_response_advisory`. Supplying `--todo-add` suppresses this
 response advisory. Neither advisory writes a todo by itself or fails closeout.
 
+**Blocking operator request todo (`#packettodo`).** A blocking
+`[#subagent-operator-request]` packet in a closeout response is a pending
+operator decision, so the binary records it instead of advising. The packet is
+parsed structurally: the exact marker line (outside fenced code, not
+blockquoted, at most three leading spaces) followed without a blank line by
+`kind: question|permission`, `blocking: true`, and a concrete `request:` line
+(the protocol's `<...>` placeholder never counts). When the closeout supplies no
+`--todo-add` and its response carries no `patch:todo`, the write appends one
+derived `--todo-add` per packet to the same tracked-work transaction:
+`Answer the blocking subagent question|permission request [for #<id>] in
+agent:exchange: <first sentence of request> (choices: <labels>)`. `<id>` is the
+one id this closeout gated (`--backlog-gate`, `--review-add`, a gated add), else
+the one document tracked-work id the response cites; with several or none the
+text cites nothing and `--todo-add` mints a surrogate (`#todoidlayer`). The text
+is deterministic and the derived item is part of the replayable mutation plan,
+so a retry, a resume, or a replayed packet folds into the existing open todo
+instead of duplicating it. The write prints `[todo] blocking operator request
+packet (#packettodo)` and logs `blocking_operator_request_todo_derived`; a
+packet skipped because the closeout recorded its own todo logs
+`blocking_operator_request_todo_skipped`. Non-blocking, fenced, and quoted
+packets record nothing. Todo mutations run after the envelope's adds, ungates,
+and gates, so a todo layered on an item this closeout gated names
+`(source: agent:review [#<id>])`.
+
 **Todo-done advisory.** When a closeout resolves tracked work (`--done`,
 `--review-resolve`) and an OPEN `agent:todo` item still cites it (an item that
 owns the id was already checked off by the `#todoids` closeout check), the

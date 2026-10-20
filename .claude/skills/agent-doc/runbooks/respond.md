@@ -656,6 +656,10 @@ When a closeout opens an `agent:review` gate that `agent:todo` does not mention,
 the write prints `[todo] advisory (#operatortodo)`. If that gate waits on the
 operator, add the TODO next cycle (`--backlog-only --todo-add ...` for a
 tracked-work-only closeout); a gate waiting on CI or a third party needs none.
+A response that presents a blocking `[#subagent-operator-request]` packet still
+owes `--todo-add` (`#wayposttodo`); if you omit it, the binary derives the todo
+from the packet's `request:` and choices and layers it on the one gated id
+(`[todo] blocking operator request packet (#packettodo)`).
 When a closeout resolves work (`--done`, `--review-resolve`), an OPEN todo that
 owns that id is checked off in the same closeout (`[todo] auto-done`); one that
 only cites it gets `[todo] advisory (#tododone)` with the exact `--todo-done`

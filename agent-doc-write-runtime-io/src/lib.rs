@@ -2181,29 +2181,6 @@ fn apply_pending_and_status_mutations_with_mode(
                         for id in &options.review_remove {
                             backlog_cmd::review_remove(file, id)?;
                         }
-                        // `#operatortodo`: operator actions land in `agent:todo`,
-                        // which `todo_add` creates when the document lacks it.
-                        for text in &options.todo_add {
-                            backlog_cmd::todo_add(file, text)?;
-                        }
-                        // `#tododone`: close operator actions in the same closeout
-                        // that finished them. Edits run first so a same-cycle
-                        // reword cannot hide an item from its done/reopen selector.
-                        for pair in &options.todo_edit {
-                            let (selector, text) = pair.split_once('=').with_context(|| {
-                                format!("--todo-edit expects 'id=text', got: {}", pair)
-                            })?;
-                            backlog_cmd::todo_edit(file, selector, text)?;
-                        }
-                        for selector in &options.todo_done {
-                            backlog_cmd::todo_done(file, selector)?;
-                        }
-                        for selector in &options.todo_reopen {
-                            backlog_cmd::todo_reopen(file, selector)?;
-                        }
-                        for selector in &options.todo_remove {
-                            backlog_cmd::todo_remove(file, selector)?;
-                        }
                         for id in &options.pending_ungate {
                             backlog_cmd::ungate(file, id)?;
                         }
@@ -2299,6 +2276,34 @@ fn apply_pending_and_status_mutations_with_mode(
                         }
                         for id in &options.pending_gate {
                             backlog_cmd::gate(file, id)?;
+                        }
+                        // `#operatortodo`: operator actions land in `agent:todo`,
+                        // which `todo_add` creates when the document lacks it.
+                        // `#packettodo`: todo ops run after this envelope's adds,
+                        // ungates, and gates, so a todo layered on an item this
+                        // closeout moved names the component it now lives in
+                        // (`(source: agent:review [#id])` for a fresh gate) and
+                        // can layer on an item this closeout added.
+                        for text in &options.todo_add {
+                            backlog_cmd::todo_add(file, text)?;
+                        }
+                        // `#tododone`: close operator actions in the same closeout
+                        // that finished them. Edits run first so a same-cycle
+                        // reword cannot hide an item from its done/reopen selector.
+                        for pair in &options.todo_edit {
+                            let (selector, text) = pair.split_once('=').with_context(|| {
+                                format!("--todo-edit expects 'id=text', got: {}", pair)
+                            })?;
+                            backlog_cmd::todo_edit(file, selector, text)?;
+                        }
+                        for selector in &options.todo_done {
+                            backlog_cmd::todo_done(file, selector)?;
+                        }
+                        for selector in &options.todo_reopen {
+                            backlog_cmd::todo_reopen(file, selector)?;
+                        }
+                        for selector in &options.todo_remove {
+                            backlog_cmd::todo_remove(file, selector)?;
                         }
                         for pair in &options.pending_set_gate_type {
                             let (id, gt) = pair.split_once('=').with_context(|| {
@@ -2952,7 +2957,11 @@ fn run_command_inner_within_pass(
     commit_mode: CommitMode,
     empty_response_recovery: Option<EmptyResponseRecovery>,
 ) -> Result<()> {
-    let file = options.file.as_path();
+    // `#packettodo`: own the path so the closeout may extend its own
+    // `options.todo_add` with the binary-derived packet todo below.
+    let mut options = options;
+    let file_buf = options.file.clone();
+    let file = file_buf.as_path();
     let closeout_role = WriteCloseoutOwnerRole::from_origin(options.origin.as_deref());
     let mut _closeout_owner = claim_foreground_closeout_owner(file, closeout_role)?;
     let _force_disk_authority_scope = if options.force_disk {
@@ -3233,6 +3242,18 @@ fn run_command_inner_within_pass(
         return finalize_commit(file, commit_mode, options.force_disk);
     }
 
+    // `#packettodo` / `#wayposttodo`: a closeout that presents a blocking
+    // `[#subagent-operator-request]` packet owes the operator decision an
+    // `agent:todo` item. Derive it from the packet into this closeout's own
+    // `--todo-add` list, so it lands in the same tracked-work transaction, is
+    // recorded in the replayable mutation plan, and is idempotent through the
+    // ordinary `--todo-add` dedupe and id layering. Only the caller's own
+    // flags count as "tracked-work mutations" for the committed-replay gate.
+    let operator_todo_add_supplied = !options.todo_add.is_empty();
+    let derived_packet_todos = derive_blocking_operator_request_todos(file, &options)?;
+    options.todo_add.extend(derived_packet_todos);
+    let has_pending_ops = options.has_pending_mutation();
+
     // Validate the response half first. The tracked-work pass below is virtual,
     // but its command helpers report successful-looking mutation diagnostics;
     // those diagnostics must never precede a response-envelope rejection.
@@ -3362,7 +3383,7 @@ fn run_command_inner_within_pass(
         || !options.pending_upsert.is_empty()
         || !options.review_add.is_empty()
         || !options.review_edit.is_empty()
-        || !options.todo_add.is_empty()
+        || operator_todo_add_supplied
         || options.has_todo_item_mutation()
         || options.status.is_some();
 
@@ -4328,6 +4349,145 @@ fn with_backlog_effects<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
         &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
         f,
     )
+}
+
+/// Read the closeout response without consuming it: the selected write path
+/// reads it again from the same override slot.
+fn peek_response_input() -> Result<String> {
+    let response = read_response_input()?;
+    RESPONSE_STDIN_OVERRIDE.with(|slot| {
+        slot.borrow_mut().replace(response.clone());
+    });
+    Ok(response)
+}
+
+/// `#packettodo`: the tracked id a packet todo layers on. The one id this
+/// closeout gated (`--backlog-gate`, `--review-add`, a gated add) wins;
+/// otherwise the one tracked-work id of the document the response cites.
+/// Several or none yields `None`, and `--todo-add` mints a surrogate.
+fn packet_todo_tracked_id(
+    options: &CommandOptions,
+    response: &str,
+    document_ids: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let explicit = |texts: &[String]| -> Vec<String> {
+        texts
+            .iter()
+            .filter_map(|text| agent_doc_element_backlog::backlog::explicit_custom_id(text))
+            .collect()
+    };
+    let opened = operator_gate_ids_opened_this_cycle(
+        &explicit(&options.review_add),
+        &explicit(&options.pending_add_gated),
+        &options.pending_gate,
+    );
+    if let [only] = opened.as_slice() {
+        return Some(only.clone());
+    }
+    if !opened.is_empty() {
+        return None;
+    }
+    let cited: Vec<String> = agent_doc_turn::response_text::cited_tracked_ids_in_response(response)
+        .into_iter()
+        .filter(|id| document_ids.contains(id))
+        .collect();
+    match cited.as_slice() {
+        [only] => Some(only.clone()),
+        _ => None,
+    }
+}
+
+/// `#packettodo`: the pure decision — which `--todo-add` texts a closeout
+/// response's blocking operator request packets owe `agent:todo`.
+fn blocking_operator_request_todo_texts(
+    options: &CommandOptions,
+    response: &str,
+    document_ids: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    if options.pending_only || !options.todo_add.is_empty() || response.contains("<!-- patch:todo")
+    {
+        return Vec::new();
+    }
+    let packets = agent_doc_turn::response_text::blocking_operator_request_packets(response);
+    if packets.is_empty() {
+        return Vec::new();
+    }
+    let tracked_id = packet_todo_tracked_id(options, response, document_ids);
+    let mut texts: Vec<String> = Vec::new();
+    for packet in &packets {
+        let text = agent_doc_turn::response_text::blocking_operator_request_todo_text(
+            packet,
+            tracked_id.as_deref(),
+        );
+        if !texts.contains(&text) {
+            texts.push(text);
+        }
+    }
+    texts
+}
+
+fn derive_blocking_operator_request_todos(
+    file: &Path,
+    options: &CommandOptions,
+) -> Result<Vec<String>> {
+    if options.pending_only {
+        return Ok(Vec::new());
+    }
+    let response = peek_response_input()?;
+    if !response.contains(agent_doc_queue::subagent_brief::SUBAGENT_OPERATOR_REQUEST_MARKER) {
+        return Ok(Vec::new());
+    }
+    if agent_doc_turn::response_text::blocking_operator_request_packets(&response).is_empty() {
+        return Ok(Vec::new());
+    }
+    if !options.todo_add.is_empty() || response.contains("<!-- patch:todo") {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "blocking_operator_request_todo_skipped file={} reason={}",
+                file.display(),
+                if options.todo_add.is_empty() {
+                    "response_patch_todo"
+                } else {
+                    "todo_add_supplied"
+                }
+            ),
+        );
+        return Ok(Vec::new());
+    }
+    // An unreadable document only loses the response-citation fallback; the
+    // gate ids and the packet itself still derive the todo.
+    let document_ids = if options.force_disk {
+        std::fs::read_to_string(file).ok()
+    } else {
+        resolve_current_document(file, "packet_todo_tracked_ids")
+            .ok()
+            .map(|current| current.into_content())
+    }
+    .map(|content| {
+        agent_doc_element_backlog::backlog::document_reserved_identity_ids(&content)
+            .into_iter()
+            .map(|id| id.to_ascii_lowercase())
+            .collect()
+    })
+    .unwrap_or_default();
+    let texts = blocking_operator_request_todo_texts(options, &response, &document_ids);
+    for text in &texts {
+        eprintln!(
+            "[todo] blocking operator request packet (#packettodo): recording the operator decision in agent:todo: {text}"
+        );
+    }
+    if !texts.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "blocking_operator_request_todo_derived file={} count={}",
+                file.display(),
+                texts.len()
+            ),
+        );
+    }
+    Ok(texts)
 }
 
 fn active_capture_response_body_for_write(file: &Path) -> Result<String> {
@@ -5716,6 +5876,66 @@ mod tests {
         }
     }
 
+    /// `#packettodo`: the derived todo layers on the ONE id this closeout
+    /// gated, falls back to the one document id the response cites, and cites
+    /// nothing (so `--todo-add` mints a surrogate) when that is ambiguous.
+    #[test]
+    fn packettodo_texts_pick_one_tracked_id_and_respect_existing_todo_records() {
+        let packet = "[#subagent-operator-request] subagent operator request\nkind: question\nblocking: true\nrequest: Keep or drop the rows?\nchoices:\n- keep: nothing\n- drop: delete\n";
+        let response = format!("About #alpha and #beta.\n\n{packet}");
+        let doc = Path::new("/tmp/packettodo-unit.md");
+        let ids: std::collections::HashSet<String> =
+            ["alpha", "beta"].iter().map(|id| id.to_string()).collect();
+        let base = || {
+            agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+                doc,
+                agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+            )
+        };
+
+        let mut gated = base();
+        gated.pending_gate = vec!["alpha".to_string()];
+        assert_eq!(
+            blocking_operator_request_todo_texts(&gated, &response, &ids),
+            vec![
+                "Answer the blocking subagent question for #alpha in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
+            ]
+        );
+
+        let mut two_gates = base();
+        two_gates.pending_gate = vec!["alpha".to_string(), "beta".to_string()];
+        assert_eq!(
+            blocking_operator_request_todo_texts(&two_gates, &response, &ids),
+            vec![
+                "Answer the blocking subagent question in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
+            ]
+        );
+
+        let one_cited = format!("About #alpha and #unknownid.\n\n{packet}");
+        assert_eq!(
+            blocking_operator_request_todo_texts(&base(), &one_cited, &ids),
+            vec![
+                "Answer the blocking subagent question for #alpha in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
+            ]
+        );
+        assert_eq!(
+            blocking_operator_request_todo_texts(&base(), &response, &ids),
+            vec![
+                "Answer the blocking subagent question in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
+            ]
+        );
+
+        let mut supplied = base();
+        supplied.todo_add = vec!["Decide the rows [#alpha]".to_string()];
+        assert!(blocking_operator_request_todo_texts(&supplied, &response, &ids).is_empty());
+        let patched =
+            format!("{response}\n<!-- patch:todo -->\n- [ ] Decide\n<!-- /patch:todo -->\n");
+        assert!(blocking_operator_request_todo_texts(&base(), &patched, &ids).is_empty());
+        let mut pending_only = base();
+        pending_only.pending_only = true;
+        assert!(blocking_operator_request_todo_texts(&pending_only, &response, &ids).is_empty());
+    }
+
     #[test]
     fn active_capture_response_body_for_write_uses_projection_without_capture_sidecar() {
         let tmp = TempDir::new().unwrap();
@@ -6017,8 +6237,8 @@ mod tests {
         );
 
         fs::write(&doc, &struck).unwrap();
-        let outcome =
-            consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true).unwrap();
+        let outcome = consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true)
+            .unwrap();
         assert!(outcome.is_none(), "{outcome:?}");
         let after = fs::read_to_string(&doc).unwrap();
         assert_eq!(
@@ -6046,8 +6266,8 @@ mod tests {
         let (decision, _struck, _response) = gh240_documents();
         fs::write(&doc, &decision).unwrap();
 
-        let outcome = consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true)
-            .unwrap();
+        let outcome =
+            consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true).unwrap();
         assert!(outcome.is_none(), "{outcome:?}");
         let after = fs::read_to_string(&doc).unwrap();
         assert_eq!(after, decision);

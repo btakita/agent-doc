@@ -1808,6 +1808,109 @@ mod tests {
         );
     }
 
+    /// v0.35.527 dogfood failure: a closeout's committed response opened with
+    /// `> **Queue prompt:** <line>` strike echoes above its `### Re:` heading.
+    /// A second `respond` then auto-reopened a fresh out-of-band cycle from
+    /// HEAD, which never re-seeds the steering watermark, and committed a
+    /// second response. The hook's watermark still described the first cycle,
+    /// but the lineage filter subtracted only the LATEST cycle's captured
+    /// response, so every first-response echo surfaced as a new operator
+    /// exchange prompt. Every response the binary captured since the
+    /// watermark's cycle is agent-authored and must be subtracted.
+    #[test]
+    fn earlier_cycle_response_echoes_are_not_operator_steering_after_auto_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:exchange -->\nOperator request.\n<!-- /agent:exchange -->\n";
+        let first_body = concat!(
+            "> **Chat prompt (#chatprompt):** check the open issues\n\n",
+            "> **Queue prompt:** fix https://github.com/example/repo/issues/317\n\n",
+            "> **Queue prompt:** fix https://github.com/example/repo/issues/318\n\n",
+            "> **Queue prompt:** release + publish\n\n",
+            "### Re: closeout\n\n",
+            "Fixed and pushed.\n",
+        );
+        let first_response = format!(
+            "<!-- patch:exchange mode=\"append\" -->\n{first_body}<!-- /patch:exchange -->\n"
+        );
+        let first_applied = baseline.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{first_body}<!-- /agent:exchange -->"),
+        );
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, None, Vec::new()).unwrap();
+        std::fs::write(&file, &first_applied).unwrap();
+        capture_response_body(&file, &first_response, baseline);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &first_applied,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &first_applied);
+
+        // The second `respond` auto-reopens from HEAD without a preflight seed.
+        let reopened = agent_doc_cycle_state_io::start_out_of_band_closeout_preflight(
+            &file,
+            Some(&first_applied),
+            Some(&first_applied),
+        )
+        .unwrap();
+        assert_ne!(reopened.cycle_id, cycle.cycle_id);
+        let second_body = "### Re: follow-up closeout\n\nSecond closeout recorded.\n";
+        let second_response = format!(
+            "<!-- patch:exchange mode=\"append\" -->\n{second_body}<!-- /patch:exchange -->\n"
+        );
+        let second_applied = first_applied.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{second_body}<!-- /agent:exchange -->"),
+        );
+        std::fs::write(&file, &second_applied).unwrap();
+        capture_response_body(&file, &second_response, &first_applied);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &second_applied,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &second_applied);
+
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap();
+        assert!(
+            hook.as_ref().is_none_or(|report| report.items.is_empty()),
+            "agent-authored echoes surfaced as operator steering: {hook:?}"
+        );
+        assert!(
+            crate::absorbed_steering::unanswered_prompts(&file)
+                .unwrap()
+                .is_empty(),
+            "agent-authored echoes must not enter the absorbed-steering ledger"
+        );
+
+        // An operator prompt typed below the re-anchored boundary after both
+        // closeouts still surfaces.
+        let operator_prompt = "Also check the release notes.";
+        std::fs::write(
+            &file,
+            second_applied.replace(
+                "<!-- /agent:exchange -->",
+                &format!(
+                    "<!-- agent:boundary:echosteer -->\n{operator_prompt}\n<!-- /agent:exchange -->"
+                ),
+            ),
+        )
+        .unwrap();
+        let hook = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("operator prompt should produce a report");
+        assert_eq!(hook.items.len(), 1, "{hook:?}");
+        assert_eq!(hook.items[0].verbatim, operator_prompt);
+    }
+
     #[test]
     fn captured_response_filter_preserves_adjacent_operator_edit() {
         let dir = tempfile::tempdir().unwrap();

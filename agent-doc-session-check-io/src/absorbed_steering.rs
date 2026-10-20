@@ -241,30 +241,58 @@ pub(crate) fn retain_operator_lineage(
         );
     }
 
+    // A steering watermark that lags the response cycle (an auto-reopened
+    // `respond` opens a fresh cycle without re-seeding steering) also observes
+    // every EARLIER response committed since its own cycle opened. Those are
+    // binary-authored by the same capture provenance; subtracting only the
+    // newest response re-reads the earlier ones as operator prompts (the
+    // v0.35.527 `> **Queue prompt:**` echo replay).
+    let mut response_bodies = vec![capture.response_body];
+    if cycle_id != response_cycle_id
+        && let Some(earlier) = agent_doc_cycle_state_io::load_captured_responses_since_cycle(
+            file,
+            cycle_id,
+            RESPONSE_LINEAGE_WINDOW,
+        )?
+    {
+        response_bodies.extend(
+            earlier
+                .into_iter()
+                .filter(|checkpoint| checkpoint.response_sha256 != response_sha256)
+                .map(|checkpoint| checkpoint.response_body),
+        );
+    }
+
     let before = items.len();
     items.retain(|item| {
         if item.source != SteeringSource::Exchange || item.change == SteeringChange::Deleted {
             return true;
         }
         let text = item.verbatim.trim();
-        text.is_empty() || !capture.response_body.contains(text)
+        text.is_empty() || !response_bodies.iter().any(|body| body.contains(text))
     });
     let suppressed = before.saturating_sub(items.len());
     if suppressed > 0 {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "midturn_steering_binary_response_suppressed file={} steering_cycle={} response_cycle={} capture={} count={} (#assistantsteeringlineage)",
+                "midturn_steering_binary_response_suppressed file={} steering_cycle={} response_cycle={} capture={} lineage_responses={} count={} (#assistantsteeringlineage)",
                 file.display(),
                 cycle_id,
                 response_cycle_id,
                 capture_id,
+                response_bodies.len(),
                 suppressed,
             ),
         );
     }
     Ok(suppressed)
 }
+
+/// Captured responses consulted when a steering watermark lags the response
+/// cycle. A lineage is normally one to three cycles; the bound keeps the
+/// boundary hook's state.db read small.
+const RESPONSE_LINEAGE_WINDOW: usize = 32;
 
 impl AbsorbedSteeringLedger {
     /// Add every reported exchange prompt whose text is inside `baseline`.

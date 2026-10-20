@@ -21608,9 +21608,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .contains("agent_doc_supervisor::selfkill::start_route_owned_doc_from_args"),
         "supervisor process discovery IO should call focused route-owned cmdline parsing directly"
     );
+    // `#replacementwithdraw`: the per-poll wait step (exit / withdraw / wait /
+    // force) is the focused escalation policy; it owns the force-kill decision.
     assert!(
-        supervisor_selfkill
-            .contains("agent_doc_supervisor::selfkill::supervisor_force_kill_decision"),
+        supervisor_selfkill.contains("agent_doc_supervisor::selfkill::supervisor_kill_wait_step"),
         "supervisor selfkill IO should call focused force-kill escalation policy directly"
     );
     for relative in [

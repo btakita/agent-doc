@@ -106,6 +106,18 @@
   pid-scoped, so a later generation's crash still restarts; the controller
   replacement path clears the marker its own kill produced before cold-starting
   the successor, and a newly registered supervisor clears any earlier one.
+- A controller replacement records its continue intent (a time-bounded
+  `controller_replacement_cold_start` marker) before it requests the kill, and a
+  supervisor's own exit record never downgrades a fresh replacement marker for
+  its pid and generation (`#replacementintent`). A replacement whose controller
+  died before the cold start is therefore recovered by the watchdog once the
+  grace ends, instead of being read as an operator stop. A promoted
+  predecessor's drain waits for in-flight replacement workers
+  (`#replacementdrain`), and the dead-pane actor GC leaves alone a binding that
+  the crash watchdog would recover (`#gcdefercrash`). A stale-binary `continue`
+  replacement withdraws its pending kill once the supervisor has re-exec'd onto
+  the installed binary in place (`#replacementwithdraw`). See
+  `specs/supervisor.md`.
 - With `agent_doc_per_component_convergence` explicitly enabled, the commit
   candidate uses the same exact retained expected→target ownership set as the
   terminal convergence gate. Every owned component must already equal current

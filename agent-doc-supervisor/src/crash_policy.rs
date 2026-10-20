@@ -327,6 +327,68 @@ pub fn watchdog_binding_decision(
     }
 }
 
+/// `#gcdefercrash`: what the dead-pane actor GC may do with an actor whose
+/// pane no longer owns a live agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeadPaneActorGcDecision {
+    /// Nothing is owed for this binding: close the actor as before.
+    Close,
+    /// The supervisor died without operator intent in a pane that still fills a
+    /// visible column, and its session never closed: the crash watchdog owns
+    /// this binding. Closing the actor first hides it from the watchdog and
+    /// the session silently never restarts.
+    DeferToWatchdog,
+}
+
+impl DeadPaneActorGcDecision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Close => "close",
+            Self::DeferToWatchdog => "defer_to_watchdog",
+        }
+    }
+}
+
+/// Facts the dead-pane actor GC observes before closing an actor whose pane
+/// fell back to a bare shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeadPaneActorGcFacts {
+    /// The actor's recorded supervisor pid is known and no longer alive.
+    pub supervisor_dead: bool,
+    /// The intentional-exit verdict for that dead pid + generation.
+    pub exit: crate::intentional_exit::IntentionalExitDecision,
+    /// The watchdog binding verdict for the actor's pane.
+    pub binding: WatchdogBindingDecision,
+    /// The supervisor session log has no close event after its latest start.
+    pub session_open: bool,
+    /// Effective queue control is paused: operator authority that also fences
+    /// the watchdog, so nothing would ever recover a deferred binding.
+    pub watchdog_paused: bool,
+}
+
+/// `#gcdefercrash` (2026-10-20 `agent-doc-bugs.md`): the dead-pane actor GC
+/// (`sync`, `start`, `gc`) and the crash watchdog both act on "the pane fell
+/// back to a shell". The GC ran first (6 s after the supervisor died, on an
+/// editor layout event) and closed the actor, and the watchdog skips closed
+/// actors, so a crash it existed to recover was never even seen. Defer exactly
+/// the bindings the watchdog would act on: a dead supervisor that was not
+/// stopped by the operator, a live visible pane, and an open session. A
+/// deliberate stop, a stashed or unresolved pane, a gone pane, a closed
+/// session, a paused queue (the watchdog is fenced too), or a live/unknown
+/// supervisor still closes as before.
+pub fn dead_pane_actor_gc_decision(facts: DeadPaneActorGcFacts) -> DeadPaneActorGcDecision {
+    let owed = facts.supervisor_dead
+        && facts.exit != crate::intentional_exit::IntentionalExitDecision::Intentional
+        && facts.binding.allows_restart()
+        && facts.session_open
+        && !facts.watchdog_paused;
+    if owed {
+        DeadPaneActorGcDecision::DeferToWatchdog
+    } else {
+        DeadPaneActorGcDecision::Close
+    }
+}
+
 /// Parsed operator response to the supervisor restart/quit prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisorPromptDecision {
@@ -562,6 +624,84 @@ impl Default for CrashPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#gcdefercrash` regression (2026-10-20 `agent-doc-bugs.md`): the
+    /// supervisor died at 15:24:45 in a visible shell pane with its session
+    /// still open; `sync` closed the actor at 15:24:51 (`cause=dead_pane`) and
+    /// the watchdog never saw it. Any death the watchdog would recover defers.
+    #[test]
+    fn dead_pane_gc_defers_a_crash_the_watchdog_owns() {
+        use crate::intentional_exit::IntentionalExitDecision as Exit;
+        for exit in [
+            Exit::NoMarker,
+            Exit::StaleMarker,
+            Exit::ReplacementColdStartPending,
+            Exit::ReplacementColdStartExpired,
+        ] {
+            assert_eq!(
+                dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+                    supervisor_dead: true,
+                    exit,
+                    binding: WatchdogBindingDecision::Live,
+                    session_open: true,
+                    watchdog_paused: false,
+                }),
+                DeadPaneActorGcDecision::DeferToWatchdog,
+                "{exit:?}"
+            );
+        }
+    }
+
+    /// The deferral is narrow: everything the watchdog would NOT act on still
+    /// closes, so `#adsessreap1` (a `claude -> zsh` pane after a normal exit)
+    /// and operator stops are reaped exactly as before.
+    #[test]
+    fn dead_pane_gc_still_closes_everything_the_watchdog_will_not_recover() {
+        use crate::intentional_exit::IntentionalExitDecision as Exit;
+        let owed = DeadPaneActorGcFacts {
+            supervisor_dead: true,
+            exit: Exit::NoMarker,
+            binding: WatchdogBindingDecision::Live,
+            session_open: true,
+            watchdog_paused: false,
+        };
+        for facts in [
+            DeadPaneActorGcFacts {
+                supervisor_dead: false,
+                ..owed
+            },
+            DeadPaneActorGcFacts {
+                exit: Exit::Intentional,
+                ..owed
+            },
+            DeadPaneActorGcFacts {
+                binding: WatchdogBindingDecision::PaneGone,
+                ..owed
+            },
+            DeadPaneActorGcFacts {
+                binding: WatchdogBindingDecision::PaneStashed,
+                ..owed
+            },
+            DeadPaneActorGcFacts {
+                binding: WatchdogBindingDecision::WindowUnresolved,
+                ..owed
+            },
+            DeadPaneActorGcFacts {
+                session_open: false,
+                ..owed
+            },
+            DeadPaneActorGcFacts {
+                watchdog_paused: true,
+                ..owed
+            },
+        ] {
+            assert_eq!(
+                dead_pane_actor_gc_decision(facts),
+                DeadPaneActorGcDecision::Close,
+                "{facts:?}"
+            );
+        }
+    }
 
     /// Create an Instant offset by `secs` from a base.
     fn offset(base: Instant, secs: u64) -> Instant {

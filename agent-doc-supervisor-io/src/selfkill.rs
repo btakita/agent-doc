@@ -199,6 +199,9 @@ pub enum SupervisorKillOutcome {
     Graceful(u32),
     /// The supervisor was force-killed after the grace window elapsed.
     Forced(u32),
+    /// `#replacementwithdraw`: the caller's goal was met while the request was
+    /// pending, so the request was withdrawn and the live supervisor kept.
+    Withdrawn(u32),
 }
 
 /// `#supkill-b` — the CP-style driver: request a graceful self-kill, wait up to
@@ -211,6 +214,25 @@ pub fn drive_supervisor_kill(
     grace: Duration,
     dry_run: bool,
 ) -> Result<SupervisorKillOutcome> {
+    drive_supervisor_kill_unless(file, grace, dry_run, || false)
+}
+
+/// `#replacementwithdraw`: [`drive_supervisor_kill`] for a caller whose goal
+/// may be met without the kill. `goal_satisfied` is polled while the graceful
+/// request is pending; once it holds, the request is withdrawn and the live
+/// supervisor is kept ([`SupervisorKillOutcome::Withdrawn`]). If the
+/// supervisor had already committed to the self-kill, it is reported as
+/// [`SupervisorKillOutcome::Graceful`] when it is observed gone.
+#[cfg(unix)]
+pub fn drive_supervisor_kill_unless<G>(
+    file: &Path,
+    grace: Duration,
+    dry_run: bool,
+    mut goal_satisfied: G,
+) -> Result<SupervisorKillOutcome>
+where
+    G: FnMut() -> bool,
+{
     let Some(pid) = supervisor_pid_for_doc(file) else {
         return Ok(SupervisorKillOutcome::NoSupervisor);
     };
@@ -226,16 +248,26 @@ pub fn drive_supervisor_kill(
     let start = Instant::now();
     loop {
         let alive = process_is_alive(pid);
-        if !alive {
-            clear_self_kill_request(file);
-            return Ok(SupervisorKillOutcome::Graceful(pid));
-        }
-        if agent_doc_supervisor::selfkill::supervisor_force_kill_decision(
-            start.elapsed(),
+        let satisfied = alive && goal_satisfied();
+        match agent_doc_supervisor::selfkill::supervisor_kill_wait_step(
             alive,
+            satisfied,
+            start.elapsed(),
             grace,
         ) {
-            break;
+            agent_doc_supervisor::selfkill::SupervisorKillWaitStep::Exited => {
+                clear_self_kill_request(file);
+                return Ok(SupervisorKillOutcome::Graceful(pid));
+            }
+            agent_doc_supervisor::selfkill::SupervisorKillWaitStep::Withdraw => {
+                clear_self_kill_request(file);
+                if process_is_alive(pid) {
+                    return Ok(SupervisorKillOutcome::Withdrawn(pid));
+                }
+                return Ok(SupervisorKillOutcome::Graceful(pid));
+            }
+            agent_doc_supervisor::selfkill::SupervisorKillWaitStep::Wait => {}
+            agent_doc_supervisor::selfkill::SupervisorKillWaitStep::ForceKill => break,
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -259,6 +291,19 @@ pub fn drive_supervisor_kill(
     _grace: Duration,
     _dry_run: bool,
 ) -> Result<SupervisorKillOutcome> {
+    Ok(SupervisorKillOutcome::NoSupervisor)
+}
+
+#[cfg(not(unix))]
+pub fn drive_supervisor_kill_unless<G>(
+    _file: &Path,
+    _grace: Duration,
+    _dry_run: bool,
+    _goal_satisfied: G,
+) -> Result<SupervisorKillOutcome>
+where
+    G: FnMut() -> bool,
+{
     Ok(SupervisorKillOutcome::NoSupervisor)
 }
 

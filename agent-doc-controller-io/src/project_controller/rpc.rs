@@ -18774,18 +18774,24 @@ fn drain_predecessor_after_promotion(
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "controller_handoff_predecessor_retired_authority pid={} generation={} clients={} workers={} budget_ms={} note=background_work_stopped_streams_released_relay_retired (#drainingpredecessor)",
+                "controller_handoff_predecessor_retired_authority pid={} generation={} clients={} workers={} replacement_workers={} budget_ms={} note=background_work_stopped_streams_released_relay_retired (#drainingpredecessor)",
                 bootstrap.pid,
                 bootstrap.controller_generation,
                 active_clients.load(Ordering::SeqCst),
                 runtime.async_editor_commands.in_flight_worker_count(),
+                runtime.supervisor_replacement_worker_count(),
                 budget.as_millis(),
             ),
         );
     }
     loop {
         let clients = active_clients.load(Ordering::SeqCst);
-        let workers = runtime.async_editor_commands.in_flight_worker_count();
+        // `#replacementdrain`: a supervisor replacement holds no client
+        // connection once its receipt is returned, yet it may already have
+        // asked the supervisor to stop. Exiting under it strands the document
+        // at a bare shell, so it counts as an in-flight worker.
+        let workers = runtime.async_editor_commands.in_flight_worker_count()
+            + runtime.supervisor_replacement_worker_count();
         let elapsed = now().saturating_duration_since(started);
         let PredecessorDrainStep::Retire {
             abandoned_clients,
@@ -20093,7 +20099,7 @@ fn supervisor_watchdog_interval() -> Duration {
     Duration::from_secs(secs)
 }
 
-fn supervisor_watchdog_blocked_by_queue_control(
+pub(super) fn supervisor_watchdog_blocked_by_queue_control(
     control: Option<&state_store::QueueControlStatus>,
 ) -> bool {
     control.is_some_and(|control| control.state == "paused")
@@ -20424,7 +20430,7 @@ fn controller_supervisor_watchdog_tick(
 
 /// `#gh133sigterm`: read the durable intentional-exit marker for a dead
 /// supervisor. An unreadable row cannot prove intent, so it reads as a crash.
-fn supervisor_watchdog_intentional_exit_decision(
+pub(super) fn supervisor_watchdog_intentional_exit_decision(
     conn: &state_store::Connection,
     document_id: &str,
     dead_pid: u32,
@@ -20462,7 +20468,10 @@ fn supervisor_watchdog_intentional_exit_decision_at(
 
 /// `#watchdogbindinglive` (GH #133): observe whether `pane` sits in a `stash`
 /// window. `None` when its window cannot be resolved (the caller fails closed).
-fn supervisor_watchdog_pane_stashed(tmux: &tmux_router::Tmux, pane: &str) -> Option<bool> {
+pub(super) fn supervisor_watchdog_pane_stashed(
+    tmux: &tmux_router::Tmux,
+    pane: &str,
+) -> Option<bool> {
     let window_id = agent_doc_tmux_io::target_window_id(tmux, pane)?;
     let window_name = agent_doc_tmux_io::target_window_name(tmux, &window_id)?;
     Some(agent_doc_controller::dispatch::is_stash_window_name(
@@ -37883,7 +37892,10 @@ pub(crate) fn handle_supervisor_replacement(
         force,
         operator_receipt_id: authorization.receipt.receipt_id,
     };
-    let background_started = spawn_supervisor_replacement_worker(work)?;
+    // `#replacementdrain`: count the worker so a self-handoff that promotes a
+    // successor mid-replacement drains it instead of exiting under it.
+    let in_flight = runtime.map(ControllerRuntime::begin_supervisor_replacement_worker);
+    let background_started = spawn_supervisor_replacement_worker(work, in_flight)?;
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(
@@ -37912,7 +37924,10 @@ pub(crate) fn handle_supervisor_replacement(
 }
 
 #[cfg(any(test, feature = "test-support"))]
-fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Result<bool> {
+fn spawn_supervisor_replacement_worker(
+    work: SupervisorReplacementWork,
+    _in_flight: Option<crate::project_controller::SupervisorReplacementWorkerInFlight>,
+) -> Result<bool> {
     agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
@@ -37930,7 +37945,10 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
-fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Result<bool> {
+fn spawn_supervisor_replacement_worker(
+    work: SupervisorReplacementWork,
+    in_flight: Option<crate::project_controller::SupervisorReplacementWorkerInFlight>,
+) -> Result<bool> {
     // `#replacementreceipt`: do not acknowledge a detached worker before its
     // first authoritative lifecycle decision. The worker may still own a slow
     // reexec/cold-start completion, but an immediate live-supervisor refusal
@@ -37940,6 +37958,8 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
     std::thread::Builder::new()
         .name("agent-doc-supervisor-replacement".to_string())
         .spawn(move || {
+            // Released when this worker returns, whatever the outcome.
+            let _in_flight = in_flight;
             if let Err(err) =
                 drive_supervisor_replacement_background(work.clone(), admission_sender)
             {
@@ -38096,10 +38116,36 @@ fn drive_supervisor_replacement_background(
             initial_host_stale
         ),
     );
-    let kill_outcome = agent_doc_supervisor_io::selfkill::drive_supervisor_kill(
+    // `#replacementintent`: record the CONTINUE intent before anything can
+    // stop the supervisor. The kill below is honoured by the supervisor at its
+    // own boundary, possibly after this worker (or its whole controller
+    // process) is gone; without this marker that supervisor recorded its exit
+    // as an operator stop and nothing ever restarted the document
+    // (2026-10-20 `agent-doc-bugs.md`: the predecessor controller exited
+    // mid-replacement and the pane was left at a bare shell).
+    mark_replacement_cold_start_pending(
+        &work,
+        agent_doc_supervisor_io::selfkill::supervisor_pid_for_doc(&work.file),
+        "pre_kill",
+    );
+    // `#replacementwithdraw`: a stale-binary continue replacement is satisfied
+    // by the supervisor's own install re-exec (same pid, child preserved).
+    // When that lands while the kill request is pending, withdraw the request
+    // rather than kill a now-fresh supervisor and its live harness child
+    // (2026-10-20: the re-exec landed 3 s after this escalation, and the
+    // supervisor then honoured the stale request and killed its Claude child).
+    let replacement_intent = SupervisorReplacementIntent::parse(&work.mode)?;
+    let kill_outcome = agent_doc_supervisor_io::selfkill::drive_supervisor_kill_unless(
         &work.file,
         agent_doc_supervisor_io::selfkill::selfkill_grace(),
         false,
+        || {
+            agent_doc_controller::supervisor_replacement::replacement_goal_satisfied_by_refresh(
+                replacement_intent,
+                initial_host_stale,
+                host_supervisor_stale_warning_for_doc(&work.file).is_some(),
+            )
+        },
     )?;
     agent_doc_ops_log_io::log_op(
         &work.file,
@@ -38108,6 +38154,23 @@ fn drive_supervisor_replacement_background(
             work.mode, work.session_id, work.pane_id, work.generation, work.operator_receipt_id
         ),
     );
+    if let agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::Withdrawn(pid) = kill_outcome {
+        // The pre-kill replacement marker stays: it names this live pid, it is
+        // consulted only once that pid is dead, and it expires with the
+        // cold-start grace. Keeping it covers a supervisor that had already
+        // committed to the self-kill when the request was withdrawn.
+        if defer_admission_until_cold_start {
+            let _ = admission_sender.send(Ok(()));
+        }
+        agent_doc_ops_log_io::log_op(
+            &work.file,
+            &format!(
+                "controller_supervisor_replacement_background_completed stage=refreshed_in_place mode={} session={} pane={} generation={} receipt_id={} supervisor_pid={pid} (#replacementwithdraw)",
+                work.mode, work.session_id, work.pane_id, work.generation, work.operator_receipt_id
+            ),
+        );
+        return Ok(());
+    }
     reap_dead_supervisor_socket(&work.file, &socket);
     // `#gh133sigterm` + `#runfrontendcrashed`: the kill above was controller
     // intent to CONTINUE this document, not operator intent to stop it — but
@@ -38122,7 +38185,7 @@ fn drive_supervisor_replacement_background(
         | agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::Forced(pid) => Some(pid),
         _ => None,
     };
-    mark_replacement_cold_start_pending(&work, killed_pid);
+    mark_replacement_cold_start_pending(&work, killed_pid, "post_kill");
     let cold_start_result = cold_start_supervisor_replacement(&work);
     if cold_start_result.is_err() {
         clear_replacement_intentional_exit(&work);
@@ -38152,7 +38215,11 @@ fn drive_supervisor_replacement_background(
 /// cold start alone. See
 /// [`agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_SIGNAL`].
 #[cfg_attr(all(feature = "test-support", not(test)), allow(dead_code))]
-fn mark_replacement_cold_start_pending(work: &SupervisorReplacementWork, killed_pid: Option<u32>) {
+fn mark_replacement_cold_start_pending(
+    work: &SupervisorReplacementWork,
+    killed_pid: Option<u32>,
+    stage: &str,
+) {
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &work.project_root,
         &work.file.to_string_lossy(),
@@ -38168,7 +38235,7 @@ fn mark_replacement_cold_start_pending(work: &SupervisorReplacementWork, killed_
     agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
-            "controller_supervisor_replacement_cold_start_marker session={} generation={} receipt_id={} outcome={}",
+            "controller_supervisor_replacement_cold_start_marker stage={stage} session={} generation={} receipt_id={} outcome={}",
             work.session_id,
             work.generation,
             work.operator_receipt_id,
@@ -39697,7 +39764,7 @@ mod tests {
             force: true,
             operator_receipt_id: 1,
         };
-        mark_replacement_cold_start_pending(&work, Some(4242));
+        mark_replacement_cold_start_pending(&work, Some(4242), "post_kill");
         let conn = state_store::open_state_db(dir.path()).unwrap();
         let marker = agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(
             &conn,
@@ -39738,6 +39805,75 @@ mod tests {
         assert!(
             supervisor_watchdog_intentional_exit_decision(&conn, &document_id, 4242, 5)
                 .allows_restart()
+        );
+    }
+
+    /// `#replacementintent` regression (2026-10-20 `agent-doc-bugs.md`, pane %2):
+    /// replacement receipt 2172 escalated against stale supervisor 2909057 and
+    /// requested its self-kill; controller 1504840 then self-recycled
+    /// (`live_plugin_update`) and its worker thread died before
+    /// `controller_supervisor_replacement_kill_outcome`. The supervisor honoured
+    /// the kill (`supervisor_intentional_exit signal=self_kill_request`), so the
+    /// watchdog read an operator stop, no cold start ever ran, and the operator
+    /// found a bare shell. The marker written BEFORE the kill must survive the
+    /// supervisor's own record and leave the death recoverable even though no
+    /// post-kill step ever runs.
+    #[test]
+    fn replacement_whose_controller_dies_after_the_kill_request_stays_recoverable() {
+        let (dir, file, document_id) = intentional_exit_fixture();
+        let work = SupervisorReplacementWork {
+            project_root: dir.path().to_path_buf(),
+            file,
+            session_id: "session".to_string(),
+            pane_id: "%3".to_string(),
+            generation: 5,
+            mode: "continue".to_string(),
+            force: true,
+            operator_receipt_id: 2172,
+        };
+        // The worker marks the supervisor it is about to stop...
+        mark_replacement_cold_start_pending(&work, Some(4242), "pre_kill");
+        let conn = state_store::open_state_db(dir.path()).unwrap();
+        let pre_kill = agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(
+            &conn,
+            &document_id,
+        )
+        .unwrap()
+        .expect("pre-kill marker recorded");
+        // ...its process exits, and the supervisor then honours the self-kill.
+        let recorded = agent_doc_supervisor_io::intentional_exit::record_intentional_exit_at(
+            &sigterm_identity(dir.path(), &document_id, 4242),
+            "self_kill_request",
+            pre_kill.recorded_at_ms + 9_000,
+        )
+        .unwrap();
+        assert_eq!(
+            recorded,
+            agent_doc_supervisor::intentional_exit::IntentionalExitRecordDecision::PreserveReplacementIntent
+        );
+        let tick = supervisor_watchdog_intentional_exit_decision_at(
+            &conn,
+            &document_id,
+            4242,
+            5,
+            pre_kill.recorded_at_ms + 10_000,
+        );
+        assert_ne!(
+            tick,
+            agent_doc_supervisor::intentional_exit::IntentionalExitDecision::Intentional,
+            "a replacement's own kill must never read as an operator stop"
+        );
+        let expired = supervisor_watchdog_intentional_exit_decision_at(
+            &conn,
+            &document_id,
+            4242,
+            5,
+            pre_kill.recorded_at_ms
+                + agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_GRACE_MS,
+        );
+        assert!(
+            expired.allows_restart(),
+            "an orphaned replacement is recovered as a crash once its grace ends"
         );
     }
 
@@ -51135,6 +51271,55 @@ mod tests {
         assert_eq!(
             exit.abandoned_workers, 1,
             "bounded: a stuck worker is reported, not waited forever"
+        );
+    }
+
+    /// `#replacementdrain` regression (2026-10-20 `agent-doc-bugs.md`): a
+    /// supervisor replacement admitted by controller 1504840 had already asked
+    /// the stale supervisor to stop when that controller self-recycled. Its
+    /// receipt had been returned, so it held no client connection, and the
+    /// drain counted only async editor workers (`workers=0`): the predecessor
+    /// exited under the replacement and the cold start never ran. A
+    /// replacement worker now holds the drain open exactly like an admitted
+    /// async worker, and remains bounded by the same budget.
+    #[test]
+    fn the_predecessor_drain_waits_for_an_in_flight_supervisor_replacement() {
+        let dir = async_handoff_test_project();
+        let runtime = test_controller_runtime(&test_bootstrap(&dir));
+        let clients = AtomicUsize::new(0);
+        let mut replacement = Some(runtime.begin_supervisor_replacement_worker());
+        assert_eq!(runtime.supervisor_replacement_worker_count(), 1);
+        let clock = FakeDrainClock::new();
+        let mut sleeps = 0usize;
+        let exit = drain_predecessor_after_promotion(
+            &runtime,
+            &clients,
+            Duration::from_secs(30),
+            || clock.now(),
+            |delay| {
+                clock.sleep(delay);
+                sleeps += 1;
+                if sleeps == 4 {
+                    replacement.take();
+                }
+            },
+        );
+        assert_eq!(exit, PredecessorDrainExit::default());
+        assert_eq!(sleeps, 4, "exit waited for the replacement to finish");
+        assert_eq!(runtime.supervisor_replacement_worker_count(), 0);
+
+        let _stuck = runtime.begin_supervisor_replacement_worker();
+        let clock = FakeDrainClock::new();
+        let exit = drain_predecessor_after_promotion(
+            &runtime,
+            &clients,
+            Duration::from_millis(200),
+            || clock.now(),
+            |delay| clock.sleep(delay),
+        );
+        assert_eq!(
+            exit.abandoned_workers, 1,
+            "bounded: a stuck replacement is reported, not waited forever"
         );
     }
 

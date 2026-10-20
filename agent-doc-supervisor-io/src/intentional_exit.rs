@@ -19,7 +19,8 @@ use std::time::Duration;
 
 use agent_doc_sqlite::state_store::{self, Connection, DocumentRuntimeStateRecord};
 use agent_doc_supervisor::intentional_exit::{
-    INTENTIONAL_EXIT_STATE_KIND, IntentionalExitMarker, parse_intentional_exit_marker,
+    INTENTIONAL_EXIT_STATE_KIND, IntentionalExitMarker, IntentionalExitRecordDecision,
+    intentional_exit_record_decision, parse_intentional_exit_marker,
 };
 use anyhow::Result;
 
@@ -150,10 +151,40 @@ impl IntentionalExitIdentity {
 }
 
 /// Record the marker for `identity` directly (bounded busy timeout).
-pub fn record_intentional_exit(identity: &IntentionalExitIdentity, signal: &str) -> Result<()> {
+///
+/// `#replacementintent`: a fresh controller-replacement marker naming exactly
+/// this pid and generation is preserved rather than downgraded to an
+/// operator-stop marker (see
+/// [`agent_doc_supervisor::intentional_exit::intentional_exit_record_decision`]).
+pub fn record_intentional_exit(
+    identity: &IntentionalExitIdentity,
+    signal: &str,
+) -> Result<IntentionalExitRecordDecision> {
+    record_intentional_exit_at(identity, signal, now_ms())
+}
+
+/// [`record_intentional_exit`] with an injected clock, so the preservation
+/// window is pinned without wall-clock timing.
+pub fn record_intentional_exit_at(
+    identity: &IntentionalExitIdentity,
+    signal: &str,
+    now_ms: u64,
+) -> Result<IntentionalExitRecordDecision> {
     let conn =
         state_store::open_state_db_with_timeout(&identity.project_root, HANDLER_BUSY_TIMEOUT)?;
-    record_intentional_exit_in_db(&conn, &identity.document_id, &identity.marker(signal))
+    let prior = load_intentional_exit_from_db(&conn, &identity.document_id)?;
+    let decision = intentional_exit_record_decision(
+        prior.as_ref(),
+        identity.supervisor_pid,
+        identity.generation,
+        now_ms,
+    );
+    if decision == IntentionalExitRecordDecision::Record {
+        let mut marker = identity.marker(signal);
+        marker.recorded_at_ms = now_ms;
+        record_intentional_exit_in_db(&conn, &identity.document_id, &marker)?;
+    }
+    Ok(decision)
 }
 
 /// Outcome of the handler's bounded record attempt, reported to the caller's
@@ -161,6 +192,8 @@ pub fn record_intentional_exit(identity: &IntentionalExitIdentity, signal: &str)
 #[derive(Debug)]
 pub enum IntentionalExitRecordOutcome {
     Recorded,
+    /// `#replacementintent`: a controller replacement already owns this exit.
+    PreservedReplacementIntent,
     Failed(String),
     TimedOut,
 }
@@ -196,7 +229,12 @@ where
                 .name("agent-doc-supervisor-sigterm-record".to_string())
                 .spawn(move || {
                     let outcome = match record_intentional_exit(&writer_identity, "SIGTERM") {
-                        Ok(()) => IntentionalExitRecordOutcome::Recorded,
+                        Ok(IntentionalExitRecordDecision::Record) => {
+                            IntentionalExitRecordOutcome::Recorded
+                        }
+                        Ok(IntentionalExitRecordDecision::PreserveReplacementIntent) => {
+                            IntentionalExitRecordOutcome::PreservedReplacementIntent
+                        }
                         Err(err) => IntentionalExitRecordOutcome::Failed(format!("{err:#}")),
                     };
                     let _ = sender.send(outcome);
@@ -294,6 +332,59 @@ mod tests {
         let after = load_intentional_exit_from_db(&conn, DOCUMENT_ID).unwrap();
         assert!(
             watchdog_intentional_exit_decision(after.as_ref(), 77, 4, now_ms()).allows_restart()
+        );
+    }
+
+    /// `#replacementintent` (2026-10-20 `agent-doc-bugs.md`): the controller
+    /// replacement marks the supervisor it is about to stop BEFORE requesting
+    /// the kill. Its controller process then exited before the cold start, and
+    /// the supervisor's own `self_kill_request` record overwrote the marker, so
+    /// the watchdog read an operator stop and the session stayed dead. The
+    /// supervisor's record must leave a fresh replacement marker in place.
+    #[test]
+    fn supervisor_self_kill_keeps_a_fresh_pre_kill_replacement_marker() {
+        let dir = project();
+        let pre_kill =
+            mark_replacement_cold_start_pending(dir.path(), DOCUMENT_ID, Some(77), 4, "%9", "s")
+                .unwrap()
+                .expect("pre-kill marker names the supervisor about to be stopped");
+        let at = pre_kill.recorded_at_ms;
+
+        let decision =
+            record_intentional_exit_at(&identity(dir.path(), 77), "self_kill_request", at + 1_000)
+                .unwrap();
+        assert_eq!(
+            decision,
+            IntentionalExitRecordDecision::PreserveReplacementIntent
+        );
+        let conn = state_store::open_state_db(dir.path()).unwrap();
+        let stored = load_intentional_exit_from_db(&conn, DOCUMENT_ID).unwrap();
+        assert_eq!(stored.as_ref(), Some(&pre_kill));
+        assert_eq!(
+            watchdog_intentional_exit_decision(stored.as_ref(), 77, 4, at + 1_000),
+            IntentionalExitDecision::ReplacementColdStartPending
+        );
+        // No successor ever registered: recovered as a crash once the grace ends.
+        assert!(
+            watchdog_intentional_exit_decision(
+                stored.as_ref(),
+                77,
+                4,
+                at + agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_GRACE_MS
+            )
+            .allows_restart()
+        );
+
+        // After the grace, a deliberate stop of the same pid is honoured again.
+        let late = at + agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_GRACE_MS;
+        assert_eq!(
+            record_intentional_exit_at(&identity(dir.path(), 77), "SIGTERM", late).unwrap(),
+            IntentionalExitRecordDecision::Record
+        );
+        let stored = load_intentional_exit_from_db(&conn, DOCUMENT_ID).unwrap();
+        assert_eq!(
+            watchdog_intentional_exit_decision(stored.as_ref(), 77, 4, late + 1),
+            IntentionalExitDecision::Intentional
         );
     }
 

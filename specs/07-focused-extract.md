@@ -18,7 +18,10 @@ without making an agent manually copy managed document regions.
   write target then
   source and checkpoint both; second write/checkpoint failure -> restore both;
   target-first crash marker -> resume by completing source removal without a
-  second target append; already applied -> no-op; either document attached to a
+  second target append, but only after proving the marked target still holds
+  every selected node; marked target that lost a selected node -> refuse with
+  no documents changed (see "Marked-target holding check"); already applied ->
+  no-op; either document attached to a
   live editor without coordination -> emit the deterministic preview, then
   refuse before mutation with the exact attached path(s) and explicit
   confirmation that the target was not created (or was left unchanged); live
@@ -68,6 +71,30 @@ without making an agent manually copy managed document regions.
 - **Allowed edit surfaces:** the focused-extract module, CLI routing, target
   scaffold shared with transfer, this command spec, its runbook, and regression
   tests.
+- **Marked-target holding check (GH #324):** the operation ID hashes the
+  source bytes, so a re-run on an unchanged source re-derives the same
+  destination marker. The marker therefore proves only that this operation
+  once wrote the target, not that the target still holds what it moved. When
+  the target is already marked, the planner removes a selected node from the
+  source only if the target still holds it: an exchange turn by its stable
+  node ID in the target `agent:exchange`; a tracked item by its ID in the same
+  target component or in target `agent:done` (a completed item); an
+  ID-less whole component by its moved bytes; an archived-context copy by its
+  provenance marker. Sibling items that share the selected ID never vouch for
+  one another. Any missing node fails the whole plan with the typed
+  `FocusedExtractTargetLostNodes` refusal, whose message names the operation,
+  the target, and each missing `component:id`, and states that no documents
+  were changed. The CLI records the condition in the destination's ops log as
+  `focused_extract_target_lost_nodes operation=<id> target=<path>
+  node_ids=<component:id,...>`.
+- **Recovery copy:** before an apply mutates either document, it writes every
+  byte the operation removes from the source, labelled per transfer
+  (component, mode, item IDs, node IDs), to
+  `.agent-doc/archives/extract/<operation>.md` under the source's project root.
+  If that write fails, apply refuses before any document changes. The
+  subdirectory keeps these copies out of the compact-archive index, which reads
+  only the top level of `.agent-doc/archives`. An archived-context copy removes
+  nothing from the source and adds nothing to the recovery copy.
 - **Verification:** pure coordination tests cover replica-count wait/timeout and
   mutation-boundary rows. Relay tests prove the detached CAS rejects a raced
   live replica, advances a zero-member canonical, and treats an exact replay as
@@ -76,8 +103,13 @@ without making an agent manually copy managed document regions.
   idempotent same-operation resume and stale-operation refusal. Planner tests
   cover multi-surface and completed-item ID selection, exchange adjacency,
   source/target boundary identity preservation, archive-locator resolution after
-  compaction, complete destination initialization, collision refusal, and
-  operation-marker resume; CLI help and the full project check cover wiring.
+  compaction, complete destination initialization, collision refusal,
+  operation-marker resume, refusal when a marked target lost exchange turns or
+  an item (while a target-completed item still resumes), and a recovery copy
+  that holds exactly the removed bytes. A CLI test reproduces the GH #324 state
+  (marked target without the moved turns, source unchanged) and proves the
+  re-run leaves both documents byte-identical and logs the loss; CLI help and
+  the full project check cover wiring.
 - **Out of scope:** semantic-topic inference inside the mutation binary,
   cross-filesystem transactions, and simultaneous multi-document CRDT commits.
 

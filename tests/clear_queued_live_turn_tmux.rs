@@ -38,10 +38,19 @@ const FAKE_CLAUDE: &str = r#"#!/usr/bin/env python3
 # busy Claude frame, records every submitted line, and ends a turn when the
 # test creates `end_turn`.
 import os, select, subprocess, sys, termios
+# `FAKE_CLAUDE_COMPOSER=1` (GH #317): read keys one at a time and render the
+# unsubmitted line in the `❯` composer, as Claude Code does, so a trigger typed
+# without Enter is visible to agent-doc's composer projection; Enter submits
+# it and `C-u` empties it.
+composer = os.environ.get("FAKE_CLAUDE_COMPOSER") == "1"
 # Like Claude Code's raw-mode TUI, never echo typed input into the frame.
 try:
     attrs = termios.tcgetattr(0)
     attrs[3] &= ~termios.ECHO
+    if composer:
+        attrs[3] &= ~termios.ICANON
+        attrs[6][termios.VMIN] = 1
+        attrs[6][termios.VTIME] = 0
     termios.tcsetattr(0, termios.TCSANOW, attrs)
 except termios.error:
     pass
@@ -59,6 +68,7 @@ bg = subprocess.Popen(["sleep", "600"], stdin=subprocess.DEVNULL)
 with open(os.path.join(d, "bg.pids"), "a") as f:
     f.write("%d\n" % bg.pid)
 RULE = "─" * 40 + "\n"
+draft = ""
 def footer():
     # `background` mirrors haiven-dev api.md pane %165 (2026-10-11): an idle
     # prompt while Claude Code background subagents and a shell keep running.
@@ -68,15 +78,34 @@ def footer():
                 "  ◯ general-purpose  Checking DecisionFeed.jsx for chat-safety status                         6m 10s · ↓ 95.4k tokens\n")
     return "  Opus 4.8 ctx:40% ~/fake main\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
 def idle():
-    sys.stdout.write("\x1b[2J\x1b[H" + RULE + "❯ \n" + RULE + footer() + "\x1b[2;3H")
+    sys.stdout.write("\x1b[2J\x1b[H" + RULE + "❯ " + draft + "\n" + RULE + footer()
+                     + "\x1b[2;%dH" % (3 + len(draft)))
     sys.stdout.flush()
 def busy():
     sys.stdout.write("\x1b[2J\x1b[H✶ Generating… (3s · esc to interrupt)\n"
-                     + RULE + "❯ \n" + RULE + footer() + "\x1b[3;3H")
+                     + RULE + "❯ " + draft + "\n" + RULE + footer()
+                     + "\x1b[3;%dH" % (3 + len(draft)))
     sys.stdout.flush()
 state = "idle"
 idle()
 end_turn = os.path.join(d, "end_turn")
+def submit(line):
+    global state
+    log.write(line + "\n")
+    if line.strip() == "/clear":
+        state = "idle"
+        if composer:
+            # Composer mode repaints on every key, and each full repaint pushes
+            # the old frame into tmux scrollback. Like Claude Code, `/clear`
+            # drops the conversation, so the clear-acceptance probe does not
+            # read those frames as a retained conversation.
+            sys.stdout.write("\x1b[3J")
+        idle()
+    elif line.strip():
+        state = "busy"
+        busy()
+    else:
+        (busy if state == "busy" else idle)()
 ticks = 0
 while True:
     ready, _, _ = select.select([sys.stdin], [], [], 0.1)
@@ -85,20 +114,25 @@ while True:
         # Like a TUI, keep repainting so stray terminal output never reads as
         # composer input.
         (busy if state == "busy" else idle)()
-    if ready:
+    if ready and composer:
+        data = os.read(0, 4096)
+        if not data:
+            break
+        for ch in data.decode("utf-8", "replace"):
+            if ch in "\r\n":
+                line, draft = draft, ""
+                submit(line)
+            elif ch == "\x15":
+                draft = ""
+                (busy if state == "busy" else idle)()
+            else:
+                draft += ch
+                (busy if state == "busy" else idle)()
+    elif ready:
         line = sys.stdin.readline()
         if not line:
             break
-        line = line.strip("\r\n")
-        log.write(line + "\n")
-        if line.strip() == "/clear":
-            state = "idle"
-            idle()
-        elif line.strip():
-            state = "busy"
-            busy()
-        else:
-            (busy if state == "busy" else idle)()
+        submit(line.strip("\r\n"))
     if state == "busy" and os.path.exists(end_turn):
         os.unlink(end_turn)
         state = "idle"
@@ -152,6 +186,21 @@ impl LiveClearScenario {
     /// `AGENT_DOC_TEST_HOLD_IDLE_WATCH_QUEUE_OBSERVATION` seam), so a test can
     /// order work before the watch's first look at the queue by handshake.
     fn start_with(label: &str, document: &str, hold_queue_observation: bool) -> Self {
+        Self::start_inner(label, document, hold_queue_observation, false)
+    }
+
+    /// The fake harness renders the unsubmitted composer line (see
+    /// `FAKE_CLAUDE_COMPOSER` in [`FAKE_CLAUDE`]).
+    fn start_with_composer(label: &str) -> Self {
+        Self::start_inner(label, PLAIN_DOC, false, true)
+    }
+
+    fn start_inner(
+        label: &str,
+        document: &str,
+        hold_queue_observation: bool,
+        composer: bool,
+    ) -> Self {
         let tmp = tempfile::TempDir::new().unwrap();
         let controllers = agent_doc_test_support::ProjectControllerReaper::under(tmp.path());
         let root = tmp.path().canonicalize().unwrap().join("project");
@@ -217,6 +266,11 @@ impl LiveClearScenario {
             )
         } else {
             String::new()
+        };
+        let hold = if composer {
+            format!("{hold}export FAKE_CLAUDE_COMPOSER=1\n")
+        } else {
+            hold
         };
         std::fs::write(
             &run,
@@ -357,10 +411,11 @@ impl LiveClearScenario {
         let output = self.agent_doc(&["session", "clear", DOC], &[], None);
         assert!(
             output.status.success(),
-            "Clear Session Context must exit 0 during the turn: {}\n--- pane ---\n{}\n--- inputs ---\n{:?}",
+            "Clear Session Context must exit 0 during the turn: {}\n--- pane ---\n{}\n--- inputs ---\n{:?}\n--- ops.log tail ---\n{}",
             stderr(&output),
             self.tmux.capture_pane(&self.pane, None).unwrap_or_default(),
             self.inputs(),
+            self.ops_log_tail(),
         );
         output
     }
@@ -538,7 +593,7 @@ impl LiveClearScenario {
     fn ops_log_tail(&self) -> String {
         let log = self.ops_log();
         let lines: Vec<&str> = log.lines().collect();
-        lines[lines.len().saturating_sub(25)..].join("\n")
+        lines[lines.len().saturating_sub(60)..].join("\n")
     }
 }
 
@@ -926,6 +981,111 @@ fn a_repeat_press_rearms_the_queued_clear_behind_the_run_started_before_it() {
         inputs.last().map(String::as_str),
         Some("/clear"),
         "{inputs:?}"
+    );
+}
+
+/// GH #317 replay (agent-loop `tasks/agent-doc/agent-doc-bugs.md`, Claude pane
+/// %50, 2026-10-20): Run Agent Doc was accepted and its trigger typed into the
+/// composer at 01:58:24, but the Enter never submitted it, so it never became a
+/// Claude Code turn: no `UserPromptSubmit`, no turn-active lease, no preflight,
+/// no `dispatch_turn_started`. Clear Session Context withdrew the leftover
+/// trigger (`#cancelturnprompt` `outcome=withdrawn`) and was then refused as
+/// `harness_turn_live evidence=dispatch_turn_pending` on the receipt of the
+/// trigger it had just withdrawn; five presses in 35s all came back queued.
+///
+/// Against the real supervisor and guard: the one press withdraws the trigger,
+/// settles its never-started receipt (`lease=none
+/// reason=trigger_never_submitted`), leaves `harness_turn_live`, and types
+/// `/clear` into the same harness, which never received the trigger.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn clear_withdraws_a_never_submitted_trigger_and_runs_instead_of_queueing() {
+    let scenario = LiveClearScenario::start_with_composer("clear-unsubmitted-trigger");
+    let harness = scenario.harness_pids();
+    assert_eq!(harness.len(), 1, "one harness launched: {harness:?}");
+
+    // Run Agent Doc accepted; the route types the trigger, but no Enter
+    // submits it and no turn hook runs.
+    scenario.accept_dispatch();
+    let trigger = format!("/agent-doc {}", scenario.doc.display());
+    let typed = scenario
+        .tmux
+        .cmd()
+        .args(["send-keys", "-t", &scenario.pane, "-l", &trigger])
+        .output()
+        .unwrap();
+    assert!(typed.status.success(), "{}", stderr(&typed));
+    scenario.wait_until("the trigger sits unsubmitted in the composer", || {
+        scenario
+            .tmux
+            .capture_pane(&scenario.pane, None)
+            .unwrap_or_default()
+            .lines()
+            .any(|line| line.trim_end() == format!("❯ {trigger}"))
+    });
+    assert!(
+        agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&scenario.doc)
+            .unwrap(),
+        "the accepted, never-started receipt is the only live-turn evidence"
+    );
+
+    let pressed = scenario.press_clear();
+    let pressed_stderr = stderr(&pressed);
+    assert!(
+        !pressed_stderr.contains("ui_outcome=queued")
+            && !pressed_stderr.contains("session_clear queued for"),
+        "the clear that withdrew the trigger must not be queued behind it\n--- stderr ---\n{pressed_stderr}\n--- ops.log tail ---\n{}",
+        scenario.ops_log_tail()
+    );
+    scenario.wait_until("the typed /clear reached the harness", || {
+        scenario.inputs().iter().any(|line| line == "/clear")
+    });
+    std::thread::sleep(Duration::from_secs(3));
+
+    let ops = scenario.ops_log();
+    assert!(
+        ops.lines().any(|line| {
+            line.contains("cancelled_trigger_composer")
+                && line.contains("source=session_clear")
+                && line.contains("outcome=withdrawn")
+                && line.contains(
+                    "lease=none reason=trigger_never_submitted settled_pending_dispatches=1",
+                )
+        }),
+        "the withdrawal settled the never-started receipt:\n{}",
+        scenario.ops_log_tail()
+    );
+    assert!(
+        ops.lines().any(|line| {
+            line.contains("flow=operator_clear")
+                && line.contains("stage=operator_guard")
+                && line.contains("outcome=completed")
+                && line.contains("reason=idle_prompt")
+        }),
+        "the guard left harness_turn_live:\n{}",
+        scenario.ops_log_tail()
+    );
+    assert!(
+        !ops.contains("reason=harness_turn_live")
+            && !ops.contains("session_clear_live_turn_deferred"),
+        "no press was refused or queued on the withdrawn trigger:\n{}",
+        scenario.ops_log_tail()
+    );
+    assert!(
+        !agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&scenario.doc)
+            .unwrap(),
+        "the never-started receipt is settled"
+    );
+    let inputs = scenario.inputs();
+    assert_eq!(scenario.clears(), 1, "exactly one clear: {inputs:?}");
+    assert!(
+        !inputs.iter().any(|line| line.starts_with("/agent-doc")),
+        "the withdrawn trigger was never submitted: {inputs:?}"
+    );
+    assert_eq!(
+        scenario.harness_pids(),
+        harness,
+        "the clear was typed into the same harness, never a restart: {inputs:?}"
     );
 }
 

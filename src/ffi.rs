@@ -5411,6 +5411,13 @@ mod tests {
                 .unwrap()
                 .contains(&serde_json::json!("client_measured_layout"))
         );
+        assert!(
+            listed["output"]["derivations"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("surface_projection")),
+            "GH #326 phase 2: the surface projection is a shipped derivation"
+        );
         let unknown = CString::new(r#"{"derivation":"later_rule"}"#).unwrap();
         let result = unsafe { agent_doc_editor_derive_json(unknown.as_ptr()) };
         assert!(result.json.is_null(), "an unknown derivation is an error");

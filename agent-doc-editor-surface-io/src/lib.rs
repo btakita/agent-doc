@@ -404,8 +404,12 @@ pub fn resolve_remote_layout_from_json(
 /// shipped, is never removed or renamed and its input fields stay optional,
 /// because after a native hot reload the library is newer than the plugin
 /// generation still calling it.
-pub const EDITOR_DERIVATIONS: &[&str] =
-    &["capabilities", "window_layout", "client_measured_layout"];
+pub const EDITOR_DERIVATIONS: &[&str] = &[
+    "capabilities",
+    "window_layout",
+    "client_measured_layout",
+    "surface_projection",
+];
 
 #[derive(serde::Deserialize)]
 struct EditorDerivationRequest {
@@ -436,6 +440,14 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
                 serde_json::from_value(input).context("parse client measured layout evidence")?;
             serde_json::to_value(agent_doc_editor_surface::resolve_client_measured_layout(
                 &evidence,
+            ))?
+        }
+        "surface_projection" => {
+            let evidence: agent_doc_editor_surface::SurfaceProjectionEvidence =
+                serde_json::from_value(input).context("parse surface projection evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::project_surface(
+                &evidence,
+                |project_root, remote| resolve_remote_layout(Path::new(project_root), remote),
             ))?
         }
         other => anyhow::bail!(
@@ -617,6 +629,107 @@ mod tests {
                 "{name}: observed_line"
             );
         }
+    }
+
+    /// GH #326 phase 2: the native `surface_projection` derivation answers every
+    /// shared parity case. The plugin's frozen Kotlin floor answers the same file
+    /// in `SurfaceProjectionTest`, so the two cannot drift silently.
+    #[test]
+    fn gh326_surface_projection_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/surface_projection.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 12, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let evidence: agent_doc_editor_surface::SurfaceProjectionEvidence =
+                serde_json::from_value(case["input"].clone()).unwrap();
+            let mut folded = false;
+            let projection =
+                agent_doc_editor_surface::project_surface(&evidence, |root, remote| {
+                    folded = true;
+                    assert_eq!(root, "/repo", "{name}: fold key");
+                    assert!(!remote.clients.is_empty(), "{name}: fold evidence");
+                    serde_json::from_value(case["remote_fold"].clone())
+                        .unwrap_or_else(|error| panic!("{name}: remote_fold: {error}"))
+                });
+            let output = serde_json::to_value(&projection).unwrap();
+            let expected = &case["expected"];
+            assert_eq!(output["outcome"], expected["outcome"], "{name}: outcome");
+            assert_eq!(
+                output.get("reason").cloned().unwrap_or_default(),
+                expected["reason"],
+                "{name}: reason"
+            );
+            assert_eq!(
+                output.get("surface").cloned().unwrap_or_default(),
+                expected["surface"],
+                "{name}: surface"
+            );
+            assert_eq!(
+                output["layout_source"], expected["layout_source"],
+                "{name}: layout_source"
+            );
+            assert_eq!(
+                folded,
+                expected["layout_source"] == "remote",
+                "{name}: the Remote Dev fold runs only for a ready remote projection"
+            );
+        }
+    }
+
+    /// GH #326 phase 2: the derivation channel answers `surface_projection` with
+    /// the log lines the plugin used to compute, and the Remote Dev fold it runs
+    /// is the native per-project memory.
+    #[test]
+    fn gh326_surface_projection_round_trips_through_the_derivation_channel() {
+        let ready = derive_editor_from_json(
+            r#"{"derivation":"surface_projection","input":{"base_path":"/repo","backend_window_count":2,
+                "windows":[{"x":0,"y":0,"selected":"/repo/a.md","session_tabs":["/repo/a.md"]},
+                           {"x":640,"y":0,"selected":"/repo/b.md","session_tabs":["/repo/b.md"]}],
+                "anchor_selected_session":"/repo/a.md"}}"#,
+        )
+        .unwrap();
+        let output = &ready["output"];
+        assert_eq!(output["outcome"], "ready");
+        assert_eq!(output["surface"]["focused"], "/repo/a.md");
+        assert_eq!(output["surface"]["column_order"], "editor");
+        assert_eq!(
+            output["observed_line"],
+            "[layout-detect] observed windows=2 snapshots=[(0,0) a.md, (640,0) b.md] columns=2 [a.md | b.md] source=windows"
+        );
+
+        let empty = derive_editor_from_json(r#"{"derivation":"surface_projection"}"#).unwrap();
+        assert_eq!(empty["output"]["outcome"], "deferred");
+        assert_eq!(
+            empty["output"]["reason"],
+            "backend_window_selection_incomplete windows=0 selected=0"
+        );
+
+        let unique_root = format!("/gh326-surface-projection-{}", std::process::id());
+        let request = serde_json::json!({
+            "derivation": "surface_projection",
+            "input": {
+                "base_path": unique_root,
+                "manager_selected": [format!("{unique_root}/a.md")],
+                "open_session_documents": [format!("{unique_root}/a.md")],
+                "selected_text_editor_session": format!("{unique_root}/a.md"),
+                "remote": {"project_root": unique_root, "clients": [
+                    {"visible": ["a.md"], "selected": ["a.md"], "open": ["a.md"]}
+                ], "focused": ["a.md"]}
+            }
+        });
+        let remote = derive_editor_from_json(&request.to_string()).unwrap();
+        let output = &remote["output"];
+        assert_eq!(output["outcome"], "ready");
+        assert_eq!(output["layout_source"], "remote");
+        let line = output["observed_line"].as_str().unwrap();
+        assert!(
+            line.starts_with("[layout-detect] unknown windows=0 source=remote_client_selected_files focused=[a.md] remote_clients=1 selections=[0:[a.md]] visible=[0:[a.md]] reason="),
+            "{line}"
+        );
     }
 
     /// GH #326: the derivation channel answers every shipped derivation, names

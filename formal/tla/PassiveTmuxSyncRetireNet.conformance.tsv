@@ -31,9 +31,9 @@ plugin_rpc	CpRouteClient.forgetEditorFocusWithReceipt	EndFrame
 plugin_rpc	CpRouteClient.forgetEditorSurfaceClient	Handoff|EndFrame	
 plugin_rpc	CpRouteClient.observeRemoteClientSurface	FrontendSync	GH #320 option B: the frontend's measured columns, forwarded on the backend's own `jetbrains-rd@<installation>` endpoint (never this frame's family)
 plugin_rpc	CpRouteClient.forgetRemoteClientSurface	FrontendSync	retires only that forward's own endpoint or `jetbrains-rd` family; the classic frame's fence is untouched
-plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->observeEditorSurface	RefocusLive|ResendFocus|Fallback|EditorReregister|EditorAck	the serialized surface delivery and its retained retry
-plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->forgetEditorSurface	Handoff|EndFrame	in-flight delivery across a handoff (InFlightSurfaceDelivery) / a superseded root
-plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->forgetEditorFocus	Handoff|EndFrame	as above, focus lane
+plugin_call	EditorTabSyncListener.deliverCapturedSurface->observeEditorSurface	RefocusLive|ResendFocus|Fallback|EditorReregister|EditorAck	the serialized surface delivery and its retained retry (GH #326: the worker half of a projection pass)
+plugin_call	EditorTabSyncListener.deliverCapturedSurface->forgetEditorSurface	Handoff|EndFrame	in-flight delivery across a handoff (InFlightSurfaceDelivery) / a superseded root
+plugin_call	EditorTabSyncListener.deliverCapturedSurface->forgetEditorFocus	Handoff|EndFrame	as above, focus lane
 plugin_call	EditorTabSyncListener.requestFocusProjection->observeEditorFocus	RefocusLive|EditorReregister|EditorAck	focus projection
 plugin_call	EditorTabSyncListener.publishCommandSurface->observeEditorSurface	RefocusLive|EditorReregister|EditorAck	Run Agent Doc / Sync Tmux Panes publish the current surface before naming it (surface_layout_reference_v1)
 plugin_call	EditorTabSyncListener.publishCommandSurface->forgetEditorSurface	Handoff	an authority handoff overtook the command's publication (InFlightSurfaceDelivery)

@@ -945,7 +945,27 @@ object LayoutDetector {
         project: com.intellij.openapi.project.Project,
         windows: List<com.intellij.openapi.fileEditor.impl.EditorWindow>,
         sessionDocumentPaths: Set<String>?,
-    ): WindowLayoutEvidence? {
+    ): WindowLayoutEvidence? =
+        captureEditorWindows(project, windows, sessionDocumentPaths)
+            .takeUnless(CapturedEditorWindows::geometryUnavailable)
+            ?.evidence
+
+    /**
+     * GH #326: what the windows of a frame are, plus whether their frame could be measured. When it
+     * could not, every window is still reported (selected tab and session tabs, no origin), because
+     * the surface projection reads the selections even when no local layout can be derived.
+     */
+    internal data class CapturedEditorWindows(
+        val evidence: WindowLayoutEvidence,
+        val geometryUnavailable: Boolean,
+    )
+
+    internal fun captureEditorWindows(
+        project: com.intellij.openapi.project.Project,
+        windows: List<com.intellij.openapi.fileEditor.impl.EditorWindow>,
+        sessionDocumentPaths: Set<String>?,
+    ): CapturedEditorWindows {
+        var geometryUnavailable = false
         val splittersComponent =
             if (windows.size >= 2) {
                 val splitters = windows.firstOrNull()?.owner
@@ -955,7 +975,8 @@ object LayoutDetector {
                         "[layout-detect] ${windows.size} editor windows but splitters component " +
                             "unavailable; cannot resolve columns",
                     )
-                    return null
+                    geometryUnavailable = true
+                    null
                 }
             } else {
                 null
@@ -985,10 +1006,14 @@ object LayoutDetector {
             )
         }
         val tabs = evidence.flatMap(EditorWindowEvidence::sessionTabs).toSet()
-        return WindowLayoutEvidence(
-            basePath = project.basePath,
-            windows = evidence,
-            history = editorHistoryPaths(project).filter(tabs::contains),
+        return CapturedEditorWindows(
+            evidence =
+                WindowLayoutEvidence(
+                    basePath = project.basePath,
+                    windows = evidence,
+                    history = editorHistoryPaths(project).filter(tabs::contains),
+                ),
+            geometryUnavailable = geometryUnavailable,
         )
     }
 
@@ -1413,6 +1438,9 @@ object LayoutDetector {
             visible +
             "reason=$reason"
     }
+
+    /** GH #326: log a native-derived `[layout-detect]` line through the shared dedup. */
+    internal fun logObservedLayout(line: String) = logLayoutObservation(line)
 
     private fun logLayoutObservation(line: String) {
         val observation = layoutObservationCount.incrementAndGet()

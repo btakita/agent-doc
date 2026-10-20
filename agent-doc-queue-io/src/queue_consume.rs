@@ -2101,19 +2101,24 @@ fn plan_queue_prompt_consumption_inner(
             };
 
             let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
+            // GH #327: a `loop` queue keeps its struck rows on drain; they are
+            // the scheduler's completion evidence and the loop restore removes
+            // them.
+            let retain_struck =
+                agent_doc_queue::queue_schedule::queue_retains_struck_heads(&comp.attrs);
             let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
             let queue_empty = remaining == 0;
             let refill_pending =
                 queue_empty && one_shot_queue_refill_pending(content, &completed_entries)?;
             let drained = queue_empty && !refill_pending;
             let all_queues_drained = total_live_prompts == consumed_texts.len() && !refill_pending;
-            let new_entries = if queue_empty {
+            let new_entries = if queue_empty && !retain_struck {
                 Vec::new()
             } else {
                 completed_entries
             };
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
-            let mut current = if drained {
+            let mut current = if drained && !retain_struck {
                 comp.replace_content(content, &new_body)
             } else if consumed_node_keys.ast_backed {
                 consume_queue_nodes_by_key(content, &consumed_node_keys.keys)?
@@ -2201,7 +2206,7 @@ fn plan_queue_prompt_consumption_inner(
                     );
                     let snap_remaining =
                         agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
-                    let snap_new_entries = if snap_remaining == 0 {
+                    let snap_new_entries = if snap_remaining == 0 && !retain_struck {
                         Vec::new()
                     } else {
                         snap_completed_entries
@@ -2223,19 +2228,20 @@ fn plan_queue_prompt_consumption_inner(
                         );
                     }
 
-                    let mut new_snap = if drained || snap_new_entries != new_entries {
-                        snap_queue.replace_content(snap, &new_body)
-                    } else if snapshot_node_keys.ast_backed {
-                        consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
-                    } else {
-                        consume_queue_prompts_by_exact_spans(snap, &snapshot_consumed_texts)?
-                            .ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "queue consume: snapshot parser could not prove the exact \
+                    let mut new_snap =
+                        if (drained && !retain_struck) || snap_new_entries != new_entries {
+                            snap_queue.replace_content(snap, &new_body)
+                        } else if snapshot_node_keys.ast_backed {
+                            consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
+                        } else {
+                            consume_queue_prompts_by_exact_spans(snap, &snapshot_consumed_texts)?
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "queue consume: snapshot parser could not prove the exact \
                                      done-id head span (#qconsumenostrike)"
-                                )
-                            })?
-                    };
+                                    )
+                                })?
+                        };
                     if drained {
                         if let Ok(sc2) = element::parse(&new_snap)
                             && let Ok(Some(sq2)) = agent_doc_queue::queue_set::component_for_id(
@@ -2508,18 +2514,21 @@ fn plan_queue_prompt_consumption_inner(
     };
 
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
+    // GH #327: a `loop` queue keeps its struck rows on drain; they are the
+    // scheduler's completion evidence and the loop restore removes them.
+    let retain_struck = agent_doc_queue::queue_schedule::queue_retains_struck_heads(&comp.attrs);
     let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
     let queue_empty = remaining == 0;
     let refill_pending = queue_empty && one_shot_queue_refill_pending(content, &completed_entries)?;
     let drained = queue_empty && !refill_pending;
     let all_queues_drained = total_live_prompts == consume_count && !refill_pending;
-    let new_entries = if queue_empty {
+    let new_entries = if queue_empty && !retain_struck {
         Vec::new()
     } else {
         completed_entries
     };
     let new_body = agent_doc_queue::document_queue::render(&new_entries);
-    let mut current = if drained {
+    let mut current = if drained && !retain_struck {
         comp.replace_content(content, &new_body)
     } else if consumed_node_keys.ast_backed {
         consume_queue_nodes_by_key(content, &consumed_node_keys.keys)?
@@ -2623,7 +2632,7 @@ fn plan_queue_prompt_consumption_inner(
                     );
                 let snap_remaining =
                     agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
-                let snap_new_entries = if snap_remaining == 0 {
+                let snap_new_entries = if snap_remaining == 0 && !retain_struck {
                     Vec::new()
                 } else {
                     snap_completed_entries
@@ -2656,7 +2665,7 @@ fn plan_queue_prompt_consumption_inner(
                 );
             }
 
-            let mut new_snap = if drained || snap_new_entries != new_entries {
+            let mut new_snap = if (drained && !retain_struck) || snap_new_entries != new_entries {
                 snap_queue.replace_content(snap, &new_body)
             } else {
                 match snapshot_node_keys.as_ref() {
@@ -3675,6 +3684,113 @@ mod core_tests {
         .expect("the matching id-backed head is still consumed");
         assert_eq!(planned.consumed_texts, vec!["do [#foo]".to_string()]);
         assert_eq!(planned.remaining, 1, "the free-text head must survive");
+    }
+
+    #[test]
+    /// GH #327 pass 3: the consume that empties a `loop` queue strikes the head
+    /// in place instead of rewriting the body to nothing, in the document and
+    /// the snapshot, so the scheduler sees completion evidence and the loop
+    /// restore puts the item back byte-for-byte.
+    fn draining_a_loop_queue_keeps_the_struck_head_for_the_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let queues = |issues_body: &str| {
+            format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:queue subagents id=main -->\n",
+                    "- ~~ship it~~\n",
+                    "<!-- /agent:queue -->\n\n",
+                    "<!-- agent:queue loop interval=\"1h\" id=issues -->\n",
+                    "{}",
+                    "<!-- /agent:queue -->\n",
+                ),
+                issues_body
+            )
+        };
+        let content = queues("- poll issues\n");
+
+        let planned = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            &content,
+            Some(&content),
+            &[],
+            1,
+        )
+        .unwrap()
+        .expect("the loop head is consumed");
+        assert_eq!(planned.consumed_text, "poll issues");
+        assert!(planned.drained);
+        for (label, text) in [
+            ("document", &planned.new_document),
+            ("snapshot", &planned.new_snapshot),
+        ] {
+            assert!(
+                agent_doc_queue::queue_schedule::live_heads_for_queue(text, "issues")
+                    .unwrap()
+                    .is_empty(),
+                "{label}: the head is consumed"
+            );
+            assert_eq!(
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues").unwrap(),
+                vec!["poll issues".to_string()],
+                "{label}: the drain left the struck row behind"
+            );
+            let restored = agent_doc_queue::queue_schedule::plan_loop_restore_for_queue(
+                text,
+                "issues",
+                &["poll issues".to_string()],
+            )
+            .unwrap()
+            .expect("the restore re-appends the item");
+            assert!(
+                restored.contains(
+                    "<!-- agent:queue loop interval=\"1h\" id=issues -->\n- poll issues\n<!-- /agent:queue -->"
+                ),
+                "{label}: restore round-trips: {restored}"
+            );
+        }
+        assert!(
+            planned
+                .new_document
+                .contains("<!-- agent:queue subagents id=main -->\n- ~~ship it~~\n"),
+            "the sibling queue is untouched"
+        );
+    }
+
+    #[test]
+    /// GH #327: the done-id consume path keeps a drained `loop` queue's struck
+    /// row too; a non-loop queue still clears its drained body.
+    fn done_id_drain_keeps_struck_rows_only_in_a_loop_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        for (attrs, keeps) in [("loop id=issues", true), ("id=issues", false)] {
+            let content = format!(
+                "---\nqueue_active: true\n---\n\n<!-- agent:queue {attrs} -->\n- do [#ping]\n<!-- /agent:queue -->\n"
+            );
+            let planned = plan_queue_prompt_consumption_with_snapshot_and_count(
+                &doc,
+                &content,
+                Some(&content),
+                &["ping".to_string()],
+                1,
+            )
+            .unwrap()
+            .expect("the done id consumes its head");
+            assert!(planned.drained, "{attrs}");
+            for text in [&planned.new_document, &planned.new_snapshot] {
+                let completed =
+                    agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues")
+                        .unwrap();
+                assert_eq!(!completed.is_empty(), keeps, "{attrs}: {text}");
+                assert!(
+                    agent_doc_queue::queue_schedule::live_heads_for_queue(text, "issues")
+                        .unwrap()
+                        .is_empty(),
+                    "{attrs}"
+                );
+            }
+        }
     }
 
     #[test]

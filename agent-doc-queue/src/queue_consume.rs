@@ -1484,6 +1484,9 @@ fn normalize_answer_topic(text: &str) -> String {
 /// Strike `node_keys` (free-text queue heads already proven answered) and
 /// annotate them; when no live head remains and the body is losslessly
 /// discardable, clear it and drop the queue activation, as one projection.
+/// A `loop` queue's body is never cleared: its struck rows are the
+/// scheduler's completion evidence and the loop restore removes them
+/// (GH #327).
 fn project_free_text_strike_of_node_keys(
     content: &str,
     node_keys: Vec<String>,
@@ -1505,7 +1508,9 @@ fn project_free_text_strike_of_node_keys(
             .find(|component| component.name == "queue")
         {
             let entries = document_queue::parse(queue.content(&target_content))?;
-            if crate::queue_convergence::queue_body_clear_is_lossless(&entries) {
+            if !crate::queue_schedule::queue_retains_struck_heads(&queue.attrs)
+                && crate::queue_convergence::queue_body_clear_is_lossless(&entries)
+            {
                 target_content = queue.replace_content(&target_content, "");
                 let components = element::parse(&target_content)?;
                 if let Some(queue) = components
@@ -3756,6 +3761,52 @@ Old.
                 .unwrap()
                 .is_none(),
             "terminal drain must be idempotent"
+        );
+    }
+
+    /// GH #327: the finalize strike that answers a `loop` queue's last head
+    /// keeps the struck row instead of clearing the drained body.
+    #[test]
+    fn answered_free_text_projection_keeps_a_drained_loop_queue_struck_row() {
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: queue-projection\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: final question — gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> final question\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue loop interval=1h -->\n",
+            "- final question\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: final question — gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> final question\n\n",
+            "Answered.\n",
+        );
+
+        let projected = project_answered_free_text_strike(document, response, Some(document))
+            .unwrap()
+            .expect("the answered loop head is struck");
+        let queue_id = crate::queue_schedule::identified_queue_schedules(&projected.target_content)
+            .unwrap()
+            .remove(0)
+            .queue_id;
+        assert!(
+            crate::queue_schedule::live_heads_for_queue(&projected.target_content, &queue_id)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            crate::queue_schedule::completed_heads_for_queue(&projected.target_content, &queue_id)
+                .unwrap()
+                .len(),
+            1,
+            "the struck row stays for the loop restore:\n{}",
+            projected.target_content
         );
     }
 

@@ -2,7 +2,7 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
-## Unreleased
+## 0.35.527
 
 - **Residual-work lists reach the operator-todo advisory, and one
   `--todo-add` no longer silences it (GH #318).** The `#operatortodo` response

@@ -23,7 +23,6 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
 <!-- status:sync -->

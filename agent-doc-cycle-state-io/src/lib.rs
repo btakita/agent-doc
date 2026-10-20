@@ -872,6 +872,67 @@ pub fn load_recent_captured_response_checkpoints(
     Ok(checkpoints)
 }
 
+/// Content-bearing response captures the binary recorded since `cycle_id`
+/// opened, oldest first, including `cycle_id`'s own capture.
+///
+/// This is committed-authorship provenance for every response cycle in a
+/// lineage: when a later cycle is opened without a fresh steering seed (the
+/// `write`/`respond` auto-reopen after a committed cycle), a reader whose
+/// baseline predates both responses must attribute BOTH to the agent, not just
+/// the newest one.
+///
+/// Returns `None` when `cycle_id`'s `preflight_started` fact is not within the
+/// bounded window: the lineage start is then unproven and callers must not
+/// widen attribution past it. Both queries are bounded by `limit`; a lineage
+/// with more captures than that yields only the newest ones, never an older
+/// capture from before `cycle_id`.
+pub fn load_captured_responses_since_cycle(
+    file: &Path,
+    cycle_id: &str,
+    limit: usize,
+) -> Result<Option<Vec<CapturedResponseCheckpoint>>> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(None);
+    };
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
+        return Ok(None);
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let opened = agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+        &conn,
+        &document_hash,
+        "preflight_started",
+        limit,
+    )?;
+    let mut start_sequence = None;
+    for row in opened {
+        let event: agent_doc_state_backbone::StateEvent =
+            serde_json::from_str(&row.payload_json)
+                .with_context(|| format!("decode state event {}", row.event_id))?;
+        if let agent_doc_state_backbone::StateFact::PreflightStarted {
+            cycle_id: opened_cycle,
+            ..
+        } = event.fact
+            && opened_cycle == cycle_id
+        {
+            // A re-entrant preflight re-emits the opening; the earliest wins.
+            start_sequence = Some(row.sequence);
+        }
+    }
+    let Some(start_sequence) = start_sequence else {
+        return Ok(None);
+    };
+    let mut captures: Vec<CapturedResponseCheckpoint> =
+        load_recent_captured_response_checkpoints(file, limit)?
+            .into_iter()
+            .filter(|capture| capture.sequence > start_sequence)
+            .collect();
+    captures.reverse();
+    Ok(Some(captures))
+}
+
 /// Load the authoritative per-document projection.
 ///
 /// A live controller serves its in-memory reactive projection. Cold durable

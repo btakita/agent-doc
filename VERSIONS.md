@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **An earlier response's `> **Queue prompt:**` echoes no longer replay as
+  operator steering after an auto-reopened closeout
+  (`#assistantsteeringlineage`).** When a second `respond` arrives after a
+  committed cycle, the binary auto-reopens a fresh cycle from HEAD without
+  re-seeding the steering watermark. The turn-boundary steering scan then
+  compared against the first cycle's preflight baseline, but it subtracted
+  only the newest cycle's captured response, so every line of the first
+  response that sat outside a `### Re:` section (the strike echoes above the
+  heading) surfaced as a new `source=exchange` operator prompt and was
+  dispatched to subagents (seen on 0.35.527). The scan now subtracts every
+  content-bearing response captured since the watermark's own cycle opened,
+  proven from the state ledger's `preflight_started` and `response_captured`
+  facts, so agent-authored text is attributed by its capture provenance
+  rather than by blockquote prefix.
+
 ## 0.35.527
 
 - **Residual-work lists reach the operator-todo advisory, and one

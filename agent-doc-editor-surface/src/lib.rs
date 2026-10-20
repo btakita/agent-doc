@@ -28,6 +28,7 @@
 //! derives [`SurfaceIntent`] from it, so the intent updates because an
 //! observation arrived rather than because a caller remembered to ask.
 
+pub mod attach_failure;
 pub mod editor_view_policy;
 pub mod endpoint_retirement;
 pub mod graph;
@@ -43,6 +44,7 @@ pub mod sync_layout;
 pub mod terminal_ownership;
 pub mod window_layout;
 
+pub use attach_failure::{AttachFailureDiagnosis, AttachFailureEvidence, diagnose_attach_failure};
 pub use editor_view_policy::{
     EditorSurfaceRole, EditorViewBindSource, EditorViewBindingPhase, EditorViewFreezeReason,
     EditorViewId, EditorViewLifecycleTransition, EditorViewPlaceholderReason, EditorViewPolicy,

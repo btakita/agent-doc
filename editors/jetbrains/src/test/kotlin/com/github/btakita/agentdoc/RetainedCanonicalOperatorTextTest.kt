@@ -96,7 +96,7 @@ class RetainedCanonicalOperatorTextTest {
         val failurePath = source
             .substringAfter("private fun recordRegisterFailure")
             .substringBefore("private fun scheduleRegisterRetry")
-        assertTrue(failurePath.contains("recordRetainedProjectionHold(filePath, reason)"))
+        assertTrue(failurePath.contains("recordRetainedProjectionHold(filePath, reason, diagnosis)"))
         assertTrue(failurePath.contains("agent_doc_record_editor_surface_event("))
         assertTrue(failurePath.contains("TerminalUtil.notifyError(project, message)"))
     }

@@ -413,6 +413,7 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "remote_layout",
     "remote_client_surface",
     "registration_projection",
+    "attach_failure_diagnosis",
 ];
 
 #[derive(serde::Deserialize)]
@@ -502,6 +503,16 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             serde_json::to_value(agent_doc_editor_surface::derive_registration_projection(
                 &evidence,
             ))?
+        }
+        "attach_failure_diagnosis" => {
+            // GH #326 phase 5b: what a CRDT replica attach failure reason means
+            // for the operator (`CrdtReplicaManager.recordRegisterFailure`,
+            // Compact Exchange): the remedy, the ops-log status token, whether
+            // the hold is surfaced, whether liveness is republished, and the
+            // notification text.
+            let evidence: agent_doc_editor_surface::AttachFailureEvidence =
+                serde_json::from_value(input).context("parse attach failure evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::diagnose_attach_failure(&evidence))?
         }
         other => anyhow::bail!(
             "unknown editor derivation `{other}`; this library answers {}",
@@ -1108,6 +1119,29 @@ mod tests {
                 expected,
                 "combination {index}: {chosen:?}"
             );
+        }
+    }
+
+    /// GH #326 phase 5b: the native `attach_failure_diagnosis` derivation
+    /// answers every shared parity case through the derivation channel. The
+    /// plugin's frozen Kotlin floor answers the same file in
+    /// `AttachFailureDiagnosisTest`, so the two cannot drift silently.
+    #[test]
+    fn gh326_attach_failure_diagnosis_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/attach_failure_diagnosis.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 32, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let request = serde_json::json!({
+                "derivation": "attach_failure_diagnosis",
+                "input": case["input"].clone(),
+            });
+            let output = derive_editor_from_json(&request.to_string()).unwrap()["output"].clone();
+            assert_eq!(output, case["expected"], "{name}");
         }
     }
 

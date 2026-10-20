@@ -74,35 +74,34 @@ class CompactExchangeAction : AnAction(), DumbAware {
                     } else {
                         "native-handoff-timeout"
                     }
-                    if (attachFailureReason != null) {
-                        recordAttachRefusal(project.basePath, file.path, attachFailureReason)
-                    }
+                    // GH #326 phase 5b: diagnose the cause and format the refusal on this
+                    // worker. The diagnosis is a native derivation, so it never runs on the
+                    // EDT; the EDT only shows the message.
+                    val attachFailureDiagnosis =
+                        attachFailureReason?.let { reason ->
+                            AttachFailureDiagnosis.diagnose(reason).also { diagnosis ->
+                                recordAttachRefusal(project.basePath, file.path, reason, diagnosis.statusToken)
+                            }
+                        }
+                    // `#replicarefusalreason`: report the refusal CAUSE and its remedy.
+                    // "Could not be attached" alone points the operator at the controller,
+                    // which is usually healthy and reports ready — observed twice on
+                    // 2026-08-11, where the real cause was an IDE running a plugin
+                    // generation older than the installed jar.
+                    val refusalMessage =
+                        if (attached) {
+                            null
+                        } else {
+                            attachRefusalMessage(attachFailureReason, attachFailureDiagnosis?.remedy)
+                        }
                     ApplicationManager.getApplication().invokeLater {
                         if (project.isDisposed) {
                             refresher.clearTransientStatus(file.path, statusToken)
                             return@invokeLater
                         }
-                        if (!attached) {
+                        if (refusalMessage != null) {
                             refresher.clearTransientStatus(file.path, statusToken)
-                            // `#replicarefusalreason`: report the refusal CAUSE and its
-                            // remedy. "Could not be attached" alone points the operator at
-                            // the controller, which is usually healthy and reports ready —
-                            // observed twice on 2026-08-11, where the real cause was an IDE
-                            // running a plugin generation older than the installed jar.
-                            val reason = attachFailureReason
-                            val remedy = reason?.let { CrdtReplicaManager.attachFailureRemedy(it) }
-                            TerminalUtil.notifyError(
-                                project,
-                                buildString {
-                                    append(
-                                        "Compact Exchange was not started because the open editor replica " +
-                                            "could not be attached to its owning project controller.",
-                                    )
-                                    if (reason != null) append(" Cause: $reason.")
-                                    if (remedy != null) append(" $remedy")
-                                    append(" The editor buffer and disk were left unchanged.")
-                                },
-                            )
+                            TerminalUtil.notifyError(project, refusalMessage)
                             return@invokeLater
                         }
                         TerminalUtil.compactExchange(project, file) {
@@ -127,7 +126,18 @@ class CompactExchangeAction : AnAction(), DumbAware {
         return ActionUpdateThread.BGT
     }
 
-    private fun recordAttachRefusal(projectRoot: String?, filePath: String, reason: String) {
+    private fun attachRefusalMessage(reason: String?, remedy: String?): String =
+        buildString {
+            append(
+                "Compact Exchange was not started because the open editor replica " +
+                    "could not be attached to its owning project controller.",
+            )
+            if (reason != null) append(" Cause: $reason.")
+            if (remedy != null) append(" $remedy")
+            append(" The editor buffer and disk were left unchanged.")
+        }
+
+    private fun recordAttachRefusal(projectRoot: String?, filePath: String, reason: String, statusToken: String) {
         if (projectRoot == null) {
             log.warn("[compact] cannot record replica attach refusal: project root unavailable")
             return
@@ -137,7 +147,7 @@ class CompactExchangeAction : AnAction(), DumbAware {
             log.warn("[compact] cannot record replica attach refusal: native library unavailable; reason=$reason")
             return
         }
-        val status = "attach_refused_${attachFailureStatusToken(reason)}"
+        val status = "attach_refused_$statusToken"
         try {
             if (!lib.agent_doc_record_editor_surface_event(
                     projectRoot,

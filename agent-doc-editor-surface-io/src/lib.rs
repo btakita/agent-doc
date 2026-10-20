@@ -410,6 +410,8 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "client_measured_layout",
     "surface_projection",
     "sync_layout",
+    "remote_layout",
+    "remote_client_surface",
 ];
 
 #[derive(serde::Deserialize)]
@@ -455,6 +457,36 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             let evidence: agent_doc_editor_surface::SyncLayoutEvidence =
                 serde_json::from_value(input).context("parse sync layout evidence")?;
             serde_json::to_value(agent_doc_editor_surface::derive_sync_layout(
+                &evidence,
+                nearest_agent_doc_root,
+            ))?
+        }
+        "remote_layout" => {
+            // GH #326 phase 4: the Remote Dev fold (GH #134) through the
+            // derivation channel. It shares the per-project memory of the
+            // pre-#326 `agent_doc_editor_surface_resolve_remote_layout_json`
+            // symbol and of `surface_projection`, so every caller folds one
+            // history. The plugin's memoryless Kotlin fallback is retired: with
+            // no native answer the Remote Dev layout is unknown.
+            let evidence: agent_doc_editor_surface::RemoteSurfaceEvidence =
+                serde_json::from_value(input).context("parse remote layout evidence")?;
+            let fold = RemoteLayoutEvidence {
+                clients: evidence.clients,
+                focused: evidence.focused,
+            };
+            let root = Path::new(&evidence.project_root);
+            let resolution = if evidence.project_root.trim().is_empty() {
+                // No root to key the memory or ask the controller by.
+                resolve_remote_layout_with_authority(root, &fold, |_| None)
+            } else {
+                resolve_remote_layout(root, &fold)
+            };
+            serde_json::to_value(resolution)?
+        }
+        "remote_client_surface" => {
+            let evidence: agent_doc_editor_surface::RemoteClientSurfaceEvidence =
+                serde_json::from_value(input).context("parse remote client surface evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::derive_remote_client_surface(
                 &evidence,
                 nearest_agent_doc_root,
             ))?
@@ -849,6 +881,162 @@ mod tests {
         ]);
         assert_eq!(cross["project_root"], work.as_str());
         assert_eq!(cross["column_order"], "editor");
+        std::fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    /// GH #326 phase 4: the Remote Dev fold answers every shared contract case,
+    /// each folded in order from an empty memory with no controller authority.
+    /// The plugin keeps no Kotlin copy of the fold (its memoryless fallback was
+    /// retired); `LayoutDetectorTest` pins that it sends each step's input
+    /// exactly and publishes each answer.
+    #[test]
+    fn gh326_remote_layout_answers_the_shared_contract_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/remote_layout.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 8, "the contract file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let mut memory = RemoteLayoutMemory::default();
+            for (index, step) in case["steps"].as_array().unwrap().iter().enumerate() {
+                let evidence: agent_doc_editor_surface::RemoteSurfaceEvidence =
+                    serde_json::from_value(step["input"].clone()).unwrap();
+                let (next, resolution) = memory.advance(&RemoteLayoutEvidence {
+                    clients: evidence.clients,
+                    focused: evidence.focused,
+                });
+                memory = next;
+                assert_eq!(
+                    serde_json::to_value(&resolution).unwrap(),
+                    step["expected"],
+                    "{name}: step {index}"
+                );
+            }
+        }
+    }
+
+    /// GH #326 phase 4: the derivation channel folds into the same per-project
+    /// memory as the pre-#326 `resolve_remote_layout` symbol, so a plugin that
+    /// asks through either channel continues one history.
+    #[test]
+    fn gh326_remote_layout_shares_the_legacy_fold_memory() {
+        let root = format!("/tmp/gh326-remote-layout-{}", std::process::id());
+        let split = serde_json::json!({
+            "derivation": "remote_layout",
+            "input": {
+                "project_root": root,
+                "clients": [{"visible": ["a.md", "b.md"], "selected": ["a.md"], "open": ["a.md", "b.md"]}],
+                "focused": ["a.md"]
+            }
+        });
+        let detected = derive_editor_from_json(&split.to_string()).unwrap();
+        assert_eq!(detected["derivation"], "remote_layout");
+        assert_eq!(
+            detected["output"]["columns"],
+            serde_json::json!([{"files": ["a.md"]}, {"files": ["b.md"]}])
+        );
+        assert_eq!(
+            detected["output"]["source"],
+            "remote_client_visible_editors"
+        );
+        let single =
+            r#"{"clients":[{"selected":["b.md"],"open":["a.md","b.md"]}],"focused":["b.md"]}"#;
+        let retained = resolve_remote_layout_from_json(Path::new(&root), single).unwrap();
+        assert_eq!(
+            retained.columns.len(),
+            2,
+            "the legacy symbol continues the history"
+        );
+        assert_eq!(retained.source.as_str(), "retained_remote_columns");
+        remote_layout_memory().remove(Path::new(&root));
+
+        let empty = derive_editor_from_json(r#"{"derivation":"remote_layout"}"#).unwrap();
+        assert_eq!(empty["output"]["columns"], serde_json::json!([]));
+        assert_eq!(empty["output"]["source"], "unknown");
+        remote_layout_memory().remove(Path::new(""));
+    }
+
+    /// GH #326 phase 4: the native `remote_client_surface` derivation answers
+    /// every shared parity case. The 262/263 backend's frozen Kotlin floor
+    /// answers the same file in `RemoteClientMeasuredLayoutTest`, so the two
+    /// cannot drift silently.
+    #[test]
+    fn gh326_remote_client_surface_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/remote_client_surface.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let evidence: agent_doc_editor_surface::RemoteClientSurfaceEvidence =
+                serde_json::from_value(case["input"].clone()).unwrap();
+            let roots = case["nearest_roots"]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            let forwarded =
+                agent_doc_editor_surface::derive_remote_client_surface(&evidence, |file| {
+                    roots
+                        .get(file)
+                        .and_then(|root| root.as_str())
+                        .map(str::to_string)
+                });
+            assert_eq!(
+                serde_json::to_value(&forwarded).unwrap(),
+                case["expected"],
+                "{name}"
+            );
+        }
+    }
+
+    /// GH #326 phase 4: the derivation channel answers `remote_client_surface`,
+    /// resolving each document's nearest `.agent-doc` root on the filesystem.
+    #[test]
+    fn gh326_remote_client_surface_resolves_project_roots_through_the_derivation_channel() {
+        let scratch = std::env::temp_dir().join(format!(
+            "gh326-remote-client-surface-{}",
+            std::process::id()
+        ));
+        let app = scratch.join("work/src/app");
+        let other = scratch.join("work/src/other");
+        for root in [&app, &other] {
+            std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        }
+        let work = scratch.join("work").to_string_lossy().into_owned();
+        let app = app.to_string_lossy().into_owned();
+        let other = other.to_string_lossy().into_owned();
+        let derive = |columns: serde_json::Value| {
+            let request = serde_json::json!({
+                "derivation": "remote_client_surface",
+                "input": {
+                    "base_path": work,
+                    "fallback_root": app,
+                    "focused": format!("{app}/a.md"),
+                    "columns": columns
+                }
+            });
+            derive_editor_from_json(&request.to_string()).unwrap()["output"].clone()
+        };
+        let single = derive(serde_json::json!([
+            [format!("{app}/b.md")],
+            [format!("{app}/a.md")]
+        ]));
+        assert_eq!(single["project_root"], app.as_str());
+        assert_eq!(single["surface"]["column_order"], "editor");
+        assert_eq!(single["surface"]["preserve_focus"], true);
+        assert_eq!(
+            single["surface"]["columns"],
+            serde_json::json!([{"files": [format!("{app}/b.md")]}, {"files": [format!("{app}/a.md")]}])
+        );
+        let cross = derive(serde_json::json!([
+            [format!("{app}/a.md")],
+            [format!("{other}/c.md")]
+        ]));
+        assert_eq!(cross["project_root"], work.as_str());
         std::fs::remove_dir_all(&scratch).unwrap();
     }
 

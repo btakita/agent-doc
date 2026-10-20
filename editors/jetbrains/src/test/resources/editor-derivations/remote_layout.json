@@ -1,0 +1,425 @@
+{
+  "derivation": "remote_layout",
+  "about": "GH #326 phase 4 contract cases. The Rust `remote_layout` derivation (the GH #134 Remote Dev fold, agent-doc-editor-surface-io) answers every case, folding its steps in order from an empty memory with no controller authority. The plugin has no Kotlin copy of this fold: its memoryless fallback was retired in phase 4, so with no native answer the layout is unknown. LayoutDetectorTest pins that the plugin sends each step's `input` exactly and turns each `expected` answer into the layout it publishes. A native rule change updates this file.",
+  "cases": [
+    {
+      "name": "one client's visible editors are a detected split",
+      "steps": [
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [
+                  "tasks/left.md",
+                  "tasks/right.md"
+                ],
+                "selected": [
+                  "tasks/left.md"
+                ],
+                "open": [
+                  "tasks/left.md",
+                  "tasks/right.md"
+                ]
+              }
+            ],
+            "focused": [
+              "tasks/left.md"
+            ]
+          },
+          "expected": {
+            "columns": [
+              {
+                "files": [
+                  "tasks/left.md"
+                ]
+              },
+              {
+                "files": [
+                  "tasks/right.md"
+                ]
+              }
+            ],
+            "source": "remote_client_visible_editors",
+            "column_order": "unknown"
+          }
+        }
+      ]
+    },
+    {
+      "name": "one client selecting two files is still a detected split, duplicates dropped",
+      "steps": [
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [],
+                "selected": [
+                  "tasks/laptop.md",
+                  "tasks/1099.md",
+                  "tasks/laptop.md"
+                ],
+                "open": [
+                  "tasks/laptop.md",
+                  "tasks/1099.md"
+                ]
+              }
+            ],
+            "focused": [
+              "tasks/laptop.md"
+            ]
+          },
+          "expected": {
+            "columns": [
+              {
+                "files": [
+                  "tasks/laptop.md"
+                ]
+              },
+              {
+                "files": [
+                  "tasks/1099.md"
+                ]
+              }
+            ],
+            "source": "remote_client_selected_files",
+            "column_order": "unknown"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a focused file without client split evidence is unknown",
+      "steps": [
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [],
+                "selected": [
+                  "tasks/laptop.md"
+                ],
+                "open": [
+                  "tasks/laptop.md"
+                ]
+              }
+            ],
+            "focused": [
+              "tasks/laptop.md"
+            ]
+          },
+          "expected": {
+            "columns": [],
+            "source": "unknown",
+            "column_order": "unknown",
+            "reason": "no_split_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "name": "two clients with one file each are not a split",
+      "steps": [
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [
+                  "tasks/laptop.md"
+                ],
+                "selected": [
+                  "tasks/laptop.md"
+                ],
+                "open": []
+              },
+              {
+                "visible": [
+                  "tasks/1099.md"
+                ],
+                "selected": [
+                  "tasks/1099.md"
+                ],
+                "open": []
+              }
+            ],
+            "focused": [
+              "tasks/laptop.md"
+            ]
+          },
+          "expected": {
+            "columns": [],
+            "source": "unknown",
+            "column_order": "unknown",
+            "reason": "no_split_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "name": "two clients with different split sets are not one split",
+      "steps": [
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [
+                  "tasks/laptop.md",
+                  "tasks/1099.md"
+                ],
+                "selected": [],
+                "open": []
+              },
+              {
+                "visible": [
+                  "tasks/guest-left.md",
+                  "tasks/guest-right.md"
+                ],
+                "selected": [],
+                "open": []
+              }
+            ],
+            "focused": []
+          },
+          "expected": {
+            "columns": [],
+            "source": "unknown",
+            "column_order": "unknown",
+            "reason": "ambiguous_remote_clients"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a later single selection retains the known split",
+      "steps": [
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [
+                  "tasks/a.md",
+                  "tasks/b.md"
+                ],
+                "selected": [
+                  "tasks/a.md"
+                ],
+                "open": [
+                  "tasks/a.md",
+                  "tasks/b.md"
+                ]
+              }
+            ],
+            "focused": [
+              "tasks/a.md"
+            ]
+          },
+          "expected": {
+            "columns": [
+              {
+                "files": [
+                  "tasks/a.md"
+                ]
+              },
+              {
+                "files": [
+                  "tasks/b.md"
+                ]
+              }
+            ],
+            "source": "remote_client_visible_editors",
+            "column_order": "unknown"
+          }
+        },
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [
+                  "tasks/b.md"
+                ],
+                "selected": [
+                  "tasks/b.md"
+                ],
+                "open": [
+                  "tasks/a.md",
+                  "tasks/b.md"
+                ]
+              }
+            ],
+            "focused": [
+              "tasks/b.md"
+            ]
+          },
+          "expected": {
+            "columns": [
+              {
+                "files": [
+                  "tasks/a.md"
+                ]
+              },
+              {
+                "files": [
+                  "tasks/b.md"
+                ]
+              }
+            ],
+            "source": "retained_remote_columns",
+            "column_order": "unknown",
+            "reason": "single_selection_within_retained_layout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a cold observation never appends the selected file to the visible split",
+      "steps": [
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [
+                  "tasks/a.md",
+                  "tasks/b.md"
+                ],
+                "selected": [
+                  "tasks/c.md"
+                ],
+                "open": [
+                  "tasks/a.md",
+                  "tasks/b.md",
+                  "tasks/c.md"
+                ]
+              }
+            ],
+            "focused": [
+              "tasks/c.md"
+            ]
+          },
+          "expected": {
+            "columns": [
+              {
+                "files": [
+                  "tasks/a.md"
+                ]
+              },
+              {
+                "files": [
+                  "tasks/b.md"
+                ]
+              }
+            ],
+            "source": "remote_client_visible_editors",
+            "column_order": "unknown"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a selected file never widens the visible split set",
+      "steps": [
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [
+                  "tasks/a.md",
+                  "tasks/b.md"
+                ],
+                "selected": [
+                  "tasks/a.md"
+                ],
+                "open": [
+                  "tasks/a.md",
+                  "tasks/b.md",
+                  "tasks/c.md"
+                ]
+              }
+            ],
+            "focused": [
+              "tasks/a.md"
+            ]
+          },
+          "expected": {
+            "columns": [
+              {
+                "files": [
+                  "tasks/a.md"
+                ]
+              },
+              {
+                "files": [
+                  "tasks/b.md"
+                ]
+              }
+            ],
+            "source": "remote_client_visible_editors",
+            "column_order": "unknown"
+          }
+        },
+        {
+          "input": {
+            "project_root": "/repo",
+            "clients": [
+              {
+                "visible": [
+                  "tasks/a.md",
+                  "tasks/b.md"
+                ],
+                "selected": [
+                  "tasks/c.md"
+                ],
+                "open": [
+                  "tasks/a.md",
+                  "tasks/b.md",
+                  "tasks/c.md"
+                ]
+              }
+            ],
+            "focused": [
+              "tasks/c.md"
+            ]
+          },
+          "expected": {
+            "columns": [
+              {
+                "files": [
+                  "tasks/c.md"
+                ]
+              },
+              {
+                "files": [
+                  "tasks/b.md"
+                ]
+              }
+            ],
+            "source": "retained_remote_columns",
+            "column_order": "unknown",
+            "reason": "selected_visible_change_replaced_focus_column"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an empty observation is unknown",
+      "steps": [
+        {
+          "input": {},
+          "expected": {
+            "columns": [],
+            "source": "unknown",
+            "column_order": "unknown",
+            "reason": "no_split_evidence"
+          }
+        }
+      ]
+    }
+  ]
+}

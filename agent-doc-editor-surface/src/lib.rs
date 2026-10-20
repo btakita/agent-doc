@@ -34,6 +34,7 @@ pub mod graph;
 pub mod installation_focus;
 pub mod navigation_lane;
 pub mod pane_placement;
+pub mod remote_client_surface;
 pub mod remote_layout;
 pub mod surface_layout_reference;
 pub mod surface_projection;
@@ -69,6 +70,9 @@ pub use navigation_lane::{
     plan_navigation_lane_reconcile, requester_navigation_lane, requester_pane_placement,
     requester_route_layout, route_owned_by_other_lane_notice, shared_sync_target_session,
     tmux_session_name_component,
+};
+pub use remote_client_surface::{
+    RemoteClientSurface, RemoteClientSurfaceEvidence, derive_remote_client_surface,
 };
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,

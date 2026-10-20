@@ -8,6 +8,8 @@ import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.github.btakita.agentdoc.split.forSchema
+import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.platform.project.ProjectId
 import fleet.util.UID
@@ -152,6 +154,7 @@ class RemoteClientMeasuredLayoutTest {
         val forwarded = RemoteClientSurfacePayload.build(
             root.toString(),
             MeasuredMainLayout.Measured(listOf(listOf(b), listOf(a)), focused = a),
+            EditorDerivation.Unavailable,
         )
         val payload = JsonParser.parseString(forwarded.surfaceJson).asJsonObject
 
@@ -164,6 +167,89 @@ class RemoteClientMeasuredLayoutTest {
                 column.asJsonObject.getAsJsonArray("files").map { it.asString }
             },
         )
+    }
+
+    private fun surfaceParityCases(): List<JsonObject> {
+        val stream = javaClass.classLoader.getResourceAsStream("editor-derivations/remote_client_surface.json")
+            ?: error("GH #326 remote client surface parity fixture not on the test classpath")
+        val raw = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        return JsonParser.parseString(raw).asJsonObject.getAsJsonArray("cases").map { it.asJsonObject }
+    }
+
+    /**
+     * The fixture omits fields the way an older plugin generation would (every input is optional on
+     * the native side); the forwarder always fills them, so overlay the case on a complete one.
+     */
+    private fun surfaceEvidenceOf(case: JsonObject): RemoteClientSurfacePayload.Evidence {
+        val complete = JsonParser.parseString("""{"focused":"","columns":[]}""").asJsonObject
+        for ((key, value) in case.getAsJsonObject("input").entrySet()) {
+            complete.add(key, value)
+        }
+        return Gson().fromJson(complete, RemoteClientSurfacePayload.Evidence::class.java)
+    }
+
+    private fun wire(forwarded: ForwardedRemoteSurface): JsonObject =
+        JsonObject().apply {
+            addProperty("project_root", forwarded.projectRoot)
+            add("surface", JsonParser.parseString(forwarded.surfaceJson))
+        }
+
+    @Test
+    fun gh326FrozenRemoteClientSurfaceFloorAnswersEverySharedParityCase() {
+        // The same file pins the native derivation in Rust
+        // (gh326_remote_client_surface_answers_the_shared_parity_cases).
+        val cases = surfaceParityCases()
+        assertTrue(cases.size >= 10, "the parity file lost cases")
+        for (case in cases) {
+            val name = case.get("name").asString
+            val roots = case.getAsJsonObject("nearest_roots")?.entrySet()?.associate { it.key to it.value.asString }.orEmpty()
+            val forwarded = RemoteClientSurfacePayload.frozen(surfaceEvidenceOf(case)) { file -> roots[file] }
+            assertEquals(case.getAsJsonObject("expected"), wire(forwarded), name)
+        }
+    }
+
+    @Test
+    fun gh326RemoteClientSurfaceEvidenceIsTheNativeWireShape() {
+        val layout = MeasuredMainLayout.Measured(listOf(listOf("/repo/src/app/b.md"), listOf("/repo/src/app/a.md")), "/repo/src/app/a.md")
+        val evidence = RemoteClientSurfacePayload.evidence("/repo", layout) { base, focused ->
+            assertEquals("/repo", base)
+            assertEquals("/repo/src/app/a.md", focused)
+            "/repo/src/app"
+        }
+        assertEquals(
+            JsonParser.parseString(
+                """{"base_path":"/repo","fallback_root":"/repo/src/app","focused":"/repo/src/app/a.md",""" +
+                    """"columns":[["/repo/src/app/b.md"],["/repo/src/app/a.md"]]}""",
+            ),
+            JsonParser.parseString(Gson().toJson(evidence)),
+        )
+    }
+
+    @Test
+    fun gh326NativeRemoteClientSurfaceAnswerWinsAndKeepsFieldsTheFloorDoesNotKnow() {
+        val root = Files.createTempDirectory("rdgeometry-native").toRealPath().toString()
+        val layout = MeasuredMainLayout.Measured(listOf(listOf("$root/a.md")), "$root/a.md")
+        var asked: String? = null
+        var input: JsonObject? = null
+        val forwarded = RemoteClientSurfacePayload.build(root, layout) { derivation, inputJson ->
+            asked = derivation
+            input = JsonParser.parseString(inputJson).asJsonObject
+            """{"project_root":"/native/root","surface":{"focused":"$root/a.md","columns":[],"later_field":7}}"""
+        }
+        assertEquals("remote_client_surface", asked)
+        assertEquals("$root/a.md", input!!.get("focused").asString)
+        assertEquals("/native/root", forwarded.projectRoot)
+        assertEquals(7, JsonParser.parseString(forwarded.surfaceJson).asJsonObject.get("later_field").asInt)
+    }
+
+    @Test
+    fun gh326AnUnreadableNativeRemoteClientSurfaceFallsBackToTheFrozenFloor() {
+        val root = Files.createTempDirectory("rdgeometry-unreadable").toRealPath().toString()
+        val layout = MeasuredMainLayout.Measured(listOf(listOf("$root/b.md"), listOf("$root/a.md")), "$root/a.md")
+        val frozen = RemoteClientSurfacePayload.build(root, layout, EditorDerivation.Unavailable)
+        for (answer in listOf("not json", """{"surface":{}}""", """{"project_root":"/x","surface":[]}""")) {
+            assertEquals(frozen, RemoteClientSurfacePayload.build(root, layout) { _, _ -> answer }, answer)
+        }
     }
 
     @Test

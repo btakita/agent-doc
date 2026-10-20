@@ -3078,6 +3078,9 @@ fn install_intentional_exit_handler(
             crate::restore_outer_terminal_on_exit();
             let (status, detail) = match outcome {
                 IntentionalExitRecordOutcome::Recorded => ("recorded", String::new()),
+                IntentionalExitRecordOutcome::PreservedReplacementIntent => {
+                    ("preserved_replacement_intent", String::new())
+                }
                 IntentionalExitRecordOutcome::TimedOut => ("timed_out", String::new()),
                 IntentionalExitRecordOutcome::Failed(err) => {
                     ("failed", format!(" error={}", err.replace('\n', "\\n")))

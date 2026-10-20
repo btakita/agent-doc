@@ -155,6 +155,48 @@ pub fn watchdog_intentional_exit_decision(
     }
 }
 
+/// `#replacementintent`: what a supervisor that is exiting on purpose (a
+/// requested self-kill, a duplicate retirement, or `SIGTERM`) may write over
+/// the marker row already stored for its document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntentionalExitRecordDecision {
+    /// Record this exit as deliberate: the watchdog will not respawn it.
+    Record,
+    /// A controller replacement already claimed this exact pid and generation
+    /// as "stopping to CONTINUE the document" and its grace is still running.
+    /// Keep that marker. Overwriting it with an operator-stop marker turns a
+    /// replacement whose requester died before the cold start into a
+    /// permanent, silent stop (2026-10-20 `agent-doc-bugs.md`).
+    PreserveReplacementIntent,
+}
+
+impl IntentionalExitRecordDecision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Record => "recorded",
+            Self::PreserveReplacementIntent => "preserved_replacement_intent",
+        }
+    }
+}
+
+/// Decide whether the supervisor `supervisor_pid` serving `generation` may
+/// record its own intentional exit over `prior`. Only a fresh replacement
+/// marker naming exactly this pid and generation is preserved; an expired one
+/// or one for any other process is replaced as before.
+pub fn intentional_exit_record_decision(
+    prior: Option<&IntentionalExitMarker>,
+    supervisor_pid: u32,
+    generation: u64,
+    now_ms: u64,
+) -> IntentionalExitRecordDecision {
+    match watchdog_intentional_exit_decision(prior, supervisor_pid, generation, now_ms) {
+        IntentionalExitDecision::ReplacementColdStartPending => {
+            IntentionalExitRecordDecision::PreserveReplacementIntent
+        }
+        _ => IntentionalExitRecordDecision::Record,
+    }
+}
+
 /// Parse a stored marker payload. A malformed payload is treated as absent:
 /// it cannot prove intent, so the death stays a crash.
 pub fn parse_intentional_exit_marker(payload_json: &str) -> Option<IntentionalExitMarker> {
@@ -253,6 +295,69 @@ mod tests {
         // A prior marker for another generation names some other process.
         assert!(replacement_cold_start_marker(Some(&sigterm), None, 4, "%7", "s", 5).is_none());
         assert!(replacement_cold_start_marker(None, None, 3, "%7", "s", 5).is_none());
+    }
+
+    /// `#replacementintent` (2026-10-20 `agent-doc-bugs.md`): a controller
+    /// replacement requested the supervisor's self-kill, then its controller
+    /// process exited before the cold start. The supervisor honoured the
+    /// request and wrote `self_kill_request` over the replacement's intent, so
+    /// the watchdog read the death as an operator stop and nobody restarted it.
+    /// A fresh replacement marker for the exiting pid + generation must survive
+    /// the supervisor's own record, so the death stays recoverable.
+    #[test]
+    fn supervisor_exit_never_downgrades_a_fresh_replacement_intent() {
+        let pending =
+            replacement_cold_start_marker(None, Some(42), 3, "%7", "session", 10_000).unwrap();
+
+        // The supervisor honours the self-kill one second later.
+        assert_eq!(
+            intentional_exit_record_decision(Some(&pending), 42, 3, 11_000),
+            IntentionalExitRecordDecision::PreserveReplacementIntent
+        );
+        // So the watchdog still sees a pending replacement, then a crash once
+        // the grace elapses with no successor (not a permanent operator stop).
+        assert_eq!(
+            watchdog_intentional_exit_decision(Some(&pending), 42, 3, 11_000),
+            IntentionalExitDecision::ReplacementColdStartPending
+        );
+        assert!(
+            watchdog_intentional_exit_decision(
+                Some(&pending),
+                42,
+                3,
+                10_000 + REPLACEMENT_COLD_START_GRACE_MS
+            )
+            .allows_restart()
+        );
+    }
+
+    /// The preservation is narrow: an expired replacement marker, a marker for
+    /// another pid or generation, an operator marker, or no marker at all is
+    /// overwritten exactly as before, so an operator `SIGTERM` long after a
+    /// replacement still stops the supervisor for good.
+    #[test]
+    fn supervisor_exit_records_over_everything_but_a_fresh_matching_replacement() {
+        let pending =
+            replacement_cold_start_marker(None, Some(42), 3, "%7", "session", 10_000).unwrap();
+        let cases = [
+            (None, 42, 3, 11_000),
+            (Some(marker(42, 3)), 42, 3, 11_000),
+            (Some(pending.clone()), 43, 3, 11_000),
+            (Some(pending.clone()), 42, 4, 11_000),
+            (
+                Some(pending.clone()),
+                42,
+                3,
+                10_000 + REPLACEMENT_COLD_START_GRACE_MS,
+            ),
+        ];
+        for (prior, pid, generation, now_ms) in cases {
+            assert_eq!(
+                intentional_exit_record_decision(prior.as_ref(), pid, generation, now_ms),
+                IntentionalExitRecordDecision::Record,
+                "prior={prior:?} pid={pid} generation={generation} now_ms={now_ms}"
+            );
+        }
     }
 
     #[test]

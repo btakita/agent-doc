@@ -3962,6 +3962,11 @@ pub(crate) struct ControllerRuntime {
     /// Status reads and event-driven awaits consume that same projection; there
     /// is no client polling cache beside it.
     async_editor_commands: ControllerAsyncEditorCommandGraph,
+    /// `#replacementdrain`: detached supervisor-replacement workers still in
+    /// flight. A promoted predecessor's drain waits for them like admitted
+    /// async editor workers, because a replacement that already asked the
+    /// supervisor to stop must finish the cold start it owes.
+    supervisor_replacement_workers: Arc<AtomicUsize>,
     supervisor_recycle_waiters: Condvar,
     /// Serialize editor-op epoch read/derive/append transitions. The checkpoint
     /// fact contains the complete epoch, so two concurrent IDE callbacks must
@@ -4100,6 +4105,18 @@ impl Drop for AsyncEditorWorkerInFlight {
             .async_editor_commands
             .in_flight_workers
             .fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// `#replacementdrain`: RAII registration of one in-flight supervisor
+/// replacement worker (see [`ControllerRuntime::begin_supervisor_replacement_worker`]).
+pub(crate) struct SupervisorReplacementWorkerInFlight {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for SupervisorReplacementWorkerInFlight {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -9023,6 +9040,7 @@ impl ControllerRuntime {
             editor_view_policy_graph,
             document_path_transition_graph,
             async_editor_commands,
+            supervisor_replacement_workers: Arc::new(AtomicUsize::new(0)),
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(EditorOpCaptureAppliedNonces::default()),
             state_projection_waiters: Condvar::new(),
@@ -9147,6 +9165,24 @@ impl ControllerRuntime {
     /// had already accepted; it runs no controller work of its own.
     pub(crate) fn successor_promoted(&self) -> bool {
         self.async_editor_commands.successor_promoted()
+    }
+
+    /// `#replacementdrain`: register one detached supervisor-replacement worker.
+    /// The returned guard is moved into the worker thread and released when it
+    /// finishes, however it finishes.
+    pub(crate) fn begin_supervisor_replacement_worker(
+        &self,
+    ) -> SupervisorReplacementWorkerInFlight {
+        self.supervisor_replacement_workers
+            .fetch_add(1, Ordering::SeqCst);
+        SupervisorReplacementWorkerInFlight {
+            counter: Arc::clone(&self.supervisor_replacement_workers),
+        }
+    }
+
+    /// `#replacementdrain`: supervisor-replacement workers still in flight.
+    pub(crate) fn supervisor_replacement_worker_count(&self) -> usize {
+        self.supervisor_replacement_workers.load(Ordering::SeqCst)
     }
 
     /// `#drainingpredecessor` (GH #261): give up every authority this process
@@ -11767,7 +11803,7 @@ where
 /// actor that is both old and dead (GH #141).
 pub fn close_stale_or_idle_actors_for_caller<F>(
     project_root: &Path,
-    mut pane_alive: F,
+    pane_alive: F,
     idle_for: Option<Duration>,
     dry_run: bool,
     caller: &str,
@@ -11775,6 +11811,114 @@ pub fn close_stale_or_idle_actors_for_caller<F>(
 ) -> Result<(usize, usize)>
 where
     F: FnMut(&str) -> bool,
+{
+    close_stale_or_idle_actors_with_crash_owner_for_caller(
+        project_root,
+        pane_alive,
+        |record| dead_pane_actor_gc_decision_for_record(project_root, record),
+        idle_for,
+        dry_run,
+        caller,
+        reason,
+    )
+}
+
+/// `#gcdefercrash`: observe the facts the crash watchdog gates on for one
+/// dead-pane actor and decide whether the GC must leave it to the watchdog.
+///
+/// Gates run cheapest-first and fail toward `Close` (the pre-fix behaviour):
+/// no recorded supervisor pid, a live pid, or an operator stop never touch
+/// tmux. Only a proven-dead supervisor that was not stopped on purpose reads
+/// the session log and the pane binding.
+fn dead_pane_actor_gc_decision_for_record(
+    project_root: &Path,
+    record: &agent_doc_controller::actor::ActorRecord,
+) -> agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision {
+    use agent_doc_supervisor::crash_policy::{
+        DeadPaneActorGcDecision, DeadPaneActorGcFacts, dead_pane_actor_gc_decision,
+        watchdog_binding_decision,
+    };
+    let Ok(conn) = open_state_db(project_root) else {
+        return DeadPaneActorGcDecision::Close;
+    };
+    let Some(supervisor_pid) =
+        load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
+            .ok()
+            .flatten()
+            .and_then(|lease| lease.supervisor_pid)
+    else {
+        return DeadPaneActorGcDecision::Close;
+    };
+    if supervisor_pid == std::process::id() || process_is_alive(supervisor_pid) {
+        return DeadPaneActorGcDecision::Close;
+    }
+    let exit = rpc::supervisor_watchdog_intentional_exit_decision(
+        &conn,
+        &record.document_id,
+        supervisor_pid,
+        record.generation,
+    );
+    if exit == agent_doc_supervisor::intentional_exit::IntentionalExitDecision::Intentional {
+        return DeadPaneActorGcDecision::Close;
+    }
+    let Some(file) = agent_doc_session_registry_io::load_in(project_root)
+        .ok()
+        .and_then(|registry| {
+            registry
+                .get(&record.document_id)
+                .map(|entry| PathBuf::from(&entry.file))
+        })
+        .filter(|file| !file.as_os_str().is_empty())
+    else {
+        return DeadPaneActorGcDecision::Close;
+    };
+    let session_open =
+        agent_doc_supervisor_io::startup_miss::session_log_status(&file, &record.session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|status| status.latest_session_open());
+    if !session_open {
+        return DeadPaneActorGcDecision::Close;
+    }
+    // The watchdog skips a paused document, so deferring to it would leave the
+    // binding open with nothing to recover it. An unreadable control row
+    // fails toward `Close` like every other gate here.
+    let watchdog_paused = state_store::load_effective_queue_control_from_db(
+        &conn,
+        &record.document_id,
+        &project_root.to_string_lossy(),
+    )
+    .map(|control| rpc::supervisor_watchdog_blocked_by_queue_control(control.as_ref()))
+    .unwrap_or(true);
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    dead_pane_actor_gc_decision(DeadPaneActorGcFacts {
+        supervisor_dead: true,
+        exit,
+        binding: watchdog_binding_decision(
+            tmux.pane_alive(&record.pane_id),
+            rpc::supervisor_watchdog_pane_stashed(&tmux, &record.pane_id),
+        ),
+        session_open,
+        watchdog_paused,
+    })
+}
+
+/// [`close_stale_or_idle_actors_for_caller`] with the `#gcdefercrash` crash
+/// ownership observation injected, so tests pin it without tmux or processes.
+fn close_stale_or_idle_actors_with_crash_owner_for_caller<F, C>(
+    project_root: &Path,
+    mut pane_alive: F,
+    mut crash_owner: C,
+    idle_for: Option<Duration>,
+    dry_run: bool,
+    caller: &str,
+    reason: &str,
+) -> Result<(usize, usize)>
+where
+    F: FnMut(&str) -> bool,
+    C: FnMut(
+        &agent_doc_controller::actor::ActorRecord,
+    ) -> agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision,
 {
     let now = timestamp_secs();
     let store = load_actor_store(project_root)?;
@@ -11794,6 +11938,30 @@ where
         if pane_is_alive && !idle {
             kept += 1;
             continue;
+        }
+
+        // `#gcdefercrash`: a dead-pane close must not pre-empt the crash
+        // watchdog. Closing hides the actor from it, and the session then
+        // never restarts (2026-10-20 `agent-doc-bugs.md`).
+        if !idle {
+            let decision = crash_owner(record);
+            if decision
+                == agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision::DeferToWatchdog
+            {
+                agent_doc_ops_log_io::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{caller}_close_stale_actor_deferred file={} session={} pane={} generation={} cause=dead_pane decision={} reason=crash_watchdog_owns_recovery (#gcdefercrash)",
+                        record.document_id,
+                        record.session_id,
+                        record.pane_id,
+                        record.generation,
+                        decision.as_str(),
+                    ),
+                );
+                kept += 1;
+                continue;
+            }
         }
 
         let cause = if idle {
@@ -15907,6 +16075,81 @@ mod tests {
         assert_eq!(live_record.pane_id, "%live");
     }
 
+    /// `#gcdefercrash` regression (2026-10-20 `agent-doc-bugs.md`, pane %2): the
+    /// supervisor died in a visible shell pane with its session still open, and
+    /// `sync` closed the actor six seconds later (`cause=dead_pane`) before the
+    /// watchdog's tick. The watchdog skips closed actors, so the crash was
+    /// never recovered. A binding the watchdog owns stays open; every other
+    /// dead-pane binding still closes in the same sweep.
+    #[test]
+    fn dead_pane_gc_leaves_a_watchdog_owned_crash_open() {
+        use agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision;
+        let dir = tempfile::TempDir::new().unwrap();
+        let crashed_doc = dir.path().join("tasks/crashed.md");
+        let exited_doc = dir.path().join("tasks/exited.md");
+        std::fs::create_dir_all(crashed_doc.parent().unwrap()).unwrap();
+        std::fs::write(&crashed_doc, "body").unwrap();
+        std::fs::write(&exited_doc, "body").unwrap();
+        let crashed_id = crashed_doc.to_string_lossy().to_string();
+        let exited_id = exited_doc.to_string_lossy().to_string();
+        let mut crashed = actor_record(&crashed_id, "%2", "@2");
+        crashed.state = agent_doc_controller::actor::ActorState::Ready;
+        let mut exited = actor_record(&exited_id, "%3", "@2");
+        exited.state = agent_doc_controller::actor::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &crashed).unwrap();
+        store_actor_record(dir.path(), Some(0), &exited).unwrap();
+
+        let (closed, kept) = close_stale_or_idle_actors_with_crash_owner_for_caller(
+            dir.path(),
+            // Both panes fell back to a bare shell.
+            |_| false,
+            |record| {
+                if record.document_id == crashed_id {
+                    DeadPaneActorGcDecision::DeferToWatchdog
+                } else {
+                    DeadPaneActorGcDecision::Close
+                }
+            },
+            None,
+            false,
+            "sync",
+            "stale_dead_pane_actor",
+        )
+        .unwrap();
+        assert_eq!((closed, kept), (1, 1));
+
+        let crashed = load_actor_record(dir.path(), &crashed_id).unwrap().unwrap();
+        assert_eq!(
+            crashed.state,
+            agent_doc_controller::actor::ActorState::Ready,
+            "the watchdog must still see the crashed binding"
+        );
+        assert_eq!(crashed.pane_id, "%2");
+        assert_eq!(
+            load_actor_record(dir.path(), &exited_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            agent_doc_controller::actor::ActorState::Closed,
+            "#adsessreap1: a binding nothing owes recovery still closes"
+        );
+    }
+
+    /// Without a recorded supervisor lease there is nothing for the watchdog to
+    /// recover, so the production observation closes without consulting tmux.
+    #[test]
+    fn dead_pane_gc_closes_without_a_supervisor_lease() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/no-lease.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let record = actor_record(&doc.to_string_lossy(), "%9", "@1");
+        assert_eq!(
+            dead_pane_actor_gc_decision_for_record(dir.path(), &record),
+            agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision::Close
+        );
+    }
+
     #[test]
     fn close_stale_dead_pane_actors_dry_run_preserves_binding() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -19472,6 +19715,7 @@ agent:queue\n\
             document_authority_graph,
             supervisor_recycle_graph,
             coordination_graph,
+            supervisor_replacement_workers: Arc::new(AtomicUsize::new(0)),
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(EditorOpCaptureAppliedNonces::default()),
             state_projection_waiters: Condvar::new(),

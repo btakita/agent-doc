@@ -28,6 +28,43 @@ pub fn supervisor_force_kill_decision(
     alive && requested_elapsed >= grace
 }
 
+/// `#replacementwithdraw` — one poll of an external kill driver that is
+/// waiting for a supervisor to honour its graceful self-kill request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorKillWaitStep {
+    /// The supervisor is gone: the request was honoured.
+    Exited,
+    /// The requester's goal was met while the request was pending (for a
+    /// stale-binary replacement: the supervisor re-exec'd onto the installed
+    /// binary in place). Withdraw the request instead of killing a supervisor
+    /// that no longer needs replacing, together with its live harness child.
+    Withdraw,
+    /// Keep waiting for the graceful self-kill.
+    Wait,
+    /// The grace elapsed with the goal unmet: force-kill the verified pid.
+    ForceKill,
+}
+
+/// Decide one kill-driver poll. Exit wins over everything (nothing is left to
+/// withdraw or kill), and a satisfied goal wins over the grace deadline, so a
+/// supervisor that refreshed itself just after the deadline is still spared.
+pub fn supervisor_kill_wait_step(
+    alive: bool,
+    goal_satisfied: bool,
+    requested_elapsed: Duration,
+    grace: Duration,
+) -> SupervisorKillWaitStep {
+    if !alive {
+        SupervisorKillWaitStep::Exited
+    } else if goal_satisfied {
+        SupervisorKillWaitStep::Withdraw
+    } else if supervisor_force_kill_decision(requested_elapsed, alive, grace) {
+        SupervisorKillWaitStep::ForceKill
+    } else {
+        SupervisorKillWaitStep::Wait
+    }
+}
+
 /// `#supkill` — parse a `start --route-owned <FILE>` supervisor cmdline.
 ///
 /// Returns the owned document path, possibly relative to the process cwd.
@@ -73,6 +110,46 @@ pub fn start_route_owned_doc_from_args(args: &[String]) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#replacementwithdraw` regression (2026-10-20 `agent-doc-bugs.md`): the
+    /// forced replacement of stale supervisor 2909057 waited 20 s, escalated
+    /// at 15:24:36 and requested a self-kill. The supervisor re-exec'd onto the
+    /// installed binary in place three seconds later (same pid, child
+    /// preserved), so the replacement's goal was met. It then still honoured
+    /// the stale request and killed its live Claude child. A satisfied goal
+    /// must withdraw the request, even after the grace deadline.
+    #[test]
+    fn kill_wait_withdraws_once_the_replacement_goal_is_met() {
+        let grace = Duration::from_secs(10);
+        for elapsed in [Duration::ZERO, Duration::from_secs(9), grace, grace * 3] {
+            assert_eq!(
+                supervisor_kill_wait_step(true, true, elapsed, grace),
+                SupervisorKillWaitStep::Withdraw,
+                "{elapsed:?}"
+            );
+        }
+    }
+
+    /// Without a satisfied goal the driver keeps its `#supkill-b` behaviour,
+    /// and an exited supervisor is always reported as exited.
+    #[test]
+    fn kill_wait_keeps_grace_then_force_and_reports_exit_first() {
+        let grace = Duration::from_secs(10);
+        assert_eq!(
+            supervisor_kill_wait_step(true, false, Duration::from_secs(9), grace),
+            SupervisorKillWaitStep::Wait
+        );
+        assert_eq!(
+            supervisor_kill_wait_step(true, false, grace, grace),
+            SupervisorKillWaitStep::ForceKill
+        );
+        for satisfied in [false, true] {
+            assert_eq!(
+                supervisor_kill_wait_step(false, satisfied, grace, grace),
+                SupervisorKillWaitStep::Exited
+            );
+        }
+    }
 
     #[test]
     fn self_kill_action_is_idle_gated() {

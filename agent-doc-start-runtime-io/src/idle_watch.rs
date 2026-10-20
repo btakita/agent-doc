@@ -3850,7 +3850,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &identity,
                                     "duplicate_supervisor_retirement",
                                 ) {
-                                    Ok(()) => "recorded".to_string(),
+                                    Ok(decision) => decision.as_str().to_string(),
                                     Err(err) => format!(
                                         "failed error={}",
                                         format!("{err:#}").replace('\n', "\\n")
@@ -3906,7 +3906,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             &identity,
                             "self_kill_request",
                         ) {
-                            Ok(()) => "recorded".to_string(),
+                            Ok(decision) => decision.as_str().to_string(),
                             Err(err) => format!("failed error={}", format!("{err:#}").replace('\n', "\\n")),
                         };
                         log_event(

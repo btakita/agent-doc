@@ -7262,6 +7262,13 @@ fn try_main() -> anyhow::Result<()> {
                                     grace.as_secs()
                                 ),
                             ),
+                            // `drive_supervisor_kill` has no goal to satisfy,
+                            // so it never withdraws; kept exhaustive.
+                            SupervisorKillOutcome::Withdrawn(pid) => (
+                                "withdrawn",
+                                Some(pid),
+                                format!("kill request for supervisor pid {pid} was withdrawn"),
+                            ),
                         };
                         if json {
                             println!(

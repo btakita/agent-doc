@@ -248,6 +248,23 @@ pub const fn decide_supervisor_replacement_escalation(
     }
 }
 
+/// `#replacementwithdraw`: whether a pending replacement kill may be withdrawn
+/// because the supervisor refreshed itself in place while the request waited.
+///
+/// Only a replacement that exists to retire a stale binary, and that does not
+/// also intend to replace the live harness child, is satisfied by a supervisor
+/// that is no longer stale: the install re-exec preserves the child and gives
+/// exactly the fresh-binary supervisor the replacement wanted. An operator
+/// restart of a fresh supervisor, or a Restart Agent / fresh-mode request,
+/// still needs the kill.
+pub const fn replacement_goal_satisfied_by_refresh(
+    intent: SupervisorReplacementIntent,
+    initial_host_stale: bool,
+    host_still_stale: bool,
+) -> bool {
+    initial_host_stale && !host_still_stale && !intent.replaces_live_harness()
+}
+
 /// What a cold supervisor-replacement path may do with the recorded owner pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupervisorReplacementPaneDecision {
@@ -322,6 +339,28 @@ pub fn parse_supervisor_replacement_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#replacementwithdraw` regression (2026-10-20 `agent-doc-bugs.md`,
+    /// receipt 2172): a stale-binary `continue` replacement escalated three
+    /// seconds before the supervisor re-exec'd onto the installed binary in
+    /// place. Once the host is fresh, the continue replacement's goal is met.
+    #[test]
+    fn stale_continue_replacement_is_satisfied_by_an_in_place_refresh() {
+        let intent = SupervisorReplacementIntent::parse("continue").unwrap();
+        assert!(replacement_goal_satisfied_by_refresh(intent, true, false));
+        assert!(!replacement_goal_satisfied_by_refresh(intent, true, true));
+        // A replacement of a supervisor that was never stale is an operator
+        // restart: freshness never satisfies it.
+        assert!(!replacement_goal_satisfied_by_refresh(intent, false, false));
+        // Restart Agent and fresh mode exist to replace the harness child.
+        for raw in ["agent:continue", "fresh", "agent:fresh"] {
+            let intent = SupervisorReplacementIntent::parse(raw).unwrap();
+            assert!(
+                !replacement_goal_satisfied_by_refresh(intent, true, false),
+                "{raw}"
+            );
+        }
+    }
 
     #[test]
     fn gh136c_stale_idle_recovery_is_total_and_clock_free() {

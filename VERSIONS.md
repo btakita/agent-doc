@@ -4,6 +4,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **A session stopped by a controller replacement is restarted, never left at
+  a bare shell (`#replacementintent`, `#replacementdrain`, `#gcdefercrash`,
+  `#replacementwithdraw`).**
+  On 2026-10-20 a forced replacement of a stale `agent-doc-bugs.md` supervisor
+  asked it to stop. Its controller then self-recycled and exited under the
+  replacement worker before the cold start. The supervisor recorded its
+  self-kill as an operator stop, `sync` closed the actor six seconds later, and
+  the watchdog never restarted it. Four changes fix this. The replacement now
+  records its continue intent before the kill, and a supervisor's own exit
+  record never downgrades it, so an orphaned replacement is recovered as a
+  crash once its grace ends. A promoted predecessor's drain waits for in-flight
+  replacement workers. The dead-pane actor GC also leaves alone a binding that
+  the crash watchdog would recover. Finally, a stale-binary replacement
+  withdraws its pending kill once the supervisor re-execs onto the installed
+  binary in place, so it no longer kills a refreshed supervisor's live child
+  (`#replacementwithdraw`).
+
 - **An earlier response's `> **Queue prompt:**` echoes no longer replay as
   operator steering after an auto-reopened closeout
   (`#assistantsteeringlineage`).** When a second `respond` arrives after a

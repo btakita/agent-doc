@@ -24,6 +24,8 @@ pub trait StatusWriteEffects {
 
     fn record_document_write_provenance(&self, file: &Path, updated: &str);
 
+    fn attribute_agent_write_to_baseline(&self, file: &Path, before: &str, after: &str);
+
     fn log_op(&self, file: &Path, message: &str);
 }
 
@@ -58,6 +60,27 @@ impl StatusWriteEffects for RuntimeStatusWriteEffects {
 
     fn record_document_write_provenance(&self, file: &Path, updated: &str) {
         agent_doc_document_realtime_io::record_document_write_provenance(file, updated);
+    }
+
+    fn attribute_agent_write_to_baseline(&self, file: &Path, before: &str, after: &str) {
+        // Attribution follows a successfully landed standalone write. Failure is
+        // fail-safe bookkeeping: leave the baseline untouched and preserve the
+        // successful focused status update.
+        if let Err(err) = agent_doc_snapshot_io::attribute_agent_write_to_document_baseline(
+            file,
+            before,
+            after,
+            agent_doc_ops_log_io::log_op,
+        ) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_baseline_agent_write_attribution file={} outcome=error error={}",
+                    file.display(),
+                    format!("{err:#}").replace('\n', " | ")
+                ),
+            );
+        }
     }
 
     fn log_op(&self, file: &Path, message: &str) {
@@ -116,11 +139,34 @@ pub fn set_with_runtime_options(file: &Path, text: &str, force_disk: bool) -> Re
     set_with_options(&RUNTIME_STATUS_WRITE_EFFECTS, file, text, force_disk)
 }
 
+/// Update only `agent:status` as an independent, mid-turn-safe command.
+///
+/// Unlike response writeback, this does not capture, seal, or commit the active
+/// cycle. The landed component delta is attributed to the agent in the document
+/// baseline so a later preflight does not report it as operator input.
+pub fn set_standalone_with_runtime_options(
+    file: &Path,
+    text: &str,
+    force_disk: bool,
+) -> Result<()> {
+    set_with_options_and_attribution(&RUNTIME_STATUS_WRITE_EFFECTS, file, text, force_disk, true)
+}
+
 pub fn set_with_options<E: StatusWriteEffects + ?Sized>(
     effects: &E,
     file: &Path,
     text: &str,
     force_disk: bool,
+) -> Result<()> {
+    set_with_options_and_attribution(effects, file, text, force_disk, false)
+}
+
+fn set_with_options_and_attribution<E: StatusWriteEffects + ?Sized>(
+    effects: &E,
+    file: &Path,
+    text: &str,
+    force_disk: bool,
+    attribute_baseline: bool,
 ) -> Result<()> {
     let full_content = if force_disk {
         effects.force_disk_document_content(file, "status_set")
@@ -150,9 +196,15 @@ pub fn set_with_options<E: StatusWriteEffects + ?Sized>(
                 agent_doc_hash::content_hash(&new_doc)
             ),
         );
+        if attribute_baseline {
+            effects.attribute_agent_write_to_baseline(file, &full_content, &new_doc);
+        }
         return Ok(());
     }
     effects.converge_or_disk_write(file, &full_content, &new_doc, "status_set")?;
+    if attribute_baseline {
+        effects.attribute_agent_write_to_baseline(file, &full_content, &new_doc);
+    }
     Ok(())
 }
 
@@ -197,6 +249,9 @@ mod tests {
         disk_reads: Cell<u32>,
         converges: Cell<u32>,
         provenance: Cell<u32>,
+        attributions: Cell<u32>,
+        attributed_before: RefCell<Option<String>>,
+        attributed_after: RefCell<Option<String>>,
         logs: RefCell<Vec<String>>,
     }
 
@@ -211,6 +266,9 @@ mod tests {
                 disk_reads: Cell::new(0),
                 converges: Cell::new(0),
                 provenance: Cell::new(0),
+                attributions: Cell::new(0),
+                attributed_before: RefCell::new(None),
+                attributed_after: RefCell::new(None),
                 logs: RefCell::new(Vec::new()),
             }
         }
@@ -261,6 +319,12 @@ mod tests {
             self.provenance.set(self.provenance.get() + 1);
         }
 
+        fn attribute_agent_write_to_baseline(&self, _file: &Path, before: &str, after: &str) {
+            self.attributions.set(self.attributions.get() + 1);
+            *self.attributed_before.borrow_mut() = Some(before.to_string());
+            *self.attributed_after.borrow_mut() = Some(after.to_string());
+        }
+
         fn log_op(&self, _file: &Path, message: &str) {
             self.logs.borrow_mut().push(message.to_string());
         }
@@ -294,6 +358,7 @@ mod tests {
         assert!(!on_disk.contains("old status"));
         assert_eq!(effects.converges.get(), 1);
         assert_eq!(effects.provenance.get(), 0);
+        assert_eq!(effects.attributions.get(), 0);
         // The only log on the converge path is the lossless-tree parity shadow,
         // which matches the legacy projection for the standard status shape.
         let logs = effects.logs.borrow();
@@ -306,6 +371,29 @@ mod tests {
         drop(logs);
         assert_eq!(effects.current_reads.get(), 1);
         assert_eq!(effects.disk_reads.get(), 0);
+    }
+
+    #[test]
+    fn standalone_set_attributes_only_the_landed_status_delta() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = write_status_doc(&dir);
+        let before = std::fs::read_to_string(&doc).unwrap();
+        let effects = TestEffects::new();
+
+        set_with_options_and_attribution(&effects, &doc, "current status", false, true).unwrap();
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(effects.attributions.get(), 1);
+        assert_eq!(
+            effects.attributed_before.borrow().as_deref(),
+            Some(before.as_str())
+        );
+        assert_eq!(
+            effects.attributed_after.borrow().as_deref(),
+            Some(after.as_str())
+        );
+        assert!(after.contains("current status"));
+        assert_eq!(effects.converges.get(), 1);
     }
 
     #[test]

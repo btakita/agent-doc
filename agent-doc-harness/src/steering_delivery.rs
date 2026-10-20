@@ -11,7 +11,8 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusyDelivery {
     /// A harness `PostToolUse` hook (`agent-doc hook steering-post-tool-use`)
-    /// injects settled steering after every tool call.
+    /// injects settled steering after every tool call and periodically
+    /// re-surfaces a persistent `agent:status sync="..."` instruction.
     PostToolUseHook,
     /// No mid-turn hook: the agent polls `agent-doc steering <FILE>` between
     /// long steps, and every agent-doc command it runs (preflight, finalize,

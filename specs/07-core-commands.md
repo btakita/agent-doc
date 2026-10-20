@@ -207,6 +207,10 @@ banner.
 
 `agent-doc reset --from-current --preserve-session <FILE>` refreshes the typed baseline and recovery checkpoint while leaving frontmatter and the active `state.db` transaction intact. The retained response intent is rebased semantically onto the operator-approved current markdown; no capture or baseline file is written.
 
+## status set
+
+`agent-doc status set <FILE> --text "<current result>" [--force-disk]` performs a focused `agent:status` update independently of response writeback. It uses editor-aware convergence by default, applies the component's additive or replace `sync-mode`, and attributes the landed status-only delta to the agent document baseline. It never captures or appends a response, seals or commits the active cycle, or mutates queue state. `--force-disk` is the explicit recovery/headless transport override.
+
 ## clean
 
 `agent-doc clean <FILE>` squashes all `agent-doc:` commits for the file into one via `git reset --soft`.

@@ -92,10 +92,20 @@ Current release: v0.35.523, published 2026-10-19 07:59:51 UTC.
 <!-- /agent:status -->
 ```
 
-`sync` is evaluated at preflight and added to the active turn's prompt. It is
-not a timer, background job, queue item, or promise that external facts were
-verified. The instruction should explicitly request verification when it
-depends on an external source.
+`sync` is evaluated at preflight and added to the active turn's prompt. On
+Claude Code and Codex, the owner-only `PostToolUse` hook also re-surfaces it no
+sooner than one minute after preflight and at most once per following one-minute
+interval. This is a throttled prompt checkpoint, not a timer, background job,
+queue item, direct document write, or promise that external facts were verified.
+The reminder is additive to normal mid-turn steering, and concurrent hooks
+atomically claim a generation-keyed next-due timestamp. The
+instruction should explicitly request verification when it depends on an
+external source.
+
+During an open turn, the reminder names the safe focused command explicitly:
+`agent-doc status set <FILE> --text "<current result>"`. It updates only status,
+attributes that component delta to the agent baseline, and does not capture,
+seal, append a response, mutate the queue, or commit the active cycle.
 
 `sync` requires a non-empty instruction. Synchronization is additive by
 default (`sync-mode="additive"` is the explicit spelling). The agent upserts

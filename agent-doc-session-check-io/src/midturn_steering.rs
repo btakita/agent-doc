@@ -40,6 +40,14 @@ pub const CONSUMER_CLI: &str = "cli";
 /// `agent-doc steering --follow <FILE>` stream consumer.
 pub const CONSUMER_FOLLOW: &str = "follow";
 
+/// Long turns re-surface a persistent `agent:status sync="..."` contract at
+/// most once per minute. Preflight remains the initial checkpoint; this cadence
+/// bounds later drift without injecting context after every tool call.
+pub const STATUS_SYNC_CHECKPOINT_INTERVAL_MS: u64 = 60_000;
+/// Stable prefix so agents and tests can distinguish the reminder from
+/// operator-authored mid-turn steering.
+pub const STATUS_SYNC_CHECKPOINT_MARKER: &str = "[agent-doc] status-sync checkpoint";
+
 /// What one observation produced for a consumer.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SteeringReport {
@@ -1320,13 +1328,91 @@ pub fn post_tool_use_output(context: &str) -> serde_json::Value {
     })
 }
 
-/// Pure hook decision: the JSON to print, or `None` for silence.
-pub fn post_tool_use_response(payload: &str) -> Result<Option<serde_json::Value>> {
+fn status_sync_checkpoint_key(file: &Path) -> String {
+    state_key("status_sync_checkpoint", file)
+}
+
+fn render_status_sync_checkpoint(
+    file: &Path,
+    directive: &agent_doc_document::status_projection::StatusSyncDirective,
+) -> String {
+    let mode = match directive.mode {
+        agent_doc_document::status_projection::StatusSyncMode::Additive => "additive",
+        agent_doc_document::status_projection::StatusSyncMode::Replace => "replace",
+    };
+    format!(
+        "{STATUS_SYNC_CHECKPOINT_MARKER}\n\
+         Re-evaluate the persistent `agent:status` instruction now: {}\n\
+         Mode: `{mode}`. If its answer changed, run `agent-doc status set '{}' --text \
+         \"<current result>\"` during this turn. That focused command does not capture, \
+         seal, or commit the active response cycle. If the answer did not change, \
+         continue without writing. This reminder is additive to any steering context \
+         above.",
+        directive.instruction,
+        file.display(),
+    )
+}
+
+/// Return the periodic status-sync reminder for an open owner turn.
+///
+/// The hook is intentionally an observation/checkpoint surface, never a second
+/// document writer: resolving an arbitrary synchronization instruction requires
+/// the active agent. A generation-keyed next-due timestamp in `state.db` makes
+/// the edge at-most-once across overlapping hook processes and prevents an
+/// immediate post-preflight duplicate or calendar-boundary burst.
+fn status_sync_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
+    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if !cycle_accepts_steering(&cycle, &cycle.cycle_id) {
+        return Ok(None);
+    }
+    let content = crate::resolve_current_document_content(file, "status_sync_checkpoint")?;
+    let Some(directive) = agent_doc_document::status_projection::status_sync_directive(&content)?
+    else {
+        return Ok(None);
+    };
+    let Some(root) = project_root(file) else {
+        return Ok(None);
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let cycle_started_at_ms = cycle
+        .cycle_id
+        .strip_prefix("cycle-")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_else(|| cycle.started_at.saturating_mul(1_000));
+    let initial_due_ms = cycle_started_at_ms.saturating_add(STATUS_SYNC_CHECKPOINT_INTERVAL_MS);
+    if !agent_doc_sqlite::state_store::claim_periodic_project_runtime_state_in_db(
+        &conn,
+        &status_sync_checkpoint_key(file),
+        &cycle.cycle_id,
+        initial_due_ms,
+        observed_at_ms,
+        STATUS_SYNC_CHECKPOINT_INTERVAL_MS,
+    )? {
+        return Ok(None);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "status_sync_checkpoint_surfaced file={} cycle={} observed_at_ms={} interval_ms={}",
+            file.display(),
+            cycle.cycle_id,
+            observed_at_ms,
+            STATUS_SYNC_CHECKPOINT_INTERVAL_MS,
+        ),
+    );
+    Ok(Some(render_status_sync_checkpoint(file, &directive)))
+}
+
+fn post_tool_use_response_at(
+    payload: &str,
+    observed_at_ms: u64,
+) -> Result<Option<serde_json::Value>> {
     let input: PostToolUseInput =
         serde_json::from_str(payload).context("parse PostToolUse payload")?;
-    // `#steerowneronly`: steering belongs to the turn that owns the document.
-    // A subagent's tool call neither receives it nor advances the watermark,
-    // so the coordinator still gets every item at its own next tool call.
+    // `#steerowneronly`: steering and persistent status checkpoints belong to
+    // the turn that owns the document. A subagent's tool call advances neither.
     if input.is_subagent() {
         return Ok(None);
     }
@@ -1346,9 +1432,36 @@ pub fn post_tool_use_response(payload: &str) -> Result<Option<serde_json::Value>
             return Err(err);
         }
     };
-    Ok(report
-        .and_then(|report| report.render())
-        .map(|context| post_tool_use_output(&context)))
+    let mut contexts = Vec::new();
+    if let Some(context) = report.and_then(|report| report.render()) {
+        contexts.push(context);
+    }
+    match status_sync_checkpoint(&file, observed_at_ms) {
+        Ok(Some(context)) => contexts.push(context),
+        Ok(None) => {}
+        Err(err) => {
+            // A checkpoint reminder must never steal already-derived steering
+            // or fail the parent tool call. Leave a durable diagnostic and keep
+            // the existing PostToolUse output intact.
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "status_sync_checkpoint_error file={} error={err:#}",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[agent-doc] status-sync checkpoint skipped for {}: {err:#}",
+                file.display()
+            );
+        }
+    }
+    Ok((!contexts.is_empty()).then(|| post_tool_use_output(&contexts.join("\n\n"))))
+}
+
+/// Pure hook decision: the JSON to print, or `None` for silence.
+pub fn post_tool_use_response(payload: &str) -> Result<Option<serde_json::Value>> {
+    post_tool_use_response_at(payload, now_ms())
 }
 
 /// `agent-doc hook steering-post-tool-use` entry point. Never fails the tool
@@ -2426,6 +2539,100 @@ mod tests {
             payload["agent_type"] = serde_json::json!("general-purpose");
         }
         payload.to_string()
+    }
+
+    #[test]
+    fn status_sync_checkpoint_is_owner_only_periodic_and_additive_to_steering() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let file = root.join("plan.md");
+        let baseline = concat!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n",
+            "<!-- agent:status sync=\"Keep the published release current\" -->\n",
+            "operator note\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        bind_session(root, &file, "coord");
+        let owner_payload = hook_payload(root, None);
+        let started_at_ms = cycle
+            .cycle_id
+            .strip_prefix("cycle-")
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        let first_due = started_at_ms + STATUS_SYNC_CHECKPOINT_INTERVAL_MS;
+
+        // Preflight already supplied the contract; an immediate first tool call
+        // must not duplicate it.
+        assert_eq!(
+            post_tool_use_response_at(&owner_payload, first_due - 1).unwrap(),
+            None
+        );
+
+        // A subagent cannot receive or consume the coordinator's status edge.
+        assert_eq!(
+            post_tool_use_response_at(&hook_payload(root, Some("agent-a1b2")), first_due).unwrap(),
+            None
+        );
+        let first = post_tool_use_response_at(&owner_payload, first_due)
+            .unwrap()
+            .expect("first status checkpoint");
+        let first_context = first["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(first_context.contains(STATUS_SYNC_CHECKPOINT_MARKER));
+        assert!(first_context.contains("Keep the published release current"));
+        assert!(first_context.contains("agent-doc status set"));
+        assert!(first_context.contains("does not capture, seal, or commit"));
+
+        // Multiple tool calls within one full interval produce one reminder.
+        assert_eq!(
+            post_tool_use_response_at(&owner_payload, first_due + 1).unwrap(),
+            None
+        );
+
+        // At the next checkpoint, ordinary operator steering remains present;
+        // status sync is additive rather than replacing the steering context.
+        std::fs::write(
+            &file,
+            baseline.replace("- current task\n", "- current task\n- inspect issue 42\n"),
+        )
+        .unwrap();
+        let second_due = first_due + STATUS_SYNC_CHECKPOINT_INTERVAL_MS;
+        let combined = post_tool_use_response_at(&owner_payload, second_due)
+            .unwrap()
+            .expect("combined steering and status checkpoint");
+        let combined_context = combined["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(combined_context.contains(core::STEERING_MARKER));
+        assert!(combined_context.contains("inspect issue 42"));
+        assert!(combined_context.contains(STATUS_SYNC_CHECKPOINT_MARKER));
+
+        // Captured/closed cycles no longer accept mid-turn status reminders.
+        close_cycle(&file, &std::fs::read_to_string(&file).unwrap());
+        assert_eq!(
+            post_tool_use_response_at(
+                &owner_payload,
+                second_due + STATUS_SYNC_CHECKPOINT_INTERVAL_MS,
+            )
+            .unwrap(),
+            None
+        );
     }
 
     /// `#steerowneronly` (#steerworks): a subagent's tool calls share the

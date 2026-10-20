@@ -1125,6 +1125,35 @@ pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItem
     }
 }
 
+/// `#capturegatedispatched`: the live heads of `content` a worker owns — an
+/// unexpired claim whose worker started (`Running`) or reported (`Reported`,
+/// awaiting integration), or a head with a binary-attested completion cell.
+/// A dispatch claim no worker acknowledged (`Claimed`), a lost or expired
+/// attempt, and a subagents-attribute hold are not worker ownership. An
+/// unreadable ledger contributes no claims (the gate this feeds stays armed).
+pub fn worker_owned_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    use agent_doc_queue::queue_claim::QueueClaimState;
+    let claims = claim_states_for_content(file, content).unwrap_or_else(|err| {
+        eprintln!(
+            "[queue-claim] WARNING: could not read queue claims for {}; treating every head as unowned: {err:#}",
+            file.display()
+        );
+        Vec::new()
+    });
+    ClaimedQueueItems::from_identities(
+        claims
+            .into_iter()
+            .filter(|claim| {
+                matches!(
+                    claim.state,
+                    QueueClaimState::Running | QueueClaimState::Reported
+                )
+            })
+            .map(|claim| claim.identity),
+    )
+    .with_heads(&completion_evidence_head_texts(content))
+}
+
 /// Live queue rows for which the document contains a structurally
 /// binary-attested subagent completion cell. This is durable work evidence even
 /// when an older claim was pruned and its generation can no longer be proven.

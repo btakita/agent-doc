@@ -99,7 +99,7 @@ pub fn check_pending_capture_guard(file: &Path, rc: &CycleContext) -> Result<Gua
             ),
         );
     }
-    if state.requires_untargeted_backlog_capture()
+    if crate::untargeted_backlog_capture_unmet(file, &state)
         && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !agent_doc_turn::heuristics::response_explicitly_closes_named_followup(&response_text)
     {

@@ -1928,7 +1928,12 @@ fn run_with_options_to_writer_in_pass(
     // binary-authored completion cell quotes such a head in the exchange and is
     // scoped out with it. Scoping is fail-closed: see
     // `agent_doc_queue::capture_scope`.
-    let backlog_capture_required = {
+    //
+    // The drainable heads the armed requirement rests on are recorded with it:
+    // the coordinator may claim one of them and start a worker mid-cycle, and
+    // the closeout gates then release the requirement once every such head is
+    // worker-owned. Text that is not a drainable head keeps it armed.
+    let (backlog_capture_required, backlog_capture_heads) = {
         let not_drained = agent_doc_queue_io::queue_claim::claimed_items_for_content(
             file,
             queue_authoritative_content,
@@ -1936,7 +1941,7 @@ fn run_with_options_to_writer_in_pass(
         .with_heads(&pending_queue_subagent_dispatch);
         // The admitted diff cut and the post-maintenance projection: maintenance
         // may reap a struck line the diff still carries.
-        let mut undrained_queue_lines = agent_doc_queue::capture_scope::undrained_queue_line_keys(
+        let mut scope = agent_doc_queue::capture_scope::capture_scope(
             &[
                 diff_result_with_current.current.as_str(),
                 queue_authoritative_content,
@@ -1947,11 +1952,12 @@ fn run_with_options_to_writer_in_pass(
         // whatever queue entry shares its text.
         if let Some(harness_only_diff) = harness_diff.as_ref() {
             for line in agent_doc_prompt_contract::collect_added_diff_lines(harness_only_diff) {
-                undrained_queue_lines.remove(
+                scope.keep_in_scope(
                     &agent_doc_queue::document_queue::normalized_queue_line_for_match(&line),
                 );
             }
         }
+        let undrained_queue_lines = &scope.undrained;
         let unscoped = agent_doc_prompt_contract::prompt_requests_backlog_work(
             &prompt_targets,
             &added_diff_lines,
@@ -1961,11 +1967,11 @@ fn run_with_options_to_writer_in_pass(
             && agent_doc_prompt_contract::prompt_requests_backlog_work(
                 &agent_doc_queue::capture_scope::without_undrained_queue_lines(
                     &prompt_targets,
-                    &undrained_queue_lines,
+                    undrained_queue_lines,
                 ),
                 &agent_doc_queue::capture_scope::without_undrained_queue_lines(
                     &added_diff_lines,
-                    &undrained_queue_lines,
+                    undrained_queue_lines,
                 ),
                 &frontmatter_prompt_presets,
             );
@@ -1979,7 +1985,27 @@ fn run_with_options_to_writer_in_pass(
                 ),
             );
         }
-        scoped
+        let heads = if scoped {
+            // Name each head as the live head a mid-cycle claim will hold: queue
+            // maintenance may have promoted a free-text head into `do [#id]`.
+            agent_doc_queue::capture_scope::promoted_head_texts(
+                &scope.heads_behind_requirement(
+                    &prompt_targets,
+                    &added_diff_lines,
+                    |targets, lines| {
+                        agent_doc_prompt_contract::prompt_requests_backlog_work(
+                            targets,
+                            lines,
+                            &frontmatter_prompt_presets,
+                        )
+                    },
+                ),
+                &queue_state.free_text_promotions,
+            )
+        } else {
+            Vec::new()
+        };
+        (scoped, heads)
     };
     let explicit_backlog_targets = agent_doc_prompt_contract::explicit_backlog_targets(
         file,
@@ -2318,6 +2344,7 @@ fn run_with_options_to_writer_in_pass(
             file,
             backlog_capture_required,
         )?;
+        agent_doc_cycle_state_io::record_backlog_capture_heads(file, &backlog_capture_heads)?;
         agent_doc_cycle_state_io::record_backlog_target_requirements(
             file,
             &explicit_backlog_requirements,
@@ -4495,6 +4522,114 @@ mod tests {
             requires,
             "the head this cycle drains owns its capture: {parsed:#}"
         );
+    }
+
+    /// `#capturegatedispatched`: claim `item` and start a worker for it, as a
+    /// coordinator does mid-cycle after preflight.
+    fn start_worker_mid_cycle(doc: &std::path::Path, item: &str, owner: &str) {
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim(doc, item, owner, 3600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            doc,
+            item,
+            owner,
+            &format!("worker-{owner}"),
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+    }
+
+    /// The finalize pre-write capture gate for a dispatch-only coordinator
+    /// response.
+    fn prewrite_capture_gate(doc: &std::path::Path) -> anyhow::Result<()> {
+        agent_doc_session_check_io::write_pending_checks::prewrite_pending_capture_check(
+            doc,
+            "### Re: dispatch — test\n\nStarted a worker for the head.\n",
+            &agent_doc_session_check_io::write_pending_checks::PendingWriteFlags {
+                strict_closeout: true,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn assert_capture_gate_armed(doc: &std::path::Path) {
+        let err = prewrite_capture_gate(doc).unwrap_err();
+        assert!(
+            err.to_string().contains("requested backlog capture"),
+            "{err:#}"
+        );
+    }
+
+    /// `#capturegatedispatched`: preflight left `#actionable-review` drainable
+    /// (not claimed, not in `queue_subagent_dispatch`), so the head armed the
+    /// requirement. The coordinator then claimed it and started a worker
+    /// mid-cycle; the head's capture belongs to that worker, so the closeout
+    /// gate releases the requirement preflight fixed.
+    #[test]
+    fn a_head_claimed_for_a_worker_mid_cycle_releases_the_capture_requirement() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "", "");
+        let current = capture_scope_doc("", "- #actionable-review\n", "");
+        let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
+        assert!(requires, "{parsed:#}");
+        let doc = dir.path().join("session.md");
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.backlog_capture_heads, vec!["#actionable-review"]);
+        assert_capture_gate_armed(&doc);
+
+        start_worker_mid_cycle(&doc, "#actionable-review", "subagent:review");
+        prewrite_capture_gate(&doc).expect("the head behind the requirement is worker-owned");
+    }
+
+    /// Two heads armed the requirement and the coordinator started a worker
+    /// for only one of them: the other is still drained by this cycle, so the
+    /// requirement stays armed until it is worker-owned too.
+    #[test]
+    fn a_partly_claimed_set_of_capture_heads_keeps_the_requirement() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "", "");
+        let current = capture_scope_doc(
+            "",
+            "- #actionable-review\n- add the leftover cleanup to the backlog\n",
+            "",
+        );
+        let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
+        assert!(requires, "{parsed:#}");
+        let doc = dir.path().join("session.md");
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        // Queue maintenance promoted the free-text head into a `do [#id]` head;
+        // the recorded head names the live head a claim holds.
+        assert_eq!(
+            state.backlog_capture_heads,
+            vec!["#actionable-review", "do [#leftovercleanupbacklog]"]
+        );
+
+        start_worker_mid_cycle(&doc, "#actionable-review", "subagent:review");
+        assert_capture_gate_armed(&doc);
+        start_worker_mid_cycle(&doc, "do [#leftovercleanupbacklog]", "subagent:cleanup");
+        prewrite_capture_gate(&doc).expect("every head behind the requirement is worker-owned");
+    }
+
+    /// Fail-closed: operator text that is not a queue head also arms the
+    /// requirement, so preflight records no heads behind it and a worker claim
+    /// on the queue head never releases it.
+    #[test]
+    fn an_armed_line_that_is_not_a_queue_head_keeps_the_requirement() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "", "");
+        let current = capture_scope_doc(
+            "",
+            "- #actionable-review\n",
+            "\nAlso put the flaky retry cleanup in the backlog.\n",
+        );
+        let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
+        assert!(requires, "{parsed:#}");
+        let doc = dir.path().join("session.md");
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(state.backlog_capture_heads.is_empty(), "{state:?}");
+
+        start_worker_mid_cycle(&doc, "#actionable-review", "subagent:review");
+        assert_capture_gate_armed(&doc);
     }
 
     /// Fail-closed control: the same preset typed as an exchange prompt is a

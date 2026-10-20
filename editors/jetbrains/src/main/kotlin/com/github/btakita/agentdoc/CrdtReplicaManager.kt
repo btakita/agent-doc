@@ -4523,10 +4523,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // src/haiven-dev documents every 30s under its retired identity after the
         // 2026-09-29 18:12:38 reload. Only the live generation retries.
         if (PluginGeneration.retired) return false
-        if (projection.failureCount == 1 && retainedProjectionHoldNeedsOperatorSurfaceUtil(reason)) {
-            recordRetainedProjectionHold(filePath, reason)
+        // GH #326 phase 5b: what the reason means (surface the hold, republish liveness,
+        // the ops-log token, the notification) is the native `attach_failure_diagnosis`
+        // derivation. Every caller records a failure off the EDT, so it is asked here.
+        val diagnosis = AttachFailureDiagnosis.diagnose(reason, File(filePath).name)
+        if (projection.failureCount == 1 && diagnosis.needsOperatorSurface) {
+            recordRetainedProjectionHold(filePath, reason, diagnosis)
         }
-        if (registerFailureNeedsLivenessRepublishUtil(reason)) {
+        if (diagnosis.needsLivenessRepublish) {
             // The owning controller never received this generation's open report, so it
             // still names another generation as the live endpoint. Republish, then retry
             // promptly instead of waiting out a backoff that cannot change the answer.
@@ -4534,6 +4538,26 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return scheduleRegisterRetry(filePath, minOf(projection.backoffMs, STALE_ENDPOINT_REGISTER_RETRY_MS))
         }
         return scheduleRegisterRetry(filePath, projection.backoffMs)
+    }
+
+    /**
+     * GH #326 phase 5b: record a register failure observed on the EDT on the replica control
+     * worker instead, so the attach-failure diagnosis (a native derivation) and the hold's ops-log
+     * event never run on the EDT. Each EDT caller observes the failure as the last effect of its
+     * turn, so the handoff keeps the order of effects. A caller already off the EDT records inline.
+     */
+    private fun recordRegisterFailureOffEdt(filePath: String, reason: String) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            recordRegisterFailure(filePath, reason)
+            return
+        }
+        try {
+            executor.execute { recordRegisterFailure(filePath, reason) }
+        } catch (rejected: RejectedExecutionException) {
+            // The manager is disposing. Keep the failure state; the diagnosis takes its frozen
+            // floor on the EDT, and no retry is scheduled for a disposed manager.
+            recordRegisterFailure(filePath, reason)
+        }
     }
 
     /** Record a text-terminal classification without leaving either retry loop armed. */
@@ -4547,7 +4571,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     /** Persist and surface a fail-closed attach hold without waiting for an editor action. */
-    private fun recordRetainedProjectionHold(filePath: String, reason: String) {
+    private fun recordRetainedProjectionHold(
+        filePath: String,
+        reason: String,
+        diagnosis: AttachFailureDiagnosis.Diagnosis,
+    ) {
         val root = resolveProjectRoot(filePath)
         if (root == null) {
             log.warn("[crdt-replica] cannot record retained projection hold: project root unavailable; reason=$reason")
@@ -4556,7 +4584,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (lib == null) {
                 log.warn("[crdt-replica] cannot record retained projection hold: native library unavailable; reason=$reason")
             } else {
-                val status = "attach_refused_${attachFailureStatusToken(reason)}"
+                val status = "attach_refused_${diagnosis.statusToken}"
                 try {
                     if (!lib.agent_doc_record_editor_surface_event(
                             root,
@@ -4576,7 +4604,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
         }
 
-        val message = retainedProjectionHoldMessageUtil(File(filePath).name, reason, attachFailureRemedy(reason))
+        // A diagnosis asked with a file name always carries its message.
+        val message = diagnosis.holdMessage ?: AttachFailureDiagnosis.frozenHoldMessage(File(filePath).name, reason)
         ApplicationManager.getApplication().invokeLater {
             if (!project.isDisposed) TerminalUtil.notifyError(project, message)
         }
@@ -4620,13 +4649,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                                 EditorOpenFileSurface.find(project, filePath)
                                     ?: LocalFileSystem.getInstance().findFileByPath(filePath)
                             if (file == null) {
-                                recordRegisterFailure(filePath, "editor-file-unavailable")
+                                recordRegisterFailureOffEdt(filePath, "editor-file-unavailable")
                                 return@runOnEdtNonBlocking
                             }
                             val document =
                                 FileDocumentManager.getInstance().getDocument(file)
                             if (document == null) {
-                                recordRegisterFailure(filePath, "editor-document-unavailable")
+                                recordRegisterFailureOffEdt(filePath, "editor-document-unavailable")
                                 return@runOnEdtNonBlocking
                             }
                     ensureOpenDocumentReplica(
@@ -5169,6 +5198,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val targets = linkedMapOf<String, Pair<CrdtReplicaManager, Document>>()
             val expectedPaths = linkedSetOf<String>()
             val managersByPath = linkedMapOf<String, CrdtReplicaManager>()
+            // GH #326 phase 5b: the EDT only reads editor state. A target whose document is
+            // unavailable is recorded after the collection, in collection order and before any
+            // registration is awaited, on this thread, so its diagnosis never runs on the EDT.
+            val unavailableTargets = mutableListOf<Pair<CrdtReplicaManager, String>>()
             val collectTargets = {
                 (handoff.projectDocuments.keys + liveProjects)
                     .distinct()
@@ -5196,11 +5229,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                                 ?: LocalFileSystem.getInstance().findFileByPath(filePath)
                                     ?.let(fileDocumentManager::getDocument)
                             if (document == null) {
-                                manager.log.warn(
-                                    "[crdt-replica] native-generation re-register outcome=editor_document_unavailable " +
-                                        "file=$filePath retry=scheduled",
-                                )
-                                manager.recordRegisterFailure(filePath, "native-reload-document-unavailable")
+                                unavailableTargets.add(manager to filePath)
                             } else {
                                 targets.putIfAbsent(filePath, manager to document)
                             }
@@ -5211,6 +5240,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 collectTargets()
             } else {
                 ApplicationManager.getApplication().invokeAndWait(collectTargets)
+            }
+            unavailableTargets.forEach { (manager, filePath) ->
+                manager.log.warn(
+                    "[crdt-replica] native-generation re-register outcome=editor_document_unavailable " +
+                        "file=$filePath retry=scheduled",
+                )
+                manager.recordRegisterFailureOffEdt(filePath, "native-reload-document-unavailable")
             }
             // The manager that awaits a path's registration is the one whose state answers for it.
             targets.forEach { (filePath, target) -> managersByPath[filePath] = target.first }

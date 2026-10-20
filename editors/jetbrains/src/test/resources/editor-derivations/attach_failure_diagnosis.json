@@ -1,0 +1,427 @@
+{
+  "derivation": "attach_failure_diagnosis",
+  "about": "GH #326 phase 5b parity cases. The Rust `attach_failure_diagnosis` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (AttachFailureDiagnosisTest) both answer every case. `input` is exactly what the plugin sends: the recorded failure reason and, for the operator notification, the document's file name. An absent field is omitted. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "cases": [
+    {
+      "name": "an IDE running a plugin generation older than the install names a restart",
+      "input": {
+        "reason": "controller_error: replica_register_detached_authority: registration carried no live editor pid"
+      },
+      "expected": {
+        "remedy": "Restart the IDE. The controller saw no live editor PID on the registration, which is what a plugin generation loaded before the current install sends. Reloading the native library or recycling the controller cannot replace a loaded plugin generation.",
+        "status_token": "controller_error",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "no listening controller names the project controller",
+      "input": {
+        "reason": "controller_error: socket_unavailable"
+      },
+      "expected": {
+        "remedy": "No project controller is listening for that document's project root; start or recycle it.",
+        "status_token": "controller_error",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a plain markdown file is not a session document",
+      "input": {
+        "reason": "not_agent_doc_document"
+      },
+      "expected": {
+        "remedy": "That file is not an agent-doc session document (no agent_doc_* frontmatter, no <!-- agent: markers).",
+        "status_token": "not_agent_doc_document",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a restarted editor without a settled ancestor is surfaced with its own remedy",
+      "input": {
+        "reason": "retained-reseed-missing-settled-shadow",
+        "file_name": "plan.md"
+      },
+      "expected": {
+        "remedy": "The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor.",
+        "status_token": "retained-reseed-missing-settled-shadow",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged."
+      }
+    },
+    {
+      "name": "an ambiguous retained projection is surfaced",
+      "input": {
+        "reason": "ambiguous-retained-projection",
+        "file_name": "agent-doc-bugs.md"
+      },
+      "expected": {
+        "remedy": "The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it.",
+        "status_token": "ambiguous-retained-projection",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged."
+      }
+    },
+    {
+      "name": "an ambiguous re-register projection with details is surfaced",
+      "input": {
+        "reason": "ambiguous-reregister-projection: buffer typed after the settled shadow",
+        "file_name": "session.md"
+      },
+      "expected": {
+        "remedy": "The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it.",
+        "status_token": "ambiguous-reregister-projection",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged."
+      }
+    },
+    {
+      "name": "an attach that outlived its wait asks the operator to wait",
+      "input": {
+        "reason": "attach-timeout-pending"
+      },
+      "expected": {
+        "remedy": "Registration is still running; wait for the next editor status update before retrying.",
+        "status_token": "attach-timeout-pending",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an unloaded FFI never prescribes its unreachable reload endpoint",
+      "input": {
+        "reason": "native-ffi-unavailable",
+        "file_name": "plan.md"
+      },
+      "expected": {
+        "remedy": "Inspect About Agent Doc or the IDE log for the executable and library that failed to load. Fix or remove that incompatible install so PATH resolves to the intended agent-doc; the native loader retries automatically. `agent-doc admin reload-lib` cannot reach this editor until FFI loads.",
+        "status_token": "native-ffi-unavailable",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: native-ffi-unavailable. Inspect About Agent Doc or the IDE log for the executable and library that failed to load. Fix or remove that incompatible install so PATH resolves to the intended agent-doc; the native loader retries automatically. `agent-doc admin reload-lib` cannot reach this editor until FFI loads. The editor buffer and disk were left unchanged."
+      }
+    },
+    {
+      "name": "a native handoff timeout prescribes one reload-lib",
+      "input": {
+        "reason": "native-handoff-timeout"
+      },
+      "expected": {
+        "remedy": "The native-generation handoff did not finish within the editor action budget. Wait for reload to settle, then run `agent-doc admin reload-lib` once before retrying.",
+        "status_token": "native-handoff-timeout",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an attach exception points at the IDE log and ops log",
+      "input": {
+        "reason": "attach-exception"
+      },
+      "expected": {
+        "remedy": "Inspect the IDE log and the `editor_surface_event` attach-refused entry in `.agent-doc/logs/ops.log`, then repair the named cause before retrying.",
+        "status_token": "attach-exception",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a failed attach worker shares the exception remedy",
+      "input": {
+        "reason": "attach-worker-failed"
+      },
+      "expected": {
+        "remedy": "Inspect the IDE log and the `editor_surface_event` attach-refused entry in `.agent-doc/logs/ops.log`, then repair the named cause before retrying.",
+        "status_token": "attach-worker-failed",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an unknown refusal asks for the inspect comparison",
+      "input": {
+        "reason": "unknown-attach-refusal"
+      },
+      "expected": {
+        "remedy": "Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas.",
+        "status_token": "unknown-attach-refusal",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a bare controller-register failure asks for the inspect comparison",
+      "input": {
+        "reason": "controller-register"
+      },
+      "expected": {
+        "remedy": "Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas.",
+        "status_token": "controller-register",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a stale editor endpoint republishes liveness without a remedy",
+      "input": {
+        "reason": "controller_error: replica_register_stale_editor_endpoint: identity does not match current reliable-liveness endpoint"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "controller_error",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": true,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a controller timeout is neither surfaced nor republished",
+      "input": {
+        "reason": "controller_error: timeout"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "controller_error",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an unavailable editor file has no specific advice",
+      "input": {
+        "reason": "editor-file-unavailable"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "editor-file-unavailable",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an unavailable editor document has no specific advice",
+      "input": {
+        "reason": "editor-document-unavailable"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "editor-document-unavailable",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a native-reload document that could not be read has no specific advice",
+      "input": {
+        "reason": "native-reload-document-unavailable",
+        "file_name": "plan.md"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "native-reload-document-unavailable",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: native-reload-document-unavailable. The editor buffer and disk were left unchanged."
+      }
+    },
+    {
+      "name": "a path transition failure has no specific advice",
+      "input": {
+        "reason": "path-transition-register"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "path-transition-register",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "the first matching remedy wins over a later one",
+      "input": {
+        "reason": "detached_authority after socket_unavailable"
+      },
+      "expected": {
+        "remedy": "Restart the IDE. The controller saw no live editor PID on the registration, which is what a plugin generation loaded before the current install sends. Reloading the native library or recycling the controller cannot replace a loaded plugin generation.",
+        "status_token": "detached_authority_after_socket_unavailable",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "the reseed remedy precedes the ambiguity remedy",
+      "input": {
+        "reason": "ambiguous-retained-projection after retained-reseed-missing-settled-shadow",
+        "file_name": "plan.md"
+      },
+      "expected": {
+        "remedy": "The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor.",
+        "status_token": "ambiguous-retained-projection_after_retained-reseed-missing-settled-shadow",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: ambiguous-retained-projection after retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged."
+      }
+    },
+    {
+      "name": "a mixed-case phrase becomes one ops-log word",
+      "input": {
+        "reason": "Attach worker failed"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "attach_worker_failed",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "separators and edge underscores collapse",
+      "input": {
+        "reason": "__lead  trail__: x"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "lead_trail",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an empty reason is unknown",
+      "input": {
+        "reason": ""
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "unknown",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a reason with no head before its colon is unknown",
+      "input": {
+        "reason": ":::"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "unknown",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an absent reason is the empty reason",
+      "input": {},
+      "expected": {
+        "remedy": null,
+        "status_token": "unknown",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an absent reason with a file name still formats the notification",
+      "input": {
+        "file_name": "plan.md"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "unknown",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: . The editor buffer and disk were left unchanged."
+      }
+    },
+    {
+      "name": "non-ASCII letters in the head become separators",
+      "input": {
+        "reason": "Ünïcode Fäilure: détails"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "n_code_f_ilure",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "an astral character in the head becomes a separator",
+      "input": {
+        "reason": "😀crash"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "crash",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "the Kelvin sign lowercases to an ASCII k",
+      "input": {
+        "reason": "Kelvin-check"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "kelvin-check",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a dotted capital I lowercases to i plus a combining dot",
+      "input": {
+        "reason": "İd-check"
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "i_d-check",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": null
+      }
+    },
+    {
+      "name": "a CRLF in the reason is part of the cause, not the token",
+      "input": {
+        "reason": "controller-register\r\nsecond line",
+        "file_name": "notes.md"
+      },
+      "expected": {
+        "remedy": "Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas.",
+        "status_token": "controller-register_second_line",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "hold_message": "Agent Doc could not attach the open editor replica for notes.md. Cause: controller-register\r\nsecond line. Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas. The editor buffer and disk were left unchanged."
+      }
+    }
+  ]
+}

@@ -320,6 +320,20 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   publication-edge rechecks, and the order of their effects stay in Kotlin. An
   action this plugin generation cannot execute takes the frozen floor, so a new
   action needs a plugin generation; a new hold reason does not.
+- `attach_failure_diagnosis` (phase 5b): what a CRDT replica attach failure
+  means for the operator. Evidence is the recorded failure reason and, for the
+  operator notification, the document's file name. Native owns the one-line
+  remedy, the `attach_refused_<token>` ops-log status token, whether the hold is
+  persisted and surfaced without waiting for an editor action (the three
+  projection-hold reasons), whether the refusal needs a reliable-liveness
+  republish (`replica_register_stale_editor_endpoint`), and the hold
+  notification text. `CrdtReplicaManager.recordRegisterFailure` asks it once per
+  failure, after the retired-generation check, and executes the answer in the
+  pre-#326 order: the hold event and notification, then the liveness republish,
+  then the retry. Compact Exchange asks it on its pooled thread, records the
+  refusal event, formats the refusal there, and only shows it on the EDT. A new
+  reason, remedy, or wording needs no plugin generation; a new *kind* of effect
+  does.
 - `capabilities`: the derivations the loaded library answers.
 
 **Threads.** Native calls stay forbidden on the EDT. The automatic surface
@@ -351,7 +365,13 @@ layout from that evidence and asks `sync_layout`. The `TmuxPaneFocusSync` poll
 resolves the focused root and asks `sync_layout` on its own poll thread. The
 measured-layout forwarder already runs on its own worker, where it also resolves the focused document's root and asks
 `remote_client_surface`. The Remote Dev fold runs on whichever worker holds the
-captured client evidence; a direct EDT caller marshals only that evidence.
+captured client evidence; a direct EDT caller marshals only that evidence. No
+register failure is recorded on the EDT (phase 5b): the register retry timer
+reads the editor file and document on the EDT and hands an unavailable one to
+the replica control worker as the last effect of its turn
+(`recordRegisterFailureOffEdt`), and the native-reload target collection only
+reads editor state inside its EDT turn, then records each unavailable document
+on the reload thread, in collection order, before any registration is awaited.
 
 **Compatibility.** After a hot reload the library is newer than the plugin
 generation calling it, so a shipped derivation is never removed or renamed,
@@ -368,13 +388,20 @@ pre-#326 `SurfaceReport` / `SelectionProjectionSettling` rules, and
 3b, the pre-#326 Run Agent Doc fallback for a chosen root, `routeLayoutMode`, and
 the `TmuxPaneFocusSync.candidateProjectRoots` probe, and
 `RemoteClientSurfacePayload.frozen` over the pre-#326 forward rules: those
-`SyncLayoutAction` root and path rules, then `SurfaceReport.buildSurface`). It is
+`SyncLayoutAction` root and path rules, then `SurfaceReport.buildSurface`, plus
+`RegistrationProjection.frozen` and, since phase 5b, `AttachFailureDiagnosis.frozen`
+over `attachFailureRemedy`, `attachFailureStatusToken`,
+`retainedProjectionHoldNeedsOperatorSurfaceUtil`,
+`registerFailureNeedsLivenessRepublishUtil`, and
+`retainedProjectionHoldMessageUtil`). It is
 a compatibility floor, never extended: new rules land only in the native
 derivation. One parity file per derivation under
 `editors/jetbrains/src/test/resources/editor-derivations/` (`window_layout.json`,
-`surface_projection.json`, `sync_layout.json`, `remote_client_surface.json`) is
+`surface_projection.json`, `sync_layout.json`, `remote_client_surface.json`,
+`registration_projection.json`, `attach_failure_diagnosis.json`) is
 answered by both the Rust derivation and the frozen floor, so a divergence is
-always a deliberate fixture edit. A library older than phase 3b ignores
+always a deliberate fixture edit. An `attach_failure_diagnosis` answer that
+leaves out a field takes that field from the floor. A library older than phase 3b ignores
 `chosen_root`. An answer that addresses another root therefore takes the floor,
 and an answer without `layout_mode` or `candidate_roots` gets them from the
 floor's rules. `sync_layout.json` and
@@ -444,13 +471,12 @@ every entry.
   `replicaRecoveryCaptureMissIsDeferredUtil`) answer while the native library is
   being handed off or the dynamic plugin load reattaches. They cannot depend on
   the library they describe, so they stay in Kotlin.
-- The attach-failure diagnosis (`attachFailureRemedy`,
-  `attachFailureStatusToken`, `retainedProjectionHoldNeedsOperatorSurfaceUtil`,
-  `registerFailureNeedsLivenessRepublishUtil`, `retainedProjectionHoldMessageUtil`)
-  is a candidate, but `recordRegisterFailure` also runs on the EDT (the register
-  retry timer and the native-reload target collection call it there), and Compact
-  Exchange formats the remedy inside `invokeLater`. It moves once those callers
-  take the diagnosis on a worker.
+- The attach-failure diagnosis moved in phase 5b (the
+  `attach_failure_diagnosis` derivation). First its EDT callers moved: the
+  register retry timer and the native-reload target collection now record a
+  failure on a worker, and Compact Exchange formats its refusal on its pooled
+  thread. The Compact Exchange refusal sentence itself (`attachRefusalMessage`)
+  is UI wording around the derived remedy and stays in Kotlin.
 - Local-edit capture (`prepareLocalEditorEditsUtil`,
   `reconstructCapturedLocalEditorBatchUtil`, `currentEpochCapturedEditsUtil`,
   `singleSpliceCapturedEditUtil`, `singleSpliceBatchUtil`) maps IntelliJ UTF-16

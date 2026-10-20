@@ -40,7 +40,10 @@ class CompactExchangeActionTest {
         )
         assertTrue(
             "a missing editor replica must fail before launching Compact Exchange",
-            source.contains("if (!attached)"),
+            // GH #326 phase 5b: the worker formats a refusal exactly when the replica is not
+            // attached, and the EDT refuses on it before routing.
+            source.contains("if (attached) {\n                            null") &&
+                source.indexOf("if (refusalMessage != null)") in 0 until compactIdx,
         )
         assertTrue(
             "the attach cause must be captured before returning to the EDT",

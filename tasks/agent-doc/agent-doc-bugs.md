@@ -394,8 +394,7 @@ These statements are now covered by the completed implementation and the green c
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/316~~
-- ~~Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Queue: Issues

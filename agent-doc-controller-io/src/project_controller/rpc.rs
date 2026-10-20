@@ -1431,12 +1431,7 @@ fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<St
 /// 60-100 failed fixtures with `timed out after 2.0s waiting for project
 /// controller response` while they asserted nothing about timing.
 fn controller_response_timeout(socket: &Path, timeout: Duration) -> Duration {
-    #[cfg(feature = "test-support")]
-    if warm_test_actor_sockets::serves(socket) {
-        return timeout.max(warm_test_actor_sockets::RESPONSE_HANG_CEILING);
-    }
-    let _ = socket;
-    timeout
+    agent_doc_state_wire::actor_response_timeout(socket, timeout)
 }
 
 /// Test-support view of [`controller_response_timeout`].
@@ -1492,39 +1487,11 @@ fn controller_idle_tick_remaining(last_tick: Option<Instant>, now: Instant) -> O
     (elapsed < CONNECT_POLL).then(|| CONNECT_POLL - elapsed)
 }
 
-/// Sockets currently served by an in-process test state actor.
+/// Sockets currently served by an in-process test state actor. The registry
+/// lives in `agent-doc-state-wire` so its direct actor transport applies the
+/// same live-peer deadline as this RPC client.
 #[cfg(feature = "test-support")]
-mod warm_test_actor_sockets {
-    use parking_lot::Mutex;
-    use std::collections::BTreeSet;
-    use std::path::{Path, PathBuf};
-    use std::time::Duration;
-
-    pub(super) const RESPONSE_HANG_CEILING: Duration = Duration::from_secs(30);
-
-    static SOCKETS: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
-
-    fn key(socket: &Path) -> PathBuf {
-        socket
-            .canonicalize()
-            .unwrap_or_else(|_| socket.to_path_buf())
-    }
-
-    pub(super) fn register(socket: &Path) -> PathBuf {
-        let key = key(socket);
-        SOCKETS.lock().insert(key.clone());
-        key
-    }
-
-    pub(super) fn unregister(key: &Path) {
-        SOCKETS.lock().remove(key);
-    }
-
-    pub(super) fn serves(socket: &Path) -> bool {
-        let sockets = SOCKETS.lock();
-        !sockets.is_empty() && sockets.contains(&key(socket))
-    }
-}
+use agent_doc_state_wire::warm_test_actor_sockets;
 
 /// Opt in to cold-launching a real detached `agent-doc controller serve`
 /// process for `project_root` from a workspace test harness, lib or

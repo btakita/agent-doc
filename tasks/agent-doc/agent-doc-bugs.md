@@ -23,12 +23,12 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 22 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
 
-Batch v0.35.530 (#324–#327 + supervisor-heartbeat fix) is integrated and make check is green; it waits on the CI auto-clear race fix. Five follow-ups are running; GH 326 phases 3–5 wait on phase 2.
+v0.35.530 is published. The v0.35.531 batch (GH 326 phases 3, 3b, 4 and 5, the Codex queued-clear fix and the capture-gate fixes) passed make check; GH 326 phase 5b and the mid-cycle capture-claim fix are running.
 
 <!-- status:sync -->
-Latest published release: [v0.35.529](https://github.com/btakita/agent-doc/releases/tag/v0.35.529) (GH #321 stash-pane orphan-drain dispatch, GH #322 Remote Dev focus-column escalation, GH #323 263 status bar, GH 320 option B client-measured Remote Dev split geometry, Lazily surface path for Run Agent Doc / Sync Tmux Layout, session-crash no-restart fixes, Claude resume id after /clear, owner-pane test fixture), published on GitHub at 2026-10-20 18:18:04 UTC (15 assets); PyPI 0.35.529 followed at 2026-10-20 18:18:53 UTC; installed locally (agent-doc 0.35.529). JetBrains packages in v0.35.529: 0.2.729 (classic), 0.2.730 (IDE 262), 0.2.731 (IDE 263), published with the release at 2026-10-20 18:18:04 UTC. VS Code extension 0.2.83.
+Latest published release: [v0.35.530](https://github.com/btakita/agent-doc/releases/tag/v0.35.530) (GH #324 extract re-run safety, GH #325 done-archive resolver, GH #326 phases 1–2 hot-reloaded editor derivations, GH #327 loop queues restore consumed items, live-supervisor drain readiness, queue auto-clear baseline, Claude crash-restart resume id, live-session run guard, closeout ordering, GH #317 regression coverage), published on GitHub at 2026-10-20 20:54:49 UTC (15 assets); PyPI 0.35.530 followed at 2026-10-20 20:55:37 UTC; installed locally (agent-doc 0.35.530). JetBrains packages in v0.35.530: 0.2.735 (classic), 0.2.736 (IDE 262), 0.2.737 (IDE 263), published with the release at 2026-10-20 20:54:49 UTC. VS Code extension 0.2.83.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -416,6 +416,15 @@ No new actionable follow-up items this cycle: every follow-up so far is already 
 It still waits for two running items (🚧): GH 326 phase 5b and the mid-cycle claim release for the capture gate. Phase 5c follows 5b.
 
 No new actionable follow-up items this cycle: every follow-up is already in the queue as its own item.
+
+### Re: closing the two duplicate v0.35.530 release items
+
+> **Queue prompt:** release + publish: Include PR #324-#327 ⟦effect:1⟧
+> **Queue prompt:** release + publish: Include PR #324-#327 ⟦effect:2⟧
+
+Both copies of the release item are done: v0.35.530 is published on GitHub and PyPI and installed locally, as in the previous entry. My last closeout didn't strike them because their document text carries a `⟦effect:N⟧` disambiguation marker and my echo left it out. These echoes include it.
+
+No new actionable follow-up items this cycle.
 <!-- agent:boundary:811a7087 -->
 <!-- /agent:exchange -->
 
@@ -441,11 +450,11 @@ No new actionable follow-up items this cycle: every follow-up is already in the 
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/327~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~preflight residue strike must not strike a loop head from an echo written before the current pass opened or about another queue head (GH 327 pass 4 wasted a pass)~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~continuation answered-head skip (syntheticstrike) still uses only the head-entry rule; apply the GH 327 pass 4 loop-pass echo scope to loop queue heads so it agrees with the preflight residue strike~~ — auto-struck: answered this cycle (#ftstrike)
-- ⚠️ release + publish: Include PR #324-#327 ⟦effect:1⟧
+- ~~release + publish: Include PR #324-#327 ⟦effect:1⟧~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~[from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~[from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~queue auto-clear: carry the pending baseline across the supervisor's self-re-exec so an item committed just before the re-exec still gets its clear~~ — auto-struck: answered this cycle (#ftstrike)
-- release + publish: Include PR #324-#327 ⟦effect:2⟧
+- ~~release + publish: Include PR #324-#327 ⟦effect:2⟧~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~[from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~closeout commit ordering: the controller committed locally before the cycle held-back --status and free-text strikes landed through the live editor; wait for the cycle own late projections before committing instead of relying on the composed-drift recovery~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/317~~ — auto-struck: answered this cycle (#ftstrike)

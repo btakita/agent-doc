@@ -321,6 +321,128 @@ impl LoopPassEchoWalk {
     }
 }
 
+/// Which history scopes the echoes that may answer a live free-text head of
+/// one queue. Read once per queue; shared by the preflight catch-up residue
+/// strike and the `#syntheticstrike` continuation-head skip so the two agree
+/// on every queue kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeadEchoWindow {
+    /// A queue without `loop`: echoes after the head's entry point
+    /// (`#qheadresiduescope`, [`FreeTextHeadEntryWalk`]).
+    HeadEntry,
+    /// A `loop` queue whose current pass opened at `opened_secs`: echoes
+    /// written in this pass about this queue's copy (GH #327 pass 4,
+    /// [`LoopPassEchoWalk`]).
+    LoopPass { opened_secs: u64 },
+    /// A `loop` queue with no open pass (window closed, no schedule row, or an
+    /// unreadable one): the head is held, and no echo answers it.
+    LoopHeld,
+}
+
+impl HeadEchoWindow {
+    /// The window for queue `queue_id` of `content`. `load_window` reads the
+    /// queue's schedule window and is called only for a `loop` queue; `None`
+    /// (no row, or a read failure) holds the head.
+    pub fn for_queue(
+        content: &str,
+        queue_id: &str,
+        load_window: impl FnOnce() -> Option<crate::queue_schedule::ScheduleWindow>,
+    ) -> Self {
+        let is_loop = agent_doc_element::element::parse(content)
+            .ok()
+            .and_then(|components| {
+                crate::queue_set::component_for_id(content, &components, queue_id)
+                    .ok()
+                    .flatten()
+                    .map(|queue| crate::queue_schedule::queue_retains_struck_heads(&queue.attrs))
+            })
+            .unwrap_or(false);
+        if !is_loop {
+            return Self::HeadEntry;
+        }
+        match load_window() {
+            Some(crate::queue_schedule::ScheduleWindow::Open { opened_secs, .. }) => {
+                Self::LoopPass { opened_secs }
+            }
+            Some(crate::queue_schedule::ScheduleWindow::Closed) | None => Self::LoopHeld,
+        }
+    }
+
+    /// Whether this is a `loop` queue's window.
+    pub fn is_loop(self) -> bool {
+        !matches!(self, Self::HeadEntry)
+    }
+}
+
+/// Which echoes in the exchange may answer one live free-text head, as the
+/// history walk for its [`HeadEchoWindow`] resolved it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeadEchoScope {
+    /// No anchor: every echo in the exchange counts.
+    WholeExchange,
+    /// Only exchange text written after the anchor counts.
+    NewerThan(LoopPassEchoAnchor),
+    /// A `loop` head with no open pass: no echo answers it.
+    NoOpenPass,
+}
+
+impl HeadEchoScope {
+    /// Resolve the scope from the window. The history reads are injected:
+    /// `entry_anchor` returns [`FreeTextHeadEntryWalk::finish`] and
+    /// `loop_anchor(opened_secs)` returns [`LoopPassEchoWalk::finish`]. Only
+    /// the one the window selects runs, and neither runs for
+    /// [`HeadEchoWindow::LoopHeld`].
+    pub fn resolve(
+        window: HeadEchoWindow,
+        entry_anchor: impl FnOnce() -> Option<String>,
+        loop_anchor: impl FnOnce(u64) -> Option<LoopPassEchoAnchor>,
+    ) -> Self {
+        match window {
+            HeadEchoWindow::HeadEntry => match entry_anchor() {
+                None => Self::WholeExchange,
+                Some(exchange) => Self::NewerThan(LoopPassEchoAnchor {
+                    exchange,
+                    kind: LoopPassEchoAnchorKind::HeadEntry,
+                }),
+            },
+            HeadEchoWindow::LoopPass { opened_secs } => match loop_anchor(opened_secs) {
+                None => Self::WholeExchange,
+                Some(anchor) => Self::NewerThan(anchor),
+            },
+            HeadEchoWindow::LoopHeld => Self::NoOpenPass,
+        }
+    }
+
+    /// The part of `exchange` whose echoes may answer the head, or `None` when
+    /// none may.
+    pub fn answering_exchange(&self, exchange: &str) -> Option<String> {
+        match self {
+            Self::WholeExchange => Some(exchange.to_string()),
+            Self::NewerThan(anchor) => Some(crate::queue_response::exchange_text_newer_than(
+                exchange,
+                &anchor.exchange,
+            )),
+            Self::NoOpenPass => None,
+        }
+    }
+
+    /// Whether an echo in scope answers the head: `answered` judged on
+    /// [`Self::answering_exchange`].
+    pub fn answers(&self, exchange: &str, answered: impl FnOnce(&str) -> bool) -> bool {
+        self.answering_exchange(exchange)
+            .is_some_and(|scoped| answered(&scoped))
+    }
+
+    /// Stable ops-log label for a head this scope kept live.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::WholeExchange => "whole_exchange",
+            Self::NewerThan(anchor) => anchor.kind.label(),
+            Self::NoOpenPass => "no_open_pass",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct HeadRows {
     live: bool,
@@ -554,5 +676,94 @@ mod tests {
         assert!(walk.visit(OPENED + 30, Some(&answered)));
         assert!(walk.visit(OPENED + 10, Some(&before)));
         assert_eq!(walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT), None);
+    }
+
+    fn open_window(opened_secs: u64) -> crate::queue_schedule::ScheduleWindow {
+        crate::queue_schedule::ScheduleWindow::Open {
+            pass: 4,
+            opened_secs,
+            roster: vec![LOOP_HEAD.to_string()],
+            ran: Vec::new(),
+        }
+    }
+
+    /// The window is classified per queue: a non-loop queue never reads the
+    /// schedule, and a `loop` queue without an open pass is held.
+    #[test]
+    fn head_echo_window_classifies_each_queue() {
+        let doc = two_queue_doc("", "", &format!("- {LOOP_HEAD}\n"));
+        assert_eq!(
+            HeadEchoWindow::for_queue(&doc, "queue-1", || panic!("non-loop: no schedule read")),
+            HeadEchoWindow::HeadEntry
+        );
+        assert_eq!(
+            HeadEchoWindow::for_queue(&doc, "queue-2", || Some(open_window(OPENED))),
+            HeadEchoWindow::LoopPass {
+                opened_secs: OPENED
+            }
+        );
+        for window in [Some(crate::queue_schedule::ScheduleWindow::Closed), None] {
+            assert_eq!(
+                HeadEchoWindow::for_queue(&doc, "queue-2", || window.clone()),
+                HeadEchoWindow::LoopHeld,
+                "{window:?}"
+            );
+        }
+        assert!(!HeadEchoWindow::HeadEntry.is_loop());
+        assert!(HeadEchoWindow::LoopHeld.is_loop());
+    }
+
+    /// The scope runs only the walk its window selects, and a held `loop`
+    /// head is answered by no echo at all.
+    #[test]
+    fn head_echo_scope_resolves_by_window() {
+        let echo = upgrade_echo();
+        let answered = |scoped: &str| {
+            crate::queue_response::free_text_head_answered_by_response(scoped, LOOP_HEAD)
+        };
+
+        let entry = HeadEchoScope::resolve(
+            HeadEchoWindow::HeadEntry,
+            || Some(String::new()),
+            |_| panic!("non-loop: no pass walk"),
+        );
+        assert_eq!(entry.label(), "head_entry");
+        assert!(entry.answers(&echo, answered));
+
+        let pass = HeadEchoScope::resolve(
+            HeadEchoWindow::LoopPass {
+                opened_secs: OPENED,
+            },
+            || panic!("loop: no entry walk"),
+            |opened_secs| {
+                assert_eq!(opened_secs, OPENED);
+                Some(LoopPassEchoAnchor {
+                    exchange: echo.clone(),
+                    kind: LoopPassEchoAnchorKind::PassOpened,
+                })
+            },
+        );
+        assert_eq!(pass.label(), "pass_opened");
+        assert!(!pass.answers(&echo, answered));
+
+        let whole = HeadEchoScope::resolve(
+            HeadEchoWindow::LoopPass {
+                opened_secs: OPENED,
+            },
+            || panic!("loop: no entry walk"),
+            |_| None,
+        );
+        assert_eq!(whole, HeadEchoScope::WholeExchange);
+        assert!(whole.answers(&echo, answered));
+
+        let held = HeadEchoScope::resolve(
+            HeadEchoWindow::LoopHeld,
+            || panic!("held: no entry walk"),
+            |_| panic!("held: no pass walk"),
+        );
+        assert_eq!(held, HeadEchoScope::NoOpenPass);
+        assert_eq!(held.label(), "no_open_pass");
+        assert_eq!(held.answering_exchange(&echo), None);
+        assert!(!held.answers(&echo, |_| panic!("held: nothing to judge")));
     }
 }

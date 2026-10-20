@@ -165,6 +165,37 @@ pub fn loop_pass_head_echo_anchor_exchange(
     walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT)
 }
 
+/// Which exchange echoes may answer the live free-text head `head_text` of
+/// queue `queue_id` of `file`, given the queue's `window`: the entry walk
+/// ([`free_text_head_entry_anchor_exchange`]) for a non-loop queue, the pass
+/// walk ([`loop_pass_head_echo_anchor_exchange`]) for a `loop` queue with an
+/// open pass, and no echo for a held `loop` queue.
+///
+/// The one resolver the preflight catch-up residue strike and the
+/// `#syntheticstrike` continuation-head skip both call, so a head one keeps
+/// live the other never treats as answered.
+pub fn head_echo_scope(
+    file: &Path,
+    queue_id: &str,
+    head_text: &str,
+    window: agent_doc_queue::queue_head_entry::HeadEchoWindow,
+    current_content: &str,
+) -> agent_doc_queue::queue_head_entry::HeadEchoScope {
+    agent_doc_queue::queue_head_entry::HeadEchoScope::resolve(
+        window,
+        || free_text_head_entry_anchor_exchange(file, queue_id, head_text),
+        |opened_secs| {
+            loop_pass_head_echo_anchor_exchange(
+                file,
+                queue_id,
+                head_text,
+                opened_secs,
+                current_content,
+            )
+        },
+    )
+}
+
 pub fn show_head(file: &Path) -> Result<Option<String>> {
     show_rev(file, "HEAD")
 }

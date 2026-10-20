@@ -62,6 +62,24 @@ pub fn schedule_held_heads(file: &Path, content: &str) -> Vec<String> {
     held
 }
 
+/// The [`agent_doc_queue::queue_head_entry::HeadEchoWindow`] of queue
+/// `queue_id` in `content`: which history scopes the echoes that may answer
+/// its live free-text heads. Reads `state.db` only for a `loop` queue; an
+/// unreadable row holds the queue's heads (no echo answers them). Shared by
+/// the preflight catch-up residue strike and the continuation-head skip.
+pub fn head_echo_window(
+    file: &Path,
+    content: &str,
+    queue_id: &str,
+) -> agent_doc_queue::queue_head_entry::HeadEchoWindow {
+    agent_doc_queue::queue_head_entry::HeadEchoWindow::for_queue(content, queue_id, || {
+        agent_doc_controller_io::queue_scheduler::load_schedule_state_for_queue(file, queue_id)
+            .ok()
+            .flatten()
+            .map(|state| state.window)
+    })
+}
+
 /// Put `roster` back into `file`'s selected `agent:queue` through the
 /// binary-owned write path (the live CRDT replica while an editor holds the
 /// document, never a disk write behind it). Returns how many items were

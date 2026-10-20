@@ -224,27 +224,32 @@ pub fn required_continuation_excluding_claimed(
     )
 }
 
-/// `#qheadresiduescope`: where a live free-text head last (re-)entered queue
-/// `queue_id`, as the exchange text at that point
-/// ([`crate::queue_head_entry::FreeTextHeadEntryWalk::finish`]); `None` when
-/// every echo in the exchange counts. Arguments: `(queue_id, head_text)`.
-pub type HeadEntryAnchor<'a> = dyn Fn(&str, &str) -> Option<String> + 'a;
+/// `#qheadresiduescope` / GH #327 pass 4: which echoes may answer the live
+/// free-text head `head_text` of queue `queue_id`
+/// ([`crate::queue_head_entry::HeadEchoScope`]), the same scope the preflight
+/// catch-up residue strike resolves. Arguments: `(queue_id, head_text)`.
+pub type HeadEchoScopeFor<'a> = dyn Fn(&str, &str) -> crate::queue_head_entry::HeadEchoScope + 'a;
 
-/// A [`HeadEntryAnchor`] with no history: every echo in the exchange counts.
-pub fn whole_exchange_head_entry(_queue_id: &str, _head: &str) -> Option<String> {
-    None
+/// A [`HeadEchoScopeFor`] with no history: every echo in the exchange counts.
+pub fn whole_exchange_head_entry(
+    _queue_id: &str,
+    _head: &str,
+) -> crate::queue_head_entry::HeadEchoScope {
+    crate::queue_head_entry::HeadEchoScope::WholeExchange
 }
 
 /// [`required_continuation_excluding_claimed`] whose `#syntheticstrike`
-/// answered-head skip counts only echoes written after each head's entry
-/// point, as `head_entry_anchor` reports it (`#qheadresiduescope`). The
-/// file-backed adapter in `agent-doc-queue-io` reads the anchor from the
-/// document's git history.
+/// answered-head skip counts only the echoes `head_echo_scope` admits: those
+/// written after each head's entry point (`#qheadresiduescope`) and, for a
+/// `loop` queue, in the current pass about this queue's copy, with none while
+/// no pass is open (GH #327 pass 4). The file-backed adapter in
+/// `agent-doc-queue-io` resolves the scope from the schedule state and the
+/// document's git history, exactly as the preflight catch-up strike does.
 pub fn required_continuation_excluding_claimed_scoped(
     content: &str,
     snapshot_content: Option<&str>,
     claimed: &ClaimedQueueItems,
-    head_entry_anchor: &HeadEntryAnchor<'_>,
+    head_echo_scope: &HeadEchoScopeFor<'_>,
 ) -> Result<Option<QueueContinuation>> {
     let (fm, _) = frontmatter::parse(content)?;
     let components = element::parse(content)?;
@@ -300,7 +305,7 @@ pub fn required_continuation_excluding_claimed_scoped(
     }
 
     let Some(head) =
-        continuation_head_skipping_answered_residue(content, &queue_id, claimed, head_entry_anchor)
+        continuation_head_skipping_answered_residue(content, &queue_id, claimed, head_echo_scope)
     else {
         return Ok(None);
     };
@@ -346,27 +351,24 @@ pub fn required_continuation_excluding_claimed_scoped(
 /// asked for it again, so the earlier echo must not hide the new copy from the
 /// continuation offer. The entry anchor is read only for a head the whole
 /// exchange would call answered, so an unanswered head costs no history read.
+///
+/// GH #327 pass 4: a `loop` queue's head is answered only by an echo written
+/// in its current pass about this queue's copy, and by none while no pass is
+/// open, so a `loop` head the preflight residue strike keeps is never skipped
+/// here as answered.
 fn continuation_head_skipping_answered_residue(
     content: &str,
     queue_id: &str,
     claimed: &ClaimedQueueItems,
-    head_entry_anchor: &HeadEntryAnchor<'_>,
+    head_echo_scope: &HeadEchoScopeFor<'_>,
 ) -> Option<QueuePrompt> {
     let (queue_facts, activation) = active_queue_for_supervisor_start(content, false)?;
     let exchange_text = crate::queue_head_entry::exchange_component_text(content);
     let answered_residue = |head: &str| -> bool {
         crate::queue_heads::free_text_queue_head_is_completed_residue(content, &exchange_text, head)
-            && match head_entry_anchor(queue_id, head) {
-                None => true,
-                Some(anchor) => crate::queue_heads::free_text_queue_head_is_completed_residue(
-                    content,
-                    &crate::queue_head_entry::exchange_after_head_entry(
-                        &exchange_text,
-                        Some(&anchor),
-                    ),
-                    head,
-                ),
-            }
+            && head_echo_scope(queue_id, head).answers(&exchange_text, |scoped| {
+                crate::queue_heads::free_text_queue_head_is_completed_residue(content, scoped, head)
+            })
     };
     let entries: Vec<QueueEntry> = activation
         .entries_after
@@ -2050,8 +2052,21 @@ mod tests {
 
         // The report re-entered the queue after that echo was written: the
         // anchor is the whole current exchange, so nothing newer answers it.
-        let reentered_after_answer =
-            |_: &str, head: &str| -> Option<String> { (head == report).then(|| exchange.clone()) };
+        let newer_than = |exchange: String| {
+            crate::queue_head_entry::HeadEchoScope::NewerThan(
+                crate::queue_head_entry::LoopPassEchoAnchor {
+                    exchange,
+                    kind: crate::queue_head_entry::LoopPassEchoAnchorKind::HeadEntry,
+                },
+            )
+        };
+        let reentered_after_answer = |_: &str, head: &str| {
+            if head == report {
+                newer_than(exchange.clone())
+            } else {
+                crate::queue_head_entry::HeadEchoScope::WholeExchange
+            }
+        };
         let scoped = required_continuation_excluding_claimed_scoped(
             &content,
             Some(&content),
@@ -2064,7 +2079,7 @@ mod tests {
 
         // The report entered before the echo (the anchor predates the answer):
         // it is still answered residue and skipped.
-        let entered_before_answer = |_: &str, _: &str| -> Option<String> { Some(String::new()) };
+        let entered_before_answer = |_: &str, _: &str| newer_than(String::new());
         let answered = required_continuation_excluding_claimed_scoped(
             &content,
             Some(&content),
@@ -2074,6 +2089,36 @@ mod tests {
         .unwrap()
         .expect("the id-backed head still requires continuation");
         assert_eq!(answered.head_prompt, "do [#next]");
+    }
+
+    /// GH #327 pass 4: the continuation-head skip honours the shared echo
+    /// scope, so a `loop` head the preflight residue strike keeps (no open
+    /// pass, or only echoes outside the pass) is never skipped as answered.
+    #[test]
+    fn required_continuation_offers_a_head_no_echo_in_scope_answers() {
+        let head = "upgrade the toolchain";
+        let content = doc_with_answered_exchange(&[head, "do [#next]"], head);
+        let exchange = crate::queue_head_entry::exchange_component_text(&content);
+        for scope in [
+            crate::queue_head_entry::HeadEchoScope::NoOpenPass,
+            crate::queue_head_entry::HeadEchoScope::NewerThan(
+                crate::queue_head_entry::LoopPassEchoAnchor {
+                    exchange: exchange.clone(),
+                    kind: crate::queue_head_entry::LoopPassEchoAnchorKind::PassOpened,
+                },
+            ),
+        ] {
+            let label = scope.label();
+            let continuation = required_continuation_excluding_claimed_scoped(
+                &content,
+                Some(&content),
+                &ClaimedQueueItems::none(),
+                &|_: &str, _: &str| scope.clone(),
+            )
+            .unwrap()
+            .expect("live heads require continuation");
+            assert_eq!(continuation.head_prompt, head, "{label}");
+        }
     }
 
     #[test]

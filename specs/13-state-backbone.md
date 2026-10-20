@@ -495,7 +495,12 @@ decide it.
   long-lived surface already holds. Re-deriving editor state per command, for
   example `--col` arguments on a CLI route, is a snapshot of the state, not
   propagation. It must reach the same derivation and must not become a second
-  source of truth.
+  source of truth. JetBrains `Run Agent Doc` and `Sync Tmux Layout` follow this
+  through `surface_layout_reference_v1`: they publish the current surface on the
+  ordinary observation path and name that publication, and the controller
+  derives their layout from its surface Source (`specs/08-session-routing.md`,
+  "Editor commands name the propagated surface"). The plugin's `--col` snapshot
+  survives only as a logged fallback for a controller without the capability.
 
 ## Regression Rule
 

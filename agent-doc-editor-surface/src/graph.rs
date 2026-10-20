@@ -323,6 +323,13 @@ impl EditorSurfaceState {
         self.ctx.get(&self.current_document_authority)
     }
 
+    /// The editor surface currently held in the `Source`. Commands that act
+    /// by reference to the propagated surface read it here instead of taking
+    /// a per-command snapshot from the editor.
+    pub fn surface(&self) -> EditorSurface {
+        self.ctx.get(&self.editor)
+    }
+
     /// Whether tmux matches the layout the editor is showing, as currently
     /// derived. `None` until the controller has reported a tmux layout.
     pub fn layout_matches(&self) -> Option<bool> {

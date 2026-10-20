@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **Run Agent Doc and Sync Tmux Layout act on the propagated editor surface,
+  not a click-time `--col` snapshot (`surface_layout_reference_v1`).** Both
+  JetBrains commands used to read the editor split again when clicked and send
+  it as `--col a,b --col c`, a second source of truth beside the surface Source
+  the editor already publishes. They now publish the current surface through
+  the ordinary `editor_surface_observe` path and send a `surface_reference`
+  naming that publication; the controller derives the route's `--col`/`--focus`
+  arguments, layout mode, and order label, or the sync's columns and focus,
+  from its retained surface Source, the same column shape automatic capture
+  uses. An unknown split or a stale focus is refused by the controller with the
+  sentences the plugin used to show, and a missing, retired, or older Source
+  fails closed. Every observe reply now lists `capabilities`; a new plugin keeps
+  the `--col` publication, logged with its reason, against a controller that
+  does not advertise the capability, for a cross-root route, or when it cannot
+  publish the surface. `agent-doc sync --col ...` from a terminal is unchanged.
+  A split showing no markdown document is not part of the surface, so a route
+  over `[a.md | non-markdown]` now derives `ensure` rather than an `exact` pair
+  with an empty placeholder. VS Code still sends its `--col` layout.
+
 ## 0.35.528
 
 - **A Remote Dev split change reaches the controller as state, and pane order

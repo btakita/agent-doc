@@ -371,6 +371,13 @@ class SyncLayoutAction : AnAction(), DumbAware {
          * Syncs tmux layout to match the IDE editor split. Can be called from
          * any action (e.g. ClaimAction calls this after claiming).
          * Runs on a background thread — safe to call from EDT.
+         *
+         * The layout is the propagated editor surface (`surface_layout_reference_v1`): the sync
+         * publishes the current surface on the [EditorTabSyncListener] path and names it, and the
+         * controller derives the columns, their order label, and the focus from its surface
+         * Source. [allowSurfaceReference] `false` is the rollout fallback that sends the editor's
+         * `--col` snapshot instead (an older controller, or a surface this listener cannot
+         * publish to the sync's controller).
          */
     fun syncLayout(
         project: com.intellij.openapi.project.Project,
@@ -378,10 +385,11 @@ class SyncLayoutAction : AnAction(), DumbAware {
         noAutostart: Boolean = false,
         callerKind: String? = null,
         terminalPrepared: Boolean = false,
+        allowSurfaceReference: Boolean = true,
     ) {
             if (!SwingUtilities.isEventDispatchThread()) {
                 ApplicationManager.getApplication().invokeLater {
-                syncLayout(project, notify, noAutostart, callerKind, terminalPrepared)
+                syncLayout(project, notify, noAutostart, callerKind, terminalPrepared, allowSurfaceReference)
                 }
                 return
             }
@@ -419,6 +427,30 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 focusedProjectRoot,
                 visibleMdFiles,
             )
+            if (allowSurfaceReference) {
+                val listener = EditorTabSyncListener.forProject(project)
+                val commandSurface = listener?.captureCommandSurface(project, focusedVFile)
+                if (listener != null && commandSurface != null) {
+                    syncLayoutBySurfaceReference(
+                        project = project,
+                        notify = notify,
+                        noAutostart = noAutostart,
+                        callerKind = callerKind,
+                        terminalPrepared = terminalPrepared,
+                        listener = listener,
+                        commandSurface = commandSurface,
+                        projectRoot = projectRoot,
+                        focusedFile = focusedFile,
+                        failureAction = failureAction,
+                    )
+                    return
+                }
+                LOG.warn(
+                    "[sync] surface reference unavailable reason=" +
+                        (if (listener == null) "no_surface_listener" else "surface_capture_deferred") +
+                        "; sending the --col snapshot",
+                )
+            }
             // IDEA component state is captured on the EDT exactly once. The
             // controller/socket work below owns the background portion.
         val editorLayout = absolutizeEditorLayout(
@@ -485,6 +517,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         noAutostart = noAutostart,
                         callerKind = callerKind,
                         terminalPrepared = true,
+                        allowSurfaceReference = allowSurfaceReference,
                     )
                 },
                 onFailure = { message ->
@@ -568,6 +601,126 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 }
             }.start()
         }
+
+    /**
+     * The surface-reference half of [syncLayout]: prepare the terminal like the snapshot path,
+     * then publish the captured surface and submit `sync_tmux_layout` naming it. The controller
+     * owns the exact-visible decisions the snapshot path makes in the plugin (an unknown split or
+     * a focus outside the columns is refused there, with the same message).
+     */
+    private fun syncLayoutBySurfaceReference(
+        project: com.intellij.openapi.project.Project,
+        notify: Boolean,
+        noAutostart: Boolean,
+        callerKind: String?,
+        terminalPrepared: Boolean,
+        listener: EditorTabSyncListener,
+        commandSurface: EditorTabSyncListener.CommandSurfaceCapture,
+        projectRoot: String,
+        focusedFile: String,
+        failureAction: String,
+    ) {
+        if (!terminalPrepared && !noAutostart) {
+            val relativeFocusedFile = java.io.File(projectRoot).toPath()
+                .relativize(java.io.File(focusedFile).toPath())
+                .toString()
+            IdeTerminalCoordinator.ensureAndAttach(
+                project = project,
+                cwd = projectRoot,
+                relativePath = relativeFocusedFile,
+                onReady = {
+                    syncLayout(
+                        project = project,
+                        notify = notify,
+                        noAutostart = noAutostart,
+                        callerKind = callerKind,
+                        terminalPrepared = true,
+                    )
+                },
+                onFailure = { message ->
+                    if (notify) {
+                        val detail = "Failed to prepare agent-doc tmux session: $message"
+                        TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
+                        TerminalUtil.notifyError(project, detail)
+                    }
+                },
+            )
+            return
+        }
+        Thread {
+            try {
+                if (!NativeReloadCoordinator.awaitReady()) {
+                    if (notify) {
+                        val detail =
+                            "Sync deferred because the native-generation handoff did not " +
+                                "finish within ${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds."
+                        TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
+                        TerminalUtil.notifyError(project, detail)
+                    }
+                    return@Thread
+                }
+                when (val publication = listener.publishCommandSurface(commandSurface, projectRoot)) {
+                    is EditorTabSyncListener.CommandSurfacePublication.Unavailable -> {
+                        LOG.warn(
+                            "[sync] surface reference unavailable reason=${publication.reason}; " +
+                                "sending the --col snapshot",
+                        )
+                        ApplicationManager.getApplication().invokeLater {
+                            if (!project.isDisposed) {
+                                syncLayout(
+                                    project = project,
+                                    notify = notify,
+                                    noAutostart = noAutostart,
+                                    callerKind = callerKind,
+                                    terminalPrepared = true,
+                                    allowSurfaceReference = false,
+                                )
+                            }
+                        }
+                    }
+                    is EditorTabSyncListener.CommandSurfacePublication.Published -> {
+                        val reference = publication.reference
+                        val receipt = CpRouteClient.submitSyncTmuxLayout(
+                            projectRoot = projectRoot,
+                            columnsJson = "[]",
+                            window = null,
+                            focus = focusedFile,
+                            noAutostart = noAutostart,
+                            exactVisible = true,
+                            callerKind = syncCallerKind(noAutostart, callerKind),
+                            surfaceReference = reference,
+                        )
+                        if (receipt.exitCode != 0) {
+                            LOG.warn(
+                                "[sync] Project Controller projection failed projectRoot=$projectRoot " +
+                                    "surface=${reference.surfaceId} min_sequence=${reference.minSequence} " +
+                                    "output=${receipt.output}",
+                            )
+                            if (notify) {
+                                val detail =
+                                    SurfaceCommandReference.refusalMessage(receipt.output)
+                                        ?: syncFailureMessage(receipt.output)
+                                TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
+                                TerminalUtil.notifyError(project, detail)
+                            }
+                        } else {
+                            LOG.info(
+                                "[sync] Project Controller projection completed by surface reference " +
+                                    "surface=${reference.surfaceId} min_sequence=${reference.minSequence}: " +
+                                    receipt.output.take(500),
+                            )
+                        }
+                    }
+                }
+            } catch (ex: Exception) {
+                if (notify) {
+                    val detail = "Failed to sync layout: ${ex.message}"
+                    TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, detail)
+                    TerminalUtil.notifyError(project, detail)
+                }
+            }
+        }.start()
+    }
     }
 
     override fun actionPerformed(e: AnActionEvent) {

@@ -523,26 +523,18 @@ object TerminalUtil {
             // Build a diagnostic command shape matching the CP editor_route request.
             val cmd = buildEditorRouteRequestCommand(relativePath)
 
-            val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-            val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
-            val editorLayout = SyncLayoutAction.absolutizeEditorLayout(
-                cwd,
-                SyncLayoutAction.normalizeEditorLayout(
-                    project.basePath,
-                    cwd,
-                    LayoutDetector.detectEditorLayout(project),
-                ),
-            )
-            val layoutArgs = buildRouteLayoutArgs(
-                visibleMdFiles = visibleMdFiles,
-                editorLayout = editorLayout,
-                focusedFile = manager.selectedTextEditor?.virtualFile
-                    ?.takeIf { it.name.endsWith(".md") }
-                    ?.path,
-            )
-            cmd.addAll(layoutArgs)
+            // `surface_layout_reference_v1`: capture the editor surface on this EDT turn through
+            // the same path the automatic capture uses. The route thread publishes it and names
+            // that publication, so the controller derives the route's layout from its surface
+            // Source instead of `--col` arguments built here.
+            val surfaceListener = EditorTabSyncListener.forProject(project)
+            val commandSurface =
+                if (ApplicationManager.getApplication().isDispatchThread) {
+                    surfaceListener?.captureCommandSurface(project, file)
+                } else {
+                    null
+                }
 
-            // Pass focused file
             LOG.warn("[route] sending CP request: ${cmd.joinToString(" ")}")
             attempt?.recordIfCurrent("route_command_built", command = cmd)
 
@@ -569,16 +561,19 @@ object TerminalUtil {
                     attempt?.recordIfCurrent("route_start", command = cmd)
                     routeGeneration =
                         StateProjectionBridge.recordRouteDispatchStarted(documentPath, routeKey)
+                    val routeLayout = resolveRouteLayout(project, cwd, surfaceListener, commandSurface)
+                    attempt?.recordIfCurrent(routeLayout.stage, command = cmd + routeLayout.diagnosticArgs)
                     val routeResult = CpRouteClient.runEditorRoute(
                         projectRoot = cwd,
                         filePath = documentPath,
                         relativePath = relativePath,
-                        layoutArgs = layoutArgs,
+                        layoutArgs = routeLayout.layoutArgs,
                         waitForReadySeconds = RUN_ROUTE_WAIT_FOR_READY_SECONDS,
                         attemptId = attempt?.id,
                         routeKey = attempt?.routeKey,
-                        columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout),
-                        layoutMode = routeLayoutMode(editorLayout),
+                        columnOrder = routeLayout.columnOrder,
+                        layoutMode = routeLayout.layoutMode,
+                        surfaceReference = routeLayout.surfaceReference,
                     )
                     val output = routeResult.output
                     val exitCode = routeResult.exitCode
@@ -749,6 +744,108 @@ object TerminalUtil {
             RUN_ROUTE_WAIT_FOR_READY_SECONDS.toString(),
             relativePath,
         )
+
+    /**
+     * The layout part of one `editor_route` request: a [surfaceReference] the controller resolves
+     * against its surface Source, or the `--col` snapshot fallback. Never both.
+     */
+    internal data class RouteLayoutRequest(
+        val layoutArgs: List<String>,
+        val columnOrder: String?,
+        val layoutMode: String?,
+        val surfaceReference: SurfaceLayoutReference?,
+        val stage: String,
+    ) {
+        val diagnosticArgs: List<String>
+            get() =
+                surfaceReference
+                    ?.let { listOf("--surface-reference", "${it.surfaceId}@${it.minSequence}") }
+                    ?: layoutArgs
+
+        companion object {
+            const val STAGE_SURFACE_REFERENCE = "route_layout_surface_reference"
+            const val STAGE_SNAPSHOT_FALLBACK = "route_layout_snapshot_fallback"
+
+            fun bySurfaceReference(reference: SurfaceLayoutReference): RouteLayoutRequest =
+                RouteLayoutRequest(
+                    layoutArgs = emptyList(),
+                    columnOrder = null,
+                    layoutMode = null,
+                    surfaceReference = reference,
+                    stage = STAGE_SURFACE_REFERENCE,
+                )
+
+            /** The pre-reference `--col` publication, kept for an older controller. */
+            fun fromEditorSnapshot(
+                visibleMdFiles: List<String>,
+                editorLayout: EditorLayout?,
+                focusedFile: String?,
+            ): RouteLayoutRequest =
+                RouteLayoutRequest(
+                    layoutArgs = buildRouteLayoutArgs(visibleMdFiles, editorLayout, focusedFile),
+                    columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout),
+                    layoutMode = routeLayoutMode(editorLayout),
+                    surfaceReference = null,
+                    stage = STAGE_SNAPSHOT_FALLBACK,
+                )
+        }
+    }
+
+    /**
+     * Publish the captured surface and name it, or fall back to the editor's `--col` snapshot
+     * when the controller cannot resolve a reference to it (logged with the reason). Route thread.
+     */
+    private fun resolveRouteLayout(
+        project: Project,
+        cwd: String,
+        listener: EditorTabSyncListener?,
+        commandSurface: EditorTabSyncListener.CommandSurfaceCapture?,
+    ): RouteLayoutRequest {
+        val reason =
+            when {
+                listener == null -> "no_surface_listener"
+                commandSurface == null -> "surface_capture_deferred"
+                else ->
+                    when (val publication = listener.publishCommandSurface(commandSurface, cwd)) {
+                        is EditorTabSyncListener.CommandSurfacePublication.Published -> {
+                            LOG.warn(
+                                "[route] layout by surface reference surface=${publication.reference.surfaceId} " +
+                                    "min_sequence=${publication.reference.minSequence}",
+                            )
+                            return RouteLayoutRequest.bySurfaceReference(publication.reference)
+                        }
+                        is EditorTabSyncListener.CommandSurfacePublication.Unavailable -> publication.reason
+                    }
+            }
+        LOG.warn("[route] surface reference unavailable reason=$reason; sending the --col snapshot")
+        return editorSnapshotRouteLayout(project, cwd)
+    }
+
+    /** The `--col` snapshot fallback, read on the EDT like every editor-state read. */
+    private fun editorSnapshotRouteLayout(project: Project, cwd: String): RouteLayoutRequest {
+        var snapshot: RouteLayoutRequest? = null
+        val read = Runnable {
+            if (project.isDisposed) return@Runnable
+            val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+            snapshot = RouteLayoutRequest.fromEditorSnapshot(
+                visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles),
+                editorLayout = SyncLayoutAction.absolutizeEditorLayout(
+                    cwd,
+                    SyncLayoutAction.normalizeEditorLayout(
+                        project.basePath,
+                        cwd,
+                        LayoutDetector.detectEditorLayout(project),
+                    ),
+                ),
+                focusedFile = manager.selectedTextEditor?.virtualFile
+                    ?.takeIf { it.name.endsWith(".md") }
+                    ?.path,
+            )
+        }
+        val application = ApplicationManager.getApplication()
+        if (application.isDispatchThread) read.run() else application.invokeAndWait(read)
+        return snapshot ?: RouteLayoutRequest.fromEditorSnapshot(emptyList(), null, null)
+    }
 
     /**
      * GH #111: what the route's `--col` arguments assert. Only a detected

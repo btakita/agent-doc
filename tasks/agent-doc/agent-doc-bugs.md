@@ -257,7 +257,40 @@ The review noted one non-blocking coverage opportunity: fault injection for disk
 ### Re: issue-watch release condition — gpt-5 · 2026-10-19T19:25-04:00
 
 No new issue was added in this pass, so no release-and-publish item was added.
-<!-- agent:boundary:2a4cf9aa -->
+
+### Re: Subagent completed: `subagent:completion_tags` returned work for queue item “Should `agent-doc-subagent-completion` tags be replaced with the response? sdk-demo.md has some lingering `agent-doc-subagent-completion` tags.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=3e549586d3501a37b9f4898a4f720c4429601be9a51f9f5f86d0d1744ac6292a -->
+
+### Re: Subagent completed: `subagent:waypost_request_id` returned work for queue item “subagent operator request should have its own id: instead of [agent-doc]. Remove ` (#waypostrequest)`. Make the Editor Plugin syntax highlighting color code the id tag the same as in todo + backlog + queue + icebox + review.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=94268ce796cc43ac3b3334b220047511093d691c41f8f34501dd4cebc6a9c196 -->
+> **Queue prompt:** If an issue was added, also add `- release + publish`
+
+### Re: issue-watch release condition — gpt-5 · 2026-10-19T20:02-04:00
+
+The delegated check confirmed that no issue was added by the preceding watch pass. No `release + publish` follow-up is required, and nothing was published.
+
+> **Queue prompt:** Should `agent-doc-subagent-completion` tags be replaced with the response? sdk-demo.md has some lingering `agent-doc-subagent-completion` tags.
+
+### Re: subagent completion feedback lifecycle — gpt-5 · 2026-10-19T20:02-04:00
+
+Yes. A matching temporary `agent-doc-subagent-completion` cell should be retired when the coordinator's integrated response closes that queue item. It was a lifecycle defect: the claim closed but the cell continued saying integration was pending.
+
+Fixed on `main` in `72bb77cb19` with the corrected regression in `d0b87395c3`. Queue closeout now removes only structurally binary-attested cells matching an actually consumed head; unmatched worker reports and lookalike prose remain. Retained-delivery proof also requires those retired attempt keys to be absent. The full queue-I/O library passes 210/210, and the combined `make check-fast` gate passes.
+
+The live `sdk-demo.md` contains zero completion markers and is healthy. The five observed markers were only in a stale worktree copy, so no live SDK document was mutated.
+
+> **Queue prompt:** subagent operator request should have its own id: instead of [agent-doc]. Remove ` (#waypostrequest)`. Make the Editor Plugin syntax highlighting color code the id tag the same as in todo + backlog + queue + icebox + review.
+
+### Re: subagent operator-request ID and highlighting — gpt-5 · 2026-10-19T20:02-04:00
+
+Implemented on `main` in `eb260b6b7b`. The handback header is now `[#subagent-operator-request] subagent operator request`; the generic `[agent-doc]` prefix and `(#waypostrequest)` suffix are removed.
+
+Shared syntax classifies `[#subagent-operator-request]` as `tracked_id`, so JetBrains and VS Code use the same existing ID color path as todo, backlog, queue, icebox, and review IDs. Runtime/preflight prompts, canonical specs, all harness runbook mirrors, editor specs, and tests were updated. The focused suite passed 34/34, plugin version checks passed, and the combined integration gate passed.
+
+The complete post-release stack is pushed through `d0b87395c3` and installed locally. This remains post-v0.35.525 work on `main`; no new release was published.
+<!-- agent:boundary:74300c47 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -265,13 +298,14 @@ No new issue was added in this pass, so no release-and-publish item was added.
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
+- ~~If an issue was added, also add `- release + publish`~~
+- 📥 Should `agent-doc-subagent-completion` tags be replaced with the response? sdk-demo.md has some lingering `agent-doc-subagent-completion` tags.
+- 📥 subagent operator request should have its own id: instead of [agent-doc]. Remove ` (#waypostrequest)`. Make the Editor Plugin syntax highlighting color code the id tag the same as in todo + backlog + queue + icebox + review.
 <!-- /agent:queue -->
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
 - Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
-- If an issue was added, also add `- release + publish`
-- Should `agent-doc-subagent-completion` tags be replaced with the response? sdk-demo.md has some lingering `agent-doc-subagent-completion` tags.
 <!-- /agent:queue -->
 
 ## Todo

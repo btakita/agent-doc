@@ -225,7 +225,43 @@ The v0.35.529 `make release` is past tagging and is waiting on the GitHub Releas
 - close GH #321 and #322 on GitHub;
 - file the crash-auto-restart follow-up;
 - repair `agent:status`.
-<!-- agent:boundary:232886f5 -->
+
+### Re: Subagent completed: `subagent:gh325` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/325” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=e3beb2fe6c10ea183d27df00f695ea40aea21bb1aee481eb6024dd972e338276 -->
+
+### Re: Subagent completed: `subagent:gh324` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/324” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=eb7f94461977ea76e333e08a784202869dc145af6bd00e9915fcf7337849a452 -->
+> **Chat prompt (#chatprompt):** subagent: fix • Blocked by hook
+>   └ Queue continuation, not an error: Codex labels the Stop continuation wire shape `Blocked by hook`. Next
+> `agent:queue auto` prompt for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md:
+> "[#tdue4decisions]: Are you suggesting that we transition the entire sdk to use float or only UE 6?". Continue THIS
+> turn in-pane: answer it, then persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/
+> tasks/sdk/sdk-dev.md`. Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md`
+> (recursive self-invocation) and do not send the final answer yet.
+
+> **Chat prompt (#chatprompt):** unless this is normal behavior
+
+### Re: Codex "Blocked by hook" on sdk-dev.md
+
+**The label is normal.** Codex can only continue a turn from its Stop hook with `decision: "block"`, and Codex shows that as `Blocked by hook`. That's why the payload starts with "Queue continuation, not an error". This is documented in `SPEC.md` and `runbooks/harness-invocation.md` (`#codex-stop-continuation-label`), and the label won't change.
+
+**What isn't normal is that it continued in the pane at all.** sdk-dev.md's queue has auto-clear on by default. With a healthy supervisor, the Stop hook should have let Codex stop at the item boundary, and the supervisor would then restart Codex fresh for the next item (`#bgclearpolicy`). Instead, `ops.log` shows:
+- **17:30:11Z**: the install recycle skipped pane `%22`'s supervisor as `cause=no_longer_live`. Pane `%53`, running sdk-dev-loop.md, was skipped the same way.
+- **17:51:16Z**: the Stop hook logged `codex_stop_queue_auto_clear_kept_in_pane supervisor_drain_readiness=supervisor_heartbeat_stale`.
+
+The supervisor was alive the whole time: PID 1728757, a child of pane `%22`, running the current 0.35.529 binary and re-executed in place. agent-doc's liveness and heartbeat checks reported a live supervisor as stale, which is the bug.
+
+I've dispatched a subagent to find the root cause in code, on branch `fix/codexstoplabel` in `~/worktrees/agent-doc-codexstoplabel-20261020`. It will leave the live supervisor and the haiven-dev documents untouched. If the evidence shows this is designed behaviour after all, it will report back without changing code.
+
+The sdk-dev Codex turn itself is fine: it should answer `#tdue4decisions` in its pane and finalize as normal.
+
+**Other work in flight:**
+- GH #324 and #325: reported; waiting to be integrated.
+- GH #326 and #327: still running.
+- v0.35.529: still waiting on the GitHub Release workflow.
+<!-- agent:boundary:27df8bc2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -241,11 +277,12 @@ The v0.35.529 `make release` is past tagging and is waiting on the GitHub Releas
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/323
 - 🚧 release + publish: Include PR #321-#323
 - 📥 do [#clauderesumeafterclear]
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/324
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/325
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/324
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/325
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/326
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/327
 - release + publish: Include PR #324-#327
+- 🚧 [from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)
 <!-- /agent:queue -->
 
 ## Queue: Issues

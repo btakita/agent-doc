@@ -1212,6 +1212,7 @@ const TRACE_SURFACE: &str = "frame-1";
 
 fn observation_surface() -> EditorSurface {
     EditorSurface {
+        column_order: Default::default(),
         focused: "/project/a.md".to_string(),
         visible: vec!["/project/a.md".to_string()],
         open: vec!["/project/a.md".to_string()],

@@ -569,6 +569,13 @@ internal object SelectionProjectionSettling {
         @SerializedName("force_reconcile") val forceReconcile: Boolean,
         @SerializedName("focus_only") val focusOnly: Boolean,
         @SerializedName("preserve_focus") val preserveFocus: Boolean,
+        /**
+         * GH #320: provenance of [columns]' left-to-right order, as observed state. `editor` only
+         * for measured split geometry; a Remote Dev backend (no client split structure) and
+         * unmeasured local windows publish `unknown`, or `retained` from an anchored fold, so the
+         * controller never presents membership order as geometry.
+         */
+        @SerializedName("column_order") val columnOrder: String = "editor",
     )
 
 private data class PendingSurfaceObservation(
@@ -699,6 +706,30 @@ private data class CapturedSurface(
                 .filterNotNull()
                 .distinct()
 
+        /**
+         * GH #320: the session documents a Remote Dev backend can see. Its own
+         * `FileEditorManager.selectedFiles` often names no session document (`activeWindow=<none>`),
+         * so deferring on it threw the remote-client state away and a split change reached tmux only
+         * on the next Run. The remote clients' visible and selected session documents (project
+         * relative, mapped back to absolute paths through the open session documents) are the same
+         * state the remote fold publishes as columns, so they join the backend's own selection.
+         */
+        fun remoteClientVisibleSessionFiles(
+            backendVisible: List<String>,
+            clientVisible: List<List<String>>,
+            clientSelected: List<List<String>>,
+            absoluteByRelative: Map<String, String>,
+        ): List<String> =
+            sequenceOf(
+                    backendVisible.asSequence(),
+                    clientVisible.asSequence().flatten().mapNotNull(absoluteByRelative::get),
+                    clientSelected.asSequence().flatten().mapNotNull(absoluteByRelative::get),
+                )
+                .flatten()
+                .filter(String::isNotBlank)
+                .distinct()
+                .toList()
+
         fun resolveActiveFilePath(
             preferredActiveFile: String?,
             selectedEditorFile: String?,
@@ -778,6 +809,7 @@ private data class CapturedSurface(
                 forceReconcile = forceReconcile,
                 focusOnly = false,
                 preserveFocus = preserveFocus,
+                columnOrder = editorLayout?.columnOrder ?: "editor",
             )
 
         /**
@@ -1211,7 +1243,7 @@ private data class CapturedSurface(
                     "windows=${surfaceWindows.size} selected=${selectedWindowPaths.size}",
             )
         }
-        val rawVisibleMdFiles =
+        val windowVisibleMdFiles =
             SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
                 selectedWindowPaths,
                 // `#stickymdpane`: keep a window that has switched to a source
@@ -1231,6 +1263,22 @@ private data class CapturedSurface(
                 },
                 sessionDocumentPaths,
             )
+        // GH #320: on a Remote Dev backend the remote clients' visible/selected documents are the
+        // observed state; never defer on the backend's own (often empty) selection.
+        val rawVisibleMdFiles =
+            if (useRemoteClientLayout) {
+                SurfaceReport.remoteClientVisibleSessionFiles(
+                    backendVisible = windowVisibleMdFiles,
+                    clientVisible = remoteLayoutCandidate.clients.map { it.visible },
+                    clientSelected = remoteLayoutCandidate.clients.map { it.selected },
+                    absoluteByRelative =
+                        allOpenSessionFiles.associate { file ->
+                            TerminalUtil.relativePath(project, file) to file.path
+                        },
+                )
+            } else {
+                windowVisibleMdFiles
+            }
         // GH #157: capture Remote Dev client/editor state on this EDT turn, but defer its native
         // retained-split fold to the generation-owned surface delivery worker below.
         val remoteLayoutSnapshot =

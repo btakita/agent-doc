@@ -488,6 +488,29 @@ class SyncLayoutActionTest {
         )
     }
 
+    /** GH #320: only measured window geometry is an `editor` order; a shared origin is not. */
+    @Test
+    fun `measured column order labels only laid out windows as editor geometry`() {
+        assertEquals(
+            "editor",
+            LayoutDetector.measuredColumnOrder(
+                listOf(
+                    LayoutDetector.LayoutWindowSnapshot(x = 900, y = 0, file = "b.md"),
+                    LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "a.md"),
+                ),
+            ),
+        )
+        assertEquals(
+            "unknown",
+            LayoutDetector.measuredColumnOrder(
+                listOf(
+                    LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "a.md"),
+                    LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "b.md"),
+                ),
+            ),
+        )
+    }
+
     @Test
     fun `build columns groups windows by x into separate columns`() {
         // Two editor windows at distinct x positions → a 2-column (2-editor-pane)

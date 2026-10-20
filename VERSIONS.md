@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **A Remote Dev split change reaches the controller as state, and pane order
+  never claims geometry it does not have (GH #320).** On a JetBrains Remote Dev
+  backend the automatic layout capture deferred every time with
+  `no_visible_session_documents`, because it gated on the backend's own
+  `selectedFiles` (no session document, `activeWindow=<none>`) and dropped the
+  remote client's `visible`/`selected` state, so a split change reached tmux
+  only on the next Run. The capture now publishes that remote-client state on
+  the Lazily surface Source. The surface state also carries its column-order
+  provenance (`column_order`): local windows at distinct origins publish
+  `editor`, while Remote Dev and unmeasured local windows publish `unknown`
+  (or `retained` from an anchored fold), and the controller derives tmux order
+  for those from the layout it retains instead of applying them as editor
+  geometry. Previously every automatic surface was labelled `editor`. The Remote
+  Dev backend has no client split structure (`GuestFileEditorManager` holds a
+  flat composite list, and the RD composite model carries only `visible`), so a
+  split move cannot reorder tmux there; the manual remedy is
+  `agent-doc sync --col <left> --col <right>`, which later automatic
+  observations keep.
+
 ## 0.35.527
 
 - **Residual-work lists reach the operator-todo advisory, and one

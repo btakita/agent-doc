@@ -4344,27 +4344,59 @@ pub(super) fn run_controller_editor_intent(
             columns,
             document,
             preserve_focus,
+            column_order,
         } => serde_json::to_string(&sync_tmux_layout(
             project_root,
-            automatic_editor_surface_sync_invocation(columns, document, *preserve_focus),
+            automatic_editor_surface_sync_invocation(
+                columns,
+                document,
+                *preserve_focus,
+                *column_order,
+            ),
         )?)
         .context("serialize controller-owned tmux layout receipt"),
     }
 }
 
+///
+/// GH #320: the observation's own order provenance travels with the columns.
+/// A surface whose order is not measured geometry (Remote Dev, or unmeasured
+/// local windows) must not reach tmux labelled `editor`, or its membership
+/// order would overwrite the layout the controller retains.
 fn automatic_editor_surface_sync_invocation(
     columns: &[SurfaceColumn],
     document: &str,
     preserve_focus: bool,
+    column_order: agent_doc_editor_surface::SurfaceColumnOrder,
 ) -> ControllerTmuxLayoutSyncInvocation {
-    automatic_layout_sync_invocation(
+    let mut invocation = automatic_layout_sync_invocation(
         columns
             .iter()
             .map(|column| column.files.join(","))
             .collect(),
         document,
         preserve_focus,
-    )
+    );
+    invocation.column_order = layout_column_order_from_surface(column_order);
+    invocation
+}
+
+/// GH #320: the surface wire label and the controller's order label name the
+/// same three provenances.
+fn layout_column_order_from_surface(
+    order: agent_doc_editor_surface::SurfaceColumnOrder,
+) -> agent_doc_tmux::LayoutColumnOrder {
+    match order {
+        agent_doc_editor_surface::SurfaceColumnOrder::Editor => {
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        }
+        agent_doc_editor_surface::SurfaceColumnOrder::Unknown => {
+            agent_doc_tmux::LayoutColumnOrder::Unknown
+        }
+        agent_doc_editor_surface::SurfaceColumnOrder::Retained => {
+            agent_doc_tmux::LayoutColumnOrder::Retained
+        }
+    }
 }
 
 /// The same automatic-caller desired layout, from columns that are already in
@@ -27581,11 +27613,33 @@ struct FocusEscalationColumns {
 /// same effect the first, layout-changing switch already runs successfully;
 /// `CoalesceIdentical` keeps a repeated selection from republishing work the
 /// worker has already converged.
+#[cfg(test)]
 fn escalate_focus_to_structural_layout(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     document: &str,
     columns: &[SurfaceColumn],
+    reason: &str,
+) -> bool {
+    escalate_focus_to_structural_layout_ordered(
+        bootstrap,
+        runtime,
+        document,
+        columns,
+        agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+        reason,
+    )
+}
+
+/// [`escalate_focus_to_structural_layout`] with the surface columns' order
+/// provenance (GH #320): editor-surface columns whose order is not geometry
+/// are republished with that label, never as `editor`.
+fn escalate_focus_to_structural_layout_ordered(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    document: &str,
+    columns: &[SurfaceColumn],
+    surface_column_order: agent_doc_editor_surface::SurfaceColumnOrder,
     reason: &str,
 ) -> bool {
     let FocusEscalationColumns {
@@ -27621,7 +27675,9 @@ fn escalate_focus_to_structural_layout(
     // the focus rather than preserve whatever tmux happens to have selected.
     let derived_columns = columns.clone();
     let mut invocation = automatic_layout_sync_invocation(columns, document, false);
-    if source != "editor_surface" {
+    if source == "editor_surface" {
+        invocation.column_order = layout_column_order_from_surface(surface_column_order);
+    } else {
         // GH #112: republishing the retained layout keeps its order source, so
         // an unchanged layout still coalesces instead of relabelling a
         // `retained` order as `editor` and minting a new generation.
@@ -28020,12 +28076,15 @@ fn navigation_lane_focus_refusal(
 /// when it reported them, else the lane's retained desired layout extended
 /// with the document. The shared lane keeps
 /// [`escalate_focus_to_structural_layout`].
-fn escalate_focus_to_lane_layout(
+/// Republish the lane's layout so a stashed focus target becomes visible,
+/// carrying the surface columns' order provenance (GH #320).
+fn escalate_focus_to_lane_layout_ordered(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     lane: &agent_doc_editor_surface::NavigationLane,
     document: &str,
     columns: &[SurfaceColumn],
+    surface_column_order: agent_doc_editor_surface::SurfaceColumnOrder,
     reason: &str,
 ) -> bool {
     let document_id = canonical_layout_document_id(&bootstrap.project_root, document);
@@ -28058,11 +28117,15 @@ fn escalate_focus_to_lane_layout(
         basis.push(document.to_string());
     }
     let asserted = basis.len();
+    let mut invocation = automatic_layout_sync_invocation(basis, document, false);
+    if source == "editor_surface" {
+        invocation.column_order = layout_column_order_from_surface(surface_column_order);
+    }
     let published = publish_pane_layout_desired_invocation_in_lane(
         bootstrap,
         runtime,
         lane,
-        automatic_layout_sync_invocation(basis, document, false),
+        invocation,
         None,
         focus_escalation_publication(reason),
         PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).asserting(asserted),
@@ -28121,6 +28184,7 @@ fn handle_editor_surface_observe(
     // pane back to the structural layout owner, so the editor's own visible
     // columns must outlive the fold's move of the observation.
     let surface_columns = observation.surface.columns.clone();
+    let surface_column_order = observation.surface.column_order;
     let surface_layout_authority = if observation.surface.focus_only {
         "focus_only"
     } else if surface_columns.is_empty() {
@@ -28265,9 +28329,14 @@ fn handle_editor_surface_observe(
                 columns,
                 document,
                 preserve_focus,
+                column_order,
             } => {
-                let invocation =
-                    automatic_editor_surface_sync_invocation(&columns, &document, preserve_focus);
+                let invocation = automatic_editor_surface_sync_invocation(
+                    &columns,
+                    &document,
+                    preserve_focus,
+                    column_order,
+                );
                 // `#stalecontrollerhotupdate` (d): the generation this mints is
                 // ordered by the editor's own frame order, which is shared by
                 // every controller this editor publishes to.
@@ -28417,20 +28486,22 @@ fn handle_editor_surface_observe(
                     )?;
                     if let Some(reason) = structural_refusal {
                         effect_failed = if navigation_lane.is_shared() {
-                            !escalate_focus_to_structural_layout(
+                            !escalate_focus_to_structural_layout_ordered(
                                 bootstrap,
                                 runtime,
                                 &document,
                                 &surface_columns,
+                                surface_column_order,
                                 &reason,
                             )
                         } else {
-                            !escalate_focus_to_lane_layout(
+                            !escalate_focus_to_lane_layout_ordered(
                                 bootstrap,
                                 runtime,
                                 &navigation_lane,
                                 &document,
                                 &surface_columns,
+                                surface_column_order,
                                 &reason,
                             )
                         };
@@ -35849,6 +35920,7 @@ mod pane_layout_projection_dispatch_tests {
             &columns,
             "/project/tasks/software/lazily.md",
             false,
+            agent_doc_editor_surface::SurfaceColumnOrder::Editor,
         );
 
         assert!(!invocation.no_autostart);
@@ -35870,8 +35942,12 @@ mod pane_layout_projection_dispatch_tests {
             "/project/tasks/left.md",
             "/project/tasks/right.md",
         ])];
-        let invocation =
-            automatic_editor_surface_sync_invocation(&columns, "/project/tasks/left.md", true);
+        let invocation = automatic_editor_surface_sync_invocation(
+            &columns,
+            "/project/tasks/left.md",
+            true,
+            agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+        );
 
         assert_eq!(invocation.focus, None);
     }
@@ -39375,6 +39451,7 @@ mod tests {
 
     fn test_editor_surface(focused: &str) -> agent_doc_editor_surface::EditorSurface {
         agent_doc_editor_surface::EditorSurface {
+            column_order: Default::default(),
             focused: focused.to_string(),
             visible: vec![focused.to_string()],
             open: vec![focused.to_string()],
@@ -40092,6 +40169,142 @@ mod tests {
         );
     }
 
+    /// GH #320, state propagation: tmux order is a pure derivation of the
+    /// latest editor surface state. A local surface whose columns carry
+    /// measured geometry (`editor`) moves from `[a | b]` to `[b | a]` and the
+    /// desired layout follows, with no event history involved.
+    #[test]
+    fn gh320_geometry_surface_state_reorders_the_desired_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let surface = |left: &str, right: &str| {
+            automatic_editor_surface_sync_invocation(
+                &[
+                    SurfaceColumn {
+                        files: vec![left.to_string()],
+                    },
+                    SurfaceColumn {
+                        files: vec![right.to_string()],
+                    },
+                ],
+                left,
+                false,
+                agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+            )
+        };
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            surface(&a, &b),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::EditorSurface,
+        )
+        .unwrap();
+        let (desired, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            surface(&b, &a),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::EditorSurface,
+        )
+        .unwrap();
+        assert_eq!(desired.invocation.columns, vec![b.clone(), a.clone()]);
+        assert_eq!(
+            desired.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+    }
+
+    /// GH #320, hazard at the controller: a Remote Dev surface reports
+    /// membership without geometry, so its columns arrive labelled `unknown`
+    /// (or `retained` from an anchored fold). After the operator's manual
+    /// remedy `agent-doc sync --col b --col a` (an `editor` publication), the
+    /// next automatic Remote Dev surface `[a | b]` keeps `[b | a]`: membership
+    /// order never overwrites the layout the controller retains.
+    #[test]
+    fn gh320_remote_surface_without_geometry_keeps_the_manual_col_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let remote = |order: agent_doc_editor_surface::SurfaceColumnOrder| {
+            automatic_editor_surface_sync_invocation(
+                &[
+                    SurfaceColumn {
+                        files: vec![a.clone()],
+                    },
+                    SurfaceColumn {
+                        files: vec![b.clone()],
+                    },
+                ],
+                &a,
+                false,
+                order,
+            )
+        };
+        // The pre-#320 hazard: the automatic surface path was always `editor`.
+        assert_eq!(
+            remote(agent_doc_editor_surface::SurfaceColumnOrder::Unknown).column_order,
+            agent_doc_tmux::LayoutColumnOrder::Unknown
+        );
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            remote(agent_doc_editor_surface::SurfaceColumnOrder::Unknown),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::EditorSurface,
+        )
+        .unwrap();
+        // `agent-doc sync --col b --col a`: no `column_order`, so `editor`.
+        let manual: ControllerTmuxLayoutSyncInvocation =
+            serde_json::from_value(serde_json::json!({
+                "columns": [b, a],
+                "focus": b,
+                "exact_visible": true,
+                "caller_kind": "manual",
+            }))
+            .unwrap();
+        let (desired, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            manual,
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(desired.invocation.columns, vec![b.clone(), a.clone()]);
+        for order in [
+            agent_doc_editor_surface::SurfaceColumnOrder::Unknown,
+            agent_doc_editor_surface::SurfaceColumnOrder::Retained,
+        ] {
+            let (desired, _) = publish_pane_layout_desired_invocation(
+                &bootstrap,
+                runtime.as_ref(),
+                remote(order),
+                None,
+                PaneLayoutPublication::FreshIntent,
+                PaneLayoutPublisher::EditorSurface,
+            )
+            .unwrap();
+            assert_eq!(desired.invocation.caller_kind, "automatic", "{order:?}");
+            assert_eq!(
+                desired.invocation.columns,
+                vec![b.clone(), a.clone()],
+                "{order:?}"
+            );
+        }
+    }
+
     /// GH #112: a positive editor split order (local multi-window geometry, or
     /// a publisher that predates `column_order`) is still authoritative and
     /// replaces the retained order.
@@ -40157,6 +40370,7 @@ mod tests {
                 ],
                 &mr,
                 false,
+                agent_doc_editor_surface::SurfaceColumnOrder::Editor,
             ),
             None,
             PaneLayoutPublication::CoalesceIdentical,
@@ -40511,6 +40725,7 @@ mod tests {
                 generation: 7,
                 sequence,
                 surface: agent_doc_editor_surface::EditorSurface {
+                    column_order: Default::default(),
                     focused: focused.to_string_lossy().to_string(),
                     visible: vec![
                         ledger.to_string_lossy().to_string(),
@@ -40607,6 +40822,7 @@ mod tests {
             },
         ];
         let surface = agent_doc_editor_surface::EditorSurface {
+            column_order: Default::default(),
             focused: "/project/a.md".to_string(),
             visible: vec!["/project/a.md".to_string(), "/project/b.md".to_string()],
             open: vec!["/project/a.md".to_string(), "/project/b.md".to_string()],
@@ -41872,6 +42088,7 @@ mod tests {
                 .flat_map(|column| column.files.clone())
                 .collect::<Vec<_>>();
             agent_doc_editor_surface::EditorSurface {
+                column_order: Default::default(),
                 focused: visible[0].clone(),
                 open: visible.clone(),
                 visible,
@@ -41884,6 +42101,7 @@ mod tests {
             }
         };
         let focus = |document: &str| agent_doc_editor_surface::EditorSurface {
+            column_order: Default::default(),
             focused: document.to_string(),
             visible: vec![document.to_string()],
             open: vec![document.to_string()],
@@ -42076,6 +42294,7 @@ mod tests {
             files: vec!["/project/a.md".to_string()],
         }];
         let surface = agent_doc_editor_surface::EditorSurface {
+            column_order: Default::default(),
             focused: "/project/a.md".to_string(),
             visible: vec!["/project/a.md".to_string()],
             open: vec!["/project/a.md".to_string()],
@@ -43933,6 +44152,7 @@ mod tests {
             generation: 100,
             sequence,
             surface: agent_doc_editor_surface::EditorSurface {
+                column_order: Default::default(),
                 focused: "/project/a.md".to_string(),
                 open: vec!["/project/a.md".to_string()],
                 visible: vec!["/project/a.md".to_string()],
@@ -44274,6 +44494,7 @@ mod tests {
                 .map(|file| (*file).to_string())
                 .collect::<Vec<_>>();
             agent_doc_editor_surface::EditorSurface {
+                column_order: Default::default(),
                 focused: files[0].clone(),
                 open: files.clone(),
                 visible: files.clone(),
@@ -44289,6 +44510,7 @@ mod tests {
             }
         };
         let focus = |document: &str| agent_doc_editor_surface::EditorSurface {
+            column_order: Default::default(),
             focused: document.to_string(),
             visible: vec![document.to_string()],
             open: vec![document.to_string()],
@@ -44402,6 +44624,7 @@ mod tests {
                     generation: 1,
                     sequence: sequence as u64 + 1,
                     surface: agent_doc_editor_surface::EditorSurface {
+                        column_order: Default::default(),
                         focused: "/project/a.md".to_string(),
                         visible: vec!["/project/a.md".to_string()],
                         open: vec!["/project/a.md".to_string()],
@@ -46361,6 +46584,7 @@ mod tests {
                         ],
                         &fx.api,
                         false,
+                        agent_doc_editor_surface::SurfaceColumnOrder::Editor,
                     ),
                     None,
                     PaneLayoutPublication::CoalesceIdentical,
@@ -56496,6 +56720,7 @@ mod tests {
         use agent_doc_editor_surface::{EditorSurface, SurfaceColumn, SurfaceTracking};
         let root = std::path::Path::new("/tmp/netadv3-focus-retry");
         let surface = |focused: &str| EditorSurface {
+            column_order: Default::default(),
             focused: focused.to_string(),
             open: vec!["/a.md".to_string(), "/b.md".to_string()],
             visible: vec!["/a.md".to_string(), "/b.md".to_string()],

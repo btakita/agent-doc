@@ -457,6 +457,31 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   pane order is therefore stable but is **not** a mirror of the editor's split order; agent-doc
   has no input from which to derive it. `pane_layout_desired_published` and every
   `pane_layout_projection` line record `caller_kind` and `column_order=editor|retained|unknown`.
+- The automatic editor surface is state, and it names its column-order provenance the same way
+  (GH #320; the rule is `specs/13-state-backbone.md`, "State Propagation, Not Effect Inference").
+  The surface payload's `column_order` is `editor` only for local windows laid out at distinct
+  origins; windows that share an origin (never measured) and every Remote Dev fold result publish
+  `unknown`, or `retained` when the fold memory is anchored. The controller carries that label
+  from `SurfaceIntent::Sync` (and a focus escalation over the surface's columns) into the desired
+  layout, so a membership order is ordered against the retained layout and never applied as
+  geometry; a payload without the field reads as `editor`. Without geometry the surface signature
+  and the tmux drift check compare columns as a set, so a permutation of the same documents is
+  neither a new layout nor drift. On a Remote Dev backend the capture reads the remote clients'
+  `visible`/`selected` session documents (mapped to the open session documents' absolute paths)
+  together with the backend's own selection; it never defers with
+  `no_visible_session_documents` because the backend's `selectedFiles` names no session document
+  (`activeWindow=<none>`), so a split change publishes without a Run.
+- **Remote Dev pane order cannot follow a split move (GH #320).** The backend has no client split
+  structure to observe: `GuestFileEditorManager` (the backend's `ClientFileEditorManager` for a
+  Remote Dev client) holds a flat composite list and one selected composite, the RD
+  `FileEditorCompositeModel` carries a per-composite `visible` flag but no window or split
+  identity, and `RdServerEditorTracker.activeEditors` is a flat list. Moving a document to the
+  opposite split therefore changes no state the backend can read except tab-open order, which is
+  not geometry, and agent-doc does not infer order from the editor remove/re-open events. The
+  manual remedy is `agent-doc sync --col <left> --col <right>` (an `editor` publication); later
+  automatic Remote Dev observations, labelled `unknown`/`retained`, keep that order. Real Remote
+  Dev geometry needs the JetBrains Client side: the 262/263 frontend module sees the client's
+  `EditorWindow`s and would have to publish measured columns through the surface Source.
 - Manual `Sync Tmux Layout` publishes `exact_visible=true` only when layout detection returns
   known columns. If columns are unreadable, it refuses before terminal preparation or controller
   publication and tells the operator that the retained tmux layout was not changed; a focused-only

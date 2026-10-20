@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 2
 <!-- status:sync -->
@@ -203,6 +203,28 @@ If the check fails, fix the cause in the integration worktree; never rerun it to
 **Per the fix-the-cause rule:** I didn't rerun it to green. A subagent on `fix/ownerpaneflake` (from `2c210f307`) is making the fixture wait for the observable process-tree event instead of a deadline, or fixing the production race if that is the real cause. It must prove the fix under CPU load. Then I re-run `make check` and `make release` as v0.35.529, since the tag is still unused. The release claim (`coordinator:release-0529`) is refreshed.
 
 **Also running:** `subagent:clauderesume` on `clauderesumeafterclear`.
+
+### Re: GH #324–#327 dispatched; v0.35.529 release still publishing
+
+Each new issue has its own subagent in its own worktree (`~/worktrees/agent-doc-gh<N>-20261020`, branch `fix/gh<N>`, cut from main `181bd291b2`):
+
+| Issue | What it fixes | Queue state |
+|---|---|---|
+| #324 | A focused extract removed linked exchange turns from the source, but the target never received them | 🚧 running |
+| #325 | Preflight resolves `agent:done archive=` as a path under the project root, so a bare `archive`/`document:` anchor never resolves | 🚧 running |
+| #326 | JetBrains 263: move frequently changed plugin logic behind the hot-reloaded native library so upgrades don't need an IDE restart | 🚧 running |
+| #327 | A `loop` queue loses its item on every pass | 🚧 running |
+
+For #326, the subagent was asked to ship one complete slice and to report the remaining phases as follow-up queue heads, rather than leave a half-done refactor.
+
+After all four report, I'll merge their branches, then run one `make check` and one `make install`. The release you queued for #324–#327 comes after that.
+
+The v0.35.529 `make release` is past tagging and is waiting on the GitHub Release workflow. Its closeout is still pending:
+- confirm the GitHub Release assets and PyPI;
+- strike the shipped heads (GH #321/#322/#323, `#sessioncrashnorestart`, `#clauderesumeafterclear`);
+- close GH #321 and #322 on GitHub;
+- file the crash-auto-restart follow-up;
+- repair `agent:status`.
 <!-- agent:boundary:232886f5 -->
 <!-- /agent:exchange -->
 
@@ -218,7 +240,12 @@ If the check fails, fix the cause in the integration worktree; never rerun it to
 - 📥 do [#sessioncrashnorestart]
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/323
 - 🚧 release + publish: Include PR #321-#323
-- 🚧 do [#clauderesumeafterclear]
+- 📥 do [#clauderesumeafterclear]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/324
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/325
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/326
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/327
+- release + publish: Include PR #324-#327
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -237,7 +264,7 @@ If the check fails, fix the cause in the integration worktree; never rerun it to
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#clauderesumeafterclear] [agent-doc] After an operator /clear in a Claude Code session, agent-doc never updates the session document's resume: field, so every later restart resumes the pre-clear conversation. Observed 2026-10-20: agent-doc-bugs.md kept resume ba846c4c after the 14:28Z /clear started e62ea89f, and both the 15:25Z manual relaunch and the 15:39Z Restart Agent resumed ba846c4c. Codex already tracks its new conversation id; do the same for Claude (SessionStart source=clear/startup hook payload carries the new session id) through the binary-owned frontmatter write, with a regression test.
+- [ ] 🚧 [#clauderesumeafterclear] [agent-doc] After an operator /clear in a Claude Code session, agent-doc never updates the session document's resume: field, so every later restart resumes the pre-clear conversation. Observed 2026-10-20: agent-doc-bugs.md kept resume ba846c4c after the 14:28Z /clear started e62ea89f, and both the 15:25Z manual relaunch and the 15:39Z Restart Agent resumed ba846c4c. Codex already tracks its new conversation id; do the same for Claude (SessionStart source=clear/startup hook payload carries the new session id) through the binary-owned frontmatter write, with a regression test.
 - [ ] 🚧 [#sessioncrashnorestart] [agent-doc] Integrate the crashed-session-no-restart fix: a background subagent (dispatched 2026-10-20 ~15:27Z from pane %2) is diagnosing why the agent-doc-bugs.md Claude session (agent-doc session 3f069c68, Claude resume ba846c4c) crashed some time between ~14:16Z and ~15:25Z and the supervisor did not restart it. It pushes branch fix/sessioncrashnorestart (worktree ~/worktrees/agent-doc-sessioncrash-20261020, based on origin/main 2d5944fb0e). When that branch has a commit: review the diagnosis in the commit and spec changes, merge it with the next batch, run make check plus make install, and close this item. If the branch has no commit and the worktree is idle, re-dispatch the investigation.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->

@@ -432,4 +432,120 @@ class LayoutDetectorTest {
         assertEquals(windows, LayoutDetector.windowsInActiveFrame(windows, { it.owner }, null))
         assertEquals(windows, LayoutDetector.windowsInActiveFrame(windows, { it.owner }, "other"))
     }
+
+    private fun windowLayoutParityCases(): List<com.google.gson.JsonObject> {
+        val stream = javaClass.classLoader.getResourceAsStream("editor-derivations/window_layout.json")
+            ?: error("GH #326 parity fixture not on the test classpath")
+        val raw = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        return com.google.gson.JsonParser.parseString(raw).asJsonObject
+            .getAsJsonArray("cases")
+            .map { it.asJsonObject }
+    }
+
+    private fun evidenceOf(case: com.google.gson.JsonObject): LayoutDetector.WindowLayoutEvidence =
+        com.google.gson.Gson().fromJson(case.get("input"), LayoutDetector.WindowLayoutEvidence::class.java)
+
+    private fun com.google.gson.JsonElement.nullableString(): String? = if (isJsonNull) null else asString
+
+    @Test
+    fun `GH 326 frozen window layout floor answers every shared parity case`() {
+        // The same file pins the native `window_layout` derivation in Rust
+        // (gh326_window_layout_answers_the_shared_parity_cases).
+        val cases = windowLayoutParityCases()
+        assertTrue("the parity file lost cases", cases.size >= 8)
+        for (case in cases) {
+            val name = case.get("name").asString
+            val expected = case.getAsJsonObject("expected")
+            val resolution = LayoutDetector.frozenWindowLayout(evidenceOf(case))
+            assertEquals(
+                name,
+                expected.getAsJsonArray("columns").map { column -> column.asJsonArray.map { it.asString } },
+                resolution.layout?.columns?.map(LayoutColumn::files).orEmpty(),
+            )
+            resolution.layout?.let { layout ->
+                assertEquals(name, expected.get("column_order").asString, layout.columnOrder)
+            }
+            assertEquals(name, expected.get("reason").nullableString(), resolution.reason)
+            assertEquals(name, expected.get("observed_line").nullableString(), resolution.observedLine)
+        }
+    }
+
+    @Test
+    fun `GH 326 window evidence is the native wire shape`() {
+        val json = com.google.gson.Gson().toJson(
+            LayoutDetector.WindowLayoutEvidence(
+                basePath = "/repo",
+                windows = listOf(
+                    LayoutDetector.EditorWindowEvidence(
+                        x = null,
+                        y = null,
+                        selected = "/repo/a.md",
+                        sessionTabs = listOf("/repo/a.md"),
+                    ),
+                ),
+                history = listOf("/repo/a.md"),
+            ),
+        )
+        val root = com.google.gson.JsonParser.parseString(json).asJsonObject
+        assertEquals("/repo", root.get("base_path").asString)
+        val window = root.getAsJsonArray("windows")[0].asJsonObject
+        assertEquals("/repo/a.md", window.get("selected").asString)
+        assertEquals("/repo/a.md", window.getAsJsonArray("session_tabs")[0].asString)
+        assertFalse("an unmeasured origin is absent, never 0", window.has("x"))
+    }
+
+    @Test
+    fun `GH 326 a native window layout answer wins and keeps empty columns`() {
+        val evidence = evidenceOf(windowLayoutParityCases().first())
+        var asked: String? = null
+        val layout = LayoutDetector.detectEditorLayout(evidence) { derivation, inputJson ->
+            asked = derivation
+            assertTrue(inputJson.contains("session_tabs"))
+            """{"columns":[{"files":[]},{"files":["tasks/right.md"]}],"column_order":"retained",""" +
+                """"snapshots":[],"observed_line":"[layout-detect] observed native"}"""
+        }
+        assertEquals("window_layout", asked)
+        assertEquals(
+            EditorLayout(
+                listOf(LayoutColumn(emptyList()), LayoutColumn(listOf("tasks/right.md"))),
+                columnOrder = "retained",
+            ),
+            layout,
+        )
+        assertEquals(
+            null,
+            LayoutDetector.detectEditorLayout(evidence) { _, _ ->
+                """{"columns":[],"column_order":"editor","reason":"later_rule"}"""
+            },
+        )
+    }
+
+    @Test
+    fun `GH 326 no native answer takes the frozen floor`() {
+        val case = windowLayoutParityCases().first()
+        val evidence = evidenceOf(case)
+        val frozen = LayoutDetector.frozenWindowLayout(evidence).layout
+        assertEquals(frozen, LayoutDetector.detectEditorLayout(evidence, EditorDerivation.Unavailable))
+        assertEquals(frozen, LayoutDetector.detectEditorLayout(evidence) { _, _ -> "not json" })
+    }
+
+    @Test
+    fun `GH 326 an EDT caller runs the native window layout derivation off the EDT`() {
+        val evidence = evidenceOf(windowLayoutParityCases().first())
+        val ranOffEdt = AtomicBoolean(false)
+        val detected = AtomicReference<EditorLayout?>()
+        SwingUtilities.invokeAndWait {
+            detected.set(
+                LayoutDetector.detectEditorLayout(evidence) { _, _ ->
+                    ranOffEdt.set(!SwingUtilities.isEventDispatchThread())
+                    """{"columns":[{"files":["a.md"]},{"files":["b.md"]}],"column_order":"editor"}"""
+                },
+            )
+        }
+        assertTrue("the native derivation must never run on the EDT", ranOffEdt.get())
+        assertEquals(
+            EditorLayout(listOf(LayoutColumn(listOf("a.md")), LayoutColumn(listOf("b.md")))),
+            detected.get(),
+        )
+    }
 }

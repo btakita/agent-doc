@@ -3470,6 +3470,36 @@ pub unsafe extern "C" fn agent_doc_editor_surface_resolve_remote_layout_json(
     })())
 }
 
+/// Answer one editor derivation over the hot-reloadable native boundary
+/// (GH #326, the #295 "path 2" lever).
+///
+/// The JetBrains exact-263 plugin generation can only be replaced by an IDE
+/// restart, while this library hot-reloads under the running IDE. Plugins
+/// therefore report evidence and ask this one entry point what it means:
+/// `request_json` is `{"derivation": "<name>", "input": {...}}` and the answer
+/// is `{"derivation": "<name>", "output": {...}}`. A new rule, or a changed
+/// one, is a native change with no new JNA method and no plugin generation.
+///
+/// Compatibility: a shipped derivation is never removed or renamed, and its
+/// input fields stay optional, because after a hot reload this library is
+/// newer than the plugin calling it. An unknown derivation is an error the
+/// plugin answers with its frozen compatibility fallback. `capabilities`
+/// lists every derivation this library answers.
+///
+/// # Safety
+///
+/// `request_json` must be a NUL-terminated UTF-8 string. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_editor_derive_json(
+    request_json: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let request_json = unsafe { required_ffi_string(request_json, "request_json") }?;
+        agent_doc_editor_surface_io::derive_editor_from_json(&request_json)
+    })())
+}
+
 /// Validate and enqueue one editor-surface observation without waiting for its
 /// controller probe or tmux consequence.
 ///
@@ -5352,6 +5382,38 @@ mod tests {
             result.json.is_null(),
             "invalid evidence is an error, not columns"
         );
+        unsafe { agent_doc_free_string(result.error) };
+    }
+
+    /// GH #326: the hot-reloadable derivation channel answers the layout
+    /// derivations a plugin generation asks for, and refuses an unknown one so
+    /// the plugin can take its frozen fallback.
+    #[test]
+    fn gh326_editor_derive_ffi_answers_layout_derivations() {
+        let request = CString::new(
+            r#"{"derivation":"window_layout","input":{"base_path":"/repo","windows":[
+                {"x":0,"y":0,"selected":"/repo/a.md","session_tabs":["/repo/a.md"]},
+                {"selected":"/repo/b.md","session_tabs":["/repo/b.md"]}]}}"#,
+        )
+        .unwrap();
+        let answer = ffi_json_value(unsafe { agent_doc_editor_derive_json(request.as_ptr()) });
+        assert_eq!(answer["derivation"], "window_layout");
+        assert_eq!(answer["output"]["column_order"], "unknown");
+        assert_eq!(
+            answer["output"]["columns"],
+            serde_json::json!([{"files": ["a.md"]}, {"files": ["b.md"]}])
+        );
+        let capabilities = CString::new(r#"{"derivation":"capabilities"}"#).unwrap();
+        let listed = ffi_json_value(unsafe { agent_doc_editor_derive_json(capabilities.as_ptr()) });
+        assert!(
+            listed["output"]["derivations"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("client_measured_layout"))
+        );
+        let unknown = CString::new(r#"{"derivation":"later_rule"}"#).unwrap();
+        let result = unsafe { agent_doc_editor_derive_json(unknown.as_ptr()) };
+        assert!(result.json.is_null(), "an unknown derivation is an error");
         unsafe { agent_doc_free_string(result.error) };
     }
 

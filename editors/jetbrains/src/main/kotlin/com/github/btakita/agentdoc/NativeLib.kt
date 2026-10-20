@@ -474,6 +474,13 @@ interface AgentDocLib : Library {
         evidence_json: String,
     ): FfiJsonResult.ByValue
 
+    /**
+     * GH #326: the hot-reloadable derivation channel. `request_json` is
+     * `{ "derivation", "input" }`; the answer is `{ "derivation", "output" }`. New and changed
+     * rules ship in the native library without a new method here or a plugin generation.
+     */
+    fun agent_doc_editor_derive_json(request_json: String): FfiJsonResult.ByValue
+
     /** Validate and enqueue an observation without waiting for tmux work. */
     fun agent_doc_editor_surface_enqueue_json(
         project_root: String,
@@ -1861,6 +1868,47 @@ object NativeAdminControls {
                 return null
             }
         return decodeJsonResult(lib, result, "editor_surface_resolve_remote_layout")
+    }
+
+    /** The native generation whose library lacks [AgentDocLib.agent_doc_editor_derive_json]. */
+    @Volatile private var editorDeriveUnavailableFor: AgentDocLib? = null
+
+    /**
+     * GH #326: ask the hot-reloaded native library for one editor derivation. Returns the
+     * derivation's `output` JSON, or `null` when no native generation can answer (not loaded, an
+     * older library without the symbol, or a derivation it does not know) so the caller takes its
+     * frozen compatibility fallback. A missing symbol is remembered per native generation only: the
+     * next hot-reloaded library is asked again.
+     */
+    fun deriveEditor(
+        derivation: String,
+        inputJson: String,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        if (editorDeriveUnavailableFor === lib) return null
+        val request =
+            com.google.gson.JsonObject().apply {
+                addProperty("derivation", derivation)
+                add("input", com.google.gson.JsonParser.parseString(inputJson))
+            }
+        val result =
+            try {
+                lib.agent_doc_editor_derive_json(request.toString())
+            } catch (e: UnsatisfiedLinkError) {
+                editorDeriveUnavailableFor = lib
+                LOG.warn("[native] editor_derive unavailable in this native generation: ${e.message}")
+                return null
+            } catch (e: Throwable) {
+                LOG.warn("[native] editor_derive $derivation failed: ${e.message}")
+                return null
+            }
+        val answer = decodeJsonResult(lib, result, "editor_derive $derivation") ?: return null
+        return try {
+            com.google.gson.JsonParser.parseString(answer).asJsonObject.get("output")?.toString()
+        } catch (e: Exception) {
+            LOG.warn("[native] editor_derive $derivation answer unreadable: ${e.message}")
+            null
+        }
     }
 
     fun editorSurfaceEnqueue(

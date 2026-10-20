@@ -397,6 +397,55 @@ pub fn resolve_remote_layout_from_json(
     Ok(resolve_remote_layout(project_root, &evidence))
 }
 
+/// Every editor derivation [`derive_editor_from_json`] answers (GH #326).
+///
+/// This is the hot-reloadable half of the plugin boundary: the plugin reports
+/// evidence and the native library derives what it means. A derivation, once
+/// shipped, is never removed or renamed and its input fields stay optional,
+/// because after a native hot reload the library is newer than the plugin
+/// generation still calling it.
+pub const EDITOR_DERIVATIONS: &[&str] =
+    &["capabilities", "window_layout", "client_measured_layout"];
+
+#[derive(serde::Deserialize)]
+struct EditorDerivationRequest {
+    derivation: String,
+    #[serde(default)]
+    input: serde_json::Value,
+}
+
+/// Answer one editor derivation request: `{"derivation": "<name>", "input": {...}}`
+/// yields `{"derivation": "<name>", "output": {...}}`.
+pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> {
+    let request: EditorDerivationRequest =
+        serde_json::from_str(request_json).context("parse editor derivation request json")?;
+    let input = if request.input.is_null() {
+        serde_json::json!({})
+    } else {
+        request.input
+    };
+    let output = match request.derivation.as_str() {
+        "capabilities" => serde_json::json!({ "derivations": EDITOR_DERIVATIONS }),
+        "window_layout" => {
+            let evidence: agent_doc_editor_surface::WindowLayoutEvidence =
+                serde_json::from_value(input).context("parse window layout evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::resolve_window_layout(&evidence))?
+        }
+        "client_measured_layout" => {
+            let evidence: agent_doc_editor_surface::ClientMeasuredLayoutEvidence =
+                serde_json::from_value(input).context("parse client measured layout evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::resolve_client_measured_layout(
+                &evidence,
+            ))?
+        }
+        other => anyhow::bail!(
+            "unknown editor derivation `{other}`; this library answers {}",
+            EDITOR_DERIVATIONS.join(", ")
+        ),
+    };
+    Ok(serde_json::json!({ "derivation": request.derivation, "output": output }))
+}
+
 fn publish_editor_observation(
     root: &Path,
     surface: EditorSurface,
@@ -523,6 +572,98 @@ pub fn current_document_authority(project_root: &Path) -> CurrentDocumentAuthori
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GH #326: the native `window_layout` derivation answers every shared
+    /// parity case. The plugin's frozen Kotlin floor answers the same file in
+    /// `LayoutDetectorTest`, so the two cannot drift silently.
+    #[test]
+    fn gh326_window_layout_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/window_layout.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 8, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let request =
+                serde_json::json!({"derivation": "window_layout", "input": case["input"]});
+            let answer = derive_editor_from_json(&request.to_string()).unwrap();
+            let output = &answer["output"];
+            let columns: Vec<serde_json::Value> = output["columns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|column| column["files"].clone())
+                .collect();
+            let expected = &case["expected"];
+            assert_eq!(
+                serde_json::Value::Array(columns),
+                expected["columns"],
+                "{name}: columns"
+            );
+            assert_eq!(
+                output["column_order"], expected["column_order"],
+                "{name}: column_order"
+            );
+            assert_eq!(
+                output.get("reason").cloned().unwrap_or_default(),
+                expected["reason"],
+                "{name}: reason"
+            );
+            assert_eq!(
+                output.get("observed_line").cloned().unwrap_or_default(),
+                expected["observed_line"],
+                "{name}: observed_line"
+            );
+        }
+    }
+
+    /// GH #326: the derivation channel answers every shipped derivation, names
+    /// what it answers, and refuses an unknown one instead of guessing.
+    #[test]
+    fn gh326_editor_derivations_round_trip_through_json() {
+        let layout = derive_editor_from_json(
+            r#"{"derivation":"window_layout","input":{"base_path":"/repo","windows":[
+                {"x":600,"y":0,"selected":"/repo/b.md","session_tabs":["/repo/b.md"]},
+                {"x":0,"y":0,"selected":"/repo/a.md","session_tabs":["/repo/a.md"]}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(layout["derivation"], "window_layout");
+        assert_eq!(
+            layout["output"]["columns"],
+            serde_json::json!([{"files": ["a.md"]}, {"files": ["b.md"]}])
+        );
+        assert_eq!(layout["output"]["column_order"], "editor");
+
+        let measured = derive_editor_from_json(
+            r#"{"derivation":"client_measured_layout","input":{"windows":[
+                {"ordinal":0,"selected_session":"/r/a.md","holds_session_document":true,"x":0,"y":0},
+                {"ordinal":1,"selected_session":"/r/b.md","holds_session_document":true,"x":0,"y":0}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            measured["output"],
+            serde_json::json!({"outcome": "unavailable", "reason": "shared_origin"})
+        );
+
+        let empty = derive_editor_from_json(r#"{"derivation":"window_layout"}"#).unwrap();
+        assert_eq!(empty["output"]["columns"], serde_json::json!([]));
+
+        let capabilities = derive_editor_from_json(r#"{"derivation":"capabilities"}"#).unwrap();
+        assert_eq!(
+            capabilities["output"]["derivations"],
+            serde_json::json!(EDITOR_DERIVATIONS)
+        );
+
+        let unknown = derive_editor_from_json(r#"{"derivation":"later_rule","input":{}}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            unknown.contains("unknown editor derivation `later_rule`"),
+            "{unknown}"
+        );
+    }
 
     /// GH #134: the native fold remembers a project's Remote Dev split across
     /// observations, so the single-selection observations that follow a

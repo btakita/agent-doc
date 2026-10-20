@@ -1,0 +1,157 @@
+{
+  "derivation": "window_layout",
+  "about": "GH #326 parity cases. The Rust `window_layout` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (LayoutDetectorTest) both answer every case; a native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "cases": [
+    {
+      "name": "two measured windows keep a source split standing for its last document",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"x": 600, "y": 0, "selected": "/repo/src/Thing.kt", "session_tabs": ["/repo/tasks/older.md", "/repo/tasks/recent.md"]},
+          {"x": 0, "y": 0, "selected": "/repo/tasks/left.md", "session_tabs": ["/repo/tasks/left.md"]}
+        ],
+        "history": ["/repo/tasks/older.md", "/repo/tasks/recent.md"]
+      },
+      "expected": {
+        "columns": [["tasks/left.md"], ["tasks/recent.md"]],
+        "column_order": "editor",
+        "reason": null,
+        "observed_line": "[layout-detect] observed windows=2 snapshots=[(600,0) tasks/recent.md, (0,0) tasks/left.md] columns=2 [tasks/left.md | tasks/recent.md] source=windows"
+      }
+    },
+    {
+      "name": "history order decides which document a source split stands for",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"x": 0, "y": 0, "selected": "/repo/a.md", "session_tabs": ["/repo/a.md"]},
+          {"x": 640, "y": 0, "selected": "/repo/Main.kt", "session_tabs": ["/repo/b.md", "/repo/c.md"]}
+        ],
+        "history": ["/repo/c.md", "/repo/b.md"]
+      },
+      "expected": {
+        "columns": [["a.md"], ["b.md"]],
+        "column_order": "editor",
+        "reason": null,
+        "observed_line": "[layout-detect] observed windows=2 snapshots=[(0,0) a.md, (640,0) b.md] columns=2 [a.md | b.md] source=windows"
+      }
+    },
+    {
+      "name": "an unmeasured window makes the whole order unknown",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"x": 600, "y": 0, "selected": "/repo/b.md", "session_tabs": ["/repo/b.md"]},
+          {"selected": "/repo/a.md", "session_tabs": ["/repo/a.md"]}
+        ],
+        "history": []
+      },
+      "expected": {
+        "columns": [["b.md"], ["a.md"]],
+        "column_order": "unknown",
+        "reason": null,
+        "observed_line": "[layout-detect] observed windows=2 snapshots=[(0,0) b.md, (0,0) a.md] columns=2 [b.md | a.md] source=windows"
+      }
+    },
+    {
+      "name": "a window without session documents keeps an empty column",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"x": 0, "y": 0, "selected": "/repo/Main.kt", "session_tabs": []},
+          {"x": 600, "y": 0, "selected": "/repo/right.md", "session_tabs": ["/repo/right.md"]}
+        ],
+        "history": []
+      },
+      "expected": {
+        "columns": [[], ["right.md"]],
+        "column_order": "editor",
+        "reason": null,
+        "observed_line": "[layout-detect] observed windows=2 snapshots=[(0,0) <none>, (600,0) right.md] columns=2 [<empty> | right.md] source=windows"
+      }
+    },
+    {
+      "name": "stacked windows in one column are not a split",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"x": 0, "y": 400, "selected": "/repo/bottom.md", "session_tabs": ["/repo/bottom.md"]},
+          {"x": 4, "y": 0, "selected": "/repo/top.md", "session_tabs": ["/repo/top.md"]}
+        ],
+        "history": []
+      },
+      "expected": {
+        "columns": [],
+        "column_order": "editor",
+        "reason": "fewer_than_two_columns",
+        "observed_line": "[layout-detect] observed windows=2 snapshots=[(0,400) bottom.md, (4,0) top.md] columns=1 [top.md,bottom.md] source=windows"
+      }
+    },
+    {
+      "name": "no session document in any window is no layout",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"x": 0, "y": 0, "selected": "/repo/a.kt", "session_tabs": []},
+          {"x": 600, "y": 0, "selected": "/repo/b.kt", "session_tabs": []}
+        ],
+        "history": []
+      },
+      "expected": {
+        "columns": [],
+        "column_order": "editor",
+        "reason": "no_session_document_in_any_window",
+        "observed_line": null
+      }
+    },
+    {
+      "name": "one local window is a known single column",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"selected": "/repo/tasks/local.md", "session_tabs": ["/repo/tasks/local.md"]}
+        ],
+        "history": []
+      },
+      "expected": {
+        "columns": [["tasks/local.md"]],
+        "column_order": "editor",
+        "reason": null,
+        "observed_line": "[layout-detect] observed windows=1 snapshots=[(0,0) tasks/local.md] columns=1 [tasks/local.md] source=windows"
+      }
+    },
+    {
+      "name": "one window showing source is no layout",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"selected": "/repo/src/Thing.kt", "session_tabs": ["/repo/tasks/local.md"]}
+        ],
+        "history": []
+      },
+      "expected": {
+        "columns": [],
+        "column_order": "editor",
+        "reason": "no_selected_session_document",
+        "observed_line": "[layout-detect] observed windows=1 snapshots=[(0,0) <none>] columns=0 [] source=windows"
+      }
+    },
+    {
+      "name": "a cross-root document keeps its absolute path",
+      "input": {
+        "base_path": "/repo",
+        "windows": [
+          {"x": 0, "y": 0, "selected": "/repo/a.md", "session_tabs": ["/repo/a.md"]},
+          {"x": 600, "y": 0, "selected": "/other/b.md", "session_tabs": ["/other/b.md"]}
+        ],
+        "history": []
+      },
+      "expected": {
+        "columns": [["a.md"], ["/other/b.md"]],
+        "column_order": "editor",
+        "reason": null,
+        "observed_line": "[layout-detect] observed windows=2 snapshots=[(0,0) a.md, (600,0) /other/b.md] columns=2 [a.md | /other/b.md] source=windows"
+      }
+    }
+  ]
+}

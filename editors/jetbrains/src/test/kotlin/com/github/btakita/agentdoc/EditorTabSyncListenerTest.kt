@@ -1616,4 +1616,49 @@ previousSelectionPath = "/repo/tasks/tsift.md",
         assertTrue(activation.contains("AgentDocSessionFiles.isSessionDocument(selectedFile)"))
         assertTrue(activation.contains("onEditorFocusGained(project, selectedFile)"))
     }
+
+    @Test
+    fun `GH 326 a worker-resolved local layout that omits the preferred document is withheld`() {
+        val layout =
+            EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("/repo/left-old.md")),
+                    LayoutColumn(listOf("/repo/right.md")),
+                ),
+            )
+        assertNull(
+            EditorTabSyncListener.SurfaceReport.layoutForPreferredDocument(
+                preferredActiveFile = "/repo/left-next.md",
+                editorLayout = layout,
+            ),
+        )
+        assertEquals(
+            layout,
+            EditorTabSyncListener.SurfaceReport.layoutForPreferredDocument(
+                preferredActiveFile = "/repo/right.md",
+                editorLayout = layout,
+            ),
+        )
+        assertEquals(
+            layout,
+            EditorTabSyncListener.SurfaceReport.layoutForPreferredDocument(
+                preferredActiveFile = null,
+                editorLayout = layout,
+            ),
+        )
+    }
+
+    @Test
+    fun `GH 326 the EDT capture reads window evidence and resolves no layout`() {
+        val source =
+            Files.readString(Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"))
+        val capture = source.substringAfter("private fun captureSurface(").substringBefore("private fun resolveSurface(")
+        assertTrue(capture.contains("LayoutDetector.captureWindowLayoutEvidence("))
+        assertFalse(
+            "the native layout derivation must not run on the EDT capture",
+            capture.contains("LayoutDetector.detectEditorLayout("),
+        )
+        val resolve = source.substringAfter("private fun resolveSurface(")
+        assertTrue(resolve.contains("LayoutDetector.detectEditorLayout(evidence)"))
+    }
 }

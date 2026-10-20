@@ -622,6 +622,11 @@ internal data class CapturedSurface(
     val visibleMdFiles: List<String>,
     val openMdFiles: List<String>,
     val editorLayout: EditorLayout?,
+    /**
+     * GH #326: the local windows' layout evidence, captured on the EDT. The hot-reloaded native
+     * `window_layout` derivation resolves it on the delivery worker, beside the Remote Dev fold.
+     */
+    val windowLayoutEvidence: LayoutDetector.WindowLayoutEvidence?,
     val remoteLayoutSnapshot: LayoutDetector.RemoteLayoutSnapshot?,
     val reconcileStaleSelection: Boolean,
     val preferredFilePath: String?,
@@ -669,6 +674,21 @@ internal data class CapturedSurface(
             windowSelections: List<String?>,
             managerSelectedFiles: List<String>,
         ): List<String?> = windowSelections.ifEmpty { managerSelectedFiles }
+
+        /**
+         * GH #326: [projectionReadiness]'s layout half, applied where the local layout now resolves
+         * (the delivery worker). The layout survives only when it holds the preferred document.
+         */
+        fun layoutForPreferredDocument(
+            preferredActiveFile: String?,
+            editorLayout: EditorLayout?,
+        ): EditorLayout? =
+            editorLayout?.takeIf {
+                projectionReadiness(
+                    preferredActiveFile = preferredActiveFile,
+                    visibleMdFiles = it.columns.flatMap(LayoutColumn::files),
+                ) == ProjectionReadiness.Current
+            }
 
         fun restoredEditorWindowsReady(selectedWindowFiles: List<String?>): Boolean =
             selectedWindowFiles.isNotEmpty() && selectedWindowFiles.all { it != null }
@@ -1300,25 +1320,26 @@ internal data class CapturedSurface(
             } else {
                 null
             }
-        val rawEditorLayout =
+        // GH #326: capture the local windows' evidence on this EDT turn; the native layout
+        // derivation runs on the delivery worker, exactly like the Remote Dev fold (GH #157).
+        val windowLayoutEvidence =
             if (remoteLayoutSnapshot != null) {
                 null
             } else {
-                project.basePath?.let { basePath ->
-                    SyncLayoutAction.absolutizeEditorLayout(
-                        basePath,
-                        LayoutDetector.detectEditorLayout(
-                            project,
-                            sessionDocumentPaths,
-                            surfaceWindows,
-                        ),
+                try {
+                    LayoutDetector.captureWindowLayoutEvidence(
+                        project,
+                        surfaceWindows,
+                        sessionDocumentPaths,
                     )
-                } ?: LayoutDetector.detectEditorLayout(
-                    project,
-                    sessionDocumentPaths,
-                    surfaceWindows,
-                )
+                } catch (e: Exception) {
+                    LOG.warn("[layout-detect] editor window evidence unavailable: ${e.message}", e)
+                    null
+                }
             }
+        // No layout is resolved on the EDT any more: both the local and the Remote Dev layout
+        // resolve on the delivery worker, so the settled EDT projection carries visible files only.
+        val rawEditorLayout: EditorLayout? = null
         val settledProjection =
             if (reconcileStaleSelection) {
                 SelectionProjectionSettling.reconcileEventEdge(
@@ -1408,6 +1429,7 @@ internal data class CapturedSurface(
             visibleMdFiles = visibleMdFiles,
             openMdFiles = openMdFiles,
             editorLayout = settledProjection.editorLayout,
+            windowLayoutEvidence = windowLayoutEvidence,
             remoteLayoutSnapshot = remoteLayoutSnapshot,
             reconcileStaleSelection = reconcileStaleSelection,
             preferredFilePath = preferredFile?.path,
@@ -1433,10 +1455,18 @@ internal data class CapturedSurface(
                 captured.openMdFiles.mapNotNull(TerminalUtil::nearestAgentDocProjectRoot) +
                     surfaceProjectRoot
             ).distinct()
+        val localEditorLayout =
+            captured.windowLayoutEvidence?.let { evidence ->
+                val relative = LayoutDetector.detectEditorLayout(evidence)
+                captured.projectBasePath
+                    ?.let { basePath -> SyncLayoutAction.absolutizeEditorLayout(basePath, relative) }
+                    ?: relative
+            }
         val resolvedEditorLayout =
             captured.editorLayout
+                ?: localEditorLayout
                 ?: captured.remoteLayoutSnapshot?.let(LayoutDetector::detectEditorLayout)
-        val settledEditorLayout =
+        val reconciledEditorLayout =
             if (captured.reconcileStaleSelection) {
                 SelectionProjectionSettling.reconcileEventEdge(
                     preferredFile = captured.preferredFilePath,
@@ -1446,6 +1476,27 @@ internal data class CapturedSurface(
                 ).editorLayout
             } else {
                 resolvedEditorLayout
+            }
+        // The EDT capture checked the preferred document against the visible set; the local
+        // layout now resolves here, so its half of that readiness check runs here too. A layout
+        // that omits the preferred document is withheld (published as unknown columns, which
+        // carry no structural authority) rather than published stale.
+        val settledEditorLayout =
+            if (captured.windowLayoutEvidence != null) {
+                SurfaceReport.layoutForPreferredDocument(
+                    preferredActiveFile = captured.preferredFilePath,
+                    editorLayout = reconciledEditorLayout,
+                ) ?: run {
+                    if (reconciledEditorLayout != null) {
+                        LOG.info(
+                            "[layout-sync] layout withheld reason=preferred_document_not_in_layout " +
+                                "preferred=${captured.preferredFilePath}",
+                        )
+                    }
+                    null
+                }
+            } else {
+                reconciledEditorLayout
             }
         val absoluteEditorLayout =
             SyncLayoutAction.absolutizeEditorLayout(

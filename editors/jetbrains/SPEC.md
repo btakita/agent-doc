@@ -204,6 +204,71 @@ the `#pluginactivationprobe` loaded-generation reading) match both versioned
 plugin jars, `agent-doc-jetbrains-<version>.jar` and `agent.doc-<version>.jar`,
 and never the unversioned module jars.
 
+### Restart-free logic upgrades: native derivations (GH #326)
+
+The package swap above is closed on exact-263, but `libagent_doc` hot-reloads
+under the running IDE (`hot-reloaded libagent_doc v<release>`). That is the
+second lever of GH #295 ("path 2"): a rule that lives behind the native boundary
+changes without a restart, while a rule written in Kotlin waits for one. The
+0.35.528 restart (`restart_required=1`, plugin stale for 31m37s) was forced by
+two Kotlin layout-sync rules exactly of that kind.
+
+**Boundary.** The plugin reports what IntelliJ state *is*; the native library
+derives what it *means*. Kotlin captures plain evidence (on the EDT when it is
+IntelliJ state) and asks one named derivation through the single, stable entry
+point `agent_doc_editor_derive_json(request_json)`:
+`{"derivation": "<name>", "input": {...}}` answers
+`{"derivation": "<name>", "output": {...}}`. A new or changed rule is a native
+change with no new JNA method and no plugin generation. Shipped derivations:
+
+- `window_layout`: the classic local `EditorWindow` layout. Evidence per window
+  is its origin in the frame's splitter coordinates (absent when unreadable),
+  its selected tab, and its session-document tabs, plus the project base path
+  and the IDE selection history restricted to those tabs. Native owns the
+  `#stickymdpane` window document, geometry-known collapse (GH #81), shared-origin
+  columns (GH #77), x-tolerance grouping, the known single-window layout, the
+  GH #320 order provenance, and the `[layout-detect] observed` line.
+- `client_measured_layout`: the JetBrains Client's measured main window forwarded
+  by the modular backend (GH #320 option B). Evidence per window is its ordinal,
+  selected session document, whether it holds any session document, and its
+  measured origin. The schema-version and main-surface checks stay with the RPC
+  contract in Kotlin.
+- `capabilities`: the derivations the loaded library answers.
+
+**Threads.** Native calls stay forbidden on the EDT. The automatic surface
+captures window evidence on the EDT and resolves `window_layout` on the
+generation-owned surface delivery worker beside the Remote Dev fold (GH #157).
+The layout half of the EDT readiness check runs there too: a resolved local
+layout that omits the preferred document is withheld (published as unknown
+columns, `[layout-sync] layout withheld reason=preferred_document_not_in_layout`)
+rather than published stale. A direct EDT caller (manual `--col` snapshot,
+claim, terminal and layout-change detectors) marshals only the immutable
+evidence to a worker and waits at most 250 ms. The measured-layout forwarder
+already runs on its own worker.
+
+**Compatibility.** After a hot reload the library is newer than the plugin
+generation calling it, so a shipped derivation is never removed or renamed,
+every input field stays optional, outputs only gain fields, and the plugin
+ignores output fields it does not know. An unknown derivation is an error. A
+library without the symbol is remembered per native generation, so the next
+hot-reloaded library is asked again. Whenever no native generation answers, the
+plugin uses a **frozen** Kotlin copy of the GH #320 rules (`frozenWindowLayout`,
+`RemoteClientMeasuredLayout.frozenDerive`). It is a compatibility floor, never
+extended: new rules land only in the native derivation. One parity file,
+`editors/jetbrains/src/test/resources/editor-derivations/window_layout.json`,
+is answered by both the Rust derivation and the frozen floor, so a divergence is
+always a deliberate fixture edit.
+
+**Still restart-bound.** Changing the *evidence* a derivation needs (a new
+IntelliJ fact to capture), adding a call site, `plugin.xml`/action/UI changes,
+and logic not yet behind the boundary still ship as a plugin generation. The
+largest remaining Kotlin rule sets are the surface projection in
+`EditorTabSyncListener.captureSurface` (visible-document union, readiness,
+active-document resolution, open-tab proximity, stale-selection settling,
+payload assembly), the manual sync column decisions in `SyncLayoutAction`, the
+Remote Dev client-evidence capture, and the CRDT replica, patch-watch, and route
+clients. Each moves behind `agent_doc_editor_derive_json` the same way.
+
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is
 a true no-op: the installer leaves the existing files and inodes in place so a

@@ -37,6 +37,7 @@ pub mod pane_placement;
 pub mod remote_layout;
 pub mod surface_layout_reference;
 pub mod terminal_ownership;
+pub mod window_layout;
 
 pub use editor_view_policy::{
     EditorSurfaceRole, EditorViewBindSource, EditorViewBindingPhase, EditorViewFreezeReason,
@@ -75,6 +76,11 @@ pub use surface_layout_reference::{
     CONTROLLER_SURFACE_CAPABILITIES, RetainedEditorSurface, SURFACE_LAYOUT_REFERENCE_CAPABILITY,
     SurfaceLayoutReference, SurfaceReferenceRefusal, SurfaceRouteLayout, SurfaceSyncLayout,
     resolve_surface_reference, route_layout_from_surface, sync_layout_from_surface,
+};
+pub use window_layout::{
+    COLUMN_X_TOLERANCE_PX, ClientMeasuredLayout, ClientMeasuredLayoutEvidence,
+    ClientWindowEvidence, EditorWindowEvidence, WindowLayoutEvidence, WindowLayoutResolution,
+    WindowSnapshot, resolve_client_measured_layout, resolve_window_layout,
 };
 
 use serde::{Deserialize, Serialize};

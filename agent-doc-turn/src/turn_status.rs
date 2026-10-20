@@ -208,6 +208,106 @@ pub fn harness_turn_end_reason(
     }
 }
 
+// ---------------------------------------------------------------------------
+// `#clauderesumeafterclear`: Claude conversation-id capture from `SessionStart`.
+//
+// A pane-launched Claude Code session never reports its conversation id back to
+// agent-doc except through hooks. An operator `/clear` (and any non-resume
+// startup) begins a NEW conversation, and unless the document's `resume.claude`
+// follows it, every later restart resumes the pre-clear conversation. The
+// capture is fail-closed: only `SessionStart` `clear`/`startup` qualify
+// (`resume` reloads the same id, `compact` keeps it), the payload's own
+// transcript must name the reported id, and the hook must be proven to come
+// from the document supervisor's direct harness child (see
+// [`hook_harness_child_of_supervisor`]) — a nested `claude -p` run from inside
+// the pane inherits `$TMUX_PANE` and must never move the document's pointer.
+// ---------------------------------------------------------------------------
+
+/// A `SessionStart` payload that reports a new Claude conversation id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeSessionStartResume {
+    /// The new conversation id (`session_id`).
+    pub session_id: String,
+    /// `clear` or `startup`.
+    pub source: &'static str,
+}
+
+/// Classify a hook payload's fields for `#clauderesumeafterclear`.
+///
+/// `Err` carries a stable skip reason. `transcript_stem` is the file stem of the
+/// payload's `transcript_path`; Claude names the transcript after the
+/// conversation, so a missing or mismatched stem fails closed.
+pub fn claude_session_start_resume(
+    hook_event_name: Option<&str>,
+    source: Option<&str>,
+    session_id: Option<&str>,
+    transcript_stem: Option<&str>,
+) -> Result<ClaudeSessionStartResume, &'static str> {
+    if hook_event_name != Some("SessionStart") {
+        return Err("not_session_start");
+    }
+    let source = match source {
+        Some("clear") => "clear",
+        Some("startup") => "startup",
+        Some("resume") => return Err("source_resume_keeps_id"),
+        Some("compact") => return Err("source_compact_keeps_id"),
+        _ => return Err("source_unproven"),
+    };
+    let session_id = session_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or("session_id_missing")?;
+    match transcript_stem.map(str::trim) {
+        Some(stem) if stem == session_id => {}
+        Some(_) => return Err("transcript_names_other_session"),
+        None => return Err("transcript_path_missing"),
+    }
+    Ok(ClaudeSessionStartResume {
+        session_id: session_id.to_string(),
+        source,
+    })
+}
+
+/// Shell names a harness may interpose between itself and a hook command
+/// (`sh -c '<command>'`). Anything else between the hook and the harness child
+/// (a nested `claude -p`, a test binary, a `cargo` run) breaks the proof.
+const HOOK_WRAPPER_SHELLS: &[&str] = &[
+    "sh", "bash", "dash", "zsh", "ash", "ksh", "mksh", "fish", "busybox",
+];
+
+/// Prove the hook process was spawned by the supervisor's DIRECT harness child.
+///
+/// `ancestors` is the hook process's ancestry as `(pid, comm)`, starting at
+/// its parent and walking upward. The supervisor must appear in it; the entry
+/// just below the supervisor is its harness child; every entry between the
+/// hook and that child must be a wrapper shell. Returns the harness child pid,
+/// or a stable skip reason.
+pub fn hook_harness_child_of_supervisor(
+    ancestors: &[(u32, String)],
+    supervisor_pid: u32,
+) -> Result<u32, &'static str> {
+    let Some(index) = ancestors.iter().position(|(pid, _)| *pid == supervisor_pid) else {
+        return Err("supervisor_not_an_ancestor");
+    };
+    if index == 0 {
+        return Err("hook_spawned_by_supervisor_not_harness");
+    }
+    let harness_pid = ancestors[index - 1].0;
+    let intermediaries_are_shells = ancestors[..index - 1]
+        .iter()
+        .all(|(_, comm)| HOOK_WRAPPER_SHELLS.contains(&comm.trim()));
+    if !intermediaries_are_shells {
+        return Err("hook_not_from_supervisor_harness_child");
+    }
+    Ok(harness_pid)
+}
+
+/// Whether a controller `harness_id` names Claude Code explicitly. Unknown
+/// harness ids fail closed rather than defaulting to Claude.
+pub fn harness_id_is_claude(harness_id: &str) -> bool {
+    matches!(harness_id.trim(), "claude" | "claude-code")
+}
+
 /// `#sdkclearwedge`: true when a harness turn-end receipt proves the pane's
 /// conversation was already reset after an operator clear was deferred at
 /// `deferred_at`, so delivering the deferred `/clear` would wipe the newer
@@ -719,6 +819,130 @@ pub fn turn_active_marker_is_live_with_transcript(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#clauderesumeafterclear`: only a `clear`/`startup` `SessionStart` whose
+    /// transcript names the reported id is a capture; `resume` and `compact`
+    /// keep the same conversation and never move the pointer.
+    #[test]
+    fn claude_session_start_resume_captures_only_new_conversations() {
+        let ss = Some("SessionStart");
+        assert_eq!(
+            claude_session_start_resume(ss, Some("clear"), Some("e62ea89f"), Some("e62ea89f")),
+            Ok(ClaudeSessionStartResume {
+                session_id: "e62ea89f".into(),
+                source: "clear",
+            })
+        );
+        assert_eq!(
+            claude_session_start_resume(ss, Some("startup"), Some(" n1 "), Some("n1"))
+                .map(|c| (c.session_id, c.source)),
+            Ok(("n1".to_string(), "startup"))
+        );
+        assert_eq!(
+            claude_session_start_resume(ss, Some("resume"), Some("a"), Some("a")),
+            Err("source_resume_keeps_id")
+        );
+        assert_eq!(
+            claude_session_start_resume(ss, Some("compact"), Some("a"), Some("a")),
+            Err("source_compact_keeps_id")
+        );
+        assert_eq!(
+            claude_session_start_resume(ss, None, Some("a"), Some("a")),
+            Err("source_unproven")
+        );
+        assert_eq!(
+            claude_session_start_resume(Some("Stop"), Some("clear"), Some("a"), Some("a")),
+            Err("not_session_start")
+        );
+        assert_eq!(
+            claude_session_start_resume(ss, Some("clear"), Some("  "), Some("a")),
+            Err("session_id_missing")
+        );
+        assert_eq!(
+            claude_session_start_resume(ss, Some("clear"), Some("a"), None),
+            Err("transcript_path_missing")
+        );
+        assert_eq!(
+            claude_session_start_resume(ss, Some("clear"), Some("a"), Some("b")),
+            Err("transcript_names_other_session")
+        );
+    }
+
+    fn chain(entries: &[(u32, &str)]) -> Vec<(u32, String)> {
+        entries
+            .iter()
+            .map(|(pid, comm)| (*pid, comm.to_string()))
+            .collect()
+    }
+
+    /// `#clauderesumeafterclear`: the hook must come from the supervisor's
+    /// direct harness child, through at most wrapper shells.
+    #[test]
+    fn hook_lineage_proves_the_supervisor_harness_child() {
+        // claude (20) is the supervisor's (10) child and ran the hook directly.
+        assert_eq!(
+            hook_harness_child_of_supervisor(&chain(&[(20, "claude"), (10, "agent-doc")]), 10),
+            Ok(20)
+        );
+        // ... or through an `sh -c` wrapper.
+        assert_eq!(
+            hook_harness_child_of_supervisor(
+                &chain(&[
+                    (30, "sh"),
+                    (20, "claude"),
+                    (10, "agent-doc"),
+                    (1, "systemd")
+                ]),
+                10
+            ),
+            Ok(20)
+        );
+        // A nested `claude -p` launched from the main session's Bash tool
+        // inherits `$TMUX_PANE`; its hook must never be attributed to the pane.
+        assert_eq!(
+            hook_harness_child_of_supervisor(
+                &chain(&[
+                    (40, "claude"),
+                    (35, "zsh"),
+                    (20, "claude"),
+                    (10, "agent-doc")
+                ]),
+                10
+            ),
+            Err("hook_not_from_supervisor_harness_child")
+        );
+        assert_eq!(
+            hook_harness_child_of_supervisor(
+                &chain(&[
+                    (50, "sh"),
+                    (40, "claude"),
+                    (20, "claude"),
+                    (10, "agent-doc")
+                ]),
+                10
+            ),
+            Err("hook_not_from_supervisor_harness_child")
+        );
+        // The supervisor itself is not a harness.
+        assert_eq!(
+            hook_harness_child_of_supervisor(&chain(&[(10, "agent-doc")]), 10),
+            Err("hook_spawned_by_supervisor_not_harness")
+        );
+        // A different (stale or foreign) supervisor proves nothing.
+        assert_eq!(
+            hook_harness_child_of_supervisor(&chain(&[(20, "claude"), (11, "agent-doc")]), 10),
+            Err("supervisor_not_an_ancestor")
+        );
+    }
+
+    #[test]
+    fn harness_id_is_claude_fails_closed_on_unknown_ids() {
+        assert!(harness_id_is_claude("claude-code"));
+        assert!(harness_id_is_claude("claude"));
+        assert!(!harness_id_is_claude("codex"));
+        assert!(!harness_id_is_claude(""));
+        assert!(!harness_id_is_claude("grok"));
+    }
 
     #[test]
     fn stale_marker_counts_only_while_its_writer_runs() {

@@ -2897,6 +2897,46 @@ pub fn load_actor_store_from_db(conn: &Connection) -> Result<BTreeMap<String, Ac
     Ok(store)
 }
 
+/// One non-closed actor bound to a pane, with the supervisor pid of its
+/// current generation's lease (`#clauderesumeafterclear`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneActorSupervisor {
+    pub document_id: String,
+    pub canonical_path: String,
+    pub harness_id: String,
+    pub supervisor_pid: Option<u32>,
+}
+
+/// Every non-`closed` actor whose current pane is `pane_id`, joined to the
+/// supervisor lease of its CURRENT generation (an older generation's lease
+/// names a supervisor that no longer owns the document).
+pub fn load_pane_actor_supervisors_from_db(
+    conn: &Connection,
+    pane_id: &str,
+) -> Result<Vec<PaneActorSupervisor>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT d.document_id, d.canonical_path, d.harness_id, l.supervisor_pid
+        FROM documents d
+        LEFT JOIN supervisor_leases l
+            ON l.document_id = d.document_id AND l.generation = d.generation
+        WHERE d.pane_id = ?1 AND d.actor_state != 'closed'
+        ORDER BY d.document_id
+        "#,
+    )?;
+    let rows = stmt.query_map(params![pane_id], |row| {
+        let pid: Option<i64> = row.get(3)?;
+        Ok(PaneActorSupervisor {
+            document_id: row.get(0)?,
+            canonical_path: row.get(1)?,
+            harness_id: row.get(2)?,
+            supervisor_pid: pid.and_then(|pid| u32::try_from(pid).ok()),
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to load pane actor supervisors from controller state")
+}
+
 /// Rekey controller-owned document/session projections after a proven path
 /// transition while preserving the existing pane and window binding.
 ///

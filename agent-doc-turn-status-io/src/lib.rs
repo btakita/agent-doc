@@ -852,6 +852,20 @@ pub fn clear_turn_status_for_pane(base: &Path, pane: &str) -> Result<()> {
 /// Set the current tmux pane's border title to reflect the turn state. No-op
 /// (Ok) when not running inside a tmux pane so the hook never breaks the turn.
 pub fn run(active: bool) -> anyhow::Result<()> {
+    run_with_idle_payload_hook(active, None)
+}
+
+/// A turn-end hook payload observer: `(project_root, pane, payload)`.
+pub type IdlePayloadHook<'a> = &'a dyn Fn(&Path, &str, &str);
+
+/// [`run`], additionally handing an `idle` invocation's hook payload to
+/// `on_idle_payload` after the turn state is applied. The binary uses it for
+/// `#clauderesumeafterclear` (recording a new Claude conversation id through
+/// the document authority), which this crate cannot depend on.
+pub fn run_with_idle_payload_hook(
+    active: bool,
+    on_idle_payload: Option<IdlePayloadHook<'_>>,
+) -> anyhow::Result<()> {
     let Ok(pane) = std::env::var("TMUX_PANE") else {
         return Ok(());
     };
@@ -884,6 +898,9 @@ pub fn run(active: bool) -> anyhow::Result<()> {
             apply_turn_status_hook_at(&base, &pane, active, payload.as_deref(), now_secs());
         if let Err(e) = result {
             eprintln!("[turn-status] warning: failed to update turn-active marker: {e:#}");
+        }
+        if !active && let (Some(hook), Some(payload)) = (on_idle_payload, payload.as_deref()) {
+            hook(&base, &pane, payload);
         }
     }
     Ok(())
@@ -1014,6 +1031,144 @@ fn hook_turn_end_reason_from_payload(payload: &str) -> Option<&'static str> {
             .and_then(serde_json::Value::as_str),
         value.get("source").and_then(serde_json::Value::as_str),
     )
+}
+
+/// `#clauderesumeafterclear`: a Claude conversation id proven to belong to one
+/// document's supervised harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeResumeCapture {
+    pub document: PathBuf,
+    pub session_id: String,
+    pub source: &'static str,
+}
+
+/// Why a hook payload did not produce a [`ClaudeResumeCapture`].
+///
+/// `candidate` is set when the payload DID report a new Claude conversation
+/// (`SessionStart` `clear`/`startup`) but its ownership could not be proven —
+/// the only skips worth surfacing. `document` is set when exactly one document
+/// was identified, so the skip can be logged against it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeResumeSkip {
+    pub reason: &'static str,
+    pub candidate: Option<agent_doc_turn::turn_status::ClaudeSessionStartResume>,
+    pub document: Option<PathBuf>,
+}
+
+/// Resolve which document a Claude `SessionStart` payload's new conversation
+/// belongs to, failing closed (`#clauderesumeafterclear`).
+///
+/// The owning document is the single non-closed actor bound to `pane` whose
+/// current-generation supervisor is proven (through `ancestors`, the hook
+/// process's `(pid, comm)` ancestry from its parent upward) to have spawned the
+/// harness that ran this hook. Any other shape — no actor, two candidates, a
+/// non-Claude actor, a hook from a nested harness — is a skip, never a guess.
+pub fn resolve_claude_session_start_resume(
+    base: &Path,
+    pane: &str,
+    payload: &str,
+    ancestors: &[(u32, String)],
+) -> std::result::Result<ClaudeResumeCapture, ClaudeResumeSkip> {
+    let skip = |reason, candidate, document| ClaudeResumeSkip {
+        reason,
+        candidate,
+        document,
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(payload.trim()).map_err(|_| skip("payload_not_json", None, None))?;
+    let field = |key: &str| value.get(key).and_then(serde_json::Value::as_str);
+    let transcript_stem = field("transcript_path")
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .and_then(|raw| Path::new(raw).file_stem())
+        .map(|stem| stem.to_string_lossy().into_owned());
+    let candidate = agent_doc_turn::turn_status::claude_session_start_resume(
+        field("hook_event_name"),
+        field("source"),
+        field("session_id"),
+        transcript_stem.as_deref(),
+    )
+    .map_err(|reason| skip(reason, None, None))?;
+
+    let actors = open_state_db(base)
+        .and_then(|conn| {
+            agent_doc_sqlite::state_store::load_pane_actor_supervisors_from_db(&conn, pane)
+        })
+        .map_err(|_| skip("state_db_unreadable", Some(candidate.clone()), None))?;
+    let proven: Vec<_> = actors
+        .into_iter()
+        .filter(|actor| {
+            actor.supervisor_pid.is_some_and(|pid| {
+                agent_doc_turn::turn_status::hook_harness_child_of_supervisor(ancestors, pid)
+                    .is_ok()
+            })
+        })
+        .collect();
+    let actor = match proven.as_slice() {
+        [] => {
+            return Err(skip(
+                "hook_not_from_pane_supervisor_harness",
+                Some(candidate),
+                None,
+            ));
+        }
+        [actor] => actor,
+        _ => return Err(skip("ambiguous_pane_document", Some(candidate), None)),
+    };
+    let document = PathBuf::from(&actor.canonical_path);
+    if !agent_doc_turn::turn_status::harness_id_is_claude(&actor.harness_id) {
+        return Err(skip(
+            "pane_actor_not_claude",
+            Some(candidate),
+            Some(document),
+        ));
+    }
+    if !document.is_absolute() || !document.is_file() {
+        return Err(skip("document_missing", Some(candidate), None));
+    }
+    Ok(ClaudeResumeCapture {
+        document,
+        session_id: candidate.session_id,
+        source: candidate.source,
+    })
+}
+
+/// Upper bound on the ancestry walk; a hook is a few levels below its harness.
+const HOOK_ANCESTRY_MAX_DEPTH: usize = 32;
+
+/// `(ppid, comm)` from a `/proc/<pid>/stat` line. The comm is parenthesized
+/// and may contain spaces or parentheses, so fields count from the LAST `)`.
+fn proc_stat_ppid_comm(stat: &str) -> Option<(u32, String)> {
+    let open = stat.find('(')?;
+    let (head, rest) = stat.rsplit_once(')')?;
+    let comm = head.get(open + 1..)?.to_string();
+    let ppid = rest.split_whitespace().nth(1)?.parse().ok()?;
+    Some((ppid, comm))
+}
+
+/// This process's ancestry as `(pid, comm)`, from its parent upward. Empty
+/// where `/proc` is unavailable, which makes every lineage proof fail closed.
+pub fn hook_process_ancestors() -> Vec<(u32, String)> {
+    let mut ancestors = Vec::new();
+    let Some((mut pid, _)) = std::fs::read_to_string("/proc/self/stat")
+        .ok()
+        .as_deref()
+        .and_then(proc_stat_ppid_comm)
+    else {
+        return ancestors;
+    };
+    while pid > 1 && ancestors.len() < HOOK_ANCESTRY_MAX_DEPTH {
+        let Some((ppid, comm)) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .as_deref()
+            .and_then(proc_stat_ppid_comm)
+        else {
+            break;
+        };
+        ancestors.push((pid, comm));
+        pid = ppid;
+    }
+    ancestors
 }
 
 /// Best-effort read of the hook payload from stdin. Never blocks the turn:
@@ -2357,5 +2512,226 @@ mod tests {
                 "{payload}"
             );
         }
+    }
+
+    /// `#clauderesumeafterclear`: seed one actor bound to `pane` whose current
+    /// generation's supervisor lease names `supervisor_pid`.
+    fn seed_pane_actor(
+        base: &Path,
+        document: &Path,
+        pane: &str,
+        harness_id: &str,
+        actor_state: &str,
+        supervisor_pid: u32,
+    ) {
+        let conn = open_state_db(base).unwrap();
+        let id = document.to_string_lossy().into_owned();
+        conn.execute(
+            "INSERT INTO documents (document_id, canonical_path, session_id, generation, pane_id, \
+             window_id, harness_id, actor_state) VALUES (?1, ?1, 'doc-session', 7, ?2, '@1', ?3, ?4)",
+            (&id, pane, harness_id, actor_state),
+        )
+        .unwrap();
+        // An older generation's lease names a supervisor that no longer owns it.
+        conn.execute(
+            "INSERT INTO supervisor_leases (document_id, generation, supervisor_pid) VALUES (?1, 6, 999)",
+            (&id,),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO supervisor_leases (document_id, generation, supervisor_pid) VALUES (?1, 7, ?2)",
+            (&id, supervisor_pid),
+        )
+        .unwrap();
+    }
+
+    fn clear_payload(source: &str, session: &str) -> String {
+        format!(
+            r#"{{"hook_event_name":"SessionStart","source":"{source}","session_id":"{session}","transcript_path":"/home/u/.claude/projects/p/{session}.jsonl","cwd":"/p"}}"#
+        )
+    }
+
+    fn ancestry(entries: &[(u32, &str)]) -> Vec<(u32, String)> {
+        entries
+            .iter()
+            .map(|(pid, comm)| (*pid, comm.to_string()))
+            .collect()
+    }
+
+    /// `#clauderesumeafterclear` (observed 2026-10-20): an operator `/clear`
+    /// in the supervised Claude pane starts conversation `e62ea89f`; the
+    /// SessionStart payload resolves to the pane's document so `resume.claude`
+    /// can follow it instead of pinning the pre-clear `ba846c4c` forever.
+    #[test]
+    fn claude_clear_session_start_resolves_the_owning_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+        let doc = base.join("agent-doc-bugs.md");
+        std::fs::write(&doc, "---\nresume:\n  claude: ba846c4c\n---\n").unwrap();
+        seed_pane_actor(base, &doc, "%2", "claude-code", "ready", 1605424);
+        let hook_from_harness =
+            ancestry(&[(31, "sh"), (2909304, "claude"), (1605424, "agent-doc")]);
+
+        let capture = resolve_claude_session_start_resume(
+            base,
+            "%2",
+            &clear_payload("clear", "e62ea89f"),
+            &hook_from_harness,
+        )
+        .unwrap();
+        assert_eq!(
+            capture,
+            ClaudeResumeCapture {
+                document: doc.clone(),
+                session_id: "e62ea89f".into(),
+                source: "clear",
+            }
+        );
+        let startup = resolve_claude_session_start_resume(
+            base,
+            "%2",
+            &clear_payload("startup", "f00d"),
+            &hook_from_harness,
+        )
+        .unwrap();
+        assert_eq!(
+            (startup.session_id.as_str(), startup.source),
+            ("f00d", "startup")
+        );
+
+        // `resume` reloads the same conversation: never a capture.
+        let resume = resolve_claude_session_start_resume(
+            base,
+            "%2",
+            &clear_payload("resume", "ba846c4c"),
+            &hook_from_harness,
+        )
+        .unwrap_err();
+        assert_eq!(resume.reason, "source_resume_keeps_id");
+        assert_eq!(resume.candidate, None);
+    }
+
+    /// `#clauderesumeafterclear`: every unprovable ownership shape fails closed.
+    #[test]
+    fn claude_session_start_resume_fails_closed_without_ownership_proof() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+        let doc = base.join("a.md");
+        std::fs::write(&doc, "---\n---\n").unwrap();
+        let payload = clear_payload("clear", "new-id");
+        let from_harness = ancestry(&[(20, "claude"), (10, "agent-doc")]);
+
+        // No actor on the pane at all.
+        let none =
+            resolve_claude_session_start_resume(base, "%5", &payload, &from_harness).unwrap_err();
+        assert_eq!(none.reason, "hook_not_from_pane_supervisor_harness");
+        assert!(
+            none.candidate.is_some(),
+            "a reported new conversation is surfaced"
+        );
+
+        seed_pane_actor(base, &doc, "%5", "claude-code", "ready", 10);
+        // A nested `claude -p` inside the pane inherits `$TMUX_PANE`.
+        let nested = ancestry(&[
+            (40, "claude"),
+            (35, "zsh"),
+            (20, "claude"),
+            (10, "agent-doc"),
+        ]);
+        assert_eq!(
+            resolve_claude_session_start_resume(base, "%5", &payload, &nested)
+                .unwrap_err()
+                .reason,
+            "hook_not_from_pane_supervisor_harness"
+        );
+        // A hook whose supervisor is only the stale older generation's.
+        let stale = ancestry(&[(20, "claude"), (999, "agent-doc")]);
+        assert_eq!(
+            resolve_claude_session_start_resume(base, "%5", &payload, &stale)
+                .unwrap_err()
+                .reason,
+            "hook_not_from_pane_supervisor_harness"
+        );
+        // Another pane's hook never resolves this pane's document.
+        assert_eq!(
+            resolve_claude_session_start_resume(base, "%6", &payload, &from_harness)
+                .unwrap_err()
+                .reason,
+            "hook_not_from_pane_supervisor_harness"
+        );
+        // A transcript naming another conversation is not this session's id.
+        let mismatched = r#"{"hook_event_name":"SessionStart","source":"clear","session_id":"new-id","transcript_path":"/x/other.jsonl"}"#;
+        assert_eq!(
+            resolve_claude_session_start_resume(base, "%5", mismatched, &from_harness)
+                .unwrap_err()
+                .reason,
+            "transcript_names_other_session"
+        );
+        assert!(resolve_claude_session_start_resume(base, "%5", &payload, &from_harness).is_ok());
+
+        // Two documents proven on one pane is ambiguous, never a guess.
+        let other = base.join("b.md");
+        std::fs::write(&other, "---\n---\n").unwrap();
+        seed_pane_actor(base, &other, "%5", "claude-code", "ready", 10);
+        assert_eq!(
+            resolve_claude_session_start_resume(base, "%5", &payload, &from_harness)
+                .unwrap_err()
+                .reason,
+            "ambiguous_pane_document"
+        );
+    }
+
+    #[test]
+    fn claude_session_start_resume_requires_a_live_claude_actor() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+        let payload = clear_payload("clear", "new-id");
+        let from_harness = ancestry(&[(20, "claude"), (10, "agent-doc")]);
+
+        let codex_doc = base.join("codex.md");
+        std::fs::write(&codex_doc, "---\n---\n").unwrap();
+        seed_pane_actor(base, &codex_doc, "%7", "codex", "ready", 10);
+        let skip =
+            resolve_claude_session_start_resume(base, "%7", &payload, &from_harness).unwrap_err();
+        assert_eq!(skip.reason, "pane_actor_not_claude");
+        assert_eq!(skip.document, Some(codex_doc));
+
+        let closed_doc = base.join("closed.md");
+        std::fs::write(&closed_doc, "---\n---\n").unwrap();
+        seed_pane_actor(base, &closed_doc, "%8", "claude-code", "closed", 10);
+        assert_eq!(
+            resolve_claude_session_start_resume(base, "%8", &payload, &from_harness)
+                .unwrap_err()
+                .reason,
+            "hook_not_from_pane_supervisor_harness"
+        );
+
+        let gone = base.join("gone.md");
+        seed_pane_actor(base, &gone, "%9", "claude-code", "ready", 10);
+        assert_eq!(
+            resolve_claude_session_start_resume(base, "%9", &payload, &from_harness)
+                .unwrap_err()
+                .reason,
+            "document_missing"
+        );
+    }
+
+    #[test]
+    fn proc_stat_ppid_comm_reads_fields_after_the_last_paren() {
+        assert_eq!(
+            proc_stat_ppid_comm("2909304 (claude) S 1605424 2909304 1 0"),
+            Some((1605424, "claude".to_string()))
+        );
+        assert_eq!(
+            proc_stat_ppid_comm("42 (a) b (c)) R 7 42"),
+            Some((7, "a) b (c)".to_string()))
+        );
+        assert_eq!(proc_stat_ppid_comm("garbage"), None);
+        // The live ancestry starts at the parent and is never this process.
+        let own = std::process::id();
+        assert!(hook_process_ancestors().iter().all(|(pid, _)| *pid != own));
     }
 }

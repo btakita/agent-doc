@@ -767,3 +767,55 @@ after preflight and ran Agent Doc again. The route refused
 `run_cancel_not_proven` and then `owner_released_cycle_not_stalled`, and its
 only unblocker was a manual `session cancel-turn`. The `/clear` receipt is the
 proof that was missing.
+
+### Claude conversation-id capture (`#clauderesumeafterclear`)
+
+A pane-launched Claude Code session reports its conversation id to agent-doc
+only through hooks. `start` mints the launch's id and records it as
+`resume.claude` (`#resumecapture`), but an operator `/clear`, or any startup
+that is not a resume, begins a NEW conversation under a new id. The same
+`turn-status idle` `SessionStart` hook therefore records that id on the
+document through the binary-owned realtime-authority frontmatter write
+(`record_document_resume_id_for_harness`, harness `claude`), so a later
+relaunch or Restart Agent resumes the post-clear conversation. Codex follows
+its thread through the hook-ledger projection; this is the Claude counterpart.
+
+The capture fails closed. Each rule is a stable skip reason
+(`agent_doc_turn::turn_status::claude_session_start_resume`,
+`hook_harness_child_of_supervisor`;
+`agent_doc_turn_status_io::resolve_claude_session_start_resume`):
+
+- Only `SessionStart` with source `clear` or `startup` qualifies. `resume`
+  reloads the same id and `compact` keeps it; both are never captures. A
+  missing source, `session_id`, or `transcript_path` is a skip, and the
+  transcript's file stem must equal the reported `session_id`.
+- The owning document is the single non-`closed` actor bound to `$TMUX_PANE`
+  whose CURRENT generation's supervisor lease (`supervisor_leases.supervisor_pid`)
+  is proven, from `/proc`, to be the parent of the harness that ran the hook:
+  walking up from the hook's parent, the supervisor must appear, and every
+  process between the hook and the supervisor's direct child must be a wrapper
+  shell. A nested `claude -p` started from the session's Bash tool inherits
+  `$TMUX_PANE`, but its hook reaches the supervisor through a non-shell process,
+  so it never moves the pointer (`hook_not_from_pane_supervisor_harness`). An
+  older generation's lease, another pane's actor, or no `/proc` all fail the
+  proof. Two proven actors are `ambiguous_pane_document`.
+- The actor's controller `harness_id` must name Claude (`claude` or
+  `claude-code`); an unknown or other harness is `pane_actor_not_claude`.
+- The document must exist at the actor's absolute `canonical_path`.
+
+The write is compare-and-swap through the realtime authority, touches only the
+`claude` key of the `resume:` map, and is a no-op when the id is already
+recorded (a startup reporting the id `start` minted). Outcomes are logged to the
+document's ops.log as `claude_session_start_resume_recorded pane= id= source=
+changed=`, `claude_session_start_resume_refused ... reason=` (when a document
+was identified), or `claude_session_start_resume_record_failed ... error=`;
+refusals also go to the hook's stderr. The hook never fails the harness.
+
+The capture moves the document pointer, which a relaunch and Restart Agent
+(which re-validates current frontmatter) both read. A crash restart inside the
+same supervisor still uses the supervisor's in-memory lineage, which never
+refreshes from frontmatter (`specs/supervisor.md`).
+
+Observed 2026-10-20 on agent-doc-bugs.md: the 14:28Z `/clear` started
+`e62ea89f`, the document kept `resume: ba846c4c`, and both the 15:25Z manual
+relaunch and the 15:39Z Restart Agent resumed the pre-clear `ba846c4c`.

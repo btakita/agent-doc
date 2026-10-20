@@ -3158,6 +3158,9 @@ mod supervisor_io;
 mod run;
 pub use run::*;
 
+mod claude_resume_capture;
+pub use claude_resume_capture::*;
+
 #[cfg(test)]
 fn agent_launch_args_sources(
     fm: &frontmatter::Frontmatter,

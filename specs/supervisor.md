@@ -202,7 +202,11 @@ persisted `resume:` value is a harness-keyed map (`claude`, `codex`, `opencode`)
 and restart/cold-recovery paths must never read another harness's entry. Legacy
 scalar values are interpreted only for the document's active harness and migrate
 to its map entry on the next managed write. Crash restarts and plain
-controller recycles never refresh lineage from frontmatter.
+controller recycles never refresh lineage from frontmatter. A Claude `/clear` or non-resume
+startup moves `resume.claude` to the new conversation through the
+`SessionStart` hook (`#clauderesumeafterclear`,
+`specs/15-turn-lifecycle.md` § Claude conversation-id capture), so the next
+Restart Agent or relaunch adopts it.
 - On the cold-start path a Restart Agent authorizes `RestartLiveHarness` even in
   continue mode. The foreign-pane guard is unchanged: only a pane running *this
   document's* harness is replaceable.

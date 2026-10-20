@@ -25,6 +25,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   non-blocking, fenced, and quoted packets record nothing. Todo mutations now
   run after the envelope's adds and gates, so a todo on a freshly gated item
   names `(source: agent:review [#id])`.
+- **The controller orphan drain no longer re-dispatches a subagent-claimed
+  id-backed head (GH #319).** The #312 claim filter checked the head's bare
+  tracked id (`beyp`), which keys as free text and never matched the claim on
+  `[#beyp]: approved` or `do [#beyp]`, so the claimed head was dispatched every
+  ~90 s, once into a busy turn. The fresh and memoized paths now check claims
+  against the head's prompt text, which the revision memo carries beside the
+  routing name.
 
 ## 0.35.526
 

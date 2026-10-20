@@ -788,10 +788,36 @@ fn eligible_head_prompt_from_entries(
 
 /// Live drainable active queue head for `scope`.
 pub fn live_drainable_continuation_head(content: &str, scope: DrainScope) -> Option<String> {
+    live_drainable_continuation_head_entry(content, scope).map(|entry| entry.head)
+}
+
+/// One drainable queue head under both of its names (GH #319).
+///
+/// `head` is what [`live_drainable_continuation_head`] returns: the bare
+/// tracked id (`beyp`) for an id-backed head, otherwise the prompt text. It is
+/// a *routing* name only. `prompt_text` is the marker-stripped line itself
+/// (`[#beyp]: approved`), the only form a claim identity may be derived from:
+/// [`ClaimedQueueItems::claims`] keys through [`crate::queue_claim::claim_identity`],
+/// which reads a bare `beyp` as free text and so never matches the claim made
+/// on the line. Every claim check against a drainable head must use
+/// `prompt_text`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrainableContinuationHead {
+    pub head: String,
+    pub prompt_text: String,
+}
+
+/// [`live_drainable_continuation_head`], also carrying the head's prompt text
+/// so a caller can check claims against the line's real identity (GH #319).
+pub fn live_drainable_continuation_head_entry(
+    content: &str,
+    scope: DrainScope,
+) -> Option<DrainableContinuationHead> {
     let head = drainable_head_prompt_for_scope(content, scope)?;
-    let stripped = strip_in_progress_marker(&head.text);
+    let prompt_text = strip_in_progress_marker(&head.text);
     let preset_only = preset_only_identity_ids(content);
-    Some(tracked_head_id(&stripped, &preset_only).unwrap_or(stripped))
+    let head = tracked_head_id(&prompt_text, &preset_only).unwrap_or_else(|| prompt_text.clone());
+    Some(DrainableContinuationHead { head, prompt_text })
 }
 
 /// [`live_drainable_continuation_head`], skipping heads `claimed` by a worker
@@ -2374,6 +2400,35 @@ mod tests {
             ),
             live_drainable_continuation_head(content, DrainScope::Supervisor)
         );
+    }
+
+    /// GH #319: the drainable head's routing name for an id-backed head is
+    /// the bare tracked id, which is NOT a claim key; the entry's prompt text
+    /// is. A claim on the line matches the prompt text and never the bare id,
+    /// for both the annotated `[#id]: note` and the directive `do [#id]` shape;
+    /// a free-text head's two names coincide.
+    #[test]
+    fn drainable_head_entry_carries_the_claim_key_beside_the_bare_id() {
+        for line in ["[#beyp]: approved", "do [#beyp]", "plain free text"] {
+            let content = format!(
+                "---\nqueue_active: true\n---\n\n<!-- agent:queue auto go -->\n- {line}\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#beyp] Claimed item\n<!-- /agent:backlog -->\n"
+            );
+            let entry = live_drainable_continuation_head_entry(&content, DrainScope::Supervisor)
+                .expect("drainable head");
+            assert_eq!(entry.prompt_text, line);
+            assert_eq!(
+                Some(entry.head.clone()),
+                live_drainable_continuation_head(&content, DrainScope::Supervisor)
+            );
+            let claimed = ClaimedQueueItems::none().with_heads([&line.to_string()]);
+            assert!(claimed.claims(&entry.prompt_text), "{line}");
+            if line.contains("[#beyp]") {
+                assert_eq!(entry.head, "beyp");
+                assert!(!claimed.claims(&entry.head), "bare id is not a claim key");
+            } else {
+                assert_eq!(entry.head, line);
+            }
+        }
     }
 
     #[test]

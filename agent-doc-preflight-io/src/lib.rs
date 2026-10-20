@@ -6423,9 +6423,29 @@ pub fn run_queue_maintenance_with_coin_gate(
     // `queue: stop` revocation it drives are wrong for the same reason. The body
     // then surfaces through the `inactive_queue_residue` warning below, which is
     // what an unanswered operator queue line should do.
-    let need_clear_drained_body = (need_strip_activation || need_clear_non_auto_residue)
+    let drained_body_clearable = (need_strip_activation || need_clear_non_auto_residue)
         && !activation.deferred
         && queue_body_clear_is_lossless(&activation.entries_after);
+    // GH #327: a `loop` queue keeps its struck rows when it drains. They are
+    // the scheduler's evidence that the pass ran each item, and the loop
+    // restore removes them when it re-appends the items. Blanking the body
+    // here (in the same write as the residue strike) left the item neither
+    // live nor struck, so the pass completed with `restore_items=0` and the
+    // loop lost its program.
+    let selected_queue_retains_struck = agent_doc_element::element::parse(&current_content)
+        .ok()
+        .and_then(|comps| {
+            agent_doc_queue::queue_set::component_for_id(
+                &current_content,
+                &comps,
+                &selected_queue_id,
+            )
+            .ok()
+            .flatten()
+            .map(|q| agent_doc_queue::queue_schedule::queue_retains_struck_heads(&q.attrs))
+        })
+        .unwrap_or(false);
+    let need_clear_drained_body = drained_body_clearable && !selected_queue_retains_struck;
     // `#queuestopretire`: a DRAIN — no live prompt left, not a `stop`-marker
     // halt, nothing held back from the backlog — clears the control on both
     // surfaces instead of writing `queue: stop` (the marker token is stripped
@@ -6459,7 +6479,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     if !activation.active
         && !activation.deferred
         && !activation.entries_after.is_empty()
-        && !need_clear_drained_body
+        && !drained_body_clearable
     {
         // `inactive_queue_residue` is a per-*edit* signal, not a per-preflight
         // nag. It is useful when the operator just added/changed content in an
@@ -15228,6 +15248,74 @@ mod tests {
         assert!(!snap.contains("queue: stop") && !snap.contains("queue_active:"));
         assert!(!snap.contains("agent:queue auto"));
         assert!(!snap.contains("- do [#alpha]"));
+    }
+
+    #[test]
+    fn queue_maintenance_keeps_a_drained_loop_queue_struck_rows_for_the_restore() {
+        // GH #327 pass 4: one maintenance write struck the loop queue's last
+        // live head and then blanked the drained body, so the scheduler saw the
+        // item neither live nor struck and completed the pass with
+        // `restore_items=0`. The same strike-then-drain shape as the sibling
+        // all-done test above, on a `loop` queue: the struck rows must stay (the
+        // loop restore removes them), in the document and the snapshot.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto loop -->\n",
+            "- do [#alpha]\n",
+            "- do [#beta]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#alpha] First done.\n",
+            "- [x] [#beta] Second done.\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        for (label, text) in [("document", &updated), ("snapshot", &snap)] {
+            let queue_id = agent_doc_queue::queue_schedule::identified_queue_schedules(text)
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("the loop queue is still scheduled")
+                .queue_id;
+            assert!(
+                agent_doc_queue::queue_schedule::live_heads_for_queue(text, &queue_id)
+                    .unwrap()
+                    .is_empty(),
+                "{label}: both heads were struck: {text}"
+            );
+            assert_eq!(
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, &queue_id)
+                    .unwrap(),
+                vec!["do [#alpha]".to_string(), "do [#beta]".to_string()],
+                "{label}: the drain kept the loop queue's struck rows: {text}"
+            );
+        }
     }
 
     #[test]

@@ -312,6 +312,22 @@ pub fn queue_schedule_spec_for_attrs(
     }
 }
 
+/// GH #327: whether a drain must keep this queue's struck (`~~item~~`) rows
+/// instead of erasing the body when its last live head is consumed.
+///
+/// A `loop` queue's struck rows are the pass's completion evidence: the
+/// scheduler's roster reconciliation ([`observe_with_completed`]) keeps a
+/// roster item only while it is live, was seen claimed, or is struck-complete,
+/// and the loop restore ([`plan_loop_restore_for_queue`]) is what removes the
+/// struck copy. A drain that erases the body when the queue empties (the
+/// closeout consume, the preflight drained-queue clear) would leave the item
+/// neither live nor struck, so the pass would complete with nothing to
+/// restore. Keyed on the bare `loop` attribute, not on a valid spec, so a
+/// malformed `loop=` value still takes the non-lossy direction.
+pub fn queue_retains_struck_heads(attrs: &HashMap<String, String>) -> bool {
+    attrs.contains_key(QUEUE_LOOP_ATTR)
+}
+
 fn declares_schedule(attrs: &HashMap<String, String>) -> bool {
     [QUEUE_INTERVAL_ATTR, QUEUE_TIME_ATTR, QUEUE_LOOP_ATTR]
         .iter()
@@ -487,6 +503,25 @@ fn identity(text: &str) -> QueueItemIdentity {
     crate::queue_claim::claim_identity(text)
 }
 
+/// Lifecycle projections only the drain writes onto a live head: claimed /
+/// in progress (`🚧`), fenced subagent attempt (`🟡`, `📥`, `⚠️`, `⏭️`), and
+/// awaiting operator (`⏳`). Pin markers (`📌`, `**pin**`, ...) are operator
+/// priority, not drain evidence, and are skipped over.
+const DRAIN_LIFECYCLE_MARKERS: &[&str] = &["🚧", "🟡", "📥", "⚠️", "⏭\u{fe0f}", "⏳"];
+
+/// GH #327: whether a live head carries a drain lifecycle marker, i.e. the
+/// pass's drain already picked it up. An operator keystroke state never does.
+fn head_carries_drain_lifecycle_marker(text: &str) -> bool {
+    let trimmed = text.trim();
+    let core = agent_doc_element_queue::strip_priority_markers(trimmed);
+    let Some(prefix) = trimmed.strip_suffix(core.as_str()) else {
+        return false;
+    };
+    DRAIN_LIFECYCLE_MARKERS
+        .iter()
+        .any(|marker| prefix.contains(marker))
+}
+
 /// The local zone's UTC offset at an instant. Injected so the schedule math is
 /// deterministic; the controller supplies the platform zone.
 pub trait LocalOffset {
@@ -558,11 +593,17 @@ pub enum ScheduleWindow {
     #[default]
     Closed,
     /// Pass `pass` is draining. `roster` is every head the pass owns: the live
-    /// heads when it opened plus any head that appeared while it ran.
+    /// heads when it opened plus any head that appeared while it ran. `ran`
+    /// is the subset of the roster the drain has been observed acting on
+    /// (seen claimed or struck-complete); that evidence is sticky for the
+    /// rest of the pass, so a drain that later erases the row cannot make
+    /// the item look like it never ran (GH #327).
     Open {
         pass: u32,
         opened_secs: u64,
         roster: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ran: Vec<String>,
     },
 }
 
@@ -815,6 +856,7 @@ pub fn fire(
             pass: state.passes_completed.saturating_add(1),
             opened_secs: now,
             roster: dedupe_by_identity(facts.live_heads.iter().cloned()),
+            ran: Vec::new(),
         };
         FireDecision::Opened
     };
@@ -856,8 +898,11 @@ pub fn observe(
 }
 
 /// Observe a queue with explicit completion evidence. During a loop pass, a
-/// roster item that is neither live nor struck-complete never ran; removing it
-/// prevents intermediate operator keystroke states from being restored later.
+/// roster item that is not live and that the drain was never observed acting
+/// on (claimed, or struck-complete in `completed_heads`) never ran; removing
+/// it prevents intermediate operator keystroke states (GH #310) from being
+/// restored later. Drain evidence is sticky for the pass: an item once seen
+/// claimed or struck is restored even after a drain erased its row (GH #327).
 pub fn observe_with_completed(
     state: QueueScheduleState,
     spec: &QueueScheduleSpec,
@@ -875,7 +920,10 @@ fn observe_inner(
     completed_heads: Option<&[String]>,
     now: u64,
 ) -> (QueueScheduleState, ObserveOutcome) {
-    let ScheduleWindow::Open { pass, roster, .. } = &mut state.window else {
+    let ScheduleWindow::Open {
+        pass, roster, ran, ..
+    } = &mut state.window
+    else {
         return (state, ObserveOutcome::Unchanged);
     };
     let pass = *pass;
@@ -884,11 +932,29 @@ fn observe_inner(
     let mut grew = false;
     if spec.loop_limit.is_loop() {
         if let Some(completed_heads) = completed_heads {
-            let completed: std::collections::HashSet<QueueItemIdentity> =
-                completed_heads.iter().map(|head| identity(head)).collect();
+            // Drain evidence observed now: a struck-complete row, or a live
+            // head carrying a drain lifecycle marker (claimed / dispatched).
+            let evidence: std::collections::HashSet<QueueItemIdentity> = completed_heads
+                .iter()
+                .map(|head| identity(head))
+                .chain(
+                    live_heads
+                        .iter()
+                        .filter(|head| head_carries_drain_lifecycle_marker(head))
+                        .map(|head| identity(head)),
+                )
+                .collect();
+            let mut ran_ids: std::collections::HashSet<QueueItemIdentity> =
+                ran.iter().map(|item| identity(item)).collect();
+            for item in roster.iter() {
+                let id = identity(item);
+                if evidence.contains(&id) && ran_ids.insert(id) {
+                    ran.push(item.clone());
+                }
+            }
             roster.retain(|item| {
                 let item = identity(item);
-                live.contains(&item) || completed.contains(&item)
+                live.contains(&item) || ran_ids.contains(&item)
             });
         }
         let known: std::collections::HashSet<QueueItemIdentity> =
@@ -1449,6 +1515,89 @@ mod tests {
             state.restore_pending,
             Some(heads(&["#upgrade", "refresh prefix"]))
         );
+    }
+
+    /// GH #327 pass 3: the closeout consume emptied the queue by rewriting the
+    /// body, so the claimed head was deleted outright with no struck copy.
+    /// Seeing it claimed is drain evidence that survives the erase.
+    #[test]
+    fn loop_item_seen_claimed_is_restored_after_its_row_is_erased() {
+        let spec = spec(&[("interval", "1h"), ("loop", "")]);
+        let state = reconcile(None, &spec, 0);
+        let (state, decision) = fire(state, &spec, 0, &facts(&["#upgrade"]), &UTC);
+        assert_eq!(decision, FireDecision::Opened);
+        let (state, outcome) =
+            observe_with_completed(state, &spec, &heads(&["🚧 #upgrade"]), &[], 1);
+        assert_eq!(outcome, ObserveOutcome::Unchanged);
+        let (state, outcome) = observe_with_completed(state, &spec, &[], &[], 2);
+        assert_eq!(
+            outcome,
+            ObserveOutcome::Completed {
+                pass: 1,
+                restore: heads(&["#upgrade"]),
+            }
+        );
+        assert_eq!(state.restore_pending, Some(heads(&["#upgrade"])));
+    }
+
+    /// GH #327: once a struck copy proved the item ran, a later observation
+    /// where that row is gone (the drained-queue clear) still restores it.
+    #[test]
+    fn loop_item_seen_struck_stays_owned_after_the_struck_row_is_cleared() {
+        let spec = spec(&[("interval", "1h"), ("loop", "")]);
+        let state = reconcile(None, &spec, 0);
+        let (state, _) = fire(state, &spec, 0, &facts(&["#upgrade", "poll"]), &UTC);
+        // `#upgrade` is struck while `poll` still runs: the pass stays open.
+        let (state, outcome) =
+            observe_with_completed(state, &spec, &heads(&["poll"]), &heads(&["#upgrade"]), 1);
+        assert_eq!(outcome, ObserveOutcome::Unchanged);
+        // The struck row is erased, then `poll` drains.
+        let (state, outcome) = observe_with_completed(state, &spec, &heads(&["poll"]), &[], 2);
+        assert_eq!(outcome, ObserveOutcome::Unchanged);
+        let (_, outcome) = observe_with_completed(state, &spec, &[], &heads(&["poll"]), 3);
+        assert_eq!(
+            outcome,
+            ObserveOutcome::Completed {
+                pass: 1,
+                restore: heads(&["#upgrade", "poll"]),
+            }
+        );
+    }
+
+    /// GH #310 stays fixed: a pin marker is operator priority, not drain
+    /// evidence, so an edited-away pinned spelling is still dropped.
+    #[test]
+    fn pin_marker_is_not_drain_evidence() {
+        assert!(head_carries_drain_lifecycle_marker("🚧 #upgrade"));
+        assert!(head_carries_drain_lifecycle_marker("📌 🟡 #upgrade"));
+        assert!(head_carries_drain_lifecycle_marker("⏳ answer me"));
+        assert!(!head_carries_drain_lifecycle_marker("📌 #upgrade"));
+        assert!(!head_carries_drain_lifecycle_marker("#upgrade 🚧 later"));
+        let spec = spec(&[("loop", "")]);
+        let state = reconcile(None, &spec, 0);
+        let (state, _) = fire(state, &spec, 0, &facts(&["📌 refresh prfex"]), &UTC);
+        let (state, _) =
+            observe_with_completed(state, &spec, &heads(&["📌 refresh prefix"]), &[], 1);
+        let (_, outcome) =
+            observe_with_completed(state, &spec, &[], &heads(&["📌 refresh prefix"]), 2);
+        assert_eq!(
+            outcome,
+            ObserveOutcome::Completed {
+                pass: 1,
+                restore: heads(&["📌 refresh prefix"]),
+            }
+        );
+    }
+
+    #[test]
+    fn loop_queue_marker_retains_struck_heads() {
+        assert!(queue_retains_struck_heads(&attrs(&[("loop", "")])));
+        assert!(queue_retains_struck_heads(&attrs(&[
+            ("loop", "3"),
+            ("interval", "1h")
+        ])));
+        assert!(!queue_retains_struck_heads(&attrs(&[("interval", "1h")])));
+        assert!(!queue_retains_struck_heads(&attrs(&[])));
     }
 
     #[test]

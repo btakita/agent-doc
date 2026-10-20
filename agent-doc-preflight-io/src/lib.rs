@@ -5912,35 +5912,13 @@ pub fn run_queue_maintenance_with_coin_gate(
         // about another queue's copy of the head, answers it. With no pass
         // open (or no readable schedule state) the head is held and nothing
         // in this pass can have answered it.
-        let selected_queue_loop_window: Option<Option<u64>> =
-            agent_doc_element::element::parse(&current_content)
-                .ok()
-                .and_then(|comps| {
-                    agent_doc_queue::queue_set::component_for_id(
-                        &current_content,
-                        &comps,
-                        &selected_queue_id,
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|q| agent_doc_queue::queue_schedule::queue_retains_struck_heads(&q.attrs))
-                })
-                .unwrap_or(false)
-                .then(|| {
-                    agent_doc_controller_io::queue_scheduler::load_schedule_state_for_queue(
-                        file,
-                        &selected_queue_id,
-                    )
-                    .ok()
-                    .flatten()
-                    .and_then(|state| match state.window {
-                        agent_doc_queue::queue_schedule::ScheduleWindow::Open {
-                            opened_secs,
-                            ..
-                        } => Some(opened_secs),
-                        agent_doc_queue::queue_schedule::ScheduleWindow::Closed => None,
-                    })
-                });
+        // The `#syntheticstrike` continuation-head skip resolves the same
+        // window and scope, so the two never disagree on a head.
+        let echo_window = agent_doc_queue_io::queue_schedule::head_echo_window(
+            file,
+            &current_content,
+            &selected_queue_id,
+        );
         let mut loop_scope_skips: Vec<&'static str> = Vec::new();
         let mut struck_claimed_heads: Vec<String> = Vec::new();
         let mut struck_count = 0usize;
@@ -5966,52 +5944,28 @@ pub fn run_queue_maintenance_with_coin_gate(
                                 // after the head (re-)entered the queue
                                 // answers it. An echo of an earlier, already
                                 // answered copy of the same text is history.
-                                && match selected_queue_loop_window {
-                                    None => match agent_doc_git_io::revision::free_text_head_entry_anchor_exchange(
+                                // GH #327 pass 4: a `loop` head counts only
+                                // its own pass's echo, and none while no pass
+                                // is open.
+                                && {
+                                    let scope = agent_doc_git_io::revision::head_echo_scope(
                                         file,
                                         &selected_queue_id,
                                         &p.text,
-                                    ) {
-                                        None => true,
-                                        Some(anchor) => {
-                                            let newer = agent_doc_queue::queue_response::exchange_text_newer_than(
-                                                &exchange_text,
-                                                &anchor,
-                                            );
-                                            let answered_after_entry =
-                                                answered_residue_in(&newer, &p.text);
-                                            if !answered_after_entry {
-                                                predating_echo_heads += 1;
-                                            }
-                                            answered_after_entry
-                                        }
-                                    },
-                                    // GH #327 pass 4: no open pass.
-                                    Some(None) => {
-                                        loop_scope_skips.push("no_open_pass");
-                                        false
-                                    }
-                                    Some(Some(opened_secs)) => match agent_doc_git_io::revision::loop_pass_head_echo_anchor_exchange(
-                                        file,
-                                        &selected_queue_id,
-                                        &p.text,
-                                        opened_secs,
+                                        echo_window,
                                         &current_content,
-                                    ) {
-                                        None => true,
-                                        Some(anchor) => {
-                                            let newer = agent_doc_queue::queue_response::exchange_text_newer_than(
-                                                &exchange_text,
-                                                &anchor.exchange,
-                                            );
-                                            let answered_in_pass =
-                                                answered_residue_in(&newer, &p.text);
-                                            if !answered_in_pass {
-                                                loop_scope_skips.push(anchor.kind.label());
-                                            }
-                                            answered_in_pass
+                                    );
+                                    let answered_in_scope = scope.answers(&exchange_text, |scoped| {
+                                        answered_residue_in(scoped, &p.text)
+                                    });
+                                    if !answered_in_scope {
+                                        if echo_window.is_loop() {
+                                            loop_scope_skips.push(scope.label());
+                                        } else {
+                                            predating_echo_heads += 1;
                                         }
-                                    },
+                                    }
+                                    answered_in_scope
                                 } =>
                 {
                     struck_count += 1;

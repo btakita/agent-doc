@@ -4714,7 +4714,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "crate::subagent_dispatch::out_of_loop_items_for_content(file, &content)",
         "crate::subagent_dispatch::out_of_loop_items_for_content(file, content)",
         "queue_continuation::required_continuation_excluding_claimed_scoped(",
-        "agent_doc_git_io::revision::free_text_head_entry_anchor_exchange(file, queue_id, head)",
+        "agent_doc_git_io::revision::head_echo_scope(file, queue_id, head, window, content)",
+        "crate::queue_schedule::head_echo_window(file, content, queue_id)",
     ] {
         assert!(
             queue_io_detect.contains(required_snippet),

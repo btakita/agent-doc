@@ -130,6 +130,89 @@ impl OwnedPtyScreen {
             .collect::<Vec<_>>()
             .join("\n")
     }
+
+    /// Render the visible viewport as text that keeps the composer ghost style.
+    ///
+    /// Every harness renders composer placeholders and autosuggestions faint
+    /// (SGR `2`) or italic (SGR `3`), while operator keystrokes render at
+    /// normal intensity. That style is the only signal that tells an empty
+    /// composer from a typed draft once the placeholder text is not on a
+    /// static list (`prompt_candidate_is_dim_placeholder`). [`Self::visible_text`]
+    /// drops it, so the supervisor read Codex's post-turn `› Ask a follow-up
+    /// question` placeholder as operator input and never saw the idle prompt
+    /// (`#clearqueuedliveturn`). Only faint and italic are kept, as the same SGR a
+    /// `tmux capture-pane -e` snapshot carries; colour and every other attribute
+    /// stay out, so the text is otherwise identical to [`Self::visible_text`].
+    pub fn visible_text_with_ghost_style(&self) -> String {
+        let mut lines: Vec<Vec<(char, GhostStyle)>> = vec![Vec::new(); self.size.rows];
+        for indexed in self.term.renderable_content().display_iter {
+            if indexed.point.line.0 < 0 {
+                continue;
+            }
+            let line_index = indexed.point.line.0 as usize;
+            if line_index >= lines.len() {
+                continue;
+            }
+            let flags = indexed.cell.flags;
+            let ch = if flags.intersects(
+                Flags::HIDDEN | Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER,
+            ) {
+                ' '
+            } else {
+                indexed.cell.c
+            };
+            lines[line_index].push((
+                ch,
+                GhostStyle {
+                    faint: flags.contains(Flags::DIM),
+                    italic: flags.contains(Flags::ITALIC),
+                },
+            ));
+        }
+
+        lines
+            .iter()
+            .map(|cells| render_ghost_styled_line(cells))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// The two cell attributes that mark harness-rendered ghost text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct GhostStyle {
+    faint: bool,
+    italic: bool,
+}
+
+/// One screen row, trailing blanks trimmed, with each change of ghost style
+/// opened by its SGR and closed by a reset.
+fn render_ghost_styled_line(cells: &[(char, GhostStyle)]) -> String {
+    let end = cells
+        .iter()
+        .rposition(|(ch, _)| !ch.is_whitespace())
+        .map_or(0, |last| last + 1);
+    let mut out = String::new();
+    let mut current = GhostStyle::default();
+    for &(ch, style) in &cells[..end] {
+        if style != current {
+            if current != GhostStyle::default() {
+                out.push_str("\x1b[0m");
+            }
+            if style.faint {
+                out.push_str("\x1b[2m");
+            }
+            if style.italic {
+                out.push_str("\x1b[3m");
+            }
+            current = style;
+        }
+        out.push(ch);
+    }
+    if current != GhostStyle::default() {
+        out.push_str("\x1b[0m");
+    }
+    out
 }
 
 impl Default for OwnedPtyScreen {
@@ -178,6 +261,52 @@ mod tests {
             screen.visible_text().contains("/tmp/project ❯"),
             "screen should include prompt after EL rewrite"
         );
+    }
+
+    /// `#clearqueuedliveturn`: Codex renders its post-turn placeholder bold `›`
+    /// then a faint body. The ghost-styled projection keeps exactly that SGR
+    /// (and nothing for the normal-intensity glyph or a typed draft), so the
+    /// composer projection can tell the placeholder from operator input.
+    #[test]
+    fn ghost_styled_text_keeps_faint_and_italic_runs_only() {
+        let mut screen = OwnedPtyScreen::new(size(4, 60));
+        screen.push(
+            "\x1b[1m\u{203a}\x1b[0m \x1b[2mAsk a follow-up question\x1b[0m\r\n\
+             \x1b[1m\u{203a}\x1b[0m \x1b[31mtyped draft\x1b[0m\r\n\
+             \x1b[3mitalic\x1b[0m plain"
+                .as_bytes(),
+        );
+
+        let styled = screen.visible_text_with_ghost_style();
+        let lines: Vec<&str> = styled.lines().collect();
+        assert_eq!(lines[0], "\u{203a} \x1b[2mAsk a follow-up question\x1b[0m");
+        assert_eq!(
+            lines[1], "\u{203a} typed draft",
+            "colour is not ghost style"
+        );
+        assert_eq!(lines[2], "\x1b[3mitalic\x1b[0m plain");
+        assert_eq!(
+            agent_doc_strip_sgr(&styled),
+            screen.visible_text(),
+            "apart from the ghost SGR the text is the plain projection"
+        );
+    }
+
+    fn agent_doc_strip_sgr(text: &str) -> String {
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' && chars.peek() == Some(&'[') {
+                for next in chars.by_ref() {
+                    if next == 'm' {
+                        break;
+                    }
+                }
+                continue;
+            }
+            out.push(ch);
+        }
+        out
     }
 
     #[test]

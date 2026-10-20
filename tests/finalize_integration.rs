@@ -5371,7 +5371,23 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     fs::write(&doc, &original).unwrap();
     init_git_repo(tmp.path(), &doc);
     checkpoint_baseline(tmp.path(), &original);
-    agent_doc_queue_io::queue_claim::claim(&doc, setup, "subagent:setup", 3600).unwrap();
+    // The unrelated setup head is claimed AND worker-bound: a claim left
+    // dispatching (`🟡`) with no worker acknowledgement becomes a coordinator
+    // obligation after `DISPATCH_EVIDENCE_GRACE_SECS` (10s), and finalize then
+    // refuses closeout over it. Left unacknowledged, this test passed only when
+    // it finished within 10s of wall clock, and failed under a loaded
+    // `make check-fast`.
+    let (_, setup_claim) =
+        agent_doc_queue_io::queue_claim::claim(&doc, setup, "subagent:setup", 3600).unwrap();
+    agent_doc_queue_io::queue_claim::start_attempt(
+        &doc,
+        setup,
+        "subagent:setup",
+        "worker:setup",
+        3600,
+        setup_claim.generation,
+    )
+    .unwrap();
     agent_doc()
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
@@ -5404,6 +5420,12 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         ])
         .assert()
         .success();
+    let dispatching_projection = fs::read_to_string(&doc).unwrap();
+    assert!(
+        dispatching_projection.contains(&format!("- 🟡 {question}\n"))
+            && dispatching_projection.contains(&format!("- 🚧 {setup}\n")),
+        "a fresh claim projects dispatching beside a worker-bound row:\n{dispatching_projection}"
+    );
     agent_doc()
         .current_dir(tmp.path())
         .args([
@@ -5423,9 +5445,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .success();
     let claimed_projection = fs::read_to_string(&doc).unwrap();
     assert!(
-        claimed_projection.contains(&format!("- 🟡 {setup}\n"))
+        claimed_projection.contains(&format!("- 🚧 {setup}\n"))
             && claimed_projection.contains(&format!("- 🚧 {question}\n")),
-        "claim and start must project dispatching and worker-bound rows distinctly:\n{claimed_projection}"
+        "start advances only its own generation to worker-bound:\n{claimed_projection}"
     );
     let released = agent_doc()
         .current_dir(tmp.path())
@@ -5449,7 +5471,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     );
     let released_projection = fs::read_to_string(&doc).unwrap();
     assert!(
-        released_projection.contains(&format!("- 🟡 {setup}\n"))
+        released_projection.contains(&format!("- 🚧 {setup}\n"))
             && released_projection.contains(&format!("- 📥 {question}\n"))
             && !released_projection.contains(&format!("- 🟡 {question}\n")),
         "reported release must retain a distinct awaiting-integration marker:\n{released_projection}"
@@ -5495,7 +5517,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         "the echoed, worker-reported head must be struck:\n{head}"
     );
     assert!(
-        head.contains(&format!("- 🟡 {setup}\n")),
+        head.contains(&format!("- 🚧 {setup}\n")),
         "the unrelated claimed head stays queued:\n{head}"
     );
     assert!(

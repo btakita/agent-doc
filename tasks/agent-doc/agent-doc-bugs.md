@@ -16,7 +16,6 @@ presets:
 dogfood:
   path: tasks/agent-doc/agent-doc-bugs.md
   auto: true
-queue: go
 ---
 
 ## Status
@@ -26,7 +25,7 @@ queue: go
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
 <!-- status:sync -->
-Latest published release: v0.35.525, published on GitHub at 2026-10-19 22:23:24 UTC; PyPI 0.35.525 published at 2026-10-19 22:24:09 UTC. Release, CI, and PyPI workflows are green. The retained-closeout Stop-hook fix and JetBrains read-only recovery are included. Coordinated sdk-dev → sdk-demo extraction remains unapplied and is tracked as a projection_changed follow-up. Two review items remain gated: jb262dynlauncherrecommen needs an operator decision, and pypiquotarecheck needs an external PyPI reply.
+Latest published release: [v0.35.525](https://github.com/btakita/agent-doc/releases/tag/v0.35.525), published on GitHub at 2026-10-19 22:23:24 UTC; PyPI 0.35.525 followed at 2026-10-19 22:24:09 UTC. The same release published JetBrains packages 0.2.720 (classic), 0.2.721 (IDE 262), and 0.2.722 (IDE 263); their assets were uploaded at 2026-10-19 22:23:22–24 UTC. Release, CI, and PyPI verification are green. The coordinated sdk-dev → sdk-demo transfer itself remains unapplied, but its projection_changed blocker is fixed post-release on main and is no longer an open backlog item. Current open work is gh299-live-263-proof; two review items remain gated: jb262dynlauncherrecommen needs an operator decision, and pypiquotarecheck needs an external PyPI reply.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -290,7 +289,12 @@ Implemented on `main` in `eb260b6b7b`. The handback header is now `[#subagent-op
 Shared syntax classifies `[#subagent-operator-request]` as `tracked_id`, so JetBrains and VS Code use the same existing ID color path as todo, backlog, queue, icebox, and review IDs. Runtime/preflight prompts, canonical specs, all harness runbook mirrors, editor specs, and tests were updated. The focused suite passed 34/34, plugin version checks passed, and the combined integration gate passed.
 
 The complete post-release stack is pushed through `d0b87395c3` and installed locally. This remains post-v0.35.525 work on `main`; no new release was published.
-<!-- agent:boundary:74300c47 -->
+> **Chat prompt (#chatprompt):** Is agent:status up to date?
+
+### Re: agent:status freshness — Codex
+
+It was partially stale. The published release number and times were correct, but the managed sync block omitted the JetBrains package versions and still described the extraction blocker as open. I refreshed it with the verified v0.35.525/PyPI timestamps, JetBrains 0.2.720/0.2.721/0.2.722 asset timestamps, and the current backlog/review state.
+<!-- agent:boundary:205bb14b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -305,7 +309,6 @@ The complete post-release stack is pushed through `d0b87395c3` and installed loc
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
-- Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:queue -->
 
 ## Todo

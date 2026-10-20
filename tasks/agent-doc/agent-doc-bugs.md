@@ -309,6 +309,7 @@ It was partially stale. The published release number and times were correct, but
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
+- Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:queue -->
 
 ## Todo

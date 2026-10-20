@@ -2261,6 +2261,94 @@ fn test_resume_id_records_the_explicit_producer_not_document_agent() {
     assert_eq!(fm.resume_for_harness("codex"), Some("codex-thread"));
 }
 
+/// `#clauderesumeafterclear` end to end through the real `turn-status idle`
+/// SessionStart hook: the test process stands in for the supervised Claude
+/// harness (it spawns the hook), and its own parent for the document
+/// supervisor, so the lineage proof is the production one.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_turn_status_idle_session_start_clear_records_new_claude_resume_id() {
+    fn parent_pid() -> u32 {
+        let stat = fs::read_to_string("/proc/self/stat").unwrap();
+        stat.rsplit_once(')')
+            .unwrap()
+            .1
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    let doc = root.join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent: claude\nresume:\n  claude: ba846c4c\n---\n\n# Session\n",
+    )
+    .unwrap();
+    let pane = "%987123";
+    let seed = |supervisor_pid: u32| {
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        let id = doc.to_string_lossy().into_owned();
+        conn.execute("DELETE FROM documents", ()).unwrap();
+        conn.execute("DELETE FROM supervisor_leases", ()).unwrap();
+        conn.execute(
+            "INSERT INTO documents (document_id, canonical_path, session_id, generation, pane_id, \
+             window_id, harness_id, actor_state) VALUES (?1, ?1, 'doc-session', 5, ?2, '@1', 'claude-code', 'ready')",
+            (&id, pane),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO supervisor_leases (document_id, generation, supervisor_pid) VALUES (?1, 5, ?2)",
+            (&id, supervisor_pid),
+        )
+        .unwrap();
+    };
+    let hook = |source: &str, id: &str| {
+        let payload = format!(
+            r#"{{"hook_event_name":"SessionStart","source":"{source}","session_id":"{id}","transcript_path":"/h/.claude/projects/p/{id}.jsonl"}}"#
+        );
+        agent_doc_cmd()
+            .current_dir(&root)
+            .env("TMUX_PANE", pane)
+            .env(
+                agent_doc_tmux_io::AGENT_DOC_TMUX_SOCKET_ENV,
+                root.join("no-tmux.sock"),
+            )
+            .args(["turn-status", "idle"])
+            .write_stdin(payload)
+            .assert()
+            .success();
+    };
+    let claude_resume = || {
+        let content = fs::read_to_string(&doc).unwrap();
+        let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content).unwrap();
+        fm.resume_for_harness("claude").map(str::to_string)
+    };
+
+    // A supervisor that is not the hook harness's parent proves nothing.
+    seed(1);
+    hook("clear", "e62ea89f");
+    assert_eq!(claude_resume().as_deref(), Some("ba846c4c"));
+
+    seed(parent_pid());
+    hook("resume", "ba846c4c-other");
+    assert_eq!(
+        claude_resume().as_deref(),
+        Some("ba846c4c"),
+        "a resume keeps the conversation"
+    );
+    hook("clear", "e62ea89f");
+    assert_eq!(
+        claude_resume().as_deref(),
+        Some("e62ea89f"),
+        "the /clear conversation becomes the document's resume target"
+    );
+    assert!(fs::read_to_string(&doc).unwrap().ends_with("# Session\n"));
+}
+
 #[test]
 fn test_cli_env_json_reports_classification_and_reason() {
     let mut cmd = agent_doc_cmd();
@@ -7403,8 +7491,14 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
     let main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(
         main.contains("agent_doc_turn_status_io::run(true)")
-            && main.contains("agent_doc_turn_status_io::run(false)"),
+            && main.contains("agent_doc_turn_status_io::run_with_idle_payload_hook("),
         "turn-status command should call the focused IO crate directly"
+    );
+    // `#clauderesumeafterclear`: the idle (SessionStart) hook payload reaches the
+    // Claude conversation-id capture, which owns the authority write.
+    assert!(
+        main.contains("agent_doc_start_runtime_io::capture_claude_session_start_resume"),
+        "turn-status idle must hand SessionStart payloads to the Claude resume capture"
     );
     let session_actor_cmd =
         fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();

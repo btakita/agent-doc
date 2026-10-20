@@ -6726,7 +6726,13 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Autoclaim => autoclaim::run(),
         Commands::TurnStatus { action } => match action {
             TurnStatusAction::Active => agent_doc_turn_status_io::run(true),
-            TurnStatusAction::Idle => agent_doc_turn_status_io::run(false),
+            // `#clauderesumeafterclear`: a Claude `SessionStart` (`/clear` or a
+            // non-resume startup) reports a new conversation id; record it on
+            // the proven owning document so later restarts resume it.
+            TurnStatusAction::Idle => agent_doc_turn_status_io::run_with_idle_payload_hook(
+                false,
+                Some(&agent_doc_start_runtime_io::capture_claude_session_start_resume),
+            ),
             TurnStatusAction::Install { dir, user, tmux } => {
                 skill::install_turn_status_hooks(dir.as_deref(), user, tmux)
             }

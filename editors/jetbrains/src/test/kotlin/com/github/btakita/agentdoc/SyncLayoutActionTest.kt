@@ -691,7 +691,13 @@ class SyncLayoutActionTest {
         val source = java.nio.file.Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt",
         ).toFile().readText()
-        assertTrue(source.contains("columnOrder = syncColumnOrder(editorLayout)"))
+        // GH #326 phase 3: the snapshot submits the label the `sync_layout` derivation answered;
+        // the frozen floor keeps this rule.
+        assertTrue(source.contains("columnOrder = snapshot.columnOrder"))
+        val floor = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutSnapshot.kt",
+        ).toFile().readText()
+        assertTrue(floor.contains("columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout)"))
         val route = java.nio.file.Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt",
         ).toFile().readText()
@@ -706,10 +712,13 @@ class SyncLayoutActionTest {
 
         assertTrue(
             source.contains(
-                "val failureAction = if (noAutostart) \"sync the tmux layout\" else \"open the tmux pane\"",
+                "get() = if (noAutostart) \"sync the tmux layout\" else \"open the tmux pane\"",
             ),
         )
-        assertTrue(source.contains("TerminalUtil.showEditorFailureStatus("))
-        assertTrue(source.split("TerminalUtil.showEditorFailureStatus(").size - 1 >= 4)
+        // Every failure of a sync reaches the focused editor through one SyncRequest.notifyFailure.
+        val notifyFailure = source.substringAfter("fun notifyFailure(").substringBefore("\n        }\n")
+        assertTrue(notifyFailure.contains("TerminalUtil.showEditorFailureStatus("))
+        assertTrue(notifyFailure.contains("TerminalUtil.notifyError("))
+        assertTrue(source.split("request.notifyFailure(").size - 1 >= 6)
     }
 }

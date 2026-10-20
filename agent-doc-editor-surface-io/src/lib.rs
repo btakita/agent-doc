@@ -409,6 +409,7 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "window_layout",
     "client_measured_layout",
     "surface_projection",
+    "sync_layout",
 ];
 
 #[derive(serde::Deserialize)]
@@ -450,12 +451,45 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
                 |project_root, remote| resolve_remote_layout(Path::new(project_root), remote),
             ))?
         }
+        "sync_layout" => {
+            let evidence: agent_doc_editor_surface::SyncLayoutEvidence =
+                serde_json::from_value(input).context("parse sync layout evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::derive_sync_layout(
+                &evidence,
+                nearest_agent_doc_root,
+            ))?
+        }
         other => anyhow::bail!(
             "unknown editor derivation `{other}`; this library answers {}",
             EDITOR_DERIVATIONS.join(", ")
         ),
     };
     Ok(serde_json::json!({ "derivation": request.derivation, "output": output }))
+}
+
+/// The nearest `.agent-doc` project root of the document at `file`, searched
+/// from its directory upward (`TerminalUtil.nearestAgentDocProjectRoot`). The
+/// path is made absolute and lexically normalized first, as the plugin did.
+fn nearest_agent_doc_root(file: &str) -> Option<String> {
+    use std::path::Component;
+    let path = Path::new(file);
+    let anchored = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in anchored.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    let directory = normalized.parent()?;
+    agent_doc_fs::find_project_root(directory).map(|root| root.to_string_lossy().into_owned())
 }
 
 fn publish_editor_observation(
@@ -730,6 +764,92 @@ mod tests {
             line.starts_with("[layout-detect] unknown windows=0 source=remote_client_selected_files focused=[a.md] remote_clients=1 selections=[0:[a.md]] visible=[0:[a.md]] reason="),
             "{line}"
         );
+    }
+
+    /// GH #326 phase 3: the native `sync_layout` derivation answers every
+    /// shared parity case. The plugin's frozen Kotlin floor answers the same
+    /// file in `SyncLayoutSnapshotTest`, so the two cannot drift silently.
+    #[test]
+    fn gh326_sync_layout_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/sync_layout.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 12, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let evidence: agent_doc_editor_surface::SyncLayoutEvidence =
+                serde_json::from_value(case["input"].clone()).unwrap();
+            let roots = case["nearest_roots"]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            let snapshot = agent_doc_editor_surface::derive_sync_layout(&evidence, |file| {
+                roots
+                    .get(file)
+                    .and_then(|root| root.as_str())
+                    .map(str::to_string)
+            });
+            let output = serde_json::to_value(&snapshot).unwrap();
+            let expected = &case["expected"];
+            for field in [
+                "project_root",
+                "layout",
+                "columns",
+                "column_order",
+                "decision",
+            ] {
+                assert_eq!(output[field], expected[field], "{name}: {field}");
+            }
+        }
+    }
+
+    /// GH #326 phase 3: the derivation channel answers `sync_layout`, resolving
+    /// each visible document's nearest `.agent-doc` root on the filesystem.
+    #[test]
+    fn gh326_sync_layout_resolves_project_roots_through_the_derivation_channel() {
+        let scratch =
+            std::env::temp_dir().join(format!("gh326-sync-layout-{}", std::process::id()));
+        let app = scratch.join("work/src/app");
+        let other = scratch.join("work/src/other");
+        for root in [&app, &other] {
+            std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+            std::fs::create_dir_all(root.join("tasks")).unwrap();
+        }
+        let work = scratch.join("work").to_string_lossy().into_owned();
+        let app = app.to_string_lossy().into_owned();
+        let other = other.to_string_lossy().into_owned();
+        let derive = |visible: Vec<String>| {
+            let request = serde_json::json!({
+                "derivation": "sync_layout",
+                "input": {
+                    "base_path": work,
+                    "fallback_root": app,
+                    "focused": format!("{app}/tasks/a.md"),
+                    "visible": visible,
+                    "layout": {"columns": [{"files": ["src/app/tasks/a.md"]}, {"files": ["src/app/tasks/./b.md"]}]}
+                }
+            });
+            derive_editor_from_json(&request.to_string()).unwrap()["output"].clone()
+        };
+        let single = derive(vec![
+            format!("{app}/tasks/a.md"),
+            format!("{app}/tasks/../tasks/b.md"),
+        ]);
+        assert_eq!(single["project_root"], app.as_str());
+        assert_eq!(
+            single["columns"],
+            serde_json::json!([format!("{app}/tasks/a.md"), format!("{app}/tasks/./b.md")])
+        );
+        assert_eq!(single["decision"], "publish");
+        let cross = derive(vec![
+            format!("{app}/tasks/a.md"),
+            format!("{other}/tasks/c.md"),
+        ]);
+        assert_eq!(cross["project_root"], work.as_str());
+        assert_eq!(cross["column_order"], "editor");
+        std::fs::remove_dir_all(&scratch).unwrap();
     }
 
     /// GH #326: the derivation channel answers every shipped derivation, names

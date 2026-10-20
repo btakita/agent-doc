@@ -1,0 +1,519 @@
+{
+  "derivation": "sync_layout",
+  "about": "GH #326 phase 3 parity cases. The Rust `sync_layout` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (SyncLayoutSnapshotTest) both answer every case. `nearest_roots` maps a visible document to its nearest `.agent-doc` project root (absent: none); it stands in for the filesystem. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "cases": [
+    {
+      "name": "a single-root split stays scoped to that root and publishes absolute columns",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/app",
+        "focused": "/repo/src/app/tasks/a.md",
+        "visible": [
+          "/repo/src/app/tasks/a.md",
+          "/repo/src/app/tasks/b.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "src/app/tasks/a.md"
+              ]
+            },
+            {
+              "files": [
+                "src/app/tasks/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        }
+      },
+      "nearest_roots": {
+        "/repo/src/app/tasks/a.md": "/repo/src/app",
+        "/repo/src/app/tasks/b.md": "/repo/src/app"
+      },
+      "expected": {
+        "project_root": "/repo/src/app",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/src/app/tasks/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/src/app/tasks/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "/repo/src/app/tasks/a.md",
+          "/repo/src/app/tasks/b.md"
+        ],
+        "column_order": "editor",
+        "decision": "publish"
+      }
+    },
+    {
+      "name": "a cross-root split uses the workspace root",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/app",
+        "focused": "/repo/src/app/tasks/y.md",
+        "visible": [
+          "/repo/src/app/tasks/y.md",
+          "/repo/tasks/x.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "tasks/x.md"
+              ]
+            },
+            {
+              "files": [
+                "src/app/tasks/y.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        }
+      },
+      "nearest_roots": {
+        "/repo/src/app/tasks/y.md": "/repo/src/app",
+        "/repo/tasks/x.md": "/repo"
+      },
+      "expected": {
+        "project_root": "/repo",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/tasks/x.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/src/app/tasks/y.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "/repo/tasks/x.md",
+          "/repo/src/app/tasks/y.md"
+        ],
+        "column_order": "editor",
+        "decision": "publish"
+      }
+    },
+    {
+      "name": "a nested root keeps a workspace document absolute and passes the order label through",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/app",
+        "focused": "/repo/src/app/tasks/orders.md",
+        "visible": [
+          "/repo/src/app/tasks/orders.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "tasks/agent-doc/bugs.md"
+              ]
+            },
+            {
+              "files": [
+                "src/app/tasks/orders.md"
+              ]
+            }
+          ],
+          "column_order": "retained"
+        }
+      },
+      "nearest_roots": {
+        "/repo/src/app/tasks/orders.md": "/repo/src/app"
+      },
+      "expected": {
+        "project_root": "/repo/src/app",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/tasks/agent-doc/bugs.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/src/app/tasks/orders.md"
+              ]
+            }
+          ],
+          "column_order": "retained"
+        },
+        "columns": [
+          "/repo/tasks/agent-doc/bugs.md",
+          "/repo/src/app/tasks/orders.md"
+        ],
+        "column_order": "retained",
+        "decision": "publish"
+      }
+    },
+    {
+      "name": "a split that shows no session document keeps its empty column",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/app",
+        "focused": "/repo/src/app/tasks/orders.md",
+        "visible": [
+          "/repo/src/app/tasks/orders.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": []
+            },
+            {
+              "files": [
+                "src/app/tasks/orders.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        }
+      },
+      "nearest_roots": {
+        "/repo/src/app/tasks/orders.md": "/repo/src/app"
+      },
+      "expected": {
+        "project_root": "/repo/src/app",
+        "layout": {
+          "columns": [
+            {
+              "files": []
+            },
+            {
+              "files": [
+                "/repo/src/app/tasks/orders.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "",
+          "/repo/src/app/tasks/orders.md"
+        ],
+        "column_order": "editor",
+        "decision": "publish"
+      }
+    },
+    {
+      "name": "an unreadable split refuses instead of collapsing to the visible documents",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/tasks/a.md",
+        "visible": [
+          "/repo/tasks/a.md",
+          "/repo/tasks/b.md",
+          "/repo/tasks/a.md"
+        ]
+      },
+      "nearest_roots": {
+        "/repo/tasks/a.md": "/repo",
+        "/repo/tasks/b.md": "/repo"
+      },
+      "expected": {
+        "project_root": "/repo",
+        "layout": null,
+        "columns": [
+          "/repo/tasks/a.md",
+          "/repo/tasks/b.md"
+        ],
+        "column_order": "unknown",
+        "decision": "refuse_unknown_layout"
+      }
+    },
+    {
+      "name": "a known single window publishes the visible documents with an unknown order",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/tasks/a.md",
+        "visible": [
+          "/repo/tasks/a.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "tasks/a.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        }
+      },
+      "nearest_roots": {
+        "/repo/tasks/a.md": "/repo"
+      },
+      "expected": {
+        "project_root": "/repo",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/tasks/a.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "/repo/tasks/a.md"
+        ],
+        "column_order": "unknown",
+        "decision": "publish"
+      }
+    },
+    {
+      "name": "a foreground sync refuses a split that omits the focused document",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/tasks/c.md",
+        "visible": [
+          "/repo/tasks/c.md",
+          "/repo/tasks/a.md",
+          "/repo/tasks/b.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "tasks/a.md"
+              ]
+            },
+            {
+              "files": [
+                "tasks/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        }
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/tasks/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/tasks/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "/repo/tasks/a.md",
+          "/repo/tasks/b.md"
+        ],
+        "column_order": "editor",
+        "decision": "refuse_stale_focus_projection"
+      }
+    },
+    {
+      "name": "a background sync publishes a split that omits the focused document",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/tasks/c.md",
+        "visible": [
+          "/repo/tasks/c.md",
+          "/repo/tasks/a.md",
+          "/repo/tasks/b.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "tasks/a.md"
+              ]
+            },
+            {
+              "files": [
+                "tasks/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "foreground": false
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/tasks/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/tasks/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "/repo/tasks/a.md",
+          "/repo/tasks/b.md"
+        ],
+        "column_order": "editor",
+        "decision": "publish"
+      }
+    },
+    {
+      "name": "rootless documents outside the focused root use the workspace base path",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/app",
+        "focused": "/repo/src/app/a.md",
+        "visible": [
+          "/repo/src/app/a.md",
+          "/other/b.md"
+        ]
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "layout": null,
+        "columns": [
+          "/repo/src/app/a.md",
+          "/other/b.md"
+        ],
+        "column_order": "unknown",
+        "decision": "refuse_unknown_layout"
+      }
+    },
+    {
+      "name": "a layout of blank files is no layout",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo",
+        "focused": "/repo/a.md",
+        "visible": [
+          "/repo/a.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                ""
+              ]
+            },
+            {
+              "files": [
+                " "
+              ]
+            }
+          ],
+          "column_order": "editor"
+        }
+      },
+      "nearest_roots": {
+        "/repo/a.md": "/repo"
+      },
+      "expected": {
+        "project_root": "/repo",
+        "layout": null,
+        "columns": [
+          "/repo/a.md"
+        ],
+        "column_order": "unknown",
+        "decision": "refuse_unknown_layout"
+      }
+    },
+    {
+      "name": "an empty observation answers with an empty column",
+      "input": {},
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "",
+        "layout": null,
+        "columns": [
+          ""
+        ],
+        "column_order": "unknown",
+        "decision": "refuse_unknown_layout"
+      }
+    },
+    {
+      "name": "a missing fallback root falls back to the base path",
+      "input": {
+        "base_path": "/repo",
+        "focused": "/repo/a.md",
+        "visible": [
+          "/repo/a.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "a.md"
+              ]
+            },
+            {
+              "files": [
+                "b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        }
+      },
+      "nearest_roots": {},
+      "expected": {
+        "project_root": "/repo",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "/repo/a.md",
+          "/repo/b.md"
+        ],
+        "column_order": "editor",
+        "decision": "publish"
+      }
+    }
+  ]
+}

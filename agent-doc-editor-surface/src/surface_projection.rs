@@ -186,7 +186,7 @@ fn non_blank(value: &Option<String>) -> Option<&str> {
 }
 
 /// Whether `path` is absolute on any platform the IDE runs on.
-fn is_absolute_path(path: &str) -> bool {
+pub(crate) fn is_absolute_path(path: &str) -> bool {
     let bytes = path.as_bytes();
     path.starts_with('/')
         || path.starts_with('\\')

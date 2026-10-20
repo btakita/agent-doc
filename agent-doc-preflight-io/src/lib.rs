@@ -3158,6 +3158,10 @@ pub struct QueueState {
     /// of opening a no-op cycle for in-flight work.
     pub claimed_queue_heads: Vec<agent_doc_queue::no_changes_explanation::ClaimedQueueItemFact>,
     pub synced_queue_ids: Vec<String>,
+    /// `#capturegatedispatched`: `(source_text, id)` receipts of the free-text
+    /// queue heads this maintenance pass promoted into `do [#id]` heads, so a
+    /// caller that observed the pre-promotion line can name the live head.
+    pub free_text_promotions: Vec<(String, String)>,
     pub warnings: Vec<PreflightWarning>,
 }
 
@@ -3579,6 +3583,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             maintenance_mutated: false,
             claimed_queue_heads: vec![],
             synced_queue_ids: vec![],
+            free_text_promotions: vec![],
             warnings: vec![],
         });
     }
@@ -3606,6 +3611,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             maintenance_mutated: false,
             claimed_queue_heads: vec![],
             synced_queue_ids: vec![],
+            free_text_promotions: vec![],
             warnings: vec![],
         });
     }
@@ -3735,6 +3741,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         maintenance_mutated: false,
         claimed_queue_heads,
         synced_queue_ids: vec![],
+        free_text_promotions: vec![],
         warnings: vec![],
     })
 }
@@ -4791,6 +4798,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(file, &current_content)?;
 
     let mut entries = entries;
+    let mut free_text_promotions: Vec<(String, String)> = Vec::new();
     let mut queue_warnings = Vec::new();
     let mut synced_queue_ids = Vec::new();
     let mut freshly_admitted_queue_ids = std::collections::HashSet::new();
@@ -5012,6 +5020,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 "[preflight] queue: WARNING: could not carry claims onto promoted heads: {err:#}"
             );
         }
+        free_text_promotions.extend(promotions);
         current_content = admission.content;
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
@@ -6306,6 +6315,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 maintenance_mutated: false,
                 claimed_queue_heads: vec![],
                 synced_queue_ids,
+                free_text_promotions: free_text_promotions.clone(),
                 warnings: Vec::new(),
             });
         }
@@ -6342,6 +6352,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 maintenance_mutated: false,
                 claimed_queue_heads: vec![],
                 synced_queue_ids,
+                free_text_promotions: free_text_promotions.clone(),
                 warnings: Vec::new(),
             });
         }
@@ -7308,6 +7319,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         maintenance_mutated: mutated,
         claimed_queue_heads,
         synced_queue_ids,
+        free_text_promotions,
         warnings: queue_warnings,
     })
 }

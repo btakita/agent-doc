@@ -161,7 +161,7 @@ pub fn precommit_pending_capture_check_with_force_disk(
                 .join(", ")
         );
     }
-    if state.requires_untargeted_backlog_capture()
+    if crate::untargeted_backlog_capture_unmet(file, &state)
         && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
     {
         log_closeout_guard(
@@ -361,7 +361,7 @@ pub fn prewrite_pending_capture_check(
     }
     if state
         .as_ref()
-        .is_some_and(agent_doc_cycle_state_io::CycleState::requires_untargeted_backlog_capture)
+        .is_some_and(|state| crate::untargeted_backlog_capture_unmet(file, state))
         && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
     {
         log_closeout_guard(
@@ -1319,6 +1319,108 @@ mod precommit_pending_capture_tests {
             .expect("queue follow-up heads are tracked capture");
         super::precommit_pending_capture_check(&doc)
             .expect("queue follow-up heads are tracked capture");
+    }
+
+    /// `#capturegatedispatched`: start a worker on the live queue head `item`.
+    fn start_worker(doc: &std::path::Path, item: &str, owner: &str) {
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim(doc, item, owner, 3600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            doc,
+            item,
+            owner,
+            &format!("worker-{owner}"),
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+    }
+
+    /// `#capturegatedispatched`: preflight recorded two drainable heads behind
+    /// the generic capture requirement, then the coordinator claimed them for
+    /// workers mid-cycle. The pre-write and pre-commit gates stay armed until
+    /// every recorded head is worker-owned, and a claim no worker acknowledged
+    /// is not ownership.
+    #[test]
+    fn worker_claims_on_every_recorded_head_release_the_generic_requirement() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let response = "### Re: dispatch — opus-4-6\n\nStarted workers for both heads.\n";
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            response,
+            false,
+        );
+        let mut content = fs::read_to_string(&doc).unwrap();
+        content.push_str(
+            "\n<!-- agent:queue -->\n- #actionable-review\n- add the leftovers to the backlog\n<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_heads(
+            &doc,
+            &[
+                "#actionable-review".to_string(),
+                "add the leftovers to the backlog".to_string(),
+            ],
+        )
+        .unwrap();
+        let flags = super::PendingWriteFlags {
+            strict_closeout: true,
+            ..Default::default()
+        };
+        let armed = |doc: &std::path::Path| {
+            let err = super::prewrite_pending_capture_check(doc, response, &flags).unwrap_err();
+            assert!(
+                err.to_string().contains("requested backlog capture"),
+                "{err:#}"
+            );
+            let err = super::precommit_pending_capture_check(doc).unwrap_err();
+            assert!(
+                err.to_string().contains("requested backlog capture"),
+                "{err:#}"
+            );
+        };
+
+        armed(&doc);
+        // A dispatch claim with no worker acknowledgement is not ownership.
+        agent_doc_queue_io::queue_claim::claim(&doc, "#actionable-review", "subagent:a", 3600)
+            .unwrap();
+        armed(&doc);
+        // One of the two heads worker-owned: still armed.
+        start_worker(&doc, "#actionable-review", "subagent:a");
+        armed(&doc);
+
+        start_worker(&doc, "add the leftovers to the backlog", "subagent:b");
+        super::prewrite_pending_capture_check(&doc, response, &flags)
+            .expect("every head behind the requirement is worker-owned");
+        super::precommit_pending_capture_check(&doc)
+            .expect("every head behind the requirement is worker-owned");
+    }
+
+    /// `#capturegatedispatched`: a requirement with no recorded heads rests on
+    /// operator text that is not a queue head, so worker claims never release
+    /// it.
+    #[test]
+    fn worker_claims_never_release_a_requirement_with_no_recorded_heads() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let response = "### Re: dispatch — opus-4-6\n\nStarted a worker.\n";
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            response,
+            false,
+        );
+        let mut content = fs::read_to_string(&doc).unwrap();
+        content.push_str("\n<!-- agent:queue -->\n- #actionable-review\n<!-- /agent:queue -->\n");
+        fs::write(&doc, &content).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        start_worker(&doc, "#actionable-review", "subagent:a");
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(
+            err.to_string().contains("requested backlog capture"),
+            "{err:#}"
+        );
     }
 
     /// Queue follow-ups meet only the generic requirement: a response that

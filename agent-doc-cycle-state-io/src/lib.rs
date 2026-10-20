@@ -224,6 +224,15 @@ pub struct CycleState {
     /// silence the uncaptured-recommendation heuristic.
     #[serde(default, skip_serializing_if = "is_false")]
     pub queue_followups_added_this_cycle: bool,
+    /// `#capturegatedispatched`: the drainable queue heads (item text) that
+    /// armed `requires_backlog_capture` at preflight, when nothing else in the
+    /// prompt texts arms it. The requirement is fixed at preflight, but the
+    /// coordinator may claim one of these heads and start a worker for it
+    /// mid-cycle; the closeout gates release the generic requirement once
+    /// every listed head is worker-owned. Empty means the requirement rests on
+    /// text that is not a drainable queue head and is never released that way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backlog_capture_heads: Vec<String>,
     /// `#opsproof-samecycle-add`: ids of tracked-work items added THIS cycle via
     /// `--pending-add` / `--pending-add-gated` / `--review-add`. Opportunistic
     /// ops-proof auto-completion must never reap an id that first appeared this
@@ -1649,6 +1658,7 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         queue_followups_added_this_cycle: false,
+        backlog_capture_heads: Vec::new(),
         pending_added_ids: Vec::new(),
         requested_done_ids: Vec::new(),
         requested_added_ids: Vec::new(),
@@ -2574,6 +2584,21 @@ pub fn record_backlog_capture_requirement(
     };
     if state.requires_backlog_capture != required {
         state.requires_backlog_capture = required;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#capturegatedispatched`: record the drainable queue heads the cycle's
+/// backlog-capture requirement rests on (see
+/// [`CycleState::backlog_capture_heads`]).
+pub fn record_backlog_capture_heads(file: &Path, heads: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if state.backlog_capture_heads != heads {
+        state.backlog_capture_heads = heads.to_vec();
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3995,6 +4020,7 @@ fn synthetic_state_with_id(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         queue_followups_added_this_cycle: false,
+        backlog_capture_heads: Vec::new(),
         pending_added_ids: Vec::new(),
         requested_done_ids: Vec::new(),
         requested_added_ids: Vec::new(),

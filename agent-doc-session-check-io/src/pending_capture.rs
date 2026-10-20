@@ -172,3 +172,52 @@ pub fn unresolved_promised_backlog_item_ids(
     .map(|id| format!("#{}", id))
     .collect()
 }
+
+/// `#capturegatedispatched`: whether the cycle's generic backlog-capture
+/// requirement ([`agent_doc_cycle_state_io::CycleState::requires_untargeted_backlog_capture`])
+/// still binds the closeout.
+///
+/// Preflight fixes the requirement from the heads that armed it. When the
+/// coordinator then claims those heads and starts workers for them mid-cycle,
+/// their capture belongs to the workers' cycles, so the requirement is released
+/// once every head preflight recorded behind it
+/// ([`agent_doc_cycle_state_io::CycleState::backlog_capture_heads`]) is
+/// worker-owned in the current document. A requirement with no recorded heads
+/// rests on operator text that is not a queue head and is never released this
+/// way. Explicit backlog targets and the uncaptured-recommendation heuristic
+/// are checked separately and are unaffected.
+pub fn untargeted_backlog_capture_unmet(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+) -> bool {
+    state.requires_untargeted_backlog_capture() && !backlog_capture_heads_worker_owned(file, state)
+}
+
+fn backlog_capture_heads_worker_owned(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+) -> bool {
+    if state.backlog_capture_heads.is_empty() {
+        return false;
+    }
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    let owned = agent_doc_queue_io::queue_claim::worker_owned_items_for_content(file, &content);
+    let unowned = state
+        .backlog_capture_heads
+        .iter()
+        .filter(|head| !owned.claims(head))
+        .count();
+    if unowned == 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "closeout_backlog_capture_released cycle={} heads={} reason=heads_worker_owned (#capturegatedispatched)",
+                state.cycle_id,
+                state.backlog_capture_heads.len()
+            ),
+        );
+    }
+    unowned == 0
+}

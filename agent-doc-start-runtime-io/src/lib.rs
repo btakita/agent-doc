@@ -3314,6 +3314,7 @@ mod th {
             expect_done_or_gate_ids: Vec::new(),
             pending_gated_ids: Vec::new(),
             pending_added_this_cycle: false,
+            queue_followups_added_this_cycle: false,
             pending_added_ids: Vec::new(),
             requested_done_ids: Vec::new(),
             requested_added_ids: Vec::new(),

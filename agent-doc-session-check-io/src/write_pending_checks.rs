@@ -161,8 +161,7 @@ pub fn precommit_pending_capture_check_with_force_disk(
                 .join(", ")
         );
     }
-    if state.requires_backlog_capture
-        && state.required_backlog_targets.is_empty()
+    if state.requires_untargeted_backlog_capture()
         && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
     {
         log_closeout_guard(
@@ -360,9 +359,10 @@ pub fn prewrite_pending_capture_check(
                 .unwrap_or_default()
         );
     }
-    if state.as_ref().is_some_and(|state| {
-        state.requires_backlog_capture && state.required_backlog_targets.is_empty()
-    }) && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
+    if state
+        .as_ref()
+        .is_some_and(agent_doc_cycle_state_io::CycleState::requires_untargeted_backlog_capture)
+        && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
     {
         log_closeout_guard(
             file,
@@ -1285,6 +1285,61 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_capture_check(&doc)
             .expect("explicit no-follow-up proof should satisfy backlog-required closeout");
+    }
+
+    /// `#capturegatedispatched`: a coordinator cycle that put its actionable
+    /// follow-ups into the queue with `agent-doc queue follow-up` (not
+    /// `--pending-add`) recorded tracked work, so the generic capture
+    /// requirement is met at both the pre-write and the pre-commit gate.
+    #[test]
+    fn queue_followups_satisfy_the_generic_backlog_capture_requirement() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let response = "### Re: dispatch — opus-4-6\n\nGH 326 phase 5 is running.\n";
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            response,
+            false,
+        );
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        let flags = super::PendingWriteFlags {
+            strict_closeout: true,
+            ..Default::default()
+        };
+        // Control: without the follow-ups the same cycle is refused.
+        let err = super::prewrite_pending_capture_check(&doc, response, &flags).unwrap_err();
+        assert!(
+            err.to_string().contains("requested backlog capture"),
+            "{err:#}"
+        );
+        super::precommit_pending_capture_check(&doc).unwrap_err();
+
+        agent_doc_cycle_state_io::mark_queue_followups_added(&doc).unwrap();
+        super::prewrite_pending_capture_check(&doc, response, &flags)
+            .expect("queue follow-up heads are tracked capture");
+        super::precommit_pending_capture_check(&doc)
+            .expect("queue follow-up heads are tracked capture");
+    }
+
+    /// Queue follow-ups meet only the generic requirement: a response that
+    /// lists untracked recommendations is still refused in strict mode.
+    #[test]
+    fn queue_followups_do_not_silence_uncaptured_recommendations() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n",
+            "### Re: recommendations — opus-4-6\n\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n",
+            false,
+        );
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::mark_queue_followups_added(&doc).unwrap();
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(
+            err.to_string().contains("recommendation-like items"),
+            "{err:#}"
+        );
     }
 
     #[test]

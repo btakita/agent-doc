@@ -216,6 +216,14 @@ pub struct CycleState {
     /// gated). Satisfies the blocked-closeout follow-up requirement.
     #[serde(default)]
     pub pending_added_this_cycle: bool,
+    /// `#capturegatedispatched`: true when this cycle inserted worker or
+    /// coordinator follow-up heads into a queue with `agent-doc queue
+    /// follow-up`. A queue head is tracked work, so it satisfies a prompt's
+    /// generic backlog-capture requirement exactly like a `--pending-add`;
+    /// it does not satisfy an explicit backlog target, and it does not
+    /// silence the uncaptured-recommendation heuristic.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub queue_followups_added_this_cycle: bool,
     /// `#opsproof-samecycle-add`: ids of tracked-work items added THIS cycle via
     /// `--pending-add` / `--pending-add-gated` / `--review-add`. Opportunistic
     /// ops-proof auto-completion must never reap an id that first appeared this
@@ -449,6 +457,17 @@ pub const STALLED_CYCLE_RESOLVE_SECS: u64 = 120;
 pub const STALLED_CYCLE_RESOLVE_CONFIRM_TICKS: u32 = 20;
 
 impl CycleState {
+    /// Whether the prompt's generic backlog-capture requirement (one with no
+    /// explicit backlog target) is still unmet by anything other than a
+    /// `--pending-add*` mutation or an explicit no-follow-up statement, which
+    /// the closeout gates check separately. Queue follow-up heads inserted
+    /// this cycle are tracked work and meet it (`#capturegatedispatched`).
+    pub fn requires_untargeted_backlog_capture(&self) -> bool {
+        self.requires_backlog_capture
+            && self.required_backlog_targets.is_empty()
+            && !self.queue_followups_added_this_cycle
+    }
+
     pub fn is_open(&self) -> bool {
         !matches!(self.phase, CyclePhase::Committed | CyclePhase::Abandoned)
     }
@@ -1629,6 +1648,7 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
         expect_done_or_gate_ids: Vec::new(),
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
+        queue_followups_added_this_cycle: false,
         pending_added_ids: Vec::new(),
         requested_done_ids: Vec::new(),
         requested_added_ids: Vec::new(),
@@ -2513,6 +2533,20 @@ pub fn mark_pending_added(file: &Path) -> Result<Option<CycleState>> {
     };
     if !state.pending_added_this_cycle {
         state.pending_added_this_cycle = true;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#capturegatedispatched`: mark that this cycle captured follow-up work as
+/// queue heads (`agent-doc queue follow-up`).
+pub fn mark_queue_followups_added(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.queue_followups_added_this_cycle {
+        state.queue_followups_added_this_cycle = true;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3960,6 +3994,7 @@ fn synthetic_state_with_id(
         expect_done_or_gate_ids: Vec::new(),
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
+        queue_followups_added_this_cycle: false,
         pending_added_ids: Vec::new(),
         requested_done_ids: Vec::new(),
         requested_added_ids: Vec::new(),

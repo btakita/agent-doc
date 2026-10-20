@@ -425,6 +425,43 @@ No new actionable follow-up items this cycle: every follow-up is already in the 
 Both copies of the release item are done: v0.35.530 is published on GitHub and PyPI and installed locally, as in the previous entry. My last closeout didn't strike them because their document text carries a `⟦effect:N⟧` disambiguation marker and my echo left it out. These echoes include it.
 
 No new actionable follow-up items this cycle.
+
+### Re: v0.35.531 batch is on main and installed locally; 9 items closed
+
+> **Queue prompt:** GH 326 phase 3 (after phase 2): move manual Sync Tmux Layout --col snapshot column decisions (exactVisibleSyncDecision, undetectedLayoutColumns, normalizeEditorLayout, absolutizeEditorLayout, chooseSyncProjectRoot) behind a derivation and take that layout read off the EDT
+> **Queue prompt:** GH 326 phase 3b (after phase 4): move Run Agent Doc --col fallback (TerminalUtil.editorSnapshotRouteLayout) and the TmuxPaneFocusSync candidate-root probe onto the sync_layout derivation (add an optional root-already-chosen input)
+> **Queue prompt:** GH 326 phase 4 (after phase 3): move RemoteClientSurfacePayload.build and the uniqueRemoteSplitSelection Kotlin remote fallback behind derivations, then retire the Kotlin fallback
+> **Queue prompt:** GH 326 phase 5 (after phase 4): audit pure decisions in CrdtReplicaManager, PatchWatcher and CpRouteClient (CrdtReplicaManager changed in 14 releases this month) and move them behind derivations
+> **Queue prompt:** GH 326 phase 5b (after 3b+5 integrate): move attach-failure diagnosis (attachFailureRemedy, attachFailureStatusToken, retainedProjectionHoldNeedsOperatorSurfaceUtil, registerFailureNeedsLivenessRepublishUtil, retainedProjectionHoldMessageUtil) behind a derivation, first moving the EDT recordRegisterFailure callers (register retry timer, native-reload target collection) and Compact Exchange remedy formatting onto a worker
+> **Queue prompt:** a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md pane %12, epoch 139, queued 16:16:27Z on 0.35.528) never fired after that turn closed out at 16:24:06Z; the operator cleared by hand at 16:29:56Z
+> **Queue prompt:** [from:coordinator] closeout pre_write_guard blocked pending_capture_required on a queue-dispatch cycle (cycle-1792527508436, 20:19:45Z, 0.35.529): preflight offered GH 326 phase 5 in queue_subagent_dispatch and the coordinator claimed and started it; follow-ups were added via queue follow-up, not backlog flags, so the guard saw no backlog mutation (regression of the capturegatedispatched class)
+> **Queue prompt:** backlog-capture signal list matches bare substrings (tasks, todo), so any tasks/... path in prompt text arms the capture gate; match words, not substrings
+> **Queue prompt:** capture gate (after the word-match fix): a head the coordinator claims mid-cycle that preflight did not list for dispatch still arms requires_backlog_capture because the requirement is fixed at preflight; record the heads behind the requirement and release it when all are worker-claimed at closeout
+
+These nine items are on main (`ecb87c02ac`) and installed with `make install`. `make check` passed: 11,360 tests run, 11,360 passed, 177 skipped.
+
+**What's included:**
+- **GH 326 phases 3, 3b, 4, 5 and 5b** move more JetBrains logic into the hot-reloaded native library:
+  - `sync_layout`, which now covers manual `--col`, Run Agent Doc and the tmux focus root;
+  - `remote_client_surface` and `remote_layout`, which retire the Kotlin remote split fallback;
+  - `registration_projection`, the replica registration direction;
+  - `attach_failure_diagnosis`.
+
+  The local editor packages are 0.2.750 (classic), 0.2.751 (IDE 262) and 0.2.752 (IDE 263). **Restart the IDE to load them**: a plugin update needs a restart, and later changes to these rules won't.
+- **Codex held-back clear:** the supervisor's screen copy now keeps faint and italic styling, so Codex's faint placeholder no longer reads as typed text. A queued clear reaches Codex as a supervised fresh restart instead of a typed `/clear`.
+- **Capture gate:**
+  - subagent completion records no longer arm it;
+  - `queue follow-up` counts as capture;
+  - signals match whole words, so paths and ids don't count;
+  - a requirement whose queue heads all get claimed by workers mid-cycle is released.
+
+  Real untracked recommendations and typed requests still block.
+
+**Not tagged.** This is on main and installed, but not released to GitHub or PyPI. Queue "release + publish" when you want v0.35.531.
+
+**Running (🚧):** GH 326 phase 5c folds the text normalization into the native containment and rebase calls. It touches the CRDT path, so it goes into the next batch.
+
+No new actionable follow-up items this cycle.
 <!-- agent:boundary:811a7087 -->
 <!-- /agent:exchange -->
 
@@ -441,12 +478,12 @@ No new actionable follow-up items this cycle.
 - ~~finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released depends on wall-clock: its unacknowledged setup claim trips DISPATCH_EVIDENCE_GRACE_SECS (10s) under check-fast load and the second finalize fails the no-worker-acknowledgement pre-write gate; make the grace deterministic (injectable clock) instead of relying on run speed~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/326~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~GH 326 phase 2: move EditorTabSyncListener.captureSurface surface projection behind agent_doc_editor_derive_json as a surface_projection derivation on the delivery worker (visible-document union incl. GH 320 Remote Dev union, readiness, active-document resolution, open-tab proximity, stale-selection settling, payload incl. column_order)~~ — auto-struck: answered this cycle (#ftstrike)
-- 📥 GH 326 phase 3 (after phase 2): move manual Sync Tmux Layout --col snapshot column decisions (exactVisibleSyncDecision, undetectedLayoutColumns, normalizeEditorLayout, absolutizeEditorLayout, chooseSyncProjectRoot) behind a derivation and take that layout read off the EDT
-- 📥 GH 326 phase 3b (after phase 4): move Run Agent Doc --col fallback (TerminalUtil.editorSnapshotRouteLayout) and the TmuxPaneFocusSync candidate-root probe onto the sync_layout derivation (add an optional root-already-chosen input)
-- 📥 GH 326 phase 4 (after phase 3): move RemoteClientSurfacePayload.build and the uniqueRemoteSplitSelection Kotlin remote fallback behind derivations, then retire the Kotlin fallback
-- 📥 GH 326 phase 5 (after phase 4): audit pure decisions in CrdtReplicaManager, PatchWatcher and CpRouteClient (CrdtReplicaManager changed in 14 releases this month) and move them behind derivations
-- 🚧 GH 326 phase 5b (after 3b+5 integrate): move attach-failure diagnosis (attachFailureRemedy, attachFailureStatusToken, retainedProjectionHoldNeedsOperatorSurfaceUtil, registerFailureNeedsLivenessRepublishUtil, retainedProjectionHoldMessageUtil) behind a derivation, first moving the EDT recordRegisterFailure callers (register retry timer, native-reload target collection) and Compact Exchange remedy formatting onto a worker
-- GH 326 phase 5c (after 5b): fold withoutBinaryOwnedMarkersUtil and the single-splice shaping into the native containment/rebase calls (NativePatching.capturedSplicesContained / rebaseCapturedSplices) so their text normalization stops needing a plugin release
+- ~~GH 326 phase 3 (after phase 2): move manual Sync Tmux Layout --col snapshot column decisions (exactVisibleSyncDecision, undetectedLayoutColumns, normalizeEditorLayout, absolutizeEditorLayout, chooseSyncProjectRoot) behind a derivation and take that layout read off the EDT~~
+- ~~GH 326 phase 3b (after phase 4): move Run Agent Doc --col fallback (TerminalUtil.editorSnapshotRouteLayout) and the TmuxPaneFocusSync candidate-root probe onto the sync_layout derivation (add an optional root-already-chosen input)~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~GH 326 phase 4 (after phase 3): move RemoteClientSurfacePayload.build and the uniqueRemoteSplitSelection Kotlin remote fallback behind derivations, then retire the Kotlin fallback~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~GH 326 phase 5 (after phase 4): audit pure decisions in CrdtReplicaManager, PatchWatcher and CpRouteClient (CrdtReplicaManager changed in 14 releases this month) and move them behind derivations~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~GH 326 phase 5b (after 3b+5 integrate): move attach-failure diagnosis (attachFailureRemedy, attachFailureStatusToken, retainedProjectionHoldNeedsOperatorSurfaceUtil, registerFailureNeedsLivenessRepublishUtil, retainedProjectionHoldMessageUtil) behind a derivation, first moving the EDT recordRegisterFailure callers (register retry timer, native-reload target collection) and Compact Exchange remedy formatting onto a worker~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 GH 326 phase 5c (after 5b): fold withoutBinaryOwnedMarkersUtil and the single-splice shaping into the native containment/rebase calls (NativePatching.capturedSplicesContained / rebaseCapturedSplices) so their text normalization stops needing a plugin release
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/327~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~preflight residue strike must not strike a loop head from an echo written before the current pass opened or about another queue head (GH 327 pass 4 wasted a pass)~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~continuation answered-head skip (syntheticstrike) still uses only the head-entry rule; apply the GH 327 pass 4 loop-pass echo scope to loop queue heads so it agrees with the preflight residue strike~~ — auto-struck: answered this cycle (#ftstrike)
@@ -458,11 +495,11 @@ No new actionable follow-up items this cycle.
 - ~~[from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~closeout commit ordering: the controller committed locally before the cycle held-back --status and free-text strikes landed through the live editor; wait for the cycle own late projections before committing instead of relying on the composed-drift recovery~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/317~~ — auto-struck: answered this cycle (#ftstrike)
-- 📥 a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md pane %12, epoch 139, queued 16:16:27Z on 0.35.528) never fired after that turn closed out at 16:24:06Z; the operator cleared by hand at 16:29:56Z
+- ~~a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md pane %12, epoch 139, queued 16:16:27Z on 0.35.528) never fired after that turn closed out at 16:24:06Z; the operator cleared by hand at 16:29:56Z~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~[from:coordinator] binary_owned_resume_commits_one_durable_capture_exactly_once fails under make check load: resume_captured_finalize returns RetryableEffect (no response from Lazily actor within 250ms); make the actor readiness or retry deterministic instead of depending on a 250ms wall-clock window~~ — auto-struck: answered this cycle (#ftstrike)
-- 📥 [from:coordinator] closeout pre_write_guard blocked pending_capture_required on a queue-dispatch cycle (cycle-1792527508436, 20:19:45Z, 0.35.529): preflight offered GH 326 phase 5 in queue_subagent_dispatch and the coordinator claimed and started it; follow-ups were added via queue follow-up, not backlog flags, so the guard saw no backlog mutation (regression of the capturegatedispatched class)
-- 📥 backlog-capture signal list matches bare substrings (tasks, todo), so any tasks/... path in prompt text arms the capture gate; match words, not substrings
-- 🚧 capture gate (after the word-match fix): a head the coordinator claims mid-cycle that preflight did not list for dispatch still arms requires_backlog_capture because the requirement is fixed at preflight; record the heads behind the requirement and release it when all are worker-claimed at closeout
+- ~~[from:coordinator] closeout pre_write_guard blocked pending_capture_required on a queue-dispatch cycle (cycle-1792527508436, 20:19:45Z, 0.35.529): preflight offered GH 326 phase 5 in queue_subagent_dispatch and the coordinator claimed and started it; follow-ups were added via queue follow-up, not backlog flags, so the guard saw no backlog mutation (regression of the capturegatedispatched class)~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~backlog-capture signal list matches bare substrings (tasks, todo), so any tasks/... path in prompt text arms the capture gate; match words, not substrings~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~capture gate (after the word-match fix): a head the coordinator claims mid-cycle that preflight did not list for dispatch still arms requires_backlog_capture because the requirement is fixed at preflight; record the heads behind the requirement and release it when all are worker-claimed at closeout~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues

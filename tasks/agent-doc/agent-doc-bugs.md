@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
 <!-- status:sync -->
@@ -514,6 +514,36 @@ The Regression Rule gains a third question that checks for this. I also added th
 **`[#yvt3]` and `[#8ph6]`:** checked off as done, as you reported.
 
 **Still open:** #320 and the pane count (both running), and "release + publish including PR #317-#320." (v0.35.527 is out; this stays open until v0.35.528 publishes). The exchange is 421 lines, so it is due for compaction once the queue drains.
+
+### Re: GH #320 subagent operator request: scope decision — opus-5.5 · 2026-10-20T02:21-04:00
+
+The #320 subagent stopped with this blocking request (verbatim):
+
+> [#subagent-operator-request] subagent operator request
+> kind: question
+> blocking: true
+> request: For GH #320, which scope should this cycle ship, given that a Remote Dev backend cannot see the client's split geometry, and where it can be read (the JetBrains Client frontend module), it is not forwarded to the controller?
+> context: Evidence from the IntelliJ `IU-263.6800.24` distribution in the Gradle cache, disassembled with JDK 25 `javap`. Files are in `/home/brian/work/btakita/agent-doc-wt/gh320/.gh320-scratch/`.
+>   1. The backend has no split structure for a remote client. `com.jetbrains.rdserver.fileEditors.GuestFileEditorManager`, which is the backend's `ClientFileEditorManager` for a Remote Dev client, holds only a flat `CopyOnWriteArrayList<EditorComposite> composites` and one `MutableStateFlow<EditorComposite> selectedComposite`. It has no EditorWindow, splitter, or window id.
+>   2. The protocol does not carry geometry either. The RD model `com.jetbrains.rd.ide.model.FileEditorCompositeModel` carries `fileId`, `editors`, `openWithFocus`, `visible: Boolean`, `pinned`, and `tabPresentation`. `RdFileEditorCompositeId` is `(fileId, clientId, index)`. No window or split identity or geometry crosses the wire.
+>   3. `RdServerEditorTracker`, the source of our `remote_client_visible_editors` collector, is a flat `List<Editor>` of active editors per ClientId. `visible` is membership in open order, not geometry.
+>   4. The geometry exists only in the JetBrains Client process. In our 262/263 modular package, `FrontendSurfaceCollector` (frontend module) builds `EditorWindowSnapshot(ordinal, selectedPath, openPaths, visiblePaths)`. The ordinal is a list index, not bounds. The backend `ControllerSurfaceSnapshotWire.snapshotRequest` then flattens every window into a single `visible` list for `editor_view_snapshot_observe`, which serves detached-surface ownership and does not feed the pane-layout Source. The classic 242–261 plugin has no frontend module at all.
+>   5. A hazard in the controller that Finding 1 would expose: `automatic_editor_surface_sync_invocation` (`agent-doc-controller-io/src/project_controller/rpc.rs`, around line 4372) publishes every automatic surface layout with `column_order: Default::default()`, which is `Editor`. So once the Remote Dev capture stops deferring, the fold's memory-guessed order would reach tmux claiming to be editor geometry. The surface payload (`EditorSurface`) has no order or geometry field to say otherwise.
+>   Current state: nothing is committed. Issue #320 has 0 comments as of this check. I have not yet seen `specs/13-state-backbone.md` (54570d2665, local only); for any spec text I would cite it by section name.
+> choices:
+> - A, ship now with honest labels and a written limit: (1) Fix Finding 1. On a Remote Dev backend the capture publishes the remote-client visible/selected state on the existing Lazily surface Source instead of deferring on the backend's empty `selectedFiles`. (2) Add a geometry/order label to the surface state: an `EditorSurface.column_order`/`geometry` field, carried through `SurfaceIntent::Sync` into the controller invocation. Local multi-window bounds publish `editor`. Remote Dev publishes `unknown` (or `retained` when the fold memory is anchored), so the controller derives order from its retained layout and never claims an order it cannot know. Older plugins default to `editor`. (3) Spec: Remote Dev pane order cannot follow a split move. The manual remedy is `agent-doc sync --col <left> --col <right>`, an `editor`-order publication that then sticks, because unknown and retained surface publications slot-fold against it. (4) Regression tests: a local `[A|B]` state followed by `[B|A]` re-derives tmux order from that state alone; the Remote Dev case stays at its labelled `unknown` order, and the manual `--col` override persists. No event heuristic. The state-propagation design for the Remote Dev case below goes to a follow-up item. Scope: this cycle.
+> - B, A plus real Remote Dev geometry in 262/263: extend the 262/263 frontend collector to capture per-window bounds against the client's splitters (the same column grouping `LayoutDetector.buildColumnsFromSnapshots` uses). Bump the shared `SurfaceSnapshotContract` schema and validator. Forward the ordered columns from the backend into the pane-layout surface Source as `editor` order. The Remote Dev fold memory is used only when no frontend snapshot is present (classic, or a one-sided install), labelled `unknown`. This needs the plugin installed on both client and backend, bumps the 262 and 263 plugin versions, and needs a JetBrains Client to verify live. Scope: more than one cycle; it delays the release.
+> - C, Finding 1 only: ship the Remote Dev capture fix without the order label. Not recommended, because it would let the fold's guessed order reach tmux labelled as editor geometry (hazard 5).
+
+**Presented from the main session:** "Which #320 scope should ship?" with the options A: ship now, label unknown (recommended); B: A + real Remote Dev geometry (more than one cycle, delays the release); C: capture fix only (not recommended).
+
+**Operator answer:** **A: ship now, label unknown.** I sent the answer back to the same worker, which is now implementing:
+- The Remote Dev visible and selected state is published on the Lazily surface Source, instead of being dropped when the backend's `selectedFiles` is empty.
+- The surface state carries an order label: `editor` for local split bounds, `unknown` or `retained` for Remote Dev. The controller never presents remembered order as editor geometry.
+- The spec states that Remote Dev pane order cannot follow a split move, and names the manual remedy (`agent-doc sync --col <left> --col <right>`).
+- Regression tests check the state-only derivation.
+
+Real Remote Dev geometry (option B) becomes a follow-up queue item. #320 still ships in v0.35.528 once its `make check` passes.
 <!-- agent:boundary:7018a289 -->
 <!-- /agent:exchange -->
 
@@ -523,14 +553,14 @@ The Regression Rule gains a third question that checks for this. I also added th
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/317~~
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/318
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/319
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/318~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/319~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 There was 1 tmux pane with 2 editor panes.
 - 📥 route: a background orphan-drain dispatch types into a pane right after reading its busy-turn cue (route_dispatch_only_busy_active_turn_skip_wait then tmux_text_enter; from GH 319)
 - 📥 investigate: preset head upgrade was dispatched 2 s after its claim landed (GH 319 "also seen"; likely claim-visibility timing in the controller state.db read)
 - ~~There is — auto-struck: completed by #adoc-baseline-drift-after-user-commit (#qftbklgstrike)~~
-- [#yvt3]: done
-- [#8ph6]: done
+- ~~[#yvt3]: done~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~[#8ph6]: done~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/320
 - release + publish including PR #317-#320.
 <!-- /agent:queue -->
@@ -547,9 +577,9 @@ The Regression Rule gains a third question that checks for this. I also added th
 - [x] [#gq2c] After the haiven-dev supervisor recycles onto the new build, re-run Agent Doc on tasks/sdk.md: bracketed todo ids are admitted again (it currently uses bare ids as a workaround).
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#n7kq] In the sdk.md session: restore the 7 todo ids the 23:30 --todo-edit dropped (#tdclireview, #tdcontracts162, #tdpromotioncallers, #tdinspectclones, #tdfpe202, #tdadr0033, #tdadr0030) with --todo-edit "<exact text>=#tdX <same text>", or accept the ids the preflight backfill assigns
-- [ ] [#8ph6] In the docs.md session: check off the Google Drive re-auth todo (--todo-done httpsdocsgoogle once backfilled, or --todo-done with its exact text)
+- [x] [#8ph6] In the docs.md session: check off the Google Drive re-auth todo (--todo-done httpsdocsgoogle once backfilled, or --todo-done with its exact text)
 - [ ] [#t1v0] In the sdk.md pane, press Clear Session Context again: the 06:03 presses were held behind the open cycle and then dropped by the install restart. Check first that sdk.md's queue has not opened its tdue4cpuset cycle.
-- [ ] [#yvt3] Manually sync tmux now that the one-pane diagnostics are complete
+- [x] [#yvt3] Manually sync tmux now that the one-pane diagnostics are complete
 <!-- /agent:todo -->
 
 ## Backlog

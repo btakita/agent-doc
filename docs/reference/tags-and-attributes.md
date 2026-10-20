@@ -87,20 +87,37 @@ with `timestamp = true` under `[components.NAME]` in
 keep a fact or summary current:
 
 ```markdown
-<!-- agent:status sync="keep the last published release and publication time current" -->
+<!-- agent:status sync="keep the last published release and publication time current" interval=5m -->
 Current release: v0.35.523, published 2026-10-19 07:59:51 UTC.
 <!-- /agent:status -->
 ```
 
 `sync` is evaluated at preflight and added to the active turn's prompt. On
 Claude Code and Codex, the owner-only `PostToolUse` hook also re-surfaces it no
-sooner than one minute after preflight and at most once per following one-minute
-interval. This is a throttled prompt checkpoint, not a timer, background job,
-queue item, direct document write, or promise that external facts were verified.
+sooner than the configured `interval` after preflight and at most once per
+following interval. This is a throttled prompt checkpoint, not a timer,
+background job, queue item, direct document write, or promise that external
+facts were verified.
+It cannot interrupt one continuously running tool call; once overdue, the next
+completed owner tool call surfaces the reminder immediately.
 The reminder is additive to normal mid-turn steering, and concurrent hooks
-atomically claim a generation-keyed next-due timestamp. The
-instruction should explicitly request verification when it depends on an
-external source.
+publish tool-boundary observations to the controller-owned Lazily graph. Its
+cycle-and-cadence-keyed Computed derives the due edge, and the controller
+atomically records the receipt that consumes that edge. SQLite is not a live
+timing or arbitration authority. The instruction should explicitly request
+verification when it depends on an external source.
+
+Periodic checkpoints default to off. With `sync` but no `interval`, the
+instruction is still included at preflight, but the `PostToolUse` hook publishes
+an explicit disarm fact and injects no repeated checkpoint. A valued `interval`
+opts in. It accepts a unitless number of seconds or a compound duration using
+`s`, `m`, `h`, and `d`, such as `5m`, `1h30m`, or `1d`. It is valid on
+`agent:status` only when `sync` is present. Bare, blank, duplicate, malformed,
+overflowing, and sub-minute values fail closed. The one-minute floor prevents a
+configuration intended to save tokens from instead amplifying prompt traffic.
+(`agent:queue interval=...` retains its independent schedule semantics.) Editing
+the interval during an open cycle recalculates the generation-keyed due edge
+from that cycle's start.
 
 During an open turn, the reminder names the safe focused command explicitly:
 `agent-doc status set <FILE> --text "<current result>"`. It updates only status,
@@ -230,7 +247,7 @@ component bodies. Those are item syntax, not opening-marker attributes.
   with a component-specific warning. Strict lint mode may elevate warnings.
 - Malformed attribute syntax and empty required values block a write. Bare
   flags are valid only where this reference says they are.
-- Invalid queue graph identities/dependencies and invalid status `sync-mode`
+- Invalid queue graph identities/dependencies and invalid status `sync-mode` or `interval`
   values fail closed. An invalid schedule holds the affected queue; sibling
   queues remain independent.
 - An unknown component name is different from an unknown attribute: a valid

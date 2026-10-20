@@ -27,7 +27,7 @@ queue: go
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
 <!-- status:sync -->
-Latest published release: [v0.35.526](https://github.com/btakita/agent-doc/releases/tag/v0.35.526), published on GitHub at 2026-10-20 04:16:57 UTC (15 assets); PyPI 0.35.526 followed at 2026-10-20 04:17:50 UTC. JetBrains packages are unchanged at 0.2.720 (classic), 0.2.721 (IDE 262), and 0.2.722 (IDE 263), because the plugin sources were byte-identical; this release re-attached them at 2026-10-20 04:16:55–56 UTC. Post-release on main: 4dd943bcf7 (the binary records blocking subagent operator requests in agent:todo) is installed locally; CI for it is still in progress. Two review items remain gated: jb262dynlauncherrecommen needs an operator decision, and pypiquotarecheck needs an external PyPI reply.
+Latest published release: [v0.35.527](https://github.com/btakita/agent-doc/releases/tag/v0.35.527) (GH #317, #318, #319 + blocking-packet todo), published on GitHub at 2026-10-20 06:26:45 UTC (15 assets); PyPI 0.35.527 followed at 2026-10-20 06:27:34 UTC; installed locally (install-full). JetBrains packages unchanged at 0.2.720 (classic), 0.2.721 (IDE 262), 0.2.722 (IDE 263): no plugin source change. Next: v0.35.528 (GH #320 option A, background-drain busy-turn defer, orphan-drain claim re-read, state-propagation spec) waits on the #320 make check.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -544,7 +544,33 @@ The #320 subagent stopped with this blocking request (verbatim):
 - Regression tests check the state-only derivation.
 
 Real Remote Dev geometry (option B) becomes a follow-up queue item. #320 still ships in v0.35.528 once its `make check` passes.
-<!-- agent:boundary:7018a289 -->
+
+### Re: Subagent completed: `subagent:panecount` returned work for queue item “There was 1 tmux pane with 2 editor panes.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=18f6f30bbbf13d34647b36e9268bb6cd21d880d01789f022ba14b2ee9a978446 -->
+
+### Re: Subagent completed: `subagent:gh320` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/320” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=f21142e5300a4705a45ebe89f3eb72133ef5a10a9bb6810d52d3d52754cb1755 -->
+
+### Re: Subagent completed: `subagent:echosteer` returned work for queue item “steering: the agent's own committed `> **Queue prompt:** <line>` echo blockquotes in agent:exchange were surfaced to the same turn as 5 NEW operator exchange prompts (source=exchange change=added dispatch=subagent) right after closeout on 0.35.527; agent-authored response cells must never be read back as operator steering” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=fbaeff51de1b9225a5e53fae66314a0daa7a4531dd36f23b91dc1d8af87869eb -->
+> **Chat prompt (#chatprompt):** This is an old version
+
+> **Chat prompt (#chatprompt):** See agent:status
+
+### Re: stale release status — opus-5.5 · 2026-10-20T04:15-04:00
+
+The `agent:status` release block was stale. It still named v0.35.527 as the latest release, with JetBrains packages 0.2.720/0.2.721/0.2.722, and said v0.35.528 was waiting on the GH #320 `make check`.
+
+**Updated to the verified current state:**
+- **Latest release:** v0.35.528, published on GitHub at 2026-10-20 07:37:15 UTC with 15 assets. PyPI 0.35.528 followed at 07:38:01 UTC. `agent-doc --version` here reports 0.35.528.
+- **JetBrains packages in v0.35.528:** classic 0.2.723, IDE 262 0.2.725, IDE 263 0.2.724, published with the release. Plugin source did change this time, so the old "no plugin source change" line no longer applies.
+- **Installed plugins:** IntelliJ IDEA 2026.1 has classic 0.2.723 and Rider 2026.2 has IDE-262 0.2.725. Both are current; restart either IDE that is still running an older plugin.
+
+I changed only the `status:sync` release block and left the two handoff/review lines as they were. The queue is being worked by another live coordinator (`subagent:gh320`, `subagent:panecount` and others), so I didn't touch it. The `release + publish including PR #317-#320` head looks satisfied by v0.35.527 plus v0.35.528, but its coordinator should close it.
+<!-- agent:boundary:268e5d65 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -552,17 +578,13 @@ Real Remote Dev geometry (option B) becomes a follow-up queue item. #320 still s
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/317~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/318~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/319~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 There was 1 tmux pane with 2 editor panes.
+- 📥 There was 1 tmux pane with 2 editor panes.
 - 📥 route: a background orphan-drain dispatch types into a pane right after reading its busy-turn cue (route_dispatch_only_busy_active_turn_skip_wait then tmux_text_enter; from GH 319)
 - 📥 investigate: preset head upgrade was dispatched 2 s after its claim landed (GH 319 "also seen"; likely claim-visibility timing in the controller state.db read)
-- ~~There is — auto-struck: completed by #adoc-baseline-drift-after-user-commit (#qftbklgstrike)~~
-- ~~[#yvt3]: done~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~[#8ph6]: done~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/320
-- 🚧 steering: the agent's own committed `> **Queue prompt:** <line>` echo blockquotes in agent:exchange were surfaced to the same turn as 5 NEW operator exchange prompts (source=exchange change=added dispatch=subagent) right after closeout on 0.35.527; agent-authored response cells must never be read back as operator steering
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/320
+- 🚧 GH 320 follow-up (option B): real Remote Dev split geometry. The 262/263 frontend module publishes the client measured editor-window columns (bump the shared surface snapshot contract) and the backend forwards them into the controller surface Source as editor order; the remembered-order fallback, labelled unknown, stays for classic and one-sided installs. Needs live JetBrains Client verification.
+- 🚧 Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").
+- 📥 steering: the agent's own committed `> **Queue prompt:** <line>` echo blockquotes in agent:exchange were surfaced to the same turn as 5 NEW operator exchange prompts (source=exchange change=added dispatch=subagent) right after closeout on 0.35.527; agent-authored response cells must never be read back as operator steering
 - release + publish including PR #317-#320.
 <!-- /agent:queue -->
 

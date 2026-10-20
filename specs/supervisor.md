@@ -424,6 +424,24 @@ a closed actor record is replaceable through the stale-authority path.
   fallback. Neither outcome may return a successful no-op (GH #307). The
   recovered route remains background-only: it neither rescues a stashed pane
   nor changes tmux focus or layout.
+- The orphan drain's claim check is a snapshot, so it is re-read at every
+  irreversible step (GH #319 claim visibility). The sweep reads the document's claim
+  ledger before its selector's claim reads, then re-reads it at the commit
+  point (after the supervisor `/proc` scan and lease reads, before taking the
+  backoff lease and logging `controller_orphan_drain_dispatch`), and the route
+  worker re-reads it again just before running a queued route, which may have
+  waited behind another document's route. If either re-read holds a claimed
+  identity the snapshot did not, the step stops with
+  `controller_orphan_drain_dispatch_skipped
+  reason=queue_claim_landed_after_snapshot stage=sweep_commit|route_worker`
+  and the next sweep re-decides from the fresh ledger. A released or expired
+  claim is not a gain and never stops a dispatch; an unreadable ledger fails
+  closed (`reason=queue_claim_read_failed`). Without the re-reads a claim that
+  committed while the sweep was mid-decision was invisible to it: a preset
+  head `#upgrade` claimed at 04:25:00 was dispatched at 04:25:02 (GH #319,
+  "also seen"). The route's own pane delivery after the worker gate is not
+  re-checked: route carries no head, so a claim landing inside `route` itself
+  remains a residual window.
 - Codex background-terminal banners are active-turn evidence. If recent pane
   output contains `Waiting for background terminal (... esc to interrupt)`, the
   supervisor idle-queue watch and route readiness checks must treat the pane as

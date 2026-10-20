@@ -18760,6 +18760,289 @@ fn log_orphan_drain_event(
     agent_doc_ops_log_io::log_op(file, &message);
 }
 
+/// GH #319 claim visibility: the document's active claim identities as stored in
+/// `state.db` right now, with no live-head filtering.
+///
+/// The orphan-drain sweep decides on a snapshot of the claim ledger, then
+/// spends real time (supervisor `/proc` scan, lease reads, the serialized route
+/// worker queue) before anything reaches the pane. A claim committed inside
+/// that window — the `#upgrade` preset head claimed at 04:25:00 and dispatched
+/// at 04:25:02 in GH #319's "also seen" note — was invisible to the decision.
+/// Each irreversible step re-reads this and compares it with the snapshot.
+fn orphan_drain_claim_snapshot(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    file: &Path,
+    now_secs: u64,
+) -> Result<agent_doc_queue::queue_claim::ClaimedQueueItems> {
+    let document_hash = agent_doc_hash::path_hash(file)?;
+    let ledger = match state_store::load_queue_document_state_from_db(
+        conn,
+        &document_hash,
+        agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+    )? {
+        Some(record) => agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
+            &record.payload_json,
+        )?,
+        None => agent_doc_queue::queue_claim::QueueClaimLedger::default(),
+    };
+    Ok(ledger.claimed_items(now_secs, None))
+}
+
+/// Why an orphan-drain step stopped at its claim recheck (GH #319 claim visibility).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OrphanDrainClaimRecheck {
+    /// No claim landed since the decision's snapshot: the step may proceed.
+    Unchanged,
+    /// A claim landed after the snapshot; re-decide on the next tick.
+    ClaimLanded,
+    /// The ledger could not be read; fail closed like the decision read.
+    ReadFailed(String),
+}
+
+impl OrphanDrainClaimRecheck {
+    fn skip_detail(&self, stage: &str) -> Option<String> {
+        match self {
+            Self::Unchanged => None,
+            Self::ClaimLanded => Some(format!(
+                "reason=queue_claim_landed_after_snapshot stage={stage} action=redecide_next_tick focus_effect=preserved pane_effect=none"
+            )),
+            Self::ReadFailed(error) => Some(format!(
+                "reason=queue_claim_read_failed stage={stage} error={error}"
+            )),
+        }
+    }
+}
+
+/// Re-read the claim ledger at an irreversible orphan-drain step and compare it
+/// with the `snapshot` the dispatch decision was made on (GH #319 claim visibility).
+///
+/// Any claimed identity absent from the snapshot means the decision is stale:
+/// the head it chose may be the one just claimed. The step stops and the next
+/// sweep re-decides from the fresh ledger, which the claim-aware selector then
+/// skips or advances past. A released or expired claim is not a gain, so a
+/// stable ledger never blocks a dispatch.
+fn orphan_drain_recheck_claims(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    file: &Path,
+    snapshot: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+    now_secs: u64,
+) -> OrphanDrainClaimRecheck {
+    match orphan_drain_claim_snapshot(conn, file, now_secs) {
+        Ok(fresh) if fresh.gained_since(snapshot) => OrphanDrainClaimRecheck::ClaimLanded,
+        Ok(_) => OrphanDrainClaimRecheck::Unchanged,
+        Err(err) => OrphanDrainClaimRecheck::ReadFailed(format!("{err:#}")),
+    }
+}
+
+/// One orphan-drain route the worker thread runs, with the claim snapshot its
+/// dispatch decision was made on (GH #319 claim visibility).
+struct OrphanDrainRouteJob {
+    invocation: ControllerEditorRouteInvocation,
+    project_root: PathBuf,
+    claims_at_decision: agent_doc_queue::queue_claim::ClaimedQueueItems,
+}
+
+/// The worker's last gate before a queued orphan-drain route touches the pane
+/// (GH #319 claim visibility). The route can wait behind another document's route on
+/// the single worker, so a claim may land after the sweep's commit-point
+/// recheck; this recheck runs on the worker thread just before the route.
+fn orphan_drain_route_job_recheck(job: &OrphanDrainRouteJob) -> OrphanDrainClaimRecheck {
+    match open_state_db(&job.project_root) {
+        Ok(conn) => orphan_drain_recheck_claims(
+            &conn,
+            &job.invocation.file,
+            &job.claims_at_decision,
+            controller_model_pressure_now_secs(),
+        ),
+        Err(err) => OrphanDrainClaimRecheck::ReadFailed(format!("{err:#}")),
+    }
+}
+
+#[cfg(test)]
+mod orphan_drain_claim_visibility_tests {
+    use super::*;
+
+    const CLAIM_TTL_SECS: u64 = 3_600;
+
+    /// A project with one queue document whose only drainable head is the
+    /// preset-shaped `#upgrade` line from GH #319's "also seen" note.
+    fn upgrade_fixture() -> (tempfile::TempDir, PathBuf, String) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n\
+prompt_presets:\n  \"#upgrade\": \"upgrade agent-doc to the latest release\"\n---\n\n\
+## Queue\n\n<!-- agent:queue auto go -->\n- #upgrade\n<!-- /agent:queue -->\n"
+            .to_string();
+        std::fs::write(&file, &content).unwrap();
+        (dir, file, content)
+    }
+
+    /// Commit `ledger` the way `agent-doc queue claim` does: from its own
+    /// `state.db` connection, i.e. another process than the controller sweep.
+    fn commit_claim_ledger(
+        root: &Path,
+        file: &Path,
+        ledger: &agent_doc_queue::queue_claim::QueueClaimLedger,
+        now_secs: u64,
+    ) {
+        let conn = open_state_db(root).unwrap();
+        state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &state_store::QueueDocumentStateRecord {
+                document_hash: agent_doc_hash::path_hash(file).unwrap(),
+                state_kind: agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND.to_string(),
+                canonical_path: file.canonicalize().unwrap().to_string_lossy().into_owned(),
+                payload_json: serde_json::to_string(ledger).unwrap(),
+                updated_at_secs: now_secs,
+            },
+        )
+        .unwrap();
+    }
+
+    fn background_route(file: &Path) -> ControllerEditorRouteInvocation {
+        ControllerEditorRouteInvocation {
+            file: file.to_path_buf(),
+            relative_path: "plan.md".to_string(),
+            pane: Some("%4".to_string()),
+            layout_args: Vec::new(),
+            dispatch_only: true,
+            plain_trigger: true,
+            wait_for_ready_secs: None,
+            force_disk: false,
+            prune_before_lookup: false,
+            background_existing_pane_only: true,
+            background_recovered_actor_fallback: false,
+            layout_owned_by_controller: false,
+            navigation_client_id: None,
+        }
+    }
+
+    /// GH #319 claim visibility (GH #319 "also seen"): `#upgrade` was claimed at
+    /// 04:25:00 and the orphan drain still logged a dispatch of it at
+    /// 04:25:02. The sweep decided on a claim read taken before the claim
+    /// committed and never looked again before the dispatch. Replays that
+    /// interleaving step by step on a real `state.db`: decide, let the claim
+    /// commit from another connection, then hit the commit point.
+    #[test]
+    fn claim_landing_after_the_decision_snapshot_stops_the_dispatch() {
+        let (dir, file, content) = upgrade_fixture();
+        let now = controller_model_pressure_now_secs();
+        let sweep = open_state_db(dir.path()).unwrap();
+
+        // Tick N decides on an empty ledger: `#upgrade` is drainable.
+        let snapshot = orphan_drain_claim_snapshot(&sweep, &file, now).unwrap();
+        assert!(snapshot.is_empty());
+        let (_, drainable, skipped) = orphan_drain_head_for_content(&content, None, &snapshot);
+        // A preset head routes by its text, exactly as the GH #319 log shows
+        // (`head=#upgrade`), so its identity matches the claim's.
+        assert_eq!(drainable.as_deref(), Some("#upgrade"));
+        assert!(!skipped);
+
+        // The coordinator's claim commits while the sweep is still working.
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim("#upgrade", "subagent:upgrade", now, CLAIM_TTL_SECS);
+        commit_claim_ledger(dir.path(), &file, &ledger, now);
+
+        // The sweep's commit point sees it and stops before the backoff lease.
+        let recheck = orphan_drain_recheck_claims(&sweep, &file, &snapshot, now);
+        assert_eq!(recheck, OrphanDrainClaimRecheck::ClaimLanded);
+        let detail = recheck.skip_detail("sweep_commit").unwrap();
+        assert!(
+            detail.contains("reason=queue_claim_landed_after_snapshot")
+                && detail.contains("stage=sweep_commit"),
+            "{detail}"
+        );
+
+        // Tick N+1 re-decides from the fresh ledger: the claim-aware selector
+        // skips the claimed head, and the commit point has nothing new.
+        let next = orphan_drain_claim_snapshot(&sweep, &file, now).unwrap();
+        let (_, drainable, skipped) = orphan_drain_head_for_content(&content, None, &next);
+        assert_eq!(drainable, None, "the only head is claimed");
+        assert!(skipped);
+        assert_eq!(
+            orphan_drain_recheck_claims(&sweep, &file, &next, now),
+            OrphanDrainClaimRecheck::Unchanged
+        );
+    }
+
+    /// A stable or shrinking ledger never blocks a dispatch: only a claim the
+    /// decision did not see stops it.
+    #[test]
+    fn released_or_unchanged_claims_do_not_stop_the_dispatch() {
+        let (dir, file, _) = upgrade_fixture();
+        let now = controller_model_pressure_now_secs();
+        let sweep = open_state_db(dir.path()).unwrap();
+        assert_eq!(
+            orphan_drain_recheck_claims(
+                &sweep,
+                &file,
+                &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+                now
+            ),
+            OrphanDrainClaimRecheck::Unchanged,
+            "no ledger row at either read"
+        );
+
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim("#upgrade", "subagent:upgrade", now, CLAIM_TTL_SECS);
+        commit_claim_ledger(dir.path(), &file, &ledger, now);
+        let snapshot = orphan_drain_claim_snapshot(&sweep, &file, now).unwrap();
+        assert_eq!(
+            orphan_drain_recheck_claims(&sweep, &file, &snapshot, now),
+            OrphanDrainClaimRecheck::Unchanged
+        );
+
+        ledger.release("#upgrade");
+        commit_claim_ledger(dir.path(), &file, &ledger, now);
+        assert_eq!(
+            orphan_drain_recheck_claims(&sweep, &file, &snapshot, now),
+            OrphanDrainClaimRecheck::Unchanged,
+            "a released claim is not a new claim"
+        );
+    }
+
+    /// The route worker serializes every document's recovery route, so a job
+    /// can wait behind another document after the sweep's commit point. Its
+    /// own recheck, on its own connection, catches a claim that landed there.
+    #[test]
+    fn route_worker_rechecks_claims_before_running_a_queued_route() {
+        let (dir, file, _) = upgrade_fixture();
+        let now = controller_model_pressure_now_secs();
+        let job = OrphanDrainRouteJob {
+            invocation: background_route(&file),
+            project_root: dir.path().to_path_buf(),
+            claims_at_decision: agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+        };
+        assert_eq!(
+            orphan_drain_route_job_recheck(&job),
+            OrphanDrainClaimRecheck::Unchanged
+        );
+
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim("#upgrade", "subagent:upgrade", now, CLAIM_TTL_SECS);
+        commit_claim_ledger(dir.path(), &file, &ledger, now);
+        let recheck = orphan_drain_route_job_recheck(&job);
+        assert_eq!(recheck, OrphanDrainClaimRecheck::ClaimLanded);
+        assert!(
+            recheck
+                .skip_detail("route_worker")
+                .is_some_and(|detail| detail.contains("stage=route_worker")),
+        );
+
+        // An unreadable state root (a file, not a directory) fails closed,
+        // like the decision read.
+        let unreadable = OrphanDrainRouteJob {
+            project_root: file.clone(),
+            ..job
+        };
+        assert!(matches!(
+            orphan_drain_route_job_recheck(&unreadable),
+            OrphanDrainClaimRecheck::ReadFailed(_)
+        ));
+    }
+}
+
 /// `#orphandrain` — advance `queue: go` documents that have no supervisor.
 ///
 /// The controller only decides and enqueues here. One bounded controller-owned
@@ -18768,7 +19051,7 @@ fn log_orphan_drain_event(
 /// dispatch fence is an atomic claim in `state.db`, surviving controller
 /// restarts and excluding simultaneous controller processes.
 struct OrphanDrainRouteWorker {
-    sender: std::sync::mpsc::SyncSender<ControllerEditorRouteInvocation>,
+    sender: std::sync::mpsc::SyncSender<OrphanDrainRouteJob>,
     in_flight: Arc<Mutex<BTreeSet<PathBuf>>>,
 }
 
@@ -18779,14 +19062,26 @@ fn start_orphan_drain_route_worker() -> Result<OrphanDrainRouteWorker> {
     // One bounded controller-owned worker serializes autonomous recovery across
     // documents. This keeps route work off the RPC accept loop without letting
     // one detached process per document contend for global controller/tmux state.
-    let (sender, receiver) = std::sync::mpsc::sync_channel::<ControllerEditorRouteInvocation>(1);
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<OrphanDrainRouteJob>(1);
     let in_flight = Arc::new(Mutex::new(BTreeSet::<PathBuf>::new()));
     let worker_in_flight = Arc::clone(&in_flight);
     std::thread::Builder::new()
         .name("controller-orphan-drain-route".to_string())
         .spawn(move || {
-            while let Ok(invocation) = receiver.recv() {
-                let file = invocation.file.clone();
+            while let Ok(job) = receiver.recv() {
+                let file = job.invocation.file.clone();
+                if let Some(detail) =
+                    orphan_drain_route_job_recheck(&job).skip_detail("route_worker")
+                {
+                    log_orphan_drain_event(
+                        &file,
+                        agent_doc_controller::orphan_drain::OrphanDrainEvent::DispatchSkipped,
+                        &detail,
+                    );
+                    worker_in_flight.lock().remove(&file);
+                    continue;
+                }
+                let invocation = job.invocation;
                 let route_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     runtime_effects().and_then(|effects| effects.run_editor_route(invocation))
                 }));
@@ -18834,15 +19129,15 @@ fn orphan_drain_route_worker() -> Result<&'static OrphanDrainRouteWorker> {
     }
 }
 
-fn enqueue_orphan_drain_route(invocation: ControllerEditorRouteInvocation) -> Result<bool> {
+fn enqueue_orphan_drain_route(job: OrphanDrainRouteJob) -> Result<bool> {
     use std::sync::mpsc::TrySendError;
 
     let worker = orphan_drain_route_worker()?;
-    let file = invocation.file.clone();
+    let file = job.invocation.file.clone();
     if !worker.in_flight.lock().insert(file.clone()) {
         return Ok(false);
     }
-    match worker.sender.try_send(invocation) {
+    match worker.sender.try_send(job) {
         Ok(()) => Ok(true),
         Err(TrySendError::Full(_)) => {
             worker.in_flight.lock().remove(&file);
@@ -19238,6 +19533,21 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             _ => None,
         };
         let now = controller_model_pressure_now_secs();
+        // GH #319 claim visibility: the claim ledger as of this decision, read BEFORE
+        // the selector's own claim reads so a claim landing between them
+        // reads as a gain at the commit point (one harmless skipped tick)
+        // rather than slipping past both.
+        let claims_at_decision = match orphan_drain_claim_snapshot(&conn, &file, now) {
+            Ok(claims) => claims,
+            Err(err) => {
+                log_orphan_drain_event(
+                    &file,
+                    OrphanDrainEvent::DispatchSkipped,
+                    &format!("reason=queue_claim_read_failed error={err:#}"),
+                );
+                continue;
+            }
+        };
         let active_claims =
             |content: Option<&str>| -> Result<agent_doc_queue::queue_claim::ClaimedQueueItems> {
                 let document_hash = agent_doc_hash::path_hash(&file)?;
@@ -19494,6 +19804,21 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             continue;
         }
 
+        // GH #319 claim visibility: the commit point. The claim snapshot above is
+        // older than the supervisor `/proc` scan and lease reads, so re-read
+        // it before taking the backoff lease and logging a dispatch.
+        if let Some(detail) = orphan_drain_recheck_claims(
+            &conn,
+            &file,
+            &claims_at_decision,
+            controller_model_pressure_now_secs(),
+        )
+        .skip_detail("sweep_commit")
+        {
+            log_orphan_drain_event(&file, OrphanDrainEvent::DispatchSkipped, &detail);
+            continue;
+        }
+
         let dispatch_claim = state_store::CoordinationLeaseRecord {
             scope_kind: ORPHAN_DRAIN_BACKOFF_SCOPE.to_string(),
             scope_id: document_hash,
@@ -19556,7 +19881,11 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             layout_owned_by_controller: false,
             navigation_client_id: None,
         };
-        match enqueue_orphan_drain_route(invocation) {
+        match enqueue_orphan_drain_route(OrphanDrainRouteJob {
+            invocation,
+            project_root: project_root.clone(),
+            claims_at_decision,
+        }) {
             Ok(true) => {}
             Ok(false) => log_orphan_drain_event(
                 &file,

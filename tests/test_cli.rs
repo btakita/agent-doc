@@ -10576,13 +10576,12 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
     let orphan_drain = &controller[start..end];
     assert!(
         controller.contains("static ORPHAN_DRAIN_ROUTE_WORKER:")
-            && controller
-                .contains("std::sync::mpsc::sync_channel::<ControllerEditorRouteInvocation>(1)",)
+            && controller.contains("std::sync::mpsc::sync_channel::<OrphanDrainRouteJob>(1)")
             && controller.contains("effects.run_editor_route(invocation)"),
         "orphan drain must use one bounded controller-owned worker thread"
     );
     assert!(
-        orphan_drain.contains("enqueue_orphan_drain_route(invocation)")
+        orphan_drain.contains("enqueue_orphan_drain_route(OrphanDrainRouteJob {")
             && orphan_drain.contains("pane: Some(record.pane_id.clone())")
             && orphan_drain.contains("prune_before_lookup: false")
             && orphan_drain.contains("background_existing_pane_only: true")
@@ -10625,6 +10624,37 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
             && orphan_drain.contains("reason=queue_head_claimed")
             && orphan_drain.contains("reason=queue_claim_read_failed"),
         "orphan drain must skip claimed heads, log the skip, and fail closed when claims cannot be read (GH #312)"
+    );
+    // GH #319 claim visibility: the decision's claim read is a snapshot. It is taken
+    // before the selector's own claim reads, re-read at the sweep's commit
+    // point before the backoff lease, and re-read on the route worker before a
+    // queued route runs.
+    let snapshot_at = orphan_drain
+        .find("let claims_at_decision = match orphan_drain_claim_snapshot(")
+        .expect("orphan drain snapshots the claim ledger for its decision");
+    let selector_claims_at = orphan_drain
+        .find("let active_claims =")
+        .expect("orphan drain selector reads claims");
+    let commit_recheck_at = orphan_drain
+        .find(".skip_detail(\"sweep_commit\")")
+        .expect("orphan drain rechecks claims at its commit point");
+    let backoff_lease_at = orphan_drain
+        .find("claim_coordination_lease_if_expired_in_db")
+        .unwrap();
+    assert!(
+        snapshot_at < selector_claims_at && commit_recheck_at < backoff_lease_at,
+        "the claim snapshot must precede the selector, and the commit-point recheck must precede the backoff lease (GH #319 claim visibility)"
+    );
+    let worker = &controller[controller
+        .find("fn start_orphan_drain_route_worker(")
+        .unwrap()
+        ..controller.find("fn orphan_drain_route_worker(").unwrap()];
+    let worker_recheck_at = worker
+        .find("orphan_drain_route_job_recheck(&job).skip_detail(\"route_worker\")")
+        .expect("the route worker rechecks claims before running a queued route");
+    assert!(
+        worker_recheck_at < worker.find("effects.run_editor_route(invocation)").unwrap(),
+        "the route worker must recheck claims before the route runs (GH #319 claim visibility)"
     );
 
     let pane_resolution =

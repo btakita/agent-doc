@@ -1825,6 +1825,13 @@ impl ClaimedQueueItems {
     pub fn claims(&self, prompt_text: &str) -> bool {
         !self.0.is_empty() && self.0.contains(&claim_identity(prompt_text))
     }
+
+    /// Whether this set holds a claimed identity `earlier` did not
+    /// (GH #319 claim visibility): a claim landed between two reads of the ledger.
+    /// A claim that released or expired in between is not a gain.
+    pub fn gained_since(&self, earlier: &ClaimedQueueItems) -> bool {
+        self.0.iter().any(|identity| !earlier.0.contains(identity))
+    }
 }
 
 #[cfg(test)]
@@ -2924,5 +2931,34 @@ mod tests {
         let claim = &ledger.claims[0];
         assert_eq!(claim.state, QueueClaimState::Running);
         assert!(diagnose_lifecycle(claim, Some(QueueLifecycleMarker::Running), 500, 5).is_none());
+    }
+
+    /// GH #319 claim visibility: a later ledger read gained a claim only when it
+    /// holds an identity the earlier read did not. A claim released or expired
+    /// between the reads is not a gain, so it never blocks a dispatch.
+    #[test]
+    fn claimed_items_gained_since_reports_only_new_identities() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("#upgrade", "coordinator:x", 100, 600);
+        let earlier = ledger.claimed_items(100, None);
+        assert!(!ledger.claimed_items(100, None).gained_since(&earlier));
+
+        ledger.claim("fix queue", "subagent:q", 101, 600);
+        let later = ledger.claimed_items(101, None);
+        assert!(later.gained_since(&earlier), "a new claim is a gain");
+        assert!(
+            !earlier.gained_since(&later),
+            "a missing claim is not a gain"
+        );
+
+        ledger.release("#upgrade");
+        assert!(
+            !ledger.claimed_items(102, None).gained_since(&later),
+            "a released claim is not a gain"
+        );
+        assert!(
+            !ClaimedQueueItems::none().gained_since(&ClaimedQueueItems::none()),
+            "two empty reads gained nothing"
+        );
     }
 }

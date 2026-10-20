@@ -18,7 +18,6 @@ use agent_doc_element::element;
 use agent_doc_queue::document_queue as queue;
 
 const QUEUE_COMPONENT: &str = "queue";
-const DONE_COMPONENT: &str = "done";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct LostQueueReport {
@@ -100,7 +99,7 @@ pub(crate) fn build_report(file: &Path, max_git_versions: usize) -> Result<LostQ
         .with_context(|| format!("failed to read {}", canonical.display()))?;
     let current_heads = queue_heads_from_doc(&current_doc, true);
     let current_head_set: BTreeSet<String> = current_heads.iter().cloned().collect();
-    let coverage_text = current_coverage_text(&canonical, &current_doc);
+    let coverage_text = current_coverage_text(&canonical, &current_doc)?;
 
     let mut sources = Vec::new();
     collect_snapshot_sources(&canonical, &mut sources);
@@ -359,35 +358,28 @@ fn normalize_prompt_text(text: &str) -> Option<String> {
     (!normalized.is_empty()).then_some(normalized)
 }
 
-fn current_coverage_text(file: &Path, current_doc: &str) -> String {
+/// Text an id must appear in to count as accounted for: the current document
+/// plus every done archive the writer's resolver locates.
+///
+/// GH #325 (same class): this used to join the raw `agent:done archive=` value
+/// onto the document directory, so a project-relative value read
+/// `<doc dir>/<project path>`, a bare `archive` read the document directory
+/// itself, and a `document:` / `project:` value read a literal
+/// `document:x.done.md` file. Every one failed silently and an archived id was
+/// reported as lost. Reading through
+/// `done_archive::read_done_archive_sources` keeps this audit on the same
+/// archive set preflight uses, and an invalid declared target fails the audit
+/// instead of under-reporting coverage.
+fn current_coverage_text(file: &Path, current_doc: &str) -> Result<String> {
     let mut text = current_doc.to_string();
-    for archive in done_archive_paths(file, current_doc) {
-        if let Ok(content) = fs::read_to_string(&archive) {
-            text.push('\n');
-            text.push_str(&content);
-        }
+    let sources =
+        agent_doc_element_backlog_io::done_archive::read_done_archive_sources(file, current_doc)
+            .with_context(|| format!("failed to read done archives for {}", file.display()))?;
+    for source in sources {
+        text.push('\n');
+        text.push_str(&source.content);
     }
-    text
-}
-
-fn done_archive_paths(file: &Path, doc: &str) -> Vec<PathBuf> {
-    let Ok(components) = element::parse(doc) else {
-        return Vec::new();
-    };
-    let base = file.parent().unwrap_or(Path::new("."));
-    components
-        .iter()
-        .filter(|component| component.name == DONE_COMPONENT)
-        .filter_map(|component| component.attrs.get("archive"))
-        .map(|archive| {
-            let path = PathBuf::from(archive);
-            if path.is_absolute() {
-                path
-            } else {
-                base.join(path)
-            }
-        })
-        .collect()
+    Ok(text)
 }
 
 fn id_is_accounted_for(id: &str, coverage_text: &str) -> bool {
@@ -480,10 +472,140 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// A valid external archive: `archive=done.md` used to stand here, but a
+    /// declared target must end in `.done.md`, and the shared resolver fails
+    /// closed on anything else.
     fn doc_with_queue(queue_body: &str, extra: &str) -> String {
+        doc_with_queue_and_done(queue_body, extra, "archive=session.done.md")
+    }
+
+    fn doc_with_queue_and_done(queue_body: &str, extra: &str, done_attrs: &str) -> String {
         format!(
-            "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{extra}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Completed\n\n<!-- agent:done archive=done.md -->\n<!-- /agent:done -->\n"
+            "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{extra}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Completed\n\n<!-- agent:done {done_attrs} -->\n<!-- /agent:done -->\n"
         )
+    }
+
+    const ARCHIVED_ID: &str = "gh325archived";
+
+    /// GH #325 fixture: a nested session document `tasks/a/session.md` whose
+    /// git history queued `[#gh325archived]`, now dequeued and recorded only in
+    /// the external done archive (not yet written). Returns the project dir
+    /// and the document path.
+    fn gh325_archived_project(done_attrs: &str) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::create_dir_all(dir.path().join("tasks/a")).unwrap();
+        let file = dir.path().join("tasks/a/session.md");
+        fs::write(
+            &file,
+            doc_with_queue_and_done(&format!("- ship it [#{ARCHIVED_ID}]\n"), "", done_attrs),
+        )
+        .unwrap();
+        run_git(dir.path(), &["init"]);
+        run_git(dir.path(), &["config", "user.email", "test@example.com"]);
+        run_git(dir.path(), &["config", "user.name", "Test User"]);
+        run_git(dir.path(), &["config", "commit.gpgsign", "false"]);
+        run_git(dir.path(), &["add", "tasks/a/session.md"]);
+        run_git(dir.path(), &["commit", "-m", "queued archived work"]);
+        fs::write(&file, doc_with_queue_and_done("", "", done_attrs)).unwrap();
+        (dir, file)
+    }
+
+    fn write_archive_entry(path: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            path,
+            format!("# Agent Doc Completed Work\n\n- 2026-10-20 [#{ARCHIVED_ID}] ship it\n"),
+        )
+        .unwrap();
+    }
+
+    fn assert_reported_lost(report: &LostQueueReport) {
+        assert!(report.covered_ids.is_empty(), "{report:?}");
+        assert_eq!(report.git_history_only_candidates.len(), 1, "{report:?}");
+        assert_eq!(
+            report.git_history_only_candidates[0]
+                .candidate
+                .id
+                .as_deref(),
+            Some(ARCHIVED_ID)
+        );
+        assert_eq!(report.proof.status, "git_history_only_review");
+    }
+
+    fn assert_accounted_by_archive(report: &LostQueueReport) {
+        assert_eq!(
+            report.covered_ids,
+            vec![ARCHIVED_ID.to_string()],
+            "{report:?}"
+        );
+        assert!(report.git_history_only_candidates.is_empty(), "{report:?}");
+        assert!(report.restore_candidates.is_empty(), "{report:?}");
+        assert_eq!(report.proof.status, "user_removal_or_completion_proof");
+    }
+
+    /// Before the archive exists the id is lost; once the archive the writer's
+    /// resolver names holds it, `recover-lost` accounts for it. The first half
+    /// proves the second is not vacuous.
+    fn assert_archive_accounts_for_id(done_attrs: &str, archive_rel: &str) {
+        let (dir, file) = gh325_archived_project(done_attrs);
+        assert_reported_lost(&build_report(&file, 5).unwrap());
+        write_archive_entry(&dir.path().join(archive_rel));
+        assert_accounted_by_archive(&build_report(&file, 5).unwrap());
+    }
+
+    #[test]
+    fn recover_lost_reads_project_relative_done_archive() {
+        // `history.done.md` is not a `<stem>.done.md` sibling candidate, so
+        // only the declared-target resolution can find it.
+        assert_archive_accounts_for_id(
+            "archive=tasks/a/history.done.md",
+            "tasks/a/history.done.md",
+        );
+    }
+
+    #[test]
+    fn recover_lost_ignores_legacy_document_relative_join_of_project_relative_archive() {
+        // The old raw join read `<doc dir>/<project-relative value>`. That file
+        // is the 0.35.521–0.35.523 legacy location, never completed history.
+        let (dir, file) = gh325_archived_project("archive=tasks/a/history.done.md");
+        write_archive_entry(&dir.path().join("tasks/a/tasks/a/history.done.md"));
+        assert_reported_lost(&build_report(&file, 5).unwrap());
+    }
+
+    #[test]
+    fn recover_lost_reads_bare_default_done_archive() {
+        // A bare `archive` is `<stem>.done.md` beside the document; the raw
+        // join read the document directory itself and found nothing.
+        assert_archive_accounts_for_id("archive", "tasks/a/session.done.md");
+    }
+
+    #[test]
+    fn recover_lost_reads_document_anchored_done_archive() {
+        assert_archive_accounts_for_id(
+            "archive=document:../history.done.md",
+            "tasks/history.done.md",
+        );
+    }
+
+    #[test]
+    fn recover_lost_reads_project_anchored_done_archive() {
+        assert_archive_accounts_for_id(
+            "archive=project:archives/session-history.done.md",
+            "archives/session-history.done.md",
+        );
+    }
+
+    #[test]
+    fn recover_lost_fails_closed_on_invalid_done_archive() {
+        // `archive=done.md` is not a `.done.md` target. Ignoring it would
+        // under-report coverage and offer completed work for restore.
+        let (_dir, file) = gh325_archived_project("archive=done.md");
+        let err = build_report(&file, 5).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("must point to a .done.md file"),
+            "{err:#}"
+        );
     }
 
     #[test]

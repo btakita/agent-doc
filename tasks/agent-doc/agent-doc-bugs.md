@@ -442,8 +442,8 @@ The exchange is large (353 lines across 38 sections). The queue is active, so I 
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 release + publish
-- 📥 In fpe.md: "What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)": This choice should have been added into `agent:todo`.
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~In fpe.md: "What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)": This choice should have been added into `agent:todo`.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues

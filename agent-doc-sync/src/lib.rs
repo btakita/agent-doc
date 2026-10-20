@@ -508,6 +508,45 @@ pub fn start_session_target(
     }
 }
 
+/// Where `start` places a pane it relocates into the expected session
+/// (pane-count drift).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartRelocationPlacement {
+    /// The pane was parked in a stash window: it moves into the expected
+    /// session's stash window and stays out of the visible layout. Whether it
+    /// becomes a visible column is the layout plane's decision, derived from
+    /// the editor's visible splits, never a side effect of a supervisor
+    /// (re)start.
+    ExpectedSessionStash,
+    /// The pane was visible where it was (the operator started it there): it
+    /// joins the expected session beside its active pane, as before.
+    BesideExpectedActivePane,
+}
+
+impl StartRelocationPlacement {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ExpectedSessionStash => "expected_session_stash",
+            Self::BesideExpectedActivePane => "beside_expected_active_pane",
+        }
+    }
+}
+
+/// Relocation preserves the pane's visibility class. Before pane-count drift a
+/// stashed pane was joined beside the expected session's active pane, i.e.
+/// into the visible `agent-doc` window, so a supervisor re-exec (auto-install)
+/// of a document parked in another session's stash added a column that no
+/// editor split asked for. A projection that has already converged treats a
+/// later extra pane as operator-owned drift and never stashes it, so the
+/// extra column stayed until the next editor split change.
+pub fn start_relocation_placement(pane_in_stash_window: bool) -> StartRelocationPlacement {
+    if pane_in_stash_window {
+        StartRelocationPlacement::ExpectedSessionStash
+    } else {
+        StartRelocationPlacement::BesideExpectedActivePane
+    }
+}
+
 /// Trim an optional CLI scope argument and treat empty strings as absent.
 pub fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     value.and_then(|s| {
@@ -1293,6 +1332,23 @@ mod tests {
         let single = TmuxSessionPolicy::single_session().with_navigation_lanes(true);
         assert!(single.allows("anything"));
         assert!(!single.is_multi_session());
+    }
+
+    #[test]
+    fn start_relocation_preserves_the_panes_visibility_class() {
+        assert_eq!(
+            start_relocation_placement(true),
+            StartRelocationPlacement::ExpectedSessionStash,
+            "a stashed pane must never be joined into the visible window"
+        );
+        assert_eq!(
+            start_relocation_placement(false),
+            StartRelocationPlacement::BesideExpectedActivePane
+        );
+        assert_eq!(
+            StartRelocationPlacement::ExpectedSessionStash.label(),
+            "expected_session_stash"
+        );
     }
 
     #[test]

@@ -136,6 +136,47 @@ pub fn pane_window_binding_drifted(recorded_window: &str, live_window: Option<&s
     recorded != live
 }
 
+/// The window the structural layout effect arranges (pane-count drift).
+///
+/// The convergence observation of a single-session project reads the pinned
+/// `tmux_session`'s `agent-doc` window, and a navigation lane reads its own
+/// lane window. A windowless effect used to pick its own target instead, from
+/// where the focused document's pane happened to live (`FocusedActor`). When
+/// that pane sat in another session's `agent-doc` window, the effect moved the
+/// columns there while the observer kept reading the pinned window: the
+/// operator saw one pane in the visible window for two editor splits, and
+/// every retry re-applied the same wrong window because the effect and the
+/// observation never named the same one. A pane displaced by those retries was
+/// stashed in the other session, from where a later `start` relocation pulled
+/// it back into the visible window as an extra column.
+///
+/// The target is therefore derived state, never inferred from a pane's
+/// carried-over placement: an explicit invocation window is kept as-is;
+/// otherwise a lane generation, or a single-session project, targets the same
+/// window its observer reads (`derived_layout_window`, read lazily); a
+/// multi-session project keeps the actor-driven session selection, because
+/// its observer follows the effect's own panes. `None` (no resolvable derived
+/// window) leaves the effect's ambient selection unchanged.
+pub fn structural_effect_window(
+    invocation_window: Option<&str>,
+    lane: bool,
+    multi_session: bool,
+    derived_layout_window: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if let Some(window) = invocation_window
+        .map(str::trim)
+        .filter(|window| !window.is_empty())
+    {
+        return Some(window.to_string());
+    }
+    if !lane && multi_session {
+        return None;
+    }
+    derived_layout_window()
+        .map(|window| window.trim().to_string())
+        .filter(|window| window.starts_with('@'))
+}
+
 /// GH #136 follow-up (a): where a desired layout publication's column COUNT
 /// comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -642,10 +683,7 @@ mod tests {
             ProjectionAttemptAdmission::Retired(ProjectionRetirement::RetryBudgetExhausted)
         );
         // A newer generation re-arms.
-        assert_eq!(
-            ledger.begin_attempt(5),
-            ProjectionAttemptAdmission::Attempt { number: 1 }
-        );
+        assert_eq!(ledger.begin_attempt(5), ProjectionAttemptAdmission::Attempt { number: 1 });
     }
 
     #[test]
@@ -700,7 +738,10 @@ mod tests {
         ledger.note_published(4, 1, Some(order(99)));
         assert_eq!(ledger.claim_stamp_ms(5, 99_000), 80_000);
         assert_eq!(ledger.retired(5), None);
-        assert_eq!(ledger.begin_attempt(5), ProjectionAttemptAdmission::Attempt { number: 1 });
+        assert_eq!(
+            ledger.begin_attempt(5),
+            ProjectionAttemptAdmission::Attempt { number: 1 }
+        );
     }
 
     #[test]
@@ -987,4 +1028,55 @@ mod tests {
         assert!(!pane_window_binding_drifted("", None));
     }
 
+    /// pane-count drift: a windowless effect in a single-session project targets
+    /// the window its observer reads, never the focused pane's session.
+    #[test]
+    fn structural_effect_window_is_the_observed_window_for_a_pinned_project() {
+        assert_eq!(
+            structural_effect_window(None, false, false, || Some("@2".to_string())),
+            Some("@2".to_string())
+        );
+        assert_eq!(
+            structural_effect_window(Some("  "), false, false, || Some(" @2 ".to_string())),
+            Some("@2".to_string()),
+            "a blank invocation window is windowless"
+        );
+        assert_eq!(
+            structural_effect_window(None, true, true, || Some("@41".to_string())),
+            Some("@41".to_string()),
+            "a lane generation targets its lane window even in a multi-session project"
+        );
+    }
+
+    #[test]
+    fn structural_effect_window_keeps_explicit_and_multi_session_selection() {
+        let derived_never_read =
+            || -> Option<String> { panic!("an explicit window must not read the derived window") };
+        assert_eq!(
+            structural_effect_window(Some(" @9 "), false, false, derived_never_read),
+            Some("@9".to_string())
+        );
+        assert_eq!(
+            structural_effect_window(Some("agent-doc"), false, true, || None),
+            Some("agent-doc".to_string()),
+            "a named explicit window is passed through for the effect to judge"
+        );
+        let multi_never_read = || -> Option<String> {
+            panic!("a multi-session project keeps the actor-driven selection")
+        };
+        assert_eq!(
+            structural_effect_window(None, false, true, multi_never_read),
+            None
+        );
+        assert_eq!(
+            structural_effect_window(None, false, false, || None),
+            None,
+            "no resolvable derived window leaves the ambient selection"
+        );
+        assert_eq!(
+            structural_effect_window(None, false, false, || Some("agent-doc".to_string())),
+            None,
+            "only a resolved window id is a derived target"
+        );
+    }
 }

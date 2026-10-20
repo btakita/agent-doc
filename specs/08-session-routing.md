@@ -588,7 +588,9 @@ falls back to a session outside the list.
   first (it must be allowed). Next is the pane's own session when allowed, which
   means no relocation. Last is the allowed pin. A pane in a disallowed session
   with no allowed target fails closed. The dead-pin auto-rebind only rebinds to
-  an allowed session. `tmux ensure` reuses a live registry pane only from an
+  an allowed session. A relocation keeps the pane's visibility class: a
+  stashed pane moves into the expected session's `stash` window, never into its
+  visible `agent-doc` window (`start_relocation_placement`). `tmux ensure` reuses a live registry pane only from an
   allowed session that matches the binding, and it creates or attaches the
   binding's session before the pin.
 - *claim*: the authoritative session follows the same `start_session_target`

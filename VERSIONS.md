@@ -24,6 +24,29 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   sweep's commit point and the route worker now re-read the ledger and stop
   with `reason=queue_claim_landed_after_snapshot` when a claim landed after
   the decision; the next sweep re-decides from the fresh ledger.
+- **tmux shows the editor's split count again: no lone pane, no extra pane
+  (pane-count drift, 2026-10-20).** Two writers changed tmux topology outside
+  the derived layout. (1) A windowless editor-layout effect picked its target
+  session from where the focused document's pane lived; with a cross-root pane
+  sitting in another session's `agent-doc` window, the effect arranged both
+  columns there while the operator's pinned window (and the controller's
+  convergence observer) kept one pane, and every retry re-applied the same
+  wrong window. In a single-session project with a live `tmux_session` pin,
+  and for every navigation lane generation, the controller now passes the
+  window its observer reads as the effect's explicit window
+  (`agent_doc_controller::pane_layout::structural_effect_window`);
+  multi-session projects keep the actor-driven selection. (2) `start`
+  relocated a pane found in the wrong session by joining it beside the
+  expected session's active pane, so a supervisor re-exec onto a fresh binary
+  pulled a document parked in the other session's stash into the visible
+  window as a third column, which a converged projection treats as operator
+  drift and never removes. Relocation now preserves the visibility class: a
+  stashed pane moves into the expected session's `stash`
+  (`agent_doc_sync::start_relocation_placement`), and every relocation is
+  logged as `start_pane_session_relocated` with `from_session`, `to_session`,
+  and `placement`. Covered by the `pane_count_drift_model` SimWorld (both
+  pre-fix mutations reproduce the 1-pane and 3-pane reports) and a
+  mutation-checked live tmux test.
 
 ## 0.35.527
 

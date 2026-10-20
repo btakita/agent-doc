@@ -279,6 +279,23 @@ On every preflight run:
 in the `agent:done archive=...done.md` target as completed-history proof for
 backlog replay and as known identifiers for the coined-ID guard after inline
 history is reaped. Invalid archive targets fail closed instead of being ignored.
+Every completed-history reader locates the archive through the writer's
+resolver (`done_archive::resolve_done_archive_target`), never by joining the raw
+attribute onto a root: a bare `archive` is `<document-basename>.done.md` beside
+the document, and `document:` / `project:` prefixes select the anchor. Readers
+take the union of the declared target and the sibling `<stem>.done.md`
+candidates walking up to the project root. Preflight's done-id and done-text
+sets — which feed done-mirror suppression, the backlog-to-queue sync exclusion,
+and the preflight done-strike — read through
+`done_archive::read_done_archive_sources` (GH #325; a raw `root.join(value)`
+read the project root directory for a bare `archive` and the literal
+`<root>/document:x.done.md` for an anchored value, so every externally archived
+item looked never done). A file at `<document dir>/<project-relative path of the
+resolved archive>`, left by 0.35.521–0.35.523's document-relative resolution of
+unprefixed values, is not completed history: preflight names it once in a
+`[preflight] done archive:` advisory and a `legacy_done_archive_advisory`
+ops-log line (one-time marker under `.agent-doc/advisories/`) and never moves,
+deletes, or reads it as history.
 - Shadow-scan scope invariant (GH #275): the shadow-backlog guard (preflight
   refusal, session-check INTERRUPTED) flags an open `- [ ] [#id]` row outside
   the live `agent:backlog` only where a drifted backlog row can hide: stray

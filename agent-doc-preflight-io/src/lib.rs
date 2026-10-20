@@ -1893,12 +1893,9 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
     }
     let mut saw_completed_before = false;
-    let project_root = file.canonicalize().ok().and_then(|canonical| {
-        agent_doc_project_root_io::project_root_containing(&canonical)
-            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
-    });
-    let already_done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
-    let done_item_texts = collect_agent_done_texts_with_root(&content, project_root.as_deref());
+    advise_misplaced_legacy_done_archive(file, &content);
+    let already_done_ids = collect_agent_done_ids(file, &content)?;
+    let done_item_texts = collect_agent_done_texts(file, &content)?;
 
     for surface in &tracked_surfaces {
         let components = agent_doc_element::element::parse(&current_content)
@@ -2550,13 +2547,21 @@ fn run_pending_maintenance_with_options(
     })
 }
 
-fn collect_agent_done_ids_with_root(
-    content: &str,
-    project_root: Option<&Path>,
-) -> std::collections::HashSet<String> {
+/// Completed-work ids for `file`: the inline `agent:done` bodies plus every
+/// done archive [`read_done_archive_sources`] locates.
+///
+/// GH #325: archives resolve through the writer's resolver
+/// (`done_archive::read_done_archive_sources`), never `project_root.join(raw)`.
+/// The raw join read the project root directory for a bare `archive` (the
+/// documented default) and the literal `<root>/document:x.done.md` for an
+/// anchored value, so done-mirror suppression and the preflight done-strike
+/// treated every externally archived item as never done.
+///
+/// [`read_done_archive_sources`]: agent_doc_element_backlog_io::done_archive::read_done_archive_sources
+fn collect_agent_done_ids(file: &Path, content: &str) -> Result<std::collections::HashSet<String>> {
     let mut ids = std::collections::HashSet::new();
     let Ok(components) = agent_doc_element::element::parse(content) else {
-        return ids;
+        return Ok(ids);
     };
     for comp in &components {
         if !agent_doc_element::element::is_backlog_done_component(&comp.name) {
@@ -2565,29 +2570,26 @@ fn collect_agent_done_ids_with_root(
         for id in agent_doc_element_done::collect_done_component_own_ids(content, comp) {
             ids.insert(id);
         }
-        if let Some(archive) = comp.attrs.get("archive")
-            && let Some(root) = project_root
-        {
-            let archive_path = root.join(archive);
-            if let Ok(archive_content) = std::fs::read_to_string(&archive_path) {
-                for id in agent_doc_element_done::collect_done_item_own_ids(&archive_content) {
-                    ids.insert(id);
-                }
-            }
-        }
     }
-    ids
+    for source in
+        agent_doc_element_backlog_io::done_archive::read_done_archive_sources(file, content)?
+    {
+        ids.extend(agent_doc_element_done::collect_done_item_own_ids(
+            &source.content,
+        ));
+    }
+    Ok(ids)
 }
 
 /// `#donemirrorbytext`: done id -> recorded text, from the same sources as
-/// [`collect_agent_done_ids_with_root`].
-fn collect_agent_done_texts_with_root(
+/// [`collect_agent_done_ids`]. Inline entries win over archived ones.
+fn collect_agent_done_texts(
+    file: &Path,
     content: &str,
-    project_root: Option<&Path>,
-) -> std::collections::HashMap<String, String> {
+) -> Result<std::collections::HashMap<String, String>> {
     let mut texts = std::collections::HashMap::new();
     let Ok(components) = agent_doc_element::element::parse(content) else {
-        return texts;
+        return Ok(texts);
     };
     for comp in &components {
         if !agent_doc_element::element::is_backlog_done_component(&comp.name) {
@@ -2596,16 +2598,60 @@ fn collect_agent_done_texts_with_root(
         for (id, text) in agent_doc_element_done::collect_done_item_texts(comp.content(content)) {
             texts.entry(id).or_insert(text);
         }
-        if let Some(archive) = comp.attrs.get("archive")
-            && let Some(root) = project_root
-            && let Ok(archive_content) = std::fs::read_to_string(root.join(archive))
-        {
-            for (id, text) in agent_doc_element_done::collect_done_item_texts(&archive_content) {
-                texts.entry(id).or_insert(text);
-            }
+    }
+    for source in
+        agent_doc_element_backlog_io::done_archive::read_done_archive_sources(file, content)?
+    {
+        for (id, text) in agent_doc_element_done::collect_done_item_texts(&source.content) {
+            texts.entry(id).or_insert(text);
         }
     }
-    texts
+    Ok(texts)
+}
+
+/// GH #325: name, once per stale file, the archive 0.35.521–0.35.523 wrote at
+/// `<doc dir>/<project-relative archive path>`. No resolver reads it, so it
+/// otherwise sits in HEAD as a second archive nobody notices. Advisory only:
+/// the file is never moved or deleted, and a failure here never blocks
+/// preflight.
+fn advise_misplaced_legacy_done_archive(file: &Path, content: &str) {
+    let legacy = match agent_doc_element_backlog_io::done_archive::misplaced_legacy_done_archive(
+        file, content,
+    ) {
+        Ok(Some(legacy)) => legacy,
+        Ok(None) | Err(_) => return,
+    };
+    let Some(root) = file
+        .canonicalize()
+        .ok()
+        .and_then(|canonical| agent_doc_project_root_io::project_root_containing(&canonical))
+    else {
+        return;
+    };
+    let Ok(key) = agent_doc_fs::document_state_hash(&legacy) else {
+        return;
+    };
+    let marker_dir = root.join(".agent-doc/advisories");
+    let marker = marker_dir.join(format!("legacy-done-archive-{key}"));
+    if marker.exists() {
+        return;
+    }
+    let message = format!(
+        "misplaced legacy done archive {} (written by agent-doc 0.35.521-0.35.523; no resolver reads it). Merge any entries missing from the resolved archive, then remove it (GH #325)",
+        legacy.display()
+    );
+    eprintln!("[preflight] done archive: {message}");
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "legacy_done_archive_advisory file={} legacy={}",
+            file.display(),
+            legacy.display()
+        ),
+    );
+    if std::fs::create_dir_all(&marker_dir).is_ok() {
+        let _ = std::fs::write(&marker, format!("{}\n", legacy.display()));
+    }
 }
 
 fn snapshot_proves_queue_was_active(file: &Path) -> bool {
@@ -5007,7 +5053,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     // suppression and the preflight done-strike so the repeat reaches the
     // agent. The live backlog checkbox is the durable incarnation boundary, so
     // maintenance retries preserve the repeat until closeout reaps that item.
-    let done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
+    let done_ids = collect_agent_done_ids(file, &content)?;
     let mut reactivated_done_ids = freshly_admitted_queue_ids;
     for id in &done_ids {
         let active_now =
@@ -7328,11 +7374,10 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
         agent_doc_project_root_io::project_root_containing(&canonical)
             .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
     });
-    let done_ids: std::collections::HashSet<String> =
-        collect_agent_done_ids_with_root(&content, project_root.as_deref())
-            .into_iter()
-            .map(|id| id.to_ascii_lowercase())
-            .collect();
+    let done_ids: std::collections::HashSet<String> = collect_agent_done_ids(file, &content)?
+        .into_iter()
+        .map(|id| id.to_ascii_lowercase())
+        .collect();
     if !done_ids.is_empty() {
         backlog_ids.retain(|id| !done_ids.contains(&id.to_ascii_lowercase()));
     }
@@ -8609,30 +8654,146 @@ mod tests {
         std::fs::write(logs.join("ops.log"), body).unwrap();
     }
 
-    #[test]
-    fn collect_agent_done_ids_reads_archive_attr_when_present() {
+    /// GH #325 fixture: a project with a session document at
+    /// `tasks/a/target.md` whose `agent:done` marker carries `archive_attr`.
+    fn gh325_project(archive_attr: &str) -> (TempDir, std::path::PathBuf, String) {
         let dir = TempDir::new().unwrap();
-        let archive_rel = "tasks/done-archive.md";
-        let archive_path = dir.path().join(archive_rel);
-        std::fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &archive_path,
-            "- [x] [#archived1] First archived item\n- [x] [#archived2] Second\n",
-        )
-        .unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/a")).unwrap();
+        let doc = dir.path().join("tasks/a/target.md");
         let content = format!(
-            "<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
-            archive_rel
+            "<!-- agent:done {archive_attr} -->\n- 2026-10-01 [#inline1] Inline entry.\n<!-- /agent:done -->\n"
         );
-        let ids = collect_agent_done_ids_with_root(&content, Some(dir.path()));
+        std::fs::write(&doc, &content).unwrap();
+        (dir, doc, content)
+    }
+
+    const GH325_ARCHIVE: &str = "# Agent Doc Completed Work\n\n- 2026-10-19 [#archived1] First archived item\n- 2026-10-20 [#archived2] Second\n";
+
+    #[test]
+    fn collect_agent_done_ids_reads_project_relative_archive_attr() {
+        let (dir, doc, content) = gh325_project("archive=tasks/done-archive.done.md");
+        std::fs::write(dir.path().join("tasks/done-archive.done.md"), GH325_ARCHIVE).unwrap();
+        let ids = collect_agent_done_ids(&doc, &content).unwrap();
+        for id in ["inline1", "archived1", "archived2"] {
+            assert!(ids.contains(id), "{id} missing: {ids:?}");
+        }
+    }
+
+    /// GH #325: a bare `archive` (the documented default) is `<stem>.done.md`
+    /// beside the document. The old reader joined the empty value onto the
+    /// project root, read the root DIRECTORY, failed silently, and returned no
+    /// archived ids or texts.
+    #[test]
+    fn collect_agent_done_ids_and_texts_read_bare_archive_beside_document() {
+        let (dir, doc, content) = gh325_project("archive");
+        std::fs::write(dir.path().join("tasks/a/target.done.md"), GH325_ARCHIVE).unwrap();
+        let ids = collect_agent_done_ids(&doc, &content).unwrap();
+        assert!(ids.contains("archived1"), "{ids:?}");
+        assert!(ids.contains("archived2"), "{ids:?}");
+        assert!(ids.contains("inline1"), "{ids:?}");
+        let texts = collect_agent_done_texts(&doc, &content).unwrap();
+        assert_eq!(
+            texts.get("archived1").map(String::as_str),
+            Some("First archived item"),
+            "{texts:?}"
+        );
+        assert_eq!(
+            texts.get("inline1").map(String::as_str),
+            Some("Inline entry."),
+            "{texts:?}"
+        );
+    }
+
+    /// GH #325: `document:` / `project:` anchors resolve like the writer's.
+    /// The old reader looked for the literal `<root>/document:x.done.md`.
+    #[test]
+    fn collect_agent_done_ids_honours_document_and_project_anchors() {
+        let (dir, doc, content) = gh325_project("archive=document:../history.done.md");
+        std::fs::write(dir.path().join("tasks/history.done.md"), GH325_ARCHIVE).unwrap();
+        let ids = collect_agent_done_ids(&doc, &content).unwrap();
+        assert!(ids.contains("archived1"), "document: anchor: {ids:?}");
+        let texts = collect_agent_done_texts(&doc, &content).unwrap();
         assert!(
-            ids.contains("archived1"),
-            "expected ids to include archived1 from archive file: {:?}",
-            ids
+            texts.contains_key("archived2"),
+            "document: anchor: {texts:?}"
         );
-        assert!(ids.contains("archived2"));
-        let ids_no_root = collect_agent_done_ids_with_root(&content, None);
-        assert!(ids_no_root.is_empty());
+
+        let (dir, doc, content) = gh325_project("archive=project:tasks/history.done.md");
+        std::fs::write(dir.path().join("tasks/history.done.md"), GH325_ARCHIVE).unwrap();
+        let ids = collect_agent_done_ids(&doc, &content).unwrap();
+        assert!(ids.contains("archived1"), "project: anchor: {ids:?}");
+    }
+
+    /// The preflight readers take the same `<stem>.done.md` sibling union
+    /// `archived_tracked_ids` reads, even with no `archive=` declared.
+    #[test]
+    fn collect_agent_done_ids_reads_sibling_archive_without_declared_target() {
+        let (dir, doc, content) = gh325_project("");
+        std::fs::write(dir.path().join("tasks/a/target.done.md"), GH325_ARCHIVE).unwrap();
+        let ids = collect_agent_done_ids(&doc, &content).unwrap();
+        assert!(ids.contains("archived1"), "{ids:?}");
+    }
+
+    /// Spec: invalid archive targets fail closed instead of being ignored.
+    #[test]
+    fn collect_agent_done_ids_fails_closed_on_invalid_archive_target() {
+        let (_dir, doc, content) = gh325_project("archive=tasks/not-an-archive.md");
+        assert!(collect_agent_done_ids(&doc, &content).is_err());
+        assert!(collect_agent_done_texts(&doc, &content).is_err());
+        let (_dir, doc, content) = gh325_project("archive=project:../escape.done.md");
+        assert!(collect_agent_done_ids(&doc, &content).is_err());
+    }
+
+    /// GH #325: 0.35.521–0.35.523 wrote `<doc dir>/<project-relative path>`.
+    /// That file is never read as history, and preflight names it once.
+    #[test]
+    fn misplaced_legacy_done_archive_is_not_read_and_is_advised_once() {
+        let (dir, doc, content) = gh325_project("archive=tasks/a/target.done.md");
+        std::fs::write(dir.path().join("tasks/a/target.done.md"), GH325_ARCHIVE).unwrap();
+        let legacy = dir.path().join("tasks/a/tasks/a/target.done.md");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, "- 2026-10-19 [#legacyonly] Misplaced.\n").unwrap();
+
+        let ids = collect_agent_done_ids(&doc, &content).unwrap();
+        assert!(ids.contains("archived1"), "{ids:?}");
+        assert!(!ids.contains("legacyonly"), "{ids:?}");
+
+        let advisories = dir.path().join(".agent-doc/advisories");
+        advise_misplaced_legacy_done_archive(&doc, &content);
+        let markers: Vec<_> = std::fs::read_dir(&advisories)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(markers.len(), 1, "{markers:?}");
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert_eq!(
+            ops.matches("legacy_done_archive_advisory").count(),
+            1,
+            "{ops}"
+        );
+
+        advise_misplaced_legacy_done_archive(&doc, &content);
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert_eq!(
+            ops.matches("legacy_done_archive_advisory").count(),
+            1,
+            "the advisory is one-time: {ops}"
+        );
+        assert!(
+            legacy.is_file(),
+            "the advisory never moves or deletes the file"
+        );
+    }
+
+    #[test]
+    fn no_legacy_advisory_without_a_misplaced_archive() {
+        let (dir, doc, content) = gh325_project("archive");
+        std::fs::write(dir.path().join("tasks/a/target.done.md"), GH325_ARCHIVE).unwrap();
+        advise_misplaced_legacy_done_archive(&doc, &content);
+        assert!(!dir.path().join(".agent-doc/advisories").exists());
     }
 
     /// GH #161: a prompt preset is a reusable command. An archived done row
@@ -15287,6 +15448,68 @@ mod tests {
         assert!(updated.contains("- 🚧 do [#beta]"));
         assert!(updated.contains("agent:queue auto"));
         assert!(updated.contains("queue: start"));
+    }
+
+    /// GH #325 end to end: a head whose id lives only in the bare-`archive`
+    /// default archive is struck exactly like an inline `agent:done` entry, and
+    /// an id that lives only in the 0.35.521–0.35.523 misplaced archive is not.
+    #[test]
+    fn queue_maintenance_strikes_head_archived_in_bare_default_archive() {
+        let dir = setup_project();
+        std::fs::create_dir_all(dir.path().join("tasks/a/tasks/a")).unwrap();
+        let doc = dir.path().join("tasks/a/target.md");
+        std::fs::write(
+            dir.path().join("tasks/a/target.done.md"),
+            "# Agent Doc Completed Work\n\n- 2026-10-19 [#alpha] First done.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("tasks/a/tasks/a/target.done.md"),
+            "# Agent Doc Completed Work\n\n- 2026-10-19 [#beta] Misplaced.\n",
+        )
+        .unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "- do [#beta]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done archive -->\n",
+            "<!-- completed work archived in target.done.md -->\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_halted, None);
+        assert_eq!(state.queue_prompts, vec!["do [#beta]".to_string()]);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- ~~do [#alpha]~~"),
+            "a head archived in the default archive must be struck: {updated}"
+        );
+        assert!(
+            updated.contains("- 🚧 do [#beta]"),
+            "the misplaced legacy archive is not completed history: {updated}"
+        );
     }
     #[test]
     fn preflight_rebases_active_queue_head_change_without_mid_edit_evidence() {

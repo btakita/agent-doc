@@ -23,8 +23,9 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
+📥 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
-
+2
 <!-- status:sync -->
 Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
@@ -123,7 +124,22 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 - **Surface path (`feat/lazilyroute-20261020`):** Run Agent Doc and Sync Tmux Layout publish the editor surface instead of `--col` arguments. Every Run then refreshes the model from the editor's own state.
 
 All three branches have reported back and are being integrated serially now, along with #321.
-<!-- agent:boundary:4e64b540 -->
+> **Chat prompt (#chatprompt):** subagent: This session crashed and did not restart. Fix agent-doc causes in a subagent
+
+### Re: crashed session with no restart — dispatched — opus-5.5 · 2026-10-20T11:27-04:00
+
+I dispatched this to a background subagent on branch `fix/sessioncrashnorestart`, worktree `~/worktrees/agent-doc-sessioncrash-20261020`, from origin/main `2d5944fb0e`.
+
+**The session in question:** agent-doc session `3f069c68…`, Claude resume `ba846c4c…`, pane `%2`. It is up again under a new supervisor instance (`7916c036…`, pid 1605424, `restart_count=0`), so the crash happened before about 15:25Z, most likely after this document's 14:16Z commit.
+
+**The subagent's brief:**
+- Build the crash timeline read-only from `ops.log`, `supervisor-stderr.log`, `state.db`, the Claude transcript tail, `journalctl` and `coredumpctl`.
+- Establish what died (the claude child, the supervisor, or both), with what signal or exit code, and why no restart happened.
+- Specifically check whether the v0.35.526–528 install/recycle around that time re-exec'd a supervisor that never came back.
+- Fix the root cause with deterministic regression tests and spec updates. A crashed child must restart or surface a clear operator-visible state, never silently vanish. If the root cause is outside agent-doc (e.g. the OOM killer), report that with evidence and still fix the missing restart or signal.
+
+**Related:** the `agent:status` nesting I caused last turn already has a fix on origin/main: `2d5944fb0e` "fix(status): parse status:sync as an AST node so writes never nest it". The nested status text may still need a one-time cleanup.
+<!-- agent:boundary:58e25cd8 -->
 <!-- /agent:exchange -->
 
 <!--

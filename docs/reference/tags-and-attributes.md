@@ -128,8 +128,13 @@ seal, append a response, mutate the queue, or commit the active cycle.
 default (`sync-mode="additive"` is the explicit spelling). The agent upserts
 exactly one neutral managed block, delimited by `<!-- status:sync -->` and
 `<!-- /status:sync -->`, while preserving every byte outside that block.
-Repeated turns update the block rather than accumulating duplicate copies. A
-duplicate or malformed managed block fails closed.
+Repeated turns update the block rather than accumulating duplicate copies.
+Pass only the result as `--text`; if the text carries its own
+`<!-- status:sync -->` block, agent-doc parses it as the whole status body and
+replaces the managed block instead of nesting it. A duplicate or malformed
+managed block fails closed at preflight, which names the binary-owned repair
+`agent-doc status repair <FILE>`; any status write also folds such a structure
+back to one block.
 
 For explicit ordinary-prose replacement, opt into the destructive mode:
 

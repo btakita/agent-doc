@@ -565,8 +565,27 @@ fn run_with_options_to_writer_in_pass(
     // A status sync marker is a persistent operator instruction, not ordinary
     // status prose. Validate it before opening or mutating the response cycle so
     // unknown modes and malformed/duplicate managed blocks fail closed.
-    let status_sync = agent_doc_document::status_projection::status_sync_directive(&content)
-        .context("invalid agent:status sync contract")?;
+    // Preflight stays fail-closed (it never normalizes structure into a new
+    // baseline), but a nested/duplicated managed block has a binary-owned
+    // repair, so the refusal names it instead of leaving a hand edit.
+    let status_sync = match agent_doc_document::status_projection::status_sync_directive(&content) {
+        Ok(directive) => directive,
+        Err(err)
+            if matches!(
+                agent_doc_document::status_projection::normalize_status_sync_content(&content),
+                Ok(Some(_))
+            ) =>
+        {
+            return Err(anyhow::anyhow!(
+                "invalid agent:status sync contract: {err:#}\n\
+                 Recovery [status_sync_structure]: agent-doc status repair {} \
+                 (folds the managed status:sync blocks into one, keeping the latest sync \
+                 payload; editor-aware, safe while the document is open)",
+                file.display()
+            ));
+        }
+        Err(err) => return Err(err.context("invalid agent:status sync contract")),
+    };
     // Phase 1 lossless-tree shadow projection (#lzlosstree): build the lossless
     // tree from the authoritative current text, render it, and log whether it
     // round-trips. Pure and non-blocking — the flat CRDT stays the authority and
@@ -10067,5 +10086,59 @@ mod tests {
                 .contains("invalid agent:status sync contract")
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+    }
+
+    #[test]
+    fn preflight_refuses_nested_status_sync_and_names_the_binary_repair() {
+        let dir = setup_project();
+        let doc = dir.path().join("status-sync-nested.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:status sync=\"Keep release current\" -->\n",
+                "\nReview pass done.\n\n",
+                "<!-- status:sync -->\n",
+                "Review pass done.\n\n",
+                "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
+                "<!-- /status:sync -->\n",
+                "<!-- /agent:status -->\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+        let before = std::fs::read_to_string(&doc).unwrap();
+
+        let err = run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("invalid agent:status sync contract"),
+            "{message}"
+        );
+        assert!(
+            message.contains("duplicate or nested status:sync blocks"),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "Recovery [status_sync_structure]: agent-doc status repair {}",
+                doc.display()
+            )),
+            "{message}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            before,
+            "preflight stays fail-closed and never normalizes the document itself"
+        );
     }
 }

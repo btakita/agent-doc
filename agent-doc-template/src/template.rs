@@ -1181,6 +1181,19 @@ pub fn apply_patches_with_overrides_pure(
             continue;
         }
         let mut new_content = apply_mode(mode, comp.content(&result), &patch_content);
+        // A `patch:status` lands as text, so a response that echoes the managed
+        // `status:sync` block (or appends a second one) could leave it nested or
+        // duplicated. Fold any malformed structure through the status AST so a
+        // response patch can never produce what preflight refuses.
+        if patch.name == "status"
+            && let Some(healed) =
+                agent_doc_document::status_sync_tree::normalize_status_sync_body(&new_content)?
+        {
+            eprintln!(
+                "[template] patch:status folded a malformed status:sync structure into one managed block"
+            );
+            new_content = healed;
+        }
         if agent_doc_element::todo::is_todo_component(&patch.name) {
             let before = comp.content(&result);
             // `#todoids`: an operator `[x]` is sticky. A patch built from a
@@ -2447,6 +2460,39 @@ All green.
             "overflow content should be in exchange"
         );
     }
+    #[test]
+    fn apply_patches_status_patch_cannot_nest_the_managed_sync_block() {
+        let doc = concat!(
+            "<!-- agent:status patch=replace sync=\"Keep release current\" -->\n",
+            "\nSummary.\n\n",
+            "<!-- status:sync -->\nPublished: v1\n<!-- /status:sync -->\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        );
+        let configs = std::collections::HashMap::new();
+        let max_lines = std::collections::HashMap::new();
+        // A response that echoed the region inside another region.
+        let patch = PatchBlock::new(
+            "status",
+            concat!(
+                "Summary.\n\n",
+                "<!-- status:sync -->\nSummary.\n\n",
+                "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
+                "<!-- /status:sync -->\n",
+            ),
+        );
+        let result = apply_patches_pure(doc, &[patch], "", None, &configs, &max_lines).unwrap();
+        assert_eq!(
+            result.matches("<!-- status:sync -->").count(),
+            1,
+            "{result}"
+        );
+        assert_eq!(result.matches("Summary.").count(), 1, "{result}");
+        assert!(result.contains("<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->"));
+        agent_doc_document::status_projection::status_sync_directive(&result)
+            .expect("patched status satisfies the preflight sync contract");
+    }
+
     #[test]
     fn apply_patches_todo_patch_creates_missing_todo_component() {
         let dir = setup_project();

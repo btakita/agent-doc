@@ -1336,7 +1336,8 @@ fn render_status_sync_checkpoint(
         "{STATUS_SYNC_CHECKPOINT_MARKER}\n\
          Re-evaluate the persistent `agent:status` instruction now: {}\n\
          Mode: `{mode}`. If its answer changed, run `agent-doc status set '{}' --text \
-         \"<current result>\"` during this turn. That focused command does not capture, \
+         \"<current result>\"` during this turn, passing only the result: agent-doc owns \
+         the `<!-- status:sync -->` markers. That focused command does not capture, \
          seal, or commit the active response cycle. If the answer did not change, \
          continue without writing. This reminder is additive to any steering context \
          above.",

@@ -183,29 +183,120 @@ fn set_with_options_and_attribution<E: StatusWriteEffects + ?Sized>(
     // one-line swap of the authoritative value. See `status_tree_inner` and the
     // parity test below for the `\n{text}\n` inner mapping.
     log_status_tree_parity(effects, file, &full_content, text, &new_doc);
+    land_status_projection(
+        effects,
+        file,
+        &full_content,
+        &new_doc,
+        force_disk,
+        attribute_baseline,
+        "status_set",
+    )
+}
+
+/// Land a computed status projection through the editor-aware transport (or
+/// the explicit `--force-disk` override) and, for standalone commands,
+/// attribute only the landed status delta to the agent document baseline.
+fn land_status_projection<E: StatusWriteEffects + ?Sized>(
+    effects: &E,
+    file: &Path,
+    full_content: &str,
+    new_doc: &str,
+    force_disk: bool,
+    attribute_baseline: bool,
+    op: &str,
+) -> Result<()> {
     if force_disk {
-        std::fs::write(file, &new_doc)
-            .with_context(|| format!("status_set: failed to write {}", file.display()))?;
-        effects.record_document_write_provenance(file, &new_doc);
+        std::fs::write(file, new_doc)
+            .with_context(|| format!("{op}: failed to write {}", file.display()))?;
+        effects.record_document_write_provenance(file, new_doc);
         effects.log_op(
             file,
             &format!(
-                "status_set_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
+                "{op}_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
                 file.display(),
                 new_doc.len(),
-                agent_doc_hash::content_hash(&new_doc)
+                agent_doc_hash::content_hash(new_doc)
             ),
         );
         if attribute_baseline {
-            effects.attribute_agent_write_to_baseline(file, &full_content, &new_doc);
+            effects.attribute_agent_write_to_baseline(file, full_content, new_doc);
         }
         return Ok(());
     }
-    effects.converge_or_disk_write(file, &full_content, &new_doc, "status_set")?;
+    effects.converge_or_disk_write(file, full_content, new_doc, op)?;
     if attribute_baseline {
-        effects.attribute_agent_write_to_baseline(file, &full_content, &new_doc);
+        effects.attribute_agent_write_to_baseline(file, full_content, new_doc);
     }
     Ok(())
+}
+
+/// Result of `agent-doc status repair`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusRepairOutcome {
+    /// The `status:sync` structure was already well-formed; nothing was written.
+    AlreadyWellFormed,
+    /// A nested/duplicated/unclosed/orphaned structure was folded to one region.
+    Repaired,
+}
+
+/// Binary-owned repair for a malformed `status:sync` structure in
+/// `agent:status` (the shape preflight refuses as "duplicate or nested
+/// status:sync blocks"). Keeps the latest innermost sync payload, moves leaked
+/// free-form prose back outside the region without duplicating it, and leaves
+/// every byte outside `agent:status` untouched. Lands like `status set`:
+/// editor-aware by default, standalone baseline attribution, no cycle capture.
+pub fn repair_with_options<E: StatusWriteEffects + ?Sized>(
+    effects: &E,
+    file: &Path,
+    force_disk: bool,
+    attribute_baseline: bool,
+) -> Result<StatusRepairOutcome> {
+    let full_content = if force_disk {
+        effects.force_disk_document_content(file, "status_repair")
+    } else {
+        effects.current_document_content(file, "status_repair")
+    }
+    .context("failed to read document")?;
+    let Some(new_doc) =
+        agent_doc_document::status_projection::normalize_status_sync_content(&full_content)?
+    else {
+        effects.log_op(
+            file,
+            &format!(
+                "status_repair file={} outcome=already_well_formed",
+                file.display()
+            ),
+        );
+        return Ok(StatusRepairOutcome::AlreadyWellFormed);
+    };
+    effects.log_op(
+        file,
+        &format!(
+            "status_repair file={} outcome=normalized before_len={} after_len={}",
+            file.display(),
+            full_content.len(),
+            new_doc.len()
+        ),
+    );
+    land_status_projection(
+        effects,
+        file,
+        &full_content,
+        &new_doc,
+        force_disk,
+        attribute_baseline,
+        "status_repair",
+    )?;
+    Ok(StatusRepairOutcome::Repaired)
+}
+
+/// `agent-doc status repair <FILE>` with the runtime effects.
+pub fn repair_standalone_with_runtime_options(
+    file: &Path,
+    force_disk: bool,
+) -> Result<StatusRepairOutcome> {
+    repair_with_options(&RUNTIME_STATUS_WRITE_EFFECTS, file, force_disk, true)
 }
 
 #[cfg(test)]
@@ -490,5 +581,79 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("lossless_write_parity op=status_set result=mismatch"))
         );
+    }
+
+    const NESTED_SYNC_DOC: &str = concat!(
+        "## Status\n\n",
+        "<!-- agent:status patch=replace sync=\"Keep release current\" -->\n",
+        "\n📥 Queue handoff: 5 reported items awaiting coordinator integration.\n",
+        "Review pass done.\n\n",
+        "<!-- status:sync -->\n",
+        "Review pass done.\n\n",
+        "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
+        "<!-- /status:sync -->\n",
+        "<!-- /agent:status -->\n",
+        "\n<!-- agent:exchange -->\nkeep\n<!-- /agent:exchange -->\n",
+    );
+
+    #[test]
+    fn repair_folds_nested_sync_through_converge_and_attributes_baseline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("nested.md");
+        std::fs::write(&doc, NESTED_SYNC_DOC).unwrap();
+        let effects = TestEffects::new();
+
+        let outcome = repair_with_options(&effects, &doc, false, true).unwrap();
+        assert_eq!(outcome, StatusRepairOutcome::Repaired);
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            on_disk,
+            concat!(
+                "## Status\n\n",
+                "<!-- agent:status patch=replace sync=\"Keep release current\" -->\n",
+                "\n📥 Queue handoff: 5 reported items awaiting coordinator integration.\n",
+                "Review pass done.\n\n",
+                "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
+                "<!-- /agent:status -->\n",
+                "\n<!-- agent:exchange -->\nkeep\n<!-- /agent:exchange -->\n",
+            )
+        );
+        agent_doc_document::status_projection::status_sync_directive(&on_disk)
+            .expect("repaired document satisfies the preflight contract");
+        assert_eq!(effects.converges.get(), 1);
+        assert_eq!(effects.provenance.get(), 0);
+        assert_eq!(effects.attributions.get(), 1);
+        assert_eq!(
+            effects.attributed_before.borrow().as_deref(),
+            Some(NESTED_SYNC_DOC)
+        );
+
+        let again = TestEffects::new();
+        let outcome = repair_with_options(&again, &doc, false, true).unwrap();
+        assert_eq!(outcome, StatusRepairOutcome::AlreadyWellFormed);
+        assert_eq!(
+            again.converges.get(),
+            0,
+            "a well-formed document is never rewritten"
+        );
+        assert_eq!(again.attributions.get(), 0);
+    }
+
+    #[test]
+    fn set_self_heals_nested_sync_instead_of_refusing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("nested.md");
+        std::fs::write(&doc, NESTED_SYNC_DOC).unwrap();
+        let effects = TestEffects::new();
+
+        set(&effects, &doc, "Published: v3").unwrap();
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            on_disk.matches("<!-- status:sync -->").count(),
+            1,
+            "{on_disk}"
+        );
+        assert_eq!(on_disk.matches("Review pass done.").count(), 1, "{on_disk}");
+        assert!(on_disk.contains("<!-- status:sync -->\nPublished: v3\n<!-- /status:sync -->"));
     }
 }

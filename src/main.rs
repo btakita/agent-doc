@@ -1720,6 +1720,16 @@ enum StatusAction {
         #[arg(long)]
         force_disk: bool,
     },
+    /// Fold a nested, duplicated, unclosed, or orphaned `status:sync` structure
+    /// in `agent:status` into exactly one managed block (keeps the latest sync
+    /// payload; leaves the active cycle open)
+    Repair {
+        /// Path to the session document
+        file: PathBuf,
+        /// Bypass editor convergence and write directly to disk
+        #[arg(long)]
+        force_disk: bool,
+    },
 }
 
 /// Turn lifecycle actions for `agent-doc turn-status`
@@ -5516,6 +5526,21 @@ fn try_main() -> anyhow::Result<()> {
             } => agent_doc_status_io::set_standalone_with_runtime_options(
                 &file, &text, force_disk,
             ),
+            StatusAction::Repair { file, force_disk } => {
+                match agent_doc_status_io::repair_standalone_with_runtime_options(
+                    &file, force_disk,
+                )? {
+                    agent_doc_status_io::StatusRepairOutcome::AlreadyWellFormed => eprintln!(
+                        "[status repair] {}: status:sync structure already well-formed; no change",
+                        file.display()
+                    ),
+                    agent_doc_status_io::StatusRepairOutcome::Repaired => eprintln!(
+                        "[status repair] {}: folded status:sync into one managed block",
+                        file.display()
+                    ),
+                }
+                Ok(())
+            }
         },
         Commands::Reset {
             file,

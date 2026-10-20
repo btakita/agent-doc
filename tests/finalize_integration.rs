@@ -262,6 +262,74 @@ fn status_set_updates_only_status_and_leaves_the_response_cycle_open() {
     );
 }
 
+#[test]
+fn status_repair_folds_nested_status_sync_and_leaves_the_cycle_open() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let status = concat!(
+        "<!-- agent:status sync=\"Keep the published release current\" -->\n",
+        "\n📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
+        "Review pass done.\n\n",
+        "<!-- status:sync -->\n",
+        "Review pass done.\n\n",
+        "<!-- status:sync -->\nPublished: v1.2.3\n<!-- /status:sync -->\n",
+        "<!-- /status:sync -->\n",
+        "<!-- /agent:status -->\n\n",
+    );
+    let content = format!(
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\n\
+         agent: codex\nmodel: gpt-5\n---\n\n\
+         <!-- agent:exchange -->\n❯ investigate release\n\
+         <!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n\
+         {status}<!-- agent:queue -->\n- do [#release]\n<!-- /agent:queue -->\n"
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), &content);
+    let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content))
+        .expect("open response cycle");
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["status", "repair", doc.to_str().unwrap(), "--force-disk"])
+        .assert()
+        .success();
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert_eq!(after.matches("<!-- status:sync -->").count(), 1, "{after}");
+    assert_eq!(after.matches("<!-- /status:sync -->").count(), 1, "{after}");
+    assert_eq!(after.matches("Review pass done.").count(), 1, "{after}");
+    assert!(
+        after.contains("Review pass done.\n\n<!-- status:sync -->\nPublished: v1.2.3\n<!-- /status:sync -->\n<!-- /agent:status -->"),
+        "{after}"
+    );
+    assert_eq!(
+        after.replace(
+            &after[after.find("<!-- agent:status").unwrap()..after.find("<!-- agent:queue").unwrap()],
+            ""
+        ),
+        content.replace(status, ""),
+        "bytes outside agent:status are unchanged"
+    );
+    agent_doc_document::status_projection::status_sync_directive(&after)
+        .expect("repaired document satisfies the preflight contract");
+
+    let still_open = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+        .unwrap()
+        .expect("cycle remains present");
+    assert_eq!(still_open.cycle_id, cycle.cycle_id);
+    assert_eq!(still_open.phase.as_str(), "preflight_started");
+
+    // A second repair is a no-op.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["status", "repair", doc.to_str().unwrap(), "--force-disk"])
+        .assert()
+        .success();
+    assert_eq!(fs::read_to_string(&doc).unwrap(), after);
+}
+
 fn enable_strict_pending_capture(doc: &Path) {
     let current = fs::read_to_string(doc).unwrap();
     let updated = current.replace(

@@ -27220,10 +27220,13 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         "agent_doc_ops_log_io::log_op(file, message)",
         "effects.current_document_content(file, \"status_set\")",
         "effects.force_disk_document_content(file, \"status_set\")",
-        "effects.converge_or_disk_write(file, &full_content, &new_doc, \"status_set\")",
-        "effects.record_document_write_provenance(file, &new_doc)",
+        "fn land_status_projection<E: StatusWriteEffects + ?Sized>(",
+        "effects.converge_or_disk_write(file, full_content, new_doc, op)",
+        "effects.record_document_write_provenance(file, new_doc)",
         "effects.log_op(",
-        "agent_doc_hash::content_hash(&new_doc)",
+        "agent_doc_hash::content_hash(new_doc)",
+        "pub fn repair_with_options<E: StatusWriteEffects + ?Sized>(",
+        "agent_doc_document::status_projection::normalize_status_sync_content",
     ] {
         assert!(
             status_io.contains(required),

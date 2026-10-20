@@ -209,7 +209,11 @@ banner.
 
 ## status set
 
-`agent-doc status set <FILE> --text "<current result>" [--force-disk]` performs a focused `agent:status` update independently of response writeback. It uses editor-aware convergence by default, applies the component's additive or replace `sync-mode`, and attributes the landed status-only delta to the agent document baseline. It never captures or appends a response, seals or commits the active cycle, or mutates queue state. `--force-disk` is the explicit recovery/headless transport override.
+`agent-doc status set <FILE> --text "<current result>" [--force-disk]` performs a focused `agent:status` update independently of response writeback. It uses editor-aware convergence by default, applies the component's additive or replace `sync-mode`, and attributes the landed status-only delta to the agent document baseline. It never captures or appends a response, seals or commits the active cycle, or mutates queue state. `--force-disk` is the explicit recovery/headless transport override. `--text` is the result only; when it carries its own `<!-- status:sync -->` block it is parsed as a full status body and the block is replaced, never nested (see `specs/02-document-format.md` § Structured status-sync writes).
+
+## status repair
+
+`agent-doc status repair <FILE> [--force-disk]` is the binary-owned recovery for the `agent:status` shape preflight refuses as `duplicate or nested status:sync blocks` (or an unclosed/orphaned delimiter). It folds the structure into exactly one managed block — keeping the latest innermost sync payload, moving free-form prose that leaked inside a wrapping block back outside without duplicating lines the outside prose already has, and dropping superseded payloads and orphaned delimiters — and leaves every byte outside `agent:status` unchanged. A well-formed document is a no-op (no write). It lands like `status set`: editor-aware convergence by default (safe while an editor holds the document), the status delta attributed to the agent baseline, and no capture, seal, commit, or queue mutation.
 
 ## clean
 

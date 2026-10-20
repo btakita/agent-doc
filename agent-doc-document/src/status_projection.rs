@@ -14,12 +14,12 @@ pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your sup
 /// worker result still needs coordinator integration, verification, and closeout.
 pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
 
-/// Neutral delimiters for the single agent-managed status-sync projection.
-///
-/// These deliberately are not `agent:*` markers: the sync projection is nested
-/// inside `agent:status`, but it is not an independently addressable component.
-pub const STATUS_SYNC_OPEN_MARKER: &str = "<!-- status:sync -->";
-pub const STATUS_SYNC_CLOSE_MARKER: &str = "<!-- /status:sync -->";
+use crate::status_sync_tree::{
+    ManagedStatusSyncBlock, ensure_well_formed_output, managed_status_sync_block,
+    normalize_status_sync_body, normalized_status_sync_payload, parse_status_write,
+    render_status_sync_block,
+};
+pub use crate::status_sync_tree::{STATUS_SYNC_CLOSE_MARKER, STATUS_SYNC_OPEN_MARKER};
 /// Minimum opt-in cadence for owner-turn status-sync checkpoints.
 pub const STATUS_SYNC_MIN_INTERVAL_MS: u64 = 60_000;
 
@@ -45,49 +45,6 @@ pub struct StatusSyncDirective {
     pub interval_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ManagedStatusSyncBlock {
-    block_start: usize,
-    content_start: usize,
-    content_end: usize,
-    block_end: usize,
-}
-
-fn managed_status_sync_block(status_body: &str) -> Result<Option<ManagedStatusSyncBlock>> {
-    let mut open: Option<(usize, usize)> = None;
-    let mut found = None;
-    let mut offset = 0usize;
-
-    for segment in status_body.split_inclusive('\n') {
-        let line = segment.strip_suffix('\n').unwrap_or(segment).trim();
-        if line == STATUS_SYNC_OPEN_MARKER {
-            if open.is_some() || found.is_some() {
-                bail!("agent:status contains duplicate or nested status:sync blocks");
-            }
-            open = Some((offset, offset + segment.len()));
-        } else if line == STATUS_SYNC_CLOSE_MARKER {
-            let Some((block_start, content_start)) = open.take() else {
-                bail!("agent:status contains a status:sync close marker without an opener");
-            };
-            if found.is_some() {
-                bail!("agent:status contains more than one status:sync block");
-            }
-            found = Some(ManagedStatusSyncBlock {
-                block_start,
-                content_start,
-                content_end: offset,
-                block_end: offset + segment.len(),
-            });
-        }
-        offset += segment.len();
-    }
-
-    if open.is_some() {
-        bail!("agent:status contains an unclosed status:sync block");
-    }
-    Ok(found)
-}
-
 /// Read and validate the persistent status-sync instruction on `agent:status`.
 ///
 /// `sync-mode` accepts only `additive` (the default) and `replace`. An optional
@@ -104,7 +61,16 @@ pub fn status_sync_directive(content: &str) -> Result<Option<StatusSyncDirective
         return Ok(None);
     };
     managed_status_sync_block(status.content(content))?;
+    status_sync_directive_attrs(content, status)
+}
 
+/// Parse only the `sync`, `sync-mode`, and `interval` attributes of the status
+/// opening marker. Writers use this instead of [`status_sync_directive`] so a
+/// malformed managed structure is repaired by the write rather than refused.
+fn status_sync_directive_attrs(
+    content: &str,
+    status: &element::Component,
+) -> Result<Option<StatusSyncDirective>> {
     let marker = &content[status.open_start..status.open_end];
     let attrs = element::open_marker_attr_tokens(marker)
         .context("failed to parse agent:status opening marker attributes")?;
@@ -220,22 +186,6 @@ fn parse_status_sync_interval_ms(raw: &str) -> Result<u64> {
     Ok(interval_ms)
 }
 
-fn normalized_status_sync_payload(text: &str) -> String {
-    let text = text.trim();
-    if text.is_empty() {
-        String::new()
-    } else {
-        format!("{text}\n")
-    }
-}
-
-fn render_status_sync_block(text: &str) -> String {
-    format!(
-        "{STATUS_SYNC_OPEN_MARKER}\n{}{STATUS_SYNC_CLOSE_MARKER}\n",
-        normalized_status_sync_payload(text)
-    )
-}
-
 fn is_protected_status_line(line: &str) -> bool {
     let line = line.trim();
     line == STALE_SUPERVISOR_STATUS_MARKER
@@ -276,11 +226,134 @@ fn protected_status_prose(status_body: &str) -> String {
     protected.join("\n\n")
 }
 
+/// Rebuild a status body as: the existing leading framing, the binary-owned
+/// operational text from outside the managed region, optional caller prose, and
+/// exactly one managed region around `payload`.
+///
+/// - `prose == None` is `sync-mode=replace`: ordinary prose is dropped and whole
+///   operational paragraphs are retained.
+/// - `prose == Some(..)` is a full status body supplied by the caller (its text
+///   carried its own region). The caller owns every ordinary line, so only the
+///   operational *lines* are retained, and caller lines that are themselves
+///   operational or repeat a retained line are dropped — the projection owns
+///   those, and keeping both would duplicate them.
+fn compose_full_status_body(
+    status_body: &str,
+    block: Option<ManagedStatusSyncBlock>,
+    prose: Option<&str>,
+    payload: &str,
+) -> String {
+    let outside = match block {
+        Some(block) => format!(
+            "{}{}",
+            &status_body[..block.block_start],
+            &status_body[block.block_end..]
+        ),
+        None => status_body.to_string(),
+    };
+    let leading_len = status_body.len() - status_body.trim_start_matches('\n').len();
+    let mut parts = Vec::new();
+    match prose {
+        None => {
+            let protected = protected_status_prose(&outside);
+            if !protected.is_empty() {
+                parts.push(protected);
+            }
+        }
+        Some(prose) => {
+            let protected_lines = outside
+                .lines()
+                .filter(|line| is_protected_status_line(line))
+                .map(str::trim_end)
+                .collect::<Vec<_>>();
+            let known = protected_lines
+                .iter()
+                .map(|line| line.trim())
+                .collect::<std::collections::HashSet<_>>();
+            if !protected_lines.is_empty() {
+                parts.push(protected_lines.join("\n"));
+            }
+            let mut kept: Vec<&str> = Vec::new();
+            for line in prose.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    if kept.last().is_some_and(|last| !last.trim().is_empty()) {
+                        kept.push("");
+                    }
+                    continue;
+                }
+                if is_protected_status_line(line) || known.contains(trimmed) {
+                    continue;
+                }
+                kept.push(line.trim_end());
+            }
+            let prose = kept.join("\n");
+            let prose = prose.trim();
+            if !prose.is_empty() {
+                parts.push(prose.to_string());
+            }
+        }
+    }
+    let mut body = status_body[..leading_len].to_string();
+    for part in parts {
+        body.push_str(&part);
+        body.push_str("\n\n");
+    }
+    body.push_str(&render_status_sync_block(payload));
+    body
+}
+
+/// Self-heal a nested, duplicated, unclosed, or orphaned `status:sync`
+/// structure in the document's `agent:status` component.
+///
+/// Returns `Ok(None)` when there is no status component or its managed
+/// structure is already well-formed. Otherwise the status body is folded into
+/// exactly one region: the latest innermost payload is kept, free-form prose
+/// that leaked inside a wrapping region moves back outside (dropping lines the
+/// outside prose already has), superseded payloads and orphaned markers are
+/// removed, and every byte outside the status component is unchanged.
+pub fn normalize_status_sync_content(content: &str) -> Result<Option<String>> {
+    let components = element::parse(content).context("failed to parse components")?;
+    let Some(status) = components
+        .iter()
+        .find(|component| component.name == "status")
+    else {
+        return Ok(None);
+    };
+    Ok(normalize_status_sync_body(status.content(content))?
+        .map(|body| status.replace_content(content, &body)))
+}
+
 fn apply_status_sync_body(status_body: &str, text: &str, mode: StatusSyncMode) -> Result<String> {
+    let updated = compose_status_sync_body(status_body, text, mode)?;
+    ensure_well_formed_output(&updated)?;
+    Ok(updated)
+}
+
+fn compose_status_sync_body(status_body: &str, text: &str, mode: StatusSyncMode) -> Result<String> {
+    // Self-heal first: a nested/duplicated/unclosed structure left by an older
+    // writer is folded into one region before this write lands, so the write
+    // never propagates (or wraps) a malformed shape.
+    let healed = normalize_status_sync_body(status_body)?;
+    let status_body = healed.as_deref().unwrap_or(status_body);
     let block = managed_status_sync_block(status_body)?;
+    // The incoming text is parsed structurally, never spliced in as opaque
+    // bytes: markers it carries are consumed, and prose it places outside its
+    // own region makes it a full status body.
+    let write = parse_status_write(text)?;
+
+    if let Some(prose) = write.prose.as_deref() {
+        return Ok(compose_full_status_body(
+            status_body,
+            block,
+            Some(prose),
+            &write.payload,
+        ));
+    }
+
     if mode == StatusSyncMode::Additive {
+        let payload = normalized_status_sync_payload(&write.payload);
         if let Some(block) = block {
-            let payload = normalized_status_sync_payload(text);
             if status_body[block.content_start..block.content_end] == payload {
                 return Ok(status_body.to_string());
             }
@@ -296,39 +369,29 @@ fn apply_status_sync_body(status_body: &str, text: &str, mode: StatusSyncMode) -
         if !updated.trim().is_empty() && !updated.ends_with("\n\n") {
             updated.push('\n');
         }
-        updated.push_str(&render_status_sync_block(text));
+        updated.push_str(&render_status_sync_block(&write.payload));
         return Ok(updated);
     }
 
-    let ordinary_free = if let Some(block) = block {
-        format!(
-            "{}{}",
-            &status_body[..block.block_start],
-            &status_body[block.block_end..]
-        )
-    } else {
-        status_body.to_string()
-    };
-    let protected = protected_status_prose(&ordinary_free);
-    let managed = render_status_sync_block(text);
-    if protected.is_empty() {
-        Ok(managed)
-    } else {
-        Ok(format!("{protected}\n\n{managed}"))
-    }
+    Ok(compose_full_status_body(
+        status_body,
+        block,
+        None,
+        &write.payload,
+    ))
 }
 
 /// Apply `write --status` semantics while honoring an optional status sync
 /// directive. Documents without `sync` retain the legacy destructive replace.
 pub fn update_status_content(content: &str, text: &str) -> Result<String> {
-    let Some(directive) = status_sync_directive(content)? else {
-        return replace_status_content(content, text);
-    };
     let components = element::parse(content).context("failed to parse components")?;
     let status = components
         .iter()
         .find(|component| component.name == "status")
         .context("document has no status component")?;
+    let Some(directive) = status_sync_directive_attrs(content, status)? else {
+        return replace_status_content(content, text);
+    };
     let body = apply_status_sync_body(status.content(content), text, directive.mode)?;
     Ok(status.replace_content(content, &body))
 }
@@ -340,6 +403,10 @@ pub fn replace_status_content(content: &str, text: &str) -> Result<String> {
         .into_iter()
         .find(|component| component.name == "status")
         .context("document has no status component")?;
+    // Legacy destructive replace keeps the caller's text, except that a
+    // malformed `status:sync` structure in it is folded to one region.
+    let healed = normalize_status_sync_body(text)?;
+    let text = healed.as_deref().map(str::trim_end).unwrap_or(text);
     let new_content = format!("\n{}\n", text);
     Ok(status.replace_content(content, &new_content))
 }
@@ -942,6 +1009,191 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("unclosed status:sync block")
+        );
+    }
+
+    // Exact `agent:status` components from agent-loop `tasks/agent-doc/agent-doc-bugs.md`:
+    // `INCIDENT_PRIOR_STATUS` at 411c4cb1a1 and `INCIDENT_NESTED_STATUS` at dc6186d4da,
+    // which `agent-doc write --status` produced from the prior one on 2026-10-20.
+    const INCIDENT_PRIOR_STATUS: &str = concat!(
+        "<!-- agent:status patch=replace sync=\"Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time.\" -->\n",
+        "\n",
+        "📥 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.\n",
+        "Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).\n",
+        "\n",
+        "<!-- status:sync -->\n",
+        "Latest published release: [v0.35.527](https://github.com/btakita/agent-doc/releases/tag/v0.35.527) (GH #317, #318, #319 + blocking-packet todo), published on GitHub at 2026-10-20 06:26:45 UTC (15 assets); PyPI 0.35.527 followed at 2026-10-20 06:27:34 UTC; installed locally (install-full). JetBrains packages unchanged at 0.2.720 (classic), 0.2.721 (IDE 262), 0.2.722 (IDE 263): no plugin source change. Next: v0.35.528 (GH #320 option A, background-drain busy-turn defer, orphan-drain claim re-read, state-propagation spec) waits on the #320 make check.\n",
+        "<!-- /status:sync -->\n",
+        "<!-- /agent:status -->\n",
+    );
+    const INCIDENT_NESTED_STATUS: &str = concat!(
+        "<!-- agent:status patch=replace sync=\"Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time.\" -->\n",
+        "\n",
+        "📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
+        "Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).\n",
+        "\n",
+        "<!-- status:sync -->\n",
+        "Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).\n",
+        "\n",
+        "<!-- status:sync -->\n",
+        "Latest published release: [v0.35.528](https://github.com/btakita/agent-doc/releases/tag/v0.35.528) (GH #320 option A: Remote Dev split state reaches the controller; background-drain busy-turn defer, orphan-drain claim re-read, state-propagation spec), published on GitHub at 2026-10-20 07:37:15 UTC (15 assets); PyPI 0.35.528 followed at 2026-10-20 07:38:01 UTC; installed locally (agent-doc 0.35.528). JetBrains packages in v0.35.528: 0.2.723 (classic), 0.2.725 (IDE 262), 0.2.724 (IDE 263), published with the release at 2026-10-20 07:37:15 UTC; installed: IntelliJ IDEA 2026.1 classic 0.2.723, Rider 2026.2 IDE-262 0.2.725. VS Code extension 0.2.83.\n",
+        "<!-- /status:sync -->\n",
+        "<!-- /status:sync -->\n",
+        "<!-- /agent:status -->\n",
+    );
+
+    /// The `--status` text the agent passed: its full status body, region included.
+    fn incident_agent_status_text() -> String {
+        let body = INCIDENT_NESTED_STATUS
+            .split_once("<!-- status:sync -->\n")
+            .unwrap()
+            .1;
+        body.rsplit_once("<!-- /status:sync -->\n<!-- /agent:status -->")
+            .unwrap()
+            .0
+            .trim_end()
+            .to_string()
+    }
+
+    fn incident_doc(status: &str) -> String {
+        format!(
+            "## Status\n\n{status}\n## Exchange\n\n<!-- agent:exchange -->\nkeep me\n<!-- /agent:exchange -->\n"
+        )
+    }
+
+    fn assert_single_incident_region(doc: &str) {
+        assert_eq!(doc.matches(STATUS_SYNC_OPEN_MARKER).count(), 1, "{doc}");
+        assert_eq!(doc.matches(STATUS_SYNC_CLOSE_MARKER).count(), 1, "{doc}");
+        assert_eq!(doc.matches("Review pass done.").count(), 1, "{doc}");
+        assert_eq!(
+            doc.matches(REPORTED_QUEUE_STATUS_PREFIX).count(),
+            1,
+            "{doc}"
+        );
+        assert!(
+            doc.contains("Latest published release: [v0.35.528]"),
+            "{doc}"
+        );
+        assert!(!doc.contains("v0.35.527"), "{doc}");
+        assert!(doc.contains("<!-- agent:exchange -->\nkeep me\n<!-- /agent:exchange -->"));
+        status_sync_directive(doc).expect("result must satisfy the preflight sync contract");
+    }
+
+    #[test]
+    fn full_body_status_write_replaces_the_region_instead_of_nesting_it() {
+        let text = incident_agent_status_text();
+        assert!(text.starts_with("Review pass done."), "{text}");
+        assert!(text.contains(STATUS_SYNC_OPEN_MARKER), "{text}");
+
+        let doc = incident_doc(INCIDENT_PRIOR_STATUS);
+        let updated = update_status_content(&doc, &text).unwrap();
+        assert_single_incident_region(&updated);
+        assert!(updated.contains(concat!(
+            "📥 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.\n\n",
+            "Review pass done.",
+        )));
+
+        let repeated = update_status_content(&updated, &text).unwrap();
+        assert_eq!(
+            repeated, updated,
+            "a repeated full-body write must be byte-idempotent"
+        );
+    }
+
+    #[test]
+    fn nested_incident_status_self_heals_on_the_next_write() {
+        let doc = incident_doc(INCIDENT_NESTED_STATUS);
+        let err = status_sync_directive(&doc).unwrap_err();
+        assert!(err.to_string().contains("duplicate or nested"), "{err:#}");
+
+        for text in [
+            incident_agent_status_text(),
+            "Latest published release: [v0.35.528](https://github.com/btakita/agent-doc/releases/tag/v0.35.528)."
+                .to_string(),
+        ] {
+            let updated = update_status_content(&doc, &text).unwrap();
+            assert_single_incident_region(&updated);
+            let repeated = update_status_content(&updated, &text).unwrap();
+            assert_eq!(repeated, updated, "repeat must be byte-idempotent");
+        }
+    }
+
+    #[test]
+    fn normalize_status_sync_content_repairs_the_incident_shape_in_place() {
+        let doc = incident_doc(INCIDENT_NESTED_STATUS);
+        let healed = normalize_status_sync_content(&doc)
+            .unwrap()
+            .expect("nested shape needs repair");
+        assert_single_incident_region(&healed);
+        let prior_shape = INCIDENT_PRIOR_STATUS
+            .replace("2 reported items", "5 reported items")
+            .replace(
+                INCIDENT_PRIOR_STATUS
+                    .split_once("<!-- status:sync -->\n")
+                    .unwrap()
+                    .1
+                    .split_once("<!-- /status:sync -->")
+                    .unwrap()
+                    .0,
+                INCIDENT_NESTED_STATUS
+                    .rsplit_once("<!-- status:sync -->\n")
+                    .unwrap()
+                    .1
+                    .split_once("<!-- /status:sync -->")
+                    .unwrap()
+                    .0,
+            );
+        assert_eq!(
+            healed,
+            incident_doc(&prior_shape),
+            "repair restores the pre-incident shape"
+        );
+        assert_eq!(normalize_status_sync_content(&healed).unwrap(), None);
+        assert_eq!(
+            normalize_status_sync_content(&incident_doc(INCIDENT_PRIOR_STATUS)).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn replace_mode_full_body_write_keeps_operational_lines_and_caller_prose() {
+        let doc = concat!(
+            "<!-- agent:status sync=\"Keep release current\" sync-mode=replace -->\n",
+            "\n📥 Queue handoff: 2 reported items awaiting coordinator integration.\n",
+            "Old summary.\n\n",
+            "<!-- status:sync -->\nPublished: v1\n<!-- /status:sync -->\n",
+            "<!-- /agent:status -->\n"
+        );
+        let text = concat!(
+            "📥 Queue handoff: 1 reported item awaiting coordinator integration.\n",
+            "New summary.\n\n",
+            "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
+        );
+        let updated = update_status_content(doc, text).unwrap();
+        assert_eq!(
+            updated,
+            concat!(
+                "<!-- agent:status sync=\"Keep release current\" sync-mode=replace -->\n",
+                "\n📥 Queue handoff: 2 reported items awaiting coordinator integration.\n\n",
+                "New summary.\n\n",
+                "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
+                "<!-- /agent:status -->\n"
+            )
+        );
+        assert_eq!(update_status_content(&updated, text).unwrap(), updated);
+    }
+
+    #[test]
+    fn legacy_status_without_sync_attr_folds_nested_text() {
+        let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
+        let updated = update_status_content(
+            doc,
+            "Summary.\n\n<!-- status:sync -->\nSummary.\n\n<!-- status:sync -->\nv2\n<!-- /status:sync -->\n<!-- /status:sync -->",
+        )
+        .unwrap();
+        assert_eq!(
+            updated,
+            "<!-- agent:status -->\n\nSummary.\n\n<!-- status:sync -->\nv2\n<!-- /status:sync -->\n<!-- /agent:status -->\n"
         );
     }
 }

@@ -18913,6 +18913,8 @@ prompt_presets:\n  \"#upgrade\": \"upgrade agent-doc to the latest release\"\n--
             prune_before_lookup: false,
             background_existing_pane_only: true,
             background_recovered_actor_fallback: false,
+            dispatch_origin:
+                agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin::AutomatedBackground,
             layout_owned_by_controller: false,
             navigation_client_id: None,
         }

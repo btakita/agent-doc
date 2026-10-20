@@ -20,6 +20,8 @@ pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
 /// inside `agent:status`, but it is not an independently addressable component.
 pub const STATUS_SYNC_OPEN_MARKER: &str = "<!-- status:sync -->";
 pub const STATUS_SYNC_CLOSE_MARKER: &str = "<!-- /status:sync -->";
+/// Minimum opt-in cadence for owner-turn status-sync checkpoints.
+pub const STATUS_SYNC_MIN_INTERVAL_MS: u64 = 60_000;
 
 /// How an `agent:status sync="..."` update treats ordinary status prose.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -37,6 +39,10 @@ pub enum StatusSyncMode {
 pub struct StatusSyncDirective {
     pub instruction: String,
     pub mode: StatusSyncMode,
+    /// Validated opt-in checkpoint cadence from `interval`, in milliseconds.
+    /// `None` keeps synchronization at preflight only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,9 +90,11 @@ fn managed_status_sync_block(status_body: &str) -> Result<Option<ManagedStatusSy
 
 /// Read and validate the persistent status-sync instruction on `agent:status`.
 ///
-/// `sync-mode` accepts only `additive` (the default) and `replace`. Validation
-/// also proves that any existing managed block is unique and balanced, so both
-/// preflight and writeback fail before changing status content.
+/// `sync-mode` accepts only `additive` (the default) and `replace`. An optional
+/// `interval` enables repeated mid-turn checkpoints using the queue duration
+/// grammar and cannot be less than one minute. Validation also proves that any
+/// existing managed block is unique and balanced, so both preflight and
+/// writeback fail before changing status content.
 pub fn status_sync_directive(content: &str) -> Result<Option<StatusSyncDirective>> {
     let components = element::parse(content).context("failed to parse components")?;
     let Some(status) = components
@@ -108,15 +116,25 @@ pub fn status_sync_directive(content: &str) -> Result<Option<StatusSyncDirective
         .iter()
         .filter(|(key, _)| key == "sync-mode")
         .collect::<Vec<_>>();
+    let intervals = attrs
+        .iter()
+        .filter(|(key, _)| key == "interval")
+        .collect::<Vec<_>>();
     if sync.len() > 1 {
         bail!("agent:status must contain at most one sync attribute");
     }
     if modes.len() > 1 {
         bail!("agent:status must contain at most one sync-mode attribute");
     }
+    if intervals.len() > 1 {
+        bail!("agent:status must contain at most one interval attribute");
+    }
     let Some((_, instruction)) = sync.first() else {
         if !modes.is_empty() {
             bail!("agent:status sync-mode requires a sync instruction");
+        }
+        if !intervals.is_empty() {
+            bail!("agent:status interval requires a sync instruction");
         }
         return Ok(None);
     };
@@ -131,14 +149,75 @@ pub fn status_sync_directive(content: &str) -> Result<Option<StatusSyncDirective
         Some(Some(other)) => {
             bail!("unsupported agent:status sync-mode `{other}`; expected `additive` or `replace`")
         }
+        Some(None) => {
+            bail!("unsupported bare agent:status sync-mode; expected `additive` or `replace`")
+        }
+    };
+    let interval_ms = match intervals.first().map(|(_, value)| value.as_deref()) {
+        None => None,
+        Some(Some(raw)) => Some(parse_status_sync_interval_ms(raw)?),
         Some(None) => bail!(
-            "unsupported bare agent:status sync-mode; expected `additive` or `replace`"
+            "unsupported bare agent:status interval; expected a duration such as `1m`, `5m`, or `1h30m`"
         ),
     };
     Ok(Some(StatusSyncDirective {
         instruction: instruction.to_string(),
         mode,
+        interval_ms,
     }))
+}
+
+fn parse_status_sync_interval_ms(raw: &str) -> Result<u64> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        bail!("agent:status interval must contain a duration");
+    }
+    let seconds = if let Ok(seconds) = raw.parse::<u64>() {
+        seconds
+    } else {
+        let mut total = 0u64;
+        let mut digits = String::new();
+        for ch in raw.chars() {
+            if ch.is_ascii_digit() {
+                digits.push(ch);
+                continue;
+            }
+            let unit = match ch.to_ascii_lowercase() {
+                'd' => 86_400u64,
+                'h' => 3_600,
+                'm' => 60,
+                's' => 1,
+                _ => bail!(
+                    "agent:status interval `{raw}` is not a duration; use e.g. `60`, `1m`, `5m`, `1h30m`, or `1d`"
+                ),
+            };
+            let value = digits.parse::<u64>().with_context(|| {
+                format!(
+                    "agent:status interval `{raw}` is not a duration; use e.g. `60`, `1m`, `5m`, `1h30m`, or `1d`"
+                )
+            })?;
+            digits.clear();
+            let segment = value
+                .checked_mul(unit)
+                .with_context(|| format!("agent:status interval `{raw}` is too long"))?;
+            total = total
+                .checked_add(segment)
+                .with_context(|| format!("agent:status interval `{raw}` is too long"))?;
+        }
+        if !digits.is_empty() {
+            bail!(
+                "agent:status interval `{raw}` mixes a unit-less number into a duration; use e.g. `1h30m`"
+            );
+        }
+        total
+    };
+    let interval_ms = seconds
+        .checked_mul(1_000)
+        .with_context(|| format!("agent:status interval `{raw}` is too long"))?;
+    if interval_ms < STATUS_SYNC_MIN_INTERVAL_MS {
+        bail!("agent:status interval `{raw}` is below the minimum `1m`");
+    }
+    Ok(interval_ms)
 }
 
 fn normalized_status_sync_payload(text: &str) -> String {
@@ -673,6 +752,7 @@ mod tests {
             Some(StatusSyncDirective {
                 instruction: "Keep the published release current".to_string(),
                 mode: StatusSyncMode::Additive,
+                interval_ms: None,
             })
         );
 
@@ -684,6 +764,25 @@ mod tests {
             status_sync_directive(&replace).unwrap().unwrap().mode,
             StatusSyncMode::Replace
         );
+
+        let throttled = additive.replace(
+            "sync=\"Keep the published release current\"",
+            "sync=\"Keep the published release current\" interval=1h30m",
+        );
+        assert_eq!(
+            status_sync_directive(&throttled)
+                .unwrap()
+                .unwrap()
+                .interval_ms,
+            Some(5_400_000)
+        );
+
+        let legacy: StatusSyncDirective = serde_json::from_value(serde_json::json!({
+            "instruction": "Keep release current",
+            "mode": "additive"
+        }))
+        .unwrap();
+        assert_eq!(legacy.interval_ms, None);
     }
 
     #[test]
@@ -730,6 +829,34 @@ mod tests {
             (
                 "<!-- agent:status sync-mode=replace -->",
                 "sync-mode requires a sync instruction",
+            ),
+            (
+                "<!-- agent:status interval=5m -->",
+                "interval requires a sync instruction",
+            ),
+            (
+                "<!-- agent:status sync=release interval -->",
+                "unsupported bare agent:status interval",
+            ),
+            (
+                "<!-- agent:status sync=release interval= -->",
+                "interval must contain a duration",
+            ),
+            (
+                "<!-- agent:status sync=release interval=30s -->",
+                "below the minimum `1m`",
+            ),
+            (
+                "<!-- agent:status sync=release interval=5x -->",
+                "is not a duration",
+            ),
+            (
+                "<!-- agent:status sync=release interval=18446744073709551615 -->",
+                "is too long",
+            ),
+            (
+                "<!-- agent:status sync=release interval=1m interval=5m -->",
+                "at most one interval attribute",
             ),
         ] {
             let doc = format!("{marker}\nordinary\n<!-- /agent:status -->\n");

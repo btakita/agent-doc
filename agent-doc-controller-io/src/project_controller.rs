@@ -4360,6 +4360,57 @@ impl AsyncEditorFocusFenceDecision {
     }
 }
 
+/// One safe active-turn boundary observed by a harness hook.
+///
+/// This is ingress, not a command to run the synchronization instruction. An
+/// absent interval explicitly disarms the mid-turn cadence while leaving the
+/// status marker's ordinary preflight behavior unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusSyncCheckpointObservation {
+    pub cycle_id: String,
+    pub cycle_started_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_ms: Option<u64>,
+    pub observed_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StatusSyncCheckpointReceipt {
+    generation: String,
+    next_due_ms: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct StatusSyncDueProjection {
+    generation: Option<String>,
+    due: bool,
+}
+
+fn derive_status_sync_due(
+    observation: Option<StatusSyncCheckpointObservation>,
+    receipt: Option<StatusSyncCheckpointReceipt>,
+) -> StatusSyncDueProjection {
+    let Some(observation) = observation else {
+        return StatusSyncDueProjection::default();
+    };
+    let Some(interval_ms) = observation.interval_ms else {
+        return StatusSyncDueProjection::default();
+    };
+    let generation = format!("{}:{interval_ms}", observation.cycle_id);
+    let next_due_ms = receipt
+        .filter(|receipt| receipt.generation == generation)
+        .map(|receipt| receipt.next_due_ms)
+        .unwrap_or_else(|| {
+            observation
+                .cycle_started_at_ms
+                .saturating_add(interval_ms)
+        });
+    StatusSyncDueProjection {
+        generation: Some(generation),
+        due: observation.observed_at_ms >= next_due_ms,
+    }
+}
+
 /// Per-document retained-write settlement as a **keyed reactive collection**
 /// (`#reactivemap`, `#retainedsettlereactive`).
 ///
@@ -4557,6 +4608,17 @@ struct ControllerDocumentGraphs {
         String,
         agent_doc_state_backbone::preflight::PreflightReadProjection,
     >,
+    /// `#statussyncreactive`: the harness publishes completed owner-tool
+    /// boundaries as lifecycle facts. The controller, not the one-shot hook or
+    /// SQLite, owns the per-document/per-turn cadence and derives the due edge.
+    status_sync_observation:
+        lazily::ThreadSafeSourceMap<String, Option<StatusSyncCheckpointObservation>>,
+    /// Receipt emitted by the controller transition that consumes one due edge.
+    /// A changed cycle or interval is a new generation and therefore ignores an
+    /// older receipt without an imperative reset path.
+    status_sync_receipt:
+        lazily::ThreadSafeSourceMap<String, Option<StatusSyncCheckpointReceipt>>,
+    status_sync_due: lazily::ThreadSafeComputedMap<String, StatusSyncDueProjection>,
     /// `#retainedclearreactive` — one settle [`lazily::Effect`] per document,
     /// subscribed to that document's [`Self::verdict`] slot.
     ///
@@ -6366,6 +6428,9 @@ impl ControllerDocumentGraphs {
             document_effect_sender: Arc::new(OnceLock::new()),
             preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
+            status_sync_observation: lazily::ThreadSafeSourceMap::new(&ctx),
+            status_sync_receipt: lazily::ThreadSafeSourceMap::new(&ctx),
+            status_sync_due: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
             retained_transition_effects: Mutex::new(BTreeMap::new()),
             compact_resume_effects: Mutex::new(BTreeMap::new()),
@@ -7410,6 +7475,64 @@ impl ControllerDocumentGraphs {
                     .unwrap_or_default()
             },
         )
+    }
+
+    /// Publish one completed owner-tool boundary and consume the derived due
+    /// edge, if any, in the same controller transition.
+    ///
+    /// The clock reading is an external fact just like process liveness: the
+    /// hook supplies it, Sources retain it, and the Computed owns the timing
+    /// decision. No SQLite read-modify-write arbitration participates in this
+    /// live actor path.
+    fn status_sync_checkpoint(
+        &self,
+        document_hash: &str,
+        observation: StatusSyncCheckpointObservation,
+    ) -> bool {
+        let key = document_hash.to_string();
+        self.ctx.batch(|ctx| {
+            if !self.status_sync_observation.contains_key(ctx, &key) {
+                self.status_sync_observation.set(ctx, key.clone(), None);
+            }
+            if !self.status_sync_receipt.contains_key(ctx, &key) {
+                self.status_sync_receipt.set(ctx, key.clone(), None);
+            }
+            let observations = self.status_sync_observation.clone();
+            let receipts = self.status_sync_receipt.clone();
+            let handle = self.status_sync_due.get_or_insert_handle(
+                ctx,
+                key.clone(),
+                move |ctx, key| {
+                    derive_status_sync_due(
+                        observations.observe(ctx, key).flatten(),
+                        receipts.observe(ctx, key).flatten(),
+                    )
+                },
+            );
+            self.status_sync_observation
+                .set(ctx, key.clone(), Some(observation.clone()));
+            let projection = ctx.get(&handle);
+            if !projection.due {
+                return false;
+            }
+            let generation = projection
+                .generation
+                .expect("a due status-sync projection has a generation");
+            let interval_ms = observation
+                .interval_ms
+                .expect("a due status-sync projection has an interval");
+            self.status_sync_receipt.set(
+                ctx,
+                key,
+                Some(StatusSyncCheckpointReceipt {
+                    generation,
+                    // Overdue tool boundaries advance from observation time,
+                    // avoiding a burst of catch-up prompts after a long tool.
+                    next_due_ms: observation.observed_at_ms.saturating_add(interval_ms),
+                }),
+            );
+            true
+        })
     }
 
     /// `#retainedclearreactive` — subscribe this document's clear to its verdict.
@@ -9583,6 +9706,15 @@ impl ControllerRuntime {
     ) -> agent_doc_state_backbone::preflight::PreflightReadProjection {
         self.document_graphs
             .preflight_projection(document_hash, facts)
+    }
+
+    pub(crate) fn document_status_sync_checkpoint(
+        &self,
+        document_hash: &str,
+        observation: StatusSyncCheckpointObservation,
+    ) -> bool {
+        self.document_graphs
+            .status_sync_checkpoint(document_hash, observation)
     }
 
     pub(crate) fn document_queue_authority_observe(
@@ -21348,6 +21480,63 @@ agent:queue\n\
             second.diff.as_deref(),
             Some("+prompt b"),
             "updating the source slot must invalidate the existing Computed entry"
+        );
+    }
+
+    #[test]
+    fn controller_document_graph_derives_and_consumes_status_sync_due_edges() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        let observation = |cycle: &str, interval_ms, observed_at_ms| {
+            StatusSyncCheckpointObservation {
+                cycle_id: cycle.to_string(),
+                cycle_started_at_ms: 1_000,
+                interval_ms,
+                observed_at_ms,
+            }
+        };
+
+        assert!(
+            !runtime.document_status_sync_checkpoint(
+                &document_hash,
+                observation("cycle-1", None, 50_000),
+            ),
+            "no interval leaves periodic status sync off"
+        );
+        assert!(!runtime.document_status_sync_checkpoint(
+            &document_hash,
+            observation("cycle-1", Some(60_000), 60_999),
+        ));
+        assert!(runtime.document_status_sync_checkpoint(
+            &document_hash,
+            observation("cycle-1", Some(60_000), 70_000),
+        ));
+        assert!(
+            !runtime.document_status_sync_checkpoint(
+                &document_hash,
+                observation("cycle-1", Some(60_000), 129_999),
+            ),
+            "the controller receipt consumes the due edge"
+        );
+        assert!(runtime.document_status_sync_checkpoint(
+            &document_hash,
+            observation("cycle-1", Some(60_000), 130_000),
+        ));
+
+        assert!(
+            runtime.document_status_sync_checkpoint(
+                &document_hash,
+                observation("cycle-2", Some(60_000), 130_000),
+            ),
+            "a new turn generation does not inherit the prior receipt"
+        );
+        assert!(
+            runtime.document_status_sync_checkpoint(
+                &document_hash,
+                observation("cycle-2", Some(120_000), 130_000),
+            ),
+            "changing interval creates a new cadence generation"
         );
     }
 

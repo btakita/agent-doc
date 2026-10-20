@@ -18,7 +18,6 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
     "id",
     "after",
     crate::queue_auto_clear::QUEUE_DISABLE_AUTO_CLEAR_ATTR,
-    crate::queue_schedule::QUEUE_INTERVAL_ATTR,
     crate::queue_schedule::QUEUE_TIME_ATTR,
     crate::queue_schedule::QUEUE_LOOP_ATTR,
 ];
@@ -47,7 +46,10 @@ pub fn is_prompt_component_attr(key: &str) -> bool {
 /// newly supported queue attribute cannot be writable-but-warned or
 /// lint-clean-but-silently-ignored.
 pub fn is_queue_component_attr(key: &str) -> bool {
-    is_queue_only_component_attr(key) || is_prompt_component_attr(key) || key == "priority"
+    is_queue_only_component_attr(key)
+        || is_prompt_component_attr(key)
+        || key == crate::queue_schedule::QUEUE_INTERVAL_ATTR
+        || key == "priority"
 }
 
 /// Whether `key` is valid on `agent:queue` without an explicit value.
@@ -154,7 +156,19 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
             );
         }
         for (key, value) in &component.attrs {
-            if is_queue_only_component_attr(key) {
+            if key == crate::queue_schedule::QUEUE_INTERVAL_ATTR {
+                if !matches!(component.name.as_str(), "queue" | "status") {
+                    issues.push(format!(
+                        "`interval` is a queue-or-status attribute but appears on `agent:{}` (use it on `agent:queue`, or on `agent:status` with `sync`)",
+                        component.name,
+                    ));
+                } else if component.name == "status" && !component.attrs.contains_key("sync") {
+                    issues.push(
+                        "`interval` on `agent:status` requires a non-empty `sync` instruction"
+                            .to_string(),
+                    );
+                }
+            } else if is_queue_only_component_attr(key) {
                 if component.name != "queue" {
                     issues.push(format!(
                         "`{key}` is a queue-only attribute but appears on `agent:{}` (did you mean `<!-- agent:queue {key} -->`?)",
@@ -537,7 +551,7 @@ mod tests {
     #[test]
     fn status_sync_attributes_are_status_only_and_require_an_instruction() {
         let valid = concat!(
-            "<!-- agent:status sync=\"Keep release current\" sync-mode=replace -->\n",
+            "<!-- agent:status sync=\"Keep release current\" sync-mode=replace interval=5m -->\n",
             "old\n",
             "<!-- /agent:status -->\n",
         );
@@ -550,10 +564,26 @@ mod tests {
             .message_body();
         assert!(body.contains("status-only attribute"), "{body}");
 
+        let misplaced_interval =
+            "<!-- agent:exchange interval=5m -->\nq\n<!-- /agent:exchange -->\n";
+        let body = component_attr_warning(misplaced_interval)
+            .expect("interval outside queue/status warns")
+            .message_body();
+        assert!(body.contains("queue-or-status attribute"), "{body}");
+
         let orphaned_mode =
             "<!-- agent:status sync-mode=replace -->\nold\n<!-- /agent:status -->\n";
         let body = component_attr_warning(orphaned_mode)
             .expect("sync-mode without sync warns")
+            .message_body();
+        assert!(
+            body.contains("requires a non-empty `sync` instruction"),
+            "{body}"
+        );
+
+        let orphaned_interval = "<!-- agent:status interval=5m -->\nold\n<!-- /agent:status -->\n";
+        let body = component_attr_warning(orphaned_interval)
+            .expect("interval without sync warns")
             .message_body();
         assert!(
             body.contains("requires a non-empty `sync` instruction"),

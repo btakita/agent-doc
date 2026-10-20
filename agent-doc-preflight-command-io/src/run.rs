@@ -10007,7 +10007,7 @@ mod tests {
             &doc,
             concat!(
                 "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-                "<!-- agent:status patch=replace sync=\"Keep the published release current\" -->\n",
+                "<!-- agent:status patch=replace sync=\"Keep the published release current\" interval=5m -->\n",
                 "Release not checked.\n",
                 "<!-- /agent:status -->\n\n",
                 "<!-- agent:exchange patch=append -->\n",
@@ -10032,6 +10032,7 @@ mod tests {
             "Keep the published release current"
         );
         assert_eq!(contract["status_sync"]["mode"], "additive");
+        assert_eq!(contract["status_sync"]["interval_ms"], 300_000);
     }
 
     #[test]

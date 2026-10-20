@@ -40,10 +40,6 @@ pub const CONSUMER_CLI: &str = "cli";
 /// `agent-doc steering --follow <FILE>` stream consumer.
 pub const CONSUMER_FOLLOW: &str = "follow";
 
-/// Long turns re-surface a persistent `agent:status sync="..."` contract at
-/// most once per minute. Preflight remains the initial checkpoint; this cadence
-/// bounds later drift without injecting context after every tool call.
-pub const STATUS_SYNC_CHECKPOINT_INTERVAL_MS: u64 = 60_000;
 /// Stable prefix so agents and tests can distinguish the reminder from
 /// operator-authored mid-turn steering.
 pub const STATUS_SYNC_CHECKPOINT_MARKER: &str = "[agent-doc] status-sync checkpoint";
@@ -1328,10 +1324,6 @@ pub fn post_tool_use_output(context: &str) -> serde_json::Value {
     })
 }
 
-fn status_sync_checkpoint_key(file: &Path) -> String {
-    state_key("status_sync_checkpoint", file)
-}
-
 fn render_status_sync_checkpoint(
     file: &Path,
     directive: &agent_doc_document::status_projection::StatusSyncDirective,
@@ -1357,10 +1349,18 @@ fn render_status_sync_checkpoint(
 ///
 /// The hook is intentionally an observation/checkpoint surface, never a second
 /// document writer: resolving an arbitrary synchronization instruction requires
-/// the active agent. A generation-keyed next-due timestamp in `state.db` makes
-/// the edge at-most-once across overlapping hook processes and prevents an
-/// immediate post-preflight duplicate or calendar-boundary burst.
-fn status_sync_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
+/// the active agent. It publishes the completed tool boundary into the live
+/// controller's Lazily graph; the controller-owned Computed derives and consumes
+/// the due edge. The one-shot hook neither polls nor arbitrates through SQLite.
+fn status_sync_checkpoint_with(
+    file: &Path,
+    observed_at_ms: u64,
+    observe_boundary: impl FnOnce(
+        &Path,
+        &Path,
+        &agent_doc_controller_io::project_controller::StatusSyncCheckpointObservation,
+    ) -> Result<bool>,
+) -> Result<Option<String>> {
     let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(None);
     };
@@ -1368,30 +1368,33 @@ fn status_sync_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<Str
         return Ok(None);
     }
     let content = crate::resolve_current_document_content(file, "status_sync_checkpoint")?;
-    let Some(directive) = agent_doc_document::status_projection::status_sync_directive(&content)?
-    else {
-        return Ok(None);
-    };
+    let directive = agent_doc_document::status_projection::status_sync_directive(&content)?;
     let Some(root) = project_root(file) else {
         return Ok(None);
     };
-    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
     let cycle_started_at_ms = cycle
         .cycle_id
         .strip_prefix("cycle-")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or_else(|| cycle.started_at.saturating_mul(1_000));
-    let initial_due_ms = cycle_started_at_ms.saturating_add(STATUS_SYNC_CHECKPOINT_INTERVAL_MS);
-    if !agent_doc_sqlite::state_store::claim_periodic_project_runtime_state_in_db(
-        &conn,
-        &status_sync_checkpoint_key(file),
-        &cycle.cycle_id,
-        initial_due_ms,
-        observed_at_ms,
-        STATUS_SYNC_CHECKPOINT_INTERVAL_MS,
-    )? {
+    let interval_ms = directive.as_ref().and_then(|directive| directive.interval_ms);
+    let due = observe_boundary(
+        &root,
+        file,
+        &agent_doc_controller_io::project_controller::StatusSyncCheckpointObservation {
+            cycle_id: cycle.cycle_id.clone(),
+            cycle_started_at_ms,
+            interval_ms,
+            observed_at_ms,
+        },
+    )?;
+    if !due {
         return Ok(None);
     }
+    let directive = directive.context("controller returned a due edge for a disarmed status sync")?;
+    let interval_ms = directive
+        .interval_ms
+        .context("controller returned a due edge without a status-sync interval")?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1399,15 +1402,24 @@ fn status_sync_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<Str
             file.display(),
             cycle.cycle_id,
             observed_at_ms,
-            STATUS_SYNC_CHECKPOINT_INTERVAL_MS,
+            interval_ms,
         ),
     );
     Ok(Some(render_status_sync_checkpoint(file, &directive)))
 }
 
-fn post_tool_use_response_at(
+fn status_sync_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
+    status_sync_checkpoint_with(
+        file,
+        observed_at_ms,
+        agent_doc_controller_io::project_controller::observe_status_sync_checkpoint,
+    )
+}
+
+fn post_tool_use_response_at_with_checkpoint(
     payload: &str,
     observed_at_ms: u64,
+    checkpoint: impl FnOnce(&Path, u64) -> Result<Option<String>>,
 ) -> Result<Option<serde_json::Value>> {
     let input: PostToolUseInput =
         serde_json::from_str(payload).context("parse PostToolUse payload")?;
@@ -1436,7 +1448,7 @@ fn post_tool_use_response_at(
     if let Some(context) = report.and_then(|report| report.render()) {
         contexts.push(context);
     }
-    match status_sync_checkpoint(&file, observed_at_ms) {
+    match checkpoint(&file, observed_at_ms) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
@@ -1457,6 +1469,13 @@ fn post_tool_use_response_at(
         }
     }
     Ok((!contexts.is_empty()).then(|| post_tool_use_output(&contexts.join("\n\n"))))
+}
+
+fn post_tool_use_response_at(
+    payload: &str,
+    observed_at_ms: u64,
+) -> Result<Option<serde_json::Value>> {
+    post_tool_use_response_at_with_checkpoint(payload, observed_at_ms, status_sync_checkpoint)
 }
 
 /// Pure hook decision: the JSON to print, or `None` for silence.
@@ -2543,13 +2562,16 @@ mod tests {
 
     #[test]
     fn status_sync_checkpoint_is_owner_only_periodic_and_additive_to_steering() {
+        use std::cell::RefCell;
+        use std::collections::VecDeque;
+
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let file = root.join("plan.md");
         let baseline = concat!(
             "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n",
-            "<!-- agent:status sync=\"Keep the published release current\" -->\n",
+            "<!-- agent:status sync=\"Keep the published release current\" interval=5m -->\n",
             "operator note\n",
             "<!-- /agent:status -->\n\n",
             "<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n",
@@ -2574,23 +2596,49 @@ mod tests {
             .unwrap()
             .parse::<u64>()
             .unwrap();
-        let first_due = started_at_ms + STATUS_SYNC_CHECKPOINT_INTERVAL_MS;
+        let configured_interval_ms = 5 * 60_000;
+        let first_due = started_at_ms + configured_interval_ms;
+        let decisions = RefCell::new(VecDeque::from([false, true, false, true, false]));
+        let observations = RefCell::new(Vec::new());
+        let checkpoint = |file: &Path, observed_at_ms: u64| {
+            status_sync_checkpoint_with(file, observed_at_ms, |_, _, observation| {
+                observations.borrow_mut().push(observation.clone());
+                Ok(decisions
+                    .borrow_mut()
+                    .pop_front()
+                    .expect("one mocked controller decision per owner boundary"))
+            })
+        };
 
         // Preflight already supplied the contract; an immediate first tool call
         // must not duplicate it.
         assert_eq!(
-            post_tool_use_response_at(&owner_payload, first_due - 1).unwrap(),
+            post_tool_use_response_at_with_checkpoint(
+                &owner_payload,
+                first_due - 1,
+                checkpoint,
+            )
+            .unwrap(),
             None
         );
 
         // A subagent cannot receive or consume the coordinator's status edge.
         assert_eq!(
-            post_tool_use_response_at(&hook_payload(root, Some("agent-a1b2")), first_due).unwrap(),
+            post_tool_use_response_at_with_checkpoint(
+                &hook_payload(root, Some("agent-a1b2")),
+                first_due,
+                checkpoint,
+            )
+            .unwrap(),
             None
         );
-        let first = post_tool_use_response_at(&owner_payload, first_due)
-            .unwrap()
-            .expect("first status checkpoint");
+        // Hooks cannot interrupt a continuously running tool. Once overdue,
+        // the next completed owner tool call surfaces the reminder immediately.
+        let first_observed = first_due + 42_000;
+        let first =
+            post_tool_use_response_at_with_checkpoint(&owner_payload, first_observed, checkpoint)
+                .unwrap()
+                .expect("first status checkpoint");
         let first_context = first["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
@@ -2601,7 +2649,12 @@ mod tests {
 
         // Multiple tool calls within one full interval produce one reminder.
         assert_eq!(
-            post_tool_use_response_at(&owner_payload, first_due + 1).unwrap(),
+            post_tool_use_response_at_with_checkpoint(
+                &owner_payload,
+                first_due + 1,
+                checkpoint,
+            )
+            .unwrap(),
             None
         );
 
@@ -2612,10 +2665,11 @@ mod tests {
             baseline.replace("- current task\n", "- current task\n- inspect issue 42\n"),
         )
         .unwrap();
-        let second_due = first_due + STATUS_SYNC_CHECKPOINT_INTERVAL_MS;
-        let combined = post_tool_use_response_at(&owner_payload, second_due)
-            .unwrap()
-            .expect("combined steering and status checkpoint");
+        let second_due = first_observed + configured_interval_ms;
+        let combined =
+            post_tool_use_response_at_with_checkpoint(&owner_payload, second_due, checkpoint)
+                .unwrap()
+                .expect("combined steering and status checkpoint");
         let combined_context = combined["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
@@ -2623,16 +2677,32 @@ mod tests {
         assert!(combined_context.contains("inspect issue 42"));
         assert!(combined_context.contains(STATUS_SYNC_CHECKPOINT_MARKER));
 
+        // Removing the opt-in interval leaves sync active for the next
+        // preflight but disables all periodic PostToolUse checkpoints.
+        std::fs::write(&file, baseline.replace(" interval=5m", "")).unwrap();
+        assert_eq!(
+            checkpoint(&file, second_due + configured_interval_ms).unwrap(),
+            None
+        );
+        assert_eq!(
+            observations.borrow().last().unwrap().interval_ms,
+            None,
+            "default-off sync must publish an explicit disarm fact"
+        );
+
         // Captured/closed cycles no longer accept mid-turn status reminders.
         close_cycle(&file, &std::fs::read_to_string(&file).unwrap());
+        let observed_boundaries = observations.borrow().len();
         assert_eq!(
-            post_tool_use_response_at(
+            post_tool_use_response_at_with_checkpoint(
                 &owner_payload,
-                second_due + STATUS_SYNC_CHECKPOINT_INTERVAL_MS,
+                second_due + configured_interval_ms,
+                checkpoint,
             )
             .unwrap(),
             None
         );
+        assert_eq!(observations.borrow().len(), observed_boundaries);
     }
 
     /// `#steerowneronly` (#steerworks): a subagent's tool calls share the

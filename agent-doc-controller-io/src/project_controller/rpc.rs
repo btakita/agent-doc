@@ -3552,6 +3552,50 @@ pub fn preflight_read_projection(
     )
 }
 
+pub(crate) fn handle_status_sync_checkpoint(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<bool> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let observation = serde_json::from_str::<StatusSyncCheckpointObservation>(
+        request
+            .diagnostic_payload
+            .as_deref()
+            .context("status_sync_checkpoint requires an observation")?,
+    )
+    .context("status_sync_checkpoint observation must be valid JSON")?;
+    Ok(runtime.document_status_sync_checkpoint(&document_hash, observation))
+}
+
+/// Publish one completed owner-tool boundary to the controller-owned Lazily
+/// graph and return whether it consumed a newly due status-sync edge.
+pub fn observe_status_sync_checkpoint(
+    project_root: &Path,
+    file: &Path,
+    observation: &StatusSyncCheckpointObservation,
+) -> Result<bool> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "status_sync_checkpoint".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(observation)?),
+            sequence: None,
+        },
+    )
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct QueueAuthorityObservationRequest {
     content: String,
@@ -20944,6 +20988,9 @@ pub(crate) fn handle_request_locked(
         }
         "preflight_read_projection" => {
             controller_envelope(handle_preflight_read_projection(runtime.as_ref(), request))
+        }
+        "status_sync_checkpoint" => {
+            controller_envelope(handle_status_sync_checkpoint(runtime.as_ref(), request))
         }
         "queue_authority_observation" => controller_envelope(handle_queue_authority_observation(
             runtime.as_ref(),

@@ -2,6 +2,25 @@
 
 Generated: 2026-10-19T22:22:00-04:00
 
+Last updated: 2026-10-19T22:59-04:00
+
+## Live continuation checkpoint
+
+- The status-interval subagent has been resumed in its preserved worktree.
+- Issue #316 commit `188fad6374b1d1cd2f79dac9fc708b4d77a1fcfb` has now been cherry-picked into the integration worktree as `7431a565b3`.
+- The integration branch is not yet tested or pushed; it is waiting for the interval commit before the one combined verification run.
+- Repository verification confirmed that Claude Code and Codex use the installed unfiltered `PostToolUse` bridge after completed tool calls. OpenCode, Grok, and Cursor use polling/command boundaries. No hook can interrupt a tool call still in progress.
+- Interval checkpoint: the obsolete SQLite periodic-claim helper and its tests have been removed; docs now identify the controller Lazily graph as the live timing authority. The refactored hook integration test and controller cadence test pass. Focused parser/RPC tests, clippy, and broader checks remain in progress.
+- Interval implementation is now committed and pushed as `7d67a33ccb105e66b9370c3f70b8d5b4280def37`; focused status-sync tests, targeted Clippy with warnings denied, `cargo build -p agent-doc`, and `git diff --check` passed.
+- The interval commit has been cherry-picked into the integration branch as `38976ca0ee`. The combined integration HEAD now contains both queue tasks; authoritative `make check` and `make tmux-ci` are next.
+- First combined `make check` attempt reached 6,843/11,116 tests before stopping on one deterministic failure: `component_attr_warning_accepts_valid_schedule_and_flags_bad_values` still expected the old `queue-only attribute` wording for misplaced `interval`; the implementation now correctly reports `queue-or-status attribute`. The interval worker is preparing the minimal expectation fix. This failure is not being treated as flaky or bypassed.
+- The stale assertion was fixed in pushed follow-up `b180f2a4d2efe30070ca92a057ce57626ccf554f` and integrated as `9646a2b934`.
+- The corrected combined `make check` is green: 11,116 Rust tests passed (173 skipped), 202 VS Code tests passed, cross-editor simulation passed, all JetBrains variants built/tested, 8 bootstrap tests passed, docs audit had no blockers, and the cached TLA proof was valid.
+- `make tmux-ci` is also green, including the previously failing `two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end` case and all live clear/layout/resync suites. Install, installed-version verification, and push remain.
+- `make install` completed once. The CLI/native library and VS Code extension were installed; JetBrains artifacts were already byte-identical. Runtime reload was scheduled for idle boundaries, with one editor correctly deferred because its document was mid-cycle.
+- Installed verification: `agent-doc 0.35.525`; integration worktree clean.
+- Integration HEAD `9646a2b934a6eb58906394b01ec37b4e89cd2a2d` was pushed to `origin/main` (`6aa595da2d..9646a2b934`). CI, Book, and Pages runs were queued at handoff update time; local verification is complete and no release was published.
+
 ## Objective
 
 Continue the active work from `tasks/agent-doc/agent-doc-bugs.md` and finish both queue heads:

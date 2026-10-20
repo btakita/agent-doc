@@ -117,6 +117,109 @@ pub fn archived_tracked_ids(file: &Path, content: &str) -> Result<HashSet<String
     Ok(ids)
 }
 
+/// One done-archive file a completed-history reader consumes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoneArchiveSource {
+    pub path: PathBuf,
+    pub content: String,
+}
+
+/// GH #325: every archive file whose entries are this document's completed
+/// history, located through the SAME resolver the writer uses.
+///
+/// Declared `agent:done archive=` targets come first, resolved by
+/// [`resolve_done_archive_target`]: a bare `archive` is `<stem>.done.md` beside
+/// the document, and `document:` / `project:` prefixes pick the anchor. Then
+/// the sibling `<stem>.done.md` candidates walking up to the project root —
+/// the union [`archived_tracked_ids`] reads. Each file appears once.
+///
+/// A reader that joined the raw attribute onto the project root read the root
+/// DIRECTORY for a bare `archive` and the literal `<root>/document:x.done.md`
+/// for an anchored one; both failed silently and left every archived item out.
+///
+/// Fail closed on a declared target: an invalid value, or a file that exists
+/// but cannot be read, is an error. A missing file contributes nothing.
+/// Sibling candidates are best-effort, exactly as in [`archived_tracked_ids`].
+pub fn read_done_archive_sources(file: &Path, content: &str) -> Result<Vec<DoneArchiveSource>> {
+    let components = agent_doc_element::element::parse(content)?;
+    let mut seen = HashSet::new();
+    let mut sources = Vec::new();
+    for component in components
+        .iter()
+        .filter(|c| agent_doc_element::element::is_backlog_done_component(&c.name))
+    {
+        let Some(archive_path) = component.attrs.get("archive") else {
+            continue;
+        };
+        let target = resolve_done_archive_target(file, archive_path)?;
+        if !seen.insert(archive_identity(&target)) {
+            continue;
+        }
+        let text = match crate::backlog_cmd::deferred_raw_content(&target) {
+            Some(staged) => staged,
+            None => match std::fs::read_to_string(&target) {
+                Ok(text) => text,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!("failed to read done archive {}", target.display())
+                    });
+                }
+            },
+        };
+        sources.push(DoneArchiveSource {
+            path: target,
+            content: text,
+        });
+    }
+    for candidate in done_archive_candidates(file) {
+        if !seen.insert(archive_identity(&candidate)) {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(&candidate) {
+            sources.push(DoneArchiveSource {
+                path: candidate,
+                content: text,
+            });
+        }
+    }
+    Ok(sources)
+}
+
+fn archive_identity(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// GH #325: the stale archive 0.35.521–0.35.523 left behind, if one exists.
+///
+/// Those releases resolved every `archive=` value against the document's
+/// directory, so a project-relative value such as `tasks/a/target.done.md` on
+/// `tasks/a/target.md` wrote `tasks/a/tasks/a/target.done.md`. No resolver
+/// reads that file now. Returns `<doc dir>/<project-relative path of the
+/// resolved archive>` when it differs from the resolved archive and exists.
+pub fn misplaced_legacy_done_archive(file: &Path, content: &str) -> Result<Option<PathBuf>> {
+    let Some(target) = configured_external_done_archive(file, content)? else {
+        return Ok(None);
+    };
+    let document = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(root) =
+        agent_doc_fs::find_project_root(&document).and_then(|root| root.canonicalize().ok())
+    else {
+        return Ok(None);
+    };
+    let Ok(relative) = target.strip_prefix(&root) else {
+        return Ok(None);
+    };
+    let Some(dir) = document.parent() else {
+        return Ok(None);
+    };
+    let legacy = dir.join(relative);
+    if legacy == target || !legacy.is_file() {
+        return Ok(None);
+    }
+    Ok(Some(legacy))
+}
+
 pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<String>> {
     let mut ids = HashSet::new();
     let components = agent_doc_element::element::parse(content)?;

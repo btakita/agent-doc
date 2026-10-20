@@ -88,7 +88,42 @@ It has been told not to touch this document. I'll report its result when it fini
 Each one pushes only its own branch. The GH issues will be closed after integration into main. #322, option B, and the surface path all touch the column-order and surface area, so I'll integrate them one at a time and run one `make install` per batch. Option B still needs live JetBrains Client verification by you after it lands.
 
 **CI:** the latest CI run on agent-doc is still in progress, and the one before it passed. This closeout relies on the local `make check` above.
-<!-- agent:boundary:0bedd6eb -->
+
+### Re: Subagent completed: `subagent:gh321` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/321” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=7204837cf8a41dae49d407df7778aa065de845fd3b85b427589bfdc7495461bd -->
+
+### Re: Subagent completed: `subagent:gh322` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/322” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=6ff6178f7b6c7acf043b3841d20a89be8f7a13ef1637f0ba5ffcc8505b5456d5 -->
+
+### Re: Subagent completed: `subagent:gh320b` returned work for queue item “GH 320 follow-up (option B): real Remote Dev split geometry. The 262/263 frontend module publishes the client measured editor-window columns (bump the shared surface snapshot contract) and the backend forwards them into the controller surface Source as editor order; the remembered-order fallback, labelled unknown, stays for classic and one-sided installs. Needs live JetBrains Client verification.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=d6ea3b75614acbc7c7005237a8bc896db18e15ceb75e9160ed516a41e9eb1168 -->
+
+### Re: Subagent completed: `subagent:surfacepath` returned work for queue item “Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=2128d7c5b9d20fcfe4088ee2a070ab6246310be3ce7fd6e18095e3a0bd01ed69 -->
+> **Chat prompt (#chatprompt):** I'm curious as to why the tmux panes get into a swapped state and do not self-correct. Is the model data swapped?
+
+### Re: why swapped tmux panes don't self-correct — opus-5.5 · 2026-10-20T11:20-04:00
+
+**Yes. When the panes are swapped, the controller's model is swapped, and tmux is faithfully showing it.** tmux is only a picture of the controller's desired layout (`pane_layout_desired_published columns=[…]`). The reconciler (`tmux_pane_order`) checks tmux against that model and nothing else. When the model has the wrong order, tmux matches the model, the reconciler logs `outcome=held swaps=[]`, and it counts that as converged. Nothing in the loop knows the model itself is wrong. For tmux to correct itself, some input has to bring the editor's real left-to-right order back into the model.
+
+**Three ways the wrong order gets into the model and stays there:**
+1. **Remote Dev has no geometry (#320).** The backend only sees a flat list of open editors, not which split is on the left. Since option A (v0.35.528), that order is labelled `column_order=unknown`. The controller does not apply an unknown order as editor geometry. Instead it falls back on the order it already holds, which avoids flapping on non-geometric input. The cost is that moving a document to the other split produces nothing that contradicts the held order, so the swap persists until a manual `agent-doc sync --col … --col …`.
+2. **The held order overrides incoming order (#320, #322).** A route marked `column_order=retained` is re-sorted to match the held layout. In #322's log the plugin sent `incoming=[a, b]` and the controller published `columns=[b, a] reordered=true`. That is the model's stale memory winning over the editor by design.
+3. **Focus replaced the wrong column (#311/#322).** When focus lands on a document that isn't in tmux, the controller replaces the latest focus's column. With two splits, that is the split you just left, which is still visible. The model ends up with two documents trading one column while the other column is never replaced. tmux reflects it exactly.
+
+**Local IDE windows are fine.** They report `column_order=editor` from measured window positions, so every observation carries the real order and a swap corrects itself. The current ops.log segment here is all local: 64 of 64 publications are `column_order=editor reordered=false`. Right now the model is `[agent-doc-bugs.md, sdk-demo.md]` and tmux `0:0` is `[%2, %58]` in that order, so there is no swap on this machine at the moment. The swapped cases came from the Remote Dev setups in #320 and #322.
+
+**The fixes all aim at the model's input, not at tmux:**
+- **Option B (`feat/rdgeometry-20261020`):** the JetBrains Client measures its own editor-window positions and sends them as `column_order=editor`, so Remote Dev gets a real order to correct against.
+- **#322 (`fix/gh322-20261020`):** the controller keeps the set of documents the IDE says it shows, and a focus replaces the column holding a document no split shows.
+- **Surface path (`feat/lazilyroute-20261020`):** Run Agent Doc and Sync Tmux Layout publish the editor surface instead of `--col` arguments. Every Run then refreshes the model from the editor's own state.
+
+All three branches have reported back and are being integrated serially now, along with #321.
+<!-- agent:boundary:4e64b540 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -96,16 +131,10 @@ Each one pushes only its own branch. The GH issues will be closed after integrat
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~There was 1 tmux pane with 2 editor panes.~~
-- ~~route: a background orphan-drain dispatch types into a pane right after reading its busy-turn cue (route_dispatch_only_busy_active_turn_skip_wait then tmux_text_enter; from GH 319)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~investigate: preset head upgrade was dispatched 2 s after its claim landed (GH 319 "also seen"; likely claim-visibility timing in the controller state.db read)~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/320~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 GH 320 follow-up (option B): real Remote Dev split geometry. The 262/263 frontend module publishes the client measured editor-window columns (bump the shared surface snapshot contract) and the backend forwards them into the controller surface Source as editor order; the remembered-order fallback, labelled unknown, stays for classic and one-sided installs. Needs live JetBrains Client verification.
-- 🚧 Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").
-- ~~steering: the agent's own committed `> **Queue prompt:** <line>` echo blockquotes in agent:exchange were surfaced to the same turn as 5 NEW operator exchange prompts (source=exchange change=added dispatch=subagent) right after closeout on 0.35.527; agent-authored response cells must never be read back as operator steering~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish including PR #317-#320.~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/321
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/322
+- 📥 GH 320 follow-up (option B): real Remote Dev split geometry. The 262/263 frontend module publishes the client measured editor-window columns (bump the shared surface snapshot contract) and the backend forwards them into the controller surface Source as editor order; the remembered-order fallback, labelled unknown, stays for classic and one-sided installs. Needs live JetBrains Client verification.
+- 📥 Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/321
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/322
 <!-- /agent:queue -->
 
 ## Queue: Issues

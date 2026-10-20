@@ -24,12 +24,11 @@ queue: go
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
 📥 Queue handoff: 9 reported items awaiting coordinator integration, verification, and closeout.
-Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
-2
-<!-- status:sync -->
-Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).
 
-Latest published release: [v0.35.528](https://github.com/btakita/agent-doc/releases/tag/v0.35.528) (GH #320 option A: Remote Dev split state reaches the controller; background-drain busy-turn defer, orphan-drain claim re-read, state-propagation spec), published on GitHub at 2026-10-20 07:37:15 UTC (15 assets); PyPI 0.35.528 followed at 2026-10-20 07:38:01 UTC; installed locally (agent-doc 0.35.528). JetBrains packages in v0.35.528: 0.2.723 (classic), 0.2.725 (IDE 262), 0.2.724 (IDE 263), published with the release at 2026-10-20 07:37:15 UTC; installed: IntelliJ IDEA 2026.1 classic 0.2.723, Rider 2026.2 IDE-262 0.2.725. VS Code extension 0.2.83.
+Batch v0.35.530 (#324–#327 + supervisor-heartbeat fix) is integrated and make check is green; it waits on the CI auto-clear race fix. Five follow-ups are running; GH 326 phases 3–5 wait on phase 2.
+
+<!-- status:sync -->
+Latest published release: [v0.35.529](https://github.com/btakita/agent-doc/releases/tag/v0.35.529) (GH #321 stash-pane orphan-drain dispatch, GH #322 Remote Dev focus-column escalation, GH #323 263 status bar, GH 320 option B client-measured Remote Dev split geometry, Lazily surface path for Run Agent Doc / Sync Tmux Layout, session-crash no-restart fixes, Claude resume id after /clear, owner-pane test fixture), published on GitHub at 2026-10-20 18:18:04 UTC (15 assets); PyPI 0.35.529 followed at 2026-10-20 18:18:53 UTC; installed locally (agent-doc 0.35.529). JetBrains packages in v0.35.529: 0.2.729 (classic), 0.2.730 (IDE 262), 0.2.731 (IDE 263), published with the release at 2026-10-20 18:18:04 UTC. VS Code extension 0.2.83.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -318,7 +317,15 @@ Note on #326: v0.35.530 carries only its first part, the layout rules moved into
 **GH 326 phases 3, 4 and 5 are queued but not dispatched.** Each builds on the one before it and touches the same plugin files, so I'll dispatch phase 3 after phase 2 merges.
 
 **v0.35.530 (your item "release + publish: Include PR #324-#327", 🚧 coordinator-owned):** the batch has #324–#327 plus the supervisor-heartbeat fix, and `make check` passed (11,243 of 11,243). It waits on the CI auto-clear race fix (🚧).
-<!-- agent:boundary:4c518cb0 -->
+
+### Re: session restart; subagents blocked on permissions
+
+The diff this cycle answers is my own previous write: the v0.35.529 status update and the auto-strikes of GH #321, #322, #323 and the #321–#323 release item. My previous closeout wrote it but could not commit it, because typed queue changes landed after its merge was computed. This cycle commits it; nothing in it is new operator input.
+
+This session came back from a restart without its bypass-permissions mode. My own shell commands with redirects or variables, and my file writes, are now refused.
+
+I resumed all six stopped subagents under their original worker ids. Two of them, GH 327 residue strike and GH 326 phase 2, have already stopped with a permission request: Bash and Read are denied in their worktrees, so they have changed nothing. The other four will hit the same wall. They are the CI auto-clear race, the GH 324 extract gap, the GH 325 recover-lost resolver, and the crash-restart resume id. All six claims stay 🚧. **Operator action needed:** switch this session back to bypass permissions (the pane was launched with `--dangerously-skip-permissions`), then tell me to continue, and I will resume all six. v0.35.530 is still integrated and green, waiting on the auto-clear race fix.
+<!-- agent:boundary:811a7087 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -328,11 +335,11 @@ Note on #326: v0.35.530 carries only its first part, the layout rules moved into
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~GH 320 follow-up (option B): real Remote Dev split geometry. The 262/263 frontend module publishes the client measured editor-window columns (bump the shared surface snapshot contract) and the backend forwards them into the controller surface Source as editor order; the remembered-order fallback, labelled unknown, stays for classic and one-sided installs. Needs live JetBrains Client verification.~~
 - ~~Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").~~
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/321
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/322
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/321~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/322~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#sessioncrashnorestart]~~
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/323
-- 🚧 release + publish: Include PR #321-#323
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/323~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: Include PR #321-#323~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#clauderesumeafterclear]~~
 - 🚧 crash auto-restart of the Claude supervisor still resumes the pre-/clear session id held in supervisor memory; re-read the SessionStart-recorded resume id before respawn
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/324

@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 21 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 22 reported items awaiting coordinator integration, verification, and closeout.
 
 Batch v0.35.530 (#324–#327 + supervisor-heartbeat fix) is integrated and make check is green; it waits on the CI auto-clear race fix. Five follow-ups are running; GH 326 phases 3–5 wait on phase 2.
 
@@ -375,6 +375,47 @@ It ships:
 **Running (🚧):** GH 326 phase 5 audits `CrdtReplicaManager`, `PatchWatcher` and `CpRouteClient` and moves their frequently changing pure decisions behind derivations. It leaves anything entangled with document mutation, threading or side-effect order for a later item.
 
 No new actionable follow-up items this cycle: every follow-up so far is already in the queue as its own item.
+
+### Re: v0.35.530 published; its 20 queue items closed
+
+> **Queue prompt:** crash auto-restart of the Claude supervisor still resumes the pre-/clear session id held in supervisor memory; re-read the SessionStart-recorded resume id before respawn
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/324
+> **Queue prompt:** focused extract follow-up (GH 324 gap): when the source was already stripped, the transfers.is_empty() path still reports already_applied via target_covers_selectors, which counts an id covered if any list mentions it; verify the target against the recovery copy under .agent-doc/archives/extract/ and its recorded node ids
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/325
+> **Queue prompt:** queue_recovery done_archive_paths joins the raw archive= value onto the document dir, bypassing resolve_done_archive_target (same class as GH 325), so recover-lost can miss archived ids; move it onto the shared reader and fix its archive=done.md tests
+> **Queue prompt:** finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released depends on wall-clock: its unacknowledged setup claim trips DISPATCH_EVIDENCE_GRACE_SECS (10s) under check-fast load and the second finalize fails the no-worker-acknowledgement pre-write gate; make the grace deterministic (injectable clock) instead of relying on run speed
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/326
+> **Queue prompt:** GH 326 phase 2: move EditorTabSyncListener.captureSurface surface projection behind agent_doc_editor_derive_json as a surface_projection derivation on the delivery worker (visible-document union incl. GH 320 Remote Dev union, readiness, active-document resolution, open-tab proximity, stale-selection settling, payload incl. column_order)
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/327
+> **Queue prompt:** preflight residue strike must not strike a loop head from an echo written before the current pass opened or about another queue head (GH 327 pass 4 wasted a pass)
+> **Queue prompt:** continuation answered-head skip (syntheticstrike) still uses only the head-entry rule; apply the GH 327 pass 4 loop-pass echo scope to loop queue heads so it agrees with the preflight residue strike
+> **Queue prompt:** release + publish: Include PR #324-#327
+> **Queue prompt:** [from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)
+> **Queue prompt:** [from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)
+> **Queue prompt:** queue auto-clear: carry the pending baseline across the supervisor's self-re-exec so an item committed just before the re-exec still gets its clear
+> **Queue prompt:** release + publish: Include PR #324-#327
+> **Queue prompt:** [from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers
+> **Queue prompt:** closeout commit ordering: the controller committed locally before the cycle held-back --status and free-text strikes landed through the live editor; wait for the cycle own late projections before committing instead of relying on the composed-drift recovery
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/317
+> **Queue prompt:** [from:coordinator] binary_owned_resume_commits_one_durable_capture_exactly_once fails under make check load: resume_captured_finalize returns RetryableEffect (no response from Lazily actor within 250ms); make the actor readiness or retry deterministic instead of depending on a 250ms wall-clock window
+
+**v0.35.530 is published and verified:**
+- **GitHub Release:** 15 files, published 20:54:49 UTC.
+- **PyPI:** 0.35.530 published 20:55:37 UTC.
+- **Local install:** `agent-doc --version` reports 0.35.530.
+- **JetBrains plugins:** classic 0.2.735, IDE 262 0.2.736, IDE 263 0.2.737.
+- **Main CI:** green again on `9c7127d5fc`, which confirms the auto-clear baseline fix behind the earlier tmux-ci failure.
+
+**GitHub issues:** GH #324, #325, #327 and #317 are closed, and each has a release comment. GH #326 stays open, with a comment saying phases 1–2 shipped. Its later phases are tracked as their own queue items, so I struck the parent `#gh-fix` item.
+
+**Next, v0.35.531** (`integrate/batch0531`, `make check` passed with 11,338 tests):
+- GH 326 phases 3, 3b, 4 and 5; the plugins are re-bumped to 0.2.747, 0.2.748 and 0.2.749;
+- the Codex queued-clear fix (faint placeholder styling, and a supervised restart instead of `/clear`);
+- the capture-gate fixes (completion records, queue follow-ups, whole-word signals).
+
+It still waits for two running items (🚧): GH 326 phase 5b and the mid-cycle claim release for the capture gate. Phase 5c follows 5b.
+
+No new actionable follow-up items this cycle: every follow-up is already in the queue as its own item.
 <!-- agent:boundary:811a7087 -->
 <!-- /agent:exchange -->
 
@@ -383,31 +424,36 @@ No new actionable follow-up items this cycle: every follow-up so far is already 
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📥 crash auto-restart of the Claude supervisor still resumes the pre-/clear session id held in supervisor memory; re-read the SessionStart-recorded resume id before respawn
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/324
-- 📥 focused extract follow-up (GH 324 gap): when the source was already stripped, the transfers.is_empty() path still reports already_applied via target_covers_selectors, which counts an id covered if any list mentions it; verify the target against the recovery copy under .agent-doc/archives/extract/ and its recorded node ids
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/325
-- 📥 queue_recovery done_archive_paths joins the raw archive= value onto the document dir, bypassing resolve_done_archive_target (same class as GH 325), so recover-lost can miss archived ids; move it onto the shared reader and fix its archive=done.md tests
-- 📥 finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released depends on wall-clock: its unacknowledged setup claim trips DISPATCH_EVIDENCE_GRACE_SECS (10s) under check-fast load and the second finalize fails the no-worker-acknowledgement pre-write gate; make the grace deterministic (injectable clock) instead of relying on run speed
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/326
-- 📥 GH 326 phase 2: move EditorTabSyncListener.captureSurface surface projection behind agent_doc_editor_derive_json as a surface_projection derivation on the delivery worker (visible-document union incl. GH 320 Remote Dev union, readiness, active-document resolution, open-tab proximity, stale-selection settling, payload incl. column_order)
+- ~~crash auto-restart of the Claude supervisor still resumes the pre-/clear session id held in supervisor memory; re-read the SessionStart-recorded resume id before respawn~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/324~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~focused extract follow-up (GH 324 gap): when the source was already stripped, the transfers.is_empty() path still reports already_applied via target_covers_selectors, which counts an id covered if any list mentions it; verify the target against the recovery copy under .agent-doc/archives/extract/ and its recorded node ids~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/325~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~queue_recovery done_archive_paths joins the raw archive= value onto the document dir, bypassing resolve_done_archive_target (same class as GH 325), so recover-lost can miss archived ids; move it onto the shared reader and fix its archive=done.md tests~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released depends on wall-clock: its unacknowledged setup claim trips DISPATCH_EVIDENCE_GRACE_SECS (10s) under check-fast load and the second finalize fails the no-worker-acknowledgement pre-write gate; make the grace deterministic (injectable clock) instead of relying on run speed~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/326~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~GH 326 phase 2: move EditorTabSyncListener.captureSurface surface projection behind agent_doc_editor_derive_json as a surface_projection derivation on the delivery worker (visible-document union incl. GH 320 Remote Dev union, readiness, active-document resolution, open-tab proximity, stale-selection settling, payload incl. column_order)~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 GH 326 phase 3 (after phase 2): move manual Sync Tmux Layout --col snapshot column decisions (exactVisibleSyncDecision, undetectedLayoutColumns, normalizeEditorLayout, absolutizeEditorLayout, chooseSyncProjectRoot) behind a derivation and take that layout read off the EDT
 - 📥 GH 326 phase 3b (after phase 4): move Run Agent Doc --col fallback (TerminalUtil.editorSnapshotRouteLayout) and the TmuxPaneFocusSync candidate-root probe onto the sync_layout derivation (add an optional root-already-chosen input)
 - 📥 GH 326 phase 4 (after phase 3): move RemoteClientSurfacePayload.build and the uniqueRemoteSplitSelection Kotlin remote fallback behind derivations, then retire the Kotlin fallback
-- 🚧 GH 326 phase 5 (after phase 4): audit pure decisions in CrdtReplicaManager, PatchWatcher and CpRouteClient (CrdtReplicaManager changed in 14 releases this month) and move them behind derivations
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/327
-- 📥 preflight residue strike must not strike a loop head from an echo written before the current pass opened or about another queue head (GH 327 pass 4 wasted a pass)
-- 📥 continuation answered-head skip (syntheticstrike) still uses only the head-entry rule; apply the GH 327 pass 4 loop-pass echo scope to loop queue heads so it agrees with the preflight residue strike
-- 🚧 release + publish: Include PR #324-#327 ⟦effect:1⟧
-- 📥 [from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)
-- 📥 [from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)
-- 📥 queue auto-clear: carry the pending baseline across the supervisor's self-re-exec so an item committed just before the re-exec still gets its clear
+- 📥 GH 326 phase 5 (after phase 4): audit pure decisions in CrdtReplicaManager, PatchWatcher and CpRouteClient (CrdtReplicaManager changed in 14 releases this month) and move them behind derivations
+- 🚧 GH 326 phase 5b (after 3b+5 integrate): move attach-failure diagnosis (attachFailureRemedy, attachFailureStatusToken, retainedProjectionHoldNeedsOperatorSurfaceUtil, registerFailureNeedsLivenessRepublishUtil, retainedProjectionHoldMessageUtil) behind a derivation, first moving the EDT recordRegisterFailure callers (register retry timer, native-reload target collection) and Compact Exchange remedy formatting onto a worker
+- GH 326 phase 5c (after 5b): fold withoutBinaryOwnedMarkersUtil and the single-splice shaping into the native containment/rebase calls (NativePatching.capturedSplicesContained / rebaseCapturedSplices) so their text normalization stops needing a plugin release
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/327~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~preflight residue strike must not strike a loop head from an echo written before the current pass opened or about another queue head (GH 327 pass 4 wasted a pass)~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~continuation answered-head skip (syntheticstrike) still uses only the head-entry rule; apply the GH 327 pass 4 loop-pass echo scope to loop queue heads so it agrees with the preflight residue strike~~ — auto-struck: answered this cycle (#ftstrike)
+- ⚠️ release + publish: Include PR #324-#327 ⟦effect:1⟧
+- ~~[from:operator] subagent: fix live Codex supervisor reported heartbeat-stale and no_longer_live (sdk-dev pane %22 stayed in-pane under Blocked by hook)~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~[from:coordinator] fix supervisor auto-clear baseline taken after item one's commit on slow startup (CI 39463326025 queue_auto_clear_types_clear_between_items_into_the_same_harness)~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~queue auto-clear: carry the pending baseline across the supervisor's self-re-exec so an item committed just before the re-exec still gets its clear~~ — auto-struck: answered this cycle (#ftstrike)
 - release + publish: Include PR #324-#327 ⟦effect:2⟧
-- 📥 [from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers
-- 📥 closeout commit ordering: the controller committed locally before the cycle held-back --status and free-text strikes landed through the live editor; wait for the cycle own late projections before committing instead of relying on the composed-drift recovery
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/317
+- ~~[from:coordinator] commit refusal for an unanswered document edit tells a live Claude Code coordinator to run agent-doc <FILE>; that launched a headless claude child resuming the coordinator own session, which resumed its background subagents without bypass permissions, wrote a false session-restart reply, then failed: boundary singleton guard rejected 2 non-adjacent markers~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~closeout commit ordering: the controller committed locally before the cycle held-back --status and free-text strikes landed through the live editor; wait for the cycle own late projections before committing instead of relying on the composed-drift recovery~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/317~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md pane %12, epoch 139, queued 16:16:27Z on 0.35.528) never fired after that turn closed out at 16:24:06Z; the operator cleared by hand at 16:29:56Z
-- 📥 [from:coordinator] binary_owned_resume_commits_one_durable_capture_exactly_once fails under make check load: resume_captured_finalize returns RetryableEffect (no response from Lazily actor within 250ms); make the actor readiness or retry deterministic instead of depending on a 250ms wall-clock window
+- ~~[from:coordinator] binary_owned_resume_commits_one_durable_capture_exactly_once fails under make check load: resume_captured_finalize returns RetryableEffect (no response from Lazily actor within 250ms); make the actor readiness or retry deterministic instead of depending on a 250ms wall-clock window~~ — auto-struck: answered this cycle (#ftstrike)
+- 📥 [from:coordinator] closeout pre_write_guard blocked pending_capture_required on a queue-dispatch cycle (cycle-1792527508436, 20:19:45Z, 0.35.529): preflight offered GH 326 phase 5 in queue_subagent_dispatch and the coordinator claimed and started it; follow-ups were added via queue follow-up, not backlog flags, so the guard saw no backlog mutation (regression of the capturegatedispatched class)
+- 📥 backlog-capture signal list matches bare substrings (tasks, todo), so any tasks/... path in prompt text arms the capture gate; match words, not substrings
+- 🚧 capture gate (after the word-match fix): a head the coordinator claims mid-cycle that preflight did not list for dispatch still arms requires_backlog_capture because the requirement is fixed at preflight; record the heads behind the requirement and release it when all are worker-claimed at closeout
 <!-- /agent:queue -->
 
 ## Queue: Issues

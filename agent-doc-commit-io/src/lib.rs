@@ -347,6 +347,57 @@ fn late_answered_free_text_strike_capture(
     Ok(recurring.then_some(LateAnsweredFreeTextStrike::Recurring(capture_id)))
 }
 
+/// Prove that post-HEAD typed-component drift is exactly the binary-owned
+/// reported-queue handoff status projection (`#queuehandoffstatus`, GH #316).
+///
+/// Pending maintenance can converge this projection through the live editor
+/// after Git has already committed the response snapshot. The terminal retry
+/// must commit that exact deterministic projection instead of classifying it as
+/// a fresh operator status edit. Fail closed unless the same response cycle is
+/// already write-applied/committed and the durable claim ledger projects HEAD
+/// to the editor-authoritative document byte-for-byte.
+fn late_reported_queue_status_projection(
+    file: &Path,
+    committed_content: &str,
+    current_content: &str,
+) -> Result<Option<usize>> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if !matches!(
+        state.phase,
+        agent_doc_turn::CyclePhase::WriteApplied | agent_doc_turn::CyclePhase::Committed
+    ) {
+        return Ok(None);
+    }
+
+    let mut reported_identities =
+        agent_doc_queue_io::queue_claim::claim_states_for_content(file, current_content)?
+            .into_iter()
+            .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
+            .map(|claim| claim.identity)
+            .collect::<HashSet<_>>();
+    reported_identities.extend(
+        agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
+            file,
+            current_content,
+        )
+        .into_iter()
+        .map(|head| agent_doc_queue::queue_claim::claim_identity(&head)),
+    );
+    let reported_count = reported_identities.len();
+    let Some(target) =
+        agent_doc_document::status_projection::reconcile_reported_queue_status_content(
+            committed_content,
+            reported_count,
+        )?
+    else {
+        return Ok(None);
+    };
+
+    Ok((target == current_content).then_some(reported_count))
+}
+
 /// `#synthcommitstrike`: whether the current document carries an answered
 /// free-text head as a prompt typed again, rather than as unstruck residue.
 ///
@@ -2614,6 +2665,35 @@ where
     }
 
     let mut binary_owned_side_effects = binary_owned_commit_side_effects(file, &file_content)?;
+    // `#latequeuehandoffstatus` (GH #316): pending maintenance can project the
+    // reported-handoff status through the live editor just after Git commits the
+    // response snapshot. Admit only the exact ledger-derived status projection
+    // from HEAD; all other typed-component drift continues through the strict
+    // ownership refusal below.
+    if snapshot_matches_head
+        && binary_owned_side_effects.is_empty()
+        && let Some(head) = head_doc.as_deref()
+        && let Some(reported_count) =
+            late_reported_queue_status_projection(file, head, &file_content)?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_reconciled_late_reported_queue_status file={} basis=committed_head_exact_projection reported_count={} snap_len={} file_len={}",
+                file.display(),
+                reported_count,
+                snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0),
+                file_content.len(),
+            ),
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &file_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        snapshot_content = Some(file_content.clone());
+        snapshot_matches_head = false;
+    }
     let late_answered_free_text = if snapshot_matches_head
         && binary_owned_side_effects.is_empty()
         && let Some(head) = head_doc.as_deref()

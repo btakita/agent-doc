@@ -3193,6 +3193,124 @@ Duplicate replay should stay live.
         );
     }
 
+    /// `#latequeuehandoffstatus` (GitHub #316): pending maintenance can deliver
+    /// the reported-handoff status line after Git has already committed the
+    /// response snapshot. The terminal retry must commit that exact binary-owned
+    /// projection, while continuing to reject any additional status prose.
+    #[test]
+    fn commit_recovers_exact_late_reported_queue_status_projection() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let response = "### Re: worker result — gpt-5\n\nIntegrated and verified.\n";
+        let committed = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:status patch=replace -->\nSession ready.\n<!-- /agent:status -->\n\n",
+                "<!-- agent:queue -->\n- do [#reported]\n<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n- [ ] [#reported] integrate worker result\n<!-- /agent:backlog -->\n",
+            ),
+            response,
+        );
+        commit_file(
+            root,
+            "session.md",
+            &committed,
+            "response before late status projection",
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "#reported", "subagent:worker", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#reported",
+            "subagent:worker",
+            "worker:test",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "#reported", Some(claim.generation))
+            .unwrap();
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            "#reported",
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+            Some(claim.generation),
+        )
+        .unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+            .unwrap();
+        let captured_response =
+            format!("<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n");
+        agent_doc_capture_io::capture_response(&doc, &captured_response).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+
+        let projected =
+            agent_doc_document::status_projection::reconcile_reported_queue_status_content(
+                &committed, 1,
+            )
+            .unwrap()
+            .expect("reported ledger must add the handoff status line");
+        assert!(projected.contains(
+            "📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."
+        ));
+
+        let operator_extended = projected.replace(
+            "Session ready.\n",
+            "Session ready.\nOperator-authored status update.\n",
+        );
+        fs::write(&doc, &operator_extended).unwrap();
+        commit(&doc).expect_err("an inexact status delta must remain blocked");
+
+        fs::write(&doc, &projected).unwrap();
+        let did_commit =
+            commit(&doc).expect("the exact late status projection must commit forward");
+        assert!(did_commit);
+        let landed = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed document");
+        assert!(
+            landed.contains(
+                "📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."
+            ) && !landed.contains("Operator-authored status update."),
+            "normal commit cleanup may insert an exchange boundary, but must land only the exact status projection:\n{landed}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_reconciled_late_reported_queue_status")
+                && log.contains("reported_count=1"),
+            "recovery must record the exact ledger-derived status proof:\n{log}"
+        );
+    }
+
     /// `#closeoutstrandedmsg` (agent-doc-bugs.md 2026-10-03 00:30): the commit
     /// landed before its own queue strikes; the `--done` projection then struck
     /// the id head plain while `#ftstrike` annotated the free-text head. That

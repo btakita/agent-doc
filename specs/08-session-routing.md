@@ -199,6 +199,52 @@ the observation/effect receipt for that intent so a prior terminal
 `operator_owned` projection cannot wedge repeated Run actions; automatic editor
 surface observations still coalesce identical values.
 
+**Editor commands name the propagated surface (`surface_layout_reference_v1`):**
+`Run Agent Doc` and `Sync Tmux Layout` do not build `--col` arguments from a
+click-time read of the editor split; that snapshot was a second source of truth
+beside the editor surface Source (`specs/13-state-backbone.md`, "State
+Propagation, Not Effect Inference"). The editor first publishes its current
+surface through `editor_surface_observe`, exactly like an automatic
+observation. Every observe reply carries `capabilities`, and a controller that
+lists `surface_layout_reference_v1` resolves a command payload's
+`surface_reference = { surface_id, min_sequence }` against its retained surface
+Source for the payload's `client_id` (pure derivation in
+`agent_doc_editor_surface::surface_layout_reference`):
+
+- `editor_route`: a split of two or more columns becomes `exact` `--col`
+  arguments in the surface's column order, labelled with the surface's own
+  `column_order`; one column or an unknown split becomes `ensure` with one
+  column per visible document and order `unknown`; `--focus` is the surface's
+  focused document. These replace `layout_args`, `column_order`, and
+  `layout_mode`, and the route then proceeds exactly as below. The surface
+  carries only columns that hold a session document, so a split showing no
+  markdown document is not a column here and never becomes an empty-column
+  placeholder: `[a.md | non-markdown]` derives `ensure` for `a.md`, where the
+  `--col` snapshot sent `exact` with an empty placeholder. The automatic
+  surface path already derives tmux from that same one-column state.
+  `controller_editor_route_surface_reference_resolved` logs the client,
+  surface, generation, sequence, mode, and order.
+- `sync_tmux_layout`: the payload carries no `columns`, `column_order`, or
+  `focus`. The controller takes the surface's columns in the automatic
+  `SurfaceIntent::Sync` shape (one comma-joined entry per column), its
+  `column_order`, and its focus. An unknown split (`columns=[]`) is refused as
+  `surface_reference_unknown_layout`, and a foreground sync whose focus is in no
+  column as `surface_reference_stale_focus`, with the sentences the editor
+  used when it made these decisions itself.
+  `controller_sync_surface_reference_resolved` logs the resolution.
+
+A reference resolves only to a live endpoint whose retained sequence is at
+least `min_sequence`; a newer observation from the same client is newer state
+and is used as is. A missing client, an unknown or retired endpoint, or an
+older Source fails closed (`surface_reference_missing_client|unavailable|
+retired|stale`, `controller_surface_reference_refused`) and leaves the retained
+layout untouched. A sync payload without `columns` and without a reference
+still fails to parse, so a controller that predates the capability cannot
+publish an empty layout; the editor sends the reference only after the observe
+reply advertised the capability, and otherwise keeps the explicit `--col`
+publication (logged with its reason). `agent-doc sync --col ...` and
+`agent-doc route` from a terminal are unchanged explicit `editor` publications.
+
 **Route layout mode (GH #111):** the route payload's `layout_mode` says what
 its `--col` arguments assert. `exact` is a positive observation of the whole
 visible layout and replaces the retained desired layout, including narrowing
@@ -216,8 +262,9 @@ its own next input, so every tab switch published `observed_panes + 1` and the
 window climbed until a plugin publication collapsed it. When
 the field is absent (editors that predate it), two or more columns infer
 `exact` and a single column infers `ensure`; an unknown value fails closed
-before publication. The JetBrains plugin sends `exact` only for a detected
-multi-column layout and `ensure` for its undetected single-file fallback.
+before publication. The JetBrains plugin's `--col` fallback sends `exact` only for a detected
+multi-column layout and `ensure` for its undetected single-file fallback; a
+surface reference derives the same modes in the controller.
 `controller_editor_route_layout_mode` logs the mode, whether it was explicit,
 the merge (`exact`, `seeded`, `focus_only`, `replaced:N`, `added:N+replaced:M`,
 `dropped:N+replaced:M`) and the route, retained

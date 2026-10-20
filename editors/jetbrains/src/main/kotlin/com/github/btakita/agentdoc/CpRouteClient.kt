@@ -52,7 +52,30 @@ internal fun controllerFailureMessageUtil(root: JsonObject): String? =
 internal data class CpEditorRouteResult(
     val exitCode: Int,
     val output: String,
+    /**
+     * For an `editor_surface_observe` publication, the sequence the observation was published at,
+     * so a command can name that publication ([SurfaceLayoutReference]). Null otherwise.
+     */
+    val surfaceSequence: Long? = null,
 )
+
+/**
+ * A command's reference to the editor surface publication it acts on (`surface_layout_reference_v1`,
+ * `specs/13-state-backbone.md` "State Propagation, Not Effect Inference"). The controller derives
+ * the command's layout from its retained surface Source for this IDE's surface client and
+ * [surfaceId], which must be at least as new as [minSequence]. The plugin sends no `--col`
+ * arguments with it.
+ */
+internal data class SurfaceLayoutReference(
+    val surfaceId: String,
+    val minSequence: Long,
+) {
+    fun toJson(): JsonObject =
+        JsonObject().also {
+            it.addProperty("surface_id", surfaceId)
+            it.addProperty("min_sequence", minSequence)
+        }
+}
 
 internal data class CpTmuxLayoutSyncState(
     val synced: Boolean,
@@ -334,14 +357,17 @@ internal object CpRouteClient {
         mayReregister: () -> Boolean = { false },
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
+        var publishedSequence: Long? = null
         fun publish(publishGeneration: Long): JsonObject {
+            val publishSequence = sequence.incrementAndGet()
+            publishedSequence = publishSequence
             val request =
                 editorSurfaceObserveRequest(
                     surfaceJson = surfaceJson,
                     surfaceId = surfaceId,
                     clientId = clientId,
                     generation = publishGeneration,
-                    sequence = sequence.incrementAndGet(),
+                    sequence = publishSequence,
                 )
             return if (selfHeal) {
                 sendOperatorRequestDataToSocket(
@@ -397,6 +423,7 @@ internal object CpRouteClient {
             CpEditorRouteResult(
                 exitCode = 0,
                 output = receipt.toString(),
+                surfaceSequence = publishedSequence,
             )
         } catch (e: Exception) {
             log.debug(
@@ -740,6 +767,7 @@ internal object CpRouteClient {
         routeKey: String?,
         columnOrder: String? = null,
         layoutMode: String? = null,
+        surfaceReference: SurfaceLayoutReference? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         if (commandPlaneEnabled()) {
@@ -755,6 +783,7 @@ internal object CpRouteClient {
                 commandId = commandId,
                 controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
                 columnOrder = columnOrder,
+                surfaceReference = surfaceReference,
             )
             return try {
                 replayIdempotentControllerCommandOnce(
@@ -802,6 +831,7 @@ internal object CpRouteClient {
             routeKey = routeKey,
             columnOrder = columnOrder,
             layoutMode = layoutMode,
+            surfaceReference = surfaceReference,
         )
         return try {
             sendToSocket(socket, request)
@@ -823,6 +853,7 @@ internal object CpRouteClient {
         exactVisible: Boolean,
         callerKind: String,
         columnOrder: String? = null,
+        surfaceReference: SurfaceLayoutReference? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         val commandId = "cmd-" + java.util.UUID.randomUUID().toString()
@@ -838,6 +869,7 @@ internal object CpRouteClient {
             clientId = navigationClientId,
             commandId = commandId,
             controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
+            surfaceReference = surfaceReference,
         )
         return try {
             replayIdempotentControllerCommandOnce(
@@ -1014,6 +1046,7 @@ internal object CpRouteClient {
         columnOrder: String? = null,
         layoutMode: String? = null,
         clientId: String? = navigationClientId,
+        surfaceReference: SurfaceLayoutReference? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("source", "jetbrains_plugin")
@@ -1021,16 +1054,24 @@ internal object CpRouteClient {
         payload.addProperty("dispatch_only", true)
         payload.addProperty("plain_trigger", true)
         payload.addProperty("wait_for_ready_secs", waitForReadySeconds)
+        attemptId?.let { payload.addProperty("attempt_id", it) }
+        routeKey?.let { payload.addProperty("route_key", it) }
+        clientId?.let { payload.addProperty("client_id", it) }
+        if (surfaceReference != null) {
+            // `surface_layout_reference_v1`: the controller derives the route's columns, their
+            // order label, and the layout mode from its retained surface Source for `client_id`.
+            // The plugin sends no `--col` snapshot beside it, so the two cannot disagree.
+            payload.add("layout_args", JsonArray())
+            payload.add("surface_reference", surfaceReference.toJson())
+            return payload
+        }
         payload.add("layout_args", JsonArray().also { array ->
             layoutArgs.forEach { array.add(it) }
         })
-        attemptId?.let { payload.addProperty("attempt_id", it) }
-        routeKey?.let { payload.addProperty("route_key", it) }
         // GH #112: name whether the `--col` order is a positive editor split
         // observation. An older controller ignores the unknown field.
         columnOrder?.let { payload.addProperty("column_order", it) }
         layoutMode?.let { payload.addProperty("layout_mode", it) }
-        clientId?.let { payload.addProperty("client_id", it) }
         return payload
     }
 
@@ -1044,6 +1085,7 @@ internal object CpRouteClient {
         columnOrder: String? = null,
         layoutMode: String? = null,
         clientId: String? = navigationClientId,
+        surfaceReference: SurfaceLayoutReference? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -1054,6 +1096,7 @@ internal object CpRouteClient {
             columnOrder,
             layoutMode,
             clientId,
+            surfaceReference,
         )
         val request = JsonObject()
         request.addProperty("command", EditorCommandName.EditorRoute.token)
@@ -1087,6 +1130,7 @@ internal object CpRouteClient {
         columnOrder: String? = null,
         layoutMode: String? = null,
         clientId: String? = navigationClientId,
+        surfaceReference: SurfaceLayoutReference? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -1097,6 +1141,7 @@ internal object CpRouteClient {
             columnOrder,
             layoutMode,
             clientId,
+            surfaceReference,
         )
         return commandSubmitRequest(
             filePath = filePath,
@@ -1218,16 +1263,25 @@ internal fun editorCommandAwaitRequest(
         columnOrder: String? = null,
         clientId: String? = null,
         controllerCommand: String = "editor_command_submit",
+        surfaceReference: SurfaceLayoutReference? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("project_root", projectRoot)
-        payload.add("columns", JsonParser.parseString(columnsJson).asJsonArray)
+        if (surfaceReference != null) {
+            // `surface_layout_reference_v1`: no `columns`, `column_order`, or `focus` of the
+            // plugin's own. The controller derives them from its retained surface Source, and a
+            // controller that cannot resolve the reference fails to parse the payload instead of
+            // publishing an empty layout. [focus] still names the envelope's document.
+            payload.add("surface_reference", surfaceReference.toJson())
+        } else {
+            payload.add("columns", JsonParser.parseString(columnsJson).asJsonArray)
+            focus?.let { payload.addProperty("focus", it) }
+            columnOrder?.let { payload.addProperty("column_order", it) }
+        }
         window?.let { payload.addProperty("window", it) }
-        focus?.let { payload.addProperty("focus", it) }
         payload.addProperty("no_autostart", noAutostart)
         payload.addProperty("exact_visible", exactVisible)
         payload.addProperty("caller_kind", callerKind)
-        columnOrder?.let { payload.addProperty("column_order", it) }
         clientId?.let { payload.addProperty("client_id", it) }
         return commandSubmitRequest(
             filePath = focus ?: projectRoot,

@@ -448,7 +448,8 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   Remote Dev memory likewise returns the positive basis while a guess is outstanding, so an IDE
   restart cannot anchor the guessed order and make a reversal self-perpetuating.
 - Explicit layout publications (`Sync Tmux Pane`, claim, resync, and the Run Agent Doc route's
-  `--col` list) name their order source as `column_order` (GH #112). Only locally detected
+  `--col` list) name their order source as `column_order` (GH #112). By surface reference the
+  label is the surface's own `column_order`, carried by the controller. Only locally detected
   multi-column geometry is `editor`; the undetected fallback lists `selectedFiles`, which IntelliJ
   orders focused-window first, so it is `unknown`. The controller resolves an `unknown` order
   against the order it already retains for those documents (`agent_doc_tmux::order_layout_columns`):
@@ -482,8 +483,31 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   automatic Remote Dev observations, labelled `unknown`/`retained`, keep that order. Real Remote
   Dev geometry needs the JetBrains Client side: the 262/263 frontend module sees the client's
   `EditorWindow`s and would have to publish measured columns through the surface Source.
+- **Run Agent Doc and Sync Tmux Layout act on the propagated surface, not a click-time snapshot**
+  (`surface_layout_reference_v1`; the rule is `specs/13-state-backbone.md`, "State Propagation, Not
+  Effect Inference"). On the EDT the command captures the surface through the same
+  `EditorTabSyncListener` capture the automatic path uses; its background thread publishes that
+  capture as an ordinary ordered `editor_surface_observe` fact of the listener's own `(client,
+  surface)` endpoint, with the delivery's endpoint bookkeeping (recorded, or retired when an authority
+  handoff overtook it). The observe reply lists the controller's `capabilities`. When it includes
+  `surface_layout_reference_v1`, the command sends `surface_reference = { surface_id, min_sequence }`
+  (the sequence it just published) and **no** `--col`, `column_order`, `layout_mode`, or sync
+  `columns`/`focus` of its own. The controller reads its retained surface Source for the command's
+  `client_id` and derives the layout from it: a sync uses the surface's columns in the automatic
+  `SurfaceIntent::Sync` shape with the surface's own `column_order` and focus; a route uses an
+  `exact` publication of a multi-column split, or `ensure` with one column per visible document
+  (order `unknown`) otherwise. A newer observation from the same client is newer state and is used
+  as is. The plugin keeps the `--col` snapshot only as a logged rollout fallback
+  (`[route]`/`[sync] surface reference unavailable reason=<reason>; sending the --col snapshot`):
+  a controller whose reply lacks the capability (an older binary), a rejected or failed publication,
+  a cross-root command (the surface Source lives in another controller), a listener whose projection
+  a Remote Dev frontend surface took over, a root this listener's projection is not active on, or a
+  capture the editor deferred. The CLI's `agent-doc sync --col ...` is unchanged and stays an
+  explicit operator `editor` publication.
 - Manual `Sync Tmux Layout` publishes `exact_visible=true` only when layout detection returns
-  known columns. If columns are unreadable, it refuses before terminal preparation or controller
+  known columns. By surface reference the controller makes the two refusals below when it
+  resolves the reference (`surface_reference_unknown_layout`, `surface_reference_stale_focus`),
+  and the plugin shows the same sentences; on the snapshot fallback the plugin makes them itself. If columns are unreadable, it refuses before terminal preparation or controller
   publication and tells the operator that the retained tmux layout was not changed; a focused-only
   fallback must never narrow a retained multi-column surface to one column (GH #154). The detected
   columns and focused document are one snapshot: if the detector's columns omit the focused file,
@@ -619,7 +643,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `[#subagent-operator-request]` handback marker as `tracked_id`. JetBrains MUST
   render it with the same tracked-ID colors used in todo, backlog, queue,
   icebox, and review items.
-- `Run Agent Doc` saves only the active markdown document and immediately dispatches a Project Controller `editor_route` request carrying dispatch-only, plain-trigger routing with a 15-second ready wait. The request's complete `--col` / `--focus` payload includes empty physical split placeholders and is an exact-visible layout boundary: the controller canonicalizes those facts, may materialize a missing focus only into one unique empty split, and converges the result before dispatch so route cannot append a pane beside stale visible state. The editor path does not block on the typing debounce and does not save unrelated open documents; the active document save is the editor-owned flush boundary before the controller route request runs. Even after `Clear Session Context`, this action still sends the plain `agent-doc <FILE>` reopen into the live session instead of restarting Codex.
+- `Run Agent Doc` saves only the active markdown document and immediately dispatches a Project Controller `editor_route` request carrying dispatch-only, plain-trigger routing with a 15-second ready wait. The request's layout is a `surface_reference` the controller resolves into `--col` / `--focus` arguments from its retained surface Source (the `--col` snapshot only on the logged fallback; see "Run Agent Doc and Sync Tmux Layout act on the propagated surface"). That complete `--col` / `--focus` layout includes empty physical split placeholders and is an exact-visible layout boundary: the controller canonicalizes those facts, may materialize a missing focus only into one unique empty split, and converges the result before dispatch so route cannot append a pane beside stale visible state. The editor path does not block on the typing debounce and does not save unrelated open documents; the active document save is the editor-owned flush boundary before the controller route request runs. Even after `Clear Session Context`, this action still sends the plain `agent-doc <FILE>` reopen into the live session instead of restarting Codex.
 - Editor selection never forks `Run Agent Doc` onto another transport. Selected-text invocations and saved-document diff steering use the exact same Project Controller request as an unselected click and submit the same bare `agent-doc <FILE>` trigger; Rust route policy decides whether that starts, replaces, or steers the live turn. Kotlin must not send `selected_text` / `steering_id`, await a turn-steering acknowledgement, or derive actor-state admission independently.
 - Every `Run Agent Doc` click writes a durable attempt ledger entry for click receipt, active document save, `editor_route` request construction/start, retry/dedupe, and terminal route outcome. The ledger may persist diagnostic route shape and route output summaries, but it must not persist raw document prompt text; prompt/trigger proof is represented by byte counts and hashes in binary/controller diagnostics.
 - Repeating `Run Agent Doc` while an `editor_route` request is still in flight coalesces with that request instead of canceling and recreating route/controller work. The duplicate click is recorded as deduped and gets an already-dispatching hint; a fresh click is eligible as soon as the bounded request completes.

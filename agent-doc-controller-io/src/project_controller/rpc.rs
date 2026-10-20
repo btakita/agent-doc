@@ -562,6 +562,10 @@ impl ControllerDocumentPathTransitionGraph {
 #[path = "surface_retire_conformance.rs"]
 mod surface_retire_conformance;
 
+#[cfg(test)]
+#[path = "surface_layout_reference_tests.rs"]
+mod surface_layout_reference_tests;
+
 /// What one `editor_surface_forget` did to one endpoint root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RootRetirement {
@@ -979,6 +983,29 @@ impl ControllerEditorSurfaceGraph {
         client_id: &str,
     ) -> agent_doc_editor_surface::NavigationLane {
         agent_doc_editor_surface::NavigationLane::for_client(self.navigation_mode, client_id)
+    }
+
+    /// The retained surface `Source` of one `(client, surface)` endpoint, for
+    /// a command that acts by reference to it (`surface_layout_reference_v1`).
+    pub(super) fn retained_surface(
+        &self,
+        project_root: &Path,
+        client_id: &str,
+        surface_id: &str,
+    ) -> Option<agent_doc_editor_surface::RetainedEditorSurface> {
+        let roots = self.roots.lock();
+        roots
+            .get(&(
+                project_root.to_path_buf(),
+                client_id.to_string(),
+                surface_id.to_string(),
+            ))
+            .map(|root| agent_doc_editor_surface::RetainedEditorSurface {
+                surface: root.state.surface(),
+                generation: root.generation,
+                sequence: root.sequence,
+                retired: root.retired,
+            })
     }
 
     fn forget(&self, project_root: &Path, client_id: &str, generation: u64) -> bool {
@@ -10643,6 +10670,12 @@ struct ControllerEditorRoutePayload {
     /// keeps the shared lane.
     #[serde(default)]
     client_id: Option<String>,
+    /// The editor surface publication this route acts on
+    /// (`surface_layout_reference_v1`). When present the route carries no
+    /// `layout_args` of its own: the controller derives them, the column
+    /// order, and the layout mode from its retained surface `Source`.
+    #[serde(default)]
+    surface_reference: Option<agent_doc_editor_surface::SurfaceLayoutReference>,
 }
 
 #[derive(Debug, Serialize)]
@@ -11852,6 +11885,48 @@ fn publish_editor_route_layout_locally<'a>(
     Ok((layout_receipt, layout_observations, route_layout_lease))
 }
 
+/// Derive a surface-referencing route's layout from the retained surface
+/// `Source` (`surface_layout_reference_v1`), in place of editor-built `--col`
+/// arguments.
+fn resolve_editor_route_surface_reference(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+    payload: &mut ControllerEditorRoutePayload,
+    reference: &agent_doc_editor_surface::SurfaceLayoutReference,
+) -> Result<()> {
+    let retained = resolve_surface_layout_reference(
+        bootstrap,
+        runtime,
+        payload.client_id.as_deref(),
+        reference,
+    )?;
+    let layout = agent_doc_editor_surface::route_layout_from_surface(&retained.surface).map_err(
+        |refusal| {
+            surface_reference_refused(bootstrap, payload.client_id.as_deref(), reference, refusal)
+        },
+    )?;
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_editor_route_surface_reference_resolved file={} client={} surface={} generation={} sequence={} min_sequence={} layout_mode={} column_order={} layout_args={}",
+            canonical.display(),
+            payload.client_id.as_deref().unwrap_or("none"),
+            reference.surface_id,
+            retained.generation,
+            retained.sequence,
+            reference.min_sequence,
+            layout.layout_mode,
+            layout.column_order.as_str(),
+            layout.layout_args.len(),
+        ),
+    );
+    payload.layout_args = layout.layout_args;
+    payload.column_order = layout_column_order_from_surface(layout.column_order);
+    payload.layout_mode = Some(layout.layout_mode.to_string());
+    Ok(())
+}
+
 fn handle_editor_route_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -11893,8 +11968,17 @@ fn handle_editor_route_rpc_with_layout_delegate(
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
-    let payload: ControllerEditorRoutePayload =
+    let mut payload: ControllerEditorRoutePayload =
         serde_json::from_str(&payload_json).context("failed to parse editor route payload")?;
+    if let Some(reference) = payload.surface_reference.take() {
+        resolve_editor_route_surface_reference(
+            bootstrap,
+            runtime,
+            &canonical,
+            &mut payload,
+            &reference,
+        )?;
+    }
     let relative_path = editor_route_relative_path(bootstrap, &canonical, &payload)?;
     let layout_args = validate_editor_route_layout_args(&payload.layout_args)?;
     let wait_secs = payload.wait_for_ready_secs.unwrap_or(15).min(600);
@@ -13575,8 +13659,8 @@ fn validate_async_editor_command_payload(
 ) -> Result<()> {
     match command_kind {
         AsyncEditorCommandKind::SyncTmuxLayout => {
-            let _: ControllerTmuxLayoutSyncInvocation =
-                serde_json::from_str(payload_json).context("parse sync_tmux_layout payload")?;
+            sync_tmux_layout_invocation_from_payload(None, payload_json)
+                .context("parse sync_tmux_layout payload")?;
         }
         AsyncEditorCommandKind::FocusDocumentPane => {
             let _: FocusDocumentPaneCommandPayload =
@@ -13946,16 +14030,18 @@ fn dispatch_command_submit_payload(
         }
         AsyncEditorCommandKind::SyncTmuxLayout => {
             let command = command_kind.token();
-            let invocation: ControllerTmuxLayoutSyncInvocation =
-                match serde_json::from_str(&payload_json) {
-                    Ok(invocation) => invocation,
-                    Err(err) => {
-                        return CommandSubmitDispatchResult::rejected(
-                            command,
-                            format!("parse {command} payload: {err:#}"),
-                        );
-                    }
-                };
+            let invocation = match sync_tmux_layout_invocation_from_payload(
+                Some((bootstrap, runtime)),
+                &payload_json,
+            ) {
+                Ok(invocation) => invocation,
+                Err(err) => {
+                    return CommandSubmitDispatchResult::rejected(
+                        command,
+                        format!("parse {command} payload: {err:#}"),
+                    );
+                }
+            };
             let mut sync_request = empty_controller_request(command);
             sync_request.file = invocation.focus.as_ref().map(PathBuf::from);
             sync_request.diagnostic_payload = Some(match serde_json::to_string(&invocation) {
@@ -21436,11 +21522,10 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
-        "editor_surface_observe" => controller_envelope(handle_editor_surface_observe(
-            &bootstrap_snapshot,
-            runtime.as_ref(),
-            request,
-        )),
+        "editor_surface_observe" => controller_envelope(
+            handle_editor_surface_observe(&bootstrap_snapshot, runtime.as_ref(), request)
+                .map(SurfaceObservationReply::new),
+        ),
         "editor_surface_forget" => controller_envelope(handle_editor_surface_forget(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -28494,6 +28579,140 @@ fn escalate_focus_to_lane_layout_ordered(
     published.is_ok()
 }
 
+/// The `editor_surface_observe` reply: the fold's receipt plus the editor-
+/// command capabilities this controller advertises. An editor publishes its
+/// surface before a command that names it, so this reply is where it learns
+/// whether the controller resolves a [`agent_doc_editor_surface::SurfaceLayoutReference`].
+#[derive(Debug, Serialize)]
+struct SurfaceObservationReply {
+    #[serde(flatten)]
+    receipt: SurfaceObservationReceipt,
+    capabilities: &'static [&'static str],
+}
+
+impl SurfaceObservationReply {
+    fn new(receipt: SurfaceObservationReceipt) -> Self {
+        Self {
+            receipt,
+            capabilities: agent_doc_editor_surface::CONTROLLER_SURFACE_CAPABILITIES,
+        }
+    }
+}
+
+/// Log one surface-reference refusal (`controller_surface_reference_refused`)
+/// and return its typed diagnostic. Every refusal, whether the reference did
+/// not resolve or the resolved surface cannot carry the command's layout,
+/// leaves the retained tmux layout untouched.
+fn surface_reference_refused(
+    bootstrap: &ControllerBootstrap,
+    client_id: Option<&str>,
+    reference: &agent_doc_editor_surface::SurfaceLayoutReference,
+    refusal: agent_doc_editor_surface::SurfaceReferenceRefusal,
+) -> anyhow::Error {
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_surface_reference_refused client={} surface={} min_sequence={} reason={}",
+            client_id.unwrap_or("none"),
+            reference.surface_id,
+            reference.min_sequence,
+            refusal.label(),
+        ),
+    );
+    anyhow::anyhow!(refusal.diagnostic())
+}
+
+/// Resolve a command's surface reference against this controller's retained
+/// surface `Source` (`specs/13-state-backbone.md` "State Propagation, Not
+/// Effect Inference"). The error is the typed refusal's diagnostic.
+fn resolve_surface_layout_reference(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    client_id: Option<&str>,
+    reference: &agent_doc_editor_surface::SurfaceLayoutReference,
+) -> Result<agent_doc_editor_surface::RetainedEditorSurface> {
+    let refuse = |refusal| surface_reference_refused(bootstrap, client_id, reference, refusal);
+    let client_id = client_id
+        .map(str::trim)
+        .filter(|client| !client.is_empty())
+        .ok_or_else(|| refuse(agent_doc_editor_surface::SurfaceReferenceRefusal::MissingClient))?;
+    let retained = runtime.editor_surface_graph.retained_surface(
+        &bootstrap.project_root,
+        client_id,
+        &reference.surface_id,
+    );
+    agent_doc_editor_surface::resolve_surface_reference(retained.as_ref(), reference)
+        .map_err(refuse)?;
+    Ok(retained.expect("resolved reference has a retained surface"))
+}
+
+/// Parse a `sync_tmux_layout` payload. A payload naming a
+/// `surface_reference` carries no columns of its own: with a runtime they are
+/// derived here from the retained surface `Source`, exactly the shape the
+/// automatic surface `Sync` publishes; without one (submit-time validation)
+/// only the payload's shape is checked.
+fn sync_tmux_layout_invocation_from_payload(
+    resolver: Option<(&ControllerBootstrap, &ControllerRuntime)>,
+    payload_json: &str,
+) -> Result<ControllerTmuxLayoutSyncInvocation> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(payload_json).context("parse sync tmux layout invocation")?;
+    let reference = value
+        .as_object_mut()
+        .and_then(|object| object.remove("surface_reference"));
+    let Some(reference) = reference else {
+        return serde_json::from_value(value).context("parse sync tmux layout invocation");
+    };
+    let reference: agent_doc_editor_surface::SurfaceLayoutReference =
+        serde_json::from_value(reference).context("parse sync tmux layout surface_reference")?;
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("columns")
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    }
+    let mut invocation: ControllerTmuxLayoutSyncInvocation =
+        serde_json::from_value(value).context("parse sync tmux layout invocation")?;
+    let Some((bootstrap, runtime)) = resolver else {
+        return Ok(invocation);
+    };
+    let retained = resolve_surface_layout_reference(
+        bootstrap,
+        runtime,
+        invocation.client_id.as_deref(),
+        &reference,
+    )?;
+    let layout = agent_doc_editor_surface::sync_layout_from_surface(
+        &retained.surface,
+        !invocation.no_autostart,
+    )
+    .map_err(|refusal| {
+        surface_reference_refused(
+            bootstrap,
+            invocation.client_id.as_deref(),
+            &reference,
+            refusal,
+        )
+    })?;
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_sync_surface_reference_resolved client={} surface={} generation={} sequence={} min_sequence={} columns={} column_order={} caller_kind={}",
+            invocation.client_id.as_deref().unwrap_or("none"),
+            reference.surface_id,
+            retained.generation,
+            retained.sequence,
+            reference.min_sequence,
+            layout.columns.len(),
+            layout.column_order.as_str(),
+            invocation.caller_kind,
+        ),
+    );
+    invocation.columns = layout.columns;
+    invocation.column_order = layout_column_order_from_surface(layout.column_order);
+    invocation.focus = Some(layout.focus);
+    Ok(invocation)
+}
+
 fn handle_editor_surface_observe(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -35164,8 +35383,8 @@ fn publish_pane_layout_desired(
     ControllerTmuxLayoutSyncInvocation,
 )> {
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
-    let mut invocation: ControllerTmuxLayoutSyncInvocation =
-        serde_json::from_str(&payload_json).context("parse sync tmux layout invocation")?;
+    let mut invocation =
+        sync_tmux_layout_invocation_from_payload(Some((bootstrap, runtime)), &payload_json)?;
     let client_id = invocation.client_id.take();
     let lane = sync_tmux_layout_command_lane(
         runtime.editor_surface_graph.navigation_mode(),

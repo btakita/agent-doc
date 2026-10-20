@@ -171,6 +171,10 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 if (current == null || current.closed) EditorTabSyncListener() else current
             }!!
 
+        /** The installed, open listener for [project], if any. */
+        internal fun forProject(project: Project): EditorTabSyncListener? =
+            instances[project]?.takeUnless { it.closed }
+
         /** Release local surface graphs and apply the lifecycle-owned controller retirement policy. */
         internal fun disposeProject(
             project: Project,
@@ -438,6 +442,9 @@ companion object {
         fun markForgotten(root: String): Boolean =
             activeRoot.get() != root && observedRoots.remove(root)
 
+        /** The root this listener's surface projection was last published to. */
+        fun active(): String? = activeRoot.get()
+
         fun drain(): List<String> {
             activeRoot.set(null)
             val roots = observedRoots.toList().sorted()
@@ -606,7 +613,7 @@ private data class PendingSurface(
  * patch-watch registration, JSON construction, and controller delivery all happen later on the
  * serialized background lane.
  */
-private data class CapturedSurface(
+internal data class CapturedSurface(
     val project: Project,
     val projectBasePath: String?,
     val surfaceId: String,
@@ -1461,6 +1468,118 @@ private data class CapturedSurface(
             knownControllerRoots = knownControllerRoots,
             liveSurfaceIds = captured.liveSurfaceIds,
         )
+    }
+
+    /**
+     * An EDT capture of the current surface for an explicit editor command (Run Agent Doc, Sync
+     * Tmux Panes), published later by [publishCommandSurface] on the command's background thread.
+     */
+    internal class CommandSurfaceCapture internal constructor(internal val captured: CapturedSurface)
+
+    /** What [publishCommandSurface] retained on the controller, or why the command keeps its snapshot. */
+    internal sealed interface CommandSurfacePublication {
+        data class Published(
+            val projectRoot: String,
+            val reference: SurfaceLayoutReference,
+        ) : CommandSurfacePublication
+
+        data class Unavailable(val reason: String) : CommandSurfacePublication
+    }
+
+    /**
+     * Capture the current surface for an explicit command. EDT only: this reads the same editor
+     * state, through the same [captureSurface], as the automatic capture. Null when this listener
+     * no longer owns its projection (a Remote Dev frontend surface took authority) or the editor
+     * projection is not settled yet.
+     */
+    internal fun captureCommandSurface(
+        project: Project,
+        preferredFile: VirtualFile?,
+    ): CommandSurfaceCapture? {
+        if (!projectionLive()) return null
+        return captureSurface(project = project, preferredFile = preferredFile)
+            ?.let(::CommandSurfaceCapture)
+    }
+
+    /**
+     * Publish [capture] as this listener's surface Source on the controller at [commandRoot], so
+     * the command can name it instead of sending a `--col` snapshot (`surface_layout_reference_v1`,
+     * `specs/13-state-backbone.md` "State Propagation, Not Effect Inference"). Background thread.
+     *
+     * The publication is an ordinary ordered observation of this listener's endpoint: it folds
+     * into the same graph as every automatic observation, and its endpoint bookkeeping is the
+     * serialized delivery's (record it, or retire it when an authority handoff overtook it). It
+     * never publishes to a root other than the one this listener's projection is active on, so it
+     * cannot open a second controller projection of the same surface.
+     */
+    internal fun publishCommandSurface(
+        capture: CommandSurfaceCapture,
+        commandRoot: String,
+    ): CommandSurfacePublication {
+        if (!projectionLive()) return CommandSurfacePublication.Unavailable("listener_projection_retired")
+        val captured = capture.captured
+        val pending =
+            try {
+                resolveSurface(captured)
+            } catch (e: Exception) {
+                return CommandSurfacePublication.Unavailable("surface_resolution_failed: ${e.message}")
+            }
+        if (pending.projectRoot != commandRoot) {
+            return CommandSurfacePublication.Unavailable(
+                "cross_root surface_root=${pending.projectRoot} command_root=$commandRoot",
+            )
+        }
+        if (surfaceRoots.active() != pending.projectRoot) {
+            return CommandSurfacePublication.Unavailable(
+                "surface_root_not_active root=${pending.projectRoot} active=${surfaceRoots.active()}",
+            )
+        }
+        val requestedAuthorityEpoch = projectionAuthorityEpoch.get()
+        val receipt =
+            CpRouteClient.observeEditorSurface(
+                projectRoot = pending.projectRoot,
+                surfaceJson = pending.surfaceJson,
+                surfaceId = pending.surfaceId,
+                mayReregister = ::projectionLive,
+            )
+        if (receipt.exitCode == 0) {
+            val endpoint = SurfaceEndpoint(pending.projectRoot, pending.surfaceId)
+            val retiredEndpoints =
+                synchronized(lifecycleLock) {
+                    when (
+                        InFlightSurfaceDelivery.decide(
+                            requestedAuthorityEpoch = requestedAuthorityEpoch,
+                            currentAuthorityEpoch = projectionAuthorityEpoch.get(),
+                        )
+                    ) {
+                        InFlightSurfaceDelivery.Decision.RetireEndpoint -> null
+                        InFlightSurfaceDelivery.Decision.RecordEndpoint ->
+                            if (closed) null else surfaceEndpoints.markPublished(endpoint, pending.liveSurfaceIds)
+                    }
+                }
+            if (retiredEndpoints == null) {
+                CpRouteClient.forgetEditorSurface(pending.projectRoot, pending.surfaceId)
+                CpRouteClient.forgetEditorFocus(pending.projectRoot, pending.surfaceId)
+                return CommandSurfacePublication.Unavailable("authority_handoff_during_publish")
+            }
+            retireClosedSurfaceEndpoints(captured.project, retiredEndpoints)
+        }
+        return when (
+            val decision =
+                SurfaceCommandReference.decide(
+                    surfaceRoot = pending.projectRoot,
+                    commandRoot = commandRoot,
+                    surfaceId = pending.surfaceId,
+                    publishExitCode = receipt.exitCode,
+                    receiptJson = receipt.output,
+                    publishedSequence = receipt.surfaceSequence,
+                )
+        ) {
+            is SurfaceCommandReference.Decision.Reference ->
+                CommandSurfacePublication.Published(pending.projectRoot, decision.reference)
+            is SurfaceCommandReference.Decision.SnapshotFallback ->
+                CommandSurfacePublication.Unavailable(decision.reason)
+        }
     }
 
     private fun requestFocusProjection(

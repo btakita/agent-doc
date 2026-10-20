@@ -35,6 +35,7 @@ pub mod installation_focus;
 pub mod navigation_lane;
 pub mod pane_placement;
 pub mod remote_layout;
+pub mod surface_layout_reference;
 pub mod terminal_ownership;
 
 pub use editor_view_policy::{
@@ -69,6 +70,11 @@ pub use navigation_lane::{
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,
     RemoteLayoutSource,
+};
+pub use surface_layout_reference::{
+    CONTROLLER_SURFACE_CAPABILITIES, RetainedEditorSurface, SURFACE_LAYOUT_REFERENCE_CAPABILITY,
+    SurfaceLayoutReference, SurfaceReferenceRefusal, SurfaceRouteLayout, SurfaceSyncLayout,
+    resolve_surface_reference, route_layout_from_surface, sync_layout_from_surface,
 };
 
 use serde::{Deserialize, Serialize};

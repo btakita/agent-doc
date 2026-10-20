@@ -7441,6 +7441,25 @@ impl ControllerDocumentGraphs {
         Ok(projection.completions.len())
     }
 
+    /// Whether the open cycle's own answered-free-text strike is projected on
+    /// the latest queue-authority observation but its adapter has not yet
+    /// published the matching application receipt.
+    ///
+    /// Closeout reads this after `observe_queue_authority`: actor admission is
+    /// not application, so a commit sealed while this is `true` seals the
+    /// response without the strike the same cycle owes, and the strike then
+    /// lands through the live editor as post-HEAD drift.
+    fn answered_free_text_strike_receipt_pending(&self, document_hash: &str) -> bool {
+        let strike = self.current_answered_free_text_strike(document_hash);
+        strike.has_target()
+            && self
+                .answered_free_text_strike_applied
+                .observe(&self.ctx, &document_hash.to_string())
+                .flatten()
+                .as_deref()
+                != Some(strike.projection_id.as_str())
+    }
+
     fn current_answered_free_text_strike(
         &self,
         document_hash: &str,
@@ -9879,6 +9898,15 @@ impl ControllerRuntime {
     ) -> Result<usize> {
         self.document_graphs
             .observe_queue_authority(document_hash, file, content)
+    }
+
+    /// See [`ControllerDocumentGraphs::answered_free_text_strike_receipt_pending`].
+    pub(crate) fn document_answered_free_text_strike_receipt_pending(
+        &self,
+        document_hash: &str,
+    ) -> bool {
+        self.document_graphs
+            .answered_free_text_strike_receipt_pending(document_hash)
     }
 
     /// `#lazily-hot-path` W1 — bounded await for the visible-write receipt of
@@ -25020,6 +25048,10 @@ revised operator request
             admitted, 0,
             "actor admission is not an application receipt and must gate queue completion"
         );
+        assert!(
+            runtime.document_answered_free_text_strike_receipt_pending(&document_hash),
+            "the controller commit must refuse to seal while the cycle's own strike has no application receipt"
+        );
 
         // The adapter failure is published asynchronously. Wait on that Source,
         // then require one observation to surface it.
@@ -25085,6 +25117,10 @@ revised operator request
             receipt.as_deref(),
             Some(projection.projection_id.as_str()),
             "the retry must publish the exact application receipt required by closeout"
+        );
+        assert!(
+            !runtime.document_answered_free_text_strike_receipt_pending(&document_hash),
+            "the exact application receipt releases the controller commit"
         );
         let retried = std::fs::read_to_string(&canonical).unwrap();
         assert!(

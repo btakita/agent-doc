@@ -1773,6 +1773,162 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
     Ok(true)
 }
 
+/// How a closeout's delegation to the CP controller's `commit_document` ended.
+#[derive(Debug)]
+enum ControllerCommitAttempt<T> {
+    /// The controller sealed the commit.
+    Committed(T),
+    /// No live editor authority to defer to; the local commit is authoritative.
+    Headless,
+    /// The controller could not seal it; the local commit path takes over.
+    Fallback(anyhow::Error),
+}
+
+/// Budget a closing cycle gives the controller to accept its commit once the
+/// live projection carrying the cycle's own late writes has landed.
+const CONTROLLER_PROJECTION_WAIT: std::time::Duration = OWNED_DELIVERY_WAIT;
+const CONTROLLER_PROJECTION_SLICE: std::time::Duration = OWNED_DELIVERY_SLICE;
+/// Spin guard between two controller asks when the delivery frontier reports
+/// converged without moving. The editor's native save has no event stream into
+/// this process: the controller observes it only through its readiness probe
+/// (`controller_commit_projection_pending ... request_sent=false`), so the ask
+/// itself is the observation and this pause only keeps it from hot-looping.
+const CONTROLLER_PROJECTION_CONVERGED_BACKOFF: std::time::Duration =
+    std::time::Duration::from_millis(100);
+
+/// Delegate the commit to the controller, and while the closing cycle owns the
+/// document, order it after the cycle's own late projections.
+///
+/// On 2026-10-20 (`tasks/agent-doc/agent-doc-bugs.md`, `cycle-1792520608189`)
+/// the controller refused a `respond --stream --done ... --status ...` closeout
+/// because the editor had not saved the converged canonical. The caller fell
+/// straight back to its local commit, which sealed the response two seconds
+/// before the cycle's held-back `--status` and its answered free-text strikes
+/// landed through the live editor; the terminal retry then refused that drift
+/// as an unanswered typed-component edit. The controller's refusal is the
+/// receipt gate (disk projection saved, strike application receipt matched),
+/// so an open cycle awaits the delivery frontier and asks again instead of
+/// sealing around it. The composed late-projection proof in
+/// `commit_with_ports_outcome` stays as the backstop for a budget that runs
+/// out, and a document without an open cycle keeps the immediate fallback.
+fn commit_via_controller_awaiting_live_projection(
+    file: &Path,
+) -> ControllerCommitAttempt<
+    agent_doc_controller_io::project_controller::ControllerCommitDocumentOutcome,
+> {
+    let may_await = open_cycle_owns_closeout_commit(file);
+    let authoritative_compaction = authoritative_compaction_commit_enabled();
+    let mut seen_version: Option<u64> = None;
+    retry_controller_commit_awaiting_projection(
+        CONTROLLER_PROJECTION_WAIT,
+        may_await,
+        || {
+            agent_doc_controller_io::project_controller::commit_document_via_controller(
+                file,
+                authoritative_compaction,
+            )
+        },
+        agent_doc_controller_io::project_controller::controller_commit_refusal_awaits_projection,
+        |slice| {
+            let observed = match seen_version {
+                Some(after) => {
+                    agent_doc_controller_io::project_controller::await_delivery_convergence_change_for_file(
+                        file, after, slice,
+                    )
+                }
+                None => agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                    file, slice,
+                ),
+            };
+            let advanced = match observed {
+                Ok(Some(status)) => {
+                    let advanced = seen_version != Some(status.version) || !status.converged;
+                    seen_version = Some(status.version);
+                    advanced
+                }
+                Ok(None) => false,
+                Err(err) => {
+                    eprintln!(
+                        "[commit] warning: could not await the live projection for {}: {err:#}",
+                        file.display()
+                    );
+                    false
+                }
+            };
+            if !advanced {
+                std::thread::sleep(CONTROLLER_PROJECTION_CONVERGED_BACKOFF);
+            }
+        },
+        |event| agent_doc_ops_log_io::log_op(file, &format!("{event} file={}", file.display())),
+    )
+}
+
+/// Whether an open cycle (not committed, not abandoned) owns the commit, so its
+/// own late projections must land before it seals.
+fn open_cycle_owns_closeout_commit(file: &Path) -> bool {
+    match agent_doc_cycle_state_io::load(file) {
+        Ok(state) => state.is_some_and(|state| state.is_open()),
+        Err(err) => {
+            eprintln!(
+                "[commit] warning: could not read the cycle state for {}; committing without awaiting its late projections: {err:#}",
+                file.display()
+            );
+            false
+        }
+    }
+}
+
+/// The I/O-free core of [`commit_via_controller_awaiting_live_projection`].
+///
+/// `attempt` asks the controller to commit (`Ok(None)` = headless). An error
+/// `awaits_projection` classifies as "the live projection has not landed" is
+/// awaited with `wait` and asked again while `may_await` and the budget allow;
+/// any other error, or an exhausted budget, hands the commit to the local path.
+fn retry_controller_commit_awaiting_projection<T>(
+    budget: std::time::Duration,
+    may_await: bool,
+    mut attempt: impl FnMut() -> Result<Option<T>>,
+    awaits_projection: impl Fn(&anyhow::Error) -> bool,
+    mut wait: impl FnMut(std::time::Duration),
+    mut log: impl FnMut(String),
+) -> ControllerCommitAttempt<T> {
+    let started = std::time::Instant::now();
+    let deadline = started + budget;
+    let mut asks = 0usize;
+    loop {
+        asks += 1;
+        let err = match attempt() {
+            Ok(Some(outcome)) => {
+                if asks > 1 {
+                    log(format!(
+                        "controller_commit_live_projection_landed asks={asks} waited_ms={}",
+                        started.elapsed().as_millis()
+                    ));
+                }
+                return ControllerCommitAttempt::Committed(outcome);
+            }
+            Ok(None) => return ControllerCommitAttempt::Headless,
+            Err(err) => err,
+        };
+        if !awaits_projection(&err) || !may_await {
+            return ControllerCommitAttempt::Fallback(err);
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            log(format!(
+                "controller_commit_live_projection_wait_exhausted asks={asks} waited_ms={} recovery=local_commit_then_composed_late_projection_proof",
+                started.elapsed().as_millis()
+            ));
+            return ControllerCommitAttempt::Fallback(err);
+        }
+        log(format!(
+            "controller_commit_awaiting_live_projection asks={asks} waited_ms={}",
+            started.elapsed().as_millis()
+        ));
+        wait(remaining.min(CONTROLLER_PROJECTION_SLICE));
+    }
+}
+
 pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         commit_with_outcome_scoped(file)
@@ -1798,18 +1954,15 @@ fn commit_with_outcome_scoped(file: &Path) -> Result<CommitOutcome> {
     // and any delegation error falls through to the local path, which keeps the
     // existing fail-closed safety.
     if !controller_commit_in_progress() && !force_disk_commit_resolution_enabled() {
-        match agent_doc_controller_io::project_controller::commit_document_via_controller(
-            file,
-            authoritative_compaction_commit_enabled(),
-        ) {
-            Ok(Some(outcome)) => {
+        match commit_via_controller_awaiting_live_projection(file) {
+            ControllerCommitAttempt::Committed(outcome) => {
                 return Ok(CommitOutcome {
                     did_commit: outcome.did_commit,
                     vcs_refresh_signaled: outcome.vcs_refresh_signaled,
                 });
             }
-            Ok(None) => {}
-            Err(err) => {
+            ControllerCommitAttempt::Headless => {}
+            ControllerCommitAttempt::Fallback(err) => {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -3856,6 +4009,218 @@ mod visible_response_absorb_tests {
         assert!(!visible_uncommitted_response_is_absorbable(
             HEAD, &local, &local
         ));
+    }
+}
+
+#[cfg(test)]
+mod controller_projection_order_tests {
+    //! The closeout commit seals only after the closing cycle's own late
+    //! projections landed: replays of the 2026-10-20 `cycle-1792520608189`
+    //! ordering, with every receipt delivered through the `wait` handshake.
+    use super::*;
+    use agent_doc_controller_io::project_controller::{
+        CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN, controller_commit_refusal_awaits_projection,
+    };
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+
+    const RESPONSE_ONLY: &str = "response";
+
+    /// One receipt the live editor/controller publishes for the closing cycle.
+    #[derive(Debug, Clone, Copy)]
+    enum Receipt {
+        /// The editor saved the converged canonical (`disk_projection_ready`).
+        DiskSaved,
+        /// The held-back `--status` reached the canonical.
+        StatusLanded,
+        /// The answered free-text strike adapter published its receipt.
+        StrikeApplied,
+    }
+
+    /// The controller side of the handshake: its refusals are exactly the
+    /// stamped ones `handle_commit_document_rpc` raises, and it seals whatever
+    /// the canonical holds once every gate passes.
+    struct LiveController {
+        canonical: RefCell<String>,
+        disk_saved: Cell<bool>,
+        strike_owed: Cell<bool>,
+        pending: RefCell<VecDeque<Receipt>>,
+        asks: Cell<usize>,
+        waits: Cell<usize>,
+    }
+
+    impl LiveController {
+        fn incident() -> Self {
+            Self {
+                canonical: RefCell::new(RESPONSE_ONLY.to_string()),
+                disk_saved: Cell::new(false),
+                strike_owed: Cell::new(true),
+                pending: RefCell::new(VecDeque::from([
+                    Receipt::DiskSaved,
+                    Receipt::StatusLanded,
+                    Receipt::StrikeApplied,
+                    Receipt::DiskSaved,
+                ])),
+                asks: Cell::new(0),
+                waits: Cell::new(0),
+            }
+        }
+
+        fn commit(&self) -> Result<Option<String>> {
+            self.asks.set(self.asks.get() + 1);
+            if !self.disk_saved.get() {
+                anyhow::bail!(
+                    "live editor commit projection is not durable yet for doc.md (barrier_ready=true disk_projection_ready=false); native editor save/reconciliation remains pending {CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN}"
+                );
+            }
+            if self.strike_owed.get() {
+                anyhow::bail!(
+                    "answered free-text queue projection is not durable yet for doc.md (strike_receipt=pending); the closing cycle's own queue strike has not been applied {CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN}"
+                );
+            }
+            Ok(Some(self.canonical.borrow().clone()))
+        }
+
+        /// The `wait` handshake: deliver exactly one pending receipt.
+        fn deliver_next(&self) {
+            self.waits.set(self.waits.get() + 1);
+            let Some(receipt) = self.pending.borrow_mut().pop_front() else {
+                return;
+            };
+            match receipt {
+                Receipt::DiskSaved => self.disk_saved.set(true),
+                // Each late write is a new canonical revision the editor has
+                // not saved yet.
+                Receipt::StatusLanded => {
+                    self.canonical.borrow_mut().push_str("+status");
+                    self.disk_saved.set(false);
+                }
+                Receipt::StrikeApplied => {
+                    self.canonical.borrow_mut().push_str("+strike");
+                    self.strike_owed.set(false);
+                    self.disk_saved.set(false);
+                }
+            }
+        }
+    }
+
+    fn run(
+        controller: &LiveController,
+        budget: std::time::Duration,
+        may_await: bool,
+        logs: &RefCell<Vec<String>>,
+    ) -> ControllerCommitAttempt<String> {
+        retry_controller_commit_awaiting_projection(
+            budget,
+            may_await,
+            || controller.commit(),
+            controller_commit_refusal_awaits_projection,
+            |_| controller.deliver_next(),
+            |event| logs.borrow_mut().push(event),
+        )
+    }
+
+    #[test]
+    fn an_open_cycle_seals_only_after_its_own_late_projections_land() {
+        let controller = LiveController::incident();
+        let logs = RefCell::new(Vec::new());
+        let attempt = run(&controller, std::time::Duration::from_secs(30), true, &logs);
+        let ControllerCommitAttempt::Committed(sealed) = attempt else {
+            panic!("the controller must seal the closeout, not the local fallback: {attempt:?}");
+        };
+        assert_eq!(
+            sealed, "response+status+strike",
+            "the sealed cut carries the held-back status and the answered strike"
+        );
+        assert_eq!(
+            controller.waits.get(),
+            4,
+            "one wait per outstanding receipt"
+        );
+        assert_eq!(controller.asks.get(), 5);
+        assert!(
+            logs.borrow()
+                .iter()
+                .any(|line| line.starts_with("controller_commit_live_projection_landed asks=5")),
+            "{:?}",
+            logs.borrow()
+        );
+    }
+
+    #[test]
+    fn the_incident_refusal_text_is_awaited_not_sealed_around() {
+        // Verbatim (path shortened) from ops.log 2026-10-20T18:23:39Z: a
+        // controller built before the stamped token still orders the commit.
+        let legacy = anyhow::anyhow!(
+            "live editor commit projection is not durable yet for tasks/agent-doc/agent-doc-bugs.md (barrier_ready=true disk_projection_ready=false); native editor save/reconciliation remains pending"
+        )
+        .context("project controller command `commit_document` failed");
+        assert!(controller_commit_refusal_awaits_projection(&legacy));
+        let failed_strike = anyhow::anyhow!(
+            "answered free-text queue projection was not applied for doc.md (projection_id=abc): retained"
+        );
+        assert!(controller_commit_refusal_awaits_projection(&failed_strike));
+        let unbound = anyhow::anyhow!("controller commit has no live actor binding for doc.md");
+        assert!(!controller_commit_refusal_awaits_projection(&unbound));
+    }
+
+    #[test]
+    fn without_an_open_cycle_or_on_other_errors_the_local_fallback_is_immediate() {
+        // No open cycle owns the commit: the legacy immediate fallback.
+        let controller = LiveController::incident();
+        let logs = RefCell::new(Vec::new());
+        let attempt = run(
+            &controller,
+            std::time::Duration::from_secs(30),
+            false,
+            &logs,
+        );
+        assert!(matches!(attempt, ControllerCommitAttempt::Fallback(_)));
+        assert_eq!(controller.waits.get(), 0);
+
+        // A refusal that is not a pending live projection is never awaited.
+        let waits = Cell::new(0);
+        let attempt = retry_controller_commit_awaiting_projection::<String>(
+            std::time::Duration::from_secs(30),
+            true,
+            || anyhow::bail!("controller commit has no live actor binding for doc.md"),
+            controller_commit_refusal_awaits_projection,
+            |_| waits.set(waits.get() + 1),
+            |_| {},
+        );
+        assert!(matches!(attempt, ControllerCommitAttempt::Fallback(_)));
+        assert_eq!(waits.get(), 0);
+
+        // Headless: nothing to defer to.
+        let attempt = retry_controller_commit_awaiting_projection::<String>(
+            std::time::Duration::from_secs(30),
+            true,
+            || Ok(None),
+            controller_commit_refusal_awaits_projection,
+            |_| waits.set(waits.get() + 1),
+            |_| {},
+        );
+        assert!(matches!(attempt, ControllerCommitAttempt::Headless));
+        assert_eq!(waits.get(), 0);
+    }
+
+    #[test]
+    fn an_exhausted_budget_hands_the_commit_to_the_backstop() {
+        let controller = LiveController::incident();
+        let logs = RefCell::new(Vec::new());
+        let attempt = run(&controller, std::time::Duration::ZERO, true, &logs);
+        let ControllerCommitAttempt::Fallback(err) = attempt else {
+            panic!("an exhausted budget falls back: {attempt:?}");
+        };
+        assert!(controller_commit_refusal_awaits_projection(&err));
+        assert_eq!(controller.waits.get(), 0);
+        assert!(
+            logs.borrow()
+                .iter()
+                .any(|line| line.starts_with("controller_commit_live_projection_wait_exhausted")),
+            "{:?}",
+            logs.borrow()
+        );
     }
 }
 

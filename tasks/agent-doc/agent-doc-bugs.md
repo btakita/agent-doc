@@ -444,10 +444,6 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=789850c6b8adb14e513fa66ea2943da3be235ad14876bed60f0d3e9efe07f1c1 -->
 
-### Re: Subagent completed: `subagent:gh317` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/317” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=fe356ba2b718b42c29b9d0f0c11b4913d1e46b463e87e91b57ef8601fb334303 -->
-
 ### Re: Subagent completed: `subagent:busycue` returned work for queue item “route: a background orphan-drain dispatch types into a pane right after reading its busy-turn cue (route_dispatch_only_busy_active_turn_skip_wait then tmux_text_enter; from GH 319)” — agent-doc
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=62f7da6542426f80d3a0ea794f0b101a4433e8a9487c9c8fa7ef5f09fb381bef -->
@@ -455,7 +451,70 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 ### Re: Subagent completed: `subagent:claimvis` returned work for queue item “investigate: preset head upgrade was dispatched 2 s after its claim landed (GH 319 "also seen"; likely claim-visibility timing in the controller state.db read)” — agent-doc
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=fb2f46b1b1c141f9c3d04edb8445635d689db23d488ba246d15001abfab58d0d -->
-<!-- agent:boundary:b0bf624b -->
+> **Chat prompt (#chatprompt):** is PR #320 included in the release?
+
+> **Chat prompt (#chatprompt):** should we use lazily instead of shelling to the cli to fix this?
+
+> **Chat prompt (#chatprompt):** should we use lazily instead of shelling to the cli to fix #320?
+
+> **Chat prompt (#chatprompt):** I would like state to be propagated...instead of relying on effects that may be incorrect
+
+> **Chat prompt (#chatprompt):** Note that #320 may have new comments
+
+> **Chat prompt (#chatprompt):** Instead of persisting in memory, because I use other agents, persist in the agent-doc spec
+
+> **Chat prompt (#chatprompt):** subagent: there are 3 tmux panes
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/317
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/318
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/319
+
+> **Queue prompt:** [#yvt3]: done
+
+> **Queue prompt:** [#8ph6]: done
+
+### Re: GH #317–#320 batch, v0.35.527 release, state-propagation spec — opus-5.5 · 2026-10-20T02:08-04:00
+
+**#317, #318, #319 are fixed, merged and released in v0.35.527.** Each was done by its own subagent, on its own branch and worktree, and integrated serially on `integrate/gh317-319`. main and the tag `v0.35.527` are pushed (`e60a9e3b1d`). `make check` passed on the version-projected tree: 11139/11139. `install-full` has run: `agent-doc --version` reports 0.35.527, and the JetBrains packages were replaced live with no restart needed. All three issues closed automatically from the `Fixes #N` commits. The release driver is still waiting for the GitHub Release and PyPI uploads to go public.
+
+- **#317 (`d94c397f4b`):** a Run Agent Doc trigger that was typed but never submitted no longer blocks Clear Session Context. When the clear withdraws the trigger and no turn-active lease appears within 1 s, it settles the oldest accepted dispatch that never started (`lease=none reason=trigger_never_submitted`), and the clear runs. A dispatch that did start, a newer queued Run, or a late lease still holds the clear. Not covered: an empty composer, where nothing was withdrawn, and the stale "turn in progress" pane title.
+- **#318 (`3a8f232365`):** bolded residual-work lists (`Still stale`, `Also stale`, `Not done`, `Still open`, `Open`, `Remaining`) now count as operator asks. Asks are counted against `--todo-add` items and open todos, so one add no longer silences the advisory. Signals match on word boundaries and skip headings and fenced code, so "reply posted" no longer matches "reply post".
+- **#319 (`b3ee177a78`):** the orphan drain checks claims against the head's line text, not its bare id, on both the fresh and memoized paths.
+- **Release fixes:** the release needed an editor-parity row for 0.35.527, which I added. The shared `src/tmux-router` checkout is 3 commits behind (0.3.21) and has local edits that overlap upstream. Building against it would have downgraded the lockfile, so the release worktree uses its own sibling tmux-router at origin/main (0.3.22). The shared checkout was not touched.
+- **Follow-up from #319: the background drain no longer types into a running turn** (`479418fe3c`, branch `fix/busycue-20261020`). Every dispatch now records whether it came from the operator or from a background drain. A background dispatch against a busy or waiting actor defers (`route_automated_dispatch_deferred_live_turn`, exit 75) and retries after backoff. Operator Run Agent Doc steering into a live turn is unchanged.
+- **Follow-up from #319: claim timing** (`d9f4aa0031`, branch `fix/claimvis-20261020`). The orphan-drain sweep read claims once per pass. It now re-reads them before taking the dispatch lease and again in the route worker. I could not confirm that this caused the `upgrade` case, because no log from that session exists on this machine.
+- **Both follow-ups are merged into `integrate/v0.35.528`,** which is local only. I fixed one clash between them in a test fixture. `make check-fast` passed: 9304/9304. They will be persisted when v0.35.528 ships.
+- **#320 is not in v0.35.527.** It is an issue, not a PR, and it was filed at 05:34Z, after that batch was cut. A subagent is fixing it now on `fix/gh320-20261020`, and it will ship immediately as v0.35.528 together with the two follow-ups.
+
+**Lazily instead of the CLI, for #320.** #320 has two faults.
+
+1. **The move is never published.** The automatic capture already uses the controller's Lazily path. But in Remote Dev it stops in Kotlin (`no_visible_session_documents`) when the backend's `selectedFiles` is empty, and the remote client's visible editors are thrown away. The fix is to publish that remote-client state on the Lazily path instead.
+2. **The merge keeps the old order** (`RemoteLayoutMemory::ordered_columns`). The Lazily path and the CLI `--col` route both reach this merge, so changing the transport alone does not fix it.
+
+Moving Run and Sync off the `--col` CLI shell-out is a separate, larger migration. I asked for it as a follow-up suggestion rather than part of this release.
+
+**Propagate state, don't infer it from effects.** The #320 subagent has been redirected. The plugin publishes the editor's actual layout: split columns in geometric order, with the visible and selected documents in each. tmux order is a pure derivation of that state, and the tmux effect only applies the result. It no longer reads "editor removed, then reopened" as a reorder. When the real geometry is known, the order is computed from the current state alone, with no carried-over memory. If the Remote Dev backend cannot see the client's geometry, the state is labelled `geometry=unknown` and the spec names that limit and the manual remedy; nothing guesses. If doing this properly needs more than one cycle, the subagent will send a `[#subagent-operator-request]` packet rather than fall back to a heuristic.
+
+**Persisted in the agent-doc spec instead of memory.** I removed the memory note. `specs/13-state-backbone.md` now has a section, "State Propagation, Not Effect Inference" (`54570d2665` on `integrate/v0.35.528`, shipping with v0.35.528):
+- consequences are derived from propagated state, and effects only apply them;
+- events may trigger a re-publish but are not evidence of state;
+- the current state alone determines the result;
+- unknown state is labelled, never guessed;
+- observed state is never dropped because of a local precondition;
+- prefer the reactive path over CLI snapshots.
+
+The Regression Rule gains a third question that checks for this. I also added the #317 entry that was missing from the 0.35.527 section of `VERSIONS.md`.
+
+**#320 comments:** none so far (0 comments; last updated 05:34:38Z). The subagent will re-read the issue before it finalises the design and again before it commits.
+
+**Tmux pane count ("There was 1 tmux pane with 2 editor panes." / "subagent: there are 3 tmux panes"):** dispatched to subagent `panecount` (`fix/panecount-20261020`). At 06:06Z window `0:0` shows 3 panes: `%2` agent-doc-bugs.md, `%44` upgrade.ad.md, `%58` sdk-demo.md. Preflight also reports `session drift: registered panes span 2 tmux sessions: 0, 2`. The subagent works read-only against ops.log, idea.log and tmux, does not touch the live layout, and follows the same state-propagation rule. It coordinates through me if its root cause overlaps #320.
+
+**`[#yvt3]` and `[#8ph6]`:** checked off as done, as you reported.
+
+**Still open:** #320 and the pane count (both running), and "release + publish including PR #317-#320." (v0.35.527 is out; this stays open until v0.35.528 publishes). The exchange is 421 lines, so it is due for compaction once the queue drains.
+<!-- agent:boundary:7018a289 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -463,13 +522,13 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/317
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/317~~
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/318
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/319
-- There was 1 tmux pane with 2 editor panes.
+- 🚧 There was 1 tmux pane with 2 editor panes.
 - 📥 route: a background orphan-drain dispatch types into a pane right after reading its busy-turn cue (route_dispatch_only_busy_active_turn_skip_wait then tmux_text_enter; from GH 319)
 - 📥 investigate: preset head upgrade was dispatched 2 s after its claim landed (GH 319 "also seen"; likely claim-visibility timing in the controller state.db read)
-- There is 
+- ~~There is — auto-struck: completed by #adoc-baseline-drift-after-user-commit (#qftbklgstrike)~~
 - [#yvt3]: done
 - [#8ph6]: done
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/320

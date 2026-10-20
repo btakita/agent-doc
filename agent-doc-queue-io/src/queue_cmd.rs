@@ -169,7 +169,7 @@ pub fn derive_claim_runtime_projection(
                     && let Some(diagnosis) = agent_doc_queue::queue_claim::diagnose_lifecycle(
                         claim,
                         observed,
-                        agent_doc_log_time::current_epoch_secs(),
+                        crate::queue_claim::claim_clock_now_secs(),
                         agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
                     )
                 {

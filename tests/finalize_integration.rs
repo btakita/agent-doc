@@ -22,6 +22,33 @@ fn agent_doc() -> Command {
     command
 }
 
+/// `#finalgrace`: one fixed claim-ledger clock for a test that leaves a queue
+/// claim unacknowledged on purpose. An unstarted claim older than
+/// `DISPATCH_EVIDENCE_GRACE_SECS` is a coordinator obligation that strict
+/// closeout refuses, so measuring its age on the wall clock made the outcome
+/// depend on how fast the test ran. The returned guard pins the clock for this
+/// test thread's in-process claim calls; spawn CLI commands with
+/// [`agent_doc_at_claim_clock`] so they read the same instant.
+fn pin_claim_clock() -> (u64, agent_doc_queue_io::queue_claim::PinnedClaimClock) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    (
+        now,
+        agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(now),
+    )
+}
+
+fn agent_doc_at_claim_clock(claim_clock_secs: u64) -> Command {
+    let mut command = agent_doc();
+    command.env(
+        agent_doc_queue_io::queue_claim::TEST_CLAIM_CLOCK_ENV,
+        claim_clock_secs.to_string(),
+    );
+    command
+}
+
 fn template_doc_content() -> String {
     "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
@@ -1766,6 +1793,10 @@ fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
 #[test]
 fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
     let (tmp, doc) = setup_session_stream_doc();
+    // The claimed heads stay unacknowledged across both finalizes; pin the
+    // claim clock so they remain inside the dispatch grace however slow the
+    // run is (`#finalgrace`).
+    let (claim_clock, _claim_clock) = pin_claim_clock();
     let issue_186 = "#gh-fix https://github.com/btakita/agent-doc/issues/186";
     let issue_187 = "#gh-fix https://github.com/btakita/agent-doc/issues/187";
     let tmux = "Make the tmux pane title contain the document name in all states.";
@@ -1790,7 +1821,7 @@ fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
     ] {
         agent_doc_queue_io::queue_claim::claim(&doc, item, owner, 3600).unwrap();
     }
-    agent_doc()
+    agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args([
             "finalize",
@@ -1812,7 +1843,7 @@ fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
     // A worker result can arrive after the setup cycle committed. Its replay
     // reopen has an authoritative empty queue selection; stale visible markers
     // for unrelated work must not be reinterpreted as this response's scope.
-    agent_doc()
+    agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args([
             "finalize",

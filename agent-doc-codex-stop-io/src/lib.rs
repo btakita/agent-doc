@@ -924,7 +924,7 @@ pub fn claude_stop_steering_reason(file_display: &str, verbatim: &str) -> String
 fn claimed_heads_stop_continuation(file: &Path) -> Result<Option<ClaudeStopContinuation>> {
     claimed_heads_stop_continuation_at(
         file,
-        now_secs(),
+        agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
         agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
     )
 }
@@ -7314,6 +7314,12 @@ Reviewed the gated items.\n\
     /// releasing the claim restores the continuation.
     #[test]
     fn claude_stop_does_not_reenter_for_claimed_heads() {
+        // Both claims stay unacknowledged on purpose: "every head claimed" is a
+        // quiet stop only inside the dispatch grace. Pin the claim clock so the
+        // outcome does not depend on run speed (`#finalgrace`).
+        let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        );
         let dir = setup_project();
         let doc = write_auto_queue_doc(
             &dir,

@@ -215,9 +215,8 @@ use agent_doc_sync::{
     SYNC_OWNERSHIP_PROOF_BUDGET, SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET,
     SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
     SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
-    destructive_repair_throttle_state_key, effective_sync_columns, epoch_millis_now,
-    blocked_owner_layout_decision, gated_layout_decision, last_visible_excerpt,
-    latency_budget_status,
+    blocked_owner_layout_decision, destructive_repair_throttle_state_key, effective_sync_columns,
+    epoch_millis_now, gated_layout_decision, last_visible_excerpt, latency_budget_status,
     plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
     rename_debounce_expired, sanitize_excerpt, sync_latency_message,
 };
@@ -8316,10 +8315,28 @@ mod tests {
         let owner_pane = iso.split_window(&stale_pane, tmp.path(), "-dh").unwrap();
         respawn_pane_as_document_owner(&iso, &owner_pane, tmp.path(), &doc);
 
+        // `#ownerpaneflake`: the stale pane's same-file `codex <doc>` process
+        // used to be typed into the pane's interactive shell with `send-keys`
+        // and then polled for against a 3s deadline. That raced the operator's
+        // shell startup (~2s for a zsh profile on an idle machine, unbounded
+        // under load), so the precondition failed whenever the shell had not
+        // read the keystrokes in time. The process is now exec'd directly as
+        // the pane's root (multi-argument `respawn-pane` runs without a shell),
+        // and the fixture waits for the readiness file the process itself
+        // writes. Once that file exists the process is necessarily in `/proc`
+        // with `<doc>` on its command line, so the process-tree precondition
+        // is checked once, not polled against a clock.
         let fake_bin_dir = tmp.path().join("bin");
         std::fs::create_dir_all(&fake_bin_dir).unwrap();
         let fake_codex = fake_bin_dir.join("codex");
-        std::fs::write(&fake_codex, "#!/bin/sh\nsleep 60\n").unwrap();
+        let stale_ready = tmp.path().join("stale-codex.ready");
+        // `sleep` runs as a child, not via `exec`, so the `codex <doc>` command
+        // line that binds the document stays alive as the pane root.
+        std::fs::write(
+            &fake_codex,
+            format!("#!/bin/sh\n: > '{}'\nsleep 60\n", stale_ready.display()),
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -8328,21 +8345,31 @@ mod tests {
             std::fs::set_permissions(&fake_codex, perms).unwrap();
         }
 
+        let fake_codex_arg = fake_codex.to_string_lossy();
+        let doc_arg = doc.to_string_lossy();
+        let cwd_arg = tmp.path().to_string_lossy();
         iso.raw_cmd(&[
-            "send-keys",
+            "respawn-pane",
+            "-k",
+            "-c",
+            cwd_arg.as_ref(),
             "-t",
             &stale_pane,
-            &format!("{} {}", fake_codex.display(), doc.display()),
-            "Enter",
+            fake_codex_arg.as_ref(),
+            doc_arg.as_ref(),
         ])
         .unwrap();
 
+        // The bound only turns a process that never starts into a failure
+        // message; success is the event (the readiness file), not elapsed time.
         assert!(
-            wait_for(Duration::from_secs(3), || {
-                find_alive_pane_for_file_inner(&iso, doc.to_string_lossy().as_ref(), None, false)
-                    .as_deref()
-                    == Some(stale_pane.as_str())
-            }),
+            wait_for(Duration::from_secs(120), || stale_ready.exists()),
+            "stale pane's same-file codex process should start and write {}",
+            stale_ready.display()
+        );
+        assert_eq!(
+            find_alive_pane_for_file_inner(&iso, doc_arg.as_ref(), None, false).as_deref(),
+            Some(stale_pane.as_str()),
             "stale pane should expose a same-file process-tree match before session-log precedence is evaluated"
         );
 
@@ -10687,9 +10714,7 @@ mod tests {
         assert!(
             components[3..]
                 .iter()
-                .filter(|component| {
-                    component.name != "todo" && component.name != "backlog"
-                })
+                .filter(|component| { component.name != "todo" && component.name != "backlog" })
                 .all(|component| component.attrs.is_empty())
         );
     }

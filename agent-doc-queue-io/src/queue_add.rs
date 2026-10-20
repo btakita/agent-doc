@@ -211,6 +211,16 @@ pub fn add_followups_with_effects(
             followups.len()
         ),
     );
+    // `#capturegatedispatched`: follow-up heads are tracked work, so they meet
+    // this cycle's generic backlog-capture requirement. The heads already
+    // landed; a failed mark only leaves the gate armed, so it must not fail
+    // (and invite a duplicating retry of) the follow-up write.
+    if let Err(err) = agent_doc_cycle_state_io::mark_queue_followups_added(file) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("queue_followup_capture_mark_failed queue_id={queue_id} error={err:#}"),
+        );
+    }
     Ok(followups.len())
 }
 
@@ -374,6 +384,36 @@ mod tests {
         assert!(!stored.contains(&token), "{stored}");
         assert!(stored.contains("[REDACTED_GITHUB]"), "{stored}");
         assert!(stored.contains("line 3"), "{stored}");
+    }
+
+    /// `#capturegatedispatched`: inserted follow-up heads are recorded on the
+    /// open cycle as tracked capture, so the closeout backlog-capture gate
+    /// does not refuse a cycle whose follow-ups went to the queue.
+    #[test]
+    fn followups_record_queue_capture_on_the_open_cycle() {
+        let content = DOC.replace("<!-- agent:queue go -->", "<!-- agent:queue id=main go -->");
+        let (_dir, doc) = project(&content);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        let before = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(!before.queue_followups_added_this_cycle);
+
+        let count = add_followups_with_effects(
+            &DiskEffects,
+            &doc,
+            "main",
+            "current task",
+            &["follow-up from the worker".to_string()],
+        )
+        .unwrap();
+        assert_eq!(count, 1);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("- follow-up from the worker"), "{content}");
+        let after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(after.queue_followups_added_this_cycle, "{after:?}");
+        assert!(
+            !after.had_pending_mutations,
+            "not a backlog mutation: {after:?}"
+        );
     }
 
     #[test]

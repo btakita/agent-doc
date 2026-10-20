@@ -15,23 +15,41 @@
 //! preflight can scope the capture requirement to the heads it does. It is
 //! pure: the caller supplies the claim / hold / dispatch set it observed.
 //!
+//! A worker's report on such a head carries the same text a second time,
+//! outside the queue: `agent-doc queue report-complete` appends a
+//! binary-authored completion cell to `agent:exchange` whose
+//! `### Re: Subagent completed: …` heading names the worker and quotes the
+//! queue item verbatim. That cell is agent-doc's own bookkeeping,
+//! never an operator request, so its lines leave the scope too. Without this,
+//! the 2026-10-20 `agent-doc-bugs.md` dispatch-only coordinator cycle
+//! (`cycle-1792527508436`) was blocked by `pending_capture_required`: a
+//! reported head's report heading quoted "… haiven-dev tasks/fpe.md …", and
+//! the bare word `tasks` is a backlog signal.
+//!
 //! The scope is fail-closed. A line is out of scope only when it is positively
-//! a queue entry this cycle does not drain, AND its text appears nowhere else:
-//! not as a drained live head, and not outside the queue components
-//! (an operator may type the same text as a live exchange prompt). Anything
+//! a queue entry this cycle does not drain, or a line of a structurally
+//! binary-attested completion cell
+//! ([`agent_doc_document::subagent_completion::completion_cell_line_ranges`]),
+//! AND its text appears nowhere else: not as a drained live head, and not as
+//! any other line outside the queue components (an operator may type the same
+//! text as a live exchange prompt). A completion-shaped heading without the
+//! fixed body and keyed marker is ordinary text and stays in scope. Anything
 //! ambiguous stays in scope and keeps the gate armed.
 
 use std::collections::HashSet;
+use std::ops::Range;
 
+use agent_doc_document::subagent_completion;
 use agent_doc_element::element;
 
 use crate::document_queue::{self, QueueEntry};
 use crate::queue_claim::ClaimedQueueItems;
 
-/// Normalized keys of the queue components' source lines that this cycle
-/// does not drain: completed (struck) entries, closed by the cycle that
-/// answered them, and live heads `not_drained` holds (a worker claim, a
-/// subagents-attribute hold, or this cycle's subagent dispatch set).
+/// Normalized keys of the source lines that carry no request for this cycle:
+/// the queue components' completed (struck) entries, closed by the cycle that
+/// answered them, the live heads `not_drained` holds (a worker claim, a
+/// subagents-attribute hold, or this cycle's subagent dispatch set), and every
+/// line of a binary-attested subagent completion cell outside the queue.
 ///
 /// `views` are the document cuts the cycle's prompt texts were drawn from —
 /// preflight passes the admitted diff cut and the post-maintenance queue
@@ -74,6 +92,7 @@ fn classify_view(
         .filter(|component| component.name == "queue")
         .collect::<Vec<_>>();
     queues.sort_by_key(|queue| queue.open_end);
+    let completion_cells = completion_cell_byte_ranges(content);
 
     let mut cursor = 0usize;
     for queue in queues {
@@ -83,7 +102,13 @@ fn classify_view(
             in_scope.extend(line_keys(content));
             return;
         }
-        in_scope.extend(line_keys(&content[cursor..queue.open_end]));
+        classify_outside_queue(
+            content,
+            cursor..queue.open_end,
+            &completion_cells,
+            undrained,
+            in_scope,
+        );
         cursor = queue.close_start;
         let body = &content[queue.open_end..queue.close_start];
         let Ok(entries) = document_queue::parse_spans(body) else {
@@ -102,7 +127,58 @@ fn classify_view(
             target.extend(line_keys(&body[span.clone()]));
         }
     }
-    in_scope.extend(line_keys(&content[cursor..]));
+    classify_outside_queue(
+        content,
+        cursor..content.len(),
+        &completion_cells,
+        undrained,
+        in_scope,
+    );
+}
+
+/// Byte ranges of `content` covered by binary-attested completion cells.
+fn completion_cell_byte_ranges(content: &str) -> Vec<Range<usize>> {
+    let ranges = subagent_completion::completion_cell_line_ranges(content);
+    if ranges.is_empty() {
+        return Vec::new();
+    }
+    let mut line_starts = Vec::new();
+    let mut offset = 0usize;
+    for line in content.split_inclusive('\n') {
+        line_starts.push(offset);
+        offset += line.len();
+    }
+    line_starts.push(offset);
+    ranges
+        .into_iter()
+        .filter_map(|lines| Some(*line_starts.get(lines.start)?..*line_starts.get(lines.end)?))
+        .collect()
+}
+
+/// Classify the lines of `content[segment]`, which lie outside every queue
+/// component: a completion-cell line is binary bookkeeping, anything else is
+/// in scope.
+fn classify_outside_queue(
+    content: &str,
+    segment: Range<usize>,
+    completion_cells: &[Range<usize>],
+    undrained: &mut HashSet<String>,
+    in_scope: &mut HashSet<String>,
+) {
+    let mut offset = segment.start;
+    for line in content[segment].split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+        let key = document_queue::normalized_queue_line_for_match(line);
+        if key.is_empty() {
+            continue;
+        }
+        if completion_cells.iter().any(|cell| cell.contains(&start)) {
+            undrained.insert(key);
+        } else {
+            in_scope.insert(key);
+        }
+    }
 }
 
 /// `texts` with every line whose normalized key is in `undrained` removed;
@@ -237,6 +313,53 @@ mod tests {
         assert_eq!(
             without_undrained_queue_lines(&texts, &undrained),
             strings(&["what's next?"])
+        );
+    }
+
+    /// The 2026-10-20 `agent-doc-bugs.md` shape (`cycle-1792527508436`): a
+    /// reported head's binary completion cell in the exchange quoted the item
+    /// verbatim, and the item mentioned `tasks/fpe.md`. The cell is agent-doc's
+    /// bookkeeping, so none of its lines stays in the capture scope.
+    #[test]
+    fn a_completion_cell_for_a_reported_head_leaves_the_capture_scope() {
+        let item =
+            "a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md) never fired";
+        let cell = subagent_completion::cell("subagent:queuedclearstall", item, "k1");
+        let content = doc(
+            &format!("\n{cell}\n"),
+            &format!("- 📥 {item}\n- do [#drainedhere]\n"),
+        );
+        let undrained = undrained_queue_line_keys(&[&content], &claimed(&[item]));
+
+        let mut added = cell.lines().map(str::to_string).collect::<Vec<_>>();
+        added.push(format!("- 📥 {item}"));
+        added.push("- do [#drainedhere]".to_string());
+        assert_eq!(
+            without_undrained_queue_lines(&added, &undrained),
+            strings(&["- do [#drainedhere]"]),
+        );
+        // The diff hunk that carries the whole cell as one text keeps nothing.
+        assert!(without_undrained_queue_lines(&[cell], &undrained).is_empty());
+    }
+
+    /// Fail-closed: a completion-shaped heading without the binary body and
+    /// keyed marker is ordinary exchange text, and the same heading typed as
+    /// its own line elsewhere keeps a real cell's heading in scope too.
+    #[test]
+    fn completion_shaped_prose_stays_in_the_capture_scope() {
+        let item = "add tasks to the backlog";
+        let heading = subagent_completion::heading("subagent:x", item);
+        let content = doc(&format!("\n{heading}\n\nPlease do this.\n"), "");
+        let undrained = undrained_queue_line_keys(&[&content], &ClaimedQueueItems::none());
+        assert!(undrained.is_empty(), "{undrained:?}");
+
+        let cell = subagent_completion::cell("subagent:x", item, "k1");
+        let content = doc(&format!("\n{cell}\n\n{heading}\n"), "");
+        let undrained = undrained_queue_line_keys(&[&content], &ClaimedQueueItems::none());
+        assert_eq!(
+            without_undrained_queue_lines(std::slice::from_ref(&heading), &undrained),
+            vec![heading],
+            "the typed copy of the heading is a live line: {undrained:?}"
         );
     }
 

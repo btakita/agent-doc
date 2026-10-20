@@ -1924,8 +1924,10 @@ fn run_with_options_to_writer_in_pass(
     // queue heads this cycle drains. A struck head (closed by the cycle that
     // answered it), a head a worker claim or subagents hold owns, and a head this
     // cycle dispatches to a subagent all carry their text in this diff, but
-    // their capture belongs to the cycle that closes them. Scoping is
-    // fail-closed: see `agent_doc_queue::capture_scope`.
+    // their capture belongs to the cycle that closes them. A worker's
+    // binary-authored completion cell quotes such a head in the exchange and is
+    // scoped out with it. Scoping is fail-closed: see
+    // `agent_doc_queue::capture_scope`.
     let backlog_capture_required = {
         let not_drained = agent_doc_queue_io::queue_claim::claimed_items_for_content(
             file,
@@ -4391,6 +4393,54 @@ mod tests {
             !requires,
             "a head an earlier cycle closed is not drained by this cycle: {parsed:#}"
         );
+    }
+
+    /// `#capturegatedispatched` regression (2026-10-20, `cycle-1792527508436`,
+    /// 0.35.529): a dispatch-only coordinator cycle whose diff carried a
+    /// worker-owned head AND that worker's binary completion cell. The cell's
+    /// heading quotes the queue item, and the item mentioned `tasks/fpe.md`, so
+    /// the bare `tasks` backlog signal armed `requires_backlog_capture` from
+    /// agent-doc's own bookkeeping and the closeout pre-write gate refused
+    /// the response with `pending_capture_required`.
+    const COMPLETION_ITEM: &str =
+        "a session clear queued behind a live Codex turn (haiven-dev tasks/fpe.md) never fired";
+
+    #[test]
+    fn a_worker_completion_cell_in_the_diff_does_not_require_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", &format!("- {COMPLETION_ITEM}\n"), "");
+        let cell =
+            agent_doc_document::subagent_completion::cell("subagent:review", COMPLETION_ITEM, "k1");
+        let current = capture_scope_doc(
+            "",
+            &format!("- 📥 {COMPLETION_ITEM}\n"),
+            &format!("\n{cell}\n"),
+        );
+        let (parsed, requires) =
+            capture_scope_preflight(&dir, &baseline, Some(COMPLETION_ITEM), &current);
+        assert!(
+            !requires,
+            "a worker's completion cell is agent-doc bookkeeping, not a request: {parsed:#}"
+        );
+    }
+
+    /// Fail-closed control for the test above: an operator line beside the
+    /// same cell that carries the backlog signal keeps the requirement, so
+    /// only the cell's own lines leave the scope.
+    #[test]
+    fn an_operator_line_beside_a_completion_cell_still_requires_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", &format!("- {COMPLETION_ITEM}\n"), "");
+        let cell =
+            agent_doc_document::subagent_completion::cell("subagent:review", COMPLETION_ITEM, "k1");
+        let current = capture_scope_doc(
+            "",
+            &format!("- 📥 {COMPLETION_ITEM}\n"),
+            &format!("\n{cell}\n\nWhy did the clear in haiven-dev tasks/fpe.md never fire?\n"),
+        );
+        let (parsed, requires) =
+            capture_scope_preflight(&dir, &baseline, Some(COMPLETION_ITEM), &current);
+        assert!(requires, "{parsed:#}");
     }
 
     /// Fail-closed control: an unclaimed head this cycle drains keeps the

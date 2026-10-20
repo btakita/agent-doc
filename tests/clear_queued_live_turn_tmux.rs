@@ -26,6 +26,11 @@
 //! live harness between the items keeps that pending clear
 //! (`#autoclearbaseline`).
 //!
+//! A fake Codex harness (`FAKE_CODEX`) covers the Codex delivery: the queued
+//! clear fires after the turn even though Codex's post-turn placeholder is on
+//! no static list (only its faint style marks it), and it arrives as one
+//! supervised fresh restart, never a typed `/clear` (Codex exits on it).
+//!
 //! Live tmux: `#[ignore]`, run through `make tmux-ci`.
 
 use std::path::PathBuf;
@@ -139,6 +144,88 @@ while True:
         idle()
 "#;
 
+/// A fake Codex harness (`#clearqueuedliveturn`, haiven-dev `tasks/fpe.md`
+/// pane %12). It renders Codex 0.163's composer the way the real TUI does: a
+/// bold `›` followed by a FAINT placeholder, `Ask Codex to do anything` in a new
+/// conversation and `Ask a follow-up question` once a turn has completed. That
+/// second placeholder is on no static list, so only its faint style says the
+/// composer is empty. Like real Codex, `/clear` ends the process
+/// (`#clear-ready-restart`).
+const FAKE_CODEX: &str = r#"#!/usr/bin/env python3
+import os, select, sys, termios
+try:
+    attrs = termios.tcgetattr(0)
+    attrs[3] &= ~termios.ECHO
+    termios.tcsetattr(0, termios.TCSANOW, attrs)
+except termios.error:
+    pass
+d = os.environ["FAKE_CLAUDE_DIR"]
+open(os.path.join(d, "started"), "w").close()
+log = open(os.path.join(d, "input.log"), "a", buffering=1)
+log.write("<started>\n")
+with open(os.path.join(d, "pids"), "a") as f:
+    f.write("%d\n" % os.getpid())
+FOOTER = "\x1b[2m  gpt-5.5 xhigh · ~/fake · Context 40% used\x1b[0m\n"
+turns = 0
+def idle():
+    placeholder = "Ask a follow-up question" if turns else "Ask Codex to do anything"
+    sys.stdout.write("\x1b[2J\x1b[H\x1b[1m›\x1b[0m \x1b[2m" + placeholder + "\x1b[0m\n\n"
+                     + FOOTER + "\x1b[1;3H")
+    sys.stdout.flush()
+def busy():
+    sys.stdout.write("\x1b[2J\x1b[H• Working (3s • esc to interrupt)\n\n\x1b[1m›\x1b[0m \n\n"
+                     + FOOTER + "\x1b[3;3H")
+    sys.stdout.flush()
+state = "idle"
+idle()
+end_turn = os.path.join(d, "end_turn")
+ticks = 0
+while True:
+    ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+    ticks += 1
+    if not ready and ticks % 10 == 0:
+        (busy if state == "busy" else idle)()
+    if ready:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        line = line.strip("\r\n")
+        log.write(line + "\n")
+        if line.strip() == "/clear":
+            sys.exit(0)
+        if line.strip():
+            state = "busy"
+            busy()
+    if state == "busy" and os.path.exists(end_turn):
+        os.unlink(end_turn)
+        turns += 1
+        state = "idle"
+        idle()
+"#;
+
+/// Which fake harness the scenario's supervisor launches.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FakeHarness {
+    Claude,
+    Codex,
+}
+
+impl FakeHarness {
+    fn binary(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+
+    fn script(self) -> &'static str {
+        match self {
+            Self::Claude => FAKE_CLAUDE,
+            Self::Codex => FAKE_CODEX,
+        }
+    }
+}
+
 fn agent_doc_bin() -> PathBuf {
     std::env::var_os("AGENT_DOC_BIN")
         .map(PathBuf::from)
@@ -172,6 +259,8 @@ const QUEUE_OBSERVATION_RELEASE: &str = "release_queue_observation";
 
 const PLAIN_DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c1\nagent: claude\n---\n\n# Session\n\n## User\n\nhello\n";
 
+const CODEX_DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c2\nagent: codex\n---\n\n# Session\n\n## User\n\nhello\n";
+
 impl LiveClearScenario {
     fn start(label: &str) -> Self {
         Self::start_with_document(label, PLAIN_DOC)
@@ -186,13 +275,24 @@ impl LiveClearScenario {
     /// `AGENT_DOC_TEST_HOLD_IDLE_WATCH_QUEUE_OBSERVATION` seam), so a test can
     /// order work before the watch's first look at the queue by handshake.
     fn start_with(label: &str, document: &str, hold_queue_observation: bool) -> Self {
-        Self::start_inner(label, document, hold_queue_observation, false)
+        Self::start_inner(
+            label,
+            document,
+            hold_queue_observation,
+            false,
+            FakeHarness::Claude,
+        )
     }
 
     /// The fake harness renders the unsubmitted composer line (see
     /// `FAKE_CLAUDE_COMPOSER` in [`FAKE_CLAUDE`]).
     fn start_with_composer(label: &str) -> Self {
-        Self::start_inner(label, PLAIN_DOC, false, true)
+        Self::start_inner(label, PLAIN_DOC, false, true, FakeHarness::Claude)
+    }
+
+    /// The supervisor launches the fake Codex harness ([`FAKE_CODEX`]).
+    fn start_codex(label: &str) -> Self {
+        Self::start_inner(label, CODEX_DOC, false, false, FakeHarness::Codex)
     }
 
     fn start_inner(
@@ -200,6 +300,7 @@ impl LiveClearScenario {
         document: &str,
         hold_queue_observation: bool,
         composer: bool,
+        harness: FakeHarness,
     ) -> Self {
         let tmp = tempfile::TempDir::new().unwrap();
         let controllers = agent_doc_test_support::ProjectControllerReaper::under(tmp.path());
@@ -215,8 +316,8 @@ impl LiveClearScenario {
         ] {
             std::fs::create_dir_all(dir).unwrap();
         }
-        let fake_claude = bin_dir.join("claude");
-        std::fs::write(&fake_claude, FAKE_CLAUDE).unwrap();
+        let fake_claude = bin_dir.join(harness.binary());
+        std::fs::write(&fake_claude, harness.script()).unwrap();
         let agent_doc = agent_doc_bin();
         std::os::unix::fs::symlink(&agent_doc, bin_dir.join("agent-doc")).unwrap();
         {
@@ -275,13 +376,14 @@ impl LiveClearScenario {
         std::fs::write(
             &run,
             format!(
-                "#!/bin/sh\nexport PATH={path}\nexport HOME={home}\nexport FAKE_CLAUDE_DIR={fake}\nexport AGENT_DOC_TMUX_SOCKET={socket}\nexport AGENT_DOC_ROOT_CEILING_DIRECTORIES={ceiling}\n{hold}unset CLAUDECODE\nif [ \"$(command -v claude)\" != {claude} ]; then echo 'refusing: claude is not the fake harness'; sleep 600; exit 99; fi\ncd {root}\nexec agent-doc start {doc}\n",
+                "#!/bin/sh\nexport PATH={path}\nexport HOME={home}\nexport FAKE_CLAUDE_DIR={fake}\nexport AGENT_DOC_TMUX_SOCKET={socket}\nexport AGENT_DOC_ROOT_CEILING_DIRECTORIES={ceiling}\n{hold}unset CLAUDECODE\nif [ \"$(command -v {binary})\" != {claude} ]; then echo 'refusing: {binary} is not the fake harness'; sleep 600; exit 99; fi\ncd {root}\nexec agent-doc start {doc}\n",
                 path = shell_quote(&path_env),
                 home = shell_quote(&home.to_string_lossy()),
                 fake = shell_quote(&fake.to_string_lossy()),
                 socket = shell_quote(&socket),
                 ceiling = shell_quote(&ceiling.to_string_lossy()),
                 claude = shell_quote(&fake_claude.to_string_lossy()),
+                binary = harness.binary(),
                 root = shell_quote(&root.to_string_lossy()),
                 doc = DOC,
             ),
@@ -772,6 +874,131 @@ fn queued_clear_lands_once_when_a_dispatch_receipt_only_turn_ends() {
         }),
         "the deferred clear was promoted to in-flight on delivery:\n{}",
         scenario.ops_log_tail()
+    );
+}
+
+/// The haiven-dev `tasks/fpe.md` incident (2026-10-20, pane %12, Codex): Clear
+/// Session Context pressed during a live Codex turn was queued behind it
+/// (`evidence=turn_active_lease`, the actor stayed `ready`), and it never
+/// fired once the turn closed. After the turn Codex shows the faint
+/// `› Ask a follow-up question` placeholder; the supervisor's screen dropped
+/// the faint style, read the placeholder as an operator draft, and held the
+/// clear at `prompt_visible=false` until the operator cleared by hand.
+///
+/// Now the queued clear fires exactly once after the turn ends, as the same
+/// supervised fresh restart an idle Codex Clear uses: Codex's own `/clear`
+/// exits the process, so nothing is typed into it. Every step waits on a
+/// handshake (an ops.log receipt or the harness's own record), never a sleep.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn queued_clear_fires_once_after_a_codex_turn_closes() {
+    let scenario = LiveClearScenario::start_codex("clear-queued-codex-turn");
+    assert_eq!(scenario.harness_pids().len(), 1);
+
+    // A Codex turn the supervisor's actor never sees: the trigger goes
+    // straight to the pane and `UserPromptSubmit` writes the turn lease.
+    scenario
+        .tmux
+        .send_keys(&scenario.pane, &format!("agent-doc {DOC}"))
+        .unwrap();
+    scenario.wait_until("the fake Codex started the turn", || {
+        scenario
+            .inputs()
+            .iter()
+            .any(|line| *line == format!("agent-doc {DOC}"))
+    });
+    scenario.hook(true, "UserPromptSubmit");
+
+    let pressed = scenario.press_clear();
+    scenario.assert_clear_queued(&pressed);
+    assert!(
+        stderr(&pressed).contains("evidence=turn_active_lease"),
+        "{}",
+        stderr(&pressed)
+    );
+    let epoch = scenario
+        .ops_log()
+        .lines()
+        .rev()
+        .find(|line| {
+            line.contains("queue_context_clear_projection_deferred")
+                && line.contains("source=operator_live_turn_deferred_clear")
+        })
+        .and_then(|line| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix("clear_epoch="))
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| panic!("no deferral receipt:\n{}", scenario.ops_log_tail()));
+    let epoch_field = format!("clear_epoch={epoch} ");
+
+    // The watch holds the clear while the turn is live.
+    scenario.wait_until(
+        "the watch held the queued clear behind the live turn",
+        || {
+            scenario.ops_log().lines().any(|line| {
+                line.contains("idle_queue_watch_deferred_clear_waiting")
+                    && line.contains(&epoch_field)
+                    && line.contains("turn_active=true")
+            })
+        },
+    );
+    assert_eq!(
+        scenario.clears(),
+        0,
+        "nothing reaches the running turn: {:?}",
+        scenario.inputs()
+    );
+
+    // The turn closes: `Stop` retires the lease and Codex redraws its idle
+    // composer with the faint follow-up placeholder.
+    scenario.end_turn();
+    scenario.wait_until("the queued clear was delivered after the turn", || {
+        scenario.ops_log().lines().any(|line| {
+            line.contains("idle_queue_watch_deferred_clear_delivered")
+                && line.contains(&epoch_field)
+        })
+    });
+    // Delivery promotes the deferral to an in-flight clear (a new epoch); the
+    // replacement Codex's watch settles it once the fresh prompt is idle.
+    scenario.wait_until("the cleared Codex settled at a fresh idle prompt", || {
+        scenario.ops_log().lines().any(|line| {
+            line.contains("queue_context_clear_projection_settled")
+                && line.contains("source=operator_live_turn_deferred_clear")
+                && line.contains("phase=Idle")
+        }) && scenario.harness_pids().len() >= 2
+            && scenario.actor_ready()
+    });
+
+    let ops = scenario.ops_log();
+    let delivered: Vec<&str> = ops
+        .lines()
+        .filter(|line| line.contains("idle_queue_watch_deferred_clear_delivered"))
+        .collect();
+    assert_eq!(delivered.len(), 1, "delivered exactly once: {delivered:#?}");
+    assert!(
+        delivered[0].contains("delivery=restart_fresh"),
+        "Codex gets the supervised fresh restart: {}",
+        delivered[0]
+    );
+    let inputs = scenario.inputs();
+    assert_eq!(scenario.clears(), 1, "exactly one clear: {inputs:?}");
+    assert!(
+        !inputs.iter().any(|line| line == "/clear"),
+        "`/clear` is never typed into Codex: {inputs:?}"
+    );
+    assert_eq!(
+        scenario.harness_pids().len(),
+        2,
+        "one fresh Codex replaced the cleared one: {inputs:?}"
+    );
+    assert!(
+        agent_doc_controller_io::project_controller::queue_context_clear_deferred_operator_for_file(
+            &scenario.doc
+        )
+        .unwrap()
+        .is_none(),
+        "no clear is left queued"
     );
 }
 

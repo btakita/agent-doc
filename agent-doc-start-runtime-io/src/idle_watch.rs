@@ -947,6 +947,69 @@ pub(crate) fn deliver_queue_auto_clear_effect(
     (delivery, effect)
 }
 
+/// `#clearqueuedliveturn`: the inputs of a waiting deferred clear's delivery
+/// gate ([`agent_doc_queue::queue_preemption::deferred_clear_delivery_ready`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DeferredClearWaitGate {
+    clear_epoch: u64,
+    prompt_visible: bool,
+    turn_active: bool,
+    dispatch_turn_running: bool,
+}
+
+/// `#clearqueuedliveturn`: what delivering a deferred operator clear did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeferredOperatorClearEffect {
+    /// The harness-native clear was typed into the live child.
+    Typed,
+    /// A supervised operator-Clear fresh restart was requested (Codex).
+    RestartRequested,
+    /// The watch was stopped while delivering.
+    Cancelled,
+    /// Nothing reached the harness; the deferral stays queued.
+    Failed(String),
+}
+
+impl DeferredOperatorClearEffect {
+    fn delivery_label(&self) -> &'static str {
+        match self {
+            Self::Typed => "native_clear",
+            Self::RestartRequested => "restart_fresh",
+            Self::Cancelled => "cancelled",
+            Self::Failed(_) => "failed",
+        }
+    }
+}
+
+/// `#clearqueuedliveturn`: deliver a deferred operator clear the way an idle
+/// operator Clear reaches the same harness (`#idleclearrestart`): typed into
+/// the live child when its native clear keeps the process, otherwise (Codex,
+/// whose `/clear` exits the process, `#clear-ready-restart`) a supervised fresh
+/// restart tagged as operator-Clear provenance, so the relaunch re-triggers
+/// the document only when work is pending. Typing `/clear` into Codex here was
+/// the one delivery left that raced Codex's own exit.
+fn deliver_deferred_operator_clear(
+    shared: &SupervisorShared,
+    stop: &AtomicBool,
+    harness: &agent_doc_harness::HarnessConfig,
+    clear_cmd: &str,
+) -> DeferredOperatorClearEffect {
+    if agent_doc_supervisor::lifecycle::native_clear_keeps_harness_process(&harness.binary) {
+        return match auto_trigger_clear_command(shared, stop, clear_cmd) {
+            AutoTriggerOutcome::Sent => DeferredOperatorClearEffect::Typed,
+            AutoTriggerOutcome::Cancelled => DeferredOperatorClearEffect::Cancelled,
+            outcome => DeferredOperatorClearEffect::Failed(outcome.as_str().to_string()),
+        };
+    }
+    match agent_doc_supervisor_io::ipc::request_supervisor_restart(
+        shared,
+        agent_doc_supervisor_io::ipc::RestartIntent::operator_clear_fresh().encode(),
+    ) {
+        Ok(_) => DeferredOperatorClearEffect::RestartRequested,
+        Err(err) => DeferredOperatorClearEffect::Failed(format!("{err:?}")),
+    }
+}
+
 fn idle_watch_fast_path_can_sleep(
     queue_state_observed: bool,
     actor_ready: bool,
@@ -2104,6 +2167,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // retired, so the clear lands at the turn's idle boundary rather
             // than at the next quiescent-maintenance probe.
             let mut deferred_clear_armed = false;
+            // `#clearqueuedliveturn`: the delivery gate last reported for the
+            // waiting deferred clear, so the wait is logged once per change of
+            // its inputs instead of silently (2026-10-20 haiven-dev `tasks/fpe.md`:
+            // a queued clear sat five minutes past its turn with no receipt of
+            // which gate held it).
+            let mut deferred_clear_wait_logged: Option<DeferredClearWaitGate> = None;
             // `#bgclearpolicy`: the context state this watch last saw as fresh
             // (latest committed cycle + queue head), re-taken after every clear.
             // Queue auto-clear fires once an item completes past it.
@@ -5501,87 +5570,128 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         dispatch_turn_running,
                     ),
                 ) {
-                    agent_doc_queue::queue_preemption::DeferredClearStep::None => {}
+                    agent_doc_queue::queue_preemption::DeferredClearStep::None => {
+                        deferred_clear_wait_logged = None;
+                    }
                     agent_doc_queue::queue_preemption::DeferredClearStep::WaitForIdle => {
                         // Pending clear, pane still mid-turn: do not interrupt
                         // in-flight work; wait for the next idle tick.
+                        if let Some(projection) = deferred_clear.as_ref() {
+                            let gate = DeferredClearWaitGate {
+                                clear_epoch: projection.clear_epoch,
+                                prompt_visible,
+                                turn_active,
+                                dispatch_turn_running: live_turn_deferral
+                                    && dispatch_turn_running,
+                            };
+                            if deferred_clear_wait_logged != Some(gate) {
+                                let event = format!(
+                                    "idle_queue_watch_deferred_clear_waiting file={} target={} harness={} clear_epoch={} prompt_visible={} turn_active={} dispatch_turn_running={} (#clearqueuedliveturn)",
+                                    path.display(),
+                                    projection.target,
+                                    harness.binary,
+                                    gate.clear_epoch,
+                                    gate.prompt_visible,
+                                    gate.turn_active,
+                                    gate.dispatch_turn_running,
+                                );
+                                log_event(&mut session_log, &event);
+                                agent_doc_ops_log_io::log_op(&path, &event);
+                                deferred_clear_wait_logged = Some(gate);
+                            }
+                        }
                         continue;
                     }
                     agent_doc_queue::queue_preemption::DeferredClearStep::Deliver => {
+                        deferred_clear_wait_logged = None;
                         let clear_cmd = deferred_clear
                             .as_ref()
                             .map(|d| d.command.clone())
                             .unwrap_or_default();
-                        match auto_trigger_clear_command(&shared, &stop, &clear_cmd) {
-                            AutoTriggerOutcome::Cancelled => return,
-                            AutoTriggerOutcome::Sent => {
-                                // Resume: the started projection below supersedes
-                                // the deferred projection, so a later tick can
-                                // drain normally after the clear settles.
-                                last_dispatched = None;
-                                awaiting_clear_settle = true;
-                                context_reset_in_flight = true;
-                                clear_settle_idle_ticks = 0;
-                                if let Some(head) = active_head.clone() {
-                                    last_context_reset_head = Some(head);
-                                }
-                                last_context_clear_at = Some(current_epoch_secs());
-                                record_context_clear_prompt_for_hooks(
-                                    &shared,
-                                    &path,
-                                    &harness,
-                                    &clear_cmd,
-                                );
-                                if let Some(projection) = deferred_clear.as_ref() {
-                                    if let Err(err) = agent_doc_controller_io::project_controller::queue_context_clear_started_for_file(
-                                        &path,
-                                        &projection.target,
-                                        &projection.harness,
-                                        &projection.command,
-                                        projection
-                                            .source
-                                            .as_deref()
-                                            .unwrap_or(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED),
-                                        active_head.as_deref(),
-                                    ) {
-                                        eprintln!(
-                                            "[agent-doc] idle-queue watch: failed to promote deferred clear projection: {err:#}"
-                                        );
-                                    }
-                                } else {
-                                    record_context_clear_in_flight_projection(
-                                        &path,
-                                        &shared,
-                                        &harness,
-                                        &clear_cmd,
-                                        CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED,
-                                        active_head.as_deref(),
-                                    );
-                                }
-                                clear_cooldown_logged = false;
-                                log_event(
-                                    &mut session_log,
-                                    &format!(
-                                        "idle_queue_watch_deferred_clear_delivered harness={} cmd=\"{}\"",
-                                        harness.binary, clear_cmd
-                                    ),
-                                );
-                                eprintln!(
-                                    "[agent-doc] idle-queue watch: delivered deferred operator clear and resumed the loop"
-                                );
-                                // Let the clear run; resume drains on a later tick.
-                                continue;
-                            }
-                            _ => {
-                                // Delivery failed: keep the marker and retry on
-                                // the next idle tick (do not resume yet).
-                                log_event(
-                                    &mut session_log,
-                                    "idle_queue_watch_deferred_clear_failed",
-                                );
-                                continue;
-                            }
+                        let effect =
+                            deliver_deferred_operator_clear(&shared, &stop, &harness, &clear_cmd);
+                        if effect == DeferredOperatorClearEffect::Cancelled {
+                            return;
                         }
+                        if let DeferredOperatorClearEffect::Failed(reason) = &effect {
+                            // Delivery failed: keep the marker and retry on
+                            // the next idle tick (do not resume yet).
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "idle_queue_watch_deferred_clear_failed harness={} reason={reason}",
+                                    harness.binary
+                                ),
+                            );
+                            continue;
+                        }
+                        // Resume: the started projection below supersedes the
+                        // deferred projection, so a later tick (or, after a
+                        // Codex restart, the next generation's watch) drains
+                        // normally once the clear settles.
+                        last_dispatched = None;
+                        awaiting_clear_settle = true;
+                        context_reset_in_flight = true;
+                        clear_settle_idle_ticks = 0;
+                        if let Some(head) = active_head.clone() {
+                            last_context_reset_head = Some(head);
+                        }
+                        last_context_clear_at = Some(current_epoch_secs());
+                        if effect == DeferredOperatorClearEffect::Typed {
+                            record_context_clear_prompt_for_hooks(
+                                &shared,
+                                &path,
+                                &harness,
+                                &clear_cmd,
+                            );
+                        }
+                        if let Some(projection) = deferred_clear.as_ref() {
+                            if let Err(err) = agent_doc_controller_io::project_controller::queue_context_clear_started_for_file(
+                                &path,
+                                &projection.target,
+                                &projection.harness,
+                                &projection.command,
+                                projection
+                                    .source
+                                    .as_deref()
+                                    .unwrap_or(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED),
+                                active_head.as_deref(),
+                            ) {
+                                eprintln!(
+                                    "[agent-doc] idle-queue watch: failed to promote deferred clear projection: {err:#}"
+                                );
+                            }
+                        } else {
+                            record_context_clear_in_flight_projection(
+                                &path,
+                                &shared,
+                                &harness,
+                                &clear_cmd,
+                                CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED,
+                                active_head.as_deref(),
+                            );
+                        }
+                        clear_cooldown_logged = false;
+                        let event = format!(
+                            "idle_queue_watch_deferred_clear_delivered file={} target={} harness={} clear_epoch={} delivery={} cmd={:?} (#clearqueuedliveturn)",
+                            path.display(),
+                            deferred_clear
+                                .as_ref()
+                                .map_or("<pty>", |projection| projection.target.as_str()),
+                            harness.binary,
+                            deferred_clear
+                                .as_ref()
+                                .map_or(0, |projection| projection.clear_epoch),
+                            effect.delivery_label(),
+                            clear_cmd,
+                        );
+                        log_event(&mut session_log, &event);
+                        agent_doc_ops_log_io::log_op(&path, &event);
+                        eprintln!(
+                            "[agent-doc] idle-queue watch: delivered deferred operator clear and resumed the loop"
+                        );
+                        // Let the clear run; resume drains on a later tick.
+                        continue;
                     }
                 }
 

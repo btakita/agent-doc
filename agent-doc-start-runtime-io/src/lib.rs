@@ -3506,6 +3506,50 @@ mod tests {
         );
     }
 
+    /// `#clearqueuedliveturn` (haiven-dev `tasks/fpe.md` pane %12, 2026-10-20): a
+    /// clear queued behind a live Codex turn never fired after the turn closed.
+    /// After a turn Codex 0.163 renders the faint `› Ask a follow-up question`
+    /// placeholder, which is on no static list; the supervisor screen dropped
+    /// its faint style, so the idle watch projected an operator draft and held
+    /// the clear (and the queue drain) at `prompt_visible=false` for good. Every
+    /// unlisted faint placeholder must read as an idle composer, and a typed
+    /// draft at normal intensity must still hide it.
+    #[test]
+    fn idle_queue_prompt_visible_reads_unlisted_faint_codex_placeholder_on_the_screen() {
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        let frame = |body: &str| {
+            format!(
+                "\x1b[2J\x1b[H\x1b[1m\u{203a}\x1b[0m {body}\r\n\r\n  \x1b[2mgpt-5.5 xhigh \u{b7} ~/work \u{b7} Context 40% used\x1b[0m\r\n"
+            )
+        };
+        for placeholder in [
+            "Ask a follow-up question",
+            "Summarize recent commits",
+            "Use /skills to list available skills",
+            "Ask Codex to do anything",
+        ] {
+            let shared = SupervisorShared::new("codex", "test-instance".to_string());
+            *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
+            record_terminal_screen(
+                &shared,
+                frame(&format!("\x1b[2m{placeholder}\x1b[0m")).as_bytes(),
+            );
+            assert!(
+                idle_queue_prompt_visible(&shared, &harness),
+                "a faint `{placeholder}` placeholder is an idle composer: {:?}",
+                child_output_for_detection(&shared)
+            );
+        }
+
+        let shared = SupervisorShared::new("codex", "test-instance".to_string());
+        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
+        record_terminal_screen(&shared, frame("Ask a follow-up question").as_bytes());
+        assert!(
+            !idle_queue_prompt_visible(&shared, &harness),
+            "the same words typed at normal intensity are an operator draft"
+        );
+    }
+
     #[test]
     fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());

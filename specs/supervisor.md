@@ -274,6 +274,19 @@ a closed actor record is replaceable through the stale-authority path.
   prefer that current viewport text and only fall back to the byte ring when the
   screen is empty, so cursor rewrites and line clears are interpreted as terminal
   state instead of append-only scrollback.
+- That viewport keeps the composer ghost style (`#clearqueuedliveturn`):
+  `OwnedPtyScreen::visible_text_with_ghost_style` re-emits faint (SGR `2`) and
+  italic (SGR `3`) runs, and only those, so `child_output_for_detection` carries
+  the same ghost-text evidence a `tmux capture-pane -e` snapshot does and the
+  shared composer projection (`prompt_candidate_is_dim_placeholder`) tells a
+  harness placeholder from a typed draft. A plain viewport dropped it: after a
+  turn Codex 0.163 renders the faint `› Ask a follow-up question` placeholder,
+  which is on no static list, so the supervisor read it as an operator draft
+  and the idle watch held `prompt_visible=false` for the rest of the
+  conversation. A clear queued behind that turn never fired (haiven-dev
+  `tasks/fpe.md` pane %12, 2026-10-20: queued 16:16:27Z, turn closed by
+  16:24:49Z, cleared by hand at 16:29:56Z) and the same blind spot held the
+  idle drain. The byte-ring fallback always kept the SGR.
 - On supervisor exit (user `q`), pty slave closes, claude gets SIGHUP.
 - OpenCode permission prompts are a guarded stdin exception: when recent child
   output parses as the horizontal `Allow once` / `Allow always` / `Reject`

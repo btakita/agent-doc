@@ -58,8 +58,15 @@ impl SupervisorOutputState {
         self.recent_output.lock().clear();
     }
 
+    /// The current child screen for prompt/composer detection.
+    ///
+    /// `#clearqueuedliveturn`: the screen keeps its faint/italic ghost style
+    /// ([`OwnedPtyScreen::visible_text_with_ghost_style`]). The raw byte
+    /// fallback below always carried it; the screen projection did not, so
+    /// every detector reading the screen lost the one signal that separates a
+    /// composer placeholder from a typed draft.
     pub fn child_output_for_detection(&self) -> String {
-        let screen = self.terminal_screen.lock().visible_text();
+        let screen = self.terminal_screen.lock().visible_text_with_ghost_style();
         if screen.trim().is_empty() {
             let recent = self.recent_output.lock();
             String::from_utf8_lossy(&recent).into_owned()
@@ -108,6 +115,22 @@ mod tests {
         state.record_terminal_screen(b"fresh");
 
         assert!(state.child_output_for_detection().contains("fresh"));
+    }
+
+    #[test]
+    fn detection_output_keeps_the_screen_ghost_style() {
+        let state = SupervisorOutputState::new(64);
+        state.record_terminal_screen(
+            "\x1b[1m\u{203a}\x1b[0m \x1b[2mAsk a follow-up question\x1b[0m".as_bytes(),
+        );
+
+        assert!(
+            state
+                .child_output_for_detection()
+                .contains("\u{203a} \x1b[2mAsk a follow-up question\x1b[0m"),
+            "{:?}",
+            state.child_output_for_detection()
+        );
     }
 
     #[test]

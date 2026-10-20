@@ -334,7 +334,8 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   refusal event, formats the refusal there, and only shows it on the EDT. A new
   reason, remedy, or wording needs no plugin generation; a new *kind* of effect
   does.
-- `capabilities`: the derivations the loaded library answers.
+- `capabilities`: the derivations the loaded library answers, and (phase 5c)
+  `captured_splice_inputs`, the optional inputs its captured-splice calls accept.
 
 **Threads.** Native calls stay forbidden on the EDT. The automatic surface
 captures evidence on the EDT and derives `surface_projection` on the
@@ -393,12 +394,16 @@ the `TmuxPaneFocusSync.candidateProjectRoots` probe, and
 over `attachFailureRemedy`, `attachFailureStatusToken`,
 `retainedProjectionHoldNeedsOperatorSurfaceUtil`,
 `registerFailureNeedsLivenessRepublishUtil`, and
-`retainedProjectionHoldMessageUtil`). It is
+`retainedProjectionHoldMessageUtil`, and, since phase 5c,
+`RegistrationSpliceShaping.frozenOperatorEditsContained` over
+`withoutBinaryOwnedMarkersUtil` and `singleSpliceBatchUtil`, and
+`cleanRegistrationMergeUtil`). It is
 a compatibility floor, never extended: new rules land only in the native
 derivation. One parity file per derivation under
 `editors/jetbrains/src/test/resources/editor-derivations/` (`window_layout.json`,
 `surface_projection.json`, `sync_layout.json`, `remote_client_surface.json`,
-`registration_projection.json`, `attach_failure_diagnosis.json`) is
+`registration_projection.json`, `attach_failure_diagnosis.json`,
+`registration_splice_shaping.json`) is
 answered by both the Rust derivation and the frozen floor, so a divergence is
 always a deliberate fixture edit. An `attach_failure_diagnosis` answer that
 leaves out a field takes that field from the floor. A library older than phase 3b ignores
@@ -482,10 +487,10 @@ every entry.
   `singleSpliceCapturedEditUtil`, `singleSpliceBatchUtil`) maps IntelliJ UTF-16
   document offsets on the keystroke path. The rebase that consumes it is already
   native (`agent-doc-merge` captured splices).
-- `withoutBinaryOwnedMarkersUtil` and `cleanRegistrationMergeUtil` shape the text
-  passed to the native containment proof and merge. Moving them means sending
-  document text across the derivation channel; they belong inside those native
-  calls instead.
+- The registration text shaping (`withoutBinaryOwnedMarkersUtil` and the single
+  splice that `cleanRegistrationMergeUtil` and the containment proof build) moved
+  in phase 5c, into the native containment and rebase calls themselves (see
+  below). It never crosses the derivation channel.
 - `closingDocumentCutRequiresTextUtil` / `closingDocumentCutRequiresReplicaUtil`
   changed because the read-permit order on close changed (GH #287/#298), which is
   ordering, not a rule.
@@ -499,6 +504,59 @@ every entry.
   field needs a plugin generation anyway, and the controller already derives the
   route from the payload (`surface_layout_reference_v1`), so the builders stay
   wire formatting.
+
+**Phase 5c: registration shaping inside the native captured-splice calls.**
+A replica registration asks two native calls about its three generations (the
+settled shadow, the live buffer, the controller canonical): the containment
+proof (`agent_doc_captured_splices_contained`, `#ambiguousholdforever`) and the
+clean merge (`agent_doc_rebase_captured_splices`, `#editorauth2`). Before phase
+5c the plugin shaped their input itself. For the proof it removed the
+binary-owned markers from all three texts (`withoutBinaryOwnedMarkersUtil`,
+`#ambiguousholdforever2`), answered true when the buffer then equaled the shadow
+or canonical, and otherwise sent the one splice from shadow to buffer
+(`singleSpliceBatchUtil`). For the merge it sent the one splice over the raw
+texts. Both symbols now also accept an optional `registration` input in their
+`edits_json` argument in place of a batch:
+`{"registration": {"buffer": "<live buffer>", "operatorText": true|false}}`. The
+`base` and `canonical` arguments stay the raw shadow and canonical. Native then
+does the shaping itself (`agent-doc-merge` `captured_splice_request`):
+`operatorText` asks it to compare operator text only, so native owns *which*
+markers are binary-owned (`registration_operator_text`), the operator-text
+shortcut, and the code-point splice (`single_splice`). A rebase refuses
+`operatorText`, because its answer is written text. A change to the
+normalization or the shaping therefore ships with a library hot reload. Kotlin
+still applies the raw guards (a missing generation, or two equal raw
+generations, asks no native call), runs both calls at the same point on the same
+replica worker, and executes the answer; no side effect moved.
+
+*Compatibility.* The plugin sends `registration` only to a library whose
+`capabilities` derivation lists it in the new output field
+`captured_splice_inputs`. It reads that once per native generation and sends the
+call to the same generation (`NativePatching.askCapturedSplicesWithRegistration`).
+A library that does not advertise it, or no library, gets the frozen floor:
+`RegistrationSpliceShaping.frozenOperatorEditsContained` and
+`cleanRegistrationMergeUtil` shape the batch exactly as before and send it to
+the same symbols, which still answer a plain batch exactly as before. A folded
+answer that refuses or cannot be read is "not proven" for the proof and "no
+merge" (hold the buffer) for the merge, as a refusal always was. The native rule
+reproduces the plugin's `java.util.regex` rule byte for byte: a boundary line is
+optional spaces and tabs, `<!-- agent:boundary:ID -->` with `ID` matching
+`[a-z0-9][a-z0-9:-]*`, then optional spaces and tabs, removed with a following
+`\n` or `\r\n` (any other terminator stays); then a trailing ` (HEAD)` plus spaces
+or tabs is dropped from a line that starts with one to six `#` and a space; lines
+end at `\n`, `\r\n`, `\r`, U+0085, U+2028, and U+2029. Splice offsets count code
+points. The shared parity file `editor-derivations/registration_splice_shaping.json`
+pins the normalization (its expected values come from the `java.util.regex`
+rule; the cases include CRLF, a lone CR, U+0085/U+2028/U+2029, composed versus
+decomposed accents, astral and ZWJ emoji, and look-alike markers that are
+operator text) and, per registration, the three operator texts, the shortcut,
+both splices, and both native answers. agent-doc-merge answers every entry
+through the `registration` input and through the pre-5c batch path, and
+`RegistrationSpliceShapingTest` checks the frozen floor and the request the
+plugin sends against the same file. This differs from the controller's
+`without_binary_owned_markers` (the retained-write proof), which accepts more
+boundary ids and headings; registration keeps the plugin's rule until it is
+deliberately changed in native code and the parity file.
 
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is

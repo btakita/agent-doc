@@ -525,6 +525,11 @@ macro_rules! ffi_guard {
 /// Plan captured editor splices against a newer canonical cut. Returns JSON
 /// splices or an explicit error; never falls back to a whole-buffer overwrite.
 ///
+/// `edits_json` is a captured batch, or (GH #326 phase 5c) the optional
+/// `registration` input: `{"registration": {"buffer": ...}}` asks native to
+/// shape the one splice from `base` (the settled shadow) to that buffer itself
+/// (see [`agent_doc_merge::captured_splice_request`]).
+///
 /// # Safety
 /// All arguments must point to valid NUL-terminated UTF-8 strings.
 #[unsafe(no_mangle)]
@@ -542,10 +547,10 @@ pub unsafe extern "C" fn agent_doc_rebase_captured_splices(
             let base = unsafe { CStr::from_ptr(base) }.to_str()?;
             let canonical = unsafe { CStr::from_ptr(canonical) }.to_str()?;
             let edits_json = unsafe { CStr::from_ptr(edits_json) }.to_str()?;
-            let batch: agent_doc_merge::captured_splice::CapturedSpliceBatch =
-                serde_json::from_str(edits_json)?;
+            let request =
+                agent_doc_merge::captured_splice_request::CapturedSpliceRequest::parse(edits_json)?;
             Ok(serde_json::to_string(
-                &agent_doc_merge::captured_splice::rebase(base, canonical, &batch)?,
+                &agent_doc_merge::captured_splice_request::rebased(base, canonical, &request)?,
             )?)
         })())
     )
@@ -555,6 +560,11 @@ pub unsafe extern "C" fn agent_doc_rebase_captured_splices(
 /// captured editor change from `base` (see
 /// [`agent_doc_merge::captured_splice::canonical_contains_captured`]), `"false"`
 /// otherwise, or an explicit error. Registration-only proof; never a write.
+///
+/// `edits_json` is a captured batch, or (GH #326 phase 5c) the optional
+/// `registration` input: `{"registration": {"buffer": ..., "operatorText": true}}`
+/// asks native to compare operator text only and shape the one splice from
+/// `base` (the settled shadow) to that buffer itself.
 ///
 /// # Safety
 /// All arguments must point to valid NUL-terminated UTF-8 strings.
@@ -573,13 +583,11 @@ pub unsafe extern "C" fn agent_doc_captured_splices_contained(
             let base = unsafe { CStr::from_ptr(base) }.to_str()?;
             let canonical = unsafe { CStr::from_ptr(canonical) }.to_str()?;
             let edits_json = unsafe { CStr::from_ptr(edits_json) }.to_str()?;
-            let batch: agent_doc_merge::captured_splice::CapturedSpliceBatch =
-                serde_json::from_str(edits_json)?;
+            let request =
+                agent_doc_merge::captured_splice_request::CapturedSpliceRequest::parse(edits_json)?;
             Ok(
-                agent_doc_merge::captured_splice::canonical_contains_captured(
-                    base, canonical, &batch,
-                )?
-                .to_string(),
+                agent_doc_merge::captured_splice_request::contained(base, canonical, &request)?
+                    .to_string(),
             )
         })())
     )
@@ -1767,5 +1775,102 @@ mod tests {
         );
         assert_eq!(replica_text_utf8(id), "");
         unsafe { agent_doc_replica_close(id) };
+    }
+
+    fn captured_splice_call(
+        call: unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> FfiPatchResult,
+        base: &str,
+        canonical: &str,
+        request: &serde_json::Value,
+    ) -> Result<String, String> {
+        let (b, c, r) = (
+            CString::new(base).unwrap(),
+            CString::new(canonical).unwrap(),
+            CString::new(request.to_string()).unwrap(),
+        );
+        let result = unsafe { call(b.as_ptr(), c.as_ptr(), r.as_ptr()) };
+        let read = |ptr: *mut c_char| {
+            (!ptr.is_null()).then(|| {
+                let text = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned();
+                unsafe { agent_doc_free_string(ptr) };
+                text
+            })
+        };
+        let (text, error) = (read(result.text), read(result.error));
+        match (text, error) {
+            (Some(text), None) => Ok(text),
+            (None, Some(error)) => Err(error),
+            other => panic!("captured splice result must be text xor error: {other:?}"),
+        }
+    }
+
+    /// GH #326 phase 5c: both captured-splice symbols shape a `registration`
+    /// request natively (operator-text normalization and the single splice),
+    /// and still answer a plugin-shaped batch exactly as before.
+    #[test]
+    fn captured_splice_symbols_shape_a_registration_request() {
+        let shadow = "## Re: x\n\nbody\n<!-- agent:boundary:ab12 -->\n- é\n";
+        let buffer = "<!-- agent:boundary:ab12 -->\n## Re: x (HEAD)\n\nbody\n- é\n- typed 🌍\n";
+        let canonical = "## Re: x\n\nbody\n<!-- agent:boundary:ab12 -->\n- é\n- typed 🌍\n";
+        let folded = serde_json::json!({
+            "registration": {"buffer": buffer, "operatorText": true}
+        });
+        assert_eq!(
+            captured_splice_call(
+                agent_doc_captured_splices_contained,
+                shadow,
+                canonical,
+                &folded
+            ),
+            Ok("true".into())
+        );
+        // The same texts without normalization: the marker moves are edits
+        // canonical never made.
+        let raw = serde_json::json!({"registration": {"buffer": buffer}});
+        assert_eq!(
+            captured_splice_call(
+                agent_doc_captured_splices_contained,
+                shadow,
+                canonical,
+                &raw
+            ),
+            Ok("false".into())
+        );
+        // The pre-5c request: the batch the plugin shaped over operator text.
+        let op = agent_doc_merge::captured_splice_request::registration_operator_text;
+        let batch =
+            agent_doc_merge::captured_splice_request::single_splice(&op(shadow), &op(buffer));
+        assert_eq!(
+            captured_splice_call(
+                agent_doc_captured_splices_contained,
+                &op(shadow),
+                &op(canonical),
+                &serde_json::to_value(&batch).unwrap(),
+            ),
+            Ok("true".into())
+        );
+
+        let merge_shadow = "a\nb\nc\n";
+        let merge_buffer = "a\nb typed\nc\n";
+        let merge_canonical = "a\nb\nc\nresponse\n";
+        let rebased = captured_splice_call(
+            agent_doc_rebase_captured_splices,
+            merge_shadow,
+            merge_canonical,
+            &serde_json::json!({"registration": {"buffer": merge_buffer}}),
+        )
+        .unwrap();
+        let rebased: serde_json::Value = serde_json::from_str(&rebased).unwrap();
+        assert_eq!(rebased["resultingText"], "a\nb typed\nc\nresponse\n");
+        // A rebase answer is written text: it never runs over operator text.
+        assert!(
+            captured_splice_call(
+                agent_doc_rebase_captured_splices,
+                merge_shadow,
+                merge_canonical,
+                &serde_json::json!({"registration": {"buffer": merge_buffer, "operatorText": true}}),
+            )
+            .is_err()
+        );
     }
 }

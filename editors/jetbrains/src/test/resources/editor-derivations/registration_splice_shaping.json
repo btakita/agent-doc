@@ -1,0 +1,642 @@
+{
+  "description": "GH #326 phase 5c: the registration shaping the captured-splice FFI calls fold behind the native boundary. `operator_text` pins the binary-owned marker normalization (expected values come from the plugin's java.util.regex rule). Each registration pins the three operator texts, whether the plugin's operator-text shortcut answers, the single splice it shapes for the containment proof and for the clean merge (code-point offsets), and the native answers. agent-doc-merge captured_splice_request answers every entry through the `registration` input and through the pre-5c batch path; RegistrationSpliceShapingTest checks the plugin's frozen floor against the same file.",
+  "operator_text": [
+    {
+      "name": "empty text",
+      "text": "",
+      "expected": ""
+    },
+    {
+      "name": "plain operator text is kept",
+      "text": "Hello\nworld\n",
+      "expected": "Hello\nworld\n"
+    },
+    {
+      "name": "a reloaded disk projection: boundary line and HEAD suffix removed",
+      "text": "<!-- agent:exchange -->\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n- PR #194 is merged. Continue.\n",
+      "expected": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n- PR #194 is merged. Continue.\n"
+    },
+    {
+      "name": "an indented boundary line is removed",
+      "text": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n  <!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n",
+      "expected": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n"
+    },
+    {
+      "name": "operator text that mentions the markers is kept",
+      "text": "Why does the heading say (HEAD)?\n`<!-- agent:boundary:60c81193 -->` appears inline here.\n### Re: topic (HEAD) was renamed\n",
+      "expected": "Why does the heading say (HEAD)?\n`<!-- agent:boundary:60c81193 -->` appears inline here.\n### Re: topic (HEAD) was renamed\n"
+    },
+    {
+      "name": "a boundary on the last line without a newline is removed",
+      "text": "text\n<!-- agent:boundary:ab12 -->",
+      "expected": "text\n"
+    },
+    {
+      "name": "a CRLF boundary line is removed with its CRLF",
+      "text": "a\r\n<!-- agent:boundary:ab12 -->\r\nb\r\n",
+      "expected": "a\r\nb\r\n"
+    },
+    {
+      "name": "tabs and spaces around a boundary are removed with it",
+      "text": "a\n \t<!-- agent:boundary:ab-1:x -->\t \nb\n",
+      "expected": "a\nb\n"
+    },
+    {
+      "name": "consecutive boundary lines are all removed",
+      "text": "a\n<!-- agent:boundary:a1 -->\n<!-- agent:boundary:b2 -->\nb\n",
+      "expected": "a\nb\n"
+    },
+    {
+      "name": "a lone CR after a boundary stays",
+      "text": "<!-- agent:boundary:ab -->\rx\n",
+      "expected": "\rx\n"
+    },
+    {
+      "name": "a U+2028 line separator after a boundary stays",
+      "text": "<!-- agent:boundary:ab -->\u2028x\n",
+      "expected": "\u2028x\n"
+    },
+    {
+      "name": "a U+2029 paragraph separator after a boundary stays",
+      "text": "a\u2029<!-- agent:boundary:ab -->\u2029x",
+      "expected": "a\u2029\u2029x"
+    },
+    {
+      "name": "an uppercase boundary id is not binary-owned",
+      "text": "<!-- agent:boundary:AB12 -->\nx\n",
+      "expected": "<!-- agent:boundary:AB12 -->\nx\n"
+    },
+    {
+      "name": "an empty boundary id is not binary-owned",
+      "text": "<!-- agent:boundary: -->\nx\n",
+      "expected": "<!-- agent:boundary: -->\nx\n"
+    },
+    {
+      "name": "a boundary after text on its line is kept",
+      "text": "x <!-- agent:boundary:ab -->\n",
+      "expected": "x <!-- agent:boundary:ab -->\n"
+    },
+    {
+      "name": "a boundary followed by text on its line is kept",
+      "text": "<!-- agent:boundary:ab --> x\n",
+      "expected": "<!-- agent:boundary:ab --> x\n"
+    },
+    {
+      "name": "a boundary with doubled spacing is kept",
+      "text": "<!--  agent:boundary:ab -->\n",
+      "expected": "<!--  agent:boundary:ab -->\n"
+    },
+    {
+      "name": "a HEAD heading suffix is removed",
+      "text": "## Re: x (HEAD)\nbody\n",
+      "expected": "## Re: x\nbody\n"
+    },
+    {
+      "name": "trailing spaces and tabs after HEAD go with it, CRLF stays",
+      "text": "## Re: x (HEAD) \t\r\nbody\r\n",
+      "expected": "## Re: x\r\nbody\r\n"
+    },
+    {
+      "name": "a HEAD heading ended by U+0085 keeps its terminator",
+      "text": "## Re: x (HEAD)\u0085y",
+      "expected": "## Re: x\u0085y"
+    },
+    {
+      "name": "a HEAD heading on the last line without a newline",
+      "text": "body\n# Re: last (HEAD)",
+      "expected": "body\n# Re: last"
+    },
+    {
+      "name": "only the last of two HEAD suffixes is removed",
+      "text": "## a (HEAD) (HEAD)\n",
+      "expected": "## a (HEAD)\n"
+    },
+    {
+      "name": "seven hashes are not a heading",
+      "text": "####### x (HEAD)\n",
+      "expected": "####### x (HEAD)\n"
+    },
+    {
+      "name": "an indented heading is kept",
+      "text": " ## x (HEAD)\n",
+      "expected": " ## x (HEAD)\n"
+    },
+    {
+      "name": "a heading without a space after its hashes is kept",
+      "text": "##x (HEAD)\n",
+      "expected": "##x (HEAD)\n"
+    },
+    {
+      "name": "a heading whose only text is HEAD is kept",
+      "text": "# (HEAD)\n",
+      "expected": "# (HEAD)\n"
+    },
+    {
+      "name": "a heading with two spaces before HEAD keeps one",
+      "text": "#  (HEAD)\n",
+      "expected": "# \n"
+    },
+    {
+      "name": "a lowercase head suffix is kept",
+      "text": "## x (head)\n",
+      "expected": "## x (head)\n"
+    },
+    {
+      "name": "a no-break space before HEAD is not a space",
+      "text": "## x\u00a0(HEAD)\n",
+      "expected": "## x\u00a0(HEAD)\n"
+    },
+    {
+      "name": "composed accent heading",
+      "text": "## Caf\u00e9 (HEAD)\n",
+      "expected": "## Caf\u00e9\n"
+    },
+    {
+      "name": "decomposed accent heading",
+      "text": "## Cafe\u0301 (HEAD)\n",
+      "expected": "## Cafe\u0301\n"
+    },
+    {
+      "name": "astral and ZWJ heading",
+      "text": "### \ud83d\udc69\u200d\ud83d\udcbb deploy \ud83c\udf0d (HEAD)\n",
+      "expected": "### \ud83d\udc69\u200d\ud83d\udcbb deploy \ud83c\udf0d\n"
+    },
+    {
+      "name": "removing a boundary joins a lone CR and a LF",
+      "text": "## h (HEAD)\r<!-- agent:boundary:ab -->\n\nz",
+      "expected": "## h\r\nz"
+    }
+  ],
+  "registrations": [
+    {
+      "name": "fpe hold: the operator's only edit is in canonical once markers are operator-neutral",
+      "shadow": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n",
+      "buffer": "<!-- agent:exchange -->\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n",
+      "canonical": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\nIncrease CPU first.\n60c81193 -->\n",
+      "expected": {
+        "operator_shadow": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n",
+        "operator_buffer": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n",
+        "operator_canonical": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\nIncrease CPU first.\n60c81193 -->\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 157,
+              "deleteCodePoints": 0,
+              "insert": "- PR #194 is merged. Continue.\n"
+            }
+          ],
+          "resultingText": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n"
+        },
+        "contained": true,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 24,
+              "deleteCodePoints": 164,
+              "insert": "<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue"
+            }
+          ],
+          "resultingText": "<!-- agent:exchange -->\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n"
+        },
+        "merged": "<!-- agent:exchange -->\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\nIncrease CPU first.\n60c81193 -->\n"
+      }
+    },
+    {
+      "name": "fpe control: an operator edit canonical lacks is not contained",
+      "shadow": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n",
+      "buffer": "<!-- agent:exchange -->\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- typed while detached\n<!-- /agent:queue -->\n<!-- /agent:done -->\n",
+      "canonical": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\nIncrease CPU first.\n60c81193 -->\n",
+      "expected": {
+        "operator_shadow": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n",
+        "operator_buffer": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- typed while detached\n<!-- /agent:queue -->\n<!-- /agent:done -->\n",
+        "operator_canonical": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\nIncrease CPU first.\n60c81193 -->\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 157,
+              "deleteCodePoints": 0,
+              "insert": "- typed while detached\n"
+            }
+          ],
+          "resultingText": "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- typed while detached\n<!-- /agent:queue -->\n<!-- /agent:done -->\n"
+        },
+        "contained": false,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 24,
+              "deleteCodePoints": 165,
+              "insert": "<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- typed while detached"
+            }
+          ],
+          "resultingText": "<!-- agent:exchange -->\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- typed while detached\n<!-- /agent:queue -->\n<!-- /agent:done -->\n"
+        },
+        "merged": null
+      }
+    },
+    {
+      "name": "fpe over CRLF line endings",
+      "shadow": "<!-- agent:exchange -->\r\n### Re: FPE capacity recommendation\r\n\r\nIncrease CPU first.\r\n<!-- agent:boundary:60c81193 -->\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\n",
+      "buffer": "<!-- agent:exchange -->\r\n<!-- agent:boundary:60c81193 -->\r\n### Re: FPE capacity recommendation (HEAD)\r\n\r\nIncrease CPU first.\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n- PR #194 is merged. Continue.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\n",
+      "canonical": "<!-- agent:exchange -->\r\n### Re: FPE capacity recommendation\r\n\r\nIncrease CPU first.\r\n<!-- agent:boundary:60c81193 -->\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n- PR #194 is merged. Continue.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\nIncrease CPU first.\r\n60c81193 -->\r\n",
+      "expected": {
+        "operator_shadow": "<!-- agent:exchange -->\r\n### Re: FPE capacity recommendation\r\n\r\nIncrease CPU first.\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\n",
+        "operator_buffer": "<!-- agent:exchange -->\r\n### Re: FPE capacity recommendation\r\n\r\nIncrease CPU first.\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n- PR #194 is merged. Continue.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\n",
+        "operator_canonical": "<!-- agent:exchange -->\r\n### Re: FPE capacity recommendation\r\n\r\nIncrease CPU first.\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n- PR #194 is merged. Continue.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\nIncrease CPU first.\r\n60c81193 -->\r\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 164,
+              "deleteCodePoints": 0,
+              "insert": "- PR #194 is merged. Continue.\r\n"
+            }
+          ],
+          "resultingText": "<!-- agent:exchange -->\r\n### Re: FPE capacity recommendation\r\n\r\nIncrease CPU first.\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n- PR #194 is merged. Continue.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\n"
+        },
+        "contained": true,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 25,
+              "deleteCodePoints": 170,
+              "insert": "<!-- agent:boundary:60c81193 -->\r\n### Re: FPE capacity recommendation (HEAD)\r\n\r\nIncrease CPU first.\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n- PR #194 is merged. Continue"
+            }
+          ],
+          "resultingText": "<!-- agent:exchange -->\r\n<!-- agent:boundary:60c81193 -->\r\n### Re: FPE capacity recommendation (HEAD)\r\n\r\nIncrease CPU first.\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n- PR #194 is merged. Continue.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\n"
+        },
+        "merged": "<!-- agent:exchange -->\r\n<!-- agent:boundary:60c81193 -->\r\n### Re: FPE capacity recommendation (HEAD)\r\n\r\nIncrease CPU first.\r\n<!-- /agent:exchange -->\r\n<!-- agent:queue -->\r\n- The performance seems slow.\r\n- PR #194 is merged. Continue.\r\n<!-- /agent:queue -->\r\n<!-- /agent:done -->\r\nIncrease CPU first.\r\n60c81193 -->\r\n"
+      }
+    },
+    {
+      "name": "markers alone differ: the buffer equals the shadow as operator text",
+      "shadow": "## Re: a\n\nbody\n<!-- agent:boundary:ab12 -->\n",
+      "buffer": "<!-- agent:boundary:ab12 -->\n## Re: a (HEAD)\n\nbody\n",
+      "canonical": "## Re: a\n\nbody\nresponse\n<!-- agent:boundary:ab12 -->\n",
+      "expected": {
+        "operator_shadow": "## Re: a\n\nbody\n",
+        "operator_buffer": "## Re: a\n\nbody\n",
+        "operator_canonical": "## Re: a\n\nbody\nresponse\n",
+        "containment_shortcut": true,
+        "containment_batch": {
+          "edits": [],
+          "resultingText": "## Re: a\n\nbody\n"
+        },
+        "contained": true,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 0,
+              "deleteCodePoints": 43,
+              "insert": "<!-- agent:boundary:ab12 -->\n## Re: a (HEAD)\n\nbody"
+            }
+          ],
+          "resultingText": "<!-- agent:boundary:ab12 -->\n## Re: a (HEAD)\n\nbody\n"
+        },
+        "merged": "<!-- agent:boundary:ab12 -->\n## Re: a (HEAD)\n\nbody\nresponse\n"
+      }
+    },
+    {
+      "name": "markers alone differ: the buffer equals canonical as operator text",
+      "shadow": "## Re: a\n\nbody\n<!-- agent:boundary:ab12 -->\n",
+      "buffer": "## Re: a (HEAD)\n\nbody\nresponse\n<!-- agent:boundary:ab12 -->\n",
+      "canonical": "## Re: a\n\nbody\nresponse\n<!-- agent:boundary:ab12 -->\n",
+      "expected": {
+        "operator_shadow": "## Re: a\n\nbody\n",
+        "operator_buffer": "## Re: a\n\nbody\nresponse\n",
+        "operator_canonical": "## Re: a\n\nbody\nresponse\n",
+        "containment_shortcut": true,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 15,
+              "deleteCodePoints": 0,
+              "insert": "response\n"
+            }
+          ],
+          "resultingText": "## Re: a\n\nbody\nresponse\n"
+        },
+        "contained": true,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 8,
+              "deleteCodePoints": 6,
+              "insert": " (HEAD)\n\nbody\nresponse"
+            }
+          ],
+          "resultingText": "## Re: a (HEAD)\n\nbody\nresponse\n<!-- agent:boundary:ab12 -->\n"
+        },
+        "merged": "## Re: a (HEAD)\n\nbody\nresponse\n<!-- agent:boundary:ab12 -->\n"
+      }
+    },
+    {
+      "name": "a composed accent the operator typed is in canonical",
+      "shadow": "- a\n<!-- /agent:queue -->\n",
+      "buffer": "- a\n- caf\u00e9\n<!-- /agent:queue -->\n",
+      "canonical": "- a\n- caf\u00e9\n<!-- /agent:queue -->\nresponse\n",
+      "expected": {
+        "operator_shadow": "- a\n<!-- /agent:queue -->\n",
+        "operator_buffer": "- a\n- caf\u00e9\n<!-- /agent:queue -->\n",
+        "operator_canonical": "- a\n- caf\u00e9\n<!-- /agent:queue -->\nresponse\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 4,
+              "deleteCodePoints": 0,
+              "insert": "- caf\u00e9\n"
+            }
+          ],
+          "resultingText": "- a\n- caf\u00e9\n<!-- /agent:queue -->\n"
+        },
+        "contained": true,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 4,
+              "deleteCodePoints": 0,
+              "insert": "- caf\u00e9\n"
+            }
+          ],
+          "resultingText": "- a\n- caf\u00e9\n<!-- /agent:queue -->\n"
+        },
+        "merged": "- a\n- caf\u00e9\n<!-- /agent:queue -->\nresponse\n"
+      }
+    },
+    {
+      "name": "a decomposed canonical does not contain a composed accent",
+      "shadow": "- a\n<!-- /agent:queue -->\n",
+      "buffer": "- a\n- caf\u00e9\n<!-- /agent:queue -->\n",
+      "canonical": "- a\n- cafe\u0301\n<!-- /agent:queue -->\nresponse\n",
+      "expected": {
+        "operator_shadow": "- a\n<!-- /agent:queue -->\n",
+        "operator_buffer": "- a\n- caf\u00e9\n<!-- /agent:queue -->\n",
+        "operator_canonical": "- a\n- cafe\u0301\n<!-- /agent:queue -->\nresponse\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 4,
+              "deleteCodePoints": 0,
+              "insert": "- caf\u00e9\n"
+            }
+          ],
+          "resultingText": "- a\n- caf\u00e9\n<!-- /agent:queue -->\n"
+        },
+        "contained": false,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 4,
+              "deleteCodePoints": 0,
+              "insert": "- caf\u00e9\n"
+            }
+          ],
+          "resultingText": "- a\n- caf\u00e9\n<!-- /agent:queue -->\n"
+        },
+        "merged": null
+      }
+    },
+    {
+      "name": "astral and ZWJ typing is in canonical beside a response",
+      "shadow": "## Queue\n- one\n",
+      "buffer": "## Queue\n- one\n- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n",
+      "canonical": "## Queue\n- one\n- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n\n### Re: ship\n\nDone \ud83c\udf0d.\n",
+      "expected": {
+        "operator_shadow": "## Queue\n- one\n",
+        "operator_buffer": "## Queue\n- one\n- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n",
+        "operator_canonical": "## Queue\n- one\n- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n\n### Re: ship\n\nDone \ud83c\udf0d.\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 15,
+              "deleteCodePoints": 0,
+              "insert": "- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n"
+            }
+          ],
+          "resultingText": "## Queue\n- one\n- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n"
+        },
+        "contained": true,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 15,
+              "deleteCodePoints": 0,
+              "insert": "- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n"
+            }
+          ],
+          "resultingText": "## Queue\n- one\n- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n"
+        },
+        "merged": "## Queue\n- one\n- ship \ud83d\ude80 \ud83d\udc69\u200d\ud83d\udcbb\n\n### Re: ship\n\nDone \ud83c\udf0d.\n"
+      }
+    },
+    {
+      "name": "astral typing after an astral prefix that canonical lacks",
+      "shadow": "\ud83c\udf0d head\n- one\n",
+      "buffer": "\ud83c\udf0d head\n- one\n- two \ud83d\ude80\n",
+      "canonical": "\ud83c\udf0d head\n- one\nresponse\n",
+      "expected": {
+        "operator_shadow": "\ud83c\udf0d head\n- one\n",
+        "operator_buffer": "\ud83c\udf0d head\n- one\n- two \ud83d\ude80\n",
+        "operator_canonical": "\ud83c\udf0d head\n- one\nresponse\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 13,
+              "deleteCodePoints": 0,
+              "insert": "- two \ud83d\ude80\n"
+            }
+          ],
+          "resultingText": "\ud83c\udf0d head\n- one\n- two \ud83d\ude80\n"
+        },
+        "contained": false,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 13,
+              "deleteCodePoints": 0,
+              "insert": "- two \ud83d\ude80\n"
+            }
+          ],
+          "resultingText": "\ud83c\udf0d head\n- one\n- two \ud83d\ude80\n"
+        },
+        "merged": null
+      }
+    },
+    {
+      "name": "a clean line merge of a queue edit and a canonical close",
+      "shadow": "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs]\n<!-- /agent:queue -->\n",
+      "buffer": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n",
+      "canonical": "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs] (closed)\n<!-- /agent:queue -->\n",
+      "expected": {
+        "operator_shadow": "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs]\n<!-- /agent:queue -->\n",
+        "operator_buffer": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n",
+        "operator_canonical": "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs] (closed)\n<!-- /agent:queue -->\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 32,
+              "deleteCodePoints": 27,
+              "insert": "do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexample"
+            }
+          ],
+          "resultingText": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n"
+        },
+        "contained": false,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 32,
+              "deleteCodePoints": 27,
+              "insert": "do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexample"
+            }
+          ],
+          "resultingText": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n"
+        },
+        "merged": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs] (closed)\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n"
+      }
+    },
+    {
+      "name": "a canonical close on a line the operator deleted refuses the merge",
+      "shadow": "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs]\n<!-- /agent:queue -->\n",
+      "buffer": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n",
+      "canonical": "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~ (closed)\n- do [#sdkdocs]\n<!-- /agent:queue -->\n",
+      "expected": {
+        "operator_shadow": "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~\n- do [#sdkdocs]\n<!-- /agent:queue -->\n",
+        "operator_buffer": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n",
+        "operator_canonical": "## Queue\n<!-- agent:queue -->\n- ~~do [#tdc]~~ (closed)\n- do [#sdkdocs]\n<!-- /agent:queue -->\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 32,
+              "deleteCodePoints": 27,
+              "insert": "do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexample"
+            }
+          ],
+          "resultingText": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n"
+        },
+        "contained": false,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 32,
+              "deleteCodePoints": 27,
+              "insert": "do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexample"
+            }
+          ],
+          "resultingText": "## Queue\n<!-- agent:queue -->\n- do [#sdkdocs]\n- review [#retryloop]\n- do [#sdkexamples]\n<!-- /agent:queue -->\n"
+        },
+        "merged": null
+      }
+    },
+    {
+      "name": "a U+2028 inside operator text with a moved boundary",
+      "shadow": "intro\u2028line\n<!-- agent:boundary:ab -->\n- q\n",
+      "buffer": "intro\u2028line\n- q\n- typed\n<!-- agent:boundary:ab -->\n",
+      "canonical": "intro\u2028line\n<!-- agent:boundary:ab -->\n- q\n- typed\n",
+      "expected": {
+        "operator_shadow": "intro\u2028line\n- q\n",
+        "operator_buffer": "intro\u2028line\n- q\n- typed\n",
+        "operator_canonical": "intro\u2028line\n- q\n- typed\n",
+        "containment_shortcut": true,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 15,
+              "deleteCodePoints": 0,
+              "insert": "- typed\n"
+            }
+          ],
+          "resultingText": "intro\u2028line\n- q\n- typed\n"
+        },
+        "contained": true,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 11,
+              "deleteCodePoints": 30,
+              "insert": "- q\n- typed\n<!-- agent:boundary:ab -->"
+            }
+          ],
+          "resultingText": "intro\u2028line\n- q\n- typed\n<!-- agent:boundary:ab -->\n"
+        },
+        "merged": "intro\u2028line\n- q\n- typed\n<!-- agent:boundary:ab -->\n"
+      }
+    },
+    {
+      "name": "a boundary ended by a lone CR leaves its CR, so the buffer's removal is an operator edit",
+      "shadow": "a\r<!-- agent:boundary:ab -->\rb\n",
+      "buffer": "a\rb\n- typed\n",
+      "canonical": "a\r<!-- agent:boundary:ab -->\rb\n- typed\nresponse\n",
+      "expected": {
+        "operator_shadow": "a\r\rb\n",
+        "operator_buffer": "a\rb\n- typed\n",
+        "operator_canonical": "a\r\rb\n- typed\nresponse\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 2,
+              "deleteCodePoints": 2,
+              "insert": "b\n- typed"
+            }
+          ],
+          "resultingText": "a\rb\n- typed\n"
+        },
+        "contained": false,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 2,
+              "deleteCodePoints": 28,
+              "insert": "b\n- typed"
+            }
+          ],
+          "resultingText": "a\rb\n- typed\n"
+        },
+        "merged": null
+      }
+    },
+    {
+      "name": "a HEAD suffix with trailing tabs in the buffer only",
+      "shadow": "### Re: plan\n\nanswer\n- q\n",
+      "buffer": "### Re: plan (HEAD)\t \n\nanswer\n- q\n- next\n",
+      "canonical": "### Re: plan\n\nanswer\n- q\n- next\nmore\n",
+      "expected": {
+        "operator_shadow": "### Re: plan\n\nanswer\n- q\n",
+        "operator_buffer": "### Re: plan\n\nanswer\n- q\n- next\n",
+        "operator_canonical": "### Re: plan\n\nanswer\n- q\n- next\nmore\n",
+        "containment_shortcut": false,
+        "containment_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 25,
+              "deleteCodePoints": 0,
+              "insert": "- next\n"
+            }
+          ],
+          "resultingText": "### Re: plan\n\nanswer\n- q\n- next\n"
+        },
+        "contained": true,
+        "merge_batch": {
+          "edits": [
+            {
+              "offsetCodePoints": 12,
+              "deleteCodePoints": 12,
+              "insert": " (HEAD)\t \n\nanswer\n- q\n- next"
+            }
+          ],
+          "resultingText": "### Re: plan (HEAD)\t \n\nanswer\n- q\n- next\n"
+        },
+        "merged": null
+      }
+    }
+  ]
+}

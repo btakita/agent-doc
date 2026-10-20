@@ -434,7 +434,13 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
         request.input
     };
     let output = match request.derivation.as_str() {
-        "capabilities" => serde_json::json!({ "derivations": EDITOR_DERIVATIONS }),
+        // GH #326 phase 5c: `captured_splice_inputs` lists the optional inputs
+        // the captured-splice FFI calls accept (`registration`), so a plugin
+        // sends one only to a library that shapes it natively.
+        "capabilities" => serde_json::json!({
+            "derivations": EDITOR_DERIVATIONS,
+            "captured_splice_inputs": agent_doc_merge::captured_splice_request::CAPTURED_SPLICE_INPUTS,
+        }),
         "window_layout" => {
             let evidence: agent_doc_editor_surface::WindowLayoutEvidence =
                 serde_json::from_value(input).context("parse window layout evidence")?;

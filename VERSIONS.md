@@ -2,8 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
-## Unreleased
+## 0.35.529
 
+- **A supervisor's adopted run keeps its ready proof across a binary refresh (GH #321).** `execve_preserve_child`
+  now carries the adopted run's ready proof into the refreshed image, so a re-exec onto a new binary no longer
+  leaves an idle session looking not-ready.
+- **Focus escalation never evicts a split the editor still shows (GH #322).**
+- **The JetBrains turn banner tracks its own document (GH #323).** The banner's render check now starts turn-state
+  tracking for the document it is drawn for, including documents opened in a Remote Dev client that the backend's
+  editor events never report; updates that arrive before the document is shown are held, and a document is released
+  only when no client still has it open.
 - **A session stopped by a controller replacement is restarted, never left at
   a bare shell (`#replacementintent`, `#replacementdrain`, `#gcdefercrash`,
   `#replacementwithdraw`).**

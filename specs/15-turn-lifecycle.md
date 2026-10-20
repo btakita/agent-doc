@@ -699,6 +699,28 @@ above.
   appears, the log line says `lease=kept reason=no_abandoned_snapshot_for_lease`
   and the ordinary settle-window rule applies. Transcript evidence alone never
   uses this rule.
+- **A trigger that never became a turn (GH #317).** A withdrawn trigger may
+  never have been submitted at all. Observed 2026-10-20, Claude pane %50: Run Agent Doc typed the trigger at 01:58:24
+  (`proof_scope=transport_only`), but no `UserPromptSubmit` ever fired, so
+  there was no turn-active lease, no preflight and no `dispatch_turn_started`.
+  Clear Session Context withdrew the leftover trigger at 01:58:32
+  (`outcome=withdrawn lease=kept reason=no_abandoned_snapshot_for_lease`).
+  The same clear was then refused as `harness_turn_live
+  evidence=dispatch_turn_pending`, on the `accepted` receipt of the trigger it
+  had just withdrawn, and so was every later press. Only the 120s pre-turn
+  grace would have released that receipt. Now, if the pane still holds no
+  turn-active lease after a 1s hook-latency window
+  (`UNSUBMITTED_LEASE_WINDOW`, enough for the `turn-status active` hook to
+  start if an Enter landed just before `C-u`), the withdrawal settles that
+  dispatch's receipt (`settle_withdrawn_unsubmitted_dispatch_turn_at_or_before`).
+  That is exactly one receipt, the oldest open, never-started, non-operator
+  receipt accepted at or before the withdrawal (`#dispatchreceiptperturn`). A
+  `running` receipt and a second stacked dispatch stay open. The log fields
+  read `lease=none reason=trigger_never_submitted
+  settled_pending_dispatches=<n>`. The clear re-reads the now-idle pane and
+  runs, and the supervisor no longer waits on that receipt to deliver an
+  earlier queued clear. A Run Agent Doc accepted after the withdrawal is a
+  new pending turn and still queues the clear behind it.
 - **Back-to-back cancels.** A second cancelled prompt adds a second orphaned
   snapshot. The classifier reports the newest one, because the older snapshot
   sits between it and the turn boundary and is skipped. A queued input after

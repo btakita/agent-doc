@@ -6500,6 +6500,117 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         );
     }
 
+    /// GH #317 replay (agent-loop, pane %50, Claude Code, 2026-10-20): Run Agent
+    /// Doc's trigger was typed at 01:58:24 but never became a turn (no
+    /// `UserPromptSubmit`, no lease, no `dispatch_turn_started`). Clear Session
+    /// Context at 01:58:30 withdrew the leftover trigger (`#cancelturnprompt`
+    /// `outcome=withdrawn`), re-read the pane — now an idle prompt — and was
+    /// still refused as `harness_turn_live evidence=dispatch_turn_pending`, as
+    /// was every press after it. The withdrawal settles the never-started
+    /// receipt, so that same clear runs at the idle prompt.
+    #[test]
+    fn clear_runs_after_withdrawing_a_trigger_that_never_became_a_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("doc-a.md");
+        std::fs::write(&doc, "---\nagent_doc_session: session-1\n---\n\nBody.\n").unwrap();
+        let mut ctx = test_session_context(
+            test_actor_record(ActorState::Ready),
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            Some("ready"),
+        );
+        ctx.canonical_file = doc.clone();
+        ctx.base_dir = root.clone();
+        // After the withdrawal the composer is empty: an idle prompt.
+        let idle = LivePaneEvidence {
+            pane_id: Some("%50".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveIdle,
+            current_command: Some("claude".to_string()),
+            prompt_ready: Some(true),
+            tail: Some("⏵⏵ bypass permissions on (shift+tab to cycle)".to_string()),
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let document_id =
+            agent_doc_session_actor_io::canonical_document_id_in(&root, &doc.to_string_lossy());
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                document_id: &document_id,
+                generation: 6,
+                command_kind: "dispatch_only_reopen",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "{}",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE dispatch_attempts SET timestamp = ?1",
+            [i64::try_from(now - 7).unwrap()],
+        )
+        .unwrap();
+
+        // Before the fix: the only evidence is the never-started receipt.
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            Some(DISPATCH_TURN_PENDING_EVIDENCE)
+        );
+
+        // The clear's withdrawal step (virtual clock; no lease ever appears).
+        let detail = crate::cancelled_trigger::retire_withdrawn_prompt_turn(
+            &doc,
+            "%50",
+            crate::cancelled_trigger::SNAPSHOT_WINDOW,
+            &mut |_| {},
+        );
+        assert_eq!(
+            detail,
+            "lease=none reason=trigger_never_submitted settled_pending_dispatches=1"
+        );
+
+        // The same clear now sees no live turn and runs at the idle prompt.
+        assert_eq!(harness_turn_live_evidence(&ctx, &idle), None);
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&idle, false, false, false, false),
+            OperatorClearInputState::IdlePrompt
+        );
+        assert!(
+            !agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&doc)
+                .unwrap()
+        );
+
+        // A Run Agent Doc accepted after the withdrawal is a new pending turn
+        // and still queues the clear behind it.
+        agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                document_id: &document_id,
+                generation: 6,
+                command_kind: "dispatch_only_reopen",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "{}",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            Some(DISPATCH_TURN_PENDING_EVIDENCE)
+        );
+    }
+
     /// `#clearaftrun` replay (haiven-dev `tasks/sdk.md`, pane %180,
     /// 2026-10-15): Run Agent Doc was accepted at 19:39:58Z (receipt 3847,
     /// `dispatch_only_reopen`), its route waited ~22s on the previous cycle's

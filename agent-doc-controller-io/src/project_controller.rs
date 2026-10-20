@@ -11210,6 +11210,30 @@ pub fn oldest_open_dispatch_turn_at_for_file(file: &Path) -> Result<Option<u64>>
     )
 }
 
+/// GH #317: settle the never-started dispatch
+/// receipt whose trigger agent-doc withdrew from the composer before it was
+/// ever submitted (no turn-active lease). See
+/// [`state_store::settle_withdrawn_unsubmitted_dispatch_turn_at_or_before`].
+/// A missing project root settles nothing.
+pub fn settle_withdrawn_unsubmitted_dispatch_turn_for_file(
+    file: &Path,
+    withdrawn_at: u64,
+) -> Result<usize> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(0);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root)?;
+    state_store::settle_withdrawn_unsubmitted_dispatch_turn_at_or_before(
+        &conn,
+        &document_id,
+        i64::try_from(withdrawn_at).unwrap_or(i64::MAX),
+    )
+}
+
 /// `#sdkclearwedge`: settle this document's dispatch receipt for a turn the
 /// harness proved ended (interrupt / abandoned prompt) whose lease was written
 /// at `turn_started_at` — its `running` receipts, or (`#codexclearwedge`) the

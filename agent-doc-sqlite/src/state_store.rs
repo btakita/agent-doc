@@ -4910,6 +4910,53 @@ pub fn settle_harness_ended_dispatch_turn_at_or_before(
     Ok(pending)
 }
 
+/// GH #317: settle the dispatch receipt whose
+/// trigger agent-doc withdrew from the harness composer before it was ever
+/// submitted as a turn.
+///
+/// Live 2026-10-20 (agent-loop, pane %50, Claude Code): Run Agent Doc typed the
+/// trigger at 01:58:24 (`proof_scope=transport_only`) but it never became a
+/// turn: no `UserPromptSubmit`, so no turn-active lease, no preflight
+/// promotion and no `dispatch_turn_started`. Clear Session Context's
+/// `#cancelturnprompt` step withdrew the leftover trigger from the composer
+/// (`outcome=withdrawn lease=kept reason=no_abandoned_snapshot_for_lease`),
+/// and then refused that same clear as `harness_turn_live
+/// evidence=dispatch_turn_pending`: the receipt stayed `accepted`, and
+/// nothing but the [`DISPATCH_PRE_TURN_GRACE_SECS`] sweep would ever settle
+/// it. Every Clear press re-queued behind a turn that could no longer start.
+///
+/// The withdrawal is the proof: the exact trigger sat idle in the composer and
+/// is gone, so its turn will never run. Exactly ONE receipt is settled
+/// (`#dispatchreceiptperturn`): the oldest open, never-started, non-operator
+/// receipt accepted at or before `withdrawn_at`. A `running` receipt belongs
+/// to a turn that did start and is untouched, as is a stacked receipt beyond
+/// the first. Returns the number settled.
+pub fn settle_withdrawn_unsubmitted_dispatch_turn_at_or_before(
+    conn: &Connection,
+    document_id: &str,
+    withdrawn_at: i64,
+) -> Result<usize> {
+    Ok(conn.execute(
+        r#"
+        UPDATE dispatch_attempts
+        SET dispatch_start_proven = 1
+        WHERE id = (
+            SELECT id
+            FROM dispatch_attempts
+            WHERE document_id = ?1
+              AND failed_stage IS NULL
+              AND COALESCE(result_status, '') IN ('accepted', 'queued')
+              AND dispatch_start_proven = 0
+              AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
+              AND timestamp <= ?2
+            ORDER BY timestamp ASC, id ASC
+            LIMIT 1
+          )
+        "#,
+        params![document_id, withdrawn_at],
+    )?)
+}
+
 /// `#clearqueuedliveturn`: settle the `running` receipts of every document whose
 /// actor runs in `pane_id`, dispatched at or before `turn_started_at`, because
 /// the harness's own turn-end hook (`Stop` / `SessionStart` → `turn-status
@@ -6877,6 +6924,76 @@ mod tests {
         Ok(())
     }
 
+    /// GH #317 replay (agent-loop, pane %50, 2026-10-20): Run Agent Doc's
+    /// `dispatch_only_reopen` was accepted at 01:58:23 and its trigger typed at
+    /// 01:58:24, but it never became a turn. Clear Session Context withdrew the
+    /// trigger from the composer at 01:58:32 and was still refused on
+    /// `dispatch_turn_pending`, because nothing settled the never-started
+    /// receipt. The withdrawal settles it — exactly one, never a running turn's.
+    #[test]
+    fn a_withdrawn_unsubmitted_trigger_settles_its_pending_receipt() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let accepted = 1_792_461_503i64; // 2026-10-20 01:58:23Z
+        let withdrawn_at = accepted + 9;
+        insert_open_dispatch(&conn, "doc", accepted, "accepted")?;
+        // An operator command receipt (the clear itself) is never a dispatch.
+        conn.execute(
+            "INSERT INTO dispatch_attempts \
+             (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+             VALUES ('doc', 6, 'session_clear', 'accepted', 0, ?1)",
+            params![accepted + 2],
+        )?;
+        insert_open_dispatch(&conn, "other-doc", accepted, "accepted")?;
+        assert!(has_pending_dispatch_turn_as_of(&conn, "doc", withdrawn_at)?);
+
+        // A withdrawal older than every dispatch settles nothing.
+        assert_eq!(
+            settle_withdrawn_unsubmitted_dispatch_turn_at_or_before(&conn, "doc", accepted - 1)?,
+            0
+        );
+        assert_eq!(
+            settle_withdrawn_unsubmitted_dispatch_turn_at_or_before(&conn, "doc", withdrawn_at)?,
+            1
+        );
+        assert!(
+            !has_pending_dispatch_turn_as_of(&conn, "doc", withdrawn_at + 4)?,
+            "the next Clear press no longer reads dispatch_turn_pending"
+        );
+        assert_eq!(
+            oldest_open_dispatch_turn_at(&conn, "doc", withdrawn_at + 4)?,
+            None
+        );
+        assert!(
+            has_pending_dispatch_turn_as_of(&conn, "other-doc", withdrawn_at)?,
+            "another document's dispatch is untouched"
+        );
+        assert_eq!(
+            settle_withdrawn_unsubmitted_dispatch_turn_at_or_before(&conn, "doc", withdrawn_at)?,
+            0,
+            "idempotent: the operator receipt is never taken"
+        );
+
+        // One withdrawal settles one receipt: a stacked second trigger stays
+        // pending, and a turn that did start (`running`) is never settled here.
+        let conn = dispatch_attempts_fixture()?;
+        insert_open_dispatch(&conn, "doc", accepted, "accepted")?;
+        insert_open_dispatch(&conn, "doc", accepted + 1, "accepted")?;
+        assert_eq!(
+            settle_withdrawn_unsubmitted_dispatch_turn_at_or_before(&conn, "doc", withdrawn_at)?,
+            1
+        );
+        assert!(has_pending_dispatch_turn_as_of(&conn, "doc", withdrawn_at)?);
+        let conn = dispatch_attempts_fixture()?;
+        insert_open_dispatch(&conn, "doc", accepted, "accepted")?;
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(
+            settle_withdrawn_unsubmitted_dispatch_turn_at_or_before(&conn, "doc", withdrawn_at)?,
+            0
+        );
+        assert!(has_running_dispatch_turn_as_of(&conn, "doc", withdrawn_at)?);
+        Ok(())
+    }
+
     /// A promoted row stays inside the open set, so neither gate changes meaning while
     /// the turn runs.
     #[test]
@@ -7201,8 +7318,14 @@ mod tests {
         assert!(receipt_proven(&conn, 1)?);
         assert!(!receipt_proven(&conn, 2)?, "one turn settles one receipt");
         assert!(!receipt_proven(&conn, 3)?, "a newer turn's receipt stays");
-        assert!(!receipt_proven(&conn, 4)?, "another pane's turn did not end");
-        assert!(!receipt_proven(&conn, 5)?, "an operator command is no dispatch");
+        assert!(
+            !receipt_proven(&conn, 4)?,
+            "another pane's turn did not end"
+        );
+        assert!(
+            !receipt_proven(&conn, 5)?,
+            "an operator command is no dispatch"
+        );
 
         // A promoted receipt is the turn's; no pending one is taken with it.
         assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);

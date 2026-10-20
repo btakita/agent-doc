@@ -34,6 +34,12 @@ pub(crate) const WITHDRAW_VERIFY_WINDOW: Duration = Duration::from_millis(600);
 /// lease to the ordinary settle-window rule.
 pub(crate) const SNAPSHOT_WINDOW: Duration = Duration::from_millis(2_000);
 pub(crate) const POLL: Duration = Duration::from_millis(100);
+/// GH #317: how long a withdrawal waits for a turn-active lease before it
+/// concludes the withdrawn trigger was never submitted. The lease is written by
+/// the harness's own `UserPromptSubmit` hook (`turn-status active`), which runs
+/// alongside preflight the moment a prompt is accepted; this only covers that
+/// hook's process start-up, should an Enter have landed just before `C-u`.
+pub(crate) const UNSUBMITTED_LEASE_WINDOW: Duration = Duration::from_millis(1_000);
 
 /// One composer observation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,13 +152,10 @@ fn send_and_verify(pane: &mut impl CancelledTriggerPane, triggers: &[&str]) -> W
         pane.sleep(POLL);
         waited += POLL;
         if let Some(observation) = pane.observe() {
-            let still_there = observation
-                .draft
-                .as_deref()
-                .is_some_and(|draft| {
-                    cancelled_trigger_composer_action(Some(draft), triggers, false, false)
-                        == CancelledTriggerComposerAction::WithdrawRestoredTrigger
-                });
+            let still_there = observation.draft.as_deref().is_some_and(|draft| {
+                cancelled_trigger_composer_action(Some(draft), triggers, false, false)
+                    == CancelledTriggerComposerAction::WithdrawRestoredTrigger
+            });
             if !still_there {
                 return WithdrawOutcome::Withdrawn;
             }
@@ -233,6 +236,15 @@ impl CancelledTriggerPane for TmuxCancelledTriggerPane<'_> {
 /// snapshot lands (no settle window: the withdrawal removed the ambiguity), and
 /// settle the dispatch receipt that turn's preflight promoted to `running`.
 /// Returns the ops-log fields describing the result.
+///
+/// GH #317: when the pane still holds NO turn-active lease once
+/// [`UNSUBMITTED_LEASE_WINDOW`] has passed, the withdrawn trigger never reached `UserPromptSubmit` — it was typed but never
+/// submitted as a turn (live 2026-10-20, pane %50: no lease, no
+/// preflight, no `dispatch_turn_started`). There is no abandoned prompt
+/// snapshot to wait for, and its dispatch receipt is still `accepted`; left
+/// alone it answered `dispatch_turn_pending` and refused the very clear that
+/// withdrew it, for the whole pre-turn grace. The withdrawal proves that turn
+/// will never run, so its receipt is settled here and the clear can proceed.
 pub(crate) fn retire_withdrawn_prompt_turn(
     file: &Path,
     pane: &str,
@@ -258,6 +270,13 @@ pub(crate) fn retire_withdrawn_prompt_turn(
                 retired.reason, retired.written_at, retired.interrupted_at, settled
             );
         }
+        // GH #317: no lease at all once the hook-latency window has passed —
+        // the withdrawn trigger was never submitted, so no snapshot will come.
+        if waited >= UNSUBMITTED_LEASE_WINDOW.min(window)
+            && agent_doc_turn_status_io::turn_active_marker_for_pane_for_file(file, pane).is_none()
+        {
+            return settle_withdrawn_unsubmitted_trigger(file);
+        }
         if waited >= window {
             return "lease=kept reason=no_abandoned_snapshot_for_lease note=settle_window_rule_applies"
                 .to_string();
@@ -265,6 +284,24 @@ pub(crate) fn retire_withdrawn_prompt_turn(
         sleep(POLL);
         waited += POLL;
     }
+}
+
+/// GH #317: settle the never-started dispatch receipt of a withdrawn trigger
+/// that never reached `UserPromptSubmit`. Returns the ops-log fields.
+fn settle_withdrawn_unsubmitted_trigger(file: &Path) -> String {
+    let withdrawn_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    let settled =
+        agent_doc_controller_io::project_controller::settle_withdrawn_unsubmitted_dispatch_turn_for_file(
+            file,
+            withdrawn_at,
+        );
+    format!(
+        "lease=none reason=trigger_never_submitted settled_pending_dispatches={}",
+        settled.map_or_else(|err| format!("error:{err:#}"), |count| count.to_string())
+    )
 }
 
 #[cfg(test)]
@@ -473,7 +510,11 @@ mod tests {
             ),
             ABS
         );
-        let draft = match agent_doc_harness::project_pane_composer_at_cursor(&restored, &harness, Some(3)) {
+        let draft = match agent_doc_harness::project_pane_composer_at_cursor(
+            &restored,
+            &harness,
+            Some(3),
+        ) {
             agent_doc_harness::PaneComposerProjection::OperatorDraft { preview } => preview,
             other => panic!("restored trigger must project as a draft, got {other:?}"),
         };
@@ -502,5 +543,142 @@ mod tests {
                 "/agent-doc tasks/agent-doc/agent-doc-bugs.md".to_string()
             ]
         );
+    }
+
+    /// A scratch project holding one session document and its state DB.
+    struct ScratchProject {
+        _dir: tempfile::TempDir,
+        root: std::path::PathBuf,
+        doc: std::path::PathBuf,
+    }
+
+    impl ScratchProject {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+            let doc = root.join("tasks/agent-doc/agent-doc-bugs.md");
+            std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+            std::fs::write(&doc, "---\nagent_doc_session: session-1\n---\n\nBody.\n").unwrap();
+            Self {
+                _dir: dir,
+                root,
+                doc,
+            }
+        }
+
+        /// Run Agent Doc accepted `secs_ago`: a `dispatch_only_reopen` receipt
+        /// whose turn never started.
+        fn accept_dispatch(&self, secs_ago: u64) {
+            let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+                &self.root,
+                &self.doc.to_string_lossy(),
+            );
+            let conn = agent_doc_sqlite::state_store::open_state_db(&self.root).unwrap();
+            agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+                &conn,
+                &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                    document_id: &document_id,
+                    generation: 6,
+                    command_kind: "dispatch_only_reopen",
+                    accepted_stage: Some("ready"),
+                    failed_stage: None,
+                    diagnostic_payload: "{}",
+                    result_status: "accepted",
+                    proof_scope: "accepted_only",
+                    dispatch_start_proven: false,
+                },
+            )
+            .unwrap();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            conn.execute(
+                "UPDATE dispatch_attempts SET timestamp = ?1 WHERE id = last_insert_rowid()",
+                [i64::try_from(now - secs_ago).unwrap()],
+            )
+            .unwrap();
+        }
+
+        fn dispatch_turn_pending(&self) -> bool {
+            agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&self.doc)
+                .unwrap()
+        }
+    }
+
+    /// GH #317 replay (agent-loop, pane %50, Claude Code, 2026-10-20): Run Agent
+    /// Doc typed the trigger at 01:58:24 but it never became a turn — no
+    /// `UserPromptSubmit`, so no turn-active lease and no preflight. Clear
+    /// Session Context withdrew the leftover trigger from the composer
+    /// (`outcome=withdrawn lease=kept reason=no_abandoned_snapshot_for_lease`)
+    /// and was then refused on `evidence=dispatch_turn_pending` by the very
+    /// receipt it had just withdrawn. The withdrawal now settles that receipt.
+    #[test]
+    fn withdrawing_a_never_submitted_trigger_releases_its_pending_dispatch() {
+        let project = ScratchProject::new();
+        project.accept_dispatch(9);
+        assert!(project.dispatch_turn_pending());
+
+        // The composer still holds the trigger, idle, no route in flight.
+        let mut pane = SimComposer::new().restore(0, ABS);
+        assert_eq!(
+            withdraw_restored_trigger(&mut pane, &[ABS], Duration::ZERO),
+            WithdrawOutcome::Withdrawn
+        );
+
+        let mut waited = Duration::ZERO;
+        let detail = retire_withdrawn_prompt_turn(&project.doc, "%50", SNAPSHOT_WINDOW, &mut |d| {
+            waited += d
+        });
+        assert_eq!(
+            detail,
+            "lease=none reason=trigger_never_submitted settled_pending_dispatches=1"
+        );
+        assert_eq!(
+            waited, UNSUBMITTED_LEASE_WINDOW,
+            "no abandoned snapshot will ever land; only the hook-latency window is waited"
+        );
+        assert!(
+            !project.dispatch_turn_pending(),
+            "the clear that withdrew the trigger is no longer refused on dispatch_turn_pending"
+        );
+    }
+
+    /// One withdrawal settles one receipt: a second Run Agent Doc stacked behind
+    /// the withdrawn trigger is still a pending turn.
+    #[test]
+    fn a_stacked_second_dispatch_stays_pending_after_one_withdrawal() {
+        let project = ScratchProject::new();
+        project.accept_dispatch(9);
+        project.accept_dispatch(3);
+        let detail =
+            retire_withdrawn_prompt_turn(&project.doc, "%50", SNAPSHOT_WINDOW, &mut |_| {});
+        assert!(detail.ends_with("settled_pending_dispatches=1"), "{detail}");
+        assert!(project.dispatch_turn_pending());
+    }
+
+    /// The race the hook-latency window covers: the Enter landed just before
+    /// `C-u`, Claude Code accepted the prompt, and its `UserPromptSubmit` hook
+    /// writes the turn-active lease 300ms later. That turn did start, so its
+    /// receipt must not be settled as never submitted.
+    #[test]
+    fn a_lease_written_inside_the_hook_window_keeps_the_dispatch() {
+        let project = ScratchProject::new();
+        project.accept_dispatch(2);
+        let mut now = Duration::ZERO;
+        let mut lease_written = false;
+        let detail = retire_withdrawn_prompt_turn(&project.doc, "%50", SNAPSHOT_WINDOW, &mut |d| {
+            now += d;
+            if !lease_written && now >= Duration::from_millis(300) {
+                agent_doc_turn_status_io::write_turn_active_marker(&project.root, "%50").unwrap();
+                lease_written = true;
+            }
+        });
+        assert_eq!(
+            detail,
+            "lease=kept reason=no_abandoned_snapshot_for_lease note=settle_window_rule_applies"
+        );
+        assert!(project.dispatch_turn_pending());
     }
 }

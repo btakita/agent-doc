@@ -454,13 +454,16 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   against the order it already retains for those documents (`agent_doc_tmux::order_layout_columns`):
   focus never reorders columns, and a newly visible document appends. On a Remote Dev backend
   whose detector stays `unknown` (no single client reports a multi-file split set, GH #97) tmux
-  pane order is therefore stable but is **not** a mirror of the editor's split order; agent-doc
-  has no input from which to derive it. `pane_layout_desired_published` and every
+  pane order is therefore stable but is **not** a mirror of the editor's split order; the backend
+  has no input from which to derive it (with the 262/263 frontend module installed on both sides,
+  the client's measured columns supply that order instead, GH #320 option B, below).
+  `pane_layout_desired_published` and every
   `pane_layout_projection` line record `caller_kind` and `column_order=editor|retained|unknown`.
 - The automatic editor surface is state, and it names its column-order provenance the same way
   (GH #320; the rule is `specs/13-state-backbone.md`, "State Propagation, Not Effect Inference").
   The surface payload's `column_order` is `editor` only for local windows laid out at distinct
-  origins; windows that share an origin (never measured) and every Remote Dev fold result publish
+  origins (and for the JetBrains Client's measured windows forwarded by the 262/263 backend,
+  below); windows that share an origin (never measured) and every Remote Dev fold result publish
   `unknown`, or `retained` when the fold memory is anchored. The controller carries that label
   from `SurfaceIntent::Sync` (and a focus escalation over the surface's columns) into the desired
   layout, so a membership order is ordered against the retained layout and never applied as
@@ -471,17 +474,53 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   together with the backend's own selection; it never defers with
   `no_visible_session_documents` because the backend's `selectedFiles` names no session document
   (`activeWindow=<none>`), so a split change publishes without a Run.
-- **Remote Dev pane order cannot follow a split move (GH #320).** The backend has no client split
-  structure to observe: `GuestFileEditorManager` (the backend's `ClientFileEditorManager` for a
-  Remote Dev client) holds a flat composite list and one selected composite, the RD
-  `FileEditorCompositeModel` carries a per-composite `visible` flag but no window or split
-  identity, and `RdServerEditorTracker.activeEditors` is a flat list. Moving a document to the
-  opposite split therefore changes no state the backend can read except tab-open order, which is
-  not geometry, and agent-doc does not infer order from the editor remove/re-open events. The
-  manual remedy is `agent-doc sync --col <left> --col <right>` (an `editor` publication); later
-  automatic Remote Dev observations, labelled `unknown`/`retained`, keep that order. Real Remote
-  Dev geometry needs the JetBrains Client side: the 262/263 frontend module sees the client's
-  `EditorWindow`s and would have to publish measured columns through the surface Source.
+- **Remote Dev pane order follows the JetBrains Client's measured split geometry (GH #320 option
+  B).** The backend has no client split structure to observe: `GuestFileEditorManager` (the
+  backend's `ClientFileEditorManager` for a Remote Dev client) holds a flat composite list and one
+  selected composite, the RD `FileEditorCompositeModel` carries a per-composite `visible` flag but
+  no window or split identity, and `RdServerEditorTracker.activeEditors` is a flat list. agent-doc
+  does not infer order from the editor remove/re-open events. Geometry exists only in the JetBrains
+  Client, so the 262/263 frontend module publishes it as state: surface snapshot schema 2 adds
+  each editor window's measured on-screen bounds (`EditorWindowSnapshot.bounds`, null unless the
+  window is showing with a positive size). The backend derives the main window's columns from
+  those bounds with the classic grouping (`LayoutDetector.buildColumnsFromSnapshots`, the
+  8 px x-tolerance; windows sharing a column stack top to bottom) and its provenance
+  (`LayoutDetector.measuredColumnOrder`). After the same snapshot's
+  `editor_view_snapshot_observe` was delivered (whatever the detached-view projection status: 263
+  freezes it without terminal capability), it forwards
+  them into the controller surface Source (`editor_surface_observe`) as `column_order=editor`,
+  `preserve_focus=true` (the snapshot names each split's selected document but not which split
+  has keyboard focus). The forward publishes on its own family,
+  `jetbrains-rd@<installation>-pid:<pid>`: the same installation as the classic surface and focus
+  lanes (so the same navigation lane and focus owner), with its own generation, because the
+  frontend authority handoff retires the whole classic `jetbrains@` family. Each frontend
+  connection publishes its own endpoint `remote-client:<clientId>:<connectionGeneration>`, retired
+  when that connection retires or the backend project closes; before this JVM's first forward to
+  a root it retires the installation's `jetbrains-rd` family there, so a dead backend JVM's forward
+  cannot keep driving. Only a remote session (`ClientType.isRemote`) is forwarded; a monolithic
+  IDE's own frontend is already measured by the classic window path. Derivation is
+  `Unavailable` (the last forwarded layout stays in force) for a schema-1 snapshot, a contributing
+  window without bounds, a shared origin, or a split whose selected tab is not a session document
+  while its tabs hold one (`#stickymdpane`: that column is unknown, not gone); a split holding no
+  session document contributes no column, so closing a split still collapses the layout. While a
+  forward is live for a project (`RemoteClientLayoutAuthority`), the backend's remote-client
+  membership fold defers (`capture deferred reason=frontend_measured_layout_authority`), so the
+  remembered-order fallback, labelled `unknown`/`retained`, remains only for classic installs,
+  one-sided installs, and a frontend that predates schema 2. Schema negotiation keeps old peers
+  working: Fleet RPC decodes with `ignoreUnknownKeys = false` and `encodeDefaults = true`, so the
+  bounds key is never encoded while null (`@EncodeDefault(NEVER)`), and the frontend asks
+  `SurfaceSnapshotRpcApi.supportedSnapshotSchemaVersion()` once per lease; a backend that predates
+  the call fails it (or does not answer within 5 s) and the frontend publishes schema 1 without
+  geometry. The backend validator accepts schemas 1 and 2. Evidence: the client logs
+  `[split-surface] snapshot schema negotiated version=<n> backend_offered=<n|none>
+  geometry=measured|unavailable`; the backend logs `[rd-layout] forwarded measured columns
+  surface=<id> root=<root> columns=<n> [<left> | <right>] column_order=editor`,
+  `[rd-layout] measured layout unavailable surface=<id> reason=<reason>`, and `[rd-layout] retired
+  measured layout surface=<id>`; ops.log records `controller_editor_surface_observed
+  client=jetbrains-rd@<installation>-pid:<pid> surface=remote-client:<clientId>:<generation>` and
+  `pane_layout_desired_published ... column_order=editor`. The manual remedy for an install
+  without the frontend module stays `agent-doc sync --col <left> --col <right>` (an `editor`
+  publication), which later automatic `unknown`/`retained` observations keep.
 - Manual `Sync Tmux Layout` publishes `exact_visible=true` only when layout detection returns
   known columns. If columns are unreadable, it refuses before terminal preparation or controller
   publication and tells the operator that the retained tmux layout was not changed; a focused-only

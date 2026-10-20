@@ -19,6 +19,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   facts, so agent-authored text is attributed by its capture provenance
   rather than by blockquote prefix.
 
+- **Remote Dev pane order follows a split move when the JetBrains Client runs
+  the 262/263 frontend module (GH #320 option B).** Split geometry exists only
+  in the JetBrains Client. The frontend module now publishes each editor
+  window's measured on-screen bounds (surface snapshot schema 2). The backend
+  derives the main window's columns from them with the classic window grouping
+  and forwards them into the controller surface Source as `column_order=editor`
+  on its own `jetbrains-rd@<installation>` lane, after the same snapshot reached
+  the detached-view policy. Moving a document to the opposite split therefore
+  reorders tmux without a Run. While that forward is live, the backend's
+  remote-client membership fold defers
+  (`capture deferred reason=frontend_measured_layout_authority`). The
+  remembered-order fallback, labelled `unknown`, remains for classic installs,
+  one-sided installs, and a frontend that predates schema 2. Mixed versions
+  keep working: the frontend asks the backend which schema it accepts, and an
+  older backend never receives the new key (Fleet RPC rejects unknown keys).
+  Not yet verified against a live JetBrains Client.
+
 ## 0.35.528
 
 - **A Remote Dev split change reaches the controller as state, and pane order

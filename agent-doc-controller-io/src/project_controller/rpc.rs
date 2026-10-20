@@ -40658,6 +40658,197 @@ mod tests {
         }
     }
 
+    /// One `editor_surface_observe` request through the controller's real
+    /// ingress (GH #320 option B), one document per column, `focused` fixed so
+    /// only the layout can change.
+    #[allow(clippy::too_many_arguments)]
+    fn gh320_observe_surface(
+        bootstrap: &ControllerBootstrap,
+        runtime: &ControllerRuntime,
+        client_id: &str,
+        surface_id: &str,
+        sequence: u64,
+        focused: &str,
+        columns: &[&str],
+        column_order: agent_doc_editor_surface::SurfaceColumnOrder,
+    ) -> SurfaceObservationReceipt {
+        let files: Vec<String> = columns.iter().map(|file| file.to_string()).collect();
+        let observation = EditorSurfaceObservation {
+            client_id: client_id.to_string(),
+            surface_id: surface_id.to_string(),
+            generation: 7,
+            sequence,
+            surface: agent_doc_editor_surface::EditorSurface {
+                column_order,
+                focused: focused.to_string(),
+                visible: files.clone(),
+                open: files.clone(),
+                columns: files
+                    .iter()
+                    .map(|file| SurfaceColumn {
+                        files: vec![file.clone()],
+                    })
+                    .collect(),
+                force_reconcile: false,
+                focus_only: false,
+                preserve_focus: true,
+            },
+        };
+        let payload = serde_json::to_string(&observation).unwrap();
+        handle_editor_surface_observe(
+            bootstrap,
+            runtime,
+            ControllerRequest {
+                command: "editor_surface_observe".to_string(),
+                file: Some(PathBuf::from(focused)),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(7),
+                state: None,
+                caller: Some(client_id.to_string()),
+                reason: Some("editor_surface_observation".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(payload),
+                sequence: None,
+            },
+        )
+        .unwrap()
+    }
+
+    /// GH #320 option B at the controller: the Remote Dev backend's membership
+    /// fold published `[a | b]` as `unknown`; then the operator moves `a` to
+    /// the opposite split. The 262/263 frontend measures the client's editor
+    /// windows, and the backend forwards the derived columns `[b | a]` on its
+    /// own `jetbrains-rd@<installation>` lane labelled `editor`. Measured order
+    /// replaces the retained one, so tmux follows the split move.
+    #[test]
+    fn gh320_frontend_measured_columns_order_the_remote_dev_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let classic = "jetbrains@IU.0a1b2c3d-pid:41";
+        let forwarded = "jetbrains-rd@IU.0a1b2c3d-pid:41";
+
+        let fold = gh320_observe_surface(
+            &bootstrap,
+            runtime.as_ref(),
+            classic,
+            "project",
+            1,
+            &a,
+            &[&a, &b],
+            agent_doc_editor_surface::SurfaceColumnOrder::Unknown,
+        );
+        assert!(
+            matches!(fold.intent, SurfaceIntent::Sync { .. }),
+            "{fold:?}"
+        );
+        let desired = runtime
+            .pane_layout_desired()
+            .expect("fold publishes a layout");
+        assert_eq!(desired.invocation.columns, vec![a.clone(), b.clone()]);
+
+        let measured = gh320_observe_surface(
+            &bootstrap,
+            runtime.as_ref(),
+            forwarded,
+            "remote-client:client-a:3",
+            1,
+            &a,
+            &[&b, &a],
+            agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+        );
+        assert!(
+            matches!(
+                measured.intent,
+                SurfaceIntent::Sync {
+                    column_order: agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+                    ..
+                }
+            ),
+            "{measured:?}"
+        );
+        let desired = runtime
+            .pane_layout_desired()
+            .expect("forward publishes a layout");
+        assert_eq!(desired.invocation.columns, vec![b.clone(), a.clone()]);
+        assert_eq!(
+            desired.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+        assert_eq!(desired.invocation.focus, None, "the forward owns no focus");
+
+        // The forward is the same installation (navigation lane, focus owner)
+        // but its own family: the frontend handoff that retires the classic
+        // `jetbrains@` family never retires the measured forward, and back.
+        assert_eq!(
+            agent_doc_editor_surface::editor_installation(classic),
+            agent_doc_editor_surface::editor_installation(forwarded)
+        );
+        assert!(!editor_surface_family_retires(
+            "jetbrains@IU.0a1b2c3d",
+            "jetbrains-rd@IU.0a1b2c3d"
+        ));
+        assert!(!editor_surface_family_retires(
+            "jetbrains-rd@IU.0a1b2c3d",
+            "jetbrains@IU.0a1b2c3d"
+        ));
+    }
+
+    /// GH #320 option B, one-sided install (no frontend module, or one that
+    /// predates schema 2): only the backend's membership fold publishes, its
+    /// order stays `unknown`, and the same documents in a new list order are
+    /// not a new layout, so the retained `[a | b]` keeps.
+    #[test]
+    fn gh320_one_sided_remote_dev_surface_stays_unknown_and_keeps_the_retained_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let classic = "jetbrains@IU.0a1b2c3d-pid:41";
+
+        gh320_observe_surface(
+            &bootstrap,
+            runtime.as_ref(),
+            classic,
+            "project",
+            1,
+            &a,
+            &[&a, &b],
+            agent_doc_editor_surface::SurfaceColumnOrder::Unknown,
+        );
+        let reordered = gh320_observe_surface(
+            &bootstrap,
+            runtime.as_ref(),
+            classic,
+            "project",
+            2,
+            &a,
+            &[&b, &a],
+            agent_doc_editor_surface::SurfaceColumnOrder::Unknown,
+        );
+        assert!(
+            !matches!(reordered.intent, SurfaceIntent::Sync { .. }),
+            "membership order is not geometry: {reordered:?}"
+        );
+        let desired = runtime
+            .pane_layout_desired()
+            .expect("fold published a layout");
+        assert_eq!(desired.invocation.columns, vec![a.clone(), b.clone()]);
+        assert_eq!(
+            desired.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Unknown
+        );
+    }
+
     /// GH #112: a positive editor split order (local multi-window geometry, or
     /// a publisher that predates `column_order`) is still authoritative and
     /// replaces the retained order.

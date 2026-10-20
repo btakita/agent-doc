@@ -6,11 +6,12 @@ import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
-import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
+import com.github.btakita.agentdoc.split.isSupportedSurfaceSnapshotSchema
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
@@ -23,8 +24,16 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 @Service(Service.Level.PROJECT)
-internal class AuthenticatedSurfaceIngressService(project: Project) {
-    private val state = AuthenticatedSurfaceIngressState(ControllerSurfaceSnapshotPublisher(project))
+internal class AuthenticatedSurfaceIngressService(project: Project) : Disposable {
+    private val layoutForwarder = ControllerRemoteClientLayoutForwarder(project)
+    private val state = AuthenticatedSurfaceIngressState(
+        ControllerSurfaceSnapshotPublisher(project),
+        layoutForwarder,
+    )
+
+    override fun dispose() {
+        layoutForwarder.dispose()
+    }
 
     val frontendSnapshotAvailable: StateFlow<Boolean> = state.frontendSnapshotAvailable
 
@@ -51,7 +60,10 @@ internal class AuthenticatedSurfaceIngressService(project: Project) {
     }
 }
 
-internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSnapshotPublisher) {
+internal class AuthenticatedSurfaceIngressState(
+    private val publisher: SurfaceSnapshotPublisher,
+    private val layoutForwarder: RemoteClientLayoutForwarder = RemoteClientLayoutForwarder.Disabled,
+) {
     private val generation = AtomicLong(0)
     private val mutex = Mutex()
     private val connections = mutableMapOf<String, ConnectionState>()
@@ -63,6 +75,7 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
         frontendInstanceId: String,
     ): SurfaceIngressLease = mutex.withLock {
         connections.remove(authenticatedClientId)?.let { previous ->
+            layoutForwarder.retire(previous.clientId, previous.lease.connectionGeneration)
             publisher.retire(previous.clientId, previous.lease.connectionGeneration)
         }
         val lease = SurfaceIngressLease(
@@ -117,6 +130,11 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
             acceptedSurfaces = snapshot.surfaces.associate { it.paneId to it.surfaceGeneration },
         )
         refreshFrontendSnapshotAvailability()
+        // GH #320 option B: the controller policy has now seen the complete snapshot, so its
+        // measured main-window geometry may drive pane layout. The pane-layout surface fences
+        // its own generation/sequence; the policy's projection status (frozen without terminal
+        // capability on 263, or stale behind a pre-restart generation) is about detached views.
+        layoutForwarder.forward(authenticatedClientId, lease.connectionGeneration, snapshot)
         SurfaceIngressAck(
             status = SurfaceIngressStatus.ACCEPTED,
             connectionGeneration = lease.connectionGeneration,
@@ -169,6 +187,7 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
         val current = connections[authenticatedClientId]
         if (current?.lease != lease) return@withLock
         connections.remove(authenticatedClientId)
+        layoutForwarder.retire(authenticatedClientId, lease.connectionGeneration)
         publisher.retire(authenticatedClientId, lease.connectionGeneration)
         refreshFrontendSnapshotAvailability()
     }
@@ -204,7 +223,9 @@ internal data class SnapshotValidationFailure(
 
 internal object SurfaceSnapshotValidator {
     fun validate(snapshot: FrontendSurfaceSnapshot): SnapshotValidationFailure? {
-        if (snapshot.schemaVersion != SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+        // GH #320 option B: schema 2 adds measured window bounds. A schema-1 frontend (no
+        // geometry) stays valid; its main layout then keeps the remembered-order fallback.
+        if (!isSupportedSurfaceSnapshotSchema(snapshot.schemaVersion)) {
             return failure(SurfaceIngressStatus.INVALID_SCHEMA, "unsupported schema ${snapshot.schemaVersion}")
         }
         if (!snapshot.complete) {

@@ -8,11 +8,14 @@ import com.github.btakita.agentdoc.split.FrontendPresentationCapability
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
 import com.github.btakita.agentdoc.split.FrontendPresentationProjection
+import com.github.btakita.agentdoc.split.LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
+import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.github.btakita.agentdoc.split.SurfaceSnapshotRpcApi
+import com.github.btakita.agentdoc.split.forSchema
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -32,6 +35,7 @@ import java.util.IdentityHashMap
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
@@ -39,6 +43,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Service(Service.Level.PROJECT)
 class FrontendSurfaceSnapshotService(
@@ -87,6 +92,7 @@ class FrontendSurfaceSnapshotService(
     }
 
     private suspend fun publishForLease(lease: SurfaceIngressLease) {
+        val schema = negotiateSnapshotSchema()
         captures.collectLatest {
             // Coalesce the burst of file-editor, AWT hierarchy, and focus events produced by one
             // dock/undock operation, while still emitting a complete authoritative snapshot.
@@ -94,7 +100,8 @@ class FrontendSurfaceSnapshotService(
             var retry = 0
             do {
                 val capture = captureOnEdt()
-                val ack = SurfaceSnapshotRpcApi.getInstance().publishSnapshot(lease, capture.snapshot)
+                val ack = SurfaceSnapshotRpcApi.getInstance()
+                    .publishSnapshot(lease, capture.snapshot.forSchema(schema))
                 if (ack.status != SurfaceIngressStatus.ACCEPTED) {
                     LOG.warn(
                         "[split-surface] snapshot rejected status=${ack.status} " +
@@ -121,6 +128,34 @@ class FrontendSurfaceSnapshotService(
                 LOG.warn("[split-surface] bounded presentation recapture exhausted")
             }
         }
+    }
+
+    /**
+     * GH #320 option B: publish measured window geometry (schema 2) only to a backend that says it
+     * accepts it. Fleet RPC decodes with `ignoreUnknownKeys = false`, so a backend that predates
+     * schema 2 would fail to decode a bounds key; it also lacks the negotiation call, and that
+     * failure selects schema 1 (no geometry, remembered-order fallback on the backend).
+     */
+    private suspend fun negotiateSnapshotSchema(): Int {
+        val offered = try {
+            withTimeoutOrNull(SCHEMA_NEGOTIATION_TIMEOUT_MS) {
+                SurfaceSnapshotRpcApi.getInstance().supportedSnapshotSchemaVersion()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            LOG.info(
+                "[split-surface] backend snapshot schema negotiation unavailable " +
+                    "(${failure.javaClass.simpleName}); publishing schema $LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION",
+            )
+            null
+        }
+        val schema = negotiatedSnapshotSchema(offered)
+        LOG.info(
+            "[split-surface] snapshot schema negotiated version=$schema backend_offered=${offered ?: "none"} " +
+                "geometry=${if (schema >= SURFACE_SNAPSHOT_SCHEMA_VERSION) "measured" else "unavailable"}",
+        )
+        return schema
     }
 
     private suspend fun captureOnEdt(): CapturedFrontendSurfaces {
@@ -210,11 +245,20 @@ class FrontendSurfaceSnapshotService(
         private const val CAPTURE_DEBOUNCE_MS = 75L
         private const val PRESENTATION_RECAPTURE_MS = 250L
         private const val MAX_PRESENTATION_RECAPTURES = 60
+        private const val SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
         private val LOG = Logger.getInstance(FrontendSurfaceSnapshotService::class.java)
 
         fun getInstance(project: Project): FrontendSurfaceSnapshotService = project.service()
     }
 }
+
+/**
+ * The snapshot schema to publish, from the backend's advertised newest schema (null when the
+ * backend predates negotiation). Never above what this frontend writes, never below schema 1.
+ */
+internal fun negotiatedSnapshotSchema(backendOffered: Int?): Int =
+    (backendOffered ?: LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION)
+        .coerceIn(LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION, SURFACE_SNAPSHOT_SCHEMA_VERSION)
 
 /**
  * Assigns identity and incarnation from public AWT/WindowManager evidence before RPC.  IDs are

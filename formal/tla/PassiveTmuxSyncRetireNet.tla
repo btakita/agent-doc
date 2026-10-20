@@ -84,7 +84,10 @@ ENVIRONMENT
   EndFrame  the frame closes, the project closes, or its root is superseded
             (`retireClosedSurfaceEndpoints`, `shutdown`): retired for good.
   FrontendSync  while the frame is not live, another publisher (the frontend)
-            keeps tmux on the editor's focus.
+            keeps tmux on the editor's focus. In code that publisher is the
+            Remote Dev backend's forward of the JetBrains Client's measured
+            columns (GH #320 option B), on its own `jetbrains-rd` endpoint and
+            family, so it never moves this frame's fence.
 
 CONFIGS (scripts/run_tla.sh)
 ----------------------------

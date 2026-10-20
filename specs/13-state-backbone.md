@@ -485,7 +485,11 @@ decide it.
   client's split geometry). The consumer then keeps its last derived value or
   fails closed, and the spec for that surface names the limit and the manual
   remedy. A plausible guess presented as state is a defect, even when it
-  happens to be right.
+  happens to be right. When another process does observe that state, it is
+  that process's job to publish it: the JetBrains Client's 262/263 frontend
+  module measures its editor windows (surface snapshot schema 2), and the
+  backend forwards the derived columns as `column_order=editor` (GH #320
+  option B). The `unknown` label remains only where no such publisher exists.
 - **Never drop observed state on a local precondition.** A publisher must not
   discard state it did observe because some other local view is empty, as in
   GH #320, where the remote-client visible editors were dropped because the

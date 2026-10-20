@@ -29,6 +29,8 @@ plugin_rpc	CpRouteClient.forgetEditorSurface	Handoff|EndFrame
 plugin_rpc	CpRouteClient.forgetEditorFocus	Handoff|EndFrame	
 plugin_rpc	CpRouteClient.forgetEditorFocusWithReceipt	EndFrame	
 plugin_rpc	CpRouteClient.forgetEditorSurfaceClient	Handoff|EndFrame	
+plugin_rpc	CpRouteClient.observeRemoteClientSurface	FrontendSync	GH #320 option B: the frontend's measured columns, forwarded on the backend's own `jetbrains-rd@<installation>` endpoint (never this frame's family)
+plugin_rpc	CpRouteClient.forgetRemoteClientSurface	FrontendSync	retires only that forward's own endpoint or `jetbrains-rd` family; the classic frame's fence is untouched
 plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->observeEditorSurface	RefocusLive|ResendFocus|Fallback|EditorReregister|EditorAck	the serialized surface delivery and its retained retry
 plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->forgetEditorSurface	Handoff|EndFrame	in-flight delivery across a handoff (InFlightSurfaceDelivery) / a superseded root
 plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->forgetEditorFocus	Handoff|EndFrame	as above, focus lane
@@ -39,11 +41,13 @@ plugin_call	EditorTabSyncListener.retireControllerProjection->forgetEditorSurfac
 plugin_call	EditorTabSyncListener.retireControllerProjection->forgetEditorFocus	Handoff	
 plugin_call	EditorTabSyncListener.shutdown->forgetEditorSurface	EndFrame	project or plugin disposal
 plugin_call	EditorTabSyncListener.shutdown->forgetEditorFocus	EndFrame	
+plugin_call	RemoteClientLayoutForwarder.deliver->observeRemoteClientSurface	FrontendSync	the other publisher keeps tmux on the editor's measured layout while this frame is not live
+plugin_call	RemoteClientLayoutForwarder.deliver->forgetRemoteClientSurface	FrontendSync	a dead backend JVM's forward (family) or the forward's previous root
+plugin_call	RemoteClientLayoutForwarder.retireSurface->forgetRemoteClientSurface	FrontendSync	the frontend connection retired, or the backend project closed
 plugin_liveness	EditorTabSyncListener.retireControllerProjection:projectionRetired	Handoff	live' = FALSE
 plugin_liveness	EditorTabSyncListener.resumeControllerProjection:projectionRetired	Fallback	live' = TRUE
 plugin_liveness	BackendGuestSelectionFallback.install->retireControllerProjection	Handoff	Remote Dev frontend snapshot accepted
 plugin_liveness	BackendGuestSelectionFallback.install->resumeControllerProjection	Fallback	Remote Dev backend fallback forwards a selection again
 model_only	AdversaryStep	AdversaryStep	the NetChannel adversary: drop, duplicate, reconnect
 model_only	RefocusHandedOff	RefocusHandedOff	the operator switches tabs while another publisher owns the surface
-model_only	FrontendSync	FrontendSync	the authenticated frontend publisher (its own endpoint, outside this model)
 model_only	EditorRetireSuperseded	EditorRetireSuperseded	the v0.35.502/503 self-retirement, removed in 9ad4fdcd04; kept only as the RetireOnNewerReply wedge knob. A code site for it is a regression (EditorTabSyncListenerTest pins its absence)

@@ -104,6 +104,38 @@ class AuthenticatedSurfaceIngressStateTest {
         assertEquals(1, publisher.receipts.size)
     }
 
+    /**
+     * GH #320 option B: a snapshot reaches the pane-layout forwarder only after the backend
+     * accepted it and delivered it to the controller policy; a rejected or undelivered one never
+     * does, and a lease retirement or reconnect retires the forwarded connection's endpoint.
+     */
+    @Test
+    fun acceptedSnapshotsReachTheLayoutForwarderAndRetirementRetiresIt() = runBlocking {
+        val forwarder = RecordingForwarder()
+        val publisher = RecordingPublisher()
+        val state = AuthenticatedSurfaceIngressState(publisher, forwarder)
+        val lease = state.open("client-a", "frontend-a")
+
+        state.publish("client-a", lease, snapshot("frontend-a", 1))
+        state.publish("client-a", lease, snapshot("frontend-a", 1))
+        assertEquals(listOf(Triple("client-a", lease.connectionGeneration, 1L)), forwarder.forwarded)
+
+        publisher.deliver = false
+        state.publish("client-a", lease, snapshot("frontend-a", 2))
+        assertEquals(1, forwarder.forwarded.size, "an undelivered snapshot never reaches pane layout")
+
+        val replacement = state.open("client-a", "frontend-a-2")
+        assertEquals(listOf("client-a" to lease.connectionGeneration), forwarder.retired)
+        state.retire("client-a", replacement)
+        assertEquals(
+            listOf(
+                "client-a" to lease.connectionGeneration,
+                "client-a" to replacement.connectionGeneration,
+            ),
+            forwarder.retired,
+        )
+    }
+
     private fun receipt(generation: Long, revision: Long, surfaceGeneration: Long) =
         FrontendPresentationReceipt(
             projectId = projectId,
@@ -121,7 +153,21 @@ class AuthenticatedSurfaceIngressStateTest {
         surfaces = listOf(FrontendSurface("root", 1, SurfaceRole.MAIN, true, emptyList())),
     )
 
+    private class RecordingForwarder : RemoteClientLayoutForwarder {
+        val forwarded = mutableListOf<Triple<String, Long, Long>>()
+        val retired = mutableListOf<Pair<String, Long>>()
+
+        override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) {
+            forwarded += Triple(clientId, generation, snapshot.sequence)
+        }
+
+        override fun retire(clientId: String, generation: Long) {
+            retired += clientId to generation
+        }
+    }
+
     private class RecordingPublisher : SurfaceSnapshotPublisher {
+        var deliver = true
         val published = mutableListOf<Triple<String, Long, Long>>()
         val retired = mutableListOf<Pair<String, Long>>()
         val receipts = mutableListOf<FrontendPresentationReceipt>()
@@ -132,7 +178,7 @@ class AuthenticatedSurfaceIngressStateTest {
             snapshot: FrontendSurfaceSnapshot,
         ): SurfaceDeliveryResult {
             published += Triple(clientId, generation, snapshot.sequence)
-            return SurfaceDeliveryResult(true)
+            return SurfaceDeliveryResult(deliver)
         }
 
         override suspend fun retire(clientId: String, generation: Long) {

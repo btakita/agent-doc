@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc.split.frontend
 
+import com.github.btakita.agentdoc.split.EditorWindowBounds
 import com.github.btakita.agentdoc.split.SurfaceRole
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -71,6 +72,23 @@ class FrontendSurfaceCollectorTest {
         val retained = tracker.assign(setOf(frame), null, complete = true).getValue(frame)
 
         assertEquals(first, retained)
+    }
+
+    /** GH #320 option B: geometry only to a backend that advertises schema 2. */
+    @Test
+    fun snapshotSchemaNegotiationFallsBackToSchemaOneForAnOldBackend() {
+        assertEquals(1, negotiatedSnapshotSchema(null))
+        assertEquals(1, negotiatedSnapshotSchema(1))
+        assertEquals(2, negotiatedSnapshotSchema(2))
+        assertEquals(2, negotiatedSnapshotSchema(9))
+        assertEquals(1, negotiatedSnapshotSchema(0))
+    }
+
+    @Test
+    fun unlaidOutWindowHasNoMeasuredBounds() {
+        assertEquals(EditorWindowBounds(640, 40, 600, 800), editorWindowBounds(640, 40, 600, 800))
+        assertNull(editorWindowBounds(0, 0, 0, 800))
+        assertNull(editorWindowBounds(0, 0, 600, 0))
     }
 
     @Test

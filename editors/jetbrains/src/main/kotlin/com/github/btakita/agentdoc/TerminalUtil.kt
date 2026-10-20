@@ -779,16 +779,23 @@ object TerminalUtil {
                     stage = STAGE_SURFACE_REFERENCE,
                 )
 
-            /** The pre-reference `--col` publication, kept for an older controller. */
-            fun fromEditorSnapshot(
-                visibleMdFiles: List<String>,
-                editorLayout: EditorLayout?,
-                focusedFile: String?,
-            ): RouteLayoutRequest =
+            /**
+             * The pre-reference `--col` publication, kept for an older controller. GH #326 phase
+             * 3b: [snapshot] is the `sync_layout` derivation for the route's own root, so the
+             * columns, their order label, and the layout mode (GH #111) are native rules. The
+             * only plugin step is the wire shape: `sync_layout` answers one empty column for an
+             * observation with no visible document, and the route sends no `--col` then.
+             */
+            fun fromSyncLayout(snapshot: SyncLayoutSnapshot.Result, focusedFile: String?): RouteLayoutRequest =
                 RouteLayoutRequest(
-                    layoutArgs = buildRouteLayoutArgs(visibleMdFiles, editorLayout, focusedFile),
-                    columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout),
-                    layoutMode = routeLayoutMode(editorLayout),
+                    layoutArgs =
+                        snapshot.columns
+                            .takeUnless { it == listOf("") }
+                            .orEmpty()
+                            .flatMap { listOf("--col", it) } +
+                            focusedFile?.let { listOf("--focus", it) }.orEmpty(),
+                    columnOrder = snapshot.columnOrder,
+                    layoutMode = snapshot.layoutMode,
                     surfaceReference = null,
                     stage = STAGE_SNAPSHOT_FALLBACK,
                 )
@@ -825,30 +832,57 @@ object TerminalUtil {
         return editorSnapshotRouteLayout(project, cwd)
     }
 
-    /** The `--col` snapshot fallback, read on the EDT like every editor-state read. */
+    /** What the `--col` snapshot fallback reads from the editor on the EDT. */
+    private class RouteSnapshotEvidence(
+        val basePath: String?,
+        val visibleMdFiles: List<String>,
+        val focusedFile: String?,
+        val layoutEvidence: LayoutDetector.EditorLayoutEvidence?,
+    )
+
+    /**
+     * The `--col` snapshot fallback. GH #326 phase 3b: the EDT only reads editor state (the visible
+     * and focused markdown documents and the split layout evidence). This route thread derives the
+     * layout from that evidence and asks `sync_layout` with the route's own root as `chosen_root`,
+     * so the normalization against [cwd], the columns, their order, and the layout mode are native.
+     */
     private fun editorSnapshotRouteLayout(project: Project, cwd: String): RouteLayoutRequest {
-        var snapshot: RouteLayoutRequest? = null
+        var captured: RouteSnapshotEvidence? = null
         val read = Runnable {
             if (project.isDisposed) return@Runnable
             val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-            snapshot = RouteLayoutRequest.fromEditorSnapshot(
+            captured = RouteSnapshotEvidence(
+                basePath = project.basePath,
                 visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles),
-                editorLayout = SyncLayoutAction.absolutizeEditorLayout(
-                    cwd,
-                    SyncLayoutAction.normalizeEditorLayout(
-                        project.basePath,
-                        cwd,
-                        LayoutDetector.detectEditorLayout(project),
-                    ),
-                ),
                 focusedFile = manager.selectedTextEditor?.virtualFile
                     ?.takeIf { it.name.endsWith(".md") }
                     ?.path,
+                layoutEvidence = LayoutDetector.captureEditorLayoutEvidence(project),
             )
         }
         val application = ApplicationManager.getApplication()
         if (application.isDispatchThread) read.run() else application.invokeAndWait(read)
-        return snapshot ?: RouteLayoutRequest.fromEditorSnapshot(emptyList(), null, null)
+        val evidence = captured
+        val editorLayout =
+            try {
+                evidence?.layoutEvidence?.let { LayoutDetector.detectEditorLayout(it) }
+            } catch (e: Exception) {
+                LOG.warn("[route] editor layout detection failed: ${e.message}", e)
+                null
+            }
+        val snapshot =
+            SyncLayoutSnapshot.derive(
+                SyncLayoutSnapshot.evidence(
+                    basePath = evidence?.basePath,
+                    fallbackRoot = cwd,
+                    focused = evidence?.focusedFile,
+                    visible = evidence?.visibleMdFiles.orEmpty(),
+                    editorLayout = editorLayout,
+                    foreground = false,
+                    chosenRoot = cwd,
+                ),
+            )
+        return RouteLayoutRequest.fromSyncLayout(snapshot, evidence?.focusedFile)
     }
 
     /**
@@ -857,6 +891,10 @@ object TerminalUtil {
      * (`exact`). The undetected fallback (Remote Dev reports one selected file)
      * names just the documents it can see, so it only asks that each one has a
      * column (`ensure`) and the controller keeps the retained layout around it.
+     *
+     * GH #326 phase 3b: the native `sync_layout` derivation answers this as `layout_mode`. This
+     * copy is the frozen floor ([SyncLayoutSnapshot.frozen]) and fills the field for a library
+     * older than phase 3b. Never extend it.
      */
     internal fun routeLayoutMode(editorLayout: EditorLayout?): String =
         if (editorLayout != null && editorLayout.columns.size > 1) {
@@ -867,28 +905,6 @@ object TerminalUtil {
 
     internal const val ROUTE_LAYOUT_MODE_EXACT = "exact"
     internal const val ROUTE_LAYOUT_MODE_ENSURE = "ensure"
-
-    internal fun buildRouteLayoutArgs(
-        visibleMdFiles: List<String>,
-        editorLayout: EditorLayout?,
-        focusedFile: String?,
-    ): List<String> {
-        val args = mutableListOf<String>()
-        if (editorLayout != null && editorLayout.columns.size > 1) {
-            for (col in editorLayout.columns) {
-                args.addAll(listOf("--col", col.files.joinToString(",")))
-            }
-        } else {
-            // GH #81: each visible document is its own split; see `undetectedLayoutColumns`.
-            for (column in SyncLayoutAction.undetectedLayoutColumns(visibleMdFiles)) {
-                args.addAll(listOf("--col", column))
-            }
-        }
-        if (focusedFile != null) {
-            args.addAll(listOf("--focus", focusedFile))
-        }
-        return args
-    }
 
     /**
      * Runs `agent-doc fix <path>` for the active markdown document.

@@ -808,7 +808,7 @@ mod tests {
         ))
         .unwrap();
         let cases = fixture["cases"].as_array().unwrap();
-        assert!(cases.len() >= 12, "the parity file lost cases");
+        assert!(cases.len() >= 18, "the parity file lost cases");
         for case in cases {
             let name = case["name"].as_str().unwrap();
             let evidence: agent_doc_editor_surface::SyncLayoutEvidence =
@@ -831,6 +831,8 @@ mod tests {
                 "columns",
                 "column_order",
                 "decision",
+                "layout_mode",
+                "candidate_roots",
             ] {
                 assert_eq!(output[field], expected[field], "{name}: {field}");
             }
@@ -881,6 +883,52 @@ mod tests {
         ]);
         assert_eq!(cross["project_root"], work.as_str());
         assert_eq!(cross["column_order"], "editor");
+        assert_eq!(cross["layout_mode"], "exact");
+        // GH #326 phase 3b: the tmux focus probe's candidates come from the
+        // same filesystem reads.
+        assert_eq!(
+            cross["candidate_roots"],
+            serde_json::json!([app, work, other])
+        );
+        std::fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    /// GH #326 phase 3b: Run Agent Doc's `--col` fallback passes the route's
+    /// own root as `chosen_root`; the channel normalizes against it instead of
+    /// the root that spans the visible layout.
+    #[test]
+    fn gh326_sync_layout_addresses_a_chosen_root_through_the_derivation_channel() {
+        let scratch =
+            std::env::temp_dir().join(format!("gh326-sync-chosen-{}", std::process::id()));
+        let app = scratch.join("work/src/app");
+        let other = scratch.join("work/src/other");
+        for root in [&app, &other] {
+            std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+            std::fs::create_dir_all(root.join("tasks")).unwrap();
+        }
+        let work = scratch.join("work").to_string_lossy().into_owned();
+        let app = app.to_string_lossy().into_owned();
+        let other = other.to_string_lossy().into_owned();
+        let request = serde_json::json!({
+            "derivation": "sync_layout",
+            "input": {
+                "base_path": work,
+                "fallback_root": app,
+                "chosen_root": app,
+                "focused": format!("{app}/tasks/a.md"),
+                "visible": [format!("{app}/tasks/a.md"), format!("{other}/tasks/c.md")],
+                "layout": {"columns": [{"files": ["src/app/tasks/a.md"]}, {"files": ["src/other/tasks/c.md"]}]},
+                "foreground": false
+            }
+        });
+        let output = derive_editor_from_json(&request.to_string()).unwrap()["output"].clone();
+        assert_eq!(output["project_root"], app.as_str());
+        assert_eq!(
+            output["columns"],
+            serde_json::json!([format!("{app}/tasks/a.md"), format!("{other}/tasks/c.md")])
+        );
+        assert_eq!(output["layout_mode"], "exact");
+        assert_eq!(output["decision"], "publish");
         std::fs::remove_dir_all(&scratch).unwrap();
     }
 

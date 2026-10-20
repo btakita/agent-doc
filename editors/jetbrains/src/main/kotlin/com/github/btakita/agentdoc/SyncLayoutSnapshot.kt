@@ -18,6 +18,11 @@ import javax.swing.SwingUtilities
  * and whether the exact-visible snapshot may be published (GH #154). The automatic surface asks the
  * same derivation for its root choice and path normalization. [frozen] answers only when no native
  * generation does; it composes the pre-#326 [SyncLayoutAction] rules and is never extended.
+ *
+ * Phase 3b moved the last two callers of those rules here. Run Agent Doc's `--col` fallback
+ * (`TerminalUtil.editorSnapshotRouteLayout`) passes the route's own root as [Evidence.chosenRoot]
+ * and reads [Result.columns], [Result.columnOrder], and [Result.layoutMode]. The
+ * `TmuxPaneFocusSync` poll reads [Result.candidateRoots].
  */
 internal object SyncLayoutSnapshot {
     private val LOG = Logger.getInstance(SyncLayoutSnapshot::class.java)
@@ -43,6 +48,12 @@ internal object SyncLayoutSnapshot {
         val visible: List<String>,
         val layout: LayoutEvidence?,
         val foreground: Boolean,
+        /**
+         * GH #326 phase 3b: the root the caller already chose (Run Agent Doc's route root). A
+         * library older than phase 3b ignores it, so [derive] takes the floor when the answer
+         * addresses another root.
+         */
+        @SerializedName("chosen_root") val chosenRoot: String? = null,
     )
 
     /** What the derivation answered. [decision] carries [columns] when it publishes. */
@@ -52,6 +63,10 @@ internal object SyncLayoutSnapshot {
         val columns: List<String>,
         val columnOrder: String,
         val decision: ExactVisibleSyncDecision,
+        /** What the columns assert to the controller (GH #111): `exact` or `ensure`. */
+        val layoutMode: String,
+        /** The controller roots that may own the tmux focus, most specific first. */
+        val candidateRoots: List<String>,
     )
 
     internal fun evidence(
@@ -61,6 +76,7 @@ internal object SyncLayoutSnapshot {
         visible: List<String>,
         editorLayout: EditorLayout?,
         foreground: Boolean = true,
+        chosenRoot: String? = null,
     ): Evidence =
         Evidence(
             basePath = basePath,
@@ -71,6 +87,7 @@ internal object SyncLayoutSnapshot {
                 LayoutEvidence(layout.columns.map { ColumnEvidence(it.files) }, layout.columnOrder)
             },
             foreground = foreground,
+            chosenRoot = chosenRoot,
         )
 
     /**
@@ -87,13 +104,37 @@ internal object SyncLayoutSnapshot {
                 LOG.warn("[sync] sync_layout asked on the EDT; using the compatibility floor")
                 null
             } else {
-                derivation.derive("sync_layout", GSON.toJson(evidence))?.let(::parseNative)
+                derivation.derive("sync_layout", GSON.toJson(evidence))
+                    ?.let { parseNative(it, evidence, nearestRoot) }
+                    ?.takeIf { answer -> honorsChosenRoot(evidence, answer) }
             }
         return native ?: frozen(evidence, nearestRoot)
     }
 
-    /** Parse the native `sync_layout` output; `null` takes the frozen floor. */
-    internal fun parseNative(json: String): Result? =
+    /**
+     * A library older than phase 3b ignores `chosen_root` and answers the root it chose itself;
+     * that answer is normalized against the wrong root, so the floor answers instead.
+     */
+    private fun honorsChosenRoot(evidence: Evidence, answer: Result): Boolean {
+        val chosen = evidence.chosenRoot?.takeIf { it.isNotBlank() } ?: return true
+        if (answer.projectRoot == chosen) return true
+        LOG.warn(
+            "[sync] native sync_layout ignored chosen_root=$chosen (answered ${answer.projectRoot}); " +
+                "using the compatibility floor",
+        )
+        return false
+    }
+
+    /**
+     * Parse the native `sync_layout` output; `null` takes the frozen floor. An answer from a library
+     * older than phase 3b has no `layout_mode` or `candidate_roots`; the floor's rules fill them from
+     * [evidence].
+     */
+    internal fun parseNative(
+        json: String,
+        evidence: Evidence? = null,
+        nearestRoot: (String) -> String? = TerminalUtil::nearestAgentDocProjectRoot,
+    ): Result? =
         try {
             val root = JsonParser.parseString(json).asJsonObject
             val columns = root.getAsJsonArray("columns").map { it.asString }
@@ -105,12 +146,22 @@ internal object SyncLayoutSnapshot {
                     else -> null
                 }
             decision?.let {
+                val projectRoot = root.get("project_root").asString
+                val editorLayout =
+                    root.get("layout")?.takeIf { it.isJsonObject }?.asJsonObject?.let(::parseLayout)
                 Result(
-                    projectRoot = root.get("project_root").asString,
-                    editorLayout = root.get("layout")?.takeIf { it.isJsonObject }?.asJsonObject?.let(::parseLayout),
+                    projectRoot = projectRoot,
+                    editorLayout = editorLayout,
                     columns = columns,
                     columnOrder = root.get("column_order")?.takeIf { !it.isJsonNull }?.asString ?: "unknown",
                     decision = it,
+                    layoutMode =
+                        root.get("layout_mode")?.takeIf { !it.isJsonNull }?.asString
+                            ?: TerminalUtil.routeLayoutMode(editorLayout),
+                    candidateRoots =
+                        root.get("candidate_roots")?.takeIf { it.isJsonArray }?.asJsonArray?.map { it.asString }
+                            ?: evidence?.let { frozenCandidateRoots(it, projectRoot, nearestRoot) }
+                            ?: emptyList(),
                 )
             } ?: run {
                 LOG.warn("[sync] native sync_layout decision unreadable: ${root.get("decision")}")
@@ -141,8 +192,11 @@ internal object SyncLayoutSnapshot {
         nearestRoot: (String) -> String? = TerminalUtil::nearestAgentDocProjectRoot,
     ): Result {
         val fallbackRoot = evidence.fallbackRoot?.takeIf { it.isNotBlank() } ?: evidence.basePath ?: ""
+        // Phase 3b: a chosen root is the pre-#326 Run Agent Doc fallback, which normalized against
+        // the route's own root.
         val projectRoot =
-            SyncLayoutAction.chooseSyncProjectRoot(evidence.basePath, fallbackRoot, evidence.visible, nearestRoot)
+            evidence.chosenRoot?.takeIf { it.isNotBlank() }
+                ?: SyncLayoutAction.chooseSyncProjectRoot(evidence.basePath, fallbackRoot, evidence.visible, nearestRoot)
         val editorLayout =
             SyncLayoutAction.absolutizeEditorLayout(
                 projectRoot,
@@ -166,6 +220,36 @@ internal object SyncLayoutSnapshot {
                     evidence.focused?.takeIf { it.isNotEmpty() },
                     evidence.foreground,
                 ),
+            layoutMode = TerminalUtil.routeLayoutMode(editorLayout),
+            candidateRoots = frozenCandidateRoots(evidence, projectRoot, nearestRoot),
         )
+    }
+
+    /**
+     * The pre-#326 `TmuxPaneFocusSync.candidateProjectRoots` rule, frozen: the focused document's
+     * own root, the root spanning the visible documents (only with a focused root), each visible
+     * document's own root (`TerminalUtil.resolveProjectPath`: its nearest `.agent-doc` root, else
+     * the base path, else its directory), then the base path. Never extend it.
+     */
+    private fun frozenCandidateRoots(
+        evidence: Evidence,
+        projectRoot: String,
+        nearestRoot: (String) -> String?,
+    ): List<String> {
+        val roots = linkedSetOf<String>()
+        val focusedRoot = evidence.fallbackRoot?.takeIf { it.isNotBlank() }
+        focusedRoot?.let { roots.add(it) }
+        if (evidence.visible.isNotEmpty() && focusedRoot != null) roots.add(projectRoot)
+        for (file in evidence.visible) {
+            val normalized = java.io.File(file).toPath().toAbsolutePath().normalize()
+            roots.add(
+                nearestRoot(file)
+                    ?: evidence.basePath?.let { java.io.File(it).toPath().toAbsolutePath().normalize().toString() }
+                    ?: normalized.parent?.toString()
+                    ?: "/",
+            )
+        }
+        evidence.basePath?.let { roots.add(it) }
+        return roots.filter { it.isNotBlank() }
     }
 }

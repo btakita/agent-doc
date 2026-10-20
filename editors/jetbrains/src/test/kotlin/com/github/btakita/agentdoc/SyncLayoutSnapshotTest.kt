@@ -63,6 +63,8 @@ class SyncLayoutSnapshotTest {
                     ExactVisibleSyncDecision.RefuseStaleFocusProjection -> "refuse_stale_focus_projection"
                 },
             )
+            addProperty("layout_mode", result.layoutMode)
+            add("candidate_roots", gson.toJsonTree(result.candidateRoots))
         }
 
     @Test
@@ -70,7 +72,7 @@ class SyncLayoutSnapshotTest {
         // The same file pins the native derivation in Rust
         // (gh326_sync_layout_answers_the_shared_parity_cases).
         val cases = parityCases()
-        assertTrue("the parity file lost cases", cases.size >= 12)
+        assertTrue("the parity file lost cases", cases.size >= 18)
         for (case in cases) {
             val name = case.get("name").asString
             // The frozen floor runs off the EDT exactly like the sync's background thread.
@@ -111,6 +113,99 @@ class SyncLayoutSnapshotTest {
         assertEquals(expected.get("columns"), gson.toJsonTree(result.columns))
         assertTrue(result.decision is ExactVisibleSyncDecision.Publish)
         assertEquals(expected.get("column_order").asString, result.columnOrder)
+    }
+
+    @Test
+    fun `GH 326 phase 3b a native answer that ignores the chosen root takes the frozen floor`() {
+        // A library older than phase 3b drops `chosen_root` and answers the root it chose itself.
+        val case = parityCases().first { it.get("name").asString.startsWith("a chosen route root normalizes") }
+        val stale = case.getAsJsonObject("expected").deepCopy().apply { addProperty("project_root", "/repo") }
+        var sent: JsonObject? = null
+        val result =
+            CompletableFuture.supplyAsync {
+                SyncLayoutSnapshot.derive(
+                    evidenceOf(case),
+                    { _, input -> sent = JsonParser.parseString(input).asJsonObject; stale.toString() },
+                    nearestRoots(case),
+                )
+            }.join()
+        assertEquals("/repo/src/one", sent?.get("chosen_root")?.asString)
+        assertEquals(case.getAsJsonObject("expected"), wire(result))
+    }
+
+    @Test
+    fun `GH 326 phase 3b fields missing from an older native answer come from the floor rules`() {
+        val case = parityCases().first { it.get("name").asString.startsWith("a single-root split") }
+        val expected = case.getAsJsonObject("expected")
+        val phase3 = expected.deepCopy().apply {
+            remove("layout_mode")
+            remove("candidate_roots")
+        }
+        val result =
+            CompletableFuture.supplyAsync {
+                SyncLayoutSnapshot.derive(evidenceOf(case), { _, _ -> phase3.toString() }, nearestRoots(case))
+            }.join()
+        assertEquals(expected, wire(result))
+        // An evidence-free parse still answers.
+        val bare = SyncLayoutSnapshot.parseNative(phase3.toString())!!
+        assertEquals(TerminalUtil.ROUTE_LAYOUT_MODE_EXACT, bare.layoutMode)
+    }
+
+    @Test
+    fun `GH 326 phase 3b the route snapshot maps the derivation without a column rule`() {
+        val publish =
+            SyncLayoutSnapshot.parseNative(
+                """{"project_root":"/r","layout":{"columns":[{"files":[]},{"files":["/r/a.md"]}]},""" +
+                    """"columns":["","/r/a.md"],"column_order":"retained","decision":"publish",""" +
+                    """"layout_mode":"later_mode","candidate_roots":["/r"]}""",
+            )!!
+        val route = TerminalUtil.RouteLayoutRequest.fromSyncLayout(publish, "/r/a.md")
+        assertEquals(listOf("--col", "", "--col", "/r/a.md", "--focus", "/r/a.md"), route.layoutArgs)
+        assertEquals("retained", route.columnOrder)
+        // A mode a newer library adds passes through.
+        assertEquals("later_mode", route.layoutMode)
+        val nothingVisible =
+            SyncLayoutSnapshot.parseNative(
+                """{"project_root":"/r","columns":[""],"column_order":"unknown","decision":"refuse_unknown_layout"}""",
+            )!!
+        assertEquals(emptyList<String>(), TerminalUtil.RouteLayoutRequest.fromSyncLayout(nothingVisible, null).layoutArgs)
+        assertEquals(TerminalUtil.ROUTE_LAYOUT_MODE_ENSURE, nothingVisible.layoutMode)
+    }
+
+    @Test
+    fun `GH 326 phase 3b Run Agent Doc and the tmux focus probe ask sync_layout off the EDT`() {
+        fun read(name: String): String =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/$name")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/$name"),
+            )
+        val route = read("TerminalUtil.kt").substringAfter("private fun editorSnapshotRouteLayout(")
+            .substringBefore("internal fun routeLayoutMode(")
+        val edt = route.substringAfter("val read = Runnable {").substringBefore("invokeAndWait(read)")
+        assertTrue(edt.contains("LayoutDetector.captureEditorLayoutEvidence("))
+        for (rule in listOf(
+            "LayoutDetector.detectEditorLayout(",
+            "SyncLayoutSnapshot.derive(",
+            "normalizeEditorLayout(",
+            "absolutizeEditorLayout(",
+        )) {
+            assertFalse("GH #326 phase 3b: the route's EDT read must not run $rule", edt.contains(rule))
+        }
+        val derived = route.substringAfter("invokeAndWait(read)")
+        assertTrue(derived.contains("SyncLayoutSnapshot.derive("))
+        assertTrue(derived.contains("chosenRoot = cwd"))
+        for (rule in listOf("normalizeEditorLayout(", "absolutizeEditorLayout(", "undetectedLayoutColumns(")) {
+            assertFalse("GH #326 phase 3b: the route fallback must not run the frozen $rule", route.contains(rule))
+        }
+
+        val probe = read("TmuxPaneFocusSync.kt").substringAfter("private fun candidateProjectRoots(")
+            .substringBefore("private fun focusedDocumentPath(")
+        assertTrue(probe.contains("SyncLayoutSnapshot.derive("))
+        assertTrue(probe.contains(".candidateRoots"))
+        for (rule in listOf("chooseSyncProjectRoot(", "resolveProjectPath(")) {
+            assertFalse("GH #326 phase 3b: the tmux focus probe must not run $rule", probe.contains(rule))
+        }
     }
 
     @Test

@@ -11,6 +11,20 @@ import org.junit.Test
 
 class TerminalUtilTest {
 
+    /** GH #326 phase 3b: Run Agent Doc's `--col` fallback for [root], answered by the frozen floor. */
+    private fun routeSnapshot(
+        root: String,
+        visible: List<String>,
+        layout: EditorLayout?,
+        focused: String?,
+    ): TerminalUtil.RouteLayoutRequest =
+        TerminalUtil.RouteLayoutRequest.fromSyncLayout(
+            SyncLayoutSnapshot.frozen(
+                SyncLayoutSnapshot.evidence(root, root, focused, visible, layout, foreground = false, chosenRoot = root),
+            ) { null },
+            focused,
+        )
+
     @Test
     fun `project path resolution is local and finds the nearest agent-doc root`() {
         val workspace = Files.createTempDirectory("agent-doc-jb-root")
@@ -246,7 +260,9 @@ class TerminalUtilTest {
             "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
         ).toFile().readText()
 
-        assertTrue(source.contains("layoutMode = routeLayoutMode(editorLayout)"))
+        // GH #326 phase 3b: the mode is the `sync_layout` derivation's `layout_mode`.
+        assertTrue(source.contains("layoutMode = snapshot.layoutMode"))
+        assertTrue(source.contains("layoutMode = routeLayout.layoutMode"))
     }
 
     @Test
@@ -327,19 +343,20 @@ class TerminalUtilTest {
 
     @Test
     fun `route layout args preserve cross root split as absolute paths`() {
-        val args = TerminalUtil.buildRouteLayoutArgs(
-            visibleMdFiles = listOf(
+        val args = routeSnapshot(
+            root = "/repo/src/sample-app",
+            visible = listOf(
                 "/repo/tasks/agent-doc/agent-doc-bugs2.md",
                 "/repo/src/sample-app/tasks/sampleorders.md",
             ),
-            editorLayout = EditorLayout(
+            layout = EditorLayout(
                 listOf(
                     LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
                     LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
                 )
             ),
-            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-        )
+            focused = "/repo/src/sample-app/tasks/sampleorders.md",
+        ).layoutArgs
 
         assertEquals(
             listOf(
@@ -356,16 +373,17 @@ class TerminalUtilTest {
 
     @Test
     fun `route layout args preserve empty split columns for mixed layouts`() {
-        val args = TerminalUtil.buildRouteLayoutArgs(
-            visibleMdFiles = listOf("/repo/src/sample-app/tasks/sampleorders.md"),
-            editorLayout = EditorLayout(
+        val args = routeSnapshot(
+            root = "/repo/src/sample-app",
+            visible = listOf("/repo/src/sample-app/tasks/sampleorders.md"),
+            layout = EditorLayout(
                 listOf(
                     LayoutColumn(emptyList()),
                     LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
                 )
             ),
-            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-        )
+            focused = "/repo/src/sample-app/tasks/sampleorders.md",
+        ).layoutArgs
 
         assertEquals(
             listOf(

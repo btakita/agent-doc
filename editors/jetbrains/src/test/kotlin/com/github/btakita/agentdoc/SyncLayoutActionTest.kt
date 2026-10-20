@@ -9,6 +9,20 @@ import java.io.File
 
 class SyncLayoutActionTest {
 
+    /** GH #326 phase 3b: Run Agent Doc's `--col` fallback for [root], answered by the frozen floor. */
+    private fun routeSnapshot(
+        root: String,
+        visible: List<String>,
+        layout: EditorLayout?,
+        focused: String?,
+    ): TerminalUtil.RouteLayoutRequest =
+        TerminalUtil.RouteLayoutRequest.fromSyncLayout(
+            SyncLayoutSnapshot.frozen(
+                SyncLayoutSnapshot.evidence(root, root, focused, visible, layout, foreground = false, chosenRoot = root),
+            ) { null },
+            focused,
+        )
+
     @Test
     fun `automatic sync commands opt out of autostart`() {
         val cmd = SyncLayoutAction.buildSyncCommand(
@@ -592,17 +606,13 @@ class SyncLayoutActionTest {
                 "--col", "/repo/tasks/agent-doc/agent-doc.md",
                 "--focus", "/repo/tasks/pmt2/mr/1109.md",
             ),
-            TerminalUtil.buildRouteLayoutArgs(
-                visibleMdFiles = visible + visible.first(),
-                editorLayout = null,
-                focusedFile = "/repo/tasks/pmt2/mr/1109.md",
-            ),
+            routeSnapshot("/repo", visible + visible.first(), null, "/repo/tasks/pmt2/mr/1109.md").layoutArgs,
         )
         // Nothing visible keeps the old shapes: an empty sync column, no route columns.
         assertEquals(listOf(""), SyncLayoutAction.buildSyncColumns(emptyList(), null))
         assertEquals(
             emptyList<String>(),
-            TerminalUtil.buildRouteLayoutArgs(emptyList(), null, null),
+            routeSnapshot("/repo", emptyList(), null, null).layoutArgs,
         )
     }
 
@@ -701,7 +711,9 @@ class SyncLayoutActionTest {
         val route = java.nio.file.Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt",
         ).toFile().readText()
-        assertTrue(route.contains("columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout)"))
+        // GH #326 phase 3b: Run Agent Doc's `--col` fallback carries the derivation's label too.
+        assertTrue(route.contains("columnOrder = snapshot.columnOrder"))
+        assertFalse(route.contains("SyncLayoutAction.syncColumnOrder("))
     }
 
     @Test

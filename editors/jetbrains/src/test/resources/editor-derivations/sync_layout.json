@@ -1,6 +1,6 @@
 {
   "derivation": "sync_layout",
-  "about": "GH #326 phase 3 parity cases. The Rust `sync_layout` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (SyncLayoutSnapshotTest) both answer every case. `nearest_roots` maps a visible document to its nearest `.agent-doc` project root (absent: none); it stands in for the filesystem. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "about": "GH #326 phase 3 parity cases, extended in phase 3b (`chosen_root` input; `layout_mode` and `candidate_roots` outputs). The Rust `sync_layout` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (SyncLayoutSnapshotTest) both answer every case. `nearest_roots` maps a visible document to its nearest `.agent-doc` project root (absent: none); it stands in for the filesystem. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
   "cases": [
     {
       "name": "a single-root split stays scoped to that root and publishes absolute columns",
@@ -54,7 +54,12 @@
           "/repo/src/app/tasks/b.md"
         ],
         "column_order": "editor",
-        "decision": "publish"
+        "decision": "publish",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo/src/app",
+          "/repo"
+        ]
       }
     },
     {
@@ -109,7 +114,12 @@
           "/repo/src/app/tasks/y.md"
         ],
         "column_order": "editor",
-        "decision": "publish"
+        "decision": "publish",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo/src/app",
+          "/repo"
+        ]
       }
     },
     {
@@ -162,7 +172,12 @@
           "/repo/src/app/tasks/orders.md"
         ],
         "column_order": "retained",
-        "decision": "publish"
+        "decision": "publish",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo/src/app",
+          "/repo"
+        ]
       }
     },
     {
@@ -211,7 +226,12 @@
           "/repo/src/app/tasks/orders.md"
         ],
         "column_order": "editor",
-        "decision": "publish"
+        "decision": "publish",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo/src/app",
+          "/repo"
+        ]
       }
     },
     {
@@ -238,7 +258,11 @@
           "/repo/tasks/b.md"
         ],
         "column_order": "unknown",
-        "decision": "refuse_unknown_layout"
+        "decision": "refuse_unknown_layout",
+        "layout_mode": "ensure",
+        "candidate_roots": [
+          "/repo"
+        ]
       }
     },
     {
@@ -280,7 +304,11 @@
           "/repo/tasks/a.md"
         ],
         "column_order": "unknown",
-        "decision": "publish"
+        "decision": "publish",
+        "layout_mode": "ensure",
+        "candidate_roots": [
+          "/repo"
+        ]
       }
     },
     {
@@ -333,7 +361,11 @@
           "/repo/tasks/b.md"
         ],
         "column_order": "editor",
-        "decision": "refuse_stale_focus_projection"
+        "decision": "refuse_stale_focus_projection",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo"
+        ]
       }
     },
     {
@@ -387,7 +419,11 @@
           "/repo/tasks/b.md"
         ],
         "column_order": "editor",
-        "decision": "publish"
+        "decision": "publish",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo"
+        ]
       }
     },
     {
@@ -410,7 +446,12 @@
           "/other/b.md"
         ],
         "column_order": "unknown",
-        "decision": "refuse_unknown_layout"
+        "decision": "refuse_unknown_layout",
+        "layout_mode": "ensure",
+        "candidate_roots": [
+          "/repo/src/app",
+          "/repo"
+        ]
       }
     },
     {
@@ -448,7 +489,11 @@
           "/repo/a.md"
         ],
         "column_order": "unknown",
-        "decision": "refuse_unknown_layout"
+        "decision": "refuse_unknown_layout",
+        "layout_mode": "ensure",
+        "candidate_roots": [
+          "/repo"
+        ]
       }
     },
     {
@@ -462,7 +507,9 @@
           ""
         ],
         "column_order": "unknown",
-        "decision": "refuse_unknown_layout"
+        "decision": "refuse_unknown_layout",
+        "layout_mode": "ensure",
+        "candidate_roots": []
       }
     },
     {
@@ -512,7 +559,270 @@
           "/repo/b.md"
         ],
         "column_order": "editor",
-        "decision": "publish"
+        "decision": "publish",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo"
+        ]
+      }
+    },
+    {
+      "name": "a chosen route root normalizes a cross-root split against that root",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/one",
+        "chosen_root": "/repo/src/one",
+        "focused": "/repo/src/one/a.md",
+        "visible": [
+          "/repo/src/one/a.md",
+          "/repo/src/two/b.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "src/one/a.md"
+              ]
+            },
+            {
+              "files": [
+                "src/two/b.md"
+              ]
+            }
+          ],
+          "column_order": "retained"
+        },
+        "foreground": false
+      },
+      "nearest_roots": {
+        "/repo/src/one/a.md": "/repo/src/one",
+        "/repo/src/two/b.md": "/repo/src/two"
+      },
+      "expected": {
+        "project_root": "/repo/src/one",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/src/one/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/src/two/b.md"
+              ]
+            }
+          ],
+          "column_order": "retained"
+        },
+        "columns": [
+          "/repo/src/one/a.md",
+          "/repo/src/two/b.md"
+        ],
+        "column_order": "retained",
+        "decision": "publish",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo/src/one",
+          "/repo/src/two",
+          "/repo"
+        ]
+      }
+    },
+    {
+      "name": "a chosen route root with a single window ensures the visible documents",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/app",
+        "chosen_root": "/repo/src/app",
+        "focused": "/repo/src/app/tasks/a.md",
+        "visible": [
+          "/repo/src/app/tasks/a.md",
+          "/repo/src/app/tasks/b.md",
+          "/repo/src/app/tasks/a.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "src/app/tasks/a.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "foreground": false
+      },
+      "nearest_roots": {
+        "/repo/src/app/tasks/a.md": "/repo/src/app",
+        "/repo/src/app/tasks/b.md": "/repo/src/app"
+      },
+      "expected": {
+        "project_root": "/repo/src/app",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/src/app/tasks/a.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "/repo/src/app/tasks/a.md",
+          "/repo/src/app/tasks/b.md"
+        ],
+        "column_order": "unknown",
+        "decision": "publish",
+        "layout_mode": "ensure",
+        "candidate_roots": [
+          "/repo/src/app",
+          "/repo"
+        ]
+      }
+    },
+    {
+      "name": "a chosen route root keeps an unreadable split's visible documents",
+      "input": {
+        "base_path": "/repo",
+        "chosen_root": "/repo",
+        "focused": "/repo/a.md",
+        "visible": [
+          "/repo/a.md"
+        ],
+        "foreground": false
+      },
+      "expected": {
+        "project_root": "/repo",
+        "layout": null,
+        "columns": [
+          "/repo/a.md"
+        ],
+        "column_order": "unknown",
+        "decision": "refuse_unknown_layout",
+        "layout_mode": "ensure",
+        "candidate_roots": [
+          "/repo"
+        ]
+      }
+    },
+    {
+      "name": "a blank chosen root lets the derivation choose the spanning root",
+      "input": {
+        "base_path": "/repo",
+        "fallback_root": "/repo/src/one",
+        "chosen_root": "  ",
+        "focused": "/repo/src/one/a.md",
+        "visible": [
+          "/repo/src/one/a.md",
+          "/repo/src/two/b.md"
+        ],
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "src/one/a.md"
+              ]
+            },
+            {
+              "files": [
+                "src/two/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        }
+      },
+      "nearest_roots": {
+        "/repo/src/one/a.md": "/repo/src/one",
+        "/repo/src/two/b.md": "/repo/src/two"
+      },
+      "expected": {
+        "project_root": "/repo",
+        "layout": {
+          "columns": [
+            {
+              "files": [
+                "/repo/src/one/a.md"
+              ]
+            },
+            {
+              "files": [
+                "/repo/src/two/b.md"
+              ]
+            }
+          ],
+          "column_order": "editor"
+        },
+        "columns": [
+          "/repo/src/one/a.md",
+          "/repo/src/two/b.md"
+        ],
+        "column_order": "editor",
+        "decision": "publish",
+        "layout_mode": "exact",
+        "candidate_roots": [
+          "/repo/src/one",
+          "/repo",
+          "/repo/src/two"
+        ]
+      }
+    },
+    {
+      "name": "the focus probe without a focused root asks each document's root then the base path",
+      "input": {
+        "base_path": "/repo",
+        "visible": [
+          "/repo/src/two/b.md",
+          "/repo/notes/c.md"
+        ],
+        "foreground": false
+      },
+      "nearest_roots": {
+        "/repo/src/two/b.md": "/repo/src/two"
+      },
+      "expected": {
+        "project_root": "/repo/src/two",
+        "layout": null,
+        "columns": [
+          "/repo/src/two/b.md",
+          "/repo/notes/c.md"
+        ],
+        "column_order": "unknown",
+        "decision": "refuse_unknown_layout",
+        "layout_mode": "ensure",
+        "candidate_roots": [
+          "/repo/src/two",
+          "/repo"
+        ]
+      }
+    },
+    {
+      "name": "the focus probe without a base path asks a rootless document's own directory",
+      "input": {
+        "fallback_root": "/elsewhere/notes",
+        "focused": "/elsewhere/notes/x.md",
+        "visible": [
+          "/elsewhere/notes/x.md",
+          "/scratch/z.md"
+        ],
+        "foreground": false
+      },
+      "expected": {
+        "project_root": "/elsewhere/notes",
+        "layout": null,
+        "columns": [
+          "/elsewhere/notes/x.md",
+          "/scratch/z.md"
+        ],
+        "column_order": "unknown",
+        "decision": "refuse_unknown_layout",
+        "layout_mode": "ensure",
+        "candidate_roots": [
+          "/elsewhere/notes",
+          "/scratch"
+        ]
       }
     }
   ]

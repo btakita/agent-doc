@@ -139,7 +139,14 @@ I dispatched this to a background subagent on branch `fix/sessioncrashnorestart`
 - Fix the root cause with deterministic regression tests and spec updates. A crashed child must restart or surface a clear operator-visible state, never silently vanish. If the root cause is outside agent-doc (e.g. the OOM killer), report that with evidence and still fix the missing restart or signal.
 
 **Related:** the `agent:status` nesting I caused last turn already has a fix on origin/main: `2d5944fb0e` "fix(status): parse status:sync as an AST node so writes never nest it". The nested status text may still need a one-time cleanup.
-<!-- agent:boundary:58e25cd8 -->
+> **Chat prompt (#chatprompt):** can I clear this session keeping the subagent going?
+
+### Re: clearing while the subagent runs — opus-5.5 · 2026-10-20T11:30-04:00
+
+**Yes, it's safe now.** `/clear` does not stop the background subagent: it keeps working in its own worktree and pushes `fix/sessioncrashnorestart` when done. What a clear loses is the report back, which would land in a fresh context with no memory of the dispatch. To cover that, I added backlog item `sessioncrashnorestart` to the queue. It names the branch, the worktree and the integration steps, so whichever coordinator picks it up merges the fix with the next batch.
+
+To lose nothing at all, wait until the pane footer's `← N agents` count drops. Otherwise, clear whenever you like.
+<!-- agent:boundary:2785f7ec -->
 <!-- /agent:exchange -->
 
 <!--
@@ -151,6 +158,7 @@ I dispatched this to a background subagent on branch `fix/sessioncrashnorestart`
 - 📥 Move Run Agent Doc and Sync Tmux Layout off the --col CLI shell-out onto the Lazily surface path (specs/13-state-backbone.md "State Propagation, Not Effect Inference").
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/321
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/322
+- do [#sessioncrashnorestart]
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -170,6 +178,7 @@ I dispatched this to a background subagent on branch `fix/sessioncrashnorestart`
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#sessioncrashnorestart] [agent-doc] Integrate the crashed-session-no-restart fix: a background subagent (dispatched 2026-10-20 ~15:27Z from pane %2) is diagnosing why the agent-doc-bugs.md Claude session (agent-doc session 3f069c68, Claude resume ba846c4c) crashed some time between ~14:16Z and ~15:25Z and the supervisor did not restart it. It pushes branch fix/sessioncrashnorestart (worktree ~/worktrees/agent-doc-sessioncrash-20261020, based on origin/main 2d5944fb0e). When that branch has a commit: review the diagnosis in the commit and spec changes, merge it with the next batch, run make check plus make install, and close this item. If the branch has no commit and the worktree is idle, re-dispatch the investigation.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 

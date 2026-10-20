@@ -2,6 +2,57 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.530
+
+- **A re-run of a focused extract never strips the source when the target lost what it moved (GH #324).** When the
+  target already carries the operation marker, the source copy of each selected piece is removed only if the target
+  still holds it. Turns are matched by node id, tracked items by id in the same component or `done`, and other pieces
+  by their moved bytes. Otherwise `prepare` refuses with `FocusedExtractTargetLostNodes`, changes neither document, and
+  logs `focused_extract_target_lost_nodes`. Every apply first writes a recovery copy to
+  `.agent-doc/archives/extract/<operation>.md`. A re-run against an already-stripped source checks the target against
+  that recovery copy before it reports `already_applied`.
+- **`agent:done archive=` resolves through the shared archive resolver (GH #325).** Preflight's done readers and
+  `queue recover-lost` read the bare `archive` default, the `document:`/`project:` anchors and sibling `<stem>.done.md`
+  files, the way the writer does. An invalid archive target fails closed. A leftover archive misplaced by
+  0.35.521–0.35.523 gets a one-time `legacy_done_archive_advisory` and is never read as history.
+- **JetBrains layout rules hot-reload without an IDE restart (GH #326, phases 1–2).** A single FFI entry point,
+  `agent_doc_editor_derive_json`, answers named derivations: `window_layout`, `client_measured_layout`,
+  `surface_projection` and `capabilities`. The plugin only captures raw editor state and resolves the derivations on
+  its delivery worker, never on the EDT. Derivations are additive-only, and a frozen Kotlin fallback answers when no
+  native library does. Shared fixtures are checked by both the Rust and Kotlin tests. Path normalization and the manual
+  `--col` sync decisions move in later phases.
+- **`loop` queues get their item back after every pass (GH #327).** The scheduler restores every loop item a drain path
+  consumed, including rows that were claimed and then deleted. A `loop` queue keeps its struck rows through the
+  closeout consume, preflight's drained-queue clear and the finalize auto-strike. The preflight residue strike and the
+  continuation answered-head skip share one loop-pass scope. A loop head is struck only by an echo written in the
+  current pass about that queue's own head, and never when no pass is open.
+- **A live supervisor is drain-ready whatever its heartbeat age.** A supervisor on the current binary whose
+  `agent-doc start` argv names the document now counts as ready. Before, any Codex turn longer than 60 s read as
+  `supervisor_heartbeat_stale`, so the Stop hook kept the queue in-pane under Codex's `Blocked by hook` label instead
+  of letting the supervisor restart Codex fresh (`#bgclearpolicy`).
+- **Queue auto-clear never skips the `/clear` after an early commit (`#autoclearbaseline`).** The supervisor records
+  its auto-clear baseline before it spawns or adopts the harness. A supervisor re-exec that keeps its harness carries
+  the pending baseline to the new image. An item committed before the watch's first look, or just before a re-exec,
+  still gets its clear.
+- **A crash auto-restart of Claude resumes the post-`/clear` conversation (`#claudecrashresumeafterclear`).** The
+  SessionStart capture is recorded with the exact child it came from (pid plus start time) and the supervisor
+  generation. A respawn adopts it only for the child that just exited, under a supervisor that still holds the lease.
+- **`agent-doc <FILE>` refuses to resume a session that is live in the harness it runs inside
+  (`#runchildresumesowner`).** `run` and `stream` refuse when the document's resume id is the calling harness's own
+  session id. They check before any diff, commit or cycle step, and again before launching the child. The
+  unanswered-edit refusal no longer tells a harness coordinator to use the run path. A commit retry now recognizes a
+  cycle's own late status and strikes that land together.
+- **Closeout seals after the cycle's own late projections.** While a cycle is open, a "projection not landed yet"
+  refusal makes the CLI wait on delivery and retry the controller instead of committing locally. The controller
+  refuses until the cycle's free-text strike is confirmed applied, and `respond` applies its held-back `--status`
+  before the commit.
+- **GH #317 regression coverage.** A live tmux test drives a Run Agent Doc trigger that never becomes a turn, then a
+  Clear. The clear must withdraw the trigger and fire exactly once.
+- **Test determinism:**
+  - In-process test actors get the 30 s hang ceiling on both actor routes, so the 250 ms editor-op read no longer times
+    out a live actor under load.
+  - The queue-claim clock can be pinned in debug builds, so the 10 s dispatch-ack grace never depends on run speed.
+
 ## 0.35.529
 
 - **A `/clear` in a Claude Code session moves the document's `resume.claude` to the new conversation

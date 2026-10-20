@@ -16,6 +16,7 @@ presets:
 dogfood:
   path: tasks/agent-doc/agent-doc-bugs.md
   auto: true
+queue: go
 ---
 
 ## Status
@@ -309,6 +310,19 @@ The new focused command `agent-doc status set FILE --text "<current result>"` sa
 The current `agent:status` is up to date. The latest published release remains v0.35.525; this checkpoint implementation is post-release on `main`, so no newer release was published.
 
 Verification passed: the authoritative combined `make check` ran 11,116 Rust tests with zero failures, 202 VS Code tests, cross-editor simulation, JetBrains classic/262/263 builds, Python/bootstrap checks, documentation audit, and the unchanged cached TLA proof. `make install` completed; the CLI help exposes `agent-doc status set`, and repository state is clean.
+
+### Re: recovered response
+
+Yes. agent-doc already installs a `PostToolUse` hook for Codex and Claude Code, which runs after each tool call during an active turn.
+
+The proposed behavior is:
+
+- No `interval` attribute: preflight sync only; no recurring hook reminders.
+- `interval="30m"`: PostToolUse checks elapsed time and injects a sync reminder when overdue.
+- Normal tool calls before the interval remain silent and token-free.
+- An overdue reminder appears at the next tool boundary.
+
+A hook cannot interrupt one continuously running eight-hour tool call; that would require timer-callback support from the harness. But during a normal long turn containing many tool calls, it can refresh status throughout the turn rather than waiting for closeout.
 <!-- agent:boundary:80584e35 -->
 <!-- /agent:exchange -->
 
@@ -316,10 +330,9 @@ Verification passed: the authoritative combined `make check` ran 11,116 Rust tes
 -->
 
 ## Queue: Main
-<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
-- ~~If an issue was added, also add `- release + publish`~~
-- ~~Should `agent-doc-subagent-completion` tags be replaced with the response? sdk-demo.md has some lingering `agent-doc-subagent-completion` tags.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~subagent operator request should have its own id: instead of [agent-doc]. Remove ` (#waypostrequest)`. Make the Editor Plugin syntax highlighting color code the id tag the same as in todo + backlog + queue + icebox + review.~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/316
+- 🚧 Should we have a `interval=...` attribute on the `agent:status` to preserve tokens?
 <!-- /agent:queue -->
 
 ## Queue: Issues

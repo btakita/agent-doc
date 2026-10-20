@@ -81,7 +81,11 @@ marker but lost any of them, apply refuses with no documents changed, names
 the missing `component:id` values, and logs
 `focused_extract_target_lost_nodes` (GH #324). Every apply that removes source
 content first writes a recovery copy of the removed bytes to
-`.agent-doc/archives/extract/<operation>.md`. Relative
+`.agent-doc/archives/extract/<operation>.md`. A re-run after the source was
+already stripped reports `already_applied` only when the destination still
+holds every node recorded in those recovery copies for the selection;
+otherwise it refuses the same way, naming the earlier operation and the
+recovery copy to restore from. Relative
 linked-resource paths are rebased when the destination directory differs.
 Extraction does not auto-claim or start the destination: the source normally
 already owns the invoking pane, so rebinding that pane would orphan the source

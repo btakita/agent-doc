@@ -21,7 +21,10 @@ without making an agent manually copy managed document regions.
   second target append, but only after proving the marked target still holds
   every selected node; marked target that lost a selected node -> refuse with
   no documents changed (see "Marked-target holding check"); already applied ->
-  no-op; either document attached to a
+  no-op, but only after the target is verified against the earlier
+  operation's recovery copy (see "Stripped-source re-run check"); stripped
+  source whose target lost a recorded node -> refuse with no documents
+  changed; either document attached to a
   live editor without coordination -> emit the deterministic preview, then
   refuse before mutation with the exact attached path(s) and explicit
   confirmation that the target was not created (or was left unchanged); live
@@ -95,6 +98,27 @@ without making an agent manually copy managed document regions.
   subdirectory keeps these copies out of the compact-archive index, which reads
   only the top level of `.agent-doc/archives`. An archived-context copy removes
   nothing from the source and adds nothing to the recovery copy.
+- **Stripped-source re-run check (GH #324 follow-up):** once an apply has
+  stripped the source, a re-run hashes different source bytes, derives a new
+  operation ID, finds no marker for it in the target, and moves nothing.
+  Selector coverage alone (each selected ID mentioned in some target list or
+  exchange turn) cannot answer "already applied": a surviving `[#id]` list
+  item would vouch for lost exchange turns that share the ID. Before reporting
+  `already_applied`, the planner therefore collects every earlier operation ID
+  of this source/target pair — from the source's
+  `agent-doc-extract-destination` pointers (which survive the strip) and the
+  target's `agent-doc-extract` markers — and loads each one's recovery copy
+  from `.agent-doc/archives/extract/<operation>.md`. Every recorded section the
+  current selectors select (a recorded item ID or node ID is selected, or the
+  removed bytes mention a selected ID) must still be held by the target under
+  the marked-target holding rules, using the section's recorded node IDs and
+  item IDs. The first operation, in recorded order, with a missing node fails
+  the plan with the same typed `FocusedExtractTargetLostNodes` refusal naming
+  that earlier operation, each missing `component:id`, and the recovery copy to
+  restore from; the ops-log line gains `recovery_copy=<path>`. Sections the
+  current selectors do not select never block the re-run. An extract that
+  predates recovery copies (no copy on disk) keeps the selector-coverage
+  answer.
 - **Verification:** pure coordination tests cover replica-count wait/timeout and
   mutation-boundary rows. Relay tests prove the detached CAS rejects a raced
   live replica, advances a zero-member canonical, and treats an exact replay as
@@ -105,11 +129,20 @@ without making an agent manually copy managed document regions.
   source/target boundary identity preservation, archive-locator resolution after
   compaction, complete destination initialization, collision refusal,
   operation-marker resume, refusal when a marked target lost exchange turns or
-  an item (while a target-completed item still resumes), and a recovery copy
-  that holds exactly the removed bytes. A CLI test reproduces the GH #324 state
-  (marked target without the moved turns, source unchanged) and proves the
-  re-run leaves both documents byte-identical and logs the loss; CLI help and
-  the full project check cover wiring.
+  an item (while a target-completed item still resumes), a recovery copy
+  that holds exactly the removed bytes and whose sections round-trip each
+  transfer's labels, and the stripped-source re-run: refusal when the target
+  lost recorded turns or a recorded item (also when the target lost its
+  operation marker), `already_applied` for a holding or target-completed
+  target, losses under an unselected operation ignored, and the legacy
+  selector-coverage answer without a recovery copy. A CLI test reproduces the
+  GH #324 state (marked target without the moved turns, source unchanged) and
+  proves the re-run leaves both documents byte-identical and logs the loss; a
+  second CLI test strips the source by applying, drops the turns from the
+  target while its `[#id]` items survive, and proves the re-run refuses instead
+  of reporting `already_applied`, names the recovery copy, leaves both
+  documents byte-identical, and logs the loss; CLI help and the full project
+  check cover wiring.
 - **Out of scope:** semantic-topic inference inside the mutation binary,
   cross-filesystem transactions, and simultaneous multi-document CRDT commits.
 

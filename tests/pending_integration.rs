@@ -2249,7 +2249,7 @@ fn write_response_request_without_todo_add_emits_operator_todo_advisory() {
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
     assert!(
         stderr.contains(
-            "[todo] advisory (#operatortodo): this closeout response leaves an operator action pending"
+            "[todo] advisory (#operatortodo): this closeout response leaves 1 operator action pending but supplied 0 --todo-add"
         ),
         "stderr: {stderr}"
     );
@@ -2257,6 +2257,84 @@ fn write_response_request_without_todo_add_emits_operator_todo_advisory() {
     assert!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo")
             .contains("- [x] [#old] Review prior draft")
+    );
+}
+
+/// GH #318: a bolded `**Still stale:**` list is operator work. One
+/// `--todo-add` no longer silences the advisory for the whole closeout; it
+/// counts asks against adds and quotes each unrecorded item with the label
+/// that marked it, in stderr and in ops.log.
+#[test]
+fn write_residual_work_list_with_one_todo_add_still_emits_operator_todo_advisory() {
+    let (tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let assert_result = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--todo-add",
+            "Rotate the deploy key",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: alice reply posted, note rewritten\n\nPosted the reply.\n\n**Still stale:**\n- Your note `n-a` in `t-a` still argues for tags over a list.\n- The description section still cites note `n-b` for the tags-vs-list argument.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(
+        stderr.contains(
+            "this closeout response leaves 2 operator actions pending but supplied 1 --todo-add; no todo matches: \"Your note `n-a` in `t-a` still argues for tags over a list.\" (residual work list: \"Still stale\")"
+        ),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("\"The description section still cites note `n-b`"),
+        "stderr: {stderr}"
+    );
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    let line = ops
+        .lines()
+        .find(|line| line.contains("operator_todo_response_advisory"))
+        .unwrap_or_else(|| panic!("ops.log: {ops}"));
+    assert!(
+        line.contains("signal=residual work list asks=2 todo_adds=1 unrecorded=2"),
+        "{line}"
+    );
+    assert!(
+        line.contains("matched=[\"Still stale\", \"Still stale\"]"),
+        "{line}"
+    );
+    assert!(
+        !line.contains("reply post"),
+        "the heading's `reply posted` is not a signal: {line}"
+    );
+}
+
+/// GH #318: `reply posted` in a response heading is not the `reply post`
+/// request signal, and an ask an open `agent:todo` item already records does
+/// not re-fire the advisory.
+#[test]
+fn write_heading_or_already_recorded_ask_emits_no_operator_todo_advisory() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n<!-- agent:todo -->\n- [ ] [#stalenote] Fix note n-a in t-a that still argues tags over a list\n<!-- /agent:todo -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let assert_result = agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: alice reply posted, note rewritten\n\nPosted the reply.\n\n**Still stale:**\n- Your note `n-a` in `t-a` still argues for tags over a list.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(
+        !stderr.contains("this closeout response leaves"),
+        "stderr: {stderr}"
     );
 }
 

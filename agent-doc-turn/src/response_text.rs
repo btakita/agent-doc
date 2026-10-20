@@ -206,11 +206,14 @@ fn truncate_response_summary(input: &str, max_chars: usize) -> String {
 }
 
 /// A conservative response-text signal that a closeout left a concrete action
-/// or decision with the operator (`#operatortodo`, GH #314).
+/// or decision with the operator (`#operatortodo`, GH #314, GH #318).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorTodoResponseSignal {
     ExplicitRequest,
     UnpublishedDraft,
+    /// An item of a bolded residual-work list (`**Still stale:**`,
+    /// `**Not done:**`, ...), GH #318.
+    ResidualWork,
 }
 
 impl OperatorTodoResponseSignal {
@@ -218,8 +221,21 @@ impl OperatorTodoResponseSignal {
         match self {
             Self::ExplicitRequest => "explicit operator request",
             Self::UnpublishedDraft => "unpublished draft path",
+            Self::ResidualWork => "residual work list",
         }
     }
+}
+
+/// One operator ask a closeout response leaves pending (GH #318).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorTodoAsk {
+    pub signal: OperatorTodoResponseSignal,
+    /// The response text that matched, exactly as written (a signal phrase
+    /// such as `Say \`post\``, or a residual-list label such as `Still stale`).
+    pub matched: String,
+    /// The ask itself: the list item or line that carries the signal, with any
+    /// list marker removed and truncated for display.
+    pub text: String,
 }
 
 const EXPLICIT_OPERATOR_TODO_SIGNALS: &[&str] = &[
@@ -257,22 +273,523 @@ const UNPUBLISHED_DRAFT_SIGNALS: &[&str] = &[
     "hasn't been published",
 ];
 
+/// Bolded labels that introduce a list of residual operator work (GH #318).
+/// Matched against the whole bold span, case-insensitively, as a word prefix:
+/// `**Also stale, not drafted:**` is an `also stale` list.
+const RESIDUAL_WORK_LABELS: &[&str] = &[
+    "still stale",
+    "also stale",
+    "not done",
+    "still open",
+    "open",
+    "remaining",
+];
+
+const OPERATOR_TODO_ASK_TEXT_MAX_CHARS: usize = 160;
+
 /// Detect only high-confidence operator actions. General future-looking prose is
 /// intentionally excluded: it belongs to backlog capture, not `agent:todo`.
-/// A named Markdown draft plus an explicit unpublished/not-posted state is the
-/// canonical path-backed action from GH #314.
+/// Returns the first ask's signal; see [`operator_todo_response_asks`].
 pub fn operator_todo_response_signal(response: &str) -> Option<OperatorTodoResponseSignal> {
-    let lower = response.to_ascii_lowercase();
-    if contains_any_signal(&lower, EXPLICIT_OPERATOR_TODO_SIGNALS) {
-        return Some(OperatorTodoResponseSignal::ExplicitRequest);
+    operator_todo_response_asks(response)
+        .first()
+        .map(|ask| ask.signal)
+}
+
+/// Every operator ask a closeout response leaves pending (GH #314, GH #318),
+/// in response order:
+///
+/// - an explicit post/publish decision request (`say \`post\``, `needs your
+///   ok`, ...), one ask per line;
+/// - an unpublished/not-posted draft whose paragraph names a Markdown path;
+/// - each top-level item of a list introduced by a bolded residual-work label
+///   (`**Still stale:**`, `**Also stale:**`, `**Not done:**`, `**Still
+///   open:**`, `**Open:**`, `**Remaining:**`); a label with inline text and no
+///   list is one ask.
+///
+/// Signals match on word boundaries, so `reply posted` is not `reply post`.
+/// Markdown headings and fenced code never count: a heading names what the
+/// response is about, not what the operator still has to do.
+pub fn operator_todo_response_asks(response: &str) -> Vec<OperatorTodoAsk> {
+    let lines = operator_todo_scan_lines(response);
+    let mut asks: Vec<(usize, OperatorTodoAsk)> = Vec::new();
+    let mut consumed = vec![false; lines.len()];
+    let mut index = 0;
+    while index < lines.len() {
+        let Some(line) = lines[index] else {
+            index += 1;
+            continue;
+        };
+        if let Some((label, inline)) = residual_work_label(line) {
+            consumed[index] = true;
+            // A label that is itself a list item owns only its nested items:
+            // the next sibling item is not part of its list.
+            let label_indent = line.len() - line.trim_start().len();
+            let min_indent = if strip_list_marker(line.trim_start()).is_some() {
+                label_indent + 1
+            } else {
+                0
+            };
+            let items = residual_work_list_items(&lines, index + 1, min_indent);
+            if items.is_empty() {
+                if !is_empty_residual_text(inline) {
+                    asks.push((
+                        index,
+                        OperatorTodoAsk {
+                            signal: OperatorTodoResponseSignal::ResidualWork,
+                            matched: label.to_string(),
+                            text: operator_todo_ask_text(inline),
+                        },
+                    ));
+                }
+            } else {
+                for (item_index, item) in items {
+                    consumed[item_index] = true;
+                    if is_empty_residual_text(item) {
+                        continue;
+                    }
+                    asks.push((
+                        item_index,
+                        OperatorTodoAsk {
+                            signal: OperatorTodoResponseSignal::ResidualWork,
+                            matched: label.to_string(),
+                            text: operator_todo_ask_text(item),
+                        },
+                    ));
+                }
+            }
+        }
+        index += 1;
     }
-    if lower.contains("draft")
-        && lower.contains(".md")
-        && contains_any_signal(&lower, UNPUBLISHED_DRAFT_SIGNALS)
-    {
-        return Some(OperatorTodoResponseSignal::UnpublishedDraft);
+    for (index, line) in lines.iter().enumerate() {
+        let Some(line) = line else { continue };
+        if consumed[index] {
+            continue;
+        }
+        let lower = line.to_ascii_lowercase();
+        if let Some((start, len)) = find_word_bounded_signal(&lower, EXPLICIT_OPERATOR_TODO_SIGNALS)
+        {
+            asks.push((
+                index,
+                OperatorTodoAsk {
+                    signal: OperatorTodoResponseSignal::ExplicitRequest,
+                    matched: line[start..start + len].to_string(),
+                    text: operator_todo_ask_text(line),
+                },
+            ));
+            consumed[index] = true;
+            continue;
+        }
+        if let Some((start, len)) = find_word_bounded_signal(&lower, UNPUBLISHED_DRAFT_SIGNALS)
+            && lower.contains("draft")
+            && paragraph_mentions_markdown_path(&lines, index)
+        {
+            asks.push((
+                index,
+                OperatorTodoAsk {
+                    signal: OperatorTodoResponseSignal::UnpublishedDraft,
+                    matched: line[start..start + len].to_string(),
+                    text: operator_todo_ask_text(line),
+                },
+            ));
+            consumed[index] = true;
+        }
+    }
+    // Response order: residual lists were collected in a first pass.
+    asks.sort_by_key(|(index, _)| *index);
+    asks.into_iter().map(|(_, ask)| ask).collect()
+}
+
+/// The response's lines, with headings and fenced code replaced by `None`, so
+/// every operator-todo matcher skips them by construction.
+fn operator_todo_scan_lines(response: &str) -> Vec<Option<&str>> {
+    let mut fence: Option<&str> = None;
+    response
+        .lines()
+        .map(|raw| {
+            let line = raw.strip_suffix('\r').unwrap_or(raw);
+            let indent = line.len() - line.trim_start_matches(' ').len();
+            let trimmed = line.trim_start();
+            if indent <= 3 {
+                let marker = if trimmed.starts_with("```") {
+                    Some("```")
+                } else if trimmed.starts_with("~~~") {
+                    Some("~~~")
+                } else {
+                    None
+                };
+                if let Some(marker) = marker {
+                    match fence {
+                        Some(open) if open == marker => fence = None,
+                        None => fence = Some(marker),
+                        Some(_) => {}
+                    }
+                    return None;
+                }
+            }
+            if fence.is_some() || (indent <= 3 && is_atx_heading(trimmed)) {
+                return None;
+            }
+            Some(line)
+        })
+        .collect()
+}
+
+fn is_atx_heading(trimmed: &str) -> bool {
+    let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&hashes)
+        && trimmed[hashes..]
+            .chars()
+            .next()
+            .is_none_or(|ch| ch == ' ' || ch == '\t')
+}
+
+/// Strip one leading list marker (`- `, `* `, `+ `, `1. `, `1) `).
+fn strip_list_marker(trimmed: &str) -> Option<&str> {
+    for bullet in ["- ", "* ", "+ "] {
+        if let Some(rest) = trimmed.strip_prefix(bullet) {
+            return Some(rest);
+        }
+    }
+    let digits = trimmed.bytes().take_while(u8::is_ascii_digit).count();
+    if (1..=9).contains(&digits) {
+        let rest = &trimmed[digits..];
+        if let Some(rest) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+            return Some(rest);
+        }
     }
     None
+}
+
+/// A line that opens with a bolded residual-work label, optionally after a
+/// list marker: returns the label as written and the text after it.
+fn residual_work_label(line: &str) -> Option<(&str, &str)> {
+    let trimmed = line.trim_start();
+    let trimmed = strip_list_marker(trimmed).unwrap_or(trimmed);
+    let (open, rest) = if let Some(rest) = trimmed.strip_prefix("**") {
+        ("**", rest)
+    } else {
+        ("__", trimmed.strip_prefix("__")?)
+    };
+    let close = rest.find(open)?;
+    let span = rest[..close].trim();
+    let after = rest[close + open.len()..].trim_start();
+    // A label ends with a colon, inside the bold span or right after it.
+    let after = if span.ends_with(':') {
+        after
+    } else {
+        after.strip_prefix(':')?
+    }
+    .trim();
+    let label_body = span.trim_end_matches([':', ' ']);
+    let lower = label_body.to_ascii_lowercase();
+    for label in RESIDUAL_WORK_LABELS {
+        if let Some(tail) = lower.strip_prefix(label)
+            && residual_work_label_tail(tail)
+        {
+            return Some((&label_body[..label.len()], after));
+        }
+    }
+    None
+}
+
+/// What may follow a residual-work label inside the bold span: nothing, a
+/// qualifier after a comma or dash (`Also stale, not drafted`), or a plain
+/// noun for the work itself (`Open questions`). `Remaining budget`,
+/// `Opened PR #12`, and `Open-source tools` are not residual-work labels.
+fn residual_work_label_tail(tail: &str) -> bool {
+    const NOUNS: &[&str] = &[
+        "work",
+        "items",
+        "questions",
+        "follow-ups",
+        "followups",
+        "asks",
+        "actions",
+        "decisions",
+        "operator actions",
+        "operator items",
+    ];
+    tail.is_empty()
+        || tail.starts_with(',')
+        || tail.starts_with(" (")
+        || tail.starts_with(" \u{2014}")
+        || tail.starts_with(" - ")
+        || tail
+            .strip_prefix(' ')
+            .is_some_and(|noun| NOUNS.contains(&noun))
+}
+
+/// The top-level list items that directly follow a residual-work label, with
+/// their line indices. One blank line may separate the label from its list;
+/// the list ends at the first blank line, the first non-item line at its own
+/// indent, or the first line indented less than `min_indent`.
+fn residual_work_list_items<'a>(
+    lines: &[Option<&'a str>],
+    start: usize,
+    min_indent: usize,
+) -> Vec<(usize, &'a str)> {
+    let mut index = start;
+    if lines
+        .get(index)
+        .is_some_and(|line| line.is_some_and(|line| line.trim().is_empty()))
+    {
+        index += 1;
+    }
+    let mut items = Vec::new();
+    let mut item_indent: Option<usize> = None;
+    while let Some(Some(line)) = lines.get(index) {
+        if line.trim().is_empty() {
+            break;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if indent < min_indent {
+            break;
+        }
+        match strip_list_marker(line.trim_start()) {
+            Some(item) if item_indent.is_none_or(|top| indent == top) => {
+                item_indent = Some(indent);
+                items.push((index, item));
+            }
+            // Nested items and continuation lines belong to the item above.
+            _ if item_indent.is_some_and(|top| indent > top) => {}
+            _ => break,
+        }
+        index += 1;
+    }
+    items
+}
+
+fn paragraph_mentions_markdown_path(lines: &[Option<&str>], index: usize) -> bool {
+    let in_paragraph = |line: &Option<&str>| line.is_some_and(|line| !line.trim().is_empty());
+    let mut first = index;
+    while first > 0 && in_paragraph(&lines[first - 1]) {
+        first -= 1;
+    }
+    let mut last = index;
+    while last + 1 < lines.len() && in_paragraph(&lines[last + 1]) {
+        last += 1;
+    }
+    lines[first..=last]
+        .iter()
+        .flatten()
+        .any(|line| line.to_ascii_lowercase().contains(".md"))
+}
+
+/// `**Remaining:** none.` / `- Nothing.` report an empty list, not an ask.
+fn is_empty_residual_text(text: &str) -> bool {
+    let lower = text
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '.' | '*' | '_' | '`' | '(' | ')' | ' '))
+        .to_ascii_lowercase();
+    lower.is_empty()
+        || matches!(lower.as_str(), "n/a" | "na" | "-" | "\u{2014}" | "no")
+        || find_word_bounded_signal(&lower, &["none", "nothing"])
+            .is_some_and(|(start, _)| start == 0)
+}
+
+fn operator_todo_ask_text(line: &str) -> String {
+    let trimmed = line.trim();
+    let text = strip_list_marker(trimmed).unwrap_or(trimmed).trim();
+    let mut out: String = text
+        .chars()
+        .take(OPERATOR_TODO_ASK_TEXT_MAX_CHARS)
+        .collect();
+    if text.chars().count() > OPERATOR_TODO_ASK_TEXT_MAX_CHARS {
+        out.push_str("...");
+    }
+    out
+}
+
+/// The first `signals` entry that occurs in `haystack` on word boundaries
+/// (GH #318): the characters on either side of the match must not be ASCII
+/// alphanumeric, so `reply post` does not match inside `reply posted`.
+/// Returns the byte range of the match.
+fn find_word_bounded_signal(haystack: &str, signals: &[&str]) -> Option<(usize, usize)> {
+    let bytes = haystack.as_bytes();
+    let is_word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    let mut best: Option<(usize, usize)> = None;
+    for signal in signals {
+        let mut from = 0;
+        while let Some(offset) = haystack[from..].find(signal) {
+            let start = from + offset;
+            let end = start + signal.len();
+            let left_ok = start == 0 || !is_word(bytes[start - 1]);
+            let right_ok = end == bytes.len() || !is_word(bytes[end]);
+            if left_ok && right_ok {
+                if best.is_none_or(|(best_start, _)| start < best_start) {
+                    best = Some((start, signal.len()));
+                }
+                break;
+            }
+            from = start + 1;
+            while from < haystack.len() && !haystack.is_char_boundary(from) {
+                from += 1;
+            }
+        }
+    }
+    best
+}
+
+/// The outcome of comparing a response's operator asks with the todos that
+/// record them (GH #318). Present only when the advisory should fire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorTodoAudit {
+    /// Every operator ask the response leaves pending.
+    pub asks: usize,
+    /// The number of `--todo-add` items this closeout supplied.
+    pub todo_adds: usize,
+    /// The asks that no supplied `--todo-add` and no open `agent:todo` item
+    /// matches by content.
+    pub unrecorded: Vec<OperatorTodoAsk>,
+}
+
+/// Compare the response's operator asks with this closeout's `--todo-add`
+/// texts and the document's open `agent:todo` actions (GH #318).
+///
+/// An ask is covered when at least half of its content words (and at least
+/// one) appear in one todo. A `--todo-add` that covers no ask is assumed to
+/// record one in other words, so it absorbs one unrecorded ask. The advisory
+/// fires (`Some`) when more unrecorded asks remain than such unmatched adds:
+/// four asks and two adds still fire, naming the asks left out, while one
+/// `--todo-add` no longer silences a whole residual-work list.
+pub fn audit_operator_todo_response(
+    response: &str,
+    todo_adds: &[String],
+    open_todo_actions: &[String],
+) -> Option<OperatorTodoAudit> {
+    let asks = operator_todo_response_asks(response);
+    if asks.is_empty() {
+        return None;
+    }
+    let add_words: Vec<Vec<String>> = todo_adds.iter().map(|add| content_words(add)).collect();
+    let open_words: Vec<Vec<String>> = open_todo_actions
+        .iter()
+        .map(|action| content_words(action))
+        .collect();
+    let mut add_matched = vec![false; todo_adds.len()];
+    let mut unrecorded = Vec::new();
+    for ask in &asks {
+        let words = content_words(&ask.text);
+        let mut covered = false;
+        for (add_index, add) in add_words.iter().enumerate() {
+            if todo_covers_ask(&words, add) {
+                add_matched[add_index] = true;
+                covered = true;
+            }
+        }
+        if !covered && !open_words.iter().any(|open| todo_covers_ask(&words, open)) {
+            unrecorded.push(ask.clone());
+        }
+    }
+    let unmatched_adds = add_matched.iter().filter(|matched| !**matched).count();
+    let fires = unrecorded.len() > unmatched_adds;
+    fires.then_some(OperatorTodoAudit {
+        asks: asks.len(),
+        todo_adds: todo_adds.len(),
+        unrecorded,
+    })
+}
+
+const CONTENT_WORD_STOPWORDS: &[&str] = &[
+    "the",
+    "and",
+    "for",
+    "you",
+    "your",
+    "yours",
+    "not",
+    "but",
+    "are",
+    "was",
+    "has",
+    "have",
+    "had",
+    "its",
+    "can",
+    "now",
+    "say",
+    "any",
+    "all",
+    "our",
+    "out",
+    "with",
+    "from",
+    "that",
+    "this",
+    "these",
+    "those",
+    "been",
+    "still",
+    "also",
+    "after",
+    "before",
+    "over",
+    "into",
+    "they",
+    "them",
+    "then",
+    "than",
+    "when",
+    "what",
+    "which",
+    "will",
+    "would",
+    "should",
+    "could",
+    "about",
+    "there",
+    "their",
+    "some",
+    "only",
+    "more",
+    "most",
+    "each",
+    "does",
+    "done",
+    "just",
+    "once",
+    "here",
+    "were",
+    "where",
+    "while",
+    "again",
+    "need",
+    "needs",
+    "longer",
+    "makes",
+    "make",
+    "stale",
+    "open",
+    "remaining",
+];
+
+fn content_words(text: &str) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    for word in text
+        .to_ascii_lowercase()
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .map(|word| word.trim_matches(['-', '_']))
+    {
+        if word.len() >= 3
+            && !CONTENT_WORD_STOPWORDS.contains(&word)
+            && !words.iter().any(|seen| seen == word)
+        {
+            words.push(word.to_string());
+        }
+    }
+    words
+}
+
+fn todo_covers_ask(ask_words: &[String], todo_words: &[String]) -> bool {
+    if ask_words.is_empty() {
+        return false;
+    }
+    let shared = ask_words
+        .iter()
+        .filter(|word| todo_words.contains(word))
+        .count();
+    shared >= 1 && shared * 2 >= ask_words.len()
 }
 
 /// A blocking `[#subagent-operator-request]` packet a closeout response presents
@@ -817,6 +1334,183 @@ mod tests {
             operator_todo_response_signal(
                 "Implementation is complete; no operator action remains."
             ),
+            None
+        );
+    }
+
+    // GH #318 cycle 1 and cycle 2 closeout responses (anonymized).
+    const GH318_CYCLE1: &str = "### Re: review notes \u{2014} opus-5\n\nRewrote the description.\n\n**Todo added: yes**, two items. Say `post` for the reply, and OK the note `n-b` rewrite.\n**Also stale, not drafted:**\n- Your note `n-a` (thread `t-a`) still argues tags over a list.\n- The description's \"Option considered\" section points to note `n-b` for the tags-vs-list argument. After the rewrite, that note no longer makes it.\n";
+    const GH318_CYCLE2: &str = "### Re: alice reply posted, note rewritten \u{2014} opus-5\n\nPosted the reply and rewrote the note.\n\n**Still stale:**\n- Your note `n-a` in `t-a` still argues for tags over a list.\n- The description's \"Option considered\" section still says \"Tags vs list was argued in note `n-b`\". The rewritten note no longer makes that argument.\n";
+
+    #[test]
+    fn operator_todo_signal_matches_on_word_boundaries_and_skips_headings() {
+        // GH #318 failure 3: `reply posted` in the heading matched `reply post`.
+        let heading_only = "### Re: alice reply posted, note rewritten \u{2014} opus-5\n\nDone.\n";
+        assert_eq!(operator_todo_response_signal(heading_only), None);
+        assert_eq!(
+            operator_todo_response_signal("The reply posted cleanly; nothing else to do."),
+            None
+        );
+        // A heading never counts, even when it carries a real signal phrase.
+        assert_eq!(
+            operator_todo_response_signal("## Say `post` to publish\n\nDone."),
+            None
+        );
+        // Fenced code never counts.
+        assert_eq!(
+            operator_todo_response_signal("```\nsay post\n```\nDone."),
+            None
+        );
+        // The signal itself still matches, and the ask quotes the matched text.
+        let asks = operator_todo_response_asks("Draft ready. Say `post` to apply it.");
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].signal, OperatorTodoResponseSignal::ExplicitRequest);
+        assert_eq!(asks[0].matched, "Say `post`");
+        assert_eq!(asks[0].text, "Draft ready. Say `post` to apply it.");
+    }
+
+    #[test]
+    fn operator_todo_asks_count_each_residual_work_list_item() {
+        // GH #318 failure 2: a bolded residual-work list is operator work.
+        let asks = operator_todo_response_asks(GH318_CYCLE2);
+        assert_eq!(asks.len(), 2, "{asks:?}");
+        assert!(
+            asks.iter()
+                .all(|ask| ask.signal == OperatorTodoResponseSignal::ResidualWork
+                    && ask.matched == "Still stale"),
+            "{asks:?}"
+        );
+        assert!(
+            asks[0].text.starts_with("Your note `n-a` in `t-a`"),
+            "{asks:?}"
+        );
+        assert!(asks[1].text.starts_with("The description's"), "{asks:?}");
+
+        let cycle1 = operator_todo_response_asks(GH318_CYCLE1);
+        let signals: Vec<_> = cycle1
+            .iter()
+            .map(|ask| (ask.signal, ask.matched.as_str()))
+            .collect();
+        assert_eq!(
+            signals,
+            vec![
+                (OperatorTodoResponseSignal::ExplicitRequest, "Say `post`"),
+                (OperatorTodoResponseSignal::ResidualWork, "Also stale"),
+                (OperatorTodoResponseSignal::ResidualWork, "Also stale"),
+            ]
+        );
+
+        for label in ["Not done", "Still open", "Open", "Remaining", "Also stale"] {
+            let response = format!(
+                "Done.\n\n**{label}:**\n\n1. Rotate the key.\n2. Re-run the deploy.\n   - nested detail\n\nThat is all.\n"
+            );
+            let asks = operator_todo_response_asks(&response);
+            assert_eq!(asks.len(), 2, "{label}: {asks:?}");
+            assert_eq!(asks[0].text, "Rotate the key.");
+            assert_eq!(asks[1].text, "Re-run the deploy.");
+        }
+        // A bulleted label owns its nested items, never its sibling items.
+        let bulleted = operator_todo_response_asks(
+            "- **Done:** the rewrite.\n- **Remaining:** the changelog entry.\n- **Notes:** none.\n",
+        );
+        assert_eq!(bulleted.len(), 1, "{bulleted:?}");
+        assert_eq!(bulleted[0].text, "the changelog entry.");
+        let nested = operator_todo_response_asks(
+            "- **Not done:**\n  - Rotate the key.\n  - Re-run the deploy.\n- **Notes:** none.\n",
+        );
+        assert_eq!(nested.len(), 2, "{nested:?}");
+        // Inline label text without a list is one ask.
+        let inline = operator_todo_response_asks("**Not done:** the changelog entry.");
+        assert_eq!(inline.len(), 1);
+        assert_eq!(inline[0].text, "the changelog entry.");
+        // Colon outside the bold span, and a noun or qualifier tail.
+        for response in [
+            "**Open questions**:\n- Which region?\n",
+            "- **Remaining work:** the changelog entry.",
+            "__Still open (2):__\n- Which region?\n- Which tier?\n",
+        ] {
+            assert!(
+                !operator_todo_response_asks(response).is_empty(),
+                "{response:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn operator_todo_asks_ignore_empty_or_unrelated_bold_labels() {
+        for response in [
+            "**Remaining:** none.",
+            "**Open:** nothing.",
+            "**Still open:**\n- None.\n",
+            "**Opened PR #12:** merged.",
+            "**Open-source tools:**\n- ripgrep\n",
+            "**Remaining budget** is fine.\n\nDone.",
+            "**Remaining budget:** 3k tokens.",
+            "**Not done yet** \u{2014} see below.",
+            "### Still stale\n- an item under a heading, not a bold label\n",
+        ] {
+            assert_eq!(
+                operator_todo_response_asks(response),
+                Vec::new(),
+                "{response:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn operator_todo_audit_counts_asks_against_todo_adds() {
+        // GH #318 failure 1: two adds for four operator items used to silence
+        // the advisory. The two stale items have no matching todo.
+        let adds = vec![
+            "Say post for the reply to alice".to_string(),
+            "OK the note n-b rewrite".to_string(),
+        ];
+        let audit = audit_operator_todo_response(GH318_CYCLE1, &adds, &[]).unwrap();
+        assert_eq!(audit.asks, 3);
+        assert_eq!(audit.todo_adds, 2);
+        let unrecorded: Vec<_> = audit
+            .unrecorded
+            .iter()
+            .map(|ask| ask.text.as_str())
+            .collect();
+        assert!(
+            unrecorded
+                .iter()
+                .any(|text| text.starts_with("Your note `n-a`")),
+            "{unrecorded:?}"
+        );
+        assert!(
+            unrecorded
+                .iter()
+                .any(|text| text.starts_with("The description's")),
+            "{unrecorded:?}"
+        );
+
+        // Cycle 2 supplied no add: both stale items fire.
+        let audit = audit_operator_todo_response(GH318_CYCLE2, &[], &[]).unwrap();
+        assert_eq!(
+            (audit.asks, audit.todo_adds, audit.unrecorded.len()),
+            (2, 0, 2)
+        );
+
+        // One add per ask, worded differently, still satisfies the count.
+        let adds = vec![
+            "Fix note n-a tags argument".to_string(),
+            "Update description section".to_string(),
+        ];
+        assert_eq!(audit_operator_todo_response(GH318_CYCLE2, &adds, &[]), None);
+
+        // Asks already open in agent:todo are recorded: no repeat advisory.
+        let open = vec![
+            "Your note n-a in t-a still argues for tags over a list".to_string(),
+            "Description \"Option considered\" section still cites note n-b tags vs list argument"
+                .to_string(),
+        ];
+        assert_eq!(audit_operator_todo_response(GH318_CYCLE2, &[], &open), None);
+
+        // No ask, no advisory.
+        assert_eq!(
+            audit_operator_todo_response("Implementation is complete.", &[], &[]),
             None
         );
     }

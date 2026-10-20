@@ -1963,37 +1963,91 @@ fn emit_operator_todo_advisory(file: &Path, unreferenced_gate_ids: &[String]) {
     );
 }
 
-/// `#operatortodo` / GH #314: the advisory for a response that hands a concrete
-/// action or decision to the operator without recording it through `--todo-add`.
+/// `#operatortodo` / GH #314, GH #318: the advisory for a response that hands
+/// concrete actions or decisions to the operator without recording each one
+/// through `--todo-add` or an open `agent:todo` item. It counts asks against
+/// todo adds instead of letting any `--todo-add` silence it, and quotes every
+/// ask that no todo matches together with the text that marked it.
 fn operator_todo_response_advisory(
     file: &Path,
-    response: &str,
-    todo_add_supplied: bool,
-) -> Option<String> {
-    if todo_add_supplied {
-        return None;
-    }
-    let signal = agent_doc_turn::response_text::operator_todo_response_signal(response)?;
-    Some(format!(
-        "[todo] advisory (#operatortodo): this closeout response leaves an operator action pending ({}) but supplied no --todo-add. If the action remains pending, record it in the next closeout: agent-doc write --commit {} --backlog-only --todo-add \"<operator action>\"",
-        signal.as_str(),
+    audit: &agent_doc_turn::response_text::OperatorTodoAudit,
+) -> String {
+    let items = audit
+        .unrecorded
+        .iter()
+        .map(|ask| {
+            format!(
+                "\"{}\" ({}: \"{}\")",
+                ask.text,
+                ask.signal.as_str(),
+                ask.matched
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        "[todo] advisory (#operatortodo): this closeout response leaves {} operator action{} pending but supplied {} --todo-add; no todo matches: {items}. If an action remains pending, record it in the next closeout: agent-doc write --commit {} --backlog-only --todo-add \"<operator action>\"",
+        audit.asks,
+        if audit.asks == 1 { "" } else { "s" },
+        audit.todo_adds,
         file.display(),
-    ))
+    )
 }
 
-fn emit_operator_todo_response_advisory(file: &Path, response: &str, todo_add_supplied: bool) {
-    let Some(advisory) = operator_todo_response_advisory(file, response, todo_add_supplied) else {
+/// The open `agent:todo` actions after this closeout's write, best effort: the
+/// advisory never fails a closeout, so an unresolvable document reads as none.
+fn open_todo_actions_for_advisory(file: &Path, force_disk: bool) -> Vec<String> {
+    let resolved = if force_disk {
+        resolve_force_disk_document(file, "operator_todo_response_advisory")
+    } else {
+        resolve_current_document(file, "operator_todo_response_advisory")
+    };
+    resolved
+        .map(|document| agent_doc_element::todo::open_todo_actions(&document.into_content()))
+        .unwrap_or_default()
+}
+
+fn emit_operator_todo_response_advisory(
+    file: &Path,
+    response: &str,
+    todo_adds: &[String],
+    force_disk: bool,
+) {
+    if agent_doc_turn::response_text::operator_todo_response_asks(response).is_empty() {
+        return;
+    }
+    let open_todos = open_todo_actions_for_advisory(file, force_disk);
+    let Some(audit) = agent_doc_turn::response_text::audit_operator_todo_response(
+        response,
+        todo_adds,
+        &open_todos,
+    ) else {
         return;
     };
-    eprintln!("{advisory}");
-    let signal = agent_doc_turn::response_text::operator_todo_response_signal(response)
-        .map(|signal| signal.as_str())
+    eprintln!("{}", operator_todo_response_advisory(file, &audit));
+    let signal = audit
+        .unrecorded
+        .first()
+        .map(|ask| ask.signal.as_str())
         .unwrap_or("unknown");
+    let matched = audit
+        .unrecorded
+        .iter()
+        .map(|ask| ask.matched.as_str())
+        .collect::<Vec<_>>();
+    let unrecorded = audit
+        .unrecorded
+        .iter()
+        .map(|ask| ask.text.as_str())
+        .collect::<Vec<_>>();
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "operator_todo_response_advisory file={} signal={signal}",
+            "operator_todo_response_advisory file={} signal={signal} asks={} todo_adds={} unrecorded={} matched={matched:?} items={unrecorded:?}",
             file.display(),
+            audit.asks,
+            audit.todo_adds,
+            audit.unrecorded.len(),
         ),
     );
 }
@@ -3629,7 +3683,12 @@ fn run_command_inner_within_pass(
 
     if write_result.is_ok() {
         let response_body = active_capture_response_body_for_write(file)?;
-        emit_operator_todo_response_advisory(file, &response_body, !options.todo_add.is_empty());
+        emit_operator_todo_response_advisory(
+            file,
+            &response_body,
+            &options.todo_add,
+            options.force_disk,
+        );
     }
 
     // `#todoidcloseout` / GH #293: a strict closeout is the publication
@@ -5745,12 +5804,16 @@ mod tests {
     }
 
     #[test]
-    fn operator_todo_response_advisory_names_missing_todo_add_and_suppresses_when_supplied() {
+    fn operator_todo_response_advisory_quotes_unrecorded_asks_and_matched_text() {
         let file = Path::new("tasks/session.md");
         let response = "The unpublished draft is at `docs/launch-note.md`.";
-        let advisory = operator_todo_response_advisory(file, response, false).unwrap();
+        let audit = agent_doc_turn::response_text::audit_operator_todo_response(response, &[], &[])
+            .unwrap();
+        let advisory = operator_todo_response_advisory(file, &audit);
         assert!(
-            advisory.contains("leaves an operator action pending (unpublished draft path)"),
+            advisory.contains(
+                "leaves 1 operator action pending but supplied 0 --todo-add; no todo matches: \"The unpublished draft is at `docs/launch-note.md`.\" (unpublished draft path: \"unpublished\")"
+            ),
             "{advisory}"
         );
         assert!(
@@ -5759,10 +5822,36 @@ mod tests {
             ),
             "{advisory}"
         );
-        assert_eq!(operator_todo_response_advisory(file, response, true), None);
+        let recorded = vec!["Publish draft docs/launch-note.md".to_string()];
         assert_eq!(
-            operator_todo_response_advisory(file, "Published the draft.", false),
+            agent_doc_turn::response_text::audit_operator_todo_response(response, &recorded, &[]),
             None
+        );
+        assert_eq!(
+            agent_doc_turn::response_text::audit_operator_todo_response(
+                "Published the draft.",
+                &[],
+                &[]
+            ),
+            None
+        );
+
+        // GH #318: one `--todo-add` no longer silences a residual-work list.
+        let response = "Posted.\n\n**Still stale:**\n- Your note `n-a` still argues tags over a list.\n- The description section still cites note `n-b`.\n";
+        let adds = vec!["Rotate the deploy key".to_string()];
+        let audit =
+            agent_doc_turn::response_text::audit_operator_todo_response(response, &adds, &[])
+                .unwrap();
+        let advisory = operator_todo_response_advisory(file, &audit);
+        assert!(
+            advisory.contains("leaves 2 operator actions pending but supplied 1 --todo-add"),
+            "{advisory}"
+        );
+        assert!(
+            advisory.contains(
+                "\"Your note `n-a` still argues tags over a list.\" (residual work list: \"Still stale\")"
+            ),
+            "{advisory}"
         );
     }
 

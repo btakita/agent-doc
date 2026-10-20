@@ -1573,6 +1573,21 @@ pub struct OpenTodoReference {
     pub selector: String,
 }
 
+/// The action text of every open (`[ ]`/`[/]`) `agent:todo` item, in document
+/// order. Feeds the GH #318 operator-todo response advisory, which treats an
+/// ask an open item already records as recorded.
+pub fn open_todo_actions(content: &str) -> Vec<String> {
+    let Ok(Some(todo)) = find_todo_component(content) else {
+        return Vec::new();
+    };
+    TodoBody::parse(todo.content(content))
+        .items
+        .into_iter()
+        .filter(|item| item.state.is_open())
+        .map(|item| item.action)
+        .collect()
+}
+
 /// Open (`[ ]`/`[/]`) todo items whose own id is, or whose action cites, one of
 /// `ids` — operator actions tied to work this closeout just resolved, which are
 /// usually finished too. Feeds the non-blocking closeout advisory.
@@ -2421,6 +2436,23 @@ mod tests {
             ]
         );
         assert!(open_todo_items_referencing("no components", &["gate1".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn open_todo_actions_list_open_items_only() {
+        let content = wrap(concat!(
+            "- [ ] [#k3vd] Verify [#gate1] in a live pane\n",
+            "- [x] [#done1] Verify [#gate1] once more\n",
+            "- [/] Decide the merge order (#gate2)\n",
+        ));
+        assert_eq!(
+            open_todo_actions(&content),
+            vec![
+                "Verify [#gate1] in a live pane".to_string(),
+                "Decide the merge order (#gate2)".to_string(),
+            ]
+        );
+        assert!(open_todo_actions("no components").is_empty());
     }
 
     #[test]

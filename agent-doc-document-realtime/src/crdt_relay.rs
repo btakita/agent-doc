@@ -68,6 +68,22 @@ use crate::crdt_authority::CrdtAuthority;
 /// callers that must not treat a persisted projection as authority.
 pub const DISK_IS_RECOVERY_PROJECTION_ONLY: bool = true;
 
+/// A tiny document may carry normal CRDT metadata that is much larger than its
+/// visible text. Do not rotate epochs for that fixed overhead alone.
+pub const AUTO_COMPACT_MIN_STATE_BYTES: usize = 1024 * 1024;
+/// Beyond the fixed floor, keep retained history proportional to visible text.
+pub const AUTO_COMPACT_TEXT_MULTIPLIER: usize = 8;
+/// Leave room for state vectors and encoding metadata around the text payload.
+pub const AUTO_COMPACT_STATE_SLACK_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutomaticHistoryCompaction {
+    pub before_bytes: usize,
+    pub after_bytes: usize,
+    pub text_bytes: usize,
+    pub limit_bytes: usize,
+}
+
 /// Explicit opt-in for the live, per-node document projection (`#cdtcutover`).
 ///
 /// The projection is default-off while it gathers live-session evidence. An
@@ -3082,6 +3098,44 @@ impl RelayHub {
         Ok(())
     }
 
+    /// Rotate an oversized, fully visible CRDT history into a fresh epoch.
+    ///
+    /// This is deliberately opportunistic. A queued delivery means at least one
+    /// live editor has not proved the current text, so automatic compaction waits
+    /// for a later update instead of retaining a background compaction request.
+    /// The explicit Compact Exchange path remains the owner of deferred fences.
+    pub fn compact_oversized_history(&mut self) -> Result<Option<AutomaticHistoryCompaction>> {
+        let text_bytes = self.canonical.text().len();
+        let limit_bytes = AUTO_COMPACT_MIN_STATE_BYTES.max(
+            text_bytes
+                .saturating_mul(AUTO_COMPACT_TEXT_MULTIPLIER)
+                .saturating_add(AUTO_COMPACT_STATE_SLACK_BYTES),
+        );
+        self.compact_oversized_history_with_limit(limit_bytes)
+    }
+
+    fn compact_oversized_history_with_limit(
+        &mut self,
+        limit_bytes: usize,
+    ) -> Result<Option<AutomaticHistoryCompaction>> {
+        if !self.visible_delivery_projected() {
+            return Ok(None);
+        }
+        let text = self.canonical.text();
+        let text_bytes = text.len();
+        let before_bytes = self.canonical.encode_state().len();
+        if before_bytes <= limit_bytes {
+            return Ok(None);
+        }
+        self.compact_authoritative_epoch(&text)?;
+        Ok(Some(AutomaticHistoryCompaction {
+            before_bytes,
+            after_bytes: self.canonical.encode_state().len(),
+            text_bytes,
+            limit_bytes,
+        }))
+    }
+
     /// Retain or immediately settle a Compact Exchange epoch fence.
     ///
     /// Returns `true` when the lineage was rebuilt now. If a live member still
@@ -4675,6 +4729,53 @@ mod tests {
         assert_ne!(hub.lineage(), prior_lineage);
         assert_eq!(hub.canonical_text(), "keep\nnext\n");
         assert_eq!(hub.pending_rebootstrap_members(), vec![2, 3]);
+    }
+
+    #[test]
+    fn automatic_history_compaction_bounds_visible_single_replica_churn() {
+        let mut hub = RelayHub::from_text(1, "keep\n");
+        hub.register(2).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        for _ in 0..64 {
+            let frontier = editor.state_vector();
+            editor.apply_local_edit(5, 0, "discard");
+            hub.relay_update(2, &editor.diff(&frontier).unwrap())
+                .unwrap();
+            let frontier = editor.state_vector();
+            editor.apply_local_edit(5, 7, "");
+            hub.relay_update(2, &editor.diff(&frontier).unwrap())
+                .unwrap();
+        }
+        let prior_lineage = hub.lineage().to_string();
+        let before_bytes = hub.canonical_encoded_state().len();
+
+        let compacted = hub
+            .compact_oversized_history_with_limit(1)
+            .unwrap()
+            .expect("the oversized visible history should compact");
+
+        assert_eq!(hub.canonical_text(), "keep\n");
+        assert_ne!(hub.lineage(), prior_lineage);
+        assert_eq!(compacted.before_bytes, before_bytes);
+        assert!(compacted.after_bytes < compacted.before_bytes);
+        assert_eq!(hub.pending_rebootstrap_members(), vec![2]);
+    }
+
+    #[test]
+    fn automatic_history_compaction_waits_for_visible_peer_delivery() {
+        let mut hub = RelayHub::from_text(1, "keep\n");
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let frontier = editor.state_vector();
+        editor.apply_local_edit(5, 0, "next\n");
+        hub.relay_update(2, &editor.diff(&frontier).unwrap())
+            .unwrap();
+        let prior_lineage = hub.lineage().to_string();
+
+        assert_eq!(hub.compact_oversized_history_with_limit(1).unwrap(), None);
+        assert_eq!(hub.lineage(), prior_lineage);
+        assert!(!hub.compact_epoch_requested());
     }
 
     #[test]

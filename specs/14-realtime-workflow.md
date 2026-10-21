@@ -2327,6 +2327,16 @@ or rotating its lineage. Baseline-to-disk reconciliation is permitted only when
 the relay has no live editor; explicit controller mutations continue to publish
 through the CRDT transport.
 
+CRDT edit history is bounded independently of visible-text commits. After an
+editor update is visibly projected by every live replica, the relay compares the
+encoded canonical state with a proportional budget: the greater of 1 MiB or
+eight times the visible UTF-8 text plus 64 KiB. State above that budget rotates
+through the same fresh-lineage, replace-capable re-bootstrap fence as Compact
+Exchange. The relay must not rotate while a live delivery is unacknowledged, and
+must signal every live editor to consume and persist the compact frontier. Thus
+a later full registration or controller-recycle resume sends the compact epoch,
+not the document's complete historical insert/delete stream.
+
 Each live editor registration on the reliable-sync plane must carry a stable
 frontend capability proof before the controller treats that editor as safe for
 operator-preserving mutation. The canonical capability is

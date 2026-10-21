@@ -3560,6 +3560,7 @@ pub fn relay_replica_update_for_file(
         isolation_refused_lossy,
         isolation_regions_restored,
         queue_attempt_projection,
+        automatic_history_compaction,
     ) = with_hub_seeded_from_file(file, |hub| -> Result<_> {
         let retained_reseed_was_pending = hub.retained_replica_reseed_pending();
         let registered = hub.is_registered(client_id);
@@ -3667,6 +3668,17 @@ pub fn relay_replica_update_for_file(
             } else {
                 (false, 0)
             };
+        // A single retained editor can accumulate megabytes of tombstones while
+        // its visible document stays tiny. Once this update is visible to every
+        // live member, rotate that history through the same replace-capable epoch
+        // fence used by Compact Exchange. The pending re-bootstrap makes the
+        // editor persist the compact frontier, so later controller recycles do
+        // not require the old multi-megabyte resume suffix again (#336).
+        let automatic_history_compaction = if packet.is_some() {
+            hub.compact_oversized_history()?
+        } else {
+            None
+        };
         Ok((
             packet,
             reattached,
@@ -3676,6 +3688,7 @@ pub fn relay_replica_update_for_file(
             isolation_refused_lossy,
             isolation_regions_restored,
             queue_attempt_projection,
+            automatic_history_compaction,
         ))
     })??;
     if editor_reseed_requested {
@@ -3803,6 +3816,24 @@ pub fn relay_replica_update_for_file(
             &format!(
                 "crdt_replica_event_signal_failed file={} reason=handoff_queue_attempt_projection error={err}",
                 file.display(),
+            ),
+        );
+    }
+    if let Some(compaction) = automatic_history_compaction {
+        let signal =
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::CanonicalProjection, 0)
+                .map_or_else(|err| format!("failed:{err}"), |()| "requested".to_string());
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_history_auto_compacted file={} authority=multi_replica client_id={} before_bytes={} after_bytes={} text_bytes={} limit_bytes={} rebootstrap={} recovery=fresh_epoch",
+                file.display(),
+                client_id,
+                compaction.before_bytes,
+                compaction.after_bytes,
+                compaction.text_bytes,
+                compaction.limit_bytes,
+                signal,
             ),
         );
     }

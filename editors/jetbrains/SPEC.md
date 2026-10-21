@@ -210,7 +210,7 @@ the `#pluginactivationprobe` loaded-generation reading) match both versioned
 plugin jars, `agent-doc-jetbrains-<version>.jar` and `agent.doc-<version>.jar`,
 and never the unversioned module jars.
 
-#### Why a plugin-owned child loader is not the remaining hot-upgrade boundary (GH #333)
+#### Why a plugin-owned child loader is not the remaining hot-upgrade boundary (GH #333/#339)
 
 The remaining Kotlin orchestration cannot be made replaceable merely by moving
 its current classes into a versioned JAR behind a plugin-owned child classloader.
@@ -234,6 +234,35 @@ coordinate the backend and frontend JVMs. Until all of those conditions have a
 tested protocol, child-loading the orchestration is not a safe restart-free path.
 Pure policy continues to move behind `agent_doc_editor_derive_json`; changes to
 IntelliJ-facing orchestration remain restart-bound.
+
+**Exact-263 decision (GH #339).** The current modular distribution has no safe
+whole-package restart-free upgrade path. This is the steady state, not an
+installer bug hidden by the absent root-jar launcher:
+
+- Replacing `agent.doc.shared`'s `loading="required"` with optional loading is
+  not a sufficient fix. It may change module selection, but it does not create
+  a handoff protocol and receipt between the Remote Dev backend and the
+  JetBrains Client JVM. Shipping that descriptor change from a backend-only
+  unload probe could leave the two processes running different Agent Doc
+  generations.
+- A plugin-owned child loader is safe only after the stable shell owns every
+  IntelliJ registration and `Disposable`, all generation traffic crosses a
+  JDK/serialized boundary, and both processes quiesce and acknowledge the same
+  verified artifact before activation. The current plugin does not have that
+  shell or protocol; loading its existing implementation classes a second time
+  is therefore forbidden.
+- Moving a policy rule behind `agent_doc_editor_derive_json` remains the
+  supported restart-free route for that rule. It does not make changes to
+  IntelliJ evidence capture, registrations, or lifecycle orchestration
+  restart-free.
+
+Accordingly, a release whose recorded JetBrains source digest changes allocates
+a new plugin version and requires an IDE restart on exact-263. A release whose
+digest does not change retains the installed plugin version, while native-only
+logic may hot-reload. This boundary may change only with tests proving both
+(1) removal and replacement of the full modular graph and (2) generation-fenced
+backend/frontend activation receipts for the same verified artifact. A
+backend-only success is not acceptance evidence.
 
 ### Restart-free logic upgrades: native derivations (GH #326)
 

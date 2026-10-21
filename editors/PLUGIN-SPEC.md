@@ -62,6 +62,13 @@ Rust binary.
   frontend in the JetBrains Client JVM (GH #333). Live-process plugin-jar probes
   match every line's versioned plugin jar
   (`agent-doc-jetbrains-<v>.jar`, `agent.doc-<v>.jar`).
+- Exact-263 whole-package restart-free upgrade is explicitly unsupported in the
+  current architecture (GH #339). Making `agent.doc.shared` optional cannot
+  supply the missing cross-JVM handoff. The modular line must stay
+  restart-required until one protocol proves both full module-graph replacement
+  and generation-fenced backend/frontend activation of the same verified
+  artifact. Native derivations may still hot-reload when the JetBrains source
+  digest is unchanged.
 
 There is no filesystem delivery queue, live-value projection, receipt file,
 plugin-owner file, queue journal, or file-signal compatibility transport.

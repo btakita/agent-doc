@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.536
+
+- **Queue claim projection is linearized against live document authority.** Claim/start marker writes now derive
+  from the durable claim ledger, re-read the current editor-authoritative document, retry bounded convergence, and
+  verify the projected work identity before reporting success; `queue claims` reads through the same authority so
+  the controller does not guess from a stale checkout snapshot.
+- **Causally proven response/edit races no longer duplicate evolving free-text queue work.** Post-apply repair caps
+  exact copies first, then collapses only the narrow interleaved snapshot lineage to its most complete revision,
+  preserving ambiguous or intentionally authored duplicate families.
+- **Accepted live relay projections defer retained Claude SessionStart resume writes (GH #337).** A projection
+  already accepted by the live editor authority is classified as retained while that replica converges instead of
+  being reported as a stranded write.
+- **Manual Sync Tmux Layout can replace a cold unknown-order fold basis (GH #338).** The owner-directed editor to
+  controller state flow preserves positive editor geometry authority while allowing an explicit manual observation
+  to reconcile unknown order without requiring a controller-to-editor echo or guessed bidirectional state.
+- **The exact-263 restart boundary is explicit and test-guarded (GH #339).** The current descriptor remains a
+  restart boundary; a future modular hot-upgrade path requires separate prepare and activate receipts before the
+  descriptor can advertise reload support.
+- **Closeout steering keeps fenced component examples inside the response.** Only the exchange boundary can end
+  assistant-response stripping, so a status close-marker example cannot expose following queue projection text as
+  fresh operator steering.
+
 ## 0.35.535
 
 - **Due loop queues recover lost restore intent from their durable struck roster (GH #335).** The idle scheduler

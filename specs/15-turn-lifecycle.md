@@ -808,8 +808,18 @@ The write is compare-and-swap through the realtime authority, touches only the
 recorded (a startup reporting the id `start` minted). Outcomes are logged to the
 document's ops.log as `claude_session_start_resume_recorded pane= id= source=
 changed=`, `claude_session_start_resume_refused ... reason=` (when a document
-was identified), or `claude_session_start_resume_record_failed ... error=`;
+was identified), `claude_session_start_resume_record_deferred ...
+recovery=retained_async_editor_delivery operator_action=none` when a live
+editor's lazy projection owns the accepted write, or
+`claude_session_start_resume_record_failed ... error=` for an actual failure;
 refusals also go to the hook's stderr. The hook never fails the harness.
+
+A retained SessionStart frontmatter write is not stranded merely because no
+response cycle or response capture is open. Its durable non-response write
+intent and live relay receipt own convergence. The retained-write diagnostic
+therefore reports the write as deferred, does not prescribe `agent-doc commit`,
+and does not emit the `record_failed` event while the live replica can finish
+the exact projection on its own (GH #337).
 
 The capture moves the document pointer, which a relaunch and Restart Agent
 (which re-validates current frontmatter) both read.

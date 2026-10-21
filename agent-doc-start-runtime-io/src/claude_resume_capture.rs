@@ -46,6 +46,9 @@ pub enum ClaudeResumeCaptureOutcome {
     Refused(&'static str),
     /// `resume.claude` now names the new id (`changed=false`: it already did).
     Recorded { changed: bool },
+    /// The id reached realtime authority and its live editor projection owns
+    /// the remaining persistence. No operator action is required.
+    Deferred,
     /// Ownership was proven but the authority write failed.
     WriteFailed(String),
 }
@@ -128,6 +131,15 @@ pub fn capture_claude_session_start_resume_with_process_view(
         }
         Err(err) => {
             let error = format!("{err:#}").replace('\n', "\\n");
+            if agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&error) {
+                let line = format!(
+                    "claude_session_start_resume_record_deferred pane={pane} id={} source={} recovery=retained_async_editor_delivery operator_action=none",
+                    capture.session_id, capture.source,
+                );
+                eprintln!("[turn-status] {line}");
+                agent_doc_ops_log_io::log_op(&capture.document, &line);
+                return ClaudeResumeCaptureOutcome::Deferred;
+            }
             let line = format!(
                 "claude_session_start_resume_record_failed pane={pane} id={} source={} error={error}",
                 capture.session_id, capture.source
@@ -297,6 +309,20 @@ pub fn claude_respawn_session_start(
 mod tests {
     use super::*;
     use agent_doc_frontmatter::frontmatter;
+
+    #[test]
+    fn retained_live_projection_is_a_deferred_resume_record_not_a_failure() {
+        let error = format!(
+            "write retained [{}] [{}]",
+            agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+            agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+        );
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&error)
+        );
+        assert!(!error.contains("STRANDED"));
+        assert!(!error.contains("agent-doc commit"));
+    }
 
     fn seed(base: &Path, doc: &Path, pane: &str, supervisor_pid: u32) {
         let conn = agent_doc_sqlite::state_store::open_state_db(base).unwrap();

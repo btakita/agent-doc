@@ -25,7 +25,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published release: [v0.35.532](https://github.com/btakita/agent-doc/releases/tag/v0.35.532), published on GitHub at 2026-10-21 04:54:19 UTC (15 assets); PyPI 0.35.532 followed at 2026-10-21 04:55:01 UTC; installed locally (agent-doc 0.35.532). Published JetBrains packages: 0.2.756 (classic), 0.2.758 (IDE 262), and 0.2.757 (IDE 263), published with the release at 2026-10-21 04:54:19 UTC. Current main/source generations are 0.2.759 (classic), 0.2.760 (IDE 262), and 0.2.761 (IDE 263); installed IDE targets were reconciled locally. VS Code extension 0.2.83.
+Latest published release: [v0.35.533](https://github.com/btakita/agent-doc/releases/tag/v0.35.533), published on GitHub at 2026-10-21 13:58:09 UTC (15 assets); PyPI 0.35.533 followed at 2026-10-21 13:59:00 UTC; installed locally (agent-doc 0.35.534). Published JetBrains packages: 0.2.759 (classic), 0.2.760 (IDE 262), and 0.2.761 (IDE 263), published with the release at 2026-10-21 13:58:09 UTC. Current main/source generations remain 0.2.759 (classic), 0.2.760 (IDE 262), and 0.2.761 (IDE 263). VS Code extension 0.2.83.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -67,7 +67,15 @@ The two commits were integrated serially from `0b5909927f` and pushed to `origin
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/331~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/332~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/332~~
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/333
+- 📥 release + publish: include issue 331-333
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/334: Can you simulation test the Coder environment?
+- 📥 release + publish: include issue 334
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/335
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/336
+- 📥 release + publish: include issue 335-336
+- 🚧 In sdk-demo.md, the queue item "- 📥 Why are you telling me to `cd /home/brian/work/btakita/agent-loop/worktrees/haiven-dev/haiven-cli/demo-open-options-20261021` if we are working in `~/work/btakita/worktrees/haiven-dev/haiven-cli/unity-hub-register-option`?" was never struck. Can this fix be a part of the 335-336 release or do we need a new release?
 <!-- /agent:queue -->
 
 ## Queue: Issues

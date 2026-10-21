@@ -258,17 +258,16 @@ merge baseline) must violate it, so the ledger fix carries the claim.
 component holding both the editor's typing and independent work, remains the
 stated boundary.
 
-`RemoteLayoutProvisional.tla` checks the recurring Coder/Remote Dev ordering
-race from GH #250. It exhausts every ordered two-column layout over four
-documents, either focused side, every selection absent from the lagging visible
-set, an optional second lagging selection, and every structural correction
-containing the selected document. `CorrectionUsesPreGuessBase` requires the
-correction to equal a fold against the layout from before the first guess;
-`ProvisionalPreservesAncestry` keeps that base stable across repeated selection
-events; and `ProvisionalClearsAfterCorrection` prevents stale ancestry from
-leaking into a later fold. `RemoteLayoutProvisionalWedge.cfg` restores the
-pre-fix behavior and must violate the correction invariant, while
-`RemoteLayoutProvisionalReach.cfg` proves the guess/correction path is reachable.
+`RemoteLayoutNoGuess.tla` checks the recurring Coder/Remote Dev ordering race
+from GH #250/#343. It exhausts ordered two-column layouts, selection-only input,
+repeated flat visible-set/timing input, and later exact frontend snapshots.
+`CachedColumnsEqualFrontendAuthority` and
+`NonExactInputNeverMutatesStructure` require every incomplete observation to
+preserve authoritative membership and order; only the exact frontend vector
+may replace both cached authority and the desired tmux target.
+`RemoteLayoutNoGuessWedge.cfg` lets a repeated flat observation swap columns and
+must violate the no-guess invariant, while `RemoteLayoutNoGuessReach.cfg` proves
+the exact-snapshot path is reachable.
 
 `StaleColumnRecycle.tla` checks GH #136: the stale-supervisor column gate and
 the safe-boundary recycle request it depends on. The editor link is an

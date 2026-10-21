@@ -122,7 +122,7 @@ What landed (the original scope follows below):
   `editor_navigation_mode_rejected`). `ControllerRuntime::new` reads it once and
   `with_navigation_mode` is no longer test-only.
 - Effect workers: `ControllerPaneLayoutLanes` holds a sink factory; every lane graph,
-  including lanes created later, gets its own `ControllerPaneLayoutProjectionSink`
+  including lanes created later, gets its own `PaneLayoutDesiredLaneEffectSink`
   and latest-wins worker. The worker takes its lane and binds
   `set_structural_effect_generation` to that lane graph's published generation, so
   the cancellation generation is keyed by lane.
@@ -204,7 +204,7 @@ What landed (the original scope follows below):
   the controller's first driving layout uses (never adopts an unmarked session). The attach
   command is rendered by the same policy (including an operator `attach_command` template).
 - Plugin publications: a `pane_layout_desired` frame carries `client_id`; the state-plane
-  sink keeps one latest-wins projector per lane (`PaneLayoutDesiredLaneProjector`) and
+  sink keeps one latest-wins effect worker per lane (`PaneLayoutDesiredLaneEffectSink`) and
   publishes into that client's lane graph, so the manual Sync Tmux Layout arranges the
   requesting IDE's own lane and two IDEs' frames never coalesce each other away. A lane frame
   is marked seen on the shared graph when the sink dispatches it (not when the lane's
@@ -439,7 +439,7 @@ republish; a per-lane `pane_layout_status` channel; optionally an opt-in focus-d
   The shared lane is the pre-lane path byte for byte; an installation lane publishes through
   `publish_pane_layout_desired_invocation_in_lane` (publisher `command`, no shared durable column
   memory, its own status channel), logs `sync_tmux_layout_lane_routed`, and awaits that lane
-  graph's projection (`await_lane_sync_tmux_layout_projection`). A `manual` command is the P4
+  graph's effect receipt (`await_lane_sync_tmux_layout_effect`). A `manual` command is the P4
   explicit claim in its own lane. FFI: `agent_doc_sync_tmux_layout_for_client_json(.., client_id)`;
   the old entry point is that with a null client. No plugin change: the JetBrains manual Sync Tmux
   Layout already reaches its lane through the plugin publication (P3).
@@ -640,7 +640,7 @@ Layout, route's layout, recycle republish) do with such a document?
   structural-effect cancellation generation
   (`agent_doc_process_owner_io::set_structural_effect_generation`, bound to
   `published_generation_handle()`) was process-global, and the pane-layout effect
-  worker plus its `ControllerPaneLayoutProjectionSink` are installed once per
+  worker plus its `PaneLayoutDesiredLaneEffectSink` are installed once per
   runtime. A newer generation in one lane must not cancel another lane's sync
   body. P2 should either key that generation by lane or drive every lane from one
   worker that drains lanes in order. The `.agent-doc/sync.lock` flock already

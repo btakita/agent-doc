@@ -52,10 +52,10 @@ command that cannot be forwarded ends in a terminal `rejected` receipt with
 reason `handoff_forward_failed` and output telling the operator to run it again.
 
 For `sync_tmux_layout`, a terminal command receipt of `applied` acknowledges
-that the controller durably accepted the desired pane-layout projection. The
+that the controller durably accepted the desired pane-layout target. The
 embedded `ControllerTmuxLayoutSyncReceipt.applied` field separately reports
 whether the downstream tmux effect was already observed. Consequently,
-`reason: "projection_published"` is a successful command terminal with
+`reason: "target_published"` is a successful command terminal with
 `applied: false` in the embedded effect receipt; retry/failure reasons remain
 rejected terminals. A manual sync's nested waits are ordered: the pane startup
 effect has 30 seconds to publish its outcome, the controller command projection

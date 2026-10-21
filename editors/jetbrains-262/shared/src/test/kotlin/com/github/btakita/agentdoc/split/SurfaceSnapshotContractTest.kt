@@ -29,14 +29,15 @@ class SurfaceSnapshotContractTest {
         assertTrue(FrontendPresentationCapability.EXACT_262_INTERNAL.admitsTerminalPresentation())
     }
 
-    /** GH #320 option B: schema 2 adds geometry; schema 1 stays accepted for an old frontend. */
+    /** Schema 3 adds frontend columns; geometry schema 2 and legacy schema 1 remain accepted. */
     @Test
-    fun schemaTwoIsCurrentAndSchemaOneStaysSupported() {
-        assertEquals(2, SURFACE_SNAPSHOT_SCHEMA_VERSION)
+    fun schemaThreeIsCurrentAndOlderSchemasStaySupported() {
+        assertEquals(3, SURFACE_SNAPSHOT_SCHEMA_VERSION)
         assertTrue(isSupportedSurfaceSnapshotSchema(1))
         assertTrue(isSupportedSurfaceSnapshotSchema(2))
+        assertTrue(isSupportedSurfaceSnapshotSchema(3))
         assertFalse(isSupportedSurfaceSnapshotSchema(0))
-        assertFalse(isSupportedSurfaceSnapshotSchema(3))
+        assertFalse(isSupportedSurfaceSnapshotSchema(4))
     }
 
     /**
@@ -53,11 +54,18 @@ class SurfaceSnapshotContractTest {
             visiblePaths = listOf("/repo/b.md"),
             bounds = EditorWindowBounds(x = 640, y = 40, width = 600, height = 800),
         )
-        val surface = FrontendSurface("root", 1, SurfaceRole.MAIN, true, listOf(measured))
+        val surface = FrontendSurface(
+            "root", 1, SurfaceRole.MAIN, true, listOf(measured),
+            layoutColumns = listOf(FrontendLayoutColumn(listOf("/repo/b.md"))),
+        )
 
-        val legacy = surface.copy(windows = surface.windows.map { it.copy(bounds = null) })
+        val legacy = surface.copy(
+            windows = surface.windows.map { it.copy(bounds = null) },
+            layoutColumns = null,
+        )
         val legacyJson = RPC_JSON.encodeToString(FrontendSurface.serializer(), legacy)
         assertFalse(legacyJson.contains("bounds"), legacyJson)
+        assertFalse(legacyJson.contains("layoutColumns"), legacyJson)
         val decodedByOldPeer = RPC_JSON.decodeFromString(LegacySurface.serializer(), legacyJson)
         assertEquals(listOf("/repo/b.md"), decodedByOldPeer.windows.single().visiblePaths)
 
@@ -82,18 +90,32 @@ class SurfaceSnapshotContractTest {
             sequence = 4,
             projectId = ProjectId(UID.random()),
             complete = true,
-            surfaces = listOf(FrontendSurface("root", 3, SurfaceRole.MAIN, true, listOf(window))),
+            surfaces = listOf(
+                FrontendSurface(
+                    "root", 3, SurfaceRole.MAIN, true, listOf(window),
+                    layoutColumns = listOf(FrontendLayoutColumn(listOf("/repo/a.md"))),
+                ),
+            ),
         )
         assertEquals(SURFACE_SNAPSHOT_SCHEMA_VERSION, snapshot.schemaVersion)
 
         val legacy = snapshot.forSchema(LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION)
         assertEquals(1, legacy.schemaVersion)
         assertNull(legacy.surfaces.single().windows.single().bounds)
+        assertNull(legacy.surfaces.single().layoutColumns)
         assertEquals("/repo/a.md", legacy.surfaces.single().windows.single().selectedPath)
         assertEquals(snapshot.sequence, legacy.sequence)
 
         val current = snapshot.forSchema(SURFACE_SNAPSHOT_SCHEMA_VERSION)
         assertEquals(EditorWindowBounds(0, 40, 600, 800), current.surfaces.single().windows.single().bounds)
+        assertEquals(listOf("/repo/a.md"), current.surfaces.single().layoutColumns!!.single().paths)
+        val currentJson = RPC_JSON.encodeToString(FrontendSurfaceSnapshot.serializer(), current)
+        assertTrue(currentJson.contains("\"layoutColumns\""), currentJson)
+        val decodedCurrent = RPC_JSON.decodeFromString(FrontendSurfaceSnapshot.serializer(), currentJson)
+        assertEquals(
+            listOf("/repo/a.md"),
+            decodedCurrent.surfaces.single().layoutColumns!!.single().paths,
+        )
     }
 
     @Serializable

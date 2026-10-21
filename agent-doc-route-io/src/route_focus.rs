@@ -21,7 +21,7 @@
 //! - a route that must preserve the caller's surface (background recovery,
 //!   cross-document child route) never focuses;
 //! - a route whose layout is owned by the controller (`editor_route`) never
-//!   focuses either — the layout projection already applied the route's focus
+//!   focuses either — the tmux layout effect already applied the route's focus
 //!   at convergence, and any later focus belongs to the newest editor
 //!   selection, which only the generation-sequenced layout plane knows;
 //! - a standalone route keeps immediate focus only when the target is proven

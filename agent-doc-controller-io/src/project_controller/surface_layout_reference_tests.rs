@@ -182,11 +182,6 @@ fn sync_by_reference_keeps_a_remote_dev_order_label() {
             SurfaceColumnOrder::Retained,
             agent_doc_tmux::LayoutColumnOrder::Retained,
         ),
-        (
-            3,
-            SurfaceColumnOrder::Provisional,
-            agent_doc_tmux::LayoutColumnOrder::Provisional,
-        ),
     ] {
         fixture.observe(sequence, split(&[&[&a], &[&b]], &a, order));
         let invocation = fixture

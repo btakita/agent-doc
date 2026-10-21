@@ -165,7 +165,7 @@ may republish the retained intent, but remains subject to the same rule.
 - Editor `Run Agent Doc` callers may retry the route command only for the authoritative-actor startup guard. Dispatch-only latest-run boot timeouts such as `latest run is still booting ... (timed_out)` already spent the binary ready-wait window and must surface the persisted route diagnostic immediately instead of silently re-waiting the full ready timeout per attempt. A real active-turn cue accepts the editor's reopen trigger immediately; protected-input blockers such as shell history search remain persistent failures.
 - Controller `editor_route` owns one plain-trigger admission for fresh runs, interrupted-turn replacements, selected-text runs, and diff steering. Non-empty legacy `selected_text` / `steering_id` fields are compatibility metadata only: they enter the same `route --dispatch-only --plain-trigger` state machine, never a separate supervisor-steering RPC. Plain-trigger admission suppresses prompt-diff queue mutation and submits the harness-native reopen trigger through a live `ready`, `busy`, or `waiting_input` actor; protected interactive substates and non-turn surfaces still fail closed. `plain_trigger` scopes what is *attached* to the dispatch (no prompt-bearing context), not which trigger the harness gets: Claude/OpenCode receive `/agent-doc <FILE>` and Codex receives the bare `agent-doc <FILE>`, matching the supervisor idle-drain rule below (`#runpromptverbose`). It previously forced the bare form for every harness, so the two dispatch paths disagreed for the same harness.
 - The explicit editor `--wait-for-ready` budget applies to every pre-submit dispatch-only readiness wait that is trying to prove a starting/latest-run pane has become dispatch-ready, including the session-log `latest run is still booting` probe. It must not fall back to the short Codex dispatch-only default while the user-visible JetBrains command asked for a longer startup-readiness window.
-- The controller editor route (`cp:editor_route`) spends that same `--wait-for-ready` budget on layout convergence BEFORE harness readiness, and hands the harness only the remainder (GH #110). Its layout gates (command-plane convergence, then routed-document membership in the published columns, where a column may stack comma-separated documents) re-observe within the budget: the per-attempt await is the remaining budget, and a refused attempt waits for the pane-layout projection to change (bounded by a short pace) before republishing a fresh route intent. `operator_owned_layout` is terminal and is not retried. Every refusal names the routed document, the receipt `reason`, and the published columns; the focus refusal names both the focused and routed documents. A route-owned supervisor still running a superseded binary after the route effect is surfaced as a route diagnostic (`controller_editor_route_supervisor_binary_stale` plus a warning line in the route output), never as a refusal. The controller re-observes freshness after the route settles: if a pending safe-boundary recycle re-executes the supervisor during that route, it logs the settlement and does not append the obsolete pre-route warning.
+- The controller editor route (`cp:editor_route`) spends that same `--wait-for-ready` budget on layout convergence BEFORE harness readiness, and hands the harness only the remainder (GH #110). Its layout gates (command-plane convergence, then routed-document membership in the published columns, where a column may stack comma-separated documents) re-observe within the budget: the per-attempt await is the remaining budget, and a refused attempt waits for the tmux layout effect state to change (bounded by a short pace) before republishing a fresh route intent. `operator_owned_layout` is terminal and is not retried. Every refusal names the routed document, the receipt `reason`, and the published columns; the focus refusal names both the focused and routed documents. A route-owned supervisor still running a superseded binary after the route effect is surfaced as a route diagnostic (`controller_editor_route_supervisor_binary_stale` plus a warning line in the route output), never as a refusal. The controller re-observes freshness after the route settles: if a pending safe-boundary recycle re-executes the supervisor during that route, it logs the settlement and does not append the obsolete pre-route warning.
 - Controller `editor_route` admission gates on superseded plugin bytes by capability, not by the jar on disk (GH #76, #257, #267). When a live JetBrains registration for the routed document maps a plugin jar that is no longer the installed one (`MappedPluginJar::Deleted`/`Superseded`), admission probes that pid's native agent-doc endpoint (the same IPC root controller → editor sends resolve) with one hello round trip (`probe_editor_endpoint_build_for_pid`). An endpoint that answers with the controller's own build proves the editor still serves the route: an exact-263 modular IDE keeps the old jar until restart but hot-reloads the native library, and that library owns the endpoint. The route is admitted, `editor_route_superseded_editor_admitted ... reason=native_endpoint_current` is logged, and a `plugin_bytes_superseded_advisory` line (restart only loads the new plugin UI) is appended to the route output; it is never a refusal. The route still fails closed before dispatch (`editor_route_refused_superseded_editor ... reason=plugin_bytes_superseded`) when the endpoint answers with another build (the native library has not reloaded, so it rejects the controller's messages), does not answer a hello, or is not bound for the project. The refusal names the pid, the mapped jar and that endpoint evidence. Its remedy is the recorded-verdict ladder (`superseded_editor_remedy`: restart once an install recorded that this process refused the restart-free upgrade, otherwise one reinstall). An other-build endpoint first gets the restart-free native reload rung (`agent-doc admin reload-lib`), because the route is admitted as soon as the endpoint answers with the controller's build. Current or inconclusive mappings never probe and never refuse.
 - That editor readiness budget is one absolute deadline shared by pane resolution, startup recovery, and dispatch-only retries; each phase receives only the remaining time. A route must also inspect the authoritative pane for an operator composer draft before spending that budget, so a protected draft returns its terminal refusal promptly instead of surfacing as the editor caller's generic timeout.
 - If a prompt-bearing dispatch-only reroute reaches a live pane that reports a plain active Codex or OpenCode turn before input is submitted, route must queue that rerun in plain `agent:queue`, sync the snapshot, strip any legacy `auto` from the touched queue tag, and print a `queued pending dispatch ... in active agent:queue` diagnostic instead of surfacing a persistent editor route failure. A historical `starting`/latest-run readiness probe cannot override a current healthy authoritative actor on the same pane once that actor is `busy` and the pane proves an active-turn blocker; route must leave the startup wait immediately and take this queue path. This queue path is only for active-turn blockers; hook review prompts, permission prompts, shell history search, and clean-exit restart prompts still fail closed with their specific recovery action. Queued composer input also remains protected unless Codex's current queued-input surface contains exactly the reopen trigger requested by this route. That exact match proves the reopen is already accepted behind the active turn, so route coalesces it as successful existing input without sending text or another submit key; a different trigger or any added operator text still fails closed.
@@ -554,38 +554,18 @@ when its columns, order, and focus are identical to the retained escalation: sel
 `agent-doc` tmux window is itself the missing consequence. Other identical escalation reasons may
 coalesce; that branch writes `controller_editor_surface_focus_escalation_coalesced` with the
 document, reason, and retained generation so an inert publication is diagnosable (GH #154).
-An escalation is a derived focus intent, not a structural observation (GH #224). It is fenced to
-the desired generation from which it derived its retained columns. If a positive editor split
-publishes first, the layout graph rebases the escalation inside its publication critical section:
-it keeps the newer editor column order and only focuses or replaces that layout's focus column. A
-route lease may defer a positive editor split that omits the route document; a later derived
-escalation for a document already present in that pending split must not overwrite the pending
-split. Releasing the route projects the editor observation, so an accepted structural-sync
-observation remains the next authoritative layout rather than disappearing behind an escalation
-reconstructed from retained columns.
-The slot chosen when that escalation replaces an uncovered document is a guess, not order
-authority (GH #302). The desired generation carries the last positively observed columns as a
-provisional order basis. If the next structural publication still includes a document displaced
-by the guess, its `unknown` order is resolved against that pre-escalation basis; a structural
-publication that confirms the guessed membership retires the provisional basis. Read-only clients
-that anchor layout memory receive the same positive basis while the guess is outstanding, including
-after a client restart, so the guessed order cannot become a durable pane reversal.
-Which slot that guess replaces is derived from propagated editor state, never from
-the focus sequence alone (GH #322). Every positive editor split observation (an
-`exact` route, a plugin publication, an editor-surface split escalation, an explicit
-sync command) records its documents as the layout graph's **editor-visible set**;
-derived publications (an escalation over retained columns, an `ensure` route, a
-recycle or lane republish) never change it. The uncovered document replaces, in
-order of preference: a column holding no editor-visible document (the latest
-focus's column among those, else the rightmost); else the latest focus's column
-(GH #278 Ask 3, a tab opened in the focused split); else the rightmost column. So a
-focus never evicts the document another IDE split still shows while tmux holds a
-column for a document no split shows. Before GH #322 the latest-focus column always
-lost: on Remote Dev, alternating `A`/`B` across two splits with tmux `[A | C]`
-replaced the split the operator had just left every time, and `C`'s pane never
-changed. The same rule applies when the #224 rebase replaces a column. The
-`controller_editor_surface_focus_escalated` line names the rule as
-`choice=not_editor_visible|latest_focus|rightmost`.
+An escalation is a derived focus intent, never structural evidence (GH #224, GH #343). It may
+update focus intent against the last accepted frontend snapshot, but it must not replace, insert,
+remove, regroup, or reorder a column. If its requested document is absent from that snapshot, the
+controller preserves the exact cached frontend column vector and defers structural work until the
+frontend publishes a complete positive snapshot. A route lease may buffer such a snapshot, but
+release applies that exact vector unchanged; backend state, focus history, tmux observation, event
+timing, and an `unknown`/partial manual capture are never allowed to reconstruct editor structure.
+When a frontend connection is authenticated, its authority is pending immediately—before the
+first debounced snapshot or schema negotiation completes—so local backend fallback cannot act in
+that window. Between snapshots the controller may continue enforcing only the last accepted
+frontend vector. An explicit `Sync Tmux Layout` replaces stale structure only when its capture is a
+complete positive frontend snapshot; otherwise it preserves the last accepted vector or defers.
 - Realising a column is audited after tmux-router runs (GH #109). A column pane
 that moved windows (a stash → layout promotion), runs another document, or
 whose route-owned supervisor maps a superseded binary gets one
@@ -649,7 +629,7 @@ install fan-out used to overwrite a non-lapsing stale request with one that
 lapsed after 900s, leaving `prior_request=unconsumed` for up to 22 hours).
 - The layout effect acknowledges the columns it gated out:
 `ControllerTmuxLayoutSyncReceipt.gated_documents` (serde-defaulted). The
-pane-layout projection measures convergence against the desired columns minus
+tmux layout effect state measures convergence against the desired columns minus
 those documents and does not demand focus of a gated document, so a gated
 column converges in one attempt instead of cycling `retry_pending` for as long
 as the supervisor stays stale. An all-gated pass converges as
@@ -742,7 +722,7 @@ All tab targets share one focus generation, so a burst of selection events
 coalesces to the newest document instead of replaying older pane selections
 after it.
 - A surface change that replaces a visible document and changes focus is one
-retained pane-layout projection with two consequences: reconcile columns, then
+retained tmux layout effect state with two consequences: reconcile columns, then
 select the requested pane. Column observation alone must not mark that
 projection converged. Its typed effect receipt must also prove the final
 `select-pane`, and the latest-input-revision worker mutex fences that effect so
@@ -859,7 +839,7 @@ thread or in a detached periodic timer.
   stash consolidation.
   Keep this aligned in `focus.rs`, `sync.rs`, and this spec.
 - Editor automatic tab-to-pane sync must not use `focus` as a substitute for
-  the retained exact-visible layout projection; beyond the selected-pane
+  the retained exact-visible tmux layout effect state; beyond the selected-pane
   recovery above, focus does not own full stash consolidation, safe passive
   replacement, or preserved-layout reselect proof.
 
@@ -1128,7 +1108,7 @@ markdown file, sync must expand that one-column projection from the project
 ### Sync-specific invariants
 
 - `provision_pane` is the passive sync-specific pane-creation path. It stages a new owner off-screen without blocking on prompt readiness; the current layout determines column placement.
-- Queue control fences autonomous route dispatch, not structural editor-layout ownership. A binary-owned provision-only sync may create and start an idle keep-alive owner while queue control is paused or draining, but it must preserve a typed `layout-provision` purpose through both route admission and the spawned `agent-doc start` lifecycle check. The initial sync sends no reopen, and the supervisor's queue watcher must continue honoring queue control before any later dispatch. A fresh layout-provision supervisor must wait one complete orphan-observation interval before it may reap a stashed pane from an inherited terminal cycle, giving the newly resumed child time to admit its prompt. That destructive orphan decision must inspect live child output directly and must not trust a stale controller `Ready` state over an active harness turn. An unchanged desired projection must settle after the pane becomes observable instead of retrying the blocked allocation on a timer.
+- Queue control fences autonomous route dispatch, not structural editor-layout ownership. A binary-owned provision-only sync may create and start an idle keep-alive owner while queue control is paused or draining, but it must preserve a typed `layout-provision` purpose through both route admission and the spawned `agent-doc start` lifecycle check. The initial sync sends no reopen, and the supervisor's queue watcher must continue honoring queue control before any later dispatch. A fresh layout-provision supervisor must wait one complete orphan-observation interval before it may reap a stashed pane from an inherited terminal cycle, giving the newly resumed child time to admit its prompt. That destructive orphan decision must inspect live child output directly and must not trust a stale controller `Ready` state over an active harness turn. An unchanged desired tmux target must settle after the pane becomes observable instead of retrying the blocked allocation on a timer.
 - Full/manual sync uses the strict provision-and-route variant: it resolves and creates the pane in the intended tmux session, registers it, waits for harness dispatch readiness, and submits the document route as one fallible controller command. A readiness or submit failure must keep the terminal command non-applied and expose its diagnostic to the caller.
 - A paused queue reduces manual layout startup to provision-only; it never resumes the queue to make geometry converge. Run Agent Doc publishes an `editor_route` layout intent that awaits exact layout convergence but does not dispatch newly created sibling panes. Only the selected document crosses the subsequent route boundary.
 - With an existing visible `agent-doc` window, layout-owned startup creates a detached staging pane and leaves visible geometry and selection unchanged. Only the current layout Effect may attach the returned pane. A startup that finishes after its layout was superseded stays off-screen, preserving the exact editor-visible pane count. First-window bootstrap retains its existing behavior.

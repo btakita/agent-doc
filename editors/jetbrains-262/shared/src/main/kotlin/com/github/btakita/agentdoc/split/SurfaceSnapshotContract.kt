@@ -13,10 +13,12 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /**
- * Current snapshot schema. Schema 2 (GH #320 option B) adds each editor window's measured
- * on-screen [EditorWindowBounds]; schema 1 carries no geometry.
+ * Current snapshot schema. Schema 2 added measured window bounds. Schema 3 adds the frontend's
+ * authoritative column vector so the backend never reconstructs editor structure from geometry.
  */
-const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 2
+const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 3
+const val GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 2
+const val FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 3
 
 /** The oldest snapshot schema a backend still accepts (a frontend that predates geometry). */
 const val LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 1
@@ -139,7 +141,12 @@ data class EditorWindowSnapshot(
     val bounds: EditorWindowBounds? = null,
 )
 
+/** One frontend-authored editor column, in exact left-to-right order. */
 @Serializable
+data class FrontendLayoutColumn(val paths: List<String>)
+
+@Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class FrontendSurface(
     val paneId: String,
     /** Frontend-owned incarnation; changes when the pane component is replaced or reopened. */
@@ -147,6 +154,12 @@ data class FrontendSurface(
     val role: SurfaceRole,
     val focused: Boolean,
     val windows: List<EditorWindowSnapshot>,
+    /**
+     * Schema 3 authoritative editor structure. The backend may validate/filter non-session paths,
+     * but must never regroup or reorder this vector.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val layoutColumns: List<FrontendLayoutColumn>? = null,
 )
 
 @Serializable
@@ -162,16 +175,26 @@ data class FrontendSurfaceSnapshot(
 )
 
 /**
- * The same snapshot in an older schema the backend accepts. Schema 1 carries no geometry, so the
- * window bounds are dropped (and, being null, are not encoded at all).
+ * The same snapshot in an older schema the backend accepts. Schema 2 carries bounds but no
+ * frontend column vector; schema 1 carries neither.
  */
 fun FrontendSurfaceSnapshot.forSchema(version: Int): FrontendSurfaceSnapshot {
     require(isSupportedSurfaceSnapshotSchema(version)) { "unsupported surface snapshot schema $version" }
-    if (version >= SURFACE_SNAPSHOT_SCHEMA_VERSION) return copy(schemaVersion = version)
     return copy(
         schemaVersion = version,
         surfaces = surfaces.map { surface ->
-            surface.copy(windows = surface.windows.map { it.copy(bounds = null) })
+            surface.copy(
+                windows = if (version >= GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+                    surface.windows
+                } else {
+                    surface.windows.map { it.copy(bounds = null) }
+                },
+                layoutColumns = if (version >= FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+                    surface.layoutColumns
+                } else {
+                    null
+                },
+            )
         },
     )
 }

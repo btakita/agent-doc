@@ -86,8 +86,8 @@ const CONTROLLER_MODEL_PRESSURE_PERSIST_TIMEOUT: Duration = Duration::from_milli
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
 const ASYNC_EDITOR_COMMAND_MIN_AWAIT_MS: u64 = 1;
 const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
-const PANE_LAYOUT_PROJECTION_RETRY_MIN: Duration = Duration::from_millis(250);
-const PANE_LAYOUT_PROJECTION_RETRY_MAX: Duration = Duration::from_secs(5);
+const TMUX_LAYOUT_EFFECT_RETRY_MIN: Duration = Duration::from_millis(250);
+const TMUX_LAYOUT_EFFECT_RETRY_MAX: Duration = Duration::from_secs(5);
 const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
 const DOCUMENT_TURN_AUTHORITY_TYPE_TAG: &str = "agent-doc.document-turn-authority.v1";
@@ -3349,13 +3349,10 @@ fn tmux_focus_state_with_caller(
 /// The shared lane's last positively observed layout columns, in order
 /// (`#tmuxpanesreversed`).
 ///
-/// This is the left-to-right order tmux shows (or is converging on), and on a
-/// JetBrains Remote Dev backend, which reports no split geometry, it is the
-/// only order authority. While focus escalation has guessed a replacement
-/// slot, this returns the pre-escalation basis rather than that provisional
-/// desired order (GH #302). The Remote Dev layout fold reads it to anchor a
-/// cold or unanchored memory instead of adopting the visible list's tab-open
-/// order.
+/// This is cached editor authority used only when no connected frontend can
+/// publish measured columns. A connected frontend snapshot supersedes it and
+/// passes unchanged into the tmux desired effect; tmux observation is only a
+/// convergence receipt, never editor-layout authority (GH #343).
 /// Existing-controller only and read-only: no autostart, no SQLite, no tmux.
 pub fn pane_layout_retained_columns_existing(project_root: &Path) -> Result<Vec<String>> {
     request_existing_controller_with_timeout(
@@ -4389,9 +4386,6 @@ fn layout_column_order_from_surface(
         }
         agent_doc_editor_surface::SurfaceColumnOrder::Retained => {
             agent_doc_tmux::LayoutColumnOrder::Retained
-        }
-        agent_doc_editor_surface::SurfaceColumnOrder::Provisional => {
-            agent_doc_tmux::LayoutColumnOrder::Provisional
         }
     }
 }
@@ -5876,8 +5870,8 @@ pub fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
     let file = file.canonicalize().ok()?;
     let project_root = agent_doc_project_root_io::project_root_containing(&file)?;
     let content = std::fs::read_to_string(&file).ok()?;
-    let dogfood = agent_doc_frontmatter_io::session::effective_dogfood_for_file(&content, &file)
-        .ok()?;
+    let dogfood =
+        agent_doc_frontmatter_io::session::effective_dogfood_for_file(&content, &file).ok()?;
     if !dogfood.enabled {
         return None;
     }
@@ -8451,7 +8445,10 @@ fn recycle_fanout_root_with_retry(
     }
     let (outcome, detail) = match &answer {
         Ok(true) => return true,
-        Ok(false) => ("declined", "controller_declined_or_socket_unanswered".to_string()),
+        Ok(false) => (
+            "declined",
+            "controller_declined_or_socket_unanswered".to_string(),
+        ),
         Err(error) => ("failed", format!("{error:#}").replace('\n', " ")),
     };
     if root.join(".agent-doc").is_dir() {
@@ -13878,12 +13875,12 @@ fn empty_controller_request(command: &str) -> ControllerRequest {
 /// Whether the command plane has successfully applied the layout command.
 ///
 /// `ControllerTmuxLayoutSyncReceipt::applied` describes the downstream tmux
-/// effect, not admission of the desired projection. Automatic/no-autostart
-/// callers intentionally return as soon as that projection is durable, so
-/// `projection_published` is a successful command-plane terminal even though
+/// effect, not admission of the desired target. Automatic/no-autostart
+/// callers intentionally return as soon as that target is durable, so
+/// `target_published` is a successful command-plane terminal even though
 /// the pane effect is still reactive.
 fn tmux_layout_command_applied(receipt: &ControllerTmuxLayoutSyncReceipt) -> bool {
-    receipt.applied || receipt.reason == "projection_published"
+    receipt.applied || receipt.reason == "target_published"
 }
 
 /// Render published layout columns for an operator-facing refusal.
@@ -14000,12 +13997,12 @@ fn editor_route_layout_refusal(
 /// route's `--wait-for-ready` budget) passes.
 ///
 /// The first observation already awaited semantic route readiness, so an effect
-/// still in flight is absorbed there. What reaches this loop is a projection the
+/// still in flight is absorbed there. What reaches this loop is an effect state the
 /// route cannot use *yet*: superseded by a newer layout without the routed
 /// document, a receipt whose columns momentarily lack it, or the budget running
 /// out mid-effect. `reobserve(refusal, remaining)` blocks on the next change to
-/// the pane-layout projection (bounded by `remaining`) and returns the receipt
-/// for the current projection. It never republishes, so a newer layout that
+/// the tmux layout effect state (bounded by `remaining`) and returns the receipt
+/// for the current effect state. It never republishes, so a newer layout that
 /// keeps the document out still refuses — only later than before, and only
 /// within the operator's budget.
 ///
@@ -27910,30 +27907,11 @@ fn focus_refusal_requires_structural_layout(reason: &str) -> bool {
 /// `cause=no_editor_columns` lines and zero escalations, and the stashed pane
 /// stayed stashed across all 92 `actor_pane_not_visible` refusals.
 ///
-/// The structural layout is already retained in the pane layout graph, which is
-/// the owner this hand-off is addressed to, so fall back to its columns and let
-/// the caller move the focus onto `document`.
-///
-/// GH #106: the fallback must never grow the retained layout. It used to
-/// append an uncovered `document` as a new column, and since the escalation
-/// publishes its result as the next desired layout, its output
-/// became its own next input: four documents asking in one second grew the
-/// column count 1→2→3→4, in the order they asked rather than their editor
-/// split position, for a surface that never reported more than one column.
-/// Republishing a covered layout as-is is a fixed point — the column set can
-/// never exceed what the editor last observed.
-///
-/// GH #126: failing closed on an *uncovered* document was the opposite defect.
-/// A passive single-column plugin publication (a tab switch to `laptop.md`)
-/// legitimately supersedes a route's `[agent-doc.ad.md]` by plane version, so
-/// the document the route had just placed is no longer a retained column; its
-/// pane is then stashed, focus refuses `actor_pane_not_visible`, and the
-/// escalation — the only thing that could switch tmux windows — was skipped.
-/// No `select-pane`, no error: the operator's explicit focus silently did
-/// nothing. An uncovered document now takes the place of the retained focus
-/// column (else the rightmost), exactly the `ensure` route rule of GH #120
-/// (`merge_editor_route_columns_within`). The width is unchanged, so GH #106's
-/// invariant holds: no sequence of escalations can grow the layout.
+/// With no columns in the focus payload, the last frontend snapshot is cached
+/// authority, not a backend-authored layout. It can be republished unchanged
+/// only when it already contains `document`; otherwise the focus is deferred
+/// until a positive frontend layout snapshot arrives. The backend never
+/// chooses a slot, reconstructs membership, or derives order (GH #343).
 fn focus_escalation_columns(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -27952,10 +27930,7 @@ fn focus_escalation_columns(
         return Ok(FocusEscalationColumns {
             columns: main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &supplied),
             source: "editor_surface",
-            replaced: None,
-            choice: None,
             basis_generation: None,
-            provisional_order_basis: None,
         });
     }
     let retained_desired = runtime.pane_layout_desired();
@@ -27965,56 +27940,12 @@ fn focus_escalation_columns(
             .map(|desired| desired.generation)
             .unwrap_or(0),
     );
-    // GH #278 Ask 3: the column to replace is the LATEST focus, including a
-    // `focus_only` outcome that published no generation, not the focus the
-    // retained layout was published with.
-    let (mut retained, mut retained_focus, mut provisional_order_basis) = retained_desired
-        .map(|desired| {
-            let focus = runtime.pane_layout_graph().latest_focus(&desired);
-            let order_authority = desired.order_authority_columns().map(<[_]>::to_vec);
-            (desired.invocation.columns, focus, order_authority)
-        })
+    let mut retained = retained_desired
+        .map(|desired| desired.invocation.columns)
         .unwrap_or_default();
     retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &retained);
-    retained_focus = retained_focus.filter(|focused| {
-        document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, focused)
-    });
-    let mut basis_source = "retained_layout";
     if retained.is_empty() {
-        // GH #166: a promoted controller's layout graph starts empty even
-        // though its supervisor-owned panes remain live in tmux. A focus-only
-        // editor event carries no columns by design, so use the same positive
-        // live observation that protects fresh-controller `ensure` routes.
-        // The observation is only a merge basis; publishing the focused
-        // layout below remains the first desired intent in this process.
-        let probe = automatic_layout_sync_invocation(Vec::new(), document, true);
-        let observation = observe_live_layout_documents(bootstrap, runtime, &probe);
-        let Some(live) = observation.documents.filter(|live| !live.is_empty()) else {
-            agent_doc_ops_log_io::log_op(
-                &bootstrap.project_root,
-                &format!(
-                    "controller_editor_surface_focus_merge_basis source=none reason={} session_source={} (GH #166)",
-                    observation.reason, observation.session_source,
-                ),
-            );
-            return Err("no_editor_columns");
-        };
-        agent_doc_ops_log_io::log_op(
-            &bootstrap.project_root,
-            &format!(
-                "controller_editor_surface_focus_merge_basis source=live_tmux_observation reason={} session_source={} columns={} (GH #166)",
-                observation.reason,
-                observation.session_source,
-                live.len(),
-            ),
-        );
-        retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &live);
-        if retained.is_empty() {
-            return Err("no_main_layout_eligible_columns");
-        }
-        retained_focus = None;
-        provisional_order_basis = Some(retained.clone());
-        basis_source = "live_tmux_layout";
+        return Err("no_frontend_layout_snapshot");
     }
     if retained
         .iter()
@@ -28022,62 +27953,22 @@ fn focus_escalation_columns(
     {
         return Ok(FocusEscalationColumns {
             columns: retained,
-            source: basis_source,
-            replaced: None,
-            choice: None,
+            source: "cached_frontend_layout",
             basis_generation,
-            provisional_order_basis,
         });
     }
-    // GH #322: the slot is chosen against the editor's propagated visible
-    // set, so a focus never evicts the document another IDE split still
-    // shows; the latest focus decides only among columns of equal standing.
-    let editor_visible = runtime.pane_layout_graph().editor_visible();
-    let slot = crate::project_controller::focus_escalation_replace_index(
-        &retained,
-        retained_focus.as_deref(),
-        editor_visible.as_deref(),
-    );
-    let mut merged = retained.clone();
-    let replaced = merged.get(slot.index).cloned();
-    let Some(target) = merged.get_mut(slot.index) else {
-        // Unreachable for a non-empty layout; refuse rather than publish a
-        // layout that grew or does not hold the document.
-        return Err("document_outside_retained_layout");
-    };
-    *target = document.to_string();
-    Ok(FocusEscalationColumns {
-        columns: merged,
-        source: if basis_source == "live_tmux_layout" {
-            "live_tmux_focus_column"
-        } else {
-            "retained_focus_column"
-        },
-        replaced,
-        choice: Some(slot.choice),
-        basis_generation,
-        provisional_order_basis,
-    })
+    Err("focus_requires_frontend_layout")
 }
 
 /// The layout a focus escalation republishes and where it came from.
 #[derive(Debug, PartialEq, Eq)]
 struct FocusEscalationColumns {
     columns: Vec<String>,
-    /// `editor_surface`, `retained_layout` (republished unchanged), or
-    /// `retained_focus_column` (GH #126: the document took one retained column).
+    /// `editor_surface` or `cached_frontend_layout` (republished unchanged).
     source: &'static str,
-    /// The retained column the document replaced, for `retained_focus_column`.
-    replaced: Option<String>,
-    /// Why that column (GH #322): `not_editor_visible`, `latest_focus` or
-    /// `rightmost`.
-    choice: Option<&'static str>,
     /// Retained desired generation used to derive `columns`; zero means there
     /// was no desired generation and the live tmux observation was the basis.
     basis_generation: Option<u64>,
-    /// Last positively observed order before this escalation guessed which
-    /// retained slot the focused document replaced (GH #302).
-    provisional_order_basis: Option<Vec<String>>,
 }
 
 /// Hand a `Focus` intent the selection lane could not apply to the structural
@@ -28122,10 +28013,7 @@ fn escalate_focus_to_structural_layout_ordered(
     let FocusEscalationColumns {
         columns,
         source,
-        replaced,
-        choice,
         basis_generation,
-        provisional_order_basis,
     } = match focus_escalation_columns(bootstrap, runtime, document, columns) {
         Ok(escalation) => escalation,
         Err(cause) => {
@@ -28141,15 +28029,8 @@ fn escalate_focus_to_structural_layout_ordered(
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}{}{}",
+            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}",
             columns.len(),
-            replaced
-                .as_ref()
-                .map(|column| format!(" replaced={column}"))
-                .unwrap_or_default(),
-            choice
-                .map(|choice| format!(" choice={choice}"))
-                .unwrap_or_default()
         ),
     );
     // The intent is "select this document", so the republished layout must carry
@@ -28172,10 +28053,7 @@ fn escalate_focus_to_structural_layout_ordered(
     // live-tmux basis, it asserts all of them (those are observations of the
     // current structure); from the retained desired layout it asserts only the
     // focused document.
-    let asserted_columns = if matches!(
-        source,
-        "editor_surface" | "live_tmux_layout" | "live_tmux_focus_column"
-    ) {
+    let asserted_columns = if source == "editor_surface" {
         invocation.columns.len()
     } else {
         1
@@ -28192,8 +28070,7 @@ fn escalate_focus_to_structural_layout_ordered(
         publication,
         PaneLayoutClaim::from(PaneLayoutPublisher::Escalation)
             .asserting(asserted_columns)
-            .derived_from(basis_generation)
-            .with_provisional_order_basis(provisional_order_basis),
+            .derived_from(basis_generation),
     );
     match published {
         Ok((desired, published_invocation)) => {
@@ -29254,13 +29131,13 @@ fn retire_pane_layout_generations_forgotten_by_editor(
     runtime: &ControllerRuntime,
     client_id: &str,
 ) {
-    use agent_doc_controller::pane_layout::ProjectionRetirement;
+    use agent_doc_controller::pane_layout::TmuxEffectRetirement;
     for lane in runtime.pane_layout_lane_ids() {
         let graph = runtime.pane_layout_graph_for_lane(&lane);
         let Some(desired) = graph.retire_generation_forgotten_by_editor(client_id) else {
             continue;
         };
-        let retirement = ProjectionRetirement::EditorSurfaceForgotten;
+        let retirement = TmuxEffectRetirement::EditorSurfaceForgotten;
         graph.record_receipt(PaneLayoutEffectReceipt {
             generation: desired.generation,
             actor_bindings: graph.actor_bindings(),
@@ -29275,10 +29152,10 @@ fn retire_pane_layout_generations_forgotten_by_editor(
         agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
-                "pane_layout_projection_retired generation={} attempts=0 reason={} {} client={client_id} (#stalecontrollerhotupdate)",
+                "tmux_layout_effect_state_retired generation={} attempts=0 reason={} {} client={client_id} (#stalecontrollerhotupdate)",
                 desired.generation,
                 retirement.as_str(),
-                pane_layout_projection_provenance(&desired),
+                tmux_layout_effect_state_provenance(&desired),
             ),
         );
     }
@@ -30566,7 +30443,7 @@ fn pane_layout_invocation_from_state_frame(
         PANE_LAYOUT_DESIRED_STATE_CHANNEL,
         PANE_LAYOUT_DESIRED_TYPE_TAG,
     )?;
-    serde_json::from_slice(&payload).context("decode pane-layout desired projection")
+    serde_json::from_slice(&payload).context("decode pane-layout desired target")
 }
 
 fn state_plane_snapshot_message_json<T: Serialize>(
@@ -30776,7 +30653,7 @@ fn publish_pane_layout_graph_status(
     runtime: &ControllerRuntime,
     graph: &super::ControllerPaneLayoutGraph,
 ) {
-    let Some(status) = graph.state_projection() else {
+    let Some(status) = graph.effect_status() else {
         return;
     };
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
@@ -30841,7 +30718,7 @@ pub(crate) fn handle_state_plane_publish(
             PANE_LAYOUT_DESIRED_TYPE_TAG,
         )?;
         let _: ControllerTmuxLayoutSyncInvocation =
-            serde_json::from_slice(&payload).context("validate pane-layout desired projection")?;
+            serde_json::from_slice(&payload).context("validate pane-layout desired target")?;
     }
     let (frame, duplicate) = runtime.publish_state_plane_frame(
         invocation.channel,
@@ -30855,7 +30732,7 @@ pub(crate) fn handle_state_plane_publish(
         reason: if duplicate {
             "duplicate_projection"
         } else {
-            "projection_published"
+            "target_published"
         }
         .to_string(),
         channel: frame.channel,
@@ -30914,7 +30791,7 @@ fn state_plane_subscription_channel(
 }
 
 #[derive(Default)]
-struct PaneLayoutDesiredProjectionState {
+struct PaneLayoutDesiredEffectState {
     pending_frame: Option<ControllerStatePlaneFrame>,
     worker_active: bool,
 }
@@ -30933,7 +30810,7 @@ struct PaneLayoutDesiredStatePlaneSink {
     lanes: Mutex<
         std::collections::BTreeMap<
             agent_doc_editor_surface::NavigationLane,
-            Arc<PaneLayoutDesiredLaneProjector>,
+            Arc<PaneLayoutDesiredLaneEffectSink>,
         >,
     >,
 }
@@ -30949,13 +30826,13 @@ impl PaneLayoutDesiredStatePlaneSink {
     fn projector(
         &self,
         lane: agent_doc_editor_surface::NavigationLane,
-    ) -> Arc<PaneLayoutDesiredLaneProjector> {
+    ) -> Arc<PaneLayoutDesiredLaneEffectSink> {
         let mut lanes = self.lanes.lock();
         Arc::clone(lanes.entry(lane.clone()).or_insert_with(|| {
-            Arc::new(PaneLayoutDesiredLaneProjector {
+            Arc::new(PaneLayoutDesiredLaneEffectSink {
                 lane,
                 runtime: self.runtime.clone(),
-                state: Arc::new(Mutex::new(PaneLayoutDesiredProjectionState::default())),
+                state: Arc::new(Mutex::new(PaneLayoutDesiredEffectState::default())),
                 wake: Arc::new(Condvar::new()),
                 last_applied_version: Arc::new(AtomicU64::new(0)),
             })
@@ -31020,15 +30897,15 @@ fn pane_layout_state_frame_lane(
 }
 
 /// One navigation lane's latest-wins `pane_layout_desired` projector.
-struct PaneLayoutDesiredLaneProjector {
+struct PaneLayoutDesiredLaneEffectSink {
     lane: agent_doc_editor_surface::NavigationLane,
     runtime: std::sync::Weak<ControllerRuntime>,
-    state: Arc<Mutex<PaneLayoutDesiredProjectionState>>,
+    state: Arc<Mutex<PaneLayoutDesiredEffectState>>,
     wake: Arc<Condvar>,
     last_applied_version: Arc<AtomicU64>,
 }
 
-impl PaneLayoutDesiredLaneProjector {
+impl PaneLayoutDesiredLaneEffectSink {
     fn project(&self, frame: ControllerStatePlaneFrame) {
         if frame.plane_version <= self.last_applied_version.load(Ordering::SeqCst) {
             return;
@@ -31062,13 +30939,7 @@ impl PaneLayoutDesiredLaneProjector {
         let spawn = std::thread::Builder::new()
             .name("agent-doc-state-plane-projector".to_string())
             .spawn(move || {
-                pane_layout_desired_projection_worker(
-                    runtime,
-                    lane,
-                    state,
-                    wake,
-                    last_applied_version,
-                );
+                pane_layout_desired_effect_worker(runtime, lane, state, wake, last_applied_version);
             });
         if let Err(error) = spawn {
             self.state.lock().worker_active = false;
@@ -31077,10 +30948,10 @@ impl PaneLayoutDesiredLaneProjector {
     }
 }
 
-fn pane_layout_desired_projection_worker(
+fn pane_layout_desired_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
     lane: agent_doc_editor_surface::NavigationLane,
-    state: Arc<Mutex<PaneLayoutDesiredProjectionState>>,
+    state: Arc<Mutex<PaneLayoutDesiredEffectState>>,
     wake: Arc<Condvar>,
     last_applied_version: Arc<AtomicU64>,
 ) {
@@ -31139,7 +31010,7 @@ fn pane_layout_desired_projection_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_desired_projected plane_version={} producer={} epoch={}{}",
+                        "pane_layout_desired_accepted plane_version={} producer={} epoch={}{}",
                         frame.plane_version,
                         frame.producer_id,
                         frame.epoch,
@@ -31156,14 +31027,14 @@ fn pane_layout_desired_projection_worker(
                     agent_doc_ops_log_io::log_op(
                         &bootstrap.project_root,
                         &format!(
-                            "pane_layout_desired_projection_retry_scheduled plane_version={} attempt={} error={error:#}",
+                            "pane_layout_desired_effect_retry_scheduled plane_version={} attempt={} error={error:#}",
                             frame.plane_version, attempt
                         ),
                     );
                 }
-                let retry_delay = pane_layout_projection_retry_delay(attempt);
-                let mut projection = state.lock();
-                if projection
+                let retry_delay = tmux_layout_effect_state_retry_delay(attempt);
+                let mut effect_state = state.lock();
+                if effect_state
                     .pending_frame
                     .as_ref()
                     .is_some_and(|current| current.plane_version > frame.plane_version)
@@ -31171,8 +31042,8 @@ fn pane_layout_desired_projection_worker(
                     attempt = 0;
                     continue;
                 }
-                wake.wait_for(&mut projection, retry_delay);
-                if projection
+                wake.wait_for(&mut effect_state, retry_delay);
+                if effect_state
                     .pending_frame
                     .as_ref()
                     .is_some_and(|current| current.plane_version > frame.plane_version)
@@ -31184,14 +31055,14 @@ fn pane_layout_desired_projection_worker(
     }
 }
 
-fn pane_layout_projection_retry_delay(attempt: u64) -> Duration {
+fn tmux_layout_effect_state_retry_delay(attempt: u64) -> Duration {
     let shift = attempt.saturating_sub(1).min(5) as u32;
-    PANE_LAYOUT_PROJECTION_RETRY_MIN
+    TMUX_LAYOUT_EFFECT_RETRY_MIN
         .saturating_mul(1_u32 << shift)
-        .min(PANE_LAYOUT_PROJECTION_RETRY_MAX)
+        .min(TMUX_LAYOUT_EFFECT_RETRY_MAX)
 }
 
-pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRuntime>) {
+pub(crate) fn install_state_plane_effect_sinks(runtime: &Arc<ControllerRuntime>) {
     runtime.install_state_plane_sink(
         PANE_LAYOUT_DESIRED_STATE_CHANNEL,
         Arc::new(PaneLayoutDesiredStatePlaneSink::new(runtime)),
@@ -31199,16 +31070,16 @@ pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRunti
 }
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-struct ControllerPaneLayoutProjectionSink {
+struct ControllerTmuxLayoutEffectSink {
     runtime: std::sync::Weak<ControllerRuntime>,
     /// The navigation lane whose graph this sink (and its worker) serves.
     lane: agent_doc_editor_surface::NavigationLane,
-    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
+    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState>>,
     wake: Arc<Condvar>,
     next_work_revision: AtomicU64,
 }
 
-impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
+impl TmuxLayoutEffectSink for ControllerTmuxLayoutEffectSink {
     fn reconcile(&self, _desired: PaneLayoutDesired) {
         let work_revision = self.next_work_revision.fetch_add(1, Ordering::SeqCst);
         let should_spawn = {
@@ -31231,7 +31102,7 @@ impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
 /// Start the single latest-wins worker behind an unwind boundary.
 ///
 /// An effect panic used to terminate this detached thread while leaving
-/// `LatestProjectionWorkerState::active` latched. Every later editor selection
+/// `LatestTmuxEffectWorkerState::active` latched. Every later editor selection
 /// then updated `pending_revision` but declined to spawn, permanently disabling
 /// tmux auto-sync until the controller restarted. Retire the failed revision
 /// atomically and hand a revision that raced with the panic to a replacement.
@@ -31239,7 +31110,7 @@ impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
 fn spawn_pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
     lane: agent_doc_editor_surface::NavigationLane,
-    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
+    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState>>,
     wake: Arc<Condvar>,
 ) {
     let worker_runtime = runtime.clone();
@@ -31281,21 +31152,21 @@ fn spawn_pane_layout_effect_worker(
 }
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-pub(super) fn install_pane_layout_projection_sink(runtime: &Arc<ControllerRuntime>) {
+pub(super) fn install_tmux_layout_effect_state_sink(runtime: &Arc<ControllerRuntime>) {
     // `#ideriderindependentnav` P2b: one sink, latest-wins worker state, and
     // structural-effect cancellation generation per navigation lane, so one
     // lane's newer layout never supersedes or cancels another lane's sync.
     let weak = Arc::downgrade(runtime);
     runtime.install_pane_layout_sink_factory(Arc::new(move |lane| {
-        Arc::new(ControllerPaneLayoutProjectionSink {
+        Arc::new(ControllerTmuxLayoutEffectSink {
             runtime: weak.clone(),
             lane: lane.clone(),
             state: Arc::new(Mutex::new(
-                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+                agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default(),
             )),
             wake: Arc::new(Condvar::new()),
             next_work_revision: AtomicU64::new(1),
-        }) as Arc<dyn PaneLayoutProjectionSink>
+        }) as Arc<dyn TmuxLayoutEffectSink>
     }));
 }
 
@@ -31349,7 +31220,7 @@ fn focus_required_for_pane_layout_generation(
 /// `focus_applied` remains the fallback for the one case where the observation
 /// could not speak for focus — a required focus the observation invocation did
 /// not carry.
-fn pane_layout_projection_converged(
+fn tmux_layout_effect_state_converged(
     report_synced: bool,
     focus_required: bool,
     focus_target_observed: bool,
@@ -32755,7 +32626,7 @@ struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<LivePaneWindow>
     observe_pane_window: F,
 }
 
-/// Apply the focus half of a pane-layout projection after its structural
+/// Apply the focus half of a tmux layout effect state after its structural
 /// reconcile has made the requested pane visible.
 ///
 /// The latest-generation mutex is held across the final effect. A newer editor
@@ -32774,7 +32645,7 @@ struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<LivePaneWindow>
 /// it toward `observation=synced`; the structural reconcile runs and the retry
 /// focuses the pane once it is back in the layout window.
 fn apply_pane_layout_focus_effect(
-    worker_state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
+    worker_state: &Mutex<agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState>,
     generation: u64,
     focus: Option<&str>,
     focus_suppressed: bool,
@@ -32899,7 +32770,7 @@ fn apply_pane_layout_focus_effect(
 fn pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
     lane: agent_doc_editor_surface::NavigationLane,
-    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
+    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState>>,
     wake: Arc<Condvar>,
     executing_revision: &AtomicU64,
 ) {
@@ -32923,10 +32794,10 @@ fn pane_layout_effect_worker(
             return;
         };
         let already_terminal = matches!(
-            graph.projection(),
-            PaneLayoutProjection::Refused(ref terminal)
-                | PaneLayoutProjection::OperatorOwned(ref terminal)
-                | PaneLayoutProjection::Converged(ref terminal)
+            graph.effect_state(),
+            TmuxLayoutEffectState::Refused(ref terminal)
+                | TmuxLayoutEffectState::OperatorOwned(ref terminal)
+                | TmuxLayoutEffectState::Converged(ref terminal)
                 if terminal.generation == desired.generation
         );
         if already_terminal {
@@ -32944,11 +32815,11 @@ fn pane_layout_effect_worker(
         // retirement are per generation and survive a worker restart, so a
         // generation that spent its retry budget or yielded its window is never
         // re-applied until a newer generation replaces it.
-        let attempt = match graph.begin_projection_attempt(desired.generation) {
-            agent_doc_controller::pane_layout::ProjectionAttemptAdmission::Attempt { number } => {
+        let attempt = match graph.begin_tmux_effect_attempt(desired.generation) {
+            agent_doc_controller::pane_layout::TmuxEffectAttemptAdmission::Attempt { number } => {
                 number
             }
-            agent_doc_controller::pane_layout::ProjectionAttemptAdmission::Retired(_) => {
+            agent_doc_controller::pane_layout::TmuxEffectAttemptAdmission::Retired(_) => {
                 if state.lock().retire_if_current(work_revision) {
                     return;
                 }
@@ -32997,7 +32868,7 @@ fn pane_layout_effect_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_projection generation={} attempt={} navigation_lane={} phase=refused reason={reason}",
+                        "tmux_layout_effect_state generation={} attempt={} navigation_lane={} phase=refused reason={reason}",
                         desired.generation,
                         attempt,
                         lane.label(),
@@ -33190,7 +33061,7 @@ fn pane_layout_effect_worker(
                 &graph,
                 &desired,
                 attempt,
-                agent_doc_controller::pane_layout::ProjectionRetirement::YieldedToNewerWindowClaim,
+                agent_doc_controller::pane_layout::TmuxEffectRetirement::YieldedToNewerWindowClaim,
                 &format!(
                     "window={claim_window} owner_root={} owner_generation={} owner_stamp_ms={}",
                     newer.project_root.display(),
@@ -33263,10 +33134,10 @@ fn pane_layout_effect_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_projection generation={} attempt={} {} phase=operator_owned operator_owned_documents={:?}",
+                        "tmux_layout_effect_state generation={} attempt={} {} phase=operator_owned operator_owned_documents={:?}",
                         desired.generation,
                         attempt,
-                        pane_layout_projection_provenance(&desired),
+                        tmux_layout_effect_state_provenance(&desired),
                         operator_owned_documents,
                     ),
                 );
@@ -33378,7 +33249,7 @@ fn pane_layout_effect_worker(
                 lane_observation_session.as_deref(),
             );
             if let Ok(report) = fresh_report
-                && pane_layout_projection_converged(
+                && tmux_layout_effect_state_converged(
                     report.synced,
                     focus_required,
                     observation_invocation.focus.is_some(),
@@ -33426,10 +33297,10 @@ fn pane_layout_effect_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_projection generation={} attempt={} {} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
+                        "tmux_layout_effect_state generation={} attempt={} {} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
                         desired.generation,
                         attempt,
-                        pane_layout_projection_provenance(&desired),
+                        tmux_layout_effect_state_provenance(&desired),
                         focus_reason,
                         logged_expected_documents,
                         logged_actual_documents,
@@ -33447,8 +33318,7 @@ fn pane_layout_effect_worker(
                     desired.generation,
                 ) {
                     PaneLayoutAttemptCompletion::Retire => return,
-                    PaneLayoutAttemptCompletion::Superseded => {
-                    }
+                    PaneLayoutAttemptCompletion::Superseded => {}
                     PaneLayoutAttemptCompletion::RetryCurrent => {
                         let _superseded = pane_layout_effect_worker_wait_for_retry(
                             &bootstrap.project_root,
@@ -33468,7 +33338,7 @@ fn pane_layout_effect_worker(
             agent_doc_ops_log_io::log_op(
                 &bootstrap.project_root,
                 &format!(
-                    "pane_layout_projection_cancelled generation={} phase=before_structural_effect reason=superseded",
+                    "tmux_layout_effect_state_cancelled generation={} phase=before_structural_effect reason=superseded",
                     desired.generation
                 ),
             );
@@ -33523,7 +33393,7 @@ fn pane_layout_effect_worker(
             agent_doc_ops_log_io::log_op(
                 &bootstrap.project_root,
                 &format!(
-                    "pane_layout_projection_cancelled generation={} phase=after_structural_effect reason=superseded",
+                    "tmux_layout_effect_state_cancelled generation={} phase=after_structural_effect reason=superseded",
                     desired.generation
                 ),
             );
@@ -33636,7 +33506,7 @@ fn pane_layout_effect_worker(
                 ),
             ),
         };
-        let synced = pane_layout_projection_converged(
+        let synced = tmux_layout_effect_state_converged(
             report.synced,
             focus_required,
             observation_invocation.focus.is_some(),
@@ -33716,10 +33586,10 @@ fn pane_layout_effect_worker(
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "pane_layout_projection generation={} attempt={} {} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
+                "tmux_layout_effect_state generation={} attempt={} {} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
                 desired.generation,
                 attempt,
-                pane_layout_projection_provenance(&desired),
+                tmux_layout_effect_state_provenance(&desired),
                 if synced {
                     "converged"
                 } else if effect_refused {
@@ -33755,7 +33625,7 @@ fn pane_layout_effect_worker(
                 // converged within its retry budget cannot be satisfied by
                 // re-applying the same effect. Retire it (logged once); the
                 // next publication is a new generation and re-arms the worker.
-                if graph.projection_retry_budget_spent(desired.generation) {
+                if graph.tmux_effect_retry_budget_spent(desired.generation) {
                     retire_pane_layout_generation(
                         &bootstrap.project_root,
                         &runtime,
@@ -33763,7 +33633,7 @@ fn pane_layout_effect_worker(
                         &graph,
                         &desired,
                         attempt,
-                        agent_doc_controller::pane_layout::ProjectionRetirement::RetryBudgetExhausted,
+                        agent_doc_controller::pane_layout::TmuxEffectRetirement::RetryBudgetExhausted,
                         &format!(
                             "observation={observation_reason} effect={effect_reason} focus={focus_reason}"
                         ),
@@ -33822,8 +33692,8 @@ fn pane_layout_window_claim_gate(
     let own_root = project_root
         .canonicalize()
         .unwrap_or_else(|_| project_root.to_path_buf());
-    let own_stamp_ms = graph.projection_claim_stamp_ms(generation, now_ms);
-    let own_publication = graph.projection_publication(generation);
+    let own_stamp_ms = graph.tmux_effect_claim_stamp_ms(generation, now_ms);
+    let own_publication = graph.tmux_effect_publication(generation);
     let current = agent_doc_tmux_io::window_user_option(tmux, window, WINDOW_LAYOUT_CLAIM_OPTION)
         .and_then(|value| WindowLayoutClaim::decode(&value));
     if window_claim_requires_yield(
@@ -33856,7 +33726,7 @@ fn pane_layout_window_claim_gate(
 /// `#stalecontrollerhotupdate` (b)/(d): retire one desired generation without
 /// converging it. The retirement is sticky in the graph's attempt ledger, the
 /// receipt is terminal (`Refused`) so the worker retires, and the
-/// `pane_layout_projection_retired` line is written once per generation.
+/// `tmux_layout_effect_state_retired` line is written once per generation.
 #[allow(clippy::too_many_arguments)]
 fn retire_pane_layout_generation(
     project_root: &Path,
@@ -33865,10 +33735,10 @@ fn retire_pane_layout_generation(
     graph: &ControllerPaneLayoutGraph,
     desired: &PaneLayoutDesired,
     attempt: u64,
-    retirement: agent_doc_controller::pane_layout::ProjectionRetirement,
+    retirement: agent_doc_controller::pane_layout::TmuxEffectRetirement,
     detail: &str,
 ) {
-    let first = graph.retire_projection(desired.generation, retirement);
+    let first = graph.retire_tmux_effect(desired.generation, retirement);
     graph.record_receipt(PaneLayoutEffectReceipt {
         generation: desired.generation,
         actor_bindings: graph.actor_bindings(),
@@ -33884,11 +33754,11 @@ fn retire_pane_layout_generation(
         agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
-                "pane_layout_projection_retired generation={} attempts={} reason={} {} {detail} (#stalecontrollerhotupdate)",
+                "tmux_layout_effect_state_retired generation={} attempts={} reason={} {} {detail} (#stalecontrollerhotupdate)",
                 desired.generation,
                 attempt,
                 retirement.as_str(),
-                pane_layout_projection_provenance(desired),
+                tmux_layout_effect_state_provenance(desired),
             ),
         );
     }
@@ -33903,21 +33773,21 @@ enum PaneLayoutAttemptCompletion {
 
 fn pane_layout_attempt_completion(
     desired_generation: Option<u64>,
-    projection: &PaneLayoutProjection,
+    effect_state: &TmuxLayoutEffectState,
     completed_generation: u64,
 ) -> PaneLayoutAttemptCompletion {
     if desired_generation != Some(completed_generation) {
         return PaneLayoutAttemptCompletion::Superseded;
     }
-    match projection {
-        PaneLayoutProjection::Refused(desired)
-        | PaneLayoutProjection::OperatorOwned(desired)
-        | PaneLayoutProjection::Converged(desired)
+    match effect_state {
+        TmuxLayoutEffectState::Refused(desired)
+        | TmuxLayoutEffectState::OperatorOwned(desired)
+        | TmuxLayoutEffectState::Converged(desired)
             if desired.generation == completed_generation =>
         {
             PaneLayoutAttemptCompletion::Retire
         }
-        PaneLayoutProjection::RetryPending(desired)
+        TmuxLayoutEffectState::RetryPending(desired)
             if desired.generation == completed_generation =>
         {
             PaneLayoutAttemptCompletion::RetryCurrent
@@ -33928,14 +33798,14 @@ fn pane_layout_attempt_completion(
 
 fn pane_layout_effect_worker_complete(
     graph: &ControllerPaneLayoutGraph,
-    state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
+    state: &Mutex<agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState>,
     completed_work_revision: u64,
     completed_generation: u64,
 ) -> PaneLayoutAttemptCompletion {
     let desired_generation = graph.desired().map(|desired| desired.generation);
-    let projection = graph.projection();
+    let effect_state = graph.effect_state();
     let completion =
-        pane_layout_attempt_completion(desired_generation, &projection, completed_generation);
+        pane_layout_attempt_completion(desired_generation, &effect_state, completed_generation);
     let mut worker = state.lock();
     if worker.is_superseded(completed_work_revision) {
         return PaneLayoutAttemptCompletion::Superseded;
@@ -33950,17 +33820,17 @@ fn pane_layout_effect_worker_complete(
 
 fn pane_layout_effect_worker_wait_for_retry(
     project_root: &std::path::Path,
-    state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
+    state: &Mutex<agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState>,
     wake: &Condvar,
     work_revision: u64,
     generation: u64,
     attempt: u64,
 ) -> bool {
-    let retry_delay = pane_layout_projection_retry_delay(attempt);
+    let retry_delay = tmux_layout_effect_state_retry_delay(attempt);
     agent_doc_ops_log_io::log_op(
         project_root,
         &format!(
-            "pane_layout_projection_retry_scheduled generation={} attempt={} delay_ms={}",
+            "tmux_layout_effect_state_retry_scheduled generation={} attempt={} delay_ms={}",
             generation,
             attempt,
             retry_delay.as_millis(),
@@ -35564,7 +35434,7 @@ fn publish_pane_layout_desired_invocation_in_lane(
     publication: PaneLayoutPublication,
     claim: impl Into<PaneLayoutClaim>,
 ) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
-    let mut claim = claim.into();
+    let claim = claim.into();
     let publisher = claim.publisher;
     let graph = runtime.pane_layout_graph_for_lane(lane);
     let store_lane_layout_state = |columns: &[String]| -> Result<()> {
@@ -35590,7 +35460,9 @@ fn publish_pane_layout_desired_invocation_in_lane(
     invocation.focus = invocation.focus.filter(|document| {
         document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, document)
     });
-    let desired_columns = layout_sync_state_expected_documents(
+    let retained = graph.desired();
+    let incoming_order = invocation.column_order;
+    let mut desired_columns = layout_sync_state_expected_documents(
         &bootstrap.project_root,
         &ControllerTmuxLayoutSyncStateInvocation {
             columns: invocation.columns.clone(),
@@ -35598,6 +35470,18 @@ fn publish_pane_layout_desired_invocation_in_lane(
             focus: invocation.focus.clone(),
         },
     );
+    // GH #343: anything short of a positive editor-authored vector has no structural authority.
+    // Preserve the exact last frontend snapshot, or fail closed before publishing when none
+    // exists. Such input may carry a focus intent only when that document is already present in
+    // the retained vector.
+    if incoming_order != agent_doc_tmux::LayoutColumnOrder::Editor {
+        let retained = retained.as_ref().context(
+            "sync_tmux_layout deferred: incomplete frontend layout has no authoritative snapshot",
+        )?;
+        invocation.columns = retained.invocation.columns.clone();
+        invocation.column_order = retained.invocation.column_order;
+        desired_columns = retained.invocation.columns.clone();
+    }
     anyhow::ensure!(
         !desired_columns.is_empty(),
         "sync_tmux_layout refused: desired pane layout is empty"
@@ -35612,96 +35496,35 @@ fn publish_pane_layout_desired_invocation_in_lane(
             "sync_tmux_layout refused before layout publication: focused document `{focus}` is absent from the desired columns"
         );
     }
-    // GH #112: a publisher without a positive split-order observation (Remote
-    // Dev `unknown`) lists documents focus-first, so its order is resolved
-    // against the retained desired layout instead of being applied verbatim.
-    let retained = graph.desired();
-    let incoming_order = invocation.column_order;
-    let retained_order_authoritative = retained
-        .as_ref()
-        .and_then(PaneLayoutDesired::order_authority_columns)
-        .is_some();
-    if incoming_order == agent_doc_tmux::LayoutColumnOrder::Provisional
-        && claim.provisional_order_basis.is_none()
-        && let Some(basis) = retained
-            .as_ref()
-            .map(PaneLayoutDesired::order_fold_basis_columns)
-            .filter(|basis| !basis.is_empty())
-    {
-        // GH #343: Remote Dev selection evidence can arrive before its
-        // structural visible-set update. Apply the guessed replacement now,
-        // but carry the pre-guess fold basis through the graph so the next
-        // structural publication cannot fold against its own guess.
-        claim = if retained_order_authoritative {
-            claim.with_provisional_order_basis(Some(basis.to_vec()))
-        } else {
-            claim.with_unanchored_provisional_order_basis(Some(basis.to_vec()))
-        };
-    }
-    // GH #338: a manual Sync Tmux Layout click is the operator asserting the
-    // order the editor just submitted. When the retained basis is only a cold
-    // `unknown` guess, folding the click against that guess makes the manual
-    // remedy incapable of correcting it. Adopt the manual vector as the next
-    // unknown fold basis; do not let it override positive editor geometry.
-    let manual_unknown_order_assertion =
-        incoming_order == agent_doc_tmux::LayoutColumnOrder::Unknown
-            && invocation.caller_kind == "manual"
-            && publisher == PaneLayoutPublisher::Command
-            && !retained_order_authoritative;
-    let order_basis: &[String] = if manual_unknown_order_assertion {
-        &[]
+    // GH #343: a positive frontend vector is already the structural authority.
+    // Eligibility and duplicate validation above may reject invalid members,
+    // but backend width memory must not fold, trim, or reorder the remainder.
+    // Derived/retained publications remain width-bounded against realised tmux
+    // state as before.
+    let frontend_authored = incoming_order == agent_doc_tmux::LayoutColumnOrder::Editor
+        && matches!(
+            publisher,
+            PaneLayoutPublisher::PluginPublication
+                | PaneLayoutPublisher::EditorSurface
+                | PaneLayoutPublisher::Command
+        );
+    let ordered_columns = if frontend_authored {
+        desired_columns.clone()
     } else {
-        retained
-            .as_ref()
-            .map(|desired| {
-                if matches!(
-                    invocation.column_order,
-                    agent_doc_tmux::LayoutColumnOrder::Unknown
-                        | agent_doc_tmux::LayoutColumnOrder::Provisional
-                ) {
-                    // GH #302/#311/#343: an escalation or editor fold's slot
-                    // placement is provisional, even when later guesses have
-                    // replaced every document in the last positive basis.
-                    desired.order_fold_basis_columns()
-                } else {
-                    desired.invocation.columns.as_slice()
-                }
-            })
-            .unwrap_or_default()
+        bound_pane_layout_publication_width(
+            &bootstrap.project_root,
+            runtime,
+            &graph.width_memory(),
+            &claim,
+            retained.as_ref(),
+            desired_columns.clone(),
+            invocation.focus.as_deref(),
+        )
     };
-    let mut ordered = agent_doc_tmux::order_layout_columns(
-        order_basis,
-        &desired_columns,
-        invocation.column_order,
-    );
-    // GH #332: resolving an unknown publication against a retained *guess*
-    // may stabilize its order, but it cannot manufacture positive order
-    // authority. Keep the generation unknown until it folds against a basis
-    // established by editor geometry, explicit sync, or another order-bearing
-    // publisher. The editor-surface anchor endpoint therefore returns no
-    // columns for the cold no-survivor chain.
-    if incoming_order == agent_doc_tmux::LayoutColumnOrder::Unknown && !retained_order_authoritative
-    {
-        ordered.order = agent_doc_tmux::LayoutColumnOrder::Unknown;
-    }
-    // GH #136 follow-up (a): every publisher is width-bounded against what the
-    // last layout pass accounted for — a derived publication (escalation,
-    // `ensure` route, recycle republish) never widens it; a positive editor
-    // split observation may, and is logged so every widening is attributable.
-    let ordered_columns = bound_pane_layout_publication_width(
-        &bootstrap.project_root,
-        runtime,
-        &graph.width_memory(),
-        &claim,
-        retained.as_ref(),
-        ordered.columns,
-        invocation.focus.as_deref(),
-    );
     // The desired Lazily fact is durable before the effect graph sees it.
     // Tmux and crash-state sidecars are projections, never fallback inputs.
     store_lane_layout_state(&ordered_columns)?;
     invocation.columns = ordered_columns;
-    invocation.column_order = ordered.order;
 
     let desired =
         graph.set_desired_attributed(invocation.clone(), source_plane_version, publication, claim);
@@ -35732,7 +35555,7 @@ fn publish_pane_layout_desired_invocation_in_lane(
         retained.as_ref().map(|retained| retained.generation),
         &desired,
         &desired_columns,
-        ordered.reordered,
+        false,
     );
     if retained.as_ref().map(|retained| retained.generation) != Some(desired.generation) {
         log_pane_layout_narrowed(&bootstrap.project_root, &desired);
@@ -35749,11 +35572,10 @@ fn collapse_duplicate_pane_layout_columns(
     project_root: &Path,
     invocation: &ControllerTmuxLayoutSyncInvocation,
 ) -> Vec<String> {
-    let (columns, dropped) =
-        agent_doc_controller::pane_layout::collapse_duplicate_layout_documents(
-            &invocation.columns,
-            |file| canonical_layout_document_id(project_root, file),
-        );
+    let (columns, dropped) = agent_doc_controller::pane_layout::collapse_duplicate_layout_documents(
+        &invocation.columns,
+        |file| canonical_layout_document_id(project_root, file),
+    );
     if !dropped.is_empty() {
         agent_doc_ops_log_io::log_op(
             project_root,
@@ -35935,7 +35757,7 @@ fn log_pane_layout_desired_publication(
     );
 }
 
-/// The publisher fields every `pane_layout_projection` line carries (GH #111).
+/// The publisher fields every `tmux_layout_effect_state` line carries (GH #111).
 ///
 /// `publisher` names which plane produced the generation (`route`,
 /// `plugin_publication`, `escalation`, `editor_surface`, `command`),
@@ -35943,7 +35765,7 @@ fn log_pane_layout_desired_publication(
 /// one, and `columns` / `retained_columns` / `observed_panes` the applied
 /// column count against the retained layout and last tmux observation it
 /// replaced.
-fn pane_layout_projection_provenance(desired: &PaneLayoutDesired) -> String {
+fn tmux_layout_effect_state_provenance(desired: &PaneLayoutDesired) -> String {
     format!(
         "publisher={} plane_version={} columns={} retained_columns={} observed_panes={}",
         desired.provenance.publisher.label(),
@@ -35970,9 +35792,9 @@ fn log_pane_layout_narrowed(project_root: &Path, desired: &PaneLayoutDesired) {
     agent_doc_ops_log_io::log_op(
         project_root,
         &format!(
-            "pane_layout_projection_narrowed generation={} {} caller_kind={} focus={} applied={:?}",
+            "tmux_layout_effect_state_narrowed generation={} {} caller_kind={} focus={} applied={:?}",
             desired.generation,
-            pane_layout_projection_provenance(desired),
+            tmux_layout_effect_state_provenance(desired),
             desired.invocation.caller_kind,
             desired.invocation.focus.as_deref().unwrap_or("none"),
             desired.invocation.columns,
@@ -36037,7 +35859,7 @@ pub(crate) fn handle_sync_tmux_layout(
     // projection receipt is known; an identical passive editor snapshot must
     // not replace it with `no_autostart=true` between publication and effect.
     let _lease =
-        pane_layout_invocation_awaits_projection(&invocation).then(|| PaneLayoutRouteLeaseGuard {
+        pane_layout_invocation_awaits_effect(&invocation).then(|| PaneLayoutRouteLeaseGuard {
             runtime,
             lane: lane.clone(),
             project_root: bootstrap.project_root.clone(),
@@ -36045,7 +35867,7 @@ pub(crate) fn handle_sync_tmux_layout(
             release_on_drop: true,
         });
     if !lane.is_shared() {
-        return await_lane_sync_tmux_layout_projection(
+        return await_lane_sync_tmux_layout_effect(
             bootstrap,
             runtime,
             &lane,
@@ -36054,7 +35876,7 @@ pub(crate) fn handle_sync_tmux_layout(
             MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT,
         );
     }
-    await_sync_tmux_layout_projection(
+    await_sync_tmux_layout_effect(
         bootstrap,
         runtime,
         desired,
@@ -36063,12 +35885,12 @@ pub(crate) fn handle_sync_tmux_layout(
     )
 }
 
-/// [`await_sync_tmux_layout_projection`] for an installation navigation lane's
+/// [`await_sync_tmux_layout_effect`] for an installation navigation lane's
 /// explicit `sync_tmux_layout` command (`#ideriderindependentnav` P6): the
-/// receipt is the lane graph's projection of the generation the command
+/// receipt is the lane graph's effect state for the generation the command
 /// published, applied by that lane's own effect worker into the lane session.
 /// The shared lane's graph, durable column memory, and status are untouched.
-fn await_lane_sync_tmux_layout_projection(
+fn await_lane_sync_tmux_layout_effect(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     lane: &agent_doc_editor_surface::NavigationLane,
@@ -36080,7 +35902,7 @@ fn await_lane_sync_tmux_layout_projection(
     #[cfg(any(test, feature = "test-support"))]
     {
         // The test runtime has no tmux effect worker, so the fake adapter is
-        // the observation (as in `await_sync_tmux_layout_projection`).
+        // the observation (as in `await_sync_tmux_layout_effect`).
         let _ = await_timeout;
         let mut invocation = invocation;
         invocation.actor_bindings = graph.actor_bindings();
@@ -36097,11 +35919,11 @@ fn await_lane_sync_tmux_layout_projection(
     {
         let _ = bootstrap;
         let routes_created_panes = invocation.routes_created_panes();
-        if !pane_layout_invocation_awaits_projection(&invocation) {
+        if !pane_layout_invocation_awaits_effect(&invocation) {
             return Ok(ControllerTmuxLayoutSyncReceipt {
                 gated_documents: Vec::new(),
                 applied: false,
-                reason: "projection_published".to_string(),
+                reason: "target_published".to_string(),
                 columns: invocation.columns,
                 layout_generation: Some(desired.generation),
                 layout_publisher: Some(desired.provenance.publisher.label().to_string()),
@@ -36113,9 +35935,9 @@ fn await_lane_sync_tmux_layout_projection(
                 file_panes: Vec::new(),
             });
         }
-        let projection = graph.await_generation(desired.generation, await_timeout);
-        let (applied, reason) = pane_layout_await_outcome(&projection, desired.generation);
-        let current = pane_layout_projection_desired(&projection);
+        let effect_state = graph.await_generation(desired.generation, await_timeout);
+        let (applied, reason) = pane_layout_await_outcome(&effect_state, desired.generation);
+        let current = tmux_layout_effect_state_desired(&effect_state);
         let receipt_generation = current
             .map(|current| current.generation)
             .unwrap_or(desired.generation);
@@ -36137,7 +35959,7 @@ fn await_lane_sync_tmux_layout_projection(
     }
 }
 
-/// Publish one fresh editor-route layout intent and await its projection.
+/// Publish one fresh editor-route layout intent and await its tmux effect receipt.
 ///
 /// GH #110: `await_timeout` is the route's remaining `--wait-for-ready` budget,
 /// not the fixed manual-sync await, so layout convergence and harness readiness
@@ -36176,7 +35998,7 @@ fn handle_editor_route_layout<'a>(
         document: invocation.focus.clone().unwrap_or_default(),
         invocation: invocation.clone(),
     };
-    let receipt = await_sync_tmux_layout_projection_in_lane(
+    let receipt = await_sync_tmux_layout_effect_in_lane(
         bootstrap,
         runtime,
         lane,
@@ -36234,14 +36056,14 @@ impl Drop for PaneLayoutRouteLeaseGuard<'_> {
     }
 }
 
-fn await_sync_tmux_layout_projection(
+fn await_sync_tmux_layout_effect(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     desired: PaneLayoutDesired,
     invocation: ControllerTmuxLayoutSyncInvocation,
     await_timeout: Duration,
 ) -> Result<ControllerTmuxLayoutSyncReceipt> {
-    await_sync_tmux_layout_projection_in_lane(
+    await_sync_tmux_layout_effect_in_lane(
         bootstrap,
         runtime,
         &agent_doc_editor_surface::NavigationLane::Shared,
@@ -36251,11 +36073,11 @@ fn await_sync_tmux_layout_projection(
     )
 }
 
-/// [`await_sync_tmux_layout_projection`] on one navigation lane's graph
+/// [`await_sync_tmux_layout_effect`] on one navigation lane's graph
 /// (`#ideriderindependentnav` P6). The shared lane is the pre-lane await byte
 /// for byte; an installation lane awaits its own graph and leaves the
 /// pre-await survey to its lane effect worker, which observes the lane session.
-fn await_sync_tmux_layout_projection_in_lane(
+fn await_sync_tmux_layout_effect_in_lane(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     lane: &agent_doc_editor_surface::NavigationLane,
@@ -36276,12 +36098,12 @@ fn await_sync_tmux_layout_projection_in_lane(
     }
     #[cfg(not(any(test, feature = "test-support")))]
     {
-        if !pane_layout_invocation_awaits_projection(&invocation) {
+        if !pane_layout_invocation_awaits_effect(&invocation) {
             let routes_created_panes = invocation.routes_created_panes();
             return Ok(ControllerTmuxLayoutSyncReceipt {
                 gated_documents: Vec::new(),
                 applied: false,
-                reason: "projection_published".to_string(),
+                reason: "target_published".to_string(),
                 columns: invocation.columns,
                 layout_generation: Some(desired.generation),
                 layout_publisher: Some(desired.provenance.publisher.label().to_string()),
@@ -36296,7 +36118,7 @@ fn await_sync_tmux_layout_projection_in_lane(
         let graph = runtime.pane_layout_graph_for_lane(lane);
         // A repeated foreground command is also a physical observation edge.
         // Re-observe before awaiting so an identical desired Source cannot reuse
-        // a stale Converged projection after pane focus or geometry drift.
+        // stale Converged state after pane focus or geometry drift.
         if lane.is_shared() {
             refresh_pane_layout_observation_before_await(bootstrap, runtime, &desired);
         }
@@ -36311,9 +36133,9 @@ fn await_sync_tmux_layout_projection_in_lane(
                 await_timeout,
             ));
         }
-        let projection = graph.await_generation(desired.generation, await_timeout);
-        let (applied, reason) = pane_layout_await_outcome(&projection, desired.generation);
-        let receipt_generation = pane_layout_projection_desired(&projection)
+        let effect_state = graph.await_generation(desired.generation, await_timeout);
+        let (applied, reason) = pane_layout_await_outcome(&effect_state, desired.generation);
+        let receipt_generation = tmux_layout_effect_state_desired(&effect_state)
             .map(|current| current.generation)
             .unwrap_or(desired.generation);
         let routes_created_panes = invocation.routes_created_panes();
@@ -36322,9 +36144,9 @@ fn await_sync_tmux_layout_projection_in_lane(
             applied,
             reason: reason.to_string(),
             columns: invocation.columns,
-            layout_generation: pane_layout_projection_desired(&projection)
+            layout_generation: tmux_layout_effect_state_desired(&effect_state)
                 .map(|current| current.generation),
-            layout_publisher: pane_layout_projection_desired(&projection)
+            layout_publisher: tmux_layout_effect_state_desired(&effect_state)
                 .map(|current| current.provenance.publisher.label().to_string()),
             window: invocation.window,
             focus: invocation.focus,
@@ -36337,7 +36159,7 @@ fn await_sync_tmux_layout_projection_in_lane(
 }
 
 /// Await semantic route readiness for `document` on the pane-layout graph and
-/// fold the projection into a receipt. Shared by the route's single publication
+/// fold the effect state into a receipt. Shared by the route's single publication
 /// and its GH #110 re-observations, which must not publish again.
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn editor_route_layout_receipt(
@@ -36347,18 +36169,18 @@ fn editor_route_layout_receipt(
     document: &str,
     await_timeout: Duration,
 ) -> ControllerTmuxLayoutSyncReceipt {
-    let projection = graph.await_route_document(document, await_timeout);
-    let (applied, reason) = pane_layout_route_await_outcome(&projection, document);
-    // Preserve the projection that won arbitration, even when it omits the
+    let effect_state = graph.await_route_document(document, await_timeout);
+    let (applied, reason) = pane_layout_route_await_outcome(&effect_state, document);
+    // Preserve the target that won arbitration, even when it omits the
     // routed document. Falling back to the route's original columns hid the
     // superseding publisher and made a terminal foreground supersession look
     // like a retryable convergence race (GH #143).
-    let projected = pane_layout_projection_desired(&projection);
-    let receipt_invocation = projected
+    let accepted = tmux_layout_effect_state_desired(&effect_state);
+    let receipt_invocation = accepted
         .map(|current| current.invocation.clone())
         .unwrap_or(invocation);
     let routes_created_panes = receipt_invocation.routes_created_panes();
-    let receipt_generation = pane_layout_projection_desired(&projection)
+    let receipt_generation = tmux_layout_effect_state_desired(&effect_state)
         .map(|current| current.generation)
         .unwrap_or(published_generation);
     ControllerTmuxLayoutSyncReceipt {
@@ -36366,8 +36188,8 @@ fn editor_route_layout_receipt(
         applied,
         reason: reason.to_string(),
         columns: receipt_invocation.columns,
-        layout_generation: projected.map(|current| current.generation),
-        layout_publisher: projected.map(|current| current.provenance.publisher.label().to_string()),
+        layout_generation: accepted.map(|current| current.generation),
+        layout_publisher: accepted.map(|current| current.provenance.publisher.label().to_string()),
         window: receipt_invocation.window,
         focus: receipt_invocation.focus,
         no_autostart: receipt_invocation.no_autostart,
@@ -36381,11 +36203,11 @@ fn editor_route_layout_receipt(
 /// publishing it again (`the_editor_route_handler_publishes_layout_once`:
 /// supersession is the layout graph's to resolve, never an RPC republish race).
 ///
-/// If the current projection still refuses the routed document, block until it
+/// If the current effect state still refuses the routed document, block until it
 /// changes — a newer desired layout, a tmux observation, or an effect receipt
 /// all notify the graph's waiters — or `timeout` passes; the comparison is
-/// against the projection just read, so a change that lands before the wait
-/// starts is not missed. Then fold the current projection into a fresh receipt
+/// against the effect state just read, so a change that lands before the wait
+/// starts is not missed. Then fold the current effect state into a fresh receipt
 /// (which itself waits through a pending effect). There is no timer poll: if
 /// nothing changes, the wait runs out the remaining `--wait-for-ready` budget.
 fn reobserve_editor_route_layout(
@@ -36397,7 +36219,7 @@ fn reobserve_editor_route_layout(
     #[cfg(any(test, feature = "test-support"))]
     {
         // The test runtime has no tmux effect worker, so the fake adapter is
-        // the observation (as in `await_sync_tmux_layout_projection`).
+        // the observation (as in `await_sync_tmux_layout_effect`).
         let _ = timeout;
         let mut invocation = published.invocation.clone();
         invocation.actor_bindings = runtime.pane_layout_actor_bindings();
@@ -36412,11 +36234,11 @@ fn reobserve_editor_route_layout(
         let _ = bootstrap;
         let deadline = Instant::now() + timeout;
         let graph = runtime.pane_layout_graph_for_lane(&published.lane);
-        let current = graph.projection();
+        let current = graph.effect_state();
         if crate::project_controller::pane_layout_route_readiness(&current, &published.document)
             == PaneLayoutRouteReadiness::Refused
         {
-            graph.await_projection_change(&current, timeout);
+            graph.await_tmux_effect_change(&current, timeout);
         }
         Ok(editor_route_layout_receipt(
             &graph,
@@ -36429,9 +36251,7 @@ fn reobserve_editor_route_layout(
 }
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-fn pane_layout_invocation_awaits_projection(
-    invocation: &ControllerTmuxLayoutSyncInvocation,
-) -> bool {
+fn pane_layout_invocation_awaits_effect(invocation: &ControllerTmuxLayoutSyncInvocation) -> bool {
     invocation.caller_kind != "automatic" && !invocation.no_autostart
 }
 
@@ -36443,7 +36263,7 @@ fn pane_layout_foreground_focus_matches_columns(
     invocation: &ControllerTmuxLayoutSyncInvocation,
     desired_columns: &[String],
 ) -> bool {
-    !pane_layout_invocation_awaits_projection(invocation)
+    !pane_layout_invocation_awaits_effect(invocation)
         || invocation.focus.as_deref().is_none_or(|focus| {
             let canonical_focus = canonical_layout_document_id(project_root, focus);
             desired_columns
@@ -36457,13 +36277,13 @@ fn pane_layout_foreground_focus_matches_columns(
 /// Editor state-plane updates are normally coalescible facts. The explicit
 /// `Sync Tmux Pane` action is different: pressing it again is a fresh operator
 /// intent even when the requested columns are byte-identical. Without a fresh
-/// generation, a prior terminal/refused projection permanently turns the
+/// generation, a prior terminal/refused effect state permanently turns the
 /// manual retry into a successful-looking no-op. Passive and automatic editor
 /// observations remain coalesced so event storms do not manufacture effects.
 fn pane_layout_publication_for_invocation(
     invocation: &ControllerTmuxLayoutSyncInvocation,
 ) -> PaneLayoutPublication {
-    if pane_layout_invocation_awaits_projection(invocation) {
+    if pane_layout_invocation_awaits_effect(invocation) {
         PaneLayoutPublication::FreshIntent
     } else {
         PaneLayoutPublication::CoalesceIdentical
@@ -36476,7 +36296,7 @@ fn pane_layout_publication_for_invocation(
 fn pane_layout_command_publication_for_invocation(
     invocation: &ControllerTmuxLayoutSyncInvocation,
 ) -> PaneLayoutPublication {
-    if pane_layout_invocation_awaits_projection(invocation) {
+    if pane_layout_invocation_awaits_effect(invocation) {
         PaneLayoutPublication::FreshCommandIntent
     } else {
         pane_layout_publication_for_invocation(invocation)
@@ -36490,21 +36310,21 @@ pub(crate) const PANE_LAYOUT_SUPERSEDED_REASON: &str = "superseded_by_newer_layo
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn pane_layout_route_await_outcome(
-    projection: &PaneLayoutProjection,
+    effect_state: &TmuxLayoutEffectState,
     document: &str,
 ) -> (bool, &'static str) {
-    match pane_layout_route_readiness(projection, document) {
+    match pane_layout_route_readiness(effect_state, document) {
         PaneLayoutRouteReadiness::Ready => (true, "observed_convergence"),
-        PaneLayoutRouteReadiness::Wait => match projection {
-            PaneLayoutProjection::NeedsEffect(_) => (false, "projection_effect_not_started"),
-            PaneLayoutProjection::Applying(_) => (false, "projection_effect_in_flight"),
-            PaneLayoutProjection::RetryPending(_) => (false, "projection_retry_pending"),
-            _ => unreachable!("route readiness Wait requires a pending projection"),
+        PaneLayoutRouteReadiness::Wait => match effect_state {
+            TmuxLayoutEffectState::NeedsEffect(_) => (false, "tmux_effect_not_started"),
+            TmuxLayoutEffectState::Applying(_) => (false, "tmux_effect_in_flight"),
+            TmuxLayoutEffectState::RetryPending(_) => (false, "tmux_effect_retry_pending"),
+            _ => unreachable!("route readiness Wait requires a pending effect state"),
         },
-        PaneLayoutRouteReadiness::Refused => match projection {
-            PaneLayoutProjection::Absent => (false, "desired_layout_state_absent"),
-            PaneLayoutProjection::Refused(_) => (false, "layout_effect_refused"),
-            PaneLayoutProjection::OperatorOwned(_) => (false, "operator_owned_layout"),
+        PaneLayoutRouteReadiness::Refused => match effect_state {
+            TmuxLayoutEffectState::Absent => (false, "desired_layout_state_absent"),
+            TmuxLayoutEffectState::Refused(_) => (false, "layout_effect_refused"),
+            TmuxLayoutEffectState::OperatorOwned(_) => (false, "operator_owned_layout"),
             _ => (false, PANE_LAYOUT_SUPERSEDED_REASON),
         },
     }
@@ -36512,19 +36332,19 @@ fn pane_layout_route_await_outcome(
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn pane_layout_await_outcome(
-    projection: &PaneLayoutProjection,
+    effect_state: &TmuxLayoutEffectState,
     requested_generation: u64,
 ) -> (bool, &'static str) {
-    let (current, applied, reason) = match projection {
-        PaneLayoutProjection::Absent => return (false, "desired_layout_state_absent"),
-        PaneLayoutProjection::Converged(current) => (current, true, "observed_convergence"),
-        PaneLayoutProjection::Refused(current) => (current, false, "layout_effect_refused"),
-        PaneLayoutProjection::OperatorOwned(current) => (current, false, "operator_owned_layout"),
-        PaneLayoutProjection::NeedsEffect(current) => {
-            (current, false, "projection_effect_not_started")
+    let (current, applied, reason) = match effect_state {
+        TmuxLayoutEffectState::Absent => return (false, "desired_layout_state_absent"),
+        TmuxLayoutEffectState::Converged(current) => (current, true, "observed_convergence"),
+        TmuxLayoutEffectState::Refused(current) => (current, false, "layout_effect_refused"),
+        TmuxLayoutEffectState::OperatorOwned(current) => (current, false, "operator_owned_layout"),
+        TmuxLayoutEffectState::NeedsEffect(current) => (current, false, "tmux_effect_not_started"),
+        TmuxLayoutEffectState::Applying(current) => (current, false, "tmux_effect_in_flight"),
+        TmuxLayoutEffectState::RetryPending(current) => {
+            (current, false, "tmux_effect_retry_pending")
         }
-        PaneLayoutProjection::Applying(current) => (current, false, "projection_effect_in_flight"),
-        PaneLayoutProjection::RetryPending(current) => (current, false, "projection_retry_pending"),
     };
     if current.generation != requested_generation {
         (false, PANE_LAYOUT_SUPERSEDED_REASON)
@@ -36545,7 +36365,7 @@ fn pane_layout_invocation_allows_structural_reuse(
 }
 
 #[cfg(test)]
-mod pane_layout_projection_dispatch_tests {
+mod tmux_layout_effect_state_dispatch_tests {
     use super::*;
 
     fn invocation(caller_kind: &str, no_autostart: bool) -> ControllerTmuxLayoutSyncInvocation {
@@ -36564,14 +36384,14 @@ mod pane_layout_projection_dispatch_tests {
 
     #[test]
     fn automatic_and_passive_layout_updates_publish_without_waiting() {
-        assert!(!pane_layout_invocation_awaits_projection(&invocation(
+        assert!(!pane_layout_invocation_awaits_effect(&invocation(
             "automatic",
             false,
         )));
-        assert!(!pane_layout_invocation_awaits_projection(&invocation(
+        assert!(!pane_layout_invocation_awaits_effect(&invocation(
             "manual", true,
         )));
-        assert!(pane_layout_invocation_awaits_projection(&invocation(
+        assert!(pane_layout_invocation_awaits_effect(&invocation(
             "manual", false,
         )));
     }
@@ -36657,25 +36477,33 @@ mod pane_layout_projection_dispatch_tests {
         // layout, so the generation converges instead of parking in
         // `retry_pending` forever while editor navigation keeps bumping the
         // input revision.
-        assert!(pane_layout_projection_converged(true, true, true, false));
+        assert!(tmux_layout_effect_state_converged(true, true, true, false));
         // Same observation, focus effect applied by this pass.
-        assert!(pane_layout_projection_converged(true, true, true, true));
+        assert!(tmux_layout_effect_state_converged(true, true, true, true));
     }
 
     #[test]
     fn an_unsynced_observation_never_converges_on_a_superseded_focus_receipt() {
         // A stashed / mismatched focus pane makes the report unsynced, and the
         // supersede reason must not launder that into convergence.
-        assert!(!pane_layout_projection_converged(false, true, true, false));
-        assert!(!pane_layout_projection_converged(false, false, false, true));
+        assert!(!tmux_layout_effect_state_converged(
+            false, true, true, false
+        ));
+        assert!(!tmux_layout_effect_state_converged(
+            false, false, false, true
+        ));
     }
 
     #[test]
     fn a_required_focus_the_observation_did_not_carry_still_falls_back_to_the_effect() {
-        assert!(!pane_layout_projection_converged(true, true, false, false));
-        assert!(pane_layout_projection_converged(true, true, false, true));
+        assert!(!tmux_layout_effect_state_converged(
+            true, true, false, false
+        ));
+        assert!(tmux_layout_effect_state_converged(true, true, false, true));
         // Focus that was never required is settled by the structural report.
-        assert!(pane_layout_projection_converged(true, false, false, false));
+        assert!(tmux_layout_effect_state_converged(
+            true, false, false, false
+        ));
     }
 
     #[test]
@@ -36733,7 +36561,7 @@ mod pane_layout_projection_dispatch_tests {
     #[test]
     fn changed_left_document_focus_is_applied_after_layout_reconciliation() {
         let state =
-            Mutex::new(agent_doc_controller::pane_layout::LatestProjectionWorkerState::default());
+            Mutex::new(agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default());
         assert!(state.lock().schedule(7));
         let file_panes = vec![
             ("/tasks/new-left.md".to_string(), "%76".to_string()),
@@ -36775,7 +36603,7 @@ mod pane_layout_projection_dispatch_tests {
     #[test]
     fn focus_is_refused_for_a_pane_stashed_out_of_the_layout_window() {
         let state =
-            Mutex::new(agent_doc_controller::pane_layout::LatestProjectionWorkerState::default());
+            Mutex::new(agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default());
         assert!(state.lock().schedule(7));
         let file_panes = vec![
             ("/tasks/new-left.md".to_string(), "%76".to_string()),
@@ -36861,7 +36689,7 @@ mod pane_layout_projection_dispatch_tests {
     fn focus_is_refused_for_a_stashed_pane_even_with_no_layout_window() {
         for window_name in ["stash", "stash-1", "stash-42"] {
             let state = Mutex::new(
-                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+                agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default(),
             );
             assert!(state.lock().schedule(7));
             let file_panes = vec![("/tasks/sample-session.md".to_string(), "%21".to_string())];
@@ -36919,7 +36747,7 @@ mod pane_layout_projection_dispatch_tests {
     fn focus_is_refused_for_a_pane_in_an_inactive_window_with_no_layout_window() {
         for (active, refused) in [(Some(false), true), (Some(true), false), (None, false)] {
             let state = Mutex::new(
-                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+                agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default(),
             );
             assert!(state.lock().schedule(7));
             let file_panes = vec![("/tasks/sample-session.md".to_string(), "%21".to_string())];
@@ -37003,7 +36831,7 @@ mod pane_layout_projection_dispatch_tests {
     fn focus_is_applied_for_a_non_stash_window_with_no_layout_window() {
         for window_name in ["agent-doc", "stashed", "claude", ""] {
             let state = Mutex::new(
-                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+                agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default(),
             );
             assert!(state.lock().schedule(7));
             let file_panes = vec![("/tasks/sample-session.md".to_string(), "%21".to_string())];
@@ -37045,7 +36873,7 @@ mod pane_layout_projection_dispatch_tests {
     #[test]
     fn the_stash_leg_wins_over_a_matching_window_id() {
         let state =
-            Mutex::new(agent_doc_controller::pane_layout::LatestProjectionWorkerState::default());
+            Mutex::new(agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default());
         assert!(state.lock().schedule(7));
         let file_panes = vec![("/tasks/left.md".to_string(), "%76".to_string())];
         let mut selected = None;
@@ -37097,7 +36925,7 @@ mod pane_layout_projection_dispatch_tests {
             (Some("@894"), Some((String::new(), String::new()))),
         ] {
             let state = Mutex::new(
-                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+                agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default(),
             );
             assert!(state.lock().schedule(7));
             let mut selected = None;
@@ -37123,7 +36951,7 @@ mod pane_layout_projection_dispatch_tests {
         }
     }
 
-    /// The layout target window is the projection's own declared window, never
+    /// The layout target window is the accepted frontend snapshot's declared window, never
     /// an inferred active/first/majority window. An explicit window id is used
     /// verbatim; a window *name* falls through to the by-name lookup so the
     /// comparison stays id-to-id.
@@ -37204,7 +37032,7 @@ mod pane_layout_projection_dispatch_tests {
     #[test]
     fn newer_layout_generation_cancels_stale_focus_before_select_pane() {
         let state =
-            Mutex::new(agent_doc_controller::pane_layout::LatestProjectionWorkerState::default());
+            Mutex::new(agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default());
         assert!(state.lock().schedule(7));
         assert!(!state.lock().schedule(8));
         let file_panes = vec![("/tasks/old-left.md".to_string(), "%72".to_string())];
@@ -37249,7 +37077,7 @@ mod pane_layout_projection_dispatch_tests {
         assert_eq!(
             pane_layout_attempt_completion(
                 Some(desired.generation),
-                &PaneLayoutProjection::RetryPending(desired.clone()),
+                &TmuxLayoutEffectState::RetryPending(desired.clone()),
                 desired.generation,
             ),
             PaneLayoutAttemptCompletion::RetryCurrent
@@ -37257,7 +37085,7 @@ mod pane_layout_projection_dispatch_tests {
         assert_eq!(
             pane_layout_attempt_completion(
                 Some(desired.generation),
-                &PaneLayoutProjection::Refused(desired.clone()),
+                &TmuxLayoutEffectState::Refused(desired.clone()),
                 desired.generation,
             ),
             PaneLayoutAttemptCompletion::Retire
@@ -37265,7 +37093,7 @@ mod pane_layout_projection_dispatch_tests {
         assert_eq!(
             pane_layout_attempt_completion(
                 Some(desired.generation),
-                &PaneLayoutProjection::Converged(desired.clone()),
+                &TmuxLayoutEffectState::Converged(desired.clone()),
                 desired.generation,
             ),
             PaneLayoutAttemptCompletion::Retire
@@ -37273,7 +37101,7 @@ mod pane_layout_projection_dispatch_tests {
         assert_eq!(
             pane_layout_attempt_completion(
                 Some(desired.generation),
-                &PaneLayoutProjection::OperatorOwned(desired.clone()),
+                &TmuxLayoutEffectState::OperatorOwned(desired.clone()),
                 desired.generation,
             ),
             PaneLayoutAttemptCompletion::Retire
@@ -37281,7 +37109,7 @@ mod pane_layout_projection_dispatch_tests {
         assert_eq!(
             pane_layout_attempt_completion(
                 Some(desired.generation + 1),
-                &PaneLayoutProjection::RetryPending(desired.clone()),
+                &TmuxLayoutEffectState::RetryPending(desired.clone()),
                 desired.generation,
             ),
             PaneLayoutAttemptCompletion::Superseded
@@ -37291,23 +37119,23 @@ mod pane_layout_projection_dispatch_tests {
     #[test]
     fn pane_layout_retry_backoff_is_bounded() {
         assert_eq!(
-            pane_layout_projection_retry_delay(1),
+            tmux_layout_effect_state_retry_delay(1),
             Duration::from_millis(250)
         );
         assert_eq!(
-            pane_layout_projection_retry_delay(2),
+            tmux_layout_effect_state_retry_delay(2),
             Duration::from_millis(500)
         );
         assert_eq!(
-            pane_layout_projection_retry_delay(5),
+            tmux_layout_effect_state_retry_delay(5),
             Duration::from_secs(4)
         );
         assert_eq!(
-            pane_layout_projection_retry_delay(6),
+            tmux_layout_effect_state_retry_delay(6),
             Duration::from_secs(5)
         );
         assert_eq!(
-            pane_layout_projection_retry_delay(u64::MAX),
+            tmux_layout_effect_state_retry_delay(u64::MAX),
             Duration::from_secs(5)
         );
     }
@@ -40489,7 +40317,7 @@ mod tests {
             ops_log.contains(
                 "controller_editor_surface_focus_escalation_skipped \
                  document=/project/payments-ledger.md \
-                 reason=actor_pane_not_visible cause=no_editor_columns"
+                 reason=actor_pane_not_visible cause=no_frontend_layout_snapshot"
             ),
             "an empty editor layout must be refused, not republished: {ops_log}"
         );
@@ -40586,7 +40414,7 @@ mod tests {
     }
 
     #[test]
-    fn gh166_fresh_controller_focus_only_switch_uses_two_live_panes() {
+    fn gh166_fresh_controller_focus_only_switch_defers_without_frontend_layout() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -40616,37 +40444,15 @@ mod tests {
         TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| *documents.borrow_mut() = None);
 
         assert!(
-            escalated,
-            "a positive two-pane observation must recover the fresh-controller focus escalation"
+            !escalated,
+            "tmux observation is a receipt, not editor authority"
         );
-        let desired = runtime.pane_layout_desired().unwrap();
-        assert_eq!(
-            desired.invocation.columns.len(),
-            2,
-            "focusing a stashed document must replace a live column, never grow the layout"
-        );
-        assert_eq!(desired.invocation.focus.as_deref(), Some(stashed.as_str()));
-        assert!(desired.invocation.columns.contains(&first));
-        assert!(desired.invocation.columns.contains(&stashed));
-        assert!(
-            !desired.invocation.columns.contains(&second),
-            "the uncovered focus replaces the rightmost live column when no retained focus exists"
-        );
+        assert!(runtime.pane_layout_desired().is_none());
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            ops_log.contains(
-                "controller_editor_surface_focus_merge_basis source=live_tmux_observation \
-                 reason=positive_observation session_source=test_hook columns=2 (GH #166)"
-            ),
-            "the live merge basis must be explicit and diagnosable: {ops_log}"
-        );
-        assert!(
-            ops_log.contains(&format!(
-                "controller_editor_surface_focus_escalated document={stashed} \
-                 reason=actor_pane_not_visible columns=2 source=live_tmux_focus_column"
-            )),
-            "the recovered focus escalation must identify the live-tmux basis: {ops_log}"
+            ops_log.contains("controller_editor_surface_focus_escalation_skipped"),
+            "focus must defer until a frontend layout snapshot arrives: {ops_log}"
         );
     }
 
@@ -40718,7 +40524,7 @@ mod tests {
         assert!(
             ops_log.contains(&format!(
                 "controller_editor_surface_focus_escalated document={infra} \
-                 reason=actor_pane_not_visible columns=2 source=retained_layout"
+                 reason=actor_pane_not_visible columns=2 source=cached_frontend_layout"
             )),
             "the retained layout must be republished as-is when it covers the document: {ops_log}"
         );
@@ -40763,15 +40569,6 @@ mod tests {
         invocation
     }
 
-    fn plugin_provisional_order_publication(
-        columns: &[&str],
-        focus: &str,
-    ) -> ControllerTmuxLayoutSyncInvocation {
-        let mut invocation = plugin_unknown_order_publication(columns, focus);
-        invocation.column_order = agent_doc_tmux::LayoutColumnOrder::Provisional;
-        invocation
-    }
-
     fn session_document(dir: &tempfile::TempDir, name: &str) -> String {
         let path = dir.path().join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -40783,9 +40580,9 @@ mod tests {
     /// documents alternated their column order, placing the focused document
     /// first, because the publisher's order was focus-first and nothing
     /// upstream of the order-preserving stages questioned it. An `unknown`
-    /// order must resolve to the retained one, so focus toggles move focus only.
-    /// When that retained basis began as a cold no-survivor guess, resolution
-    /// stays `unknown`: a stable guess is not positive order authority.
+    /// order must preserve the last positive editor vector, so focus toggles
+    /// move focus only. Cold unknown input is covered by
+    /// `manual_unknown_order_preserves_structure_until_frontend_snapshot`.
     #[test]
     fn unknown_order_publications_keep_the_retained_column_order_across_focus_toggles() {
         let dir = tempfile::tempdir().unwrap();
@@ -40795,7 +40592,18 @@ mod tests {
         let ad = session_document(&dir, "tasks/agent-doc/agent-doc.ad.md");
         let mr = session_document(&dir, "tasks/pmt2/mr/1102.md");
 
-        let mut generations = Vec::new();
+        let mut initial = plugin_unknown_order_publication(&[&ad, &mr], &ad);
+        initial.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            initial,
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+
         for focus in [&ad, &mr, &ad, &mr] {
             let other = if focus == &ad { &mr } else { &ad };
             let (desired, _) = publish_pane_layout_desired_invocation(
@@ -40813,7 +40621,6 @@ mod tests {
                 "focus on {focus} must not reorder the retained columns"
             );
             assert_eq!(desired.invocation.focus.as_deref(), Some(focus.as_str()));
-            generations.push(desired.generation);
         }
         assert_eq!(
             runtime
@@ -40821,38 +40628,16 @@ mod tests {
                 .unwrap()
                 .invocation
                 .column_order,
-            agent_doc_tmux::LayoutColumnOrder::Unknown
+            agent_doc_tmux::LayoutColumnOrder::Editor
         );
-        assert!(
-            pane_layout_order_authority(runtime.as_ref()).is_empty(),
-            "a cold no-survivor guess must not be exported as Remote Dev anchor authority"
+        assert_eq!(
+            pane_layout_order_authority(runtime.as_ref()),
+            vec![ad.clone(), mr.clone()],
         );
         assert_eq!(
             load_layout_state(&bootstrap.project_root).unwrap_or_default(),
             vec![ad.clone(), mr.clone()],
             "the durable column memory must hold the resolved order, not the incoming one"
-        );
-
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-        assert!(
-            ops_log.contains(&format!(
-                "pane_layout_desired_published generation={} caller_kind=automatic plane_version=none \
-                 column_order=unknown reordered=false incoming={:?}",
-                generations[0],
-                [&ad, &mr]
-            )),
-            "the first publication has no retained basis and must say so: {ops_log}"
-        );
-        assert!(
-            ops_log.contains(&format!(
-                "pane_layout_desired_published generation={} caller_kind=automatic plane_version=none \
-                 column_order=unknown reordered=true incoming={:?} columns={:?}",
-                generations[1],
-                [&mr, &ad],
-                [&ad, &mr]
-            )),
-            "the publisher and both the received and stable-but-unknown order must be logged: {ops_log}"
         );
 
         let mut measured = plugin_unknown_order_publication(&[&mr, &ad], &mr);
@@ -40873,13 +40658,11 @@ mod tests {
         assert_eq!(pane_layout_order_authority(runtime.as_ref()), vec![mr, ad]);
     }
 
-    /// GH #343: Remote Dev reports the selection before its structural
-    /// visible-set update. The first publication guesses `[c | b]` from the
-    /// confirmed `[a | b]`; the follow-up proves `[a | c]`. The guess changes
-    /// membership immediately but must never become the follow-up's fold basis
-    /// or controller-to-editor order authority.
+    /// GH #343: connected frontend columns are the effect target. A manual Sync Tmux Layout uses
+    /// that authoritative snapshot to recover from conflicting retained backend state without
+    /// reordering or reconstructing the vector.
     #[test]
-    fn provisional_editor_replacement_keeps_the_pre_guess_order_basis() {
+    fn manual_sync_frontend_snapshot_replaces_stale_backend_target_unchanged() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -40888,156 +40671,56 @@ mod tests {
         let b = session_document(&dir, "b.md");
         let c = session_document(&dir, "c.md");
 
-        let mut measured = plugin_unknown_order_publication(&[&a, &b], &a);
-        measured.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
-        let (measured, _) = publish_pane_layout_desired_invocation(
-            &bootstrap,
-            runtime.as_ref(),
-            measured,
-            Some(1),
-            PaneLayoutPublication::FreshIntent,
-            PaneLayoutPublisher::PluginPublication,
-        )
-        .unwrap();
-        assert_eq!(measured.invocation.columns, vec![a.clone(), b.clone()]);
-
-        let (guessed, _) = publish_pane_layout_desired_invocation(
-            &bootstrap,
-            runtime.as_ref(),
-            plugin_provisional_order_publication(&[&c, &b], &c),
-            Some(2),
-            PaneLayoutPublication::FreshIntent,
-            PaneLayoutPublisher::PluginPublication,
-        )
-        .unwrap();
-        assert_eq!(guessed.invocation.columns, vec![c.clone(), b.clone()]);
-        assert_eq!(
-            guessed.invocation.column_order,
-            agent_doc_tmux::LayoutColumnOrder::Provisional
-        );
-        assert_eq!(
-            guessed.provenance.provisional_order_basis,
-            Some(vec![a.clone(), b.clone()])
-        );
-        assert_eq!(
-            pane_layout_order_authority(runtime.as_ref()),
-            vec![a.clone(), b]
-        );
-
-        let (corrected, _) = publish_pane_layout_desired_invocation(
-            &bootstrap,
-            runtime.as_ref(),
-            plugin_unknown_order_publication(&[&a, &c], &c),
-            Some(3),
-            PaneLayoutPublication::FreshIntent,
-            PaneLayoutPublisher::PluginPublication,
-        )
-        .unwrap();
-        assert_eq!(corrected.invocation.columns, vec![a, c]);
-        assert_eq!(corrected.provenance.provisional_order_basis, None);
-    }
-
-    /// GH #343 over GH #332: cold Remote Dev membership is useful fold
-    /// ancestry, but carrying it across a provisional replacement must not
-    /// upgrade it into editor-anchor authority.
-    #[test]
-    fn provisional_replacement_keeps_a_cold_basis_unanchored() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let bootstrap = test_bootstrap(&dir);
-        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
-        let a = session_document(&dir, "a.md");
-        let b = session_document(&dir, "b.md");
-        let c = session_document(&dir, "c.md");
-
+        let mut stale = plugin_unknown_order_publication(&[&a, &b], &a);
+        stale.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
         publish_pane_layout_desired_invocation(
             &bootstrap,
             runtime.as_ref(),
-            plugin_unknown_order_publication(&[&a, &b], &a),
+            stale,
             Some(1),
             PaneLayoutPublication::FreshIntent,
             PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
-        let (guessed, _) = publish_pane_layout_desired_invocation(
+
+        // Wider and deliberately reversed relative to the stale backend target:
+        // neither retained order nor width memory may fold this positive vector.
+        let mut frontend = plugin_unknown_order_publication(&[&c, &b, &a], &c);
+        frontend.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        frontend.caller_kind = "manual".to_string();
+        let (desired, published) = publish_pane_layout_desired_invocation(
             &bootstrap,
             runtime.as_ref(),
-            plugin_provisional_order_publication(&[&c, &b], &c),
+            frontend,
             Some(2),
-            PaneLayoutPublication::FreshIntent,
-            PaneLayoutPublisher::PluginPublication,
-        )
-        .unwrap();
-        assert_eq!(
-            guessed.provenance.provisional_order_basis,
-            Some(vec![a.clone(), b])
-        );
-        assert!(!guessed.provenance.provisional_order_basis_authoritative);
-        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
-
-        let (corrected, _) = publish_pane_layout_desired_invocation(
-            &bootstrap,
-            runtime.as_ref(),
-            plugin_unknown_order_publication(&[&a, &c], &c),
-            Some(3),
-            PaneLayoutPublication::FreshIntent,
-            PaneLayoutPublisher::PluginPublication,
-        )
-        .unwrap();
-        assert_eq!(corrected.invocation.columns, vec![a, c]);
-        assert_eq!(
-            corrected.invocation.column_order,
-            agent_doc_tmux::LayoutColumnOrder::Unknown
-        );
-        assert_eq!(corrected.provenance.provisional_order_basis, None);
-        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
-    }
-
-    /// GH #338: Remote Dev has membership but no backend split geometry. A
-    /// manual Sync Tmux Layout click is therefore the only way to replace a
-    /// cold, unanchored order guess without restarting the controller or
-    /// round-tripping controller state through the editor. The replacement
-    /// remains `unknown`, becomes the fold basis for later automatic
-    /// focus-first observations, and cannot override a later positive
-    /// editor-geometry authority.
-    #[test]
-    fn manual_unknown_order_reconciles_without_controller_to_editor_echo() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let bootstrap = test_bootstrap(&dir);
-        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
-        let a = session_document(&dir, "a.md");
-        let b = session_document(&dir, "b.md");
-
-        let (cold, _) = publish_pane_layout_desired_invocation(
-            &bootstrap,
-            runtime.as_ref(),
-            plugin_unknown_order_publication(&[&b, &a], &b),
-            None,
-            PaneLayoutPublication::FreshIntent,
-            PaneLayoutPublisher::PluginPublication,
-        )
-        .unwrap();
-        assert_eq!(cold.invocation.columns, vec![b.clone(), a.clone()]);
-        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
-
-        let (manual, _) = publish_pane_layout_desired_invocation(
-            &bootstrap,
-            runtime.as_ref(),
-            manual_unknown_order_publication(&[&a, &b], &a),
-            None,
             PaneLayoutPublication::FreshIntent,
             PaneLayoutPublisher::Command,
         )
         .unwrap();
-        assert_eq!(manual.invocation.columns, vec![a.clone(), b.clone()]);
+        assert_eq!(published.columns, vec![c.clone(), b.clone(), a.clone()]);
         assert_eq!(
-            manual.invocation.column_order,
-            agent_doc_tmux::LayoutColumnOrder::Unknown,
+            desired.invocation.columns,
+            vec![c.clone(), b.clone(), a.clone()]
         );
-        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
+        assert_eq!(
+            desired.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+        assert_eq!(pane_layout_order_authority(runtime.as_ref()), vec![c, b, a]);
+    }
 
-        let (automatic, _) = publish_pane_layout_desired_invocation(
+    /// GH #343: a manual click with unknown order is not structural evidence. It preserves the
+    /// retained vector; recovery requires the connected frontend's positive column snapshot.
+    #[test]
+    fn manual_unknown_order_preserves_structure_until_frontend_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+
+        let cold_error = publish_pane_layout_desired_invocation(
             &bootstrap,
             runtime.as_ref(),
             plugin_unknown_order_publication(&[&b, &a], &b),
@@ -41045,11 +40728,12 @@ mod tests {
             PaneLayoutPublication::FreshIntent,
             PaneLayoutPublisher::PluginPublication,
         )
-        .unwrap();
-        assert_eq!(
-            automatic.invocation.columns,
-            vec![a.clone(), b.clone()],
-            "later focus-first membership must fold against the manual basis",
+        .unwrap_err();
+        assert!(
+            cold_error
+                .to_string()
+                .contains("incomplete frontend layout"),
+            "cold unknown structure must defer, got {cold_error:#}",
         );
 
         let mut measured = plugin_unknown_order_publication(&[&b, &a], &b);
@@ -41077,10 +40761,29 @@ mod tests {
             PaneLayoutPublisher::Command,
         )
         .unwrap();
+        assert_eq!(manual.invocation.columns, vec![b.clone(), a.clone()]);
         assert_eq!(
-            manual.invocation.columns,
-            vec![b, a],
-            "unknown manual order must not override positive editor geometry",
+            manual.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor,
+        );
+        assert_eq!(
+            pane_layout_order_authority(runtime.as_ref()),
+            vec![b.clone(), a.clone()],
+        );
+
+        let (automatic, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&a, &b], &a),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(
+            automatic.invocation.columns,
+            vec![b.clone(), a.clone()],
+            "manual unknown input must not become a new structural basis",
         );
     }
 
@@ -41088,17 +40791,19 @@ mod tests {
     /// keeps that label, so the unchanged layout coalesces rather than minting
     /// a new generation per tab switch.
     #[test]
-    fn an_unanchored_layout_escalation_coalesces_but_outside_window_mints_an_effect() {
+    fn a_retained_layout_escalation_coalesces_but_outside_window_mints_an_effect() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
         let ad = session_document(&dir, "ad.md");
         let mr = session_document(&dir, "mr.md");
+        let mut authoritative = plugin_unknown_order_publication(&[&ad, &mr], &ad);
+        authoritative.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
         publish_pane_layout_desired_invocation(
             &bootstrap,
             runtime.as_ref(),
-            plugin_unknown_order_publication(&[&ad, &mr], &ad),
+            authoritative,
             None,
             PaneLayoutPublication::FreshIntent,
             PaneLayoutPublisher::PluginPublication,
@@ -41124,7 +40829,7 @@ mod tests {
         assert_eq!(first.invocation.columns, vec![ad.clone(), mr.clone()]);
         assert_eq!(
             first.invocation.column_order,
-            agent_doc_tmux::LayoutColumnOrder::Unknown
+            agent_doc_tmux::LayoutColumnOrder::Editor
         );
         escalate_focus_to_structural_layout(
             &bootstrap,
@@ -41136,7 +40841,7 @@ mod tests {
         assert_eq!(
             runtime.pane_layout_desired().unwrap().generation,
             first.generation,
-            "an identical unanchored escalation must coalesce"
+            "an identical retained escalation must coalesce"
         );
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
@@ -41159,10 +40864,10 @@ mod tests {
         );
     }
 
-    /// GH #112: a newly visible document joins at the end of a retained
-    /// unknown-order layout instead of jumping to the front as the focus.
+    /// GH #343: a flat observation cannot append a newly focused document to
+    /// the last exact frontend vector.
     #[test]
-    fn unknown_order_publication_appends_a_new_focused_document() {
+    fn unknown_order_publication_cannot_append_a_new_focused_document() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -41171,10 +40876,12 @@ mod tests {
         let mr = session_document(&dir, "mr.md");
         let infra = session_document(&dir, "infra.md");
 
+        let mut authoritative = plugin_unknown_order_publication(&[&ad, &mr], &ad);
+        authoritative.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
         publish_pane_layout_desired_invocation(
             &bootstrap,
             runtime.as_ref(),
-            plugin_unknown_order_publication(&[&ad, &mr], &ad),
+            authoritative,
             None,
             PaneLayoutPublication::FreshIntent,
             PaneLayoutPublisher::PluginPublication,
@@ -41191,17 +40898,15 @@ mod tests {
         .unwrap();
         assert_eq!(
             desired.invocation.columns,
-            vec![ad.clone(), mr.clone(), infra.clone()]
+            vec![ad.clone(), mr.clone()]
         );
         assert_eq!(desired.invocation.focus.as_deref(), Some(infra.as_str()));
     }
 
-    /// GH #278 Ask 1 at the controller: retained `[a | b]`; an unordered
-    /// publication `{b, c}` (the left split switched from `a` to `c`) gives `c`
-    /// the slot `a` vacated: `[c | b]`, never `[b | c]`. A `retained` label
-    /// may place `c` but never inverts the survivor order either.
+    /// GH #343: retained `[a | b]` plus unordered `{b, c}` cannot infer that
+    /// `c` replaced `a`; only an exact frontend vector may name that slot.
     #[test]
-    fn gh278_unknown_order_publication_fills_the_vacated_slot() {
+    fn gh278_unknown_order_publication_cannot_fill_a_vacated_slot() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -41209,10 +40914,12 @@ mod tests {
         let a = session_document(&dir, "a.md");
         let b = session_document(&dir, "b.md");
         let c = session_document(&dir, "c.md");
+        let mut authoritative = plugin_unknown_order_publication(&[&a, &b], &a);
+        authoritative.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
         publish_pane_layout_desired_invocation(
             &bootstrap,
             runtime.as_ref(),
-            plugin_unknown_order_publication(&[&a, &b], &a),
+            authoritative,
             None,
             PaneLayoutPublication::FreshIntent,
             PaneLayoutPublisher::PluginPublication,
@@ -41227,13 +40934,13 @@ mod tests {
             PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
-        assert_eq!(desired.invocation.columns, vec![c.clone(), b.clone()]);
+        assert_eq!(desired.invocation.columns, vec![a.clone(), b.clone()]);
         assert_eq!(
             desired.invocation.column_order,
-            agent_doc_tmux::LayoutColumnOrder::Unknown,
-            "slot placement is stable but remains a no-survivor-derived guess (GH #332)"
+            agent_doc_tmux::LayoutColumnOrder::Editor,
         );
-        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
+        assert_eq!(desired.invocation.focus.as_deref(), Some(c.as_str()));
+        assert_eq!(pane_layout_order_authority(runtime.as_ref()), vec![a, b]);
     }
 
     /// GH #320, state propagation: tmux order is a pure derivation of the
@@ -41322,7 +41029,7 @@ mod tests {
             remote(agent_doc_editor_surface::SurfaceColumnOrder::Unknown).column_order,
             agent_doc_tmux::LayoutColumnOrder::Unknown
         );
-        publish_pane_layout_desired_invocation(
+        let cold = publish_pane_layout_desired_invocation(
             &bootstrap,
             runtime.as_ref(),
             remote(agent_doc_editor_surface::SurfaceColumnOrder::Unknown),
@@ -41330,7 +41037,8 @@ mod tests {
             PaneLayoutPublication::FreshIntent,
             PaneLayoutPublisher::EditorSurface,
         )
-        .unwrap();
+        .unwrap_err();
+        assert!(cold.to_string().contains("incomplete frontend layout"));
         // `agent-doc sync --col b --col a`: no `column_order`, so `editor`.
         let manual: ControllerTmuxLayoutSyncInvocation =
             serde_json::from_value(serde_json::json!({
@@ -41353,7 +41061,6 @@ mod tests {
         for order in [
             agent_doc_editor_surface::SurfaceColumnOrder::Unknown,
             agent_doc_editor_surface::SurfaceColumnOrder::Retained,
-            agent_doc_editor_surface::SurfaceColumnOrder::Provisional,
         ] {
             let (desired, _) = publish_pane_layout_desired_invocation(
                 &bootstrap,
@@ -41433,8 +41140,8 @@ mod tests {
         .unwrap()
     }
 
-    /// GH #320 option B at the controller: the Remote Dev backend's membership
-    /// fold published `[a | b]` as `unknown`; then the operator moves `a` to
+    /// GH #320/#343 at the controller: the Remote Dev backend's flat membership
+    /// observation is deferred as `unknown`; then the operator moves `a` to
     /// the opposite split. The 262/263 frontend measures the client's editor
     /// windows, and the backend forwards the derived columns `[b | a]` on its
     /// own `jetbrains-rd@<installation>` lane labelled `editor`. Measured order
@@ -41464,10 +41171,10 @@ mod tests {
             matches!(fold.intent, SurfaceIntent::Sync { .. }),
             "{fold:?}"
         );
-        let desired = runtime
-            .pane_layout_desired()
-            .expect("fold publishes a layout");
-        assert_eq!(desired.invocation.columns, vec![a.clone(), b.clone()]);
+        assert!(
+            runtime.pane_layout_desired().is_none(),
+            "flat membership must not publish a backend-authored target"
+        );
 
         let measured = gh320_observe_surface(
             &bootstrap,
@@ -41516,10 +41223,9 @@ mod tests {
         ));
     }
 
-    /// GH #320 option B, one-sided install (no frontend module, or one that
-    /// predates schema 2): only the backend's membership fold publishes, its
-    /// order stays `unknown`, and the same documents in a new list order are
-    /// not a new layout, so the retained `[a | b]` keeps.
+    /// GH #320/#343, one-sided install (no frontend module, or one that
+    /// predates schema 3): flat backend membership observations remain
+    /// structurally inert, however often their list order changes.
     #[test]
     fn gh320_one_sided_remote_dev_surface_stays_unknown_and_keeps_the_retained_order() {
         let dir = tempfile::tempdir().unwrap();
@@ -41554,13 +41260,9 @@ mod tests {
             !matches!(reordered.intent, SurfaceIntent::Sync { .. }),
             "membership order is not geometry: {reordered:?}"
         );
-        let desired = runtime
-            .pane_layout_desired()
-            .expect("fold published a layout");
-        assert_eq!(desired.invocation.columns, vec![a.clone(), b.clone()]);
-        assert_eq!(
-            desired.invocation.column_order,
-            agent_doc_tmux::LayoutColumnOrder::Unknown
+        assert!(
+            runtime.pane_layout_desired().is_none(),
+            "schema-1/flat evidence must not invent a desired tmux target"
         );
     }
 
@@ -41576,10 +41278,12 @@ mod tests {
         let ad = session_document(&dir, "ad.md");
         let mr = session_document(&dir, "mr.md");
 
+        let mut initial = plugin_unknown_order_publication(&[&ad, &mr], &ad);
+        initial.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
         publish_pane_layout_desired_invocation(
             &bootstrap,
             runtime.as_ref(),
-            plugin_unknown_order_publication(&[&ad, &mr], &ad),
+            initial,
             None,
             PaneLayoutPublication::FreshIntent,
             PaneLayoutPublisher::PluginPublication,
@@ -41670,8 +41374,8 @@ mod tests {
     /// every uncovered asking document to the last published layout and
     /// republished the result, so four documents switching in one second grew
     /// the columns 1→2→3→4. No sequence of focus-only escalations may grow the
-    /// retained column set. GH #126: an uncovered document takes the retained
-    /// focus column instead of being skipped, so the width still holds.
+    /// retained column set. GH #343: an uncovered document is deferred; it
+    /// never takes a backend-chosen slot.
     #[test]
     fn focus_only_escalations_never_grow_the_retained_layout() {
         let dir = tempfile::tempdir().unwrap();
@@ -41700,21 +41404,21 @@ mod tests {
         assert_eq!(observed, vec![ledger.clone()]);
 
         for other in &others {
-            escalate_focus_to_structural_layout(
+            assert!(!escalate_focus_to_structural_layout(
                 &bootstrap,
                 runtime.as_ref(),
                 other,
                 &[],
                 "actor_pane_not_visible",
-            );
+            ));
             let desired = runtime.pane_layout_desired().unwrap();
             assert_eq!(
                 desired.invocation.columns.len(),
                 observed.len(),
                 "a focus-only escalation must never grow the published layout: {desired:?}"
             );
-            assert_eq!(desired.invocation.columns, vec![other.clone()]);
-            assert_eq!(desired.invocation.focus.as_deref(), Some(other.as_str()));
+            assert_eq!(desired.invocation.columns, observed);
+            assert_eq!(desired.invocation.focus.as_deref(), Some(ledger.as_str()));
         }
 
         let ops_log =
@@ -41722,16 +41426,12 @@ mod tests {
         for other in &others {
             assert!(
                 ops_log.contains(&format!(
-                    "controller_editor_surface_focus_escalated document={other} \
-                     reason=actor_pane_not_visible columns=1 source=retained_focus_column"
+                    "controller_editor_surface_focus_escalation_skipped document={other} \
+                     reason=actor_pane_not_visible cause=focus_requires_frontend_layout"
                 )),
-                "an uncovered document must take the retained focus column: {ops_log}"
+                "an uncovered focus must defer without changing structure: {ops_log}"
             );
         }
-        assert!(
-            !ops_log.contains("controller_editor_surface_focus_escalation_skipped"),
-            "no uncovered document may be silently skipped (GH #126): {ops_log}"
-        );
     }
 
     /// GH #278 Ask 3: an escalation replaces the column of the LATEST focus.
@@ -41775,37 +41475,37 @@ mod tests {
             published.generation
         );
 
-        escalate_focus_to_structural_layout(
+        assert!(!escalate_focus_to_structural_layout(
             &bootstrap,
             runtime.as_ref(),
             &d,
             &[],
             "actor_pane_not_visible",
-        );
+        ));
         let desired = runtime.pane_layout_desired().unwrap();
-        assert_eq!(desired.invocation.columns, vec![c.clone(), d.clone()]);
-        assert_eq!(desired.invocation.focus.as_deref(), Some(d.as_str()));
+        assert_eq!(desired.invocation.columns, vec![c.clone(), b.clone()]);
+        assert_eq!(desired.invocation.focus.as_deref(), Some(c.as_str()));
 
         // The escalation's own publication carries focus `d`, so an outcome
         // recorded under the older generation no longer names the column.
-        escalate_focus_to_structural_layout(
+        assert!(escalate_focus_to_structural_layout(
             &bootstrap,
             runtime.as_ref(),
             &b,
             &[],
             "actor_pane_not_visible",
-        );
+        ));
         assert_eq!(
             runtime.pane_layout_desired().unwrap().invocation.columns,
             vec![c.clone(), b.clone()]
         );
     }
 
-    /// GH #302: a focus escalation guesses the replacement slot, but that
-    /// guess must not become either the next unknown-order fold's basis or the
-    /// authority used to anchor a cold/restarted Remote Dev client.
+    /// GH #343: focus-only input cannot invent a frontend column. The cached
+    /// frontend layout remains the desired tmux target until a newer positive
+    /// frontend snapshot replaces it.
     #[test]
-    fn gh302_focus_escalation_guess_never_becomes_order_authority() {
+    fn focus_only_input_never_mutates_frontend_membership_or_order() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -41833,125 +41533,17 @@ mod tests {
             "actor_pane_not_visible",
         ));
 
-        // Focus-only c guesses that it replaced a, so desired becomes [c | b].
-        assert!(escalate_focus_to_structural_layout(
+        assert!(!escalate_focus_to_structural_layout(
             &bootstrap,
             runtime.as_ref(),
             &c,
             &[],
             "actor_pane_not_visible",
         ));
-        let guessed = runtime.pane_layout_desired().unwrap();
-        assert_eq!(guessed.invocation.columns, vec![c.clone(), b.clone()]);
-        assert_eq!(
-            guessed.provenance.provisional_order_basis,
-            Some(vec![a.clone(), b.clone()])
-        );
-
-        // A restarted plugin anchors to the positive basis, never the guess.
-        let authority = pane_layout_order_authority(runtime.as_ref());
-        assert_eq!(authority, vec![a.clone(), b.clone()]);
-        let authority_columns = authority
-            .iter()
-            .map(|document| SurfaceColumn {
-                files: vec![document.clone()],
-            })
-            .collect::<Vec<_>>();
-        let restarted = agent_doc_editor_surface::RemoteLayoutMemory::default()
-            .anchor(&authority_columns);
-        assert_eq!(restarted.columns, authority_columns);
-
-        // The next structural publication says a survived and c replaced b.
-        // Its order is unknown, so folding against the guessed [c | b] would
-        // reverse it to [c | a]. The positive basis keeps [a | c].
-        let mut observation = automatic_layout_sync_invocation(
-            vec![a.clone(), c.clone()],
-            &c,
-            false,
-        );
-        observation.column_order = agent_doc_tmux::LayoutColumnOrder::Unknown;
-        let (corrected, _) = publish_pane_layout_desired_invocation(
-            &bootstrap,
-            runtime.as_ref(),
-            observation,
-            Some(1),
-            PaneLayoutPublication::CoalesceIdentical,
-            PaneLayoutPublisher::PluginPublication,
-        )
-        .unwrap();
-        assert_eq!(corrected.invocation.columns, vec![a, c]);
-        assert_eq!(corrected.provenance.provisional_order_basis, None);
-    }
-
-    #[test]
-    fn gh311_chained_focus_escalations_do_not_author_unknown_order() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let bootstrap = test_bootstrap(&dir);
-        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
-        let path = |name: &str| {
-            let path = dir.path().join(name);
-            std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
-            path.canonicalize().unwrap().display().to_string()
-        };
-        let (a, b, c, d) = (path("a.md"), path("b.md"), path("c.md"), path("d.md"));
-
-        // Positive editor geometry establishes [a | b], focused on a.
-        assert!(escalate_focus_to_structural_layout(
-            &bootstrap,
-            runtime.as_ref(),
-            &a,
-            &[
-                SurfaceColumn {
-                    files: vec![a.clone()],
-                },
-                SurfaceColumn {
-                    files: vec![b.clone()],
-                },
-            ],
-            "actor_pane_not_visible",
-        ));
-
-        // Consecutive focus-only escalations keep replacing the latest focus
-        // slot, but neither guess may replace [a | b] as order authority.
-        assert!(escalate_focus_to_structural_layout(
-            &bootstrap,
-            runtime.as_ref(),
-            &c,
-            &[],
-            "actor_pane_not_visible",
-        ));
-        assert!(escalate_focus_to_structural_layout(
-            &bootstrap,
-            runtime.as_ref(),
-            &d,
-            &[],
-            "actor_pane_not_visible",
-        ));
-        let guessed = runtime.pane_layout_desired().unwrap();
-        assert_eq!(guessed.invocation.columns, vec![d.clone(), b.clone()]);
-        assert_eq!(
-            guessed.provenance.provisional_order_basis,
-            Some(vec![a.clone(), b])
-        );
-
-        // Remote Dev then reports only newer documents. Folding [c | d]
-        // against the latest guess [d | b] would reverse it to [d | c]. With
-        // no positive-basis survivor, preserve the incoming unknown order.
-        let mut observation =
-            automatic_layout_sync_invocation(vec![c.clone(), d.clone()], &d, false);
-        observation.column_order = agent_doc_tmux::LayoutColumnOrder::Unknown;
-        let (corrected, _) = publish_pane_layout_desired_invocation(
-            &bootstrap,
-            runtime.as_ref(),
-            observation,
-            Some(1),
-            PaneLayoutPublication::CoalesceIdentical,
-            PaneLayoutPublisher::PluginPublication,
-        )
-        .unwrap();
-        assert_eq!(corrected.invocation.columns, vec![c, d]);
-        assert_eq!(corrected.provenance.provisional_order_basis, None);
+        let desired = runtime.pane_layout_desired().unwrap();
+        assert_eq!(desired.invocation.columns, vec![a.clone(), b.clone()]);
+        assert_eq!(desired.invocation.focus.as_deref(), Some(a.as_str()));
+        assert_eq!(pane_layout_order_authority(runtime.as_ref()), vec![a, b]);
     }
 
     /// `#focusstashescalate` end to end at the observe boundary: a same-layout
@@ -44004,7 +43596,7 @@ mod tests {
         loop {
             let ops = std::fs::read_to_string(&ops_log).unwrap_or_default();
             if ops.lines().any(|line| {
-                line.contains("pane_layout_desired_projected")
+                line.contains("pane_layout_desired_accepted")
                     && line.contains("navigation_lane=IU.0a1b2c3d")
             }) {
                 break;
@@ -44019,7 +43611,7 @@ mod tests {
 
     fn pane_layout_statuses_from_frames(
         frames: &[ControllerStatePlaneFrame],
-    ) -> Vec<ControllerPaneLayoutStateProjection> {
+    ) -> Vec<ControllerTmuxLayoutEffectStatus> {
         frames
             .iter()
             .map(|frame| {
@@ -44265,7 +43857,7 @@ mod tests {
         assert_eq!(status[0].generation, desired.generation);
         assert_eq!(
             Some(status[0].clone()),
-            runtime.pane_layout_graph().state_projection()
+            runtime.pane_layout_graph().effect_status()
         );
         for client in [
             "jetbrains@IU.0a1b2c3d-pid:41",
@@ -47007,7 +46599,7 @@ mod tests {
     }
 
     #[test]
-    fn editor_route_layout_args_become_an_exact_awaited_projection() {
+    fn editor_route_layout_args_become_an_exact_awaited_tmux_target() {
         let args = vec![
             "--col".to_string(),
             "/repo/bugs.md".to_string(),
@@ -47030,7 +46622,7 @@ mod tests {
             !invocation.routes_created_panes(),
             "layout must not dispatch sibling work"
         );
-        assert!(pane_layout_invocation_awaits_projection(&invocation));
+        assert!(pane_layout_invocation_awaits_effect(&invocation));
     }
 
     #[test]
@@ -48164,7 +47756,7 @@ mod tests {
             3,
             "{ops}"
         );
-        assert!(!ops.contains("pane_layout_projection_narrowed"), "{ops}");
+        assert!(!ops.contains("tmux_layout_effect_state_narrowed"), "{ops}");
     }
 
     #[test]
@@ -48231,7 +47823,7 @@ mod tests {
         }
         let ops = fixture.ops_log();
         assert!(!ops.contains("merge=added"), "{ops}");
-        assert!(!ops.contains("pane_layout_projection_narrowed"), "{ops}");
+        assert!(!ops.contains("tmux_layout_effect_state_narrowed"), "{ops}");
     }
 
     impl RouteLayoutFixture {
@@ -48371,9 +47963,8 @@ mod tests {
     }
 
     /// GH #136 follow-up (a): an observation of a stale generation never
-    /// bounds a newer one — a route racing the effect reads `unknown` and
-    /// falls back to the retained width, so a split the editor just reported
-    /// is never trimmed before tmux has had a pass at it.
+    /// bounds a newer one. The positive frontend vector bypasses backend width
+    /// folding entirely, and a route racing its effect preserves that vector.
     #[test]
     fn gh136a_an_unobserved_retained_generation_is_bounded_by_its_own_width() {
         let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
@@ -48390,11 +47981,10 @@ mod tests {
             !ops.contains("pane_layout_publication_width_bounded"),
             "{ops}"
         );
-        // The editor's own wider observation is published and attributable.
+        // The editor's own wider observation is authoritative, so backend
+        // width code neither trims it nor emits a derived widening decision.
         assert!(
-            ops.contains(
-                "pane_layout_publication_widened publisher=plugin_publication authority=editor_split_observation columns=3 observed_panes=2 observed_bound=2"
-            ),
+            !ops.contains("pane_layout_publication_widened publisher=plugin_publication"),
             "{ops}"
         );
     }
@@ -48482,7 +48072,7 @@ mod tests {
             let ops = fixture.ops_log();
             assert!(!ops.contains("merge=seeded"), "seed={seed}: {ops}");
             assert!(
-                !ops.contains("pane_layout_projection_narrowed"),
+                !ops.contains("tmux_layout_effect_state_narrowed"),
                 "seed={seed}: {ops}"
             );
             assert!(
@@ -48725,7 +48315,7 @@ mod tests {
     /// error. It must now put the document back in the focus column and focus
     /// it, without widening the plugin's one-column split.
     #[test]
-    fn gh126_focus_on_a_document_a_plugin_publication_evicted_republishes_it() {
+    fn gh126_focus_on_evicted_document_defers_until_frontend_republishes_layout() {
         let fixture = RouteLayoutFixture::new(&["agent-doc.ad", "laptop"]);
         let ad = fixture.id("agent-doc.ad");
         let laptop = fixture.id("laptop");
@@ -48754,25 +48344,20 @@ mod tests {
         );
         let ops = fixture.ops_log();
         assert!(
-            !ops.contains("controller_editor_surface_focus_escalation_skipped"),
-            "an explicit focus on an existing pane must not be silently skipped: {ops}"
-        );
-        assert!(
             ops.contains(&format!(
-                "controller_editor_surface_focus_escalated document={ad} \
-                 reason=actor_pane_not_visible columns=1 source=retained_focus_column \
-                 replaced={laptop}"
+                "controller_editor_surface_focus_escalation_skipped document={ad} \
+                 reason=actor_pane_not_visible cause=focus_requires_frontend_layout"
             )),
-            "the escalation must say which retained column the document took: {ops}"
+            "the focus must defer rather than replace the frontend column: {ops}"
         );
         let desired = fixture.runtime.pane_layout_desired().unwrap();
-        assert!(desired.generation > evicting.generation);
+        assert_eq!(desired.generation, evicting.generation);
         assert_eq!(
             desired.invocation.columns,
-            vec![ad.clone()],
-            "the document must be back in the layout, in place of the evicting column"
+            vec![laptop.clone()],
+            "cached frontend authority remains unchanged"
         );
-        assert_eq!(desired.invocation.focus.as_deref(), Some(ad.as_str()));
+        assert_eq!(desired.invocation.focus.as_deref(), Some(laptop.as_str()));
         assert_eq!(
             desired.provenance.structure_owner,
             PaneLayoutPublisher::PluginPublication,
@@ -48797,7 +48382,7 @@ mod tests {
     /// retained *focus* column, the other columns stay where they are, and the
     /// width never changes.
     #[test]
-    fn gh126_uncovered_focus_escalation_replaces_only_the_retained_focus_column() {
+    fn gh126_uncovered_focus_escalation_preserves_frontend_columns() {
         let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
         fixture.plugin(&["alpha", "beta"], "beta", 100);
         escalate_focus_to_structural_layout(
@@ -48809,9 +48394,9 @@ mod tests {
         );
         assert_eq!(
             fixture.desired_columns(),
-            vec![fixture.id("alpha"), fixture.id("gamma")]
+            vec![fixture.id("alpha"), fixture.id("beta")]
         );
-        assert_eq!(fixture.desired_focus(), Some(fixture.id("gamma")));
+        assert_eq!(fixture.desired_focus(), Some(fixture.id("beta")));
     }
 
     /// GH #322 (#311 mirrored): Remote Dev, every observation `focus_only`.
@@ -48839,7 +48424,7 @@ mod tests {
                 // A covered document is focused in place: `focus_only`.
                 graph.record_focus_outcome(document);
             } else {
-                assert!(escalate_focus_to_structural_layout(
+                assert!(!escalate_focus_to_structural_layout(
                     &fixture.bootstrap,
                     fixture.runtime.as_ref(),
                     document,
@@ -48853,7 +48438,7 @@ mod tests {
         // an editor-visible document, so GH #278's latest-focus rule decides.
         focus(&b);
         focus(&c);
-        assert_eq!(fixture.desired_columns(), vec![a.clone(), c.clone()]);
+        assert_eq!(fixture.desired_columns(), vec![a.clone(), b.clone()]);
 
         // Back to the left split, then `b` reopened over `c` on the right.
         // `c` is in no split the editor reported, so its column is replaced,
@@ -48877,21 +48462,10 @@ mod tests {
             .lines()
             .filter(|line| line.contains("controller_editor_surface_focus_escalated"))
             .collect::<Vec<_>>();
-        assert_eq!(escalations.len(), 2, "{escalations:#?}");
-        assert!(
-            escalations[0].contains(&format!(
-                "document={c} reason=actor_pane_not_visible columns=2 \
-                 source=retained_focus_column replaced={b} choice=latest_focus"
-            )),
-            "{escalations:#?}"
-        );
-        assert!(
-            escalations[1].contains(&format!(
-                "document={b} reason=actor_pane_not_visible columns=2 \
-                 source=retained_focus_column replaced={c} choice=not_editor_visible"
-            )),
-            "{escalations:#?}"
-        );
+        assert!(escalations.is_empty(), "{escalations:#?}");
+        assert!(ops.contains(&format!(
+            "document={c} reason=actor_pane_not_visible cause=focus_requires_frontend_layout"
+        )));
     }
 
     /// GH #322, the issue's last records: the route's `incoming=[a, b]` was
@@ -48899,19 +48473,19 @@ mod tests {
     /// focus on `a` must take back `c`'s column, not `b`'s, which the IDE
     /// still shows.
     #[test]
-    fn gh322_a_focus_takes_back_the_column_of_a_document_no_split_shows() {
+    fn gh322_focus_never_takes_a_frontend_column_without_layout_evidence() {
         let fixture = RouteLayoutFixture::new(&["a", "b", "c"]);
         let (a, b, c) = (fixture.id("a"), fixture.id("b"), fixture.id("c"));
         fixture.route("b", &["b", "a"], Some("exact")).unwrap();
         fixture.runtime.pane_layout_graph().record_focus_outcome(&a);
-        assert!(escalate_focus_to_structural_layout(
+        assert!(!escalate_focus_to_structural_layout(
             &fixture.bootstrap,
             fixture.runtime.as_ref(),
             &c,
             &[],
             "actor_pane_not_visible",
         ));
-        assert_eq!(fixture.desired_columns(), vec![b.clone(), c.clone()]);
+        assert_eq!(fixture.desired_columns(), vec![b.clone(), a.clone()]);
         fixture.runtime.pane_layout_graph().record_focus_outcome(&b);
         assert!(escalate_focus_to_structural_layout(
             &fixture.bootstrap,
@@ -48935,7 +48509,7 @@ mod tests {
         assert_eq!(graph.editor_visible(), None);
         fixture.plugin(&["a", "b"], "a", 100);
         assert_eq!(graph.editor_visible(), Some(vec![a.clone(), b.clone()]));
-        assert!(escalate_focus_to_structural_layout(
+        assert!(!escalate_focus_to_structural_layout(
             &fixture.bootstrap,
             fixture.runtime.as_ref(),
             &c,
@@ -49185,7 +48759,7 @@ mod tests {
             ops.contains("mode=ensure explicit=false merge=focus_only route_columns=1 retained_columns=2 published_columns=2"),
             "{ops}"
         );
-        assert!(!ops.contains("pane_layout_projection_narrowed"), "{ops}");
+        assert!(!ops.contains("tmux_layout_effect_state_narrowed"), "{ops}");
     }
 
     #[test]
@@ -49213,12 +48787,12 @@ mod tests {
         let ops = fixture.ops_log();
         let narrowed = ops
             .lines()
-            .filter(|line| line.contains("pane_layout_projection_narrowed"))
+            .filter(|line| line.contains("tmux_layout_effect_state_narrowed"))
             .collect::<Vec<_>>();
         assert_eq!(narrowed.len(), 1, "{ops}");
         assert!(
             narrowed[0].contains(&format!(
-                "pane_layout_projection_narrowed generation={generation} publisher=route plane_version=none columns=2 retained_columns=3 observed_panes=unknown caller_kind=editor_route"
+                "tmux_layout_effect_state_narrowed generation={generation} publisher=route plane_version=none columns=2 retained_columns=3 observed_panes=unknown caller_kind=editor_route"
             )),
             "{}",
             narrowed[0]
@@ -49333,7 +48907,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            pane_layout_projection_provenance(&desired),
+            tmux_layout_effect_state_provenance(&desired),
             "publisher=plugin_publication plane_version=115964117044 columns=2 retained_columns=0 observed_panes=unknown"
         );
 
@@ -49352,7 +48926,7 @@ mod tests {
         .unwrap();
         assert_eq!(narrowed.provenance.retained_columns, 2);
         assert!(fixture.ops_log().contains(&format!(
-            "pane_layout_projection_narrowed generation={} publisher=plugin_publication plane_version=115964117045 columns=1 retained_columns=2",
+            "tmux_layout_effect_state_narrowed generation={} publisher=plugin_publication plane_version=115964117045 columns=1 retained_columns=2",
             narrowed.generation
         )));
     }
@@ -49387,7 +48961,10 @@ mod tests {
         );
 
         // Distinct documents are untouched and log nothing new.
-        let before = fixture.ops_log().matches("duplicate_columns_collapsed").count();
+        let before = fixture
+            .ops_log()
+            .matches("duplicate_columns_collapsed")
+            .count();
         let (distinct, _) = publish_pane_layout_desired_invocation(
             &fixture.bootstrap,
             fixture.runtime.as_ref(),
@@ -49406,7 +48983,10 @@ mod tests {
             vec![fixture.id("api"), fixture.id("sdk")]
         );
         assert_eq!(
-            fixture.ops_log().matches("duplicate_columns_collapsed").count(),
+            fixture
+                .ops_log()
+                .matches("duplicate_columns_collapsed")
+                .count(),
             before
         );
     }
@@ -49499,8 +49079,7 @@ mod tests {
         assert_eq!(claim().map(|claim| claim.project_root), Some(inner.clone()));
         // agent-loop's later cross-root publication takes the window.
         assert!(
-            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 2_000)
-                .is_none()
+            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 2_000).is_none()
         );
         assert_eq!(claim().map(|claim| claim.generation), Some(36));
         // haiven-dev's retry of generation 4, however late it runs, yields:
@@ -49511,8 +49090,7 @@ mod tests {
         assert_eq!(newer.generation, 36);
         // The owner never yields, and its claim is untouched by the loser.
         assert!(
-            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 9_500)
-                .is_none()
+            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 9_500).is_none()
         );
         assert_eq!(claim().map(|claim| claim.project_root), Some(outer.clone()));
         // A genuinely newer haiven-dev publication takes the window back.
@@ -49521,8 +49099,7 @@ mod tests {
         );
         assert_eq!(claim().map(|claim| claim.generation), Some(5));
         assert!(
-            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 9_900)
-                .is_some()
+            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 9_900).is_some()
         );
     }
 
@@ -49538,9 +49115,7 @@ mod tests {
         use agent_doc_controller::layout_owner::{
             EditorPublicationOrder, WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim,
         };
-        use agent_doc_controller::pane_layout::{
-            ProjectionAttemptAdmission, ProjectionRetirement,
-        };
+        use agent_doc_controller::pane_layout::{TmuxEffectAttemptAdmission, TmuxEffectRetirement};
         let tmux = agent_doc_tmux_io::isolated_test_tmux("stalecontroller-editor-order");
         tmux.raw_cmd(&["new-session", "-d", "-s", "agent-doc", "-n", "agent-doc"])
             .unwrap();
@@ -49581,8 +49156,15 @@ mod tests {
             86,
         );
         assert!(
-            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, two_pane.generation, 1)
-                .is_none()
+            pane_layout_window_claim_gate(
+                &outer,
+                &tmux,
+                &window,
+                outer_graph,
+                two_pane.generation,
+                1
+            )
+            .is_none()
         );
         // haiven-dev's older 1-pane frame (seq 84) arrives late and its worker
         // runs with a much later clock: it still yields.
@@ -49603,23 +49185,35 @@ mod tests {
         .expect("a late, older editor frame yields the window");
         assert_eq!(owner.project_root, outer);
         assert_eq!(owner.publication, Some(order(86)));
-        let stored = agent_doc_tmux_io::window_user_option(&*tmux, &window, WINDOW_LAYOUT_CLAIM_OPTION)
-            .and_then(|value| WindowLayoutClaim::decode(&value))
-            .unwrap();
-        assert_eq!(stored.project_root, outer, "the loser never overwrites the claim");
+        let stored =
+            agent_doc_tmux_io::window_user_option(&*tmux, &window, WINDOW_LAYOUT_CLAIM_OPTION)
+                .and_then(|value| WindowLayoutClaim::decode(&value))
+                .unwrap();
+        assert_eq!(
+            stored.project_root, outer,
+            "the loser never overwrites the claim"
+        );
 
         // The editor forgets haiven-dev's surface: its generation retires.
         let retired = inner_graph
             .retire_generation_forgotten_by_editor(client)
             .expect("the forgotten frame's generation retires");
         assert_eq!(retired.generation, one_pane.generation);
-        assert!(inner_graph.retire_generation_forgotten_by_editor(client).is_none());
+        assert!(
+            inner_graph
+                .retire_generation_forgotten_by_editor(client)
+                .is_none()
+        );
         assert_eq!(
-            inner_graph.begin_projection_attempt(one_pane.generation),
-            ProjectionAttemptAdmission::Retired(ProjectionRetirement::EditorSurfaceForgotten)
+            inner_graph.begin_tmux_effect_attempt(one_pane.generation),
+            TmuxEffectAttemptAdmission::Retired(TmuxEffectRetirement::EditorSurfaceForgotten)
         );
         // Another client's forget never touches it.
-        assert!(outer_graph.retire_generation_forgotten_by_editor("vscode-1").is_none());
+        assert!(
+            outer_graph
+                .retire_generation_forgotten_by_editor("vscode-1")
+                .is_none()
+        );
 
         // The editor really does go back to 1 pane (seq 92): the identical
         // layout mints a NEW generation that outranks the 2-pane claim.
@@ -49631,26 +49225,40 @@ mod tests {
         );
         assert!(back_to_one.generation > one_pane.generation);
         assert!(
-            pane_layout_window_claim_gate(&inner, &tmux, &window, inner_graph, back_to_one.generation, 2)
-                .is_none()
+            pane_layout_window_claim_gate(
+                &inner,
+                &tmux,
+                &window,
+                inner_graph,
+                back_to_one.generation,
+                2
+            )
+            .is_none()
         );
         assert!(
-            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, two_pane.generation, 3)
-                .is_some(),
+            pane_layout_window_claim_gate(
+                &outer,
+                &tmux,
+                &window,
+                outer_graph,
+                two_pane.generation,
+                3
+            )
+            .is_some(),
             "agent-loop's older 2-pane generation now yields"
         );
     }
 
     #[test]
-    fn gh111_every_pane_layout_projection_line_carries_its_provenance() {
+    fn gh111_every_tmux_layout_effect_state_line_carries_its_provenance() {
         let source = include_str!("rpc.rs");
         let attributed = format!(
             "{}{}",
-            "\"pane_layout_projection generation={} attempt={} {} ", "phase="
+            "\"tmux_layout_effect_state generation={} attempt={} {} ", "phase="
         );
         let unattributed = format!(
             "{}{}",
-            "\"pane_layout_projection generation={} attempt={} ", "phase="
+            "\"tmux_layout_effect_state generation={} attempt={} ", "phase="
         );
         assert_eq!(source.matches(&attributed).count(), 3);
         assert_eq!(source.matches(&unattributed).count(), 0);
@@ -49754,7 +49362,7 @@ mod tests {
 
     #[test]
     fn gh110_convergence_gate_names_reason_document_and_columns() {
-        let receipt = gh110_receipt(false, "projection_effect_in_flight", &["/repo/a.md"]);
+        let receipt = gh110_receipt(false, "tmux_effect_in_flight", &["/repo/a.md"]);
         let refusal = editor_route_layout_refusal(&receipt, "/repo/a.md").unwrap();
         assert!(refusal.retryable);
         assert!(
@@ -49764,11 +49372,7 @@ mod tests {
             "{}",
             refusal.message
         );
-        assert!(
-            refusal
-                .message
-                .contains("reason=projection_effect_in_flight")
-        );
+        assert!(refusal.message.contains("reason=tmux_effect_in_flight"));
         assert!(refusal.message.contains("routed document `/repo/a.md`"));
         assert!(refusal.message.contains("published columns: `/repo/a.md`"));
 
@@ -49778,8 +49382,8 @@ mod tests {
                 .unwrap()
                 .retryable
         );
-        // `projection_published` is a successful command-plane terminal.
-        let published = gh110_receipt(false, "projection_published", &["/repo/a.md"]);
+        // `target_published` is a successful command-plane terminal.
+        let published = gh110_receipt(false, "target_published", &["/repo/a.md"]);
         assert_eq!(editor_route_layout_refusal(&published, "/repo/a.md"), None);
     }
 
@@ -49964,7 +49568,7 @@ mod tests {
         let error = await_editor_route_layout_gates(
             "/repo/a.md",
             Instant::now(),
-            gh110_receipt(false, "projection_effect_in_flight", &["/repo/a.md"]),
+            gh110_receipt(false, "tmux_effect_in_flight", &["/repo/a.md"]),
             |_, _| panic!("no budget left to re-observe"),
         )
         .unwrap_err()
@@ -49973,10 +49577,7 @@ mod tests {
             error.contains("did not converge before dispatch"),
             "{error}"
         );
-        assert!(
-            error.contains("reason=projection_effect_in_flight"),
-            "{error}"
-        );
+        assert!(error.contains("reason=tmux_effect_in_flight"), "{error}");
         assert!(error.contains("after 1 layout observation(s)"), "{error}");
         assert!(error.contains("exhausted"), "{error}");
     }
@@ -50744,40 +50345,43 @@ mod tests {
         let desired = super::super::tests::pane_layout_desired_for_test(7);
         let cases = [
             (
-                PaneLayoutProjection::NeedsEffect(desired.clone()),
+                TmuxLayoutEffectState::NeedsEffect(desired.clone()),
                 false,
-                "projection_effect_not_started",
+                "tmux_effect_not_started",
             ),
             (
-                PaneLayoutProjection::Applying(desired.clone()),
+                TmuxLayoutEffectState::Applying(desired.clone()),
                 false,
-                "projection_effect_in_flight",
+                "tmux_effect_in_flight",
             ),
             (
-                PaneLayoutProjection::RetryPending(desired.clone()),
+                TmuxLayoutEffectState::RetryPending(desired.clone()),
                 false,
-                "projection_retry_pending",
+                "tmux_effect_retry_pending",
             ),
             (
-                PaneLayoutProjection::OperatorOwned(desired.clone()),
+                TmuxLayoutEffectState::OperatorOwned(desired.clone()),
                 false,
                 "operator_owned_layout",
             ),
             (
-                PaneLayoutProjection::Converged(desired),
+                TmuxLayoutEffectState::Converged(desired),
                 true,
                 "observed_convergence",
             ),
         ];
-        for (projection, applied, reason) in cases {
-            assert_eq!(pane_layout_await_outcome(&projection, 7), (applied, reason));
+        for (effect_state, applied, reason) in cases {
             assert_eq!(
-                pane_layout_await_outcome(&projection, 6),
+                pane_layout_await_outcome(&effect_state, 7),
+                (applied, reason)
+            );
+            assert_eq!(
+                pane_layout_await_outcome(&effect_state, 6),
                 (false, "superseded_by_newer_layout_state")
             );
         }
         assert_eq!(
-            pane_layout_await_outcome(&PaneLayoutProjection::Absent, 7),
+            pane_layout_await_outcome(&TmuxLayoutEffectState::Absent, 7),
             (false, "desired_layout_state_absent")
         );
     }
@@ -50843,7 +50447,7 @@ mod tests {
     }
 
     #[test]
-    fn published_tmux_layout_projection_is_a_successful_command_terminal() {
+    fn published_tmux_layout_target_is_a_successful_command_terminal() {
         let receipt = |applied, reason: &str| ControllerTmuxLayoutSyncReceipt {
             gated_documents: Vec::new(),
             applied,
@@ -50861,7 +50465,7 @@ mod tests {
 
         assert!(tmux_layout_command_applied(&receipt(
             false,
-            "projection_published"
+            "target_published"
         )));
         assert!(tmux_layout_command_applied(&receipt(
             true,
@@ -50869,7 +50473,7 @@ mod tests {
         )));
         assert!(!tmux_layout_command_applied(&receipt(
             false,
-            "projection_retry_pending"
+            "tmux_effect_retry_pending"
         )));
         assert!(!tmux_layout_command_applied(&receipt(
             false,
@@ -50903,21 +50507,21 @@ mod tests {
 
         assert_eq!(
             pane_layout_route_await_outcome(
-                &PaneLayoutProjection::Applying(desired(2, vec![document.to_string()])),
+                &TmuxLayoutEffectState::Applying(desired(2, vec![document.to_string()])),
                 document,
             ),
-            (false, "projection_effect_in_flight")
+            (false, "tmux_effect_in_flight")
         );
         assert_eq!(
             pane_layout_route_await_outcome(
-                &PaneLayoutProjection::Converged(desired(3, vec![document.to_string()])),
+                &TmuxLayoutEffectState::Converged(desired(3, vec![document.to_string()])),
                 document,
             ),
             (true, "observed_convergence")
         );
         assert_eq!(
             pane_layout_route_await_outcome(
-                &PaneLayoutProjection::Converged(desired(
+                &TmuxLayoutEffectState::Converged(desired(
                     4,
                     vec!["/project/tasks/other.md".to_string()],
                 )),
@@ -50927,7 +50531,7 @@ mod tests {
         );
         assert_eq!(
             pane_layout_route_await_outcome(
-                &PaneLayoutProjection::OperatorOwned(desired(5, vec![document.to_string()])),
+                &TmuxLayoutEffectState::OperatorOwned(desired(5, vec![document.to_string()])),
                 document,
             ),
             (false, "operator_owned_layout")
@@ -51727,8 +51331,7 @@ mod tests {
         let dir = async_handoff_test_project();
         let runtime = test_controller_runtime(&test_bootstrap(&dir));
         let file = dir.path().join("tasks/one.md");
-        let channel =
-            document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
+        let channel = document_turn_authority_channel(&agent_doc_hash::document_id_for_path(&file));
         let (request, _) = document_turn_authority_stream_request(&file, &channel, None).unwrap();
         let dependency = runtime.state_plane_graph.channel_dependency(&channel);
         let stream_runtime = Arc::clone(&runtime);

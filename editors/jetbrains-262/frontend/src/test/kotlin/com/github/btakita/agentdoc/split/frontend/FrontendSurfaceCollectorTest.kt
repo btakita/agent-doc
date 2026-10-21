@@ -1,6 +1,8 @@
 package com.github.btakita.agentdoc.split.frontend
 
 import com.github.btakita.agentdoc.split.EditorWindowBounds
+import com.github.btakita.agentdoc.split.EditorWindowSnapshot
+import com.github.btakita.agentdoc.split.FrontendLayoutColumn
 import com.github.btakita.agentdoc.split.SurfaceRole
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -8,6 +10,12 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
 class FrontendSurfaceCollectorTest {
+    @Test
+    fun snapshotTimingWindowsAreExplicitAndDoNotDefineAuthority() {
+        assertEquals(75L, FRONTEND_CAPTURE_DEBOUNCE_MS)
+        assertEquals(5_000L, FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS)
+    }
+
     @Test
     fun terminalCommandUsesOnlyControllerProvidedSession() {
         assertEquals(
@@ -74,14 +82,40 @@ class FrontendSurfaceCollectorTest {
         assertEquals(first, retained)
     }
 
-    /** GH #320 option B: geometry only to a backend that advertises schema 2. */
+    /** Schema 3 carries frontend-authored columns; older peers receive only what they understand. */
     @Test
     fun snapshotSchemaNegotiationFallsBackToSchemaOneForAnOldBackend() {
         assertEquals(1, negotiatedSnapshotSchema(null))
         assertEquals(1, negotiatedSnapshotSchema(1))
         assertEquals(2, negotiatedSnapshotSchema(2))
-        assertEquals(2, negotiatedSnapshotSchema(9))
+        assertEquals(3, negotiatedSnapshotSchema(3))
+        assertEquals(3, negotiatedSnapshotSchema(9))
         assertEquals(1, negotiatedSnapshotSchema(0))
+    }
+
+    @Test
+    fun frontendAuthorsColumnMembershipAndOrderFromPositiveGeometryOnly() {
+        fun window(path: String, x: Int, y: Int) = EditorWindowSnapshot(
+            ordinal = 0,
+            selectedPath = path,
+            openPaths = listOf(path),
+            visiblePaths = listOf(path),
+            bounds = EditorWindowBounds(x, y, 600, 400),
+        )
+        assertEquals(
+            listOf(
+                FrontendLayoutColumn(listOf("/repo/a.md", "/repo/b.md")),
+                FrontendLayoutColumn(listOf("/repo/c.md")),
+            ),
+            frontendLayoutColumns(
+                listOf(
+                    window("/repo/c.md", 640, 40),
+                    window("/repo/b.md", 4, 500),
+                    window("/repo/a.md", 0, 40),
+                ),
+            ),
+        )
+        assertNull(frontendLayoutColumns(listOf(window("/repo/a.md", 0, 0), window("/repo/b.md", 0, 0))))
     }
 
     @Test

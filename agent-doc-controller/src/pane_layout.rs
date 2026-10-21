@@ -1,4 +1,4 @@
-//! Pure latest-wins ownership for the pane-layout projection worker.
+//! Pure latest-wins ownership for the tmux layout effect state worker.
 //!
 //! The IO layer supplies the effect worker. This state owns the race-sensitive
 //! decision: a newer input revision published while the current effect is
@@ -22,12 +22,12 @@ pub const MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct LatestProjectionWorkerState {
+pub struct LatestTmuxEffectWorkerState {
     pending_revision: u64,
     active: bool,
 }
 
-impl LatestProjectionWorkerState {
+impl LatestTmuxEffectWorkerState {
     /// Record an exact-input revision and return whether the caller must start
     /// the single worker. An already-active worker observes the newer revision
     /// through the same retained state.
@@ -93,7 +93,7 @@ impl LatestProjectionWorkerState {
 /// the pane was bound, and nothing re-derives it. When a pane is later moved into
 /// the `stash` window, both records keep naming the visible `agent-doc` window, so
 /// every record-vs-record comparison still agrees and the drift is invisible — the
-/// pane-layout projection then counts a stashed pane as a co-visible column and
+/// tmux layout effect state then counts a stashed pane as a co-visible column and
 /// mirrors editor focus onto a pane the operator cannot see.
 ///
 /// The live window is the only authority for where a pane *is*; a recorded window
@@ -414,18 +414,18 @@ pub fn collapse_duplicate_layout_documents(
 }
 
 /// `#stalecontrollerhotupdate` (b): attempts one desired generation may spend
-/// projecting before the controller stops retrying it.
+/// applying before the controller stops retrying it.
 ///
 /// With the 250ms..5s exponential retry delay this is roughly 40s of effort,
 /// far beyond a supervisor start or a stash promotion. A generation that has
 /// not converged by then cannot be satisfied by retrying the same effect; the
 /// next editor publication (a new generation) re-arms the worker.
-pub const PROJECTION_RETRY_ATTEMPT_LIMIT: u64 = 12;
+pub const TMUX_EFFECT_RETRY_ATTEMPT_LIMIT: u64 = 12;
 
-/// Why a desired generation's projection stopped without converging.
+/// Why a desired generation's tmux effect stopped without converging.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProjectionRetirement {
-    /// The retry budget ([`PROJECTION_RETRY_ATTEMPT_LIMIT`]) was spent.
+pub enum TmuxEffectRetirement {
+    /// The retry budget ([`TMUX_EFFECT_RETRY_ATTEMPT_LIMIT`]) was spent.
     RetryBudgetExhausted,
     /// Another project root's controller published a newer layout for the
     /// same tmux window ([`crate::layout_owner::window_claim_requires_yield`]).
@@ -441,7 +441,7 @@ pub enum ProjectionRetirement {
     SupersededByNewerGeneration,
 }
 
-impl ProjectionRetirement {
+impl TmuxEffectRetirement {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::RetryBudgetExhausted => "retry_budget_exhausted",
@@ -462,16 +462,16 @@ impl ProjectionRetirement {
     }
 }
 
-/// Whether the worker may run another projection attempt for a generation.
+/// Whether the worker may run another tmux effect attempt for a generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProjectionAttemptAdmission {
+pub enum TmuxEffectAttemptAdmission {
     /// Run attempt `number` (1-based, counted per generation).
     Attempt { number: u64 },
     /// The generation already retired; never re-apply it.
-    Retired(ProjectionRetirement),
+    Retired(TmuxEffectRetirement),
 }
 
-/// Per-generation projection memory that survives worker restarts.
+/// Per-generation tmux effect memory that survives worker restarts.
 ///
 /// The effect worker's own attempt counter lived on the worker thread and was
 /// reset whenever the worker restarted (actor-binding churn makes a terminal
@@ -481,15 +481,15 @@ pub enum ProjectionAttemptAdmission {
 /// newer generation replaces it, and the window-claim stamp of a generation is
 /// minted exactly once.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ProjectionAttemptLedger {
+pub struct TmuxEffectAttemptLedger {
     generation: u64,
     attempts: u64,
     claim_stamp_ms: Option<u64>,
     publication: Option<crate::layout_owner::EditorPublicationOrder>,
-    retired: Option<ProjectionRetirement>,
+    retired: Option<TmuxEffectRetirement>,
 }
 
-impl ProjectionAttemptLedger {
+impl TmuxEffectAttemptLedger {
     /// Move the ledger to `generation` when it is newer. Returns false for an
     /// OLDER generation, which never rewinds the ledger: a worker that read
     /// generation N just before N+1 was published must not erase N+1's
@@ -509,21 +509,21 @@ impl ProjectionAttemptLedger {
 
     /// Admit (and count) the next attempt for `generation`, or report that the
     /// generation already retired. Exceeding the attempt limit retires it.
-    pub fn begin_attempt(&mut self, generation: u64) -> ProjectionAttemptAdmission {
+    pub fn begin_attempt(&mut self, generation: u64) -> TmuxEffectAttemptAdmission {
         if !self.track(generation) {
-            return ProjectionAttemptAdmission::Retired(
-                ProjectionRetirement::SupersededByNewerGeneration,
+            return TmuxEffectAttemptAdmission::Retired(
+                TmuxEffectRetirement::SupersededByNewerGeneration,
             );
         }
         if let Some(retired) = self.retired {
-            return ProjectionAttemptAdmission::Retired(retired);
+            return TmuxEffectAttemptAdmission::Retired(retired);
         }
-        if self.attempts >= PROJECTION_RETRY_ATTEMPT_LIMIT {
-            self.retired = Some(ProjectionRetirement::RetryBudgetExhausted);
-            return ProjectionAttemptAdmission::Retired(ProjectionRetirement::RetryBudgetExhausted);
+        if self.attempts >= TMUX_EFFECT_RETRY_ATTEMPT_LIMIT {
+            self.retired = Some(TmuxEffectRetirement::RetryBudgetExhausted);
+            return TmuxEffectAttemptAdmission::Retired(TmuxEffectRetirement::RetryBudgetExhausted);
         }
         self.attempts += 1;
-        ProjectionAttemptAdmission::Attempt {
+        TmuxEffectAttemptAdmission::Attempt {
             number: self.attempts,
         }
     }
@@ -531,12 +531,12 @@ impl ProjectionAttemptLedger {
     /// True when the attempt just run was the last one the budget allows, so
     /// an unconverged result must retire instead of scheduling a retry.
     pub fn retry_budget_spent(&self, generation: u64) -> bool {
-        self.generation == generation && self.attempts >= PROJECTION_RETRY_ATTEMPT_LIMIT
+        self.generation == generation && self.attempts >= TMUX_EFFECT_RETRY_ATTEMPT_LIMIT
     }
 
     /// Retire `generation`. Returns true only for the first retirement, so the
     /// caller logs it once.
-    pub fn retire(&mut self, generation: u64, reason: ProjectionRetirement) -> bool {
+    pub fn retire(&mut self, generation: u64, reason: TmuxEffectRetirement) -> bool {
         if !self.track(generation) || self.retired.is_some() {
             return false;
         }
@@ -544,8 +544,10 @@ impl ProjectionAttemptLedger {
         true
     }
 
-    pub fn retired(&self, generation: u64) -> Option<ProjectionRetirement> {
-        (self.generation == generation).then_some(self.retired).flatten()
+    pub fn retired(&self, generation: u64) -> Option<TmuxEffectRetirement> {
+        (self.generation == generation)
+            .then_some(self.retired)
+            .flatten()
     }
 
     /// The window-claim stamp of `generation`, minted from `now_ms` on first
@@ -665,37 +667,40 @@ mod tests {
 
     #[test]
     fn ledger_bounds_attempts_per_generation_and_stays_retired() {
-        let mut ledger = ProjectionAttemptLedger::default();
-        for n in 1..=PROJECTION_RETRY_ATTEMPT_LIMIT {
+        let mut ledger = TmuxEffectAttemptLedger::default();
+        for n in 1..=TMUX_EFFECT_RETRY_ATTEMPT_LIMIT {
             assert_eq!(
                 ledger.begin_attempt(4),
-                ProjectionAttemptAdmission::Attempt { number: n }
+                TmuxEffectAttemptAdmission::Attempt { number: n }
             );
         }
         assert!(ledger.retry_budget_spent(4));
         assert_eq!(
             ledger.begin_attempt(4),
-            ProjectionAttemptAdmission::Retired(ProjectionRetirement::RetryBudgetExhausted)
+            TmuxEffectAttemptAdmission::Retired(TmuxEffectRetirement::RetryBudgetExhausted)
         );
         // A restarted worker still sees the retirement.
         assert_eq!(
             ledger.begin_attempt(4),
-            ProjectionAttemptAdmission::Retired(ProjectionRetirement::RetryBudgetExhausted)
+            TmuxEffectAttemptAdmission::Retired(TmuxEffectRetirement::RetryBudgetExhausted)
         );
         // A newer generation re-arms.
-        assert_eq!(ledger.begin_attempt(5), ProjectionAttemptAdmission::Attempt { number: 1 });
+        assert_eq!(
+            ledger.begin_attempt(5),
+            TmuxEffectAttemptAdmission::Attempt { number: 1 }
+        );
     }
 
     #[test]
     fn ledger_retires_once_and_keeps_the_claim_stamp_stable() {
-        let mut ledger = ProjectionAttemptLedger::default();
+        let mut ledger = TmuxEffectAttemptLedger::default();
         assert_eq!(ledger.claim_stamp_ms(7, 1_000), 1_000);
         assert_eq!(ledger.claim_stamp_ms(7, 9_000), 1_000, "never re-stamped");
-        assert!(ledger.retire(7, ProjectionRetirement::YieldedToNewerWindowClaim));
-        assert!(!ledger.retire(7, ProjectionRetirement::RetryBudgetExhausted));
+        assert!(ledger.retire(7, TmuxEffectRetirement::YieldedToNewerWindowClaim));
+        assert!(!ledger.retire(7, TmuxEffectRetirement::RetryBudgetExhausted));
         assert_eq!(
             ledger.retired(7),
-            Some(ProjectionRetirement::YieldedToNewerWindowClaim)
+            Some(TmuxEffectRetirement::YieldedToNewerWindowClaim)
         );
         assert_eq!(ledger.retired(8), None);
         assert_eq!(ledger.claim_stamp_ms(8, 9_000), 9_000);
@@ -711,7 +716,7 @@ mod tests {
             generation: 3,
             sequence,
         };
-        let mut ledger = ProjectionAttemptLedger::default();
+        let mut ledger = TmuxEffectAttemptLedger::default();
         ledger.note_published(4, 1_000, Some(order(84)));
         // The worker's first attempt, much later, does not re-stamp.
         assert_eq!(ledger.claim_stamp_ms(4, 50_000), 1_000);
@@ -732,23 +737,25 @@ mod tests {
         // A worker still holding generation 4 never rewinds the ledger.
         assert_eq!(
             ledger.begin_attempt(4),
-            ProjectionAttemptAdmission::Retired(ProjectionRetirement::SupersededByNewerGeneration)
+            TmuxEffectAttemptAdmission::Retired(TmuxEffectRetirement::SupersededByNewerGeneration)
         );
-        assert!(!ledger.retire(4, ProjectionRetirement::RetryBudgetExhausted));
+        assert!(!ledger.retire(4, TmuxEffectRetirement::RetryBudgetExhausted));
         ledger.note_published(4, 1, Some(order(99)));
         assert_eq!(ledger.claim_stamp_ms(5, 99_000), 80_000);
         assert_eq!(ledger.retired(5), None);
         assert_eq!(
             ledger.begin_attempt(5),
-            ProjectionAttemptAdmission::Attempt { number: 1 }
+            TmuxEffectAttemptAdmission::Attempt { number: 1 }
         );
     }
 
     #[test]
     fn only_lost_generations_rearm_on_an_identical_republication() {
-        assert!(ProjectionRetirement::YieldedToNewerWindowClaim.rearms_on_identical_republication());
-        assert!(ProjectionRetirement::EditorSurfaceForgotten.rearms_on_identical_republication());
-        assert!(!ProjectionRetirement::RetryBudgetExhausted.rearms_on_identical_republication());
+        assert!(
+            TmuxEffectRetirement::YieldedToNewerWindowClaim.rearms_on_identical_republication()
+        );
+        assert!(TmuxEffectRetirement::EditorSurfaceForgotten.rearms_on_identical_republication());
+        assert!(!TmuxEffectRetirement::RetryBudgetExhausted.rearms_on_identical_republication());
     }
 
     /// GH #136 follow-up (d), exhaustive: republish exactly when the settling
@@ -970,7 +977,7 @@ mod tests {
 
     #[test]
     fn newer_input_revision_prevents_the_active_worker_from_retiring() {
-        let mut state = LatestProjectionWorkerState::default();
+        let mut state = LatestTmuxEffectWorkerState::default();
         assert!(state.schedule(7));
         assert!(!state.schedule(8));
         assert!(state.is_superseded(7));
@@ -982,7 +989,7 @@ mod tests {
 
     #[test]
     fn failed_worker_releases_current_revision_for_the_next_navigation() {
-        let mut state = LatestProjectionWorkerState::default();
+        let mut state = LatestTmuxEffectWorkerState::default();
         assert!(state.schedule(7));
 
         assert!(!state.recover_after_failure(7));
@@ -993,7 +1000,7 @@ mod tests {
 
     #[test]
     fn failed_worker_hands_newer_retained_revision_to_a_replacement() {
-        let mut state = LatestProjectionWorkerState::default();
+        let mut state = LatestTmuxEffectWorkerState::default();
         assert!(state.schedule(7));
         assert!(!state.schedule(8));
 

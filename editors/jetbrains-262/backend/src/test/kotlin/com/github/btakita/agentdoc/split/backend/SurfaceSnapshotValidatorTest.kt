@@ -43,15 +43,16 @@ class SurfaceSnapshotValidatorTest {
         assertEquals(SurfaceIngressStatus.INCOMPLETE, failure?.status)
     }
 
-    /** GH #320 option B: a schema-1 frontend (no geometry) keeps working; unknown schemas fail. */
+    /** Older schemas remain accepted; an unknown future schema fails closed. */
     @Test
     fun acceptsLegacySchemaOneAndRejectsAnUnknownSchema() {
         val main = surface("root", SurfaceRole.MAIN, window("/repo/a.md"))
         assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 1)))
         assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 2)))
+        assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 3)))
         assertEquals(
             SurfaceIngressStatus.INVALID_SCHEMA,
-            SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 3))?.status,
+            SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 4))?.status,
         )
     }
 

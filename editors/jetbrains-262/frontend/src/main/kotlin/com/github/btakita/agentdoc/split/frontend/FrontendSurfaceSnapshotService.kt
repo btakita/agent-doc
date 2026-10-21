@@ -96,7 +96,7 @@ class FrontendSurfaceSnapshotService(
         captures.collectLatest {
             // Coalesce the burst of file-editor, AWT hierarchy, and focus events produced by one
             // dock/undock operation, while still emitting a complete authoritative snapshot.
-            delay(CAPTURE_DEBOUNCE_MS)
+            delay(FRONTEND_CAPTURE_DEBOUNCE_MS)
             var retry = 0
             do {
                 val capture = captureOnEdt()
@@ -131,14 +131,13 @@ class FrontendSurfaceSnapshotService(
     }
 
     /**
-     * GH #320 option B: publish measured window geometry (schema 2) only to a backend that says it
-     * accepts it. Fleet RPC decodes with `ignoreUnknownKeys = false`, so a backend that predates
-     * schema 2 would fail to decode a bounds key; it also lacks the negotiation call, and that
-     * failure selects schema 1 (no geometry, remembered-order fallback on the backend).
+     * Publish frontend-authored columns (schema 3) only to a backend that accepts them. Fleet RPC
+     * decodes with `ignoreUnknownKeys = false`; negotiation prevents older peers from seeing new
+     * keys. The authenticated lease already owns structure while this call is pending.
      */
     private suspend fun negotiateSnapshotSchema(): Int {
         val offered = try {
-            withTimeoutOrNull(SCHEMA_NEGOTIATION_TIMEOUT_MS) {
+            withTimeoutOrNull(FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS) {
                 SurfaceSnapshotRpcApi.getInstance().supportedSnapshotSchemaVersion()
             }
         } catch (cancelled: CancellationException) {
@@ -242,15 +241,19 @@ class FrontendSurfaceSnapshotService(
     }
 
     companion object {
-        private const val CAPTURE_DEBOUNCE_MS = 75L
         private const val PRESENTATION_RECAPTURE_MS = 250L
         private const val MAX_PRESENTATION_RECAPTURES = 60
-        private const val SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
         private val LOG = Logger.getInstance(FrontendSurfaceSnapshotService::class.java)
 
         fun getInstance(project: Project): FrontendSurfaceSnapshotService = project.service()
     }
 }
+
+/** Intentional event-burst quiet window before the next authoritative snapshot capture. */
+internal const val FRONTEND_CAPTURE_DEBOUNCE_MS = 75L
+
+/** Hang guard for first-lease schema negotiation; authority is already pending during this wait. */
+internal const val FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
 
 /**
  * The snapshot schema to publish, from the backend's advertised newest schema (null when the

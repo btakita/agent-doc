@@ -300,6 +300,34 @@ fn retained_intent_refusal(file: &Path, intent_id: &str, message: String) -> any
     ))
 }
 
+/// [`retained_refusal`] for a live delivery projection proven by this call.
+///
+/// The capture-only ownership reader cannot rediscover a newly retained
+/// non-response intent while the same write is still unwinding. Callers of
+/// this helper already hold the unconverged relay receipt, so preserve that
+/// local proof and stamp the narrow self-converging marker. Rejection and
+/// editor-recovery verdicts still win and withhold the marker.
+fn retained_delivery_projection_refusal(file: &Path, message: String) -> anyhow::Error {
+    let ownership = observed_retained_write_ownership(file).with_retained_projection(true);
+    let pending_marker = if ownership.verdict()
+        == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
+    {
+        format!(
+            " [{}]",
+            agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN
+        )
+    } else {
+        String::new()
+    };
+    await_editor_replica_no_disk_write(format!(
+        "{message}. {}{pending_marker}",
+        agent_doc_turn::write_ownership::retained_write_remedy(
+            ownership,
+            &file.display().to_string(),
+        )
+    ))
+}
+
 #[derive(Debug)]
 struct ForceDiskAuthorityChanged(String);
 
@@ -1464,7 +1492,7 @@ fn atomic_write_rebased_through_authority_body(
                     await_visible_editor_projection_receipt(path, &relay_write.content_hash)?;
                 if !editor_receipt {
                     record_serialized_write_projection_unconverged(path, &relay_write.content_hash);
-                    return Err(retained_refusal(
+                    return Err(retained_delivery_projection_refusal(
                         path,
                         format!(
                             "serialized_atomic_write: binary-owned write for {} remains retained while its exact editor projection converges (content_hash={})",
@@ -1484,7 +1512,7 @@ fn atomic_write_rebased_through_authority_body(
                     await_visible_editor_projection_receipt(path, &relay_write.content_hash)?;
                 if !editor_receipt {
                     record_serialized_write_projection_unconverged(path, &relay_write.content_hash);
-                    return Err(retained_refusal(
+                    return Err(retained_delivery_projection_refusal(
                         path,
                         format!(
                             "serialized_atomic_write: binary-owned write for {} remains retained while the editor projection converges (content_hash={})",
@@ -7661,6 +7689,33 @@ mod retained_refusal_token_tests {
         );
     }
 
+    /// GH #337: the relay receipt is local ownership proof even when no
+    /// response cycle/capture exists and the projection has not reached disk.
+    #[test]
+    fn a_live_delivery_receipt_is_deferred_not_stranded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "# plan\n").expect("write");
+
+        let deferred = format!(
+            "{:#}",
+            retained_delivery_projection_refusal(
+                &file,
+                "serialized_atomic_write: exact editor projection is converging".to_string(),
+            )
+        );
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&deferred),
+            "{deferred}"
+        );
+        assert!(
+            deferred.contains("this exact retained intent commits itself once delivery converges"),
+            "{deferred}"
+        );
+        assert!(!deferred.contains("STRANDED"), "{deferred}");
+        assert!(!deferred.contains("agent-doc commit"), "{deferred}");
+    }
+
     /// `#retainedwriteverdict`: every refusal that follows a freshly recorded
     /// deferred intent carries that intent into the predicate. A new site that
     /// retains an intent and then reaches the capture-only builder would
@@ -13831,33 +13886,21 @@ mod tests {
             !message.contains("retry through the document actor"),
             "{message}"
         );
-        // The regression. This harness has no open cycle and no retained capture,
-        // so the predicate derives `Stranded` and the remedy is `agent-doc commit`.
-        // The caller half used to assert a deferral on top of that -- "the same
-        // intent resumes ... Do not recapture ... do not force disk" -- and the
-        // ORIGINAL form of this test required those phrases, pinning the
-        // contradiction as correct. One message then told an operator both to wait
-        // and that waiting could never work, which is what it did on 2026-09-20.
-        //
-        // Exactly one verdict may appear, and it must be the derived one.
+        // GH #337: this harness has no response cycle or capture, but the relay
+        // receipt and durable non-response intent own the exact write. Dropping
+        // that local proof derived `Stranded` and prescribed `agent-doc commit`
+        // even though the replica projected the write on its own seconds later.
+        // Exactly one verdict may appear, and it must preserve that ownership.
         assert!(
-            message.contains("STRANDED, not deferred"),
-            "this scenario derives the stranded verdict: {message}"
+            message.contains("this exact retained intent commits itself once delivery converges"),
+            "this scenario derives the deferred verdict: {message}"
         );
         assert!(
-            message.contains("agent-doc commit"),
-            "a stranded write must name its recovery command: {message}"
+            agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&message),
+            "a live replica owns the retained projection: {message}"
         );
-        for deferral_claim in [
-            "the same intent resumes",
-            "deferral, not a lost response",
-            "Do not recapture",
-        ] {
-            assert!(
-                !message.contains(deferral_claim),
-                "a stranded verdict must not also claim a deferral ({deferral_claim}): {message}"
-            );
-        }
+        assert!(!message.contains("STRANDED"), "{message}");
+        assert!(!message.contains("agent-doc commit"), "{message}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
         let pending = pending_document_write(&file).expect("retained write intent");
         assert_eq!(pending.target_hash, agent_doc_hash::content_hash(target));

@@ -81,12 +81,61 @@ A reusable internal crate such as `tsift-decisions` could be worthwhile once par
 So the recommendation is: **file as source of truth, tsift database as projection, tsift as the product boundary**.
 
 Evidence: no repository paths changed because this cycle was classified as a design response. I verified the current boundary with `tsift status`, bounded tsift searches/source reads, `tsift memory findings --help`, `tsift memory finding-add --help`, and `tsift memory status . --json`. Confidence is high; no escalation is needed.
+
+### Re: do [#needfeaturesdecisions] — gpt-5 · 2026-10-21T02:50-04:00
+
+Yes, but the Markdown should stay deliberately small. Its job is to be the reviewable, source-controlled record; tsift should derive the richer retrieval graph from it.
+
+A good v1 needs:
+
+1. **Stable identity and lifecycle** — `id`, `status` (`proposed`, `accepted`, `superseded`, `rejected`), and `date`. Decision lifecycle should remain distinct from tsift's ingestion trust (`draft`/`trusted`); accepted files can project as trusted, while proposed files remain draft-only.
+2. **Consistent semantic sections** — `Decision`, `Context`, `Rationale`, and `Consequences`; `Alternatives` can be optional. This gives agents predictable, bounded fields instead of forcing them to summarize arbitrary prose.
+3. **Scope and anchors** — affected repositories, paths, and stable tsift symbol handles. Never use line numbers as durable anchors.
+4. **Relationships** — `supersedes`, `superseded_by`, and `related` decision IDs. These should become graph edges, with validation for missing IDs and cycles.
+5. **Provenance** — author/source, originating issue or session, and optional commit/reference links. Generated database fields and embeddings should not be written back into Markdown.
+6. **Validation and synchronization** — a command such as `tsift decision lint|sync` should validate schema and links, project changed files idempotently into `.tsift/findings.db` / the shared graph, detect removed or renamed decisions, and report drift without silently rewriting authored prose.
+7. **Retrieval policy** — search and `context-pack` should prefer accepted, non-superseded decisions relevant to the current code/query, while allowing explicit inclusion of proposed or historical records. Results should cite the Markdown path and decision ID.
+
+A compact file could look like:
+
+```markdown
+---
+id: dec-0007
+status: accepted
+date: 2026-10-21
+anchors:
+  - code_symbol:GraphStore
+supersedes: []
+related: [dec-0003]
+---
+
+# Keep decision records file-backed
+
+## Decision
+Use tracked Markdown as authority and tsift databases as projections.
+
+## Context
+...
+
+## Rationale
+...
+
+## Consequences
+...
+```
+
+The current `tsift finding` layer already supplies most of the database behavior: decision nodes, draft/trusted promotion, relationships, stable symbol/file anchors, stale-anchor detection, passive harvesting, and a dedicated `.tsift/findings.db`. The missing feature is therefore a Markdown importer/exporter plus schema/link linting—not another database or another standalone tool.
+
+Features I would defer from v1: approval workflows, organization-wide ACLs, elaborate templates, automatic prose rewriting, and mandatory one-file-per-decision layout. Those can be layered later without changing the core record contract.
+
+Evidence: no repository paths changed because the planning contract classified this cycle as a design response. I verified the existing surface with `tsift status`, bounded searches/source reads, and the `FindingCommand` definition. Confidence is high; no escalation is needed.
 <!-- agent:boundary:bf6d00d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#needfeaturesdecisions]~~
 - ~~do [#databasefiledecisions]~~
 - #gh-fix https://github.com/btakita/tsift/issues/29
 <!-- /agent:queue -->

@@ -35618,19 +35618,33 @@ fn publish_pane_layout_desired_invocation_in_lane(
         .as_ref()
         .and_then(PaneLayoutDesired::order_authority_columns)
         .is_some();
-    let order_basis = retained
-        .as_ref()
-        .map(|desired| {
-            if invocation.column_order == agent_doc_tmux::LayoutColumnOrder::Unknown {
-                // GH #302/#311: an escalation's slot placement is provisional,
-                // even when later escalations have replaced every document in
-                // the last positively observed basis.
-                desired.order_fold_basis_columns()
-            } else {
-                desired.invocation.columns.as_slice()
-            }
-        })
-        .unwrap_or_default();
+    // GH #338: a manual Sync Tmux Layout click is the operator asserting the
+    // order the editor just submitted. When the retained basis is only a cold
+    // `unknown` guess, folding the click against that guess makes the manual
+    // remedy incapable of correcting it. Adopt the manual vector as the next
+    // unknown fold basis; do not let it override positive editor geometry.
+    let manual_unknown_order_assertion =
+        incoming_order == agent_doc_tmux::LayoutColumnOrder::Unknown
+            && invocation.caller_kind == "manual"
+            && publisher == PaneLayoutPublisher::Command
+            && !retained_order_authoritative;
+    let order_basis: &[String] = if manual_unknown_order_assertion {
+        &[]
+    } else {
+        retained
+            .as_ref()
+            .map(|desired| {
+                if invocation.column_order == agent_doc_tmux::LayoutColumnOrder::Unknown {
+                    // GH #302/#311: an escalation's slot placement is provisional,
+                    // even when later escalations have replaced every document in
+                    // the last positively observed basis.
+                    desired.order_fold_basis_columns()
+                } else {
+                    desired.invocation.columns.as_slice()
+                }
+            })
+            .unwrap_or_default()
+    };
     let mut ordered = agent_doc_tmux::order_layout_columns(
         order_basis,
         &desired_columns,
@@ -40697,9 +40711,8 @@ mod tests {
         );
     }
 
-    /// The JetBrains plugin's undetected-layout publication (`Sync Tmux Pane`,
-    /// claim, resync, and the editor route's `--col` list) on a Remote Dev
-    /// backend: one column per visible document, listed focus-first.
+    /// The JetBrains plugin's automatic undetected-layout publication on a
+    /// Remote Dev backend: one column per visible document, listed focus-first.
     fn plugin_unknown_order_publication(
         columns: &[&str],
         focus: &str,
@@ -40710,11 +40723,20 @@ mod tests {
             focus: Some(focus.to_string()),
             no_autostart: false,
             exact_visible: true,
-            caller_kind: "manual".to_string(),
+            caller_kind: "automatic".to_string(),
             column_order: agent_doc_tmux::LayoutColumnOrder::Unknown,
             actor_bindings: Vec::new(),
             client_id: None,
         }
+    }
+
+    fn manual_unknown_order_publication(
+        columns: &[&str],
+        focus: &str,
+    ) -> ControllerTmuxLayoutSyncInvocation {
+        let mut invocation = plugin_unknown_order_publication(columns, focus);
+        invocation.caller_kind = "manual".to_string();
+        invocation
     }
 
     fn session_document(dir: &tempfile::TempDir, name: &str) -> String {
@@ -40782,7 +40804,7 @@ mod tests {
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             ops_log.contains(&format!(
-                "pane_layout_desired_published generation={} caller_kind=manual plane_version=none \
+                "pane_layout_desired_published generation={} caller_kind=automatic plane_version=none \
                  column_order=unknown reordered=false incoming={:?}",
                 generations[0],
                 [&ad, &mr]
@@ -40791,7 +40813,7 @@ mod tests {
         );
         assert!(
             ops_log.contains(&format!(
-                "pane_layout_desired_published generation={} caller_kind=manual plane_version=none \
+                "pane_layout_desired_published generation={} caller_kind=automatic plane_version=none \
                  column_order=unknown reordered=true incoming={:?} columns={:?}",
                 generations[1],
                 [&mr, &ad],
@@ -40816,6 +40838,97 @@ mod tests {
             agent_doc_tmux::LayoutColumnOrder::Editor
         );
         assert_eq!(pane_layout_order_authority(runtime.as_ref()), vec![mr, ad]);
+    }
+
+    /// GH #338: Remote Dev has membership but no backend split geometry. A
+    /// manual Sync Tmux Layout click is therefore the only way to replace a
+    /// cold, unanchored order guess without restarting the controller or
+    /// round-tripping controller state through the editor. The replacement
+    /// remains `unknown`, becomes the fold basis for later automatic
+    /// focus-first observations, and cannot override a later positive
+    /// editor-geometry authority.
+    #[test]
+    fn manual_unknown_order_reconciles_without_controller_to_editor_echo() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+
+        let (cold, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&b, &a], &b),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(cold.invocation.columns, vec![b.clone(), a.clone()]);
+        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
+
+        let (manual, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            manual_unknown_order_publication(&[&a, &b], &a),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::Command,
+        )
+        .unwrap();
+        assert_eq!(manual.invocation.columns, vec![a.clone(), b.clone()]);
+        assert_eq!(
+            manual.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Unknown,
+        );
+        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
+
+        let (automatic, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&b, &a], &b),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(
+            automatic.invocation.columns,
+            vec![a.clone(), b.clone()],
+            "later focus-first membership must fold against the manual basis",
+        );
+
+        let mut measured = plugin_unknown_order_publication(&[&b, &a], &b);
+        measured.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            measured,
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(
+            pane_layout_order_authority(runtime.as_ref()),
+            vec![b.clone(), a.clone()],
+        );
+
+        let (manual, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            manual_unknown_order_publication(&[&a, &b], &a),
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::Command,
+        )
+        .unwrap();
+        assert_eq!(
+            manual.invocation.columns,
+            vec![b, a],
+            "unknown manual order must not override positive editor geometry",
+        );
     }
 
     /// GH #112: a focus escalation that republishes a `retained`-order layout

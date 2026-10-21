@@ -189,19 +189,27 @@ pub fn queue_prompt_preset_expansions_with_presets(
     presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Vec<(String, String)> {
     let text = strip_priority_markers(text);
+    let text = crate::queue_continuation::mask_inline_code(&text);
     let referenced = text
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
-        .filter(|token| token.starts_with('#'))
-        .collect::<Vec<_>>();
-    presets
-        .iter()
-        .filter(|(name, _)| {
-            referenced
-                .iter()
-                .any(|token| token.eq_ignore_ascii_case(name))
-        })
-        .map(|(name, body)| (name.clone(), body.clone()))
-        .collect()
+        .filter(|token| token.starts_with('#'));
+    let mut expansions = Vec::new();
+    for token in referenced {
+        let Some((name, body)) = presets
+            .iter()
+            .find(|(name, _)| token.eq_ignore_ascii_case(name))
+        else {
+            continue;
+        };
+        if expansions
+            .iter()
+            .any(|(seen, _): &(String, String)| seen.eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
+        expansions.push((name.clone(), body.clone()));
+    }
+    expansions
 }
 
 /// True when the response contains evidence for every resolved preset expansion
@@ -1574,6 +1582,38 @@ mod tests {
             "### Re: partial\n\nUpgrade agent-doc and verify the current issues.",
             "#upgrade #gh-fix https://github.com/example/sample/issues/100"
         ));
+    }
+
+    #[test]
+    fn prompt_preset_expansions_ignore_inline_code_and_follow_item_order() {
+        let content = concat!(
+            "---\nprompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc.\n",
+            "  '#gh-issue': File a GitHub issue.\n",
+            "---\n",
+        );
+
+        assert_eq!(
+            queue_prompt_preset_expansions(content, "#gh-issue: do not run `#upgrade` here",),
+            vec![("#gh-issue".to_string(), "File a GitHub issue.".to_string())]
+        );
+        assert_eq!(
+            queue_prompt_preset_expansions(
+                content,
+                "#gh-issue: quoted row `- ~~#upgrade~~ — auto-struck`",
+            ),
+            vec![("#gh-issue".to_string(), "File a GitHub issue.".to_string())]
+        );
+        assert_eq!(
+            queue_prompt_preset_expansions(
+                content,
+                "#gh-issue then #upgrade, then #gh-issue again",
+            ),
+            vec![
+                ("#gh-issue".to_string(), "File a GitHub issue.".to_string()),
+                ("#upgrade".to_string(), "Upgrade agent-doc.".to_string()),
+            ]
+        );
     }
 
     /// `#ftstrikeclaimedmention` (agent-doc-bugs.md 2026-10-09): a status

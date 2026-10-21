@@ -1400,7 +1400,11 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
             target_content,
             source_content,
             reason,
-        )
+        )?;
+        // Publish the accepted write receipt into the bounded current-document
+        // read graph before the projection loop verifies a fresh authority cut.
+        agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+        Ok(())
     }
 
     fn consume_free_text_queue_prompts_force_disk(
@@ -8053,12 +8057,13 @@ fn try_main() -> anyhow::Result<()> {
                 Ok(())
             }
             QueueAction::Claims { file } => {
-                let content = std::fs::read_to_string(&file)
-                    .with_context(|| format!("read {}", file.display()))?;
                 // `#claimownerliveness`: each claim carries whether the
                 // coordinator session that made it is still alive.
-                let claims =
-                    agent_doc_queue_io::queue_claim::claim_reports_for_content(&file, &content)?;
+                let queue_effects = CliQueueCommandEffects;
+                let claims = agent_doc_queue_io::queue_cmd::claim_reports_with_effects(
+                    &queue_effects,
+                    &file,
+                )?;
                 println!("{}", serde_json::to_string_pretty(&claims)?);
                 Ok(())
             }

@@ -167,6 +167,7 @@ Preset expansion `fix then close` is complete: Issue #29 is already fixed and cl
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- [#needfeaturesdecisions]: This seems similar to agent-doc's id system for backlog + todo + icebox items. Should we extract a common library?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

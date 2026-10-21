@@ -23,11 +23,10 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published release: [v0.35.535](https://github.com/btakita/agent-doc/releases/tag/v0.35.535), published on GitHub at 2026-10-21 16:47:10 UTC (15 assets); PyPI 0.35.535 followed at 2026-10-21 16:48:01 UTC. Release commit f514601d20. Published JetBrains packages: 0.2.762 (classic), 0.2.763 (IDE 262), and 0.2.764 (IDE 263), published with the release at 2026-10-21 16:47:10 UTC; VS Code 0.2.83. Post-release main is a0e4b0ecd4 with the five-fix integration batch; its JetBrains source/package generations are 0.2.765 (classic), 0.2.766 (IDE 262), and 0.2.767 (IDE 263). The integrated CLI/native library and available editor packages are installed locally; the active mid-cycle native reload is deferred to the next idle boundary.
+Latest published release: [v0.35.536](https://github.com/btakita/agent-doc/releases/tag/v0.35.536), published on GitHub at 2026-10-21 18:37:51 UTC (15 assets); PyPI 0.35.536 followed at 2026-10-21 18:38:38 UTC and passed clean-install verification. Release commit c7cab9758a. Published JetBrains packages: 0.2.765 (classic), 0.2.766 (IDE 262), and 0.2.767 (IDE 263); VS Code 0.2.83. The exact release tree passed the 11,387-test full gate and the separate real-tmux gate and is installed locally; one active mid-cycle native reload is deferred to its next idle boundary.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -200,40 +199,49 @@ Fixed on `main` at `1820a9a0cf`. Response stripping now terminates only at a rea
 The `sdk-demo.md` live queue is clean: it contains only the unrelated SBX-login item and its `subagent:real_login` claim. The OAuth/chat repetitions now exist only in historical response and diagnostic prose, which should not be rewritten. Prevention remains on main in `a8e1e714c3` (interleaved edit deduplication) and `0f174e979e` (claim projection linearization), with their focused regressions green.
 
 The older release rows resolve to their already-published artifacts: v0.35.533 for #331–#333, v0.35.534 for #334, and v0.35.535 for #335–#336. The worktree-path row was already lifecycle-safely closed. The post-v0.35.535 fixes, including this closeout projection correction, remain explicitly queued under `#post535release`; they are not falsely attributed to v0.35.535.
-<!-- agent:boundary:4884d9a1 -->
+> **Chat prompt (#chatprompt):** subagent: fix • Hook stopped
+>   └ agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-
+> demo.md, but the cycle is still open. [session-check] INTERRUPTED: cycle state is committed but the snapshot does not
+> match HEAD in the owning repo (snapshot_len=46563, head_len=42274). The response patchback is visible but was never
+> committed Recovery [direct_response_patchback]: `agent-doc write --commit /home/brian/work/btakita/agent-loop/src/
+> haiven-dev/tasks/sdk/sdk-demo.md` to absorb the visible `### Re:` response through the snapshot/commit boundary.
+>
+>   Worked for 31m 30s • 1:24 PM
+
+> **Queue prompt:** do [#post535release]
+
+### Re: v0.35.536 publication and sdk-demo patchback recovery — gpt-5 · 2026-10-21T14:39-04:00
+
+The `sdk-demo.md` missed patchback is recovered. The delegated pane correctly refused to mutate a session owned by pane `%58`, then routed the absolute-path reopen to that authoritative pane. The owner absorbed the visible response through the snapshot/commit boundary as `b08efdd342b5c4ffb06fc0519055336c06f945f6` (`agent-doc(sdk-demo): 2026-10-21 14:10:00`), changing only `tasks/sdk/sdk-demo.md`. The original snapshot/HEAD mismatch is gone and the session log reports `committed_after_latest_run=true`.
+
+That owner immediately advanced its existing auto-queue, so its current `session-check` result is correctly `IN PROGRESS`, not another patchback failure. Do not rerun recovery while that turn is active. Its remaining claim is `subagent:real_login`, generation 1, worker `/root/real_login`.
+
+[v0.35.536](https://github.com/btakita/agent-doc/releases/tag/v0.35.536) is released and published from `c7cab9758a`. GitHub published all 15 expected assets at 2026-10-21 18:37:51 UTC; PyPI published `agent_doc-0.35.536-py3-none-any.whl` at 2026-10-21 18:38:38 UTC, and the clean-install verification passed. Published editor packages are JetBrains 0.2.765 classic, 0.2.766 IDE 262, 0.2.767 IDE 263, and VS Code 0.2.83.
+
+This release contains the post-v0.35.535 queue-claim projection linearization, realtime edit-revision deduplication, retained SessionStart defer fix (#337), manual unknown-order layout authority fix (#338), exact-263 hot-upgrade boundary documentation/tests (#339), and closeout response stripping fix for fenced component examples. The exact release tree passed 11,387 Rust tests, 202 VS Code tests, cross-editor simulation, all JetBrains checks, bootstrap, TLA, and the separate real-tmux integration gate. Local full installation succeeded; one native editor reload remains safely deferred until its active document reaches an idle boundary.
+
+The status hooks are:
+
+```sh
+# Mid-cycle status repair
+agent-doc status set FILE --text 'Latest published release: ...'
+
+# Preferred transactional closeout
+agent-doc respond FILE --stream --origin skill --template \
+  --status 'Latest published release: ...'
+```
+
+In the document, keep one `agent:status` component with a `status:sync` managed region. Human prose can remain outside `status:sync`; the hooks replace the managed projection and preserve the surrounding prose.
+
+The Unity acknowledgement fix remains callback/event-based because the socket is already realtime and Unity already marshals callbacks onto its main thread. The receive loop now isolates malformed frames and throwing subscribers so later correlated acknowledgements are delivered. Zscaler is only part of agent-doc's Coder/network conformance simulation (`closeout_sim_net_coder_zscaler_seed_corpus`, which passed); Unity does not run under Zscaler and no proxy-specific Unity runtime logic was added.
+<!-- agent:boundary:0861e8e1 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Queue: Main
-<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#post535release]
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/331~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/332~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/333~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: include issue 331-333~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/334: Can you simulation test the Coder environment?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: include issue 334~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/335~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/336~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~📌 In sdk-demo.md, the queue item "- 📥 Why are you telling me to `cd /home/brian/work/btakita/agent-loop/worktrees/haiven-dev/haiven-cli/demo-open-options-20261021` if we are working in `~/work/btakita/worktrees/haiven-dev/haiven-cli/unity-hub-register-option`?" was never struck. Can this fix be a part of the 335-336 release or do we need a new release?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The queue items in sdk-dev.md do not have a prefix despite an active turn with subagents for each queue item. Include fix in 335-336 reease.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: include issue 335-336~~ — auto-struck: answered this cycle (#ftstrike)
-~~~done
-sdk-demo.md queue items were duplicated as I edited the queue items after starting Run Agent Doc
-```
-- ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
-- ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
-- ⚠️ I sent a test message to the Boss Room demo. It still says "you(sending)". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven website?
-- ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
-- 🟡 I sent a test message to the Boss Room demo. It still says "you(sending)". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven frontend?
-```
-~~~
-- ~~do [#queueclaimprojectionrace]: This should relate to the "sdk-demo.md queue items were duplicated" item above.~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/337~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/338: Why are we not able to detect the tmux pane state? Do we need agent-doc to use lazily state projection between the IDE frontend + backend? Ensure editor plugin parity. Do we need bi-directional state syncing so the controller does not need to "guess"?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/339~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -250,7 +258,6 @@ sdk-demo.md queue items were duplicated as I edited the queue items after starti
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#post535release] Release + publish the post-v0.35.535 main batch containing the queue-claim projection, realtime edit deduplication, and issues #337-#339 fixes with JetBrains generations 0.2.765/0.2.766/0.2.767.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 

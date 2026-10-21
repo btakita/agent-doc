@@ -1566,8 +1566,8 @@ fn multiline_head_has_prose_lead(text: &str) -> bool {
         })
 }
 
-/// Replace inline-code span contents with spaces so a QUOTED id cannot be
-/// mistaken for the head's own directive id (`#ftquotedid`).
+/// Replace inline-code span contents with spaces so a QUOTED id or preset
+/// cannot be mistaken for an active directive (`#ftquotedid`, GH #331).
 ///
 /// An operator bug report that quotes a queue head — ``"`do [#foo]` was in the
 /// queue but nothing ran"`` — is a fresh free-text prompt *about* `#foo`, not a
@@ -1579,7 +1579,7 @@ fn multiline_head_has_prose_lead(text: &str) -> bool {
 ///
 /// Only balanced backtick runs are masked; an unbalanced backtick is ordinary
 /// prose, so the remainder stays visible to id extraction.
-fn mask_inline_code(text: &str) -> String {
+pub(crate) fn mask_inline_code(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;

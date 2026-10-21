@@ -193,3 +193,34 @@ fn brief_refuses_an_item_that_is_not_a_live_head() {
         .assert()
         .failure();
 }
+
+#[test]
+fn brief_does_not_grant_a_preset_quoted_in_inline_code() {
+    let item = "#gh-issue: do not run `#upgrade` here";
+    let (_dir, doc) = write_doc(&document(
+        concat!(
+            "prompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc.\n",
+            "  '#gh-issue': File a GitHub issue.\n",
+        ),
+        "subagents",
+        &[item],
+        &[],
+    ));
+    let output = cargo_bin_cmd!("agent-doc")
+        .args(["queue", "brief"])
+        .arg(&doc)
+        .args(["--item", item, "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["status"], "resolved", "{json}");
+    assert_eq!(json["presets"].as_array().unwrap().len(), 1, "{json}");
+    assert_eq!(json["presets"][0]["name"], "#gh-issue", "{json}");
+    assert_eq!(json["presets"][0]["source"], "item", "{json}");
+    let preamble = json["subagent_prompt_preamble"].as_str().unwrap();
+    assert!(preamble.contains("Operator authorization, item preset `#gh-issue`"));
+    assert!(!preamble.contains("Operator authorization, item preset `#upgrade`"));
+    assert!(!preamble.contains("> Upgrade agent-doc."));
+}

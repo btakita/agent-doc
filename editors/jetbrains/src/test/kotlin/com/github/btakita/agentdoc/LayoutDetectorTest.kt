@@ -188,7 +188,7 @@ class LayoutDetectorTest {
         val line = LayoutDetector.observedRemoteLayoutLine(
             snapshots = listOf(LayoutDetector.LayoutWindowSnapshot(0, 0, "tasks/b.md")),
             columns = listOf(LayoutColumn(listOf("tasks/b.md"))),
-            source = "retained_remote_columns reason=selected_visible_change_replaced_focus_column",
+            source = "retained_remote_columns reason=selected_visible_change_preserved_structure",
             clients = listOf(
                 LayoutDetector.RemoteClientSessionEditors(
                     visible = listOf("tasks/a.md", "tasks/b.md"),

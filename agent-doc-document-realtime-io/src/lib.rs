@@ -4985,11 +4985,18 @@ fn collapse_progressive_queue_projection(
         .as_ref()
         .map(|reconciliation| reconciliation.queue_entries.as_slice())
         .unwrap_or(&observed_entries);
+    let exact = agent_doc_queue::document_queue::dedup_free_text_heads(entries, &snapshot_entries);
+    let entries = exact.as_deref().unwrap_or(entries);
+    let revisions = agent_doc_queue::document_queue::collapse_raced_free_text_revisions(
+        entries,
+        &snapshot_entries,
+    );
+    let entries = revisions.as_deref().unwrap_or(entries);
     let progressive = agent_doc_queue::document_queue::collapse_progressive_free_text_heads(
         entries,
         &snapshot_entries,
     );
-    if materialized.is_none() && progressive.is_none() {
+    if materialized.is_none() && exact.is_none() && revisions.is_none() && progressive.is_none() {
         return None;
     }
 
@@ -12272,6 +12279,43 @@ mod tests {
             !queue_body.lines().any(|line| line == format!("- {stale}")),
             "{queue_body}"
         );
+    }
+
+    #[test]
+    fn post_projection_race_collapses_interleaved_sdk_demo_queue_revisions() {
+        let oauth = "I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?";
+        let chat_seed = "I sent a test message to the Boss Room demo. ![img_41.png](img_41.png)";
+        let chat_website = "I sent a test message to the Boss Room demo. It still says \"you(sending)\". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven website?";
+        let chat_frontend = "I sent a test message to the Boss Room demo. It still says \"you(sending)\". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven frontend?";
+        let base = format!(
+            "<!-- agent:queue priority subagents go -->\n- 🟡 {oauth}\n- 🟡 {chat_seed}\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n"
+        );
+        let projected = base.replacen(
+            "<!-- agent:boundary:abc123 -->",
+            "### Re: current\n\nDone.\n<!-- agent:boundary:abc123 -->",
+            1,
+        );
+        let raced = projected.replacen(
+            &format!("- 🟡 {oauth}\n- 🟡 {chat_seed}\n"),
+            &format!(
+                "- ⚠️ {oauth}\n- ⚠️ {oauth}\n- ⚠️ {chat_website}\n- ⚠️ {oauth}\n- 🟡 {chat_frontend}\n"
+            ),
+            1,
+        );
+
+        let collapsed = collapse_progressive_queue_projection(&base, &projected, &raced)
+            .expect("the causally raced queue revisions should collapse");
+        let queue = agent_doc_element::element::parse(&collapsed)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let body = queue.content(&collapsed);
+        assert_eq!(body.matches(oauth).count(), 1, "{body}");
+        assert!(!body.contains(chat_seed), "{body}");
+        assert!(!body.contains(chat_website), "{body}");
+        assert_eq!(body.matches(chat_frontend).count(), 1, "{body}");
+        assert!(collapsed.contains("### Re: current\n\nDone."));
     }
 
     #[test]

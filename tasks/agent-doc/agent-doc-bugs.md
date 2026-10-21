@@ -216,7 +216,7 @@ The integrated `make check` passed: 11,386 Rust tests, 202 VS Code tests, cross-
 - The queue items in sdk-dev.md do not have a prefix despite an active turn with subagents for each queue item. Include fix in 335-336 reease.
 - 📥 release + publish: include issue 335-336
 ---
-⚠️ sdk-demo.md queue items were duplicated as I edited the queue items after starting Run Agent Doc
+🚧 sdk-demo.md queue items were duplicated as I edited the queue items after starting Run Agent Doc
 ```
 - ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
 - ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?

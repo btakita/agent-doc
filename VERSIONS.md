@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.532
+
+- **JetBrains Local History save assertions recover through the existing persistence reconciliation path.** Both
+  `RuntimeException` and `AssertionError` from IntelliJ document saves are treated as recoverable persistence
+  failures, while VM and linkage failures still escape; classic, IDE 262, and IDE 263 plugin generations remain
+  synchronized with the repaired source.
+- **Visible queue loop rosters no longer clear unsettled restore state prematurely (GH #330).** A roster that is
+  already visible still has to cross the delivery-convergence guard, preserving durable `restore_pending` state
+  and its backoff retry until delivery is actually settled.
+
 ## 0.35.531
 
 - **JetBrains editor decisions continue moving behind the hot-reloadable native derivation boundary (GH #326,

@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.531
+
+- **JetBrains editor decisions continue moving behind the hot-reloadable native derivation boundary (GH #326,
+  phases 3, 3b, 4, 5, 5b and 5c).** Native derivations now own the Sync Tmux Layout snapshot, the `--col`
+  fallback and focus probe, Remote Dev surface folding, CRDT replica registration direction and attach-failure
+  diagnosis, and registration-text shaping for captured splices. The Kotlin plugin remains a thin raw-state
+  adapter with frozen fallbacks, while shared fixtures keep the Rust and Kotlin answers aligned.
+- **A Clear Session Context request queued behind an active Codex turn is delivered when that turn closes.** The
+  supervisor retains the clear intent instead of dropping it with the in-flight route, so a busy session reaches
+  the requested fresh context exactly once at the next safe boundary.
+- **Capture gates distinguish real backlog-capture evidence from worker lifecycle bookkeeping.** Worker completion
+  cells no longer satisfy the backlog-capture gate, prose signals match whole words instead of substrings, and a
+  gate releases when its relevant queue heads become worker-claimed during the cycle.
+- **Subagent queue dispatch carries optional model and reasoning-effort policy.** Queue, preset and frontmatter
+  policy resolve in a deterministic precedence order, appear in briefs and launch guidance, and persist through
+  claim/start attribution without inventing values when none were configured.
+- **Queue context clearing has an explicit cadence policy.** The canonical bare `clear` attribute clears direct
+  queues after each completed turn and defers subagent/fan-out clearing until live claims reach a safe idle
+  boundary; `disable-auto-clear` remains the compatible opt-out.
+- **Reactive answered-free-text strikes retire their matching completion evidence atomically (GH #329).** Closing
+  an attested queue row now removes only that row's transient subagent-completion cell, preserving unrelated
+  reports and preventing stale evidence from attaching to later same-text work.
+
 ## 0.35.530
 
 - **A re-run of a focused extract never strips the source when the target lost what it moved (GH #324).** When the

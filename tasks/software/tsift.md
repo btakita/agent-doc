@@ -44,12 +44,18 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): GitHub issues 26–28; v0.1.104 release; upgrade-friendly tsift skill; 3 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): [#haivenrootsync] dispatched to a subagent; [#haivenrootsync]...
+
+### Re: recovered response
+
+Session is now assigned to Codex. `#gh-fix` for [tsift issue #29](https://github.com/btakita/tsift/issues/29) is queued for the next agent-doc cycle.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- #gh-fix https://github.com/btakita/tsift/issues/29
+- release + publish: include P
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

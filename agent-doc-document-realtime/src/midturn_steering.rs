@@ -698,7 +698,8 @@ fn exchange_candidates(
 /// prose. A response section runs from a new `### Re:` heading to the next
 /// boundary marker (the binary re-anchors a boundary after every response
 /// checkpoint, and operator text typed afterwards lands below it), the next
-/// response heading, or the end of the exchange component.
+/// response heading, or the end of the exchange component. Other component
+/// close markers may be examples inside the response and are not boundaries.
 fn strip_new_response_sections(baseline: &str, current: &str) -> String {
     let baseline_headings: BTreeSet<&str> = baseline
         .lines()
@@ -732,7 +733,8 @@ fn strip_new_response_sections(baseline: &str, current: &str) -> String {
         let heading = crate::baseline_comparison::is_exchange_response_heading(trimmed);
         if heading {
             skipping = !baseline_headings.contains(trimmed);
-        } else if trimmed.starts_with("<!-- agent:boundary:") || trimmed.starts_with("<!-- /agent:")
+        } else if trimmed.starts_with("<!-- agent:boundary:")
+            || trimmed == "<!-- /agent:exchange -->"
         {
             skipping = false;
         }
@@ -2146,6 +2148,68 @@ mod tests {
         assert_eq!(obs.ready[0].source, SteeringSource::Exchange);
         assert_eq!(obs.ready[0].dispatch, SteeringDispatch::AddressNow);
         assert_eq!(obs.ready[0].verbatim, "also check the CI status please");
+    }
+
+    /// Closeout response prose can document component markup in a fenced code
+    /// block.  A nested-looking close marker is response content, not the end
+    /// of the exchange.  Stopping there leaves the closing fence and following
+    /// queue in the exchange diff, which previously resurfaced the entire
+    /// rendered queue snapshot after every lifecycle-marker projection.
+    #[test]
+    fn closeout_response_component_example_does_not_project_queue_as_exchange() {
+        fn fixture(queue_marker: &str, response: &str) -> String {
+            format!(
+                concat!(
+                    "{}# Session\n\n",
+                    "<!-- agent:exchange -->\n",
+                    "Earlier exchange history.\n",
+                    "{}",
+                    "<!-- agent:boundary:stable -->\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "## Queue: Main\n",
+                    "<!-- agent:queue id=\"main\" -->\n",
+                    "- do [#post535release]\n",
+                    "---\n",
+                    "{} sdk-demo.md queue items were duplicated\n",
+                    "```\n",
+                    "- first duplicate\n",
+                    "- second duplicate\n",
+                    "```\n",
+                    "---\n",
+                    "- ~~completed work~~\n",
+                    "<!-- /agent:queue -->\n"
+                ),
+                FM, response, queue_marker,
+            )
+        }
+
+        let baseline = fixture("⚠️", "");
+        let response = concat!(
+            "\n### Re: completed queue work\n\n",
+            "Use this managed hook:\n\n",
+            "```markdown\n",
+            "<!-- agent:status patch=replace -->\n",
+            "managed status\n",
+            "<!-- /agent:status -->\n",
+            "```\n"
+        );
+        let owned = BTreeSet::new();
+        for marker in ["🟡", "🚧"] {
+            let current = fixture(marker, response);
+            let obs = observe_with_mode(
+                &seeded(&baseline, None),
+                &current,
+                &quiet_ctx(&owned),
+                ObserveMode::Boundary,
+            );
+            assert!(
+                obs.ready
+                    .iter()
+                    .all(|item| item.source != SteeringSource::Exchange),
+                "queue projection surfaced as exchange steering for {marker}: {:#?}",
+                obs.ready
+            );
+        }
     }
 
     #[test]

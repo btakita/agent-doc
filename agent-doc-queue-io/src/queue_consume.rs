@@ -394,34 +394,6 @@ fn same_queue_head_text(left: &str, right: &str) -> bool {
     strip_priority_markers(left).trim() == strip_priority_markers(right).trim()
 }
 
-/// Retire the transient binary completion cells whose queue items are being
-/// proven integrated by this consume. The attempt keys are returned so a
-/// retained editor delivery cannot be declared landed from the queue strike
-/// alone while the stale "awaiting integration" cell is still visible.
-fn retire_consumed_completion_feedback(
-    content: &str,
-    consumed_heads: &[String],
-) -> (String, HashSet<String>) {
-    let consumed_identities = consumed_heads
-        .iter()
-        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
-        .collect::<HashSet<_>>();
-    let mut retired_keys = HashSet::new();
-    let retired = agent_doc_document::subagent_completion::strip_completion_cells_matching(
-        content,
-        |evidence| {
-            let matches = consumed_identities.contains(
-                &agent_doc_queue::queue_claim::claim_identity(&evidence.item),
-            );
-            if matches {
-                retired_keys.insert(evidence.key.clone());
-            }
-            matches
-        },
-    );
-    (retired, retired_keys)
-}
-
 /// Strike the active queue head, **skipping the visible-write idle guard**, for
 /// the repair recovery path (`#repair-strike-consumed-head`). Repair already
 /// writes the recovered response straight to disk (bypassing IPC/IDE), so the
@@ -824,10 +796,16 @@ fn consume_queue_prompts_with_options_fenced(
     // heads this exact closeout proved and struck; concurrent/unmatched reports
     // remain durable. Keep the snapshot aligned with the same semantic change.
     let (new_document, retired_completion_keys) =
-        retire_consumed_completion_feedback(&plan.new_document, &plan.consumed_texts);
+        agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+            &plan.new_document,
+            &plan.consumed_texts,
+        );
     plan.new_document = new_document;
-    plan.new_snapshot =
-        retire_consumed_completion_feedback(&plan.new_snapshot, &plan.consumed_texts).0;
+    plan.new_snapshot = agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+        &plan.new_snapshot,
+        &plan.consumed_texts,
+    )
+    .0;
 
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
 

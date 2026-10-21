@@ -52,6 +52,33 @@ pub struct QueueConsumptionPlan {
     pub save_snapshot: bool,
 }
 
+/// Retire the transient binary completion cells whose queue items this
+/// closeout proves integrated. The attempt keys are returned so I/O adapters
+/// can fence retained editor delivery on both the queue strike and cell
+/// retirement reaching the authoritative document.
+pub fn retire_consumed_completion_feedback(
+    content: &str,
+    consumed_heads: &[String],
+) -> (String, HashSet<String>) {
+    let consumed_identities = consumed_heads
+        .iter()
+        .map(|head| crate::queue_claim::claim_identity(head))
+        .collect::<HashSet<_>>();
+    let mut retired_keys = HashSet::new();
+    let retired = agent_doc_document::subagent_completion::strip_completion_cells_matching(
+        content,
+        |evidence| {
+            let matches =
+                consumed_identities.contains(&crate::queue_claim::claim_identity(&evidence.item));
+            if matches {
+                retired_keys.insert(evidence.key.clone());
+            }
+            matches
+        },
+    );
+    (retired, retired_keys)
+}
+
 pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> Option<String> {
     let working_components = element::parse(working).ok()?;
     let head_components = element::parse(head).ok()?;
@@ -1481,9 +1508,10 @@ fn normalize_answer_topic(text: &str) -> String {
         .to_lowercase()
 }
 
-/// Strike `node_keys` (free-text queue heads already proven answered) and
-/// annotate them; when no live head remains and the body is losslessly
-/// discardable, clear it and drop the queue activation, as one projection.
+/// Strike `node_keys` (free-text queue heads already proven answered), annotate
+/// them, and retire their transient completion cells; when no live head remains
+/// and the body is losslessly discardable, clear it and drop the queue
+/// activation, as one projection.
 /// A `loop` queue's body is never cleared: its struck rows are the
 /// scheduler's completion evidence and the loop restore removes them
 /// (GH #327).
@@ -1494,11 +1522,21 @@ fn project_free_text_strike_of_node_keys(
     if node_keys.is_empty() {
         return Ok(None);
     }
+    let node_key_set = node_keys.iter().collect::<HashSet<_>>();
+    let consumed_heads = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")?
+        .into_iter()
+        .filter(|node| node_key_set.contains(&node.node_key))
+        .map(|node| node.item.text)
+        .collect::<Vec<_>>();
     let struck = consume_queue_nodes_by_key(content, &node_keys)?;
     if struck == content {
         return Ok(None);
     }
     let annotated = annotate_newly_struck_free_text_heads(content, &struck)?;
+    // `#queueworkevidence`: the answered-head strike is a terminal closeout
+    // boundary just like queue consume. Retire its completion cell in the same
+    // derived target so stale evidence cannot attach to a later same-text row.
+    let annotated = retire_consumed_completion_feedback(&annotated, &consumed_heads).0;
     let remaining = crate::queue_heads::active_queue_heads(&annotated).len();
     let mut target_content = annotated;
     if remaining == 0 {
@@ -3536,6 +3574,54 @@ Old.
                 .is_none(),
             "the projection must disappear once its target is authoritative"
         );
+    }
+
+    #[test]
+    fn answered_free_text_strike_retires_only_its_completion_evidence() {
+        let item = "#upgrade";
+        let other_item = "later worker result";
+        let completion =
+            agent_doc_document::subagent_completion::cell("subagent:upgrade", item, "upgrade-key");
+        let other_completion = agent_doc_document::subagent_completion::cell(
+            "subagent:later",
+            other_item,
+            "later-key",
+        );
+        let document = format!(
+            concat!(
+                "---\nagent_doc_session: queue-completion-retirement\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "{completion}\n{other_completion}\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- {item}\n",
+                "- {other_item}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            completion = completion,
+            other_completion = other_completion,
+            item = item,
+            other_item = other_item,
+        );
+        let response = format!(
+            "### Re: upgrade — gpt-5\n\n> **Queue prompt:** {item}\n\nIntegrated and verified.\n"
+        );
+
+        let projected = project_answered_free_text_strike(&document, &response, Some(&document))
+            .unwrap()
+            .expect("answered worker head should project a target");
+        let evidence =
+            agent_doc_document::subagent_completion::completion_evidence(&projected.target_content);
+
+        assert!(
+            projected.target_content.contains(&format!(
+                "- ~~{item}~~ — auto-struck: answered this cycle (#ftstrike)"
+            )),
+            "the integrated row must close"
+        );
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].item, other_item);
+        assert_eq!(evidence[0].key, "later-key");
     }
 
     /// A preflight-selected head can join the live queue after the response

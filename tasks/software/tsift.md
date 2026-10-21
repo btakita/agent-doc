@@ -21,6 +21,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -161,13 +162,36 @@ Preset expansion `fix then close` is complete: Issue #29 is already fixed and cl
 - Verification: the issue is closed, the fix commit is in `v0.1.106`, and the commit digest contains the content-watermark implementation and its regression test.
 - Confidence: high.
 - Escalation: none.
+
+### Re: do [#needfeaturesdecisions] — gpt-5 · 2026-10-21T10:20-04:00
+
+Do not extract a common ID library yet. The systems share syntax, but not identity semantics:
+
+- Agent-doc's `PendingItem` IDs are document-local work handles. Generated IDs hash `(text, document, counter)`, widen from four to eight characters on collision, and participate in checkbox state, queue mirroring, nested subtasks, review gates, and todo layering.
+- Tsift findings currently use a namespaced, content-derived graph-node ID based on `(kind, title, anchor)`. A durable decision manifest should instead use an explicit, immutable authored ID such as `dec-0007`, because editing a title or anchor must not create a new decision identity.
+- Agent-doc's parser and mutation code is therefore coupled to GFM task lists and session-document lifecycle, while tsift needs cross-document reference validation, lifecycle relationships, provenance, and graph projection.
+
+The right boundary is to keep a tsift-local `DecisionId` and decision schema, initially inside a focused `tsift-decisions` module or crate. Reuse existing general Markdown/frontmatter infrastructure where it fits, but do not make tsift depend on `agent-doc-element-backlog` or extract a generic `StableId` abstraction whose grammar and collision policy would immediately need domain-specific escape hatches.
+
+Reconsider a neutral shared crate only after a second independent consumer needs the same three things: the same canonical grammar, the same identity stability rules, and the same collision/compatibility policy. At that point the extractable layer should be deliberately small—typed ID parsing and validation—not backlog, todo, decision, or graph lifecycle behavior.
+
+I added `[#decisionmanifest]` as the recommended implementation follow-up: prototype the tsift decision-manifest importer/linter with a tsift-local ID and lifecycle schema, then reassess extraction from concrete duplication. It is appended behind the operator's already queued work.
+
+Preset expansion `update spec + tests. build + install for local testing. commit + push` is a proven no-op for this item: the planning contract classified it as an architecture response, and the decision is specifically not to extract or change source yet. No spec, test, build, install, source commit, or source push is warranted; the agent-doc closeout commits this decision and its tracked follow-up.
+
+- Changed paths: no agent-doc or tsift source paths; only the session document and its tracked backlog/queue state are changed by closeout.
+- Commands: `agent-doc plan`, `tsift status`, targeted `tsift search`, `tsift symbol-read PendingItem`, `tsift symbol-read generate_hash_n`, `tsift symbol-read cmd_finding_add`, and `tsift graph finding_id --callers`.
+- Verification: confirmed agent-doc's ID grammar/generation and work-item lifecycle are domain-specific, and confirmed tsift's current finding identity is content-derived and used only by finding add/harvest paths.
+- Confidence: high.
+- Escalation: none.
 <!-- agent:boundary:a2b805d7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- [#needfeaturesdecisions]: This seems similar to agent-doc's id system for backlog + todo + icebox items. Should we extract a common library?
+- ~~do [#needfeaturesdecisions]~~
+- do [#decisionmanifest]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -176,6 +200,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#decisionmanifest] [recommended] Prototype tsift decision-manifest import and lint with a tsift-local DecisionId and lifecycle schema; reassess a shared ID crate only after another domain needs the same grammar and collision semantics.
 <!-- /agent:backlog -->
 
 ## Review

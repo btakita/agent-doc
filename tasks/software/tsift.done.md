@@ -579,3 +579,4 @@
   ```
 - 2026-10-21 [#databasefiledecisions] Could we have a database and/or file of decisions to provide context to the agent? Would the decision database be a good feature for tsift or a separate tool/library?
 - 2026-10-21 [#needfeaturesdecisions] Do we need any features for the decisions markdown?
+- 2026-10-21 [#needfeaturesdecisions] : This seems similar to agent-doc's id system for backlog + todo + icebox items. Should we extract a common library?

@@ -1122,7 +1122,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   lines. JetBrains therefore applies prompt styling consistently to queue turns
   emitted by Codex, Claude, and OpenCode without harness-specific parsing.
 - Native visual-token projection classifies the
-  `[#subagent-operator-request]` handback marker as `tracked_id`. JetBrains MUST
+  `[#subagent-operator-request-<unique-id>]` handback marker as `tracked_id`. JetBrains MUST
   render it with the same tracked-ID colors used in todo, backlog, queue,
   icebox, and review items.
 - `Run Agent Doc` saves only the active markdown document and immediately dispatches a Project Controller `editor_route` request carrying dispatch-only, plain-trigger routing with a 15-second ready wait. The request's layout is a `surface_reference` the controller resolves into `--col` / `--focus` arguments from its retained surface Source (the `--col` snapshot only on the logged fallback; see "Run Agent Doc and Sync Tmux Layout act on the propagated surface"). That complete `--col` / `--focus` layout includes empty physical split placeholders and is an exact-visible layout boundary: the controller canonicalizes those facts, may materialize a missing focus only into one unique empty split, and converges the result before dispatch so route cannot append a pane beside stale visible state. The editor path does not block on the typing debounce and does not save unrelated open documents; the active document save is the editor-owned flush boundary before the controller route request runs. Even after `Clear Session Context`, this action still sends the plain `agent-doc <FILE>` reopen into the live session instead of restarting Codex.

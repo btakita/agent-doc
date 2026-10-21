@@ -2339,11 +2339,11 @@ fn write_heading_or_already_recorded_ask_emits_no_operator_todo_advisory() {
 }
 
 /// `#packettodo`: the 3ad3e23c closeout response — a blocking
-/// `[#subagent-operator-request]` packet beside a review gate.
+/// `[#subagent-operator-request-<unique-id>]` packet beside a review gate.
 const BLOCKING_PACKET_RESPONSE: &str = "<!-- patch:exchange -->\n\
 `#apipendingorphans` is gated on review of #733 and on your decision below.\n\
 \n\
-[#subagent-operator-request] subagent operator request\n\
+[#subagent-operator-request-pending-rows] subagent operator request\n\
 kind: question\n\
 blocking: true\n\
 request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?\n\
@@ -2452,8 +2452,8 @@ fn write_nonblocking_or_quoted_operator_request_packet_records_no_todo() {
     let nonblocking = BLOCKING_PACKET_RESPONSE.replace("blocking: true", "blocking: false");
     let fenced = BLOCKING_PACKET_RESPONSE
         .replace(
-            "[#subagent-operator-request] subagent operator request\n",
-            "```text\n[#subagent-operator-request] subagent operator request\n",
+            "[#subagent-operator-request-pending-rows] subagent operator request\n",
+            "```text\n[#subagent-operator-request-pending-rows] subagent operator request\n",
         )
         .replace(
             "- leave: change nothing.\n",
@@ -2481,6 +2481,28 @@ fn write_nonblocking_or_quoted_operator_request_packet_records_no_todo() {
         );
         assert!(!stderr.contains("#packettodo"), "stderr: {stderr}");
     }
+}
+
+/// Request markers are tracked identities, so one closeout may not present two
+/// different operator questions under the same id.
+#[test]
+fn write_rejects_duplicate_blocking_operator_request_ids() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let duplicate = BLOCKING_PACKET_RESPONSE.replace(
+        "<!-- /patch:exchange -->\n",
+        &format!("\n{BLOCKING_PACKET_RESPONSE}"),
+    );
+    agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(duplicate)
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "reuse [#subagent-operator-request-pending-rows]",
+        ))
+        .stderr(predicates::str::contains(
+            "give every packet a unique [#subagent-operator-request-<unique-id>] marker",
+        ));
 }
 
 /// `#packettodo`: with no single tracked item to layer on, the derived todo

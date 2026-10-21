@@ -649,7 +649,7 @@ granted through the harness permission system. Conversely, the existence of a
 possible native prompt MUST NOT make the agent reject or re-confirm task
 authorization before it attempts the authorized action.
 
-### Subagent operator-request handback (`[#subagent-operator-request]`)
+### Subagent operator-request handback (`[#subagent-operator-request-<unique-id>]`)
 
 Every `agent-doc queue brief` preamble MUST tell a dispatched worker how to
 surface a genuinely missing scope/choice or a harness-native permission request
@@ -658,7 +658,7 @@ but MUST first honor any task authorization already resolved above. Before
 stopping, it sends or returns this packet without paraphrase:
 
 ```text
-[#subagent-operator-request] subagent operator request
+[#subagent-operator-request-<unique-id>] subagent operator request
 kind: question | permission
 blocking: true
 request: <exact question or exact tool/action requiring permission>
@@ -666,6 +666,14 @@ context: <why it is needed, current state, target/scope, and risk or effect>
 choices:
 - <label>: <effect>
 ```
+
+The worker MUST replace `<unique-id>` with a short request-specific lowercase
+suffix containing letters, digits, and hyphens, and MUST use a different marker
+id for every request packet in the session document. The fixed legacy
+`[#subagent-operator-request]` marker remains readable for retained and
+historical packets, but workers MUST NOT emit or reuse it. A closeout that
+presents two blocking packets with the same marker id fails before response
+capture and names the duplicate id.
 
 The packet MUST include every offered choice with its effect. `choices: []` is
 valid only when the harness supplied no choices. The coordinator MUST copy the

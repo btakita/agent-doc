@@ -490,6 +490,23 @@ decide it.
   module measures its editor windows (surface snapshot schema 2), and the
   backend forwards the derived columns as `column_order=editor` (GH #320
   option B). The `unknown` label remains only where no such publisher exists.
+- **A manual order assertion is a bounded override, not inferred state.** Both
+  editor plugins submit `Sync Tmux Layout` as `caller_kind=manual`. If that
+  command carries `column_order=unknown`, the controller adopts its submitted
+  columns only when the retained basis has no positive order authority. The
+  vector remains labelled `unknown` and stabilizes later automatic folds; it
+  cannot replace measured editor geometry. Tmux observation already belongs to
+  the controller, so this repair requires neither editor polling nor another
+  lazy state-projection channel (GH #338).
+- **Do not make layout authority a bidirectional echo.** The flow is
+  owner-directed: editors publish editor-surface facts to the controller, while
+  the controller observes tmux locally and may publish typed layout status back
+  for presentation and acknowledgement. That status is not editor-layout input
+  and must never be echoed back as a new desired surface. Consequently the
+  controller does not guess tmux state, and it does not need an editor round
+  trip to reconcile it. When no process can observe editor split geometry, the
+  order remains explicitly `unknown`; a manual assertion supplies the bounded
+  missing intent until a positive editor-geometry Source appears (GH #338).
 - **Never drop observed state on a local precondition.** A publisher must not
   discard state it did observe because some other local view is empty, as in
   GH #320, where the remote-client visible editors were dropped because the

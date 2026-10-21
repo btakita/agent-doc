@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.534
+
+- **Remote Dev sync fallback preserves the originating client focus context (GH #334).** Reference-publication
+  fallback now captures fresh EDT layout evidence and applies the snapshot without re-entering focus discovery under
+  the backend client identity.
+- **Automatic Remote Dev capture retains client-side session documents (GH #334).** Client editor managers are
+  classified directly instead of being filtered through the backend-local open-file set, preventing empty backend
+  state from collapsing the client document set to `no_visible_session_documents`.
+- **Coder/Zscaler simulation coverage confirms the repaired path.** The focused seed-corpus regression and the full
+  network simulation pass alongside classic, IDE 262, IDE 263, VS Code, and cross-editor checks. Issue #334 is
+  closed.
+
 ## 0.35.533
 
 - **JetBrains Local History save assertion failures recover through persistence reconciliation.** The plugin now

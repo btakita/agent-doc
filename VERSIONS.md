@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.533
+
+- **JetBrains Local History save assertion failures recover through persistence reconciliation.** The plugin now
+  treats assertion failures from `saveDocument` as recoverable alongside runtime exceptions while still allowing
+  fatal VM and linkage failures to escape.
+- **JetBrains package generations are staged deterministically.** Classic, IDE 262, and IDE 263 packages retain
+  source-digest-backed generations across source-identical application releases, preventing distinct package bytes
+  from being published under an existing generation.
+- **Codex post-commit queue edits no longer reopen the response that just committed.** Fresh tracked work is handed
+  to a successor cycle without recapturing the predecessor's closing summary.
+- **Queue preset authorization ignores literal inline-code references (GH #331).** A phrase such as
+  ``do not run `#upgrade` here`` no longer grants that preset, and real preset expansions preserve textual
+  occurrence order. Issue #331 is closed.
+- **Cold Remote Dev layout observations no longer invent column-order authority (GH #332).** The controller keeps
+  order unknown until an editor or manual order-bearing signal arrives, preventing reversed panes after controller
+  restart. Issue #332 is closed.
+- **Exact-263 restart diagnostics now distinguish dated evidence from the current install (GH #333).** They cite
+  the 2026-10-19 IU 263.7031.23 module-graph probe as prior evidence, require separate qualification for later
+  builds, retain the independent split-frontend blocker, and document why a child classloader is unsafe without a
+  stable shim and verified cross-JVM handoff protocol. Issue #333 is closed.
+
 ## 0.35.532
 
 - **JetBrains Local History save assertions recover through the existing persistence reconciliation path.** Both

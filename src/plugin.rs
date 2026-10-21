@@ -17,7 +17,7 @@
 //! - `install_local(editor)` — returns `Err` if no `editors/` directory is found or no artifact exists.
 //! - `update(editor)` — returns `Ok(())` early (no-op) when the JetBrains plugin is already at the latest version.
 //! - `update_all_installed()` attempts editor families independently and reports all failures after the remaining installed targets have been attempted.
-//! - A staged target is never counted as updated: it needs an IDE restart, and when agent-doc declined the restart-free upgrade on that JetBrains build the summary says the restart-free path is unavailable there (GH #114). A modular 262/263 package line with no upgrade entry point is the same permanent loss (GH #277): its restart-required target is `RestartRequired { permanent: true }`, gets the same once-per-process NOTE, summary line and `restart_free_unavailable=true`, and the NOTE/summary state the between-restarts rule the code enforces (routes admitted while the native endpoint answers with this build, native saves at or above the protocol floor, `admin reload-lib` before a restart on a `plugin_bytes_superseded` refusal).
+//! - A staged target is never counted as updated: it needs an IDE restart, and when agent-doc declined the restart-free upgrade on that JetBrains build the summary says the restart-free path is unavailable there (GH #114). A modular 262/263 package line with no upgrade entry point is the same permanent loss (GH #277): its restart-required target is `RestartRequired { permanent: true }`, gets the same once-per-process NOTE, summary line and `restart_free_unavailable=true`, and the operator text scopes that loss to the package line rather than claiming a dated platform probe measured the current build (GH #333). The NOTE/summary state the between-restarts rule the code enforces (routes admitted while the native endpoint answers with this build, native saves at or above the protocol floor, `admin reload-lib` before a restart on a `plugin_bytes_superseded` refusal).
 //! - `list()` — always returns `Ok(())`; emits a stderr message when no plugins are found.
 //! - Unrecognized `editor` strings return `Err` with a list of supported values.
 //! - Byte-identical local JetBrains packages are true no-ops: the installed tree is not
@@ -1687,16 +1687,19 @@ fn copy_jetbrains_package_for_upgrade_launcher(source: &Path, destination: &Path
 /// generation in another JVM (GH #290). A filtered attach probe on split-mode
 /// IU 263.7031.23 reached `DynamicPlugins`, but its computed removal state kept
 /// Agent Doc in the module graph and `unloadPlugin` returned false (GH #299).
-/// That is a property of these package lines, not a legacy build, so it must
-/// never read as "predates restart-free support" or imply that adding a manifest
-/// entry would make the swap safe.
+/// That probe ran on 2026-10-19; package classification does not re-run it and
+/// therefore must not describe its evidence as a measurement of the current
+/// upgrade or of an unqualified later 263 build (GH #333). The separate
+/// split-mode frontend boundary applies to the package line. Neither boundary
+/// makes this a legacy build or implies that adding a manifest entry would make
+/// the swap safe.
 const JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE: &str =
     "modular JetBrains package has no restart-free dynamic upgrade entry point";
 
 /// Stable measured blocker for exact-263, kept separate from the general
-/// modular-package classification so operator diagnostics name live evidence.
+/// modular-package classification so operator diagnostics name dated evidence.
 const JETBRAINS_263_MODULE_GRAPH_UNLOAD_BLOCKER: &str =
-    "live split-mode IU 263.7031.23 kept Agent Doc included in the module graph";
+    "the 2026-10-19 split-mode IU 263.7031.23 probe kept Agent Doc included in the module graph";
 
 /// Which compatibility line a package ZIP holds. The published archive root is
 /// authoritative because exact-262 and 263 share `agent.doc-<v>.jar` (GH #255).
@@ -1737,7 +1740,7 @@ fn jetbrains_dynamic_upgrade_entry_point_refusal(
             )))
         }
         JetbrainsPackageRange::Modular263 => Ok(Some(format!(
-            "the exact-263 {JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} because {JETBRAINS_263_MODULE_GRAPH_UNLOAD_BLOCKER}: a filtered attach probe reached DynamicPlugins, which computed Agent Doc's removal but rejected the new state because the plugin was expected not to be loaded yet remained included in the module graph; unloadPlugin returned false. Adding a Main-Class to agent.doc-{expected_version}.jar or invoking the upgrader classes already present in agent.doc.backend.jar therefore cannot provide a safe restart-free swap, so a running 263 IDE keeps its current plugin generation until it restarts"
+            "the exact-263 {JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE}: {JETBRAINS_263_MODULE_GRAPH_UNLOAD_BLOCKER}. That filtered attach probe reached DynamicPlugins, which computed Agent Doc's removal but rejected the new state because the plugin was expected not to be loaded yet remained included in the module graph; unloadPlugin returned false. This installer did not repeat that probe for the current upgrade, and a different 263 build must be qualified separately before attributing the measured module-graph refusal to it. Independently, a backend attach cannot atomically replace the split-mode frontend in another JetBrains Client JVM. Adding a Main-Class to agent.doc-{expected_version}.jar or invoking the upgrader classes already present in agent.doc.backend.jar therefore cannot provide a safe restart-free whole-package swap, so a running 263 IDE keeps its current plugin generation until it restarts"
         ))),
         JetbrainsPackageRange::Classic242To261 => {
             Ok((!launcher_has_main()?).then(|| {
@@ -2709,8 +2712,8 @@ fn agent_doc_declined_dynamic_upgrade(reason: &str) -> bool {
         || reason.contains(LEGACY_ASYNC_RETIREMENT_DECLINE)
 }
 
-/// GH #277: is the restart-free upgrade unavailable on this JetBrains build for
-/// every future install, not only for this attempt? Two causes qualify:
+/// GH #277: is the restart-free upgrade unavailable for this target on every
+/// future install, not only for this attempt? Two causes qualify:
 /// agent-doc's own asynchronous-classloader decline (GH #108) and a modular
 /// package line that deliberately exposes no upgrade entry point because no
 /// safe, atomic whole-package swap exists (`#jbmodulardynupgrade`, GH #290).
@@ -2747,7 +2750,7 @@ fn dynamic_upgrade_fallback_warning(reason: &str, fallback: &str) -> String {
         // lines, not a failure and not a legacy build. GH #290: name the
         // safety boundary, not only the intentionally absent entry point.
         if reason.contains("exact-263") {
-            "the exact-263 modular restart-free upgrade is unavailable because live split-mode IU 263.7031.23 kept Agent Doc included in the module graph after DynamicPlugins computed its removal, so the running IDE keeps its current plugin generation until restart"
+            "the exact-263 modular restart-free upgrade is unavailable: the 2026-10-19 split-mode IU 263.7031.23 probe kept Agent Doc included in the module graph after DynamicPlugins computed its removal, and this install did not re-run that probe; independently, the backend cannot atomically replace the split-mode frontend, so the running IDE keeps its current plugin generation until restart"
         } else {
             "the exact-262 modular restart-free upgrade is unsafe because asynchronous classloader retirement and the separate split-mode frontend leave no whole-package swap point, so the running IDE keeps its current plugin generation until restart"
         }
@@ -2770,7 +2773,7 @@ fn permanent_dynamic_upgrade_loss_note(reason: &str) -> String {
             "exact-263"
         };
         let cause = if line == "exact-263" {
-            "its exact-263 modular plugin package has no safe whole-package swap: live split-mode IU 263.7031.23 kept Agent Doc included in the module graph after DynamicPlugins computed its removal"
+            "its exact-263 modular plugin package has no safe whole-package swap: the 2026-10-19 split-mode IU 263.7031.23 probe kept Agent Doc included in the module graph after DynamicPlugins computed its removal; this install did not re-run that probe, and the backend cannot atomically replace the split-mode frontend"
                 .to_string()
         } else {
             format!(
@@ -2787,8 +2790,13 @@ fn permanent_dynamic_upgrade_loss_note(reason: &str) -> String {
             "every future install will stage the same way",
         )
     };
+    let scope = if reason.contains(JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE) {
+        "for this modular package line"
+    } else {
+        "on this JetBrains build"
+    };
     format!(
-        "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build ({cause}); {consequence}. Use `agent-doc upgrade` (or the plugin install) and then restart the IDE; re-running the install will not load the plugin without a restart. {}",
+        "NOTE: restart-free plugin upgrade is permanently unavailable {scope} ({cause}); {consequence}. Use `agent-doc upgrade` (or the plugin install) and then restart the IDE; re-running the install will not load the plugin without a restart. {}",
         between_restarts_guidance()
     )
 }
@@ -3228,13 +3236,13 @@ pub enum PluginTargetOutcome {
     /// Already at (or ahead of) the release; nothing was written.
     Unchanged,
     /// A live IDE staged the package for its next start; the plugin tree still
-    /// holds the previous generation. `permanent`: agent-doc declined the
-    /// restart-free upgrade on this JetBrains build, so no retry can avoid the
-    /// restart there.
+    /// holds the previous generation. `permanent`: no retry can avoid the
+    /// restart for this target, either because agent-doc declined on this build
+    /// or because the modular package line has no safe whole-package swap.
     StagedForRestart { permanent: bool },
     /// The files were replaced on disk while a live IDE keeps the previous
     /// generation loaded. `permanent` (GH #277): the restart-free upgrade is
-    /// unavailable on this build for every future install (a modular package
+    /// unavailable for this target on every future install (a modular package
     /// line with no upgrade entry point), not just this attempt.
     RestartRequired { permanent: bool },
     /// GH #233: the target's proven platform build lies outside every
@@ -3266,7 +3274,7 @@ impl PluginTargetOutcome {
         )
     }
 
-    /// GH #114 / #277: no retry can avoid the restart on this target's build.
+    /// GH #114 / #277: no retry can avoid the restart for this target.
     fn restart_free_unavailable(&self) -> bool {
         matches!(
             self,
@@ -3405,13 +3413,13 @@ impl PluginReconcileReport {
             let (label, version) = (&target.label, &target.version);
             let line = match (target.family, &target.outcome) {
                 (_, PluginTargetOutcome::StagedForRestart { permanent: true }) => format!(
-                    "Restart {label} to load plugin v{version}; restart-free upgrade is unavailable on this build."
+                    "Restart {label} to load plugin v{version}; restart-free upgrade is unavailable for this target."
                 ),
                 (_, PluginTargetOutcome::StagedForRestart { permanent: false }) => format!(
                     "Restart {label} to load plugin v{version}; the restart-free upgrade did not complete, so it was staged for the next start."
                 ),
                 (_, PluginTargetOutcome::RestartRequired { permanent: true }) => format!(
-                    "Restart {label} to load plugin v{version}; the running IDE keeps the previous plugin until then, and restart-free upgrade is unavailable on this build."
+                    "Restart {label} to load plugin v{version}; the running IDE keeps the previous plugin until then, and restart-free upgrade is unavailable for this target."
                 ),
                 (_, PluginTargetOutcome::RestartRequired { permanent: false }) => format!(
                     "Restart {label} to load plugin v{version}; the running IDE keeps the previous plugin until then."
@@ -6207,6 +6215,14 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         assert!(refusal.contains("expected not to be loaded"), "{refusal}");
         assert!(refusal.contains("unloadPlugin returned false"), "{refusal}");
+        assert!(refusal.contains("2026-10-19"), "{refusal}");
+        assert!(refusal.contains("did not repeat that probe"), "{refusal}");
+        assert!(refusal.contains("qualified separately"), "{refusal}");
+        assert!(
+            refusal.contains("cannot atomically replace the split-mode frontend"),
+            "{refusal}"
+        );
+        assert!(!refusal.contains("live split-mode"), "{refusal}");
         assert!(
             refusal.contains("already present in agent.doc.backend.jar"),
             "{refusal}"
@@ -6399,17 +6415,20 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 .load(std::sync::atomic::Ordering::Relaxed)
         );
 
-        // GH #299: the NOTE names the blocker measured on live split-mode
-        // 263.7031.23 and the between-restarts rule; a missing launcher is only
-        // a consequence.
+        // GH #299 / #333: the NOTE cites the dated 263.7031.23 measurement,
+        // says this install did not repeat it, scopes permanence to the modular
+        // package line, and retains the between-restarts rule. A missing
+        // launcher is only a consequence.
         let note = super::permanent_dynamic_upgrade_loss_note(&reason);
         assert!(
             note.starts_with(
-                "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build (its exact-263 modular plugin package has no safe whole-package swap: live split-mode IU 263.7031.23 kept Agent Doc included in the module graph after DynamicPlugins computed its removal)"
+                "NOTE: restart-free plugin upgrade is permanently unavailable for this modular package line (its exact-263 modular plugin package has no safe whole-package swap: the 2026-10-19 split-mode IU 263.7031.23 probe kept Agent Doc included in the module graph after DynamicPlugins computed its removal; this install did not re-run that probe, and the backend cannot atomically replace the split-mode frontend)"
             ),
             "{note}"
         );
         assert!(note.contains("included in the module graph"), "{note}");
+        assert!(note.contains("did not re-run that probe"), "{note}");
+        assert!(!note.contains("live split-mode"), "{note}");
         assert!(!note.contains("ships no upgrade entry point"), "{note}");
         assert!(note.contains(&super::between_restarts_guidance()), "{note}");
         let guidance = super::between_restarts_guidance();
@@ -6446,7 +6465,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let summary = report.summary("0.35.510");
         assert!(
             summary.contains(
-                "Restart IntelliJIdea2026.3 to load plugin v0.2.647; the running IDE keeps the previous plugin until then, and restart-free upgrade is unavailable on this build."
+                "Restart IntelliJIdea2026.3 to load plugin v0.2.647; the running IDE keeps the previous plugin until then, and restart-free upgrade is unavailable for this target."
             ),
             "{summary}"
         );
@@ -6462,7 +6481,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let after_note = super::printed_reconcile_summary(&report, "0.35.510", true);
         assert!(!after_note.contains(&guidance), "{after_note}");
         assert!(
-            after_note.contains("restart-free upgrade is unavailable on this build"),
+            after_note.contains("restart-free upgrade is unavailable for this target"),
             "{after_note}"
         );
         assert_eq!(
@@ -6790,7 +6809,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         assert!(
             summary.contains(
-                "Restart IntelliJIdea2026.3 to load plugin v0.2.481; restart-free upgrade is unavailable on this build."
+                "Restart IntelliJIdea2026.3 to load plugin v0.2.481; restart-free upgrade is unavailable for this target."
             ),
             "{summary}"
         );

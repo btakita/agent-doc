@@ -52,10 +52,15 @@ Rust binary.
   262 IDE gets a file replacement plus an explicit restart-required verdict that
   names the missing entry point, never a misleading "legacy package" or
   upgrader-failure warning. Exact-263 is also restart-only: a filtered launcher
-  probe on a live split-mode IU 263.7031.23 reached `DynamicPlugins`, which
+  probe on split-mode IU 263.7031.23 on 2026-10-19 reached `DynamicPlugins`, which
   computed Agent Doc's removal but rejected the new state because the plugin
   remained included in the module graph; `unloadPlugin` returned false (GH
-  #299). Live-process plugin-jar probes match every line's versioned plugin jar
+  #299). Package classification does not repeat that probe during an install,
+  so diagnostics cite it as dated evidence rather than a live measurement; a
+  different exact-263 build must be qualified separately. The independent
+  split-mode blocker remains: a backend attach cannot atomically replace the
+  frontend in the JetBrains Client JVM (GH #333). Live-process plugin-jar probes
+  match every line's versioned plugin jar
   (`agent-doc-jetbrains-<v>.jar`, `agent.doc-<v>.jar`).
 
 There is no filesystem delivery queue, live-value projection, receipt file,

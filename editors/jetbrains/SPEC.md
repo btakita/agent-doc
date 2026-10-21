@@ -172,28 +172,34 @@ from the root manifest is not the final blocker and adding a `Main-Class` would
 not restore a safe upgrade (GH #290).
 
 JetBrains `DynamicPlugins` computes and validates a replacement state from the
-main plugin descriptor and its resolved module graph. A live split-mode probe on
-IU 263.7031.23 supplied the missing platform evidence (GH #299): a filtered
-launcher containing only the attach bridge reached the backend without adding
-plugin implementation classes to the system classloader. `DynamicPlugins`
+main plugin descriptor and its resolved module graph. A split-mode probe on IU
+263.7031.23 on 2026-10-19 supplied the missing platform evidence (GH #299): a
+filtered launcher containing only the attach bridge reached the backend without
+adding plugin implementation classes to the system classloader. `DynamicPlugins`
 computed a state excluding Agent Doc and logged that the plugin would be removed
 from the context, then rejected the state because Agent Doc was expected not to
 be loaded but remained included in the module graph. `unloadPlugin` returned
-false. This happens before a replacement generation can load, so exact-263 has
-no safe restart-free whole-package swap through the supported platform API.
+false. This happens before a replacement generation can load, so that measured
+build has no safe restart-free whole-package swap through the supported platform
+API. Package-line classification does not repeat the attach probe during an
+install and must never describe this dated result as a live measurement of the
+current upgrade. A different exact-263 platform build must be qualified with the
+filtered probe before the module-graph result is attributed to it.
 
 The modular package is also installed on both sides of split mode. Attaching
 only to the backend cannot atomically update `agent.doc.frontend` in the separate
 JetBrains Client JVM, and local-archive plugin synchronization supplies no
 cross-JVM handoff receipt. A backend-only swap while the client keeps the old
 frontend is therefore not a valid fallback after the measured module-graph
-refusal.
+refusal, and remains the package-line blocker while a later 263 build is
+unqualified.
 
 When a live IDE owns either modular target, the installer recognizes the package
 line from its `agent.doc-<version>.jar`, does not attempt an attach, replaces the
 plugin files on disk, and reports restart-required. Exact-262 names its
-classloader/frontend safety boundaries; exact-263 names the live 263.7031.23
-module-graph refusal plus the frontend boundary. The absent launcher is
+classloader/frontend safety boundaries; exact-263 cites the dated 263.7031.23
+module-graph refusal as prior evidence, says that the current install did not
+repeat it, and names the independent frontend boundary. The absent launcher is
 deliberate, and invoking the already-shipped backend upgrader would not bypass
 those boundaries (`ops.log`: `declined_by=modular_package`). It never reports
 either package as one that "predates restart-free dynamic upgrade support"; that
@@ -203,6 +209,31 @@ probes (`#pluginbyteidentity` superseded-bytes detection, the controller's
 the `#pluginactivationprobe` loaded-generation reading) match both versioned
 plugin jars, `agent-doc-jetbrains-<version>.jar` and `agent.doc-<version>.jar`,
 and never the unversioned module jars.
+
+#### Why a plugin-owned child loader is not the remaining hot-upgrade boundary (GH #333)
+
+The remaining Kotlin orchestration cannot be made replaceable merely by moving
+its current classes into a versioned JAR behind a plugin-owned child classloader.
+IntelliJ registers listeners, services, extension implementations, actions, and
+their `Disposable` parents with objects whose implementation classes belong to a
+particular loader. `CrdtReplicaManager`, patch-watch, and route orchestration also
+own callbacks, worker state, static registries, and values whose class identity
+crosses those registrations. Loading a second copy would either leave the old
+loader rooted by platform callbacks or allow old and new class identities to
+meet in one document lifecycle. Closing the child loader does not unregister
+those references, and the exact-263 backend still cannot atomically replace the
+frontend half in the JetBrains Client JVM.
+
+A future child-loader design would therefore require a different architecture,
+not a packaging change: the stable plugin generation must own every IntelliJ
+registration and disposable; the reloadable implementation may exchange only
+bootstrap/JDK types or version-neutral serialized data across the loader
+boundary; handoff must quiesce and acknowledge every callback and worker, carry
+state without implementation-class identity, verify the versioned JAR, and
+coordinate the backend and frontend JVMs. Until all of those conditions have a
+tested protocol, child-loading the orchestration is not a safe restart-free path.
+Pure policy continues to move behind `agent_doc_editor_derive_json`; changes to
+IntelliJ-facing orchestration remain restart-bound.
 
 ### Restart-free logic upgrades: native derivations (GH #326)
 

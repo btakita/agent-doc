@@ -554,7 +554,7 @@ fn normalize_queue_tag_token(token: &str) -> String {
 fn is_queue_boolean_attr(key: &str) -> bool {
     matches!(
         key,
-        "auto" | "priority" | "go" | "start" | "stop" | "disable-auto-clear"
+        "auto" | "priority" | "go" | "start" | "stop" | "clear" | "disable-auto-clear"
     )
 }
 

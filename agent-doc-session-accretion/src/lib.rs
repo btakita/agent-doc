@@ -297,8 +297,8 @@ pub fn restart_or_drain_guidance(queue_active: bool) -> String {
     if queue_active {
         "Queue is actively draining — do NOT stop to restart or defer the remaining items: \
          keep finalizing the current item (#drain-no-defer). With queue auto-clear on (the \
-         default; `<!-- agent:queue disable-auto-clear -->` turns it off) the supervisor resets \
-         agent context between items at idle boundaries — follow \
+         default, positively declared by bare `clear`; legacy `disable-auto-clear` turns it off) \
+         the supervisor resets agent context between items at safe idle boundaries — follow \
          `queue_continuation_guidance` / session-check to end the turn or keep looping; with \
          it off, only an explicit operator Clear resets the session. Either way a context \
          clear does not shrink the document: accretion `block` measures the exchange size, \

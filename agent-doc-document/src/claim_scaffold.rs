@@ -10,7 +10,7 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "<!-- agent:exchange patch=append -->\n",
     "<!-- /agent:exchange -->\n",
     "\n## Queue\n\n",
-    "<!-- agent:queue priority subagents -->\n",
+    "<!-- agent:queue priority subagents clear -->\n",
     "<!-- /agent:queue -->\n",
     "\n## Todo\n\n",
     "<!-- agent:todo priority -->\n",
@@ -160,7 +160,11 @@ mod tests {
             components[2].attrs.get("subagents").map(String::as_str),
             Some("")
         );
-        assert_eq!(components[2].attrs.len(), 2);
+        assert_eq!(
+            components[2].attrs.get("clear").map(String::as_str),
+            Some("")
+        );
+        assert_eq!(components[2].attrs.len(), 3);
         let todo = components
             .iter()
             .find(|component| component.name == "todo")

@@ -1560,10 +1560,9 @@ struct ControllerPaneLayoutGraph {
     /// no desired generation, so the retained layout's `focus` goes stale the
     /// moment the operator moves focus without changing the layout.
     focus_outcome: Mutex<Option<PaneLayoutFocusOutcome>>,
-    /// GH #322: the documents the editor last positively reported visible
-    /// (the columns of the latest accepted editor split observation). A
-    /// focus escalation never replaces a column holding one of them while a
-    /// column holding none remains.
+    /// GH #322/#343: diagnostic memory of the documents in the latest positive
+    /// editor split observation. It is retained for state/audit regression coverage only;
+    /// focus escalation never consults it to replace or reconstruct a column.
     editor_visible: Mutex<Option<Vec<String>>>,
     /// `#stalecontrollerhotupdate` (b)/(d): per-generation attempt count,
     /// retirement, and window-claim stamp. Held by the graph, not the worker
@@ -2367,8 +2366,8 @@ impl ControllerPaneLayoutGraph {
         });
     }
 
-    /// GH #322: record the documents of a positive editor split observation
-    /// as the editor's visible set, replacing the previous one.
+    /// GH #322/#343: record diagnostic visibility from a positive editor split
+    /// observation. This state does not authorize structural replacement.
     pub(crate) fn record_editor_visible(&self, columns: &[String]) {
         let documents = columns
             .iter()
@@ -2383,7 +2382,7 @@ impl ControllerPaneLayoutGraph {
         *self.editor_visible.lock() = Some(documents);
     }
 
-    /// GH #322: the documents the editor last positively reported visible.
+    /// GH #322/#343: diagnostic visibility from the latest positive editor split.
     #[cfg(test)]
     pub(crate) fn editor_visible(&self) -> Option<Vec<String>> {
         self.editor_visible.lock().clone()

@@ -446,10 +446,11 @@ writing the window; per-controller routing reproduces the flip) and the
 `cross_root_editor_route_*` controller tests.
 
 *A plugin win never licenses backend reconstruction (GH #126, GH #343).* A passive
-single-column plugin publication (a tab switch; on a Remote Dev / Coder backend
-every publication is one undetected column) correctly supersedes a route by
-`newer_plane_version`, which takes the routed document out of the retained
-layout and lets tmux stash its pane. A later explicit focus of that document —
+Remote Dev / Coder backend tab switch publishes focus/liveness only: it has no
+columns, cannot supersede the retained structural route, and cannot cause tmux
+to stash a pane. Only a newer complete positive frontend vector may supersede
+the route by `newer_plane_version`; if that exact vector omits the routed
+document, tmux may then stash its pane. A later explicit focus of that document —
 Sync Tmux Layout or a tab switch back — refused
 `actor_pane_not_visible`/`outside_agent_doc_window` escalates, and the
 escalation republishes cached frontend columns unchanged only when they already

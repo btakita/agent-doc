@@ -969,6 +969,16 @@ snapshot as a second head. This is an adjacency- and lineage-shaped repair, not
 global fuzzy deduplication: non-adjacent similar work and intentional repeated
 directives remain distinct.
 
+The closeout delivery path must likewise collapse a causally proven queue-edit
+projection fan-out before rebasing the agent response (`#queue-edit-revision-fanout`).
+It first caps exact free-text copies at snapshot-authored multiplicity, then uses
+each unique, sufficiently long snapshot row as a lineage anchor for interleaved
+live descendants. When several descendants preserve that anchor's normalized
+word sequence, the most complete descendant (latest on equal length) replaces
+the family at its earliest queue slot. Ambiguous descendants, short anchors, and
+snapshot-authored duplicate families remain untouched. This repair is legal only
+inside the post-apply projection-race path; it is not general fuzzy queue dedup.
+
 An id-backed queue head with a nonempty inline operator verdict, such as
 `complete [#push]: hold lifted; do the push`, is fresh executable authority even
 when the referenced item currently lives in `agent:review` and therefore has no

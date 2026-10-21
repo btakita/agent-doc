@@ -3153,6 +3153,135 @@ pub fn dedup_free_text_heads(
     if dropped { Some(deduped) } else { None }
 }
 
+/// Collapse superseded versions of one snapshot-authored free-text queue row
+/// after a causally proven projection race (`#queue-edit-revision-fanout`).
+///
+/// A CRDT apply can observe several versions of one operator edit as separate
+/// rows, with revisions of other rows interleaved between them. Ordinary
+/// progressive collapse is intentionally adjacency-bound, so this repair uses
+/// the committed snapshot as the lineage anchor instead: a unique, sufficiently
+/// long snapshot row may own several live descendants when its normalized word
+/// sequence survives in each descendant. The most complete descendant wins
+/// (latest on equal length), but it is written at the family's earliest slot so
+/// an edit never reorders the queue. Ambiguous descendants and snapshot-authored
+/// duplicate families are left untouched.
+///
+/// Callers MUST have causal evidence that a non-operator projection raced the
+/// editor. This is not a general fuzzy queue deduplicator.
+pub fn collapse_raced_free_text_revisions(
+    entries: &[QueueEntry],
+    snapshot_entries: &[QueueEntry],
+) -> Option<Vec<QueueEntry>> {
+    #[derive(Clone)]
+    struct Seed {
+        words: Vec<String>,
+        indent: usize,
+        ordered_marker: Option<String>,
+        authored_count: usize,
+    }
+
+    let mut seeds = Vec::<Seed>::new();
+    for entry in snapshot_entries {
+        let Some((prompt, text)) = progressive_free_text_prompt(entry) else {
+            continue;
+        };
+        let words = progressive_revision_words(&text);
+        if words.len() < 8 {
+            continue;
+        }
+        if let Some(seed) = seeds.iter_mut().find(|seed| {
+            seed.words == words
+                && seed.indent == prompt.indent
+                && seed.ordered_marker == prompt.ordered_marker
+        }) {
+            seed.authored_count += 1;
+        } else {
+            seeds.push(Seed {
+                words,
+                indent: prompt.indent,
+                ordered_marker: prompt.ordered_marker.clone(),
+                authored_count: 1,
+            });
+        }
+    }
+
+    let mut families = vec![Vec::<(usize, usize)>::new(); seeds.len()];
+    for (index, entry) in entries.iter().enumerate() {
+        let Some((prompt, text)) = progressive_free_text_prompt(entry) else {
+            continue;
+        };
+        let words = progressive_revision_words(&text);
+        let matches = seeds
+            .iter()
+            .enumerate()
+            .filter(|(_, seed)| {
+                seed.authored_count == 1
+                    && seed.indent == prompt.indent
+                    && seed.ordered_marker == prompt.ordered_marker
+                    && words.len() >= seed.words.len()
+                    && words_are_subsequence(&seed.words, &words)
+            })
+            .map(|(seed_index, _)| seed_index)
+            .collect::<Vec<_>>();
+        if let [seed_index] = matches.as_slice() {
+            families[*seed_index].push((index, words.len()));
+        }
+    }
+
+    let mut replacements = std::collections::HashMap::<usize, QueueEntry>::new();
+    let mut drops = std::collections::HashSet::<usize>::new();
+    for family in families.into_iter().filter(|family| family.len() > 1) {
+        let earliest = family.iter().map(|(index, _)| *index).min().unwrap();
+        let survivor = family
+            .iter()
+            .max_by_key(|(index, word_count)| (*word_count, *index))
+            .map(|(index, _)| *index)
+            .unwrap();
+        replacements.insert(earliest, entries[survivor].clone());
+        drops.extend(
+            family
+                .into_iter()
+                .map(|(index, _)| index)
+                .filter(|index| *index != earliest),
+        );
+    }
+    if drops.is_empty() && replacements.is_empty() {
+        return None;
+    }
+
+    Some(
+        entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                if drops.contains(&index) {
+                    None
+                } else {
+                    Some(
+                        replacements
+                            .get(&index)
+                            .cloned()
+                            .unwrap_or_else(|| entry.clone()),
+                    )
+                }
+            })
+            .collect(),
+    )
+}
+
+fn words_are_subsequence(needle: &[String], haystack: &[String]) -> bool {
+    let mut next = 0usize;
+    for word in haystack {
+        if needle.get(next) == Some(word) {
+            next += 1;
+            if next == needle.len() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Collapse a contiguous sequence of progressive, single-line free-text prompt
 /// snapshots when each prompt is a strict textual extension of the previous
 /// one, or when a later synthesis contains every earlier draft in the raced run.
@@ -5552,6 +5681,49 @@ mod tests {
                 .expect("the retained current spelling must replace the stale revision");
             assert_eq!(render(&collapsed), format!("- {current}\n"));
         }
+    }
+
+    #[test]
+    fn raced_free_text_revisions_collapse_interleaved_sdk_demo_edits() {
+        let oauth = "I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?";
+        let chat_seed = "I sent a test message to the Boss Room demo. ![img_41.png](img_41.png)";
+        let chat_website = "I sent a test message to the Boss Room demo. It still says \"you(sending)\". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven website?";
+        let chat_frontend = "I sent a test message to the Boss Room demo. It still says \"you(sending)\". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven frontend?";
+        let snapshot = parse(&format!("- 🟡 {oauth}\n- 🟡 {chat_seed}\n")).unwrap();
+        let raced = parse(&format!(
+            "- ⚠️ {oauth}\n- ⚠️ {oauth}\n- ⚠️ {chat_website}\n- ⚠️ {oauth}\n- 🟡 {chat_frontend}\n"
+        ))
+        .unwrap();
+
+        let deduped = dedup_free_text_heads(&raced, &snapshot)
+            .expect("exact raced copies should collapse to snapshot multiplicity");
+        let collapsed = collapse_raced_free_text_revisions(&deduped, &snapshot)
+            .expect("interleaved descendants should collapse to one latest revision");
+        assert_eq!(
+            render(&collapsed),
+            format!("- ⚠️ {oauth}\n- 🟡 {chat_frontend}\n")
+        );
+    }
+
+    #[test]
+    fn raced_free_text_revisions_preserve_ambiguous_or_authored_families() {
+        let snapshot = parse(concat!(
+            "- This sufficiently long baseline prompt names the alpha deployment target.\n",
+            "- This sufficiently long baseline prompt names the alpha deployment target.\n",
+            "- This sufficiently long baseline prompt names the beta deployment target.\n",
+        ))
+        .unwrap();
+        let entries = parse(concat!(
+            "- This sufficiently long baseline prompt names the alpha deployment target with checks.\n",
+            "- This sufficiently long baseline prompt names the alpha deployment target with logs.\n",
+            "- This sufficiently long baseline prompt names the alpha and beta deployment target.\n",
+        ))
+        .unwrap();
+
+        assert!(
+            collapse_raced_free_text_revisions(&entries, &snapshot).is_none(),
+            "duplicate snapshot families and ambiguous descendants must remain operator-authored work"
+        );
     }
 
     #[test]

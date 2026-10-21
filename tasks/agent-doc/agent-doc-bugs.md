@@ -3,7 +3,7 @@ agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
   codex: 01a1545a-f42c-7aa1-b9a0-aeafeba96910
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -23,6 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
+📥 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
 
 Main is at fa3a54b1aa and installed locally: every GH 326 phase (3, 3b, 4, 5, 5b, 5c), the Codex queued-clear fix and four capture-gate fixes. Unreleased; queue "release + publish" to tag v0.35.531. The main queue is empty.
 
@@ -42,6 +43,26 @@ Latest published release: [v0.35.530](https://github.com/btakita/agent-doc/relea
 Compacted content:
 - Archived 29 response topic(s): nested status:sync, reported-item integration, four new subagents; Subagent completed: `subagent:gh321` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issue...; Subagent completed: `subagent:gh322` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issue...; 26 more
 - Prior summary/context: prior compacted content: Archived 49 response topic(s): Subagent completed: `subagent:issue310` returned work for que...
+
+### Re: Response
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/328
+
+Implemented and closed GitHub issue #328. Queue subagent dispatches now support optional `model` and `effort`, resolved in queue → preset → frontmatter order and omitted when unset. The resolved policy is included in briefs/preflight launch guidance and persisted through claim/start attribution.
+
+> **Queue prompt:** [#n7kq]: Is this moot?
+
+Yes. Commit `f88bcde1` restored all seven IDs immediately after the destructive edit. Two remain open in `sdk.md`, two moved intact to `sdk-dev.md`, and three were completed and reaped. Restoring them again would duplicate or resurrect work, so `#n7kq` is marked done without changing either SDK document.
+
+> **Queue prompt:** [#t1v0]: look through the logs to validate if this works or not
+
+Validated: Clear Session Context succeeded through Codex's `supervisor_restart_fresh` path. The later “projection dropped” event was only the redundant queued `/clear`. The SDK actor is ready, its latest cycle is committed, and no `tdue4cpuset` cycle is open. Do not clear again; the separate CPU-sharing decision remains open. `#t1v0` is marked done.
+
+> **Queue prompt:** Can we have a setting for ultra-efficient usage of tokens? Perhaps regular clearing of session context in the queue would help? auto-clear should be an optional `attribute` in `agent:queue`. The `clear` attribute should default to clear per turn when not in subagent mode. When in subagent-mode, `clear` at the next idle spot? `clear` should be set in the default template.
+
+Implemented a canonical bare `clear` queue attribute. Direct queues clear after each completed turn; `subagents` and `fan-out` queues defer clearing until the next safe idle point after live claims settle. Existing supervisor safety gates are reused, `disable-auto-clear` remains a compatible winning opt-out, and default/generated templates now include `clear`.
+
+Both changes were integrated on `main` at `bca2b67240`. The combined `make check` passed, `make install` succeeded, the integration worktree is clean, and installed agent-doc remains version `0.35.530`. The persistent release status was already current, so it was not rewritten.
 <!-- agent:boundary:811a7087 -->
 <!-- /agent:exchange -->
 
@@ -50,6 +71,10 @@ Compacted content:
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/328~~
+- ~~[#n7kq]: Is this moot?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~[#t1v0]: look through the logs to validate if this works or not~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Can we have a setting for ultra-efficient usage of tokens? Perhaps regular clearing of session context in the queue would help? auto-clear should be an optional `attribute` in `agent:queue`. The `clear` attribute should default to clear per turn when not in subagent mode. When in subagent-mode, `clear` at the next idle spot? `clear` should be set in the default template.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -61,8 +86,8 @@ Compacted content:
 <!-- agent:todo -->
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
-- [ ] [#n7kq] In the sdk.md session: restore the 7 todo ids the 23:30 --todo-edit dropped (#tdclireview, #tdcontracts162, #tdpromotioncallers, #tdinspectclones, #tdfpe202, #tdadr0033, #tdadr0030) with --todo-edit "<exact text>=#tdX <same text>", or accept the ids the preflight backfill assigns
-- [ ] [#t1v0] In the sdk.md pane, press Clear Session Context again: the 06:03 presses were held behind the open cycle and then dropped by the install restart. Check first that sdk.md's queue has not opened its tdue4cpuset cycle.
+- [x] [#n7kq] In the sdk.md session: restore the 7 todo ids the 23:30 --todo-edit dropped (#tdclireview, #tdcontracts162, #tdpromotioncallers, #tdinspectclones, #tdfpe202, #tdadr0033, #tdadr0030) with --todo-edit "<exact text>=#tdX <same text>", or accept the ids the preflight backfill assigns
+- [x] [#t1v0] In the sdk.md pane, press Clear Session Context again: the 06:03 presses were held behind the open cycle and then dropped by the install restart. Check first that sdk.md's queue has not opened its tdue4cpuset cycle.
 <!-- /agent:todo -->
 
 ## Backlog

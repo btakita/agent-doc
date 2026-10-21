@@ -472,6 +472,7 @@ mod tests {
         let state = reconcile(graph.state(&due.key), &document.spec, now);
         let facts = FireFacts {
             live_heads: vec!["check".to_string()],
+            completed_heads: Vec::new(),
             paused: false,
         };
         let (state, _) = fire(state, &document.spec, now, &facts, graph.tz());

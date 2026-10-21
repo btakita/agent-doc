@@ -794,6 +794,8 @@ pub enum FireDecision {
     NotDue,
     /// A pass window opened; the ordinary drain may now dispatch the heads.
     Opened,
+    /// An idle loop recovered its struck roster and opened a new pass.
+    Recovered,
     /// The tick found no live head; the window stays closed.
     EmptyPoll,
     /// The queue is held (`pause`/`stop`); the tick is skipped, not deferred.
@@ -808,6 +810,8 @@ pub enum FireDecision {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FireFacts {
     pub live_heads: Vec<String>,
+    /// Completed rows still present in this queue.
+    pub completed_heads: Vec<String>,
     /// The queue control resolves to a hold (`pause`, legacy `stop`).
     pub paused: bool,
 }
@@ -844,6 +848,19 @@ pub fn fire(
         FireDecision::SkippedPaused
     } else if state.window_open() {
         FireDecision::SkippedBusy
+    } else if facts.live_heads.is_empty()
+        && spec.loop_limit.is_loop()
+        && !facts.completed_heads.is_empty()
+    {
+        let roster = dedupe_by_identity(facts.completed_heads.iter().cloned());
+        state.restore_pending = Some(roster.clone());
+        state.window = ScheduleWindow::Open {
+            pass: state.passes_completed.saturating_add(1),
+            opened_secs: now,
+            roster,
+            ran: Vec::new(),
+        };
+        FireDecision::Recovered
     } else if facts.live_heads.is_empty() {
         if !spec.has_cadence() {
             // A cadence-less loop with nothing queued paces itself by pass
@@ -1228,6 +1245,7 @@ mod tests {
     fn facts(items: &[&str]) -> FireFacts {
         FireFacts {
             live_heads: heads(items),
+            completed_heads: Vec::new(),
             paused: false,
         }
     }
@@ -1356,6 +1374,33 @@ mod tests {
     }
 
     #[test]
+    fn an_idle_loop_recovers_its_struck_roster_into_a_new_pass() {
+        let spec = spec(&[("interval", "1h"), ("loop", "")]);
+        let mut state = reconcile(None, &spec, 1_000);
+        state.passes_completed = 9;
+        let facts = FireFacts {
+            live_heads: Vec::new(),
+            completed_heads: heads(&["#upgrade", "check CI", "#upgrade"]),
+            paused: false,
+        };
+
+        let (state, decision) = fire(state, &spec, 1_000, &facts, &UTC);
+
+        let roster = heads(&["#upgrade", "check CI"]);
+        assert_eq!(decision, FireDecision::Recovered);
+        assert_eq!(state.restore_pending, Some(roster.clone()));
+        assert_eq!(
+            state.window,
+            ScheduleWindow::Open {
+                pass: 10,
+                opened_secs: 1_000,
+                roster,
+                ran: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
     fn missed_ticks_are_coalesced_into_one() {
         let spec = spec(&[("interval", "10m")]);
         let state = reconcile(None, &spec, 0);
@@ -1435,6 +1480,7 @@ mod tests {
         let state = reconcile(None, &spec, 0);
         let paused = FireFacts {
             live_heads: heads(&["a"]),
+            completed_heads: Vec::new(),
             paused: true,
         };
         let (state, decision) = fire(state, &spec, 0, &paused, &UTC);

@@ -622,6 +622,7 @@ impl QueueScheduleWorker {
         let now = self.io.now_secs();
         let facts = FireFacts {
             live_heads: queue_schedule::live_heads_for_queue(&text, &due.queue_id)?,
+            completed_heads: queue_schedule::completed_heads_for_queue(&text, &due.queue_id)?,
             paused: queue_schedule::queue_held_by_control_for_queue(&text, &due.queue_id)?,
         };
         let tz = self.graph.tz();
@@ -657,6 +658,10 @@ impl QueueScheduleWorker {
                     ),
                 ),
             );
+        }
+        if decision == FireDecision::Recovered {
+            self.restore(&due.key, &due.file, &due.queue_id, &facts.completed_heads);
+            return Ok(self.graph.state(&due.key));
         }
         Ok(Some(state))
     }
@@ -1341,6 +1346,55 @@ mod tests {
         assert_eq!(state.passes_completed, 2);
         assert_eq!(*io.text.lock(), content, "pass 2 restored the struck item");
         assert_eq!(io.restores.lock().len(), 2);
+    }
+
+    /// GH #335: if the one post-pass restore write was lost, the next due
+    /// tick rebuilds the loop roster from its struck rows instead of leaving
+    /// the queue in `empty_poll` forever.
+    #[test]
+    fn idle_loop_tick_recovers_struck_rows_when_restore_pending_was_lost() {
+        let struck = doc("interval=1h loop", "- ~~#upgrade~~\n");
+        let live = doc("interval=1h loop", "- #upgrade\n");
+        let (_dir, file) = project(&struck);
+        let io = FakeIo::new(&struck);
+        let worker = worker(&io);
+        worker.refresh(&file);
+        mutate_schedule_state(
+            &file,
+            agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID,
+            1_000,
+            |prev| {
+                let mut state = prev.expect("schedule admitted");
+                state.passes_completed = 9;
+                state.window = queue_schedule::ScheduleWindow::Closed;
+                state.restore_pending = None;
+                (Some(state), ())
+            },
+        )
+        .unwrap();
+
+        worker.run_due(&due(&file));
+
+        let state = load_schedule_state(&file).unwrap().unwrap();
+        assert_eq!(*io.text.lock(), live);
+        assert_eq!(state.passes_completed, 9);
+        assert_eq!(state.restore_pending, None);
+        assert_eq!(
+            state.window,
+            queue_schedule::ScheduleWindow::Open {
+                pass: 10,
+                opened_secs: 1_000,
+                roster: vec!["#upgrade".into()],
+                ran: Vec::new(),
+            }
+        );
+        assert_eq!(
+            io.restores.lock().as_slice(),
+            &[vec![String::from("#upgrade")]]
+        );
+        assert!(io.logs.lock().iter().any(|line| {
+            line.contains("queue_schedule_tick") && line.contains("decision=recovered")
+        }));
     }
 
     #[test]

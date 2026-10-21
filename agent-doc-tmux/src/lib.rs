@@ -882,6 +882,9 @@ pub fn build_layout_state(
 /// focused editor's selection first. `Retained` means a stateful upstream fold
 /// has already resolved the order from its own retained layout, including slot
 /// replacement when one visible document replaces another (GH #185).
+/// `Provisional` means an upstream fold guessed which slot a replacement
+/// occupies; the membership is current, but the controller must retain the
+/// preceding fold basis until structural evidence confirms the replacement.
 ///
 /// The serde default is `Editor` so an older publisher that never names an
 /// order keeps its previous (authoritative) meaning.
@@ -892,6 +895,7 @@ pub enum LayoutColumnOrder {
     Editor,
     Unknown,
     Retained,
+    Provisional,
 }
 
 impl LayoutColumnOrder {
@@ -900,6 +904,7 @@ impl LayoutColumnOrder {
             Self::Editor => "editor",
             Self::Unknown => "unknown",
             Self::Retained => "retained",
+            Self::Provisional => "provisional",
         }
     }
 
@@ -954,6 +959,8 @@ pub struct OrderedLayoutColumns {
 ///   retained order (a slot-preserving permutation). Upstream folds anchored
 ///   to this layout never invert two of its documents, so an inversion is
 ///   divergence (an unanchored or stale upstream memory), never geometry.
+/// - `Provisional` uses the `Unknown` slot fold while preserving its label so
+///   the controller can keep the preceding fold basis across the guess.
 ///
 /// Focus never participates. Documents are compared by trimmed identity;
 /// callers pass canonical ids. Idempotent: resolving a resolved vector against
@@ -1058,7 +1065,11 @@ pub fn order_layout_columns(
     let reordered = columns != incoming;
     OrderedLayoutColumns {
         columns,
-        order: LayoutColumnOrder::Retained,
+        order: if incoming_order == LayoutColumnOrder::Provisional {
+            LayoutColumnOrder::Provisional
+        } else {
+            LayoutColumnOrder::Retained
+        },
         reordered,
     }
 }
@@ -2797,6 +2808,30 @@ distinct, identical ones still dedupe"
         assert_eq!(ordered.columns, cols(&["a.md", "d.md", "c.md"]));
     }
 
+    /// GH #343: a Remote Dev selection-first replacement uses the same slot
+    /// fold as unknown membership, but keeps its provisional label so the
+    /// controller can retain the pre-guess basis for the structural follow-up.
+    #[test]
+    fn provisional_order_slot_fold_preserves_its_provenance() {
+        let ordered = order_layout_columns(
+            &cols(&["a.md", "b.md"]),
+            &cols(&["c.md", "b.md"]),
+            LayoutColumnOrder::Provisional,
+        );
+        assert_eq!(ordered.columns, cols(&["c.md", "b.md"]));
+        assert_eq!(ordered.order, LayoutColumnOrder::Provisional);
+        assert!(!ordered.reordered);
+
+        let reordered = order_layout_columns(
+            &cols(&["a.md", "b.md"]),
+            &cols(&["b.md", "c.md"]),
+            LayoutColumnOrder::Provisional,
+        );
+        assert_eq!(reordered.columns, cols(&["c.md", "b.md"]));
+        assert_eq!(reordered.order, LayoutColumnOrder::Provisional);
+        assert!(reordered.reordered);
+    }
+
     #[test]
     fn unknown_order_follows_document_position_inside_stacked_retained_columns() {
         // Retained one stacked column `a,b`; the publisher split them focus-first.
@@ -2897,14 +2932,18 @@ distinct, identical ones still dedupe"
     }
 
     /// `#tmuxpanesreversed`: the controller-side order invariants, checked
-    /// exhaustively for both upstream labels without geometry.
+    /// exhaustively for every upstream label without geometry.
     #[test]
     fn order_resolution_never_inverts_the_retained_layout() {
         let layouts = ordered_subsets(4);
         let mut checked = 0usize;
         for retained in &layouts {
             for incoming in layouts.iter().filter(|layout| !layout.is_empty()) {
-                for label in [LayoutColumnOrder::Unknown, LayoutColumnOrder::Retained] {
+                for label in [
+                    LayoutColumnOrder::Unknown,
+                    LayoutColumnOrder::Retained,
+                    LayoutColumnOrder::Provisional,
+                ] {
                     let ordered = order_layout_columns(retained, incoming, label);
                     // 1. A permutation of the incoming membership.
                     let mut sorted_in = incoming.clone();
@@ -2935,7 +2974,10 @@ distinct, identical ones still dedupe"
                         .filter(|(_, column)| !incoming.contains(column))
                         .map(|(index, _)| index)
                         .collect();
-                    if label == LayoutColumnOrder::Unknown
+                    if matches!(
+                        label,
+                        LayoutColumnOrder::Unknown | LayoutColumnOrder::Provisional
+                    )
                         && retained.len() == incoming.len()
                         && added.len() == 1
                         && dropped.len() == 1
@@ -2965,5 +3007,6 @@ distinct, identical ones still dedupe"
     fn layout_column_order_defaults_to_editor() {
         assert_eq!(LayoutColumnOrder::default(), LayoutColumnOrder::Editor);
         assert_eq!(LayoutColumnOrder::Retained.to_string(), "retained");
+        assert_eq!(LayoutColumnOrder::Provisional.to_string(), "provisional");
     }
 }

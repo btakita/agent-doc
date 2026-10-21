@@ -1329,10 +1329,11 @@ mod tests {
     /// `#tmuxpanesreversed`: a native reload drops the fold memory. The next
     /// observation lists the visible documents in tab-open order — here the
     /// reverse of the editor's `[a | b]` split — and the memory used to adopt
-    /// it, so the following tab switch in the LEFT split (a -> c) published
-    /// `[b | c]` labelled `retained`, which the controller applies verbatim:
-    /// reversed panes. Anchoring the cold memory to the controller's retained
-    /// layout first keeps `[c | b]`.
+    /// it, so the following tab switch in the LEFT split (a -> c) used to
+    /// publish `[b | c]` as retained order: reversed panes. Anchoring the cold
+    /// memory to the controller's retained layout first keeps `[c | b]`; the
+    /// selection-first replacement remains explicitly provisional until its
+    /// structural follow-up.
     #[test]
     fn a_reloaded_fold_anchors_to_the_retained_layout_before_folding() {
         let root = Path::new("/tmp/tmuxpanesreversed-reload-root");

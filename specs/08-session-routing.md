@@ -227,7 +227,10 @@ Source for the payload's `client_id` (pure derivation in
 - `sync_tmux_layout`: the payload carries no `columns`, `column_order`, or
   `focus`. The controller takes the surface's columns in the automatic
   `SurfaceIntent::Sync` shape (one comma-joined entry per column), its
-  `column_order`, and its focus. An unknown split (`columns=[]`) is refused as
+  `column_order`, and its focus. The order label is propagated unchanged,
+  including `provisional` for a Remote Dev replacement whose pre-guess basis
+  the pane-layout graph must retain (GH #343). An unknown split (`columns=[]`)
+  is refused as
   `surface_reference_unknown_layout`, and a foreground sync whose focus is in no
   column as `surface_reference_stale_focus`, with the sentences the editor
   used when it made these decisions itself.

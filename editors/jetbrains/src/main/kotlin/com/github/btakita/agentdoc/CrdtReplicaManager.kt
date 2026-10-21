@@ -3381,8 +3381,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
             }
             outcome
-        } catch (e: RuntimeException) {
-            log.warn("[crdt-replica] remote editor apply save failed for $filePath", e)
+        } catch (failure: Throwable) {
+            if (!recoverableRemoteDocumentSaveFailureUtil(failure)) throw failure
+            log.warn("[crdt-replica] remote editor apply save failed for $filePath", failure)
             reconcileRemotePersistence(
                 filePath,
                 document,
@@ -6577,6 +6578,16 @@ internal fun remoteCrdtDiskCanPersistUtil(
     targetText: String,
     diskText: String?,
 ): Boolean = diskText == expectedText || diskText == targetText
+
+/**
+ * IntelliJ's document save boundary normally reports failures as runtime
+ * exceptions, but a corrupt Local History record store can throw an
+ * [AssertionError] from inside `FileDocumentManager.saveDocument`. Both leave
+ * the editor and disk available for the ordinary exact-plane reconciliation.
+ * Other VM/linkage errors remain fatal and must not be swallowed.
+ */
+internal fun recoverableRemoteDocumentSaveFailureUtil(failure: Throwable): Boolean =
+    failure is RuntimeException || failure is AssertionError
 
 /**
  * A REPLACE delivery installs [canonicalText] wholesale and re-bootstraps the

@@ -2509,6 +2509,12 @@ balanced component markers, and at most one live exchange boundary marker.
   that exact editor revision to perform its native save, then re-observes
   authority and disk equality before checkpoint, commit, and the durable
   compact-settled receipt. Compact admission itself never issues this save.
+- A JetBrains native save can fail with either a runtime exception or the
+  `AssertionError` IntelliJ Local History emits when its private record store is
+  corrupt. The editor bridge treats those two classes as recoverable save
+  refusals: it logs the failure, rereads disk, and follows the same exact-plane
+  persist/rollback/preserve reconciliation without ACKing an unpersisted cut.
+  Other VM and linkage errors remain fatal rather than being swallowed.
 - Repeated refusal of one immutable retained native-save projection is an
   Effect receipt, not a second polling authority. On every third refusal the
   existing persistence Effect requests an idempotent editor-replica rebuild,

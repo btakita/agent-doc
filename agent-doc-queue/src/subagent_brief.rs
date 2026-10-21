@@ -353,9 +353,40 @@ pub const SUBAGENT_SCRATCH_ISOLATION_RULE: &str = subagent_scratch_isolation_rul
 pub const SUBAGENT_PREAMBLE_MARKER: &str =
     "[agent-doc] operator authorization for a dispatched queue item (#waypostauthorization)";
 
-/// Marker that opens a blocking request a worker routes through its coordinator.
+/// Reserved tracked-id prefix for a blocking request a worker routes through
+/// its coordinator. Every request packet appends a request-specific suffix so
+/// two pending questions never claim the same document identity.
+pub const SUBAGENT_OPERATOR_REQUEST_ID_PREFIX: &str = "subagent-operator-request-";
+
+/// Marker template that opens a blocking request. Workers replace
+/// `<unique-id>` with a short request-specific suffix.
 pub const SUBAGENT_OPERATOR_REQUEST_MARKER: &str =
+    "[#subagent-operator-request-<unique-id>] subagent operator request";
+
+/// Read compatibility for packets emitted before request-specific ids.
+pub const LEGACY_SUBAGENT_OPERATOR_REQUEST_MARKER: &str =
     "[#subagent-operator-request] subagent operator request";
+
+/// The tracked id carried by a subagent operator-request marker line.
+///
+/// New markers require a non-empty alphanumeric/hyphen suffix. The fixed
+/// legacy marker remains readable so existing session history and retained
+/// closeouts still parse, but the worker protocol never emits it.
+pub fn subagent_operator_request_id(line: &str) -> Option<&str> {
+    const MARKER_SUFFIX: &str = "] subagent operator request";
+    let line = line.trim();
+    if line == LEGACY_SUBAGENT_OPERATOR_REQUEST_MARKER {
+        return Some("subagent-operator-request");
+    }
+    let id = line.strip_prefix("[#")?.strip_suffix(MARKER_SUFFIX)?;
+    let suffix = id.strip_prefix(SUBAGENT_OPERATOR_REQUEST_ID_PREFIX)?;
+    let mut chars = suffix.chars();
+    let first = chars.next()?;
+    if !first.is_ascii_alphanumeric() || !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-') {
+        return None;
+    }
+    Some(id)
+}
 
 /// Cross-harness fallback for questions and permission requests that a background
 /// worker cannot present to the operator itself. The field names are deliberately
@@ -366,13 +397,16 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "before ",
     "stopping; use the harness's native parent-message mechanism when available, otherwise ",
     "return the packet as your result:\n\n",
-    "[#subagent-operator-request] subagent operator request\n",
+    "[#subagent-operator-request-<unique-id>] subagent operator request\n",
     "kind: question | permission\n",
     "blocking: true\n",
     "request: <exact question or exact tool/action requiring permission>\n",
     "context: <why it is needed, current state, target/scope, and risk or effect>\n",
     "choices:\n",
     "- <label>: <effect>\n\n",
+    "Replace `<unique-id>` with a short request-specific lowercase suffix using letters, digits, ",
+    "and hyphens. Use a different marker id for every request packet in the session document; ",
+    "never reuse the legacy fixed `[#subagent-operator-request]` id. ",
     "Include every offered choice; write `choices: []` only when the harness supplied none. ",
     "Claude Code may surface a background worker's tool-permission prompt natively, and Codex ",
     "provides inter-agent messaging; Grok Build and OpenCode may require returning the packet ",
@@ -907,10 +941,39 @@ mod tests {
             assert!(!preamble.contains("[agent-doc] subagent operator request"));
             assert!(!preamble.contains("(#waypostrequest)"));
             assert!(preamble.contains("request: <exact question or exact tool/action"));
+            assert!(preamble.contains(
+                "Use a different marker id for every request packet in the session document"
+            ));
+            assert!(
+                preamble.contains("never reuse the legacy fixed `[#subagent-operator-request]` id")
+            );
             assert!(preamble.contains("choices:\n- <label>: <effect>"));
             for harness in ["Claude Code", "Codex", "Grok Build", "OpenCode"] {
                 assert!(preamble.contains(harness), "missing {harness}: {preamble}");
             }
         }
+    }
+
+    #[test]
+    fn operator_request_marker_requires_a_request_specific_id() {
+        assert_eq!(
+            subagent_operator_request_id(
+                "[#subagent-operator-request-pr645] subagent operator request"
+            ),
+            Some("subagent-operator-request-pr645")
+        );
+        assert_eq!(
+            subagent_operator_request_id(LEGACY_SUBAGENT_OPERATOR_REQUEST_MARKER),
+            Some("subagent-operator-request")
+        );
+        assert_eq!(
+            subagent_operator_request_id(SUBAGENT_OPERATOR_REQUEST_MARKER),
+            None,
+            "the protocol placeholder is not a concrete packet id"
+        );
+        assert_eq!(
+            subagent_operator_request_id("[#subagent-operator-request-] subagent operator request"),
+            None
+        );
     }
 }

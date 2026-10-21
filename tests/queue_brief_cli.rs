@@ -57,7 +57,10 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
         .stdout(predicate::str::contains("treat prior authorization as the answer").not())
         .stdout(predicate::str::contains("Never run `make install`"))
         .stdout(predicate::str::contains(
-            "[#subagent-operator-request] subagent operator request",
+            "[#subagent-operator-request-<unique-id>] subagent operator request",
+        ))
+        .stdout(predicate::str::contains(
+            "Use a different marker id for every request packet in the session document",
         ))
         .stdout(predicate::str::contains("[agent-doc] subagent operator request").not())
         .stdout(predicate::str::contains("(#waypostrequest)").not())

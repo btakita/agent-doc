@@ -221,7 +221,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      generation binds to at most one worker and one worker binds to at most one
      live claim in the document; a stale generation or conflicting binding is
      refused without mutation.
-  4. Treat `[#subagent-operator-request] subagent operator request` as a
+  4. Treat `[#subagent-operator-request-<unique-id>] subagent operator request` as a
      blocking handback, not worker completion. Copy the entire packet verbatim
      into `agent:exchange` so the exact request, why it is needed, target/scope,
      risk or effect, and every offered choice remain visible. Present that same
@@ -264,7 +264,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   6. A subagent commits and pushes its own branch, fast-forward only by default.
      Verbatim operator authorization that explicitly names another target branch
      or explicitly requires a force push overrides only that default; the worker
-     executes exactly the named scope and uses the `[#subagent-operator-request]` protocol for
+     executes exactly the named scope and uses the `[#subagent-operator-request-<unique-id>]` protocol for
      any harness-native permission gate.
      It never runs `make install`, a release build, a version bump, a tag, or a
      release. Concurrent subagents share the coordinator's scratchpad, so a
@@ -656,7 +656,7 @@ When a closeout opens an `agent:review` gate that `agent:todo` does not mention,
 the write prints `[todo] advisory (#operatortodo)`. If that gate waits on the
 operator, add the TODO next cycle (`--backlog-only --todo-add ...` for a
 tracked-work-only closeout); a gate waiting on CI or a third party needs none.
-A response that presents a blocking `[#subagent-operator-request]` packet still
+A response that presents a blocking `[#subagent-operator-request-<unique-id>]` packet still
 owes `--todo-add` (`#wayposttodo`); if you omit it, the binary derives the todo
 from the packet's `request:` and choices and layers it on the one gated id
 (`[todo] blocking operator request packet (#packettodo)`).

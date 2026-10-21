@@ -792,10 +792,12 @@ fn todo_covers_ask(ask_words: &[String], todo_words: &[String]) -> bool {
     shared >= 1 && shared * 2 >= ask_words.len()
 }
 
-/// A blocking `[#subagent-operator-request]` packet a closeout response presents
+/// A blocking `[#subagent-operator-request-<unique-id>]` packet a closeout response presents
 /// to the operator (`#packettodo`, `#wayposttodo`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockingOperatorRequestPacket {
+    /// The packet's request-specific tracked id.
+    pub id: String,
     /// `question` or `permission`.
     pub kind: String,
     /// The packet's `request:` line, trimmed.
@@ -807,17 +809,16 @@ pub struct BlockingOperatorRequestPacket {
 const OPERATOR_REQUEST_TODO_SUMMARY_MAX_CHARS: usize = 200;
 const OPERATOR_REQUEST_TODO_CHOICE_MAX_CHARS: usize = 40;
 
-/// Every blocking `[#subagent-operator-request]` packet in `response`, parsed
+/// Every blocking `[#subagent-operator-request-<unique-id>]` packet in `response`, parsed
 /// structurally (`#packettodo`).
 ///
-/// A packet is the exact marker line (at most three leading spaces, so an
-/// indented code block never counts) followed, without a blank line, by
+/// A packet is a request-specific marker line (at most three leading spaces,
+/// so an indented code block never counts) followed, without a blank line, by
 /// `key: value` field lines. It counts only when it carries `kind: question`
 /// or `kind: permission`, `blocking: true`, and a concrete `request:` (not the
 /// `<...>` protocol placeholder). Lines inside fenced code blocks and
 /// blockquoted (`>`) lines are quoted prose, never a packet.
 pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperatorRequestPacket> {
-    let marker = agent_doc_queue::subagent_brief::SUBAGENT_OPERATOR_REQUEST_MARKER;
     let lines: Vec<&str> = response.lines().collect();
     let mut packets = Vec::new();
     let mut fence: Option<(char, usize)> = None;
@@ -837,9 +838,12 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
             continue;
         }
         let indent = line.len() - trimmed_start.len();
-        if indent > 3 || line.trim() != marker {
+        let Some(packet_id) = (indent <= 3)
+            .then(|| agent_doc_queue::subagent_brief::subagent_operator_request_id(line))
+            .flatten()
+        else {
             continue;
-        }
+        };
         let mut kind = None;
         let mut blocking = None;
         let mut request = None;
@@ -847,7 +851,9 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
         let mut in_choices = false;
         while index < lines.len() {
             let field = lines[index].trim();
-            if field.is_empty() || field == marker {
+            if field.is_empty()
+                || agent_doc_queue::subagent_brief::subagent_operator_request_id(field).is_some()
+            {
                 break;
             }
             index += 1;
@@ -884,12 +890,24 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
             continue;
         }
         packets.push(BlockingOperatorRequestPacket {
+            id: packet_id.to_string(),
             kind,
             request,
             choice_labels,
         });
     }
     packets
+}
+
+/// The first request id reused by more than one blocking packet, if any.
+pub fn duplicate_blocking_operator_request_id(
+    packets: &[BlockingOperatorRequestPacket],
+) -> Option<&str> {
+    let mut seen = std::collections::HashSet::new();
+    packets
+        .iter()
+        .map(|packet| packet.id.as_str())
+        .find(|id| !seen.insert(*id))
 }
 
 fn opening_fence(trimmed_start: &str) -> Option<(char, usize)> {
@@ -972,8 +990,8 @@ fn truncate_on_word(text: &str, max_chars: usize) -> String {
 }
 
 /// Letter-led tracked-work ids a response cites as `#id` / `[#id]`, lowercase,
-/// distinct, in first-seen order (`#packettodo`). The packet marker's own
-/// `subagent-operator-request` token is not a citation.
+/// distinct, in first-seen order (`#packettodo`). Packet marker ids in the
+/// reserved `subagent-operator-request-*` family are not citations.
 pub fn cited_tracked_ids_in_response(response: &str) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
     for (start, _) in response.match_indices('#') {
@@ -988,6 +1006,7 @@ pub fn cited_tracked_ids_in_response(response: &str) -> Vec<String> {
             .to_ascii_lowercase();
         if !id.starts_with(|c: char| c.is_ascii_alphabetic())
             || id == "subagent-operator-request"
+            || id.starts_with(agent_doc_queue::subagent_brief::SUBAGENT_OPERATOR_REQUEST_ID_PREFIX)
             || ids.contains(&id)
         {
             continue;
@@ -1744,7 +1763,7 @@ mod tests {
     const BLOCKING_PACKET_RESPONSE: &str = "\
 `#apipendingorphans` is gated on review of #733 and on your decision below.
 
-[#subagent-operator-request] subagent operator request
+[#subagent-operator-request-pending-rows] subagent operator request
 kind: question
 blocking: true
 request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
@@ -1762,6 +1781,7 @@ choices:
     fn packettodo_parses_a_blocking_packet_structurally() {
         let packets = blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE);
         assert_eq!(packets.len(), 1, "{packets:?}");
+        assert_eq!(packets[0].id, "subagent-operator-request-pending-rows");
         assert_eq!(packets[0].kind, "question");
         assert!(packets[0].request.starts_with("What should happen"));
         assert_eq!(
@@ -1786,6 +1806,7 @@ choices:
             blocking_operator_request_todo_text(packet, Some("apipendingorphans"))
         );
         let permission = BlockingOperatorRequestPacket {
+            id: "subagent-operator-request-deploy-stg".to_string(),
             kind: "permission".to_string(),
             request: "Run `make deploy` against STG".to_string(),
             choice_labels: Vec::new(),
@@ -1842,6 +1863,7 @@ choices:
     #[test]
     fn packettodo_long_requests_and_labels_truncate_on_word_boundaries() {
         let packet = BlockingOperatorRequestPacket {
+            id: "subagent-operator-request-long".to_string(),
             kind: "question".to_string(),
             request: "word ".repeat(80),
             choice_labels: vec![
@@ -1866,6 +1888,52 @@ choices:
         assert_eq!(
             cited_tracked_ids_in_response("### Re: x\n[#abc] and #abc, docs.md#frag, &#123;, #157"),
             vec!["abc"]
+        );
+    }
+
+    #[test]
+    fn packettodo_parses_unique_ids_and_reports_duplicate_packet_identity() {
+        let second = BLOCKING_PACKET_RESPONSE.replace(
+            "subagent-operator-request-pending-rows",
+            "subagent-operator-request-reaper-policy",
+        );
+        let unique =
+            blocking_operator_request_packets(&format!("{BLOCKING_PACKET_RESPONSE}\n{second}"));
+        assert_eq!(
+            unique
+                .iter()
+                .map(|packet| packet.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "subagent-operator-request-pending-rows",
+                "subagent-operator-request-reaper-policy"
+            ]
+        );
+        assert_eq!(duplicate_blocking_operator_request_id(&unique), None);
+
+        let duplicate = blocking_operator_request_packets(&format!(
+            "{BLOCKING_PACKET_RESPONSE}\n{BLOCKING_PACKET_RESPONSE}"
+        ));
+        assert_eq!(
+            duplicate_blocking_operator_request_id(&duplicate),
+            Some("subagent-operator-request-pending-rows")
+        );
+
+        let legacy = BLOCKING_PACKET_RESPONSE.replace(
+            "subagent-operator-request-pending-rows",
+            "subagent-operator-request",
+        );
+        assert_eq!(
+            blocking_operator_request_packets(&legacy)[0].id,
+            "subagent-operator-request",
+            "old retained/history packets remain readable"
+        );
+        let duplicate_legacy =
+            blocking_operator_request_packets(&format!("{legacy}\n{legacy}"));
+        assert_eq!(
+            duplicate_blocking_operator_request_id(&duplicate_legacy),
+            Some("subagent-operator-request"),
+            "the fixed marker duplicated in older api/sdk documents is rejected at closeout"
         );
     }
 }

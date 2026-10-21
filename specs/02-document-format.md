@@ -437,12 +437,16 @@ Four asks and two unrelated adds still advise; an ask already open in
 fails closeout.
 
 **Blocking operator request todo (`#packettodo`).** A blocking
-`[#subagent-operator-request]` packet in a closeout response is a pending
+`[#subagent-operator-request-<unique-id>]` packet in a closeout response is a pending
 operator decision, so the binary records it instead of advising. The packet is
-parsed structurally: the exact marker line (outside fenced code, not
+parsed structurally: a request-specific marker line (outside fenced code, not
 blockquoted, at most three leading spaces) followed without a blank line by
 `kind: question|permission`, `blocking: true`, and a concrete `request:` line
-(the protocol's `<...>` placeholder never counts). When the closeout supplies no
+(the protocol's `<...>` placeholders never count). Marker ids use the reserved
+`subagent-operator-request-` prefix plus a request-specific alphanumeric/hyphen
+suffix and MUST be unique among packets in one closeout; duplicate ids fail the
+write before response capture. The fixed `[#subagent-operator-request]` spelling
+remains read-compatible for historical packets but is not emitted. When the closeout supplies no
 `--todo-add` and its response carries no `patch:todo`, the write appends one
 derived `--todo-add` per packet to the same tracked-work transaction:
 `Answer the blocking subagent question|permission request [for #<id>] in

@@ -3352,7 +3352,7 @@ fn run_command_inner_within_pass(
     }
 
     // `#packettodo` / `#wayposttodo`: a closeout that presents a blocking
-    // `[#subagent-operator-request]` packet owes the operator decision an
+    // `[#subagent-operator-request-<unique-id>]` packet owes the operator decision an
     // `agent:todo` item. Derive it from the packet into this closeout's own
     // `--todo-add` list, so it lands in the same tracked-work transaction, is
     // recorded in the replayable mutation plan, and is idempotent through the
@@ -4556,11 +4556,16 @@ fn derive_blocking_operator_request_todos(
         return Ok(Vec::new());
     }
     let response = peek_response_input()?;
-    if !response.contains(agent_doc_queue::subagent_brief::SUBAGENT_OPERATOR_REQUEST_MARKER) {
+    let packets = agent_doc_turn::response_text::blocking_operator_request_packets(&response);
+    if packets.is_empty() {
         return Ok(Vec::new());
     }
-    if agent_doc_turn::response_text::blocking_operator_request_packets(&response).is_empty() {
-        return Ok(Vec::new());
+    if let Some(duplicate) =
+        agent_doc_turn::response_text::duplicate_blocking_operator_request_id(&packets)
+    {
+        anyhow::bail!(
+            "blocking subagent operator-request packets reuse [#{duplicate}]; give every packet a unique [#subagent-operator-request-<unique-id>] marker"
+        );
     }
     if !options.todo_add.is_empty() || response.contains("<!-- patch:todo") {
         agent_doc_ops_log_io::log_op(
@@ -6157,7 +6162,7 @@ mod tests {
     /// nothing (so `--todo-add` mints a surrogate) when that is ambiguous.
     #[test]
     fn packettodo_texts_pick_one_tracked_id_and_respect_existing_todo_records() {
-        let packet = "[#subagent-operator-request] subagent operator request\nkind: question\nblocking: true\nrequest: Keep or drop the rows?\nchoices:\n- keep: nothing\n- drop: delete\n";
+        let packet = "[#subagent-operator-request-keep-or-drop] subagent operator request\nkind: question\nblocking: true\nrequest: Keep or drop the rows?\nchoices:\n- keep: nothing\n- drop: delete\n";
         let response = format!("About #alpha and #beta.\n\n{packet}");
         let doc = Path::new("/tmp/packettodo-unit.md");
         let ids: std::collections::HashSet<String> =

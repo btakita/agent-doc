@@ -599,10 +599,10 @@ hello
 
     #[test]
     fn subagent_operator_request_id_uses_tracked_id_highlighting() {
-        let doc = "[#subagent-operator-request] subagent operator request\n";
+        let doc = "[#subagent-operator-request-pr645] subagent operator request\n";
         assert_eq!(
             tokens_of(doc, VisualTokenKind::TrackedId),
-            vec!["[#subagent-operator-request]"]
+            vec!["[#subagent-operator-request-pr645]"]
         );
         assert!(tokens_of(doc, VisualTokenKind::LabelTag).is_empty());
     }

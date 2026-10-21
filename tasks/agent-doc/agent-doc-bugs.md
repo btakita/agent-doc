@@ -60,38 +60,6 @@ Fixed and closed [GH #332](https://github.com/btakita/agent-doc/issues/332). Col
 Verification passed: focused controller tests, 810/810 controller-library tests, and 27/27 editor-surface tests; the worker's full suite passed 11,376 nextest tests, 202 VS Code tests, cross-editor simulation, Python bootstrap, all JetBrains builds, and TLA validation.
 
 The two commits were integrated serially from `0b5909927f` and pushed to `origin/main` at `b6b9af6e15`. A single authoritative combined `make check` then passed with exit 0 and zero detected failures. The single batch `make install` also passed, installing agent-doc 0.35.532, VS Code 0.2.83, and JetBrains generations 0.2.759/0.2.760/0.2.761. The latest pre-integration main CI run was green; the new push will receive its own CI run asynchronously.
-
-### Re: Subagent completed: `subagent:release331333` returned work for queue item “release + publish: include issue 331-333” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=3792a79a79bdb0b86ae43f23dc097bcfe17d5255c1ce7058eaa8dfe4e03c53b4 -->
-
-### Re: Subagent completed: `subagent:issue333` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/333” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=f067c6c00bfc11d4d9bff3331bce8860360f50c518a78590c98b5a996c3d594b -->
-
-### Re: Subagent completed: `subagent:release334` returned work for queue item “release + publish: include issue 334” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=78419dcb5f0f4affb26d299291d9719beabc49da91b28b10ca9284e897511b68 -->
-
-### Re: Subagent completed: `subagent:issue334` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/334: Can you simulation test the Coder environment?” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=912b50ea9317a2bad737e7ec0e69c2e122f18fca716d19244cb9e7def702d2da -->
-
-### Re: Subagent completed: `subagent:release335336` returned work for queue item “release + publish: include issue 335-336” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=30000a8a064b082586b9db17732704862a406b81eb4f5a834eabc120b0d25cd7 -->
-
-### Re: Subagent completed: `subagent:sdkdemo_strike` returned work for queue item “In sdk-demo.md, the queue item "- 📥 Why are you telling me to `cd /home/brian/work/btakita/agent-loop/worktrees/haiven-dev/haiven-cli/demo-open-options-20261021` if we are working in `~/work/btakita/worktrees/haiven-dev/haiven-cli/unity-hub-register-option`?" was never struck. Can this fix be a part of the 335-336 release or do we need a new release?” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=98c84084eb552e813f3f32763c153da3a1fd33733ef59a0d6419a82988c3d88e -->
-
-### Re: Subagent completed: `subagent:issue336` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/336” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=5a34eeb5bd63a5386fea6706a3c8b0edf7874ba1d17fba6278118e39eb5011b3 -->
-
-### Re: Subagent completed: `subagent:issue335` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/335” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=e98cf6beb81936e9f9cc8cd642d8aab59cae0cf84b847d073cf63b23bb391d6a -->
 > **Chat prompt (#chatprompt):** is v0.35.533 released?
 
 > **Chat prompt (#chatprompt):** and published
@@ -195,7 +163,44 @@ Post-v0.35.535 main is now `a0e4b0ecd4` and also contains:
 - JetBrains source generations 0.2.765 (classic), 0.2.766 (IDE 262), and 0.2.767 (IDE 263) (`a0e4b0ecd4`). Published v0.35.535 packages remain 0.2.762/0.2.763/0.2.764 until the next release.
 
 The integrated `make check` passed: 11,386 Rust tests, 202 VS Code tests, cross-editor simulation, all JetBrains generations, bootstrap, and TLA. One coordinator `make install` succeeded; the active editor's native reload is deferred to its next idle boundary. The six-commit batch is pushed to `origin/main`. Because these five post-release fixes landed after the v0.35.535 tag, they are queued for a subsequent release rather than being falsely attributed to v0.35.535.
-<!-- agent:boundary:e64c4270 -->
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/333
+
+> **Queue prompt:** release + publish: include issue 331-333
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/334: Can you simulation test the Coder environment?
+
+> **Queue prompt:** release + publish: include issue 334
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/335
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/336
+
+> **Queue prompt:** 📌 In sdk-demo.md, the queue item "- 📥 Why are you telling me to `cd /home/brian/work/btakita/agent-loop/worktrees/haiven-dev/haiven-cli/demo-open-options-20261021` if we are working in `~/work/btakita/worktrees/haiven-dev/haiven-cli/unity-hub-register-option`?" was never struck. Can this fix be a part of the 335-336 release or do we need a new release?
+
+> **Queue prompt:** The queue items in sdk-dev.md do not have a prefix despite an active turn with subagents for each queue item. Include fix in 335-336 reease.
+
+> **Queue prompt:** release + publish: include issue 335-336
+
+> **Queue prompt:** sdk-demo.md queue items were duplicated as I edited the queue items after starting Run Agent Doc
+>
+> ```
+> - ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
+> - ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
+> - ⚠️ I sent a test message to the Boss Room demo. It still says "you(sending)". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven website?
+> - ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
+> - 🟡 I sent a test message to the Boss Room demo. It still says "you(sending)". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven frontend?
+> ```
+
+### Re: closeout queue-snapshot projection — gpt-5 · 2026-10-21T13:36-04:00
+
+The residual rows above were already completed; they remained visible because the committed response documented the status-hook markup inside a fenced block. The response stripper incorrectly treated the example's `agent:status` closing comment as the end of the real exchange, so the live queue leaked into exchange steering and completion matching became inconsistent.
+
+Fixed on `main` at `1820a9a0cf`. Response stripping now terminates only at a real `agent:boundary:*` marker or the exact exchange closing marker. The regression reproduces the fenced status example, malformed multiline queue item, and repeated ⚠️→🟡→🚧 projections. Red-before/green-after proof, 394 affected-crate tests, documentation audit, and the integrated full gate all pass; the full gate contains 11,387 Rust tests, 202 VS Code tests, cross-editor simulation, every JetBrains generation, bootstrap, and TLA. The corrected binary and editor packages are installed locally, and the commit is pushed to `origin/main`.
+
+The `sdk-demo.md` live queue is clean: it contains only the unrelated SBX-login item and its `subagent:real_login` claim. The OAuth/chat repetitions now exist only in historical response and diagnostic prose, which should not be rewritten. Prevention remains on main in `a8e1e714c3` (interleaved edit deduplication) and `0f174e979e` (claim projection linearization), with their focused regressions green.
+
+The older release rows resolve to their already-published artifacts: v0.35.533 for #331–#333, v0.35.534 for #334, and v0.35.535 for #335–#336. The worktree-path row was already lifecycle-safely closed. The post-v0.35.535 fixes, including this closeout projection correction, remain explicitly queued under `#post535release`; they are not falsely attributed to v0.35.535.
+<!-- agent:boundary:4884d9a1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -206,17 +211,17 @@ The integrated `make check` passed: 11,386 Rust tests, 202 VS Code tests, cross-
 - do [#post535release]
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/331~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/332~~
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/333
-- 📥 release + publish: include issue 331-333
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/334: Can you simulation test the Coder environment?
-- 📥 release + publish: include issue 334
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/335
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/336
-- 📥 📌 In sdk-demo.md, the queue item "- 📥 Why are you telling me to `cd /home/brian/work/btakita/agent-loop/worktrees/haiven-dev/haiven-cli/demo-open-options-20261021` if we are working in `~/work/btakita/worktrees/haiven-dev/haiven-cli/unity-hub-register-option`?" was never struck. Can this fix be a part of the 335-336 release or do we need a new release?
-- The queue items in sdk-dev.md do not have a prefix despite an active turn with subagents for each queue item. Include fix in 335-336 reease.
-- 📥 release + publish: include issue 335-336
----
-🚧 sdk-demo.md queue items were duplicated as I edited the queue items after starting Run Agent Doc
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/333~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: include issue 331-333~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/334: Can you simulation test the Coder environment?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: include issue 334~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/335~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/336~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~📌 In sdk-demo.md, the queue item "- 📥 Why are you telling me to `cd /home/brian/work/btakita/agent-loop/worktrees/haiven-dev/haiven-cli/demo-open-options-20261021` if we are working in `~/work/btakita/worktrees/haiven-dev/haiven-cli/unity-hub-register-option`?" was never struck. Can this fix be a part of the 335-336 release or do we need a new release?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~The queue items in sdk-dev.md do not have a prefix despite an active turn with subagents for each queue item. Include fix in 335-336 reease.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: include issue 335-336~~ — auto-struck: answered this cycle (#ftstrike)
+~~~done
+sdk-demo.md queue items were duplicated as I edited the queue items after starting Run Agent Doc
 ```
 - ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
 - ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
@@ -224,7 +229,7 @@ The integrated `make check` passed: 11,386 Rust tests, 202 VS Code tests, cross-
 - ⚠️ I signed in the Boss Room demo. Are we using the real OAuth flow on localhost using the SBX credentials?
 - 🟡 I sent a test message to the Boss Room demo. It still says "you(sending)". Is the chat integrated and working? ![img_41.png](img_41.png). What room was created? Can I see it on my localhost chat rooms on the haiven frontend?
 ```
----
+~~~
 - ~~do [#queueclaimprojectionrace]: This should relate to the "sdk-demo.md queue items were duplicated" item above.~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/337~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/338: Why are we not able to detect the tmux pane state? Do we need agent-doc to use lazily state projection between the IDE frontend + backend? Ensure editor plugin parity. Do we need bi-directional state syncing so the controller does not need to "guess"?~~ — auto-struck: answered this cycle (#ftstrike)

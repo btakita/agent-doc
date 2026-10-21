@@ -169,6 +169,26 @@ fn agent_selection_previews_applies_and_reruns_idempotently() {
 }
 
 #[test]
+fn new_target_inherits_the_source_effective_harness_when_agent_is_absent() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let source = dir.path().join("legacy-claude.md");
+    let target = dir.path().join("legacy-claude-legal.md");
+    let source_without_agent = source_document().replacen(
+        "agent: codex\n",
+        "resume:\n  claude: claude-session-id\n",
+        1,
+    );
+    fs::write(&source, source_without_agent).unwrap();
+    git_fixture(dir.path(), "legacy-claude.md");
+
+    apply_legal_extract(dir.path(), &source, &target).success();
+
+    let target_after = fs::read_to_string(&target).unwrap();
+    assert!(target_after.contains("agent: claude\n"), "{target_after}");
+    assert!(!target_after.contains("agent: codex\n"), "{target_after}");
+}
+
+#[test]
 fn legacy_extract_rejects_plain_markdown_target_without_mutating_source() {
     let dir = tempfile::TempDir::new().unwrap();
     let source = dir.path().join("sdk-dev.md");

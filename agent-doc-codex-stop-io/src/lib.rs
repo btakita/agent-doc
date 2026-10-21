@@ -200,6 +200,11 @@ impl Serialize for StopResponse {
 
 enum StopCloseAttempt {
     Closed,
+    /// The response closeout is already committed, and a later operator edit
+    /// to a typed component is intentionally being left for the next cycle.
+    /// The Stop hook must end this turn instead of wrapping that refusal as a
+    /// recovery prompt that tells the agent to keep working (`#stopnextedit`).
+    UnansweredEditPending,
     StillOpen {
         note: String,
     },
@@ -1623,6 +1628,13 @@ fn apply_bound_stop(
                         }
                         payload_already_committed = true;
                     }
+                    StopCloseAttempt::UnansweredEditPending => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            "codex_stop_unanswered_edit_pending action=allow_exit_next_cycle (#stopnextedit)",
+                        );
+                        return Ok(StopResponse::AllowExit);
+                    }
                     StopCloseAttempt::DeferredToDurableOwner => {
                         return Ok(StopResponse::AllowExit);
                     }
@@ -2081,6 +2093,13 @@ fn active_session_prompt_requires_writeback(
                 agent_doc_ops_log_io::log_op(
                     file,
                     "codex_stop_prompt_writeback_auto_closed source=exact_thread_prompt_debt",
+                );
+                return Ok(Some(StopResponse::AllowExit));
+            }
+            StopCloseAttempt::UnansweredEditPending => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    "codex_stop_prompt_writeback_next_cycle action=allow_exit (#stopnextedit)",
                 );
                 return Ok(Some(StopResponse::AllowExit));
             }
@@ -3342,6 +3361,21 @@ fn attempt_stop_closeout(
         Err(err) => {
             let ownership = agent_doc_capture_io::retained_write_ownership(file);
             let rendered = format!("{err:#}").replace('\n', " ");
+            // `#stopnextedit`: this typed refusal proves the response is
+            // already committed and only a newer operator-authored queue,
+            // backlog, status, or other typed-component edit remains. Its
+            // shared remedy explicitly says END THIS TURN and let the next
+            // cycle answer that edit. Do not turn that successful boundary
+            // into a Codex hook block by wrapping it as `StillOpen`.
+            if unanswered_edit_pending_commit_refusal(&err) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_auto_close_next_cycle verdict=unanswered_edit_pending action=allow_exit err={rendered} (#stopnextedit)"
+                    ),
+                );
+                return Ok(StopCloseAttempt::UnansweredEditPending);
+            }
             match closeout_failure_disposition(&rendered, ownership.verdict()) {
                 CloseoutFailureDisposition::DeferToDurableOwner => {
                     agent_doc_ops_log_io::log_op(
@@ -3378,6 +3412,16 @@ fn attempt_stop_closeout(
     }
     agent_doc_ops_log_io::log_op(file, "codex_stop_auto_close_success");
     Ok(StopCloseAttempt::Closed)
+}
+
+/// Whether the final commit boundary refused because a newer unanswered
+/// typed-component edit must remain uncommitted for the next cycle.
+///
+/// This is a typed error-chain check, not diagnostic parsing: the refusal's
+/// wording is operator guidance and may evolve independently.
+fn unanswered_edit_pending_commit_refusal(error: &anyhow::Error) -> bool {
+    agent_doc_commit_io::retained_write_commit_refusal_verdict(error)
+        == Some(agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending)
 }
 
 /// Whether a failed commit boundary is a deferral the binary already owns.
@@ -5010,6 +5054,46 @@ Done.\n\
         );
     }
 
+    /// `#stopnextedit`: tasks/software/tsift.md, 2026-10-21. Codex Stop had
+    /// already committed the response while the operator edited a later queue
+    /// line. The final commit correctly returned the typed
+    /// `UnansweredEditPending` refusal, but Stop erased that type and wrapped
+    /// the refusal as "could not finish closeout", contradicting its own END
+    /// THIS TURN remedy and producing another hook-blocked model turn.
+    #[test]
+    fn unanswered_typed_component_refusal_is_next_cycle_stop_state() {
+        let dir = setup_project();
+        let doc = write_manual_queue_doc(&dir, &["current work", "release + publish: include P"]);
+        init_git_repo(dir.path(), &doc);
+
+        let committed = fs::read_to_string(&doc).unwrap();
+        let edited = committed.replace(
+            "release + publish: include P",
+            "release + publish: include Issue #29",
+        );
+        fs::write(&doc, edited).unwrap();
+
+        let err = agent_doc_commit_io::commit(&doc)
+            .expect_err("a newer queue edit must stay uncommitted for the next cycle");
+        assert!(
+            unanswered_edit_pending_commit_refusal(&err),
+            "Stop must preserve the commit layer's typed next-cycle verdict: {err:#}"
+        );
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("END THIS TURN"), "{rendered}");
+        assert!(rendered.contains("UNANSWERED DOCUMENT EDIT"), "{rendered}");
+
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed document");
+        assert!(head.contains("release + publish: include P"), "{head}");
+        assert!(!head.contains("Issue #29"), "{head}");
+        assert!(
+            fs::read_to_string(&doc).unwrap().contains("Issue #29"),
+            "the operator edit must remain live for the next cycle"
+        );
+    }
+
     #[test]
     fn stop_closeout_classifies_commit_failure_before_reporting_still_open() {
         let source = include_str!("lib.rs");
@@ -5019,13 +5103,18 @@ Done.\n\
             .split("complete_required_closeout(file, false)")
             .nth(1)
             .expect("closeout crosses the commit boundary");
+        let next_cycle = commit
+            .find("unanswered_edit_pending_commit_refusal(&err)")
+            .expect("typed unanswered edits must be preserved for the next cycle");
         let deferral = commit
             .find("closeout_failure_disposition(")
             .expect("commit failure must consult the durable-owner deferral");
         let still_open = commit
             .find("StopCloseAttempt::StillOpen")
             .expect("unowned failures stay still-open");
+        assert!(next_cycle < deferral);
         assert!(deferral < still_open);
+        assert!(commit.contains("StopCloseAttempt::UnansweredEditPending"));
         assert!(commit.contains("StopCloseAttempt::DeferredToDurableOwner"));
         assert!(commit.contains("CloseoutFailureDisposition::AwaitDurableOwner"));
         assert!(commit.contains("StopCloseAttempt::RepairDeferredToDurableOwner"));

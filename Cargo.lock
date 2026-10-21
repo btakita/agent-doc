@@ -358,6 +358,7 @@ dependencies = [
  "agent-doc-capture-io",
  "agent-doc-closeout-runtime-io",
  "agent-doc-codex-hook-io",
+ "agent-doc-commit-io",
  "agent-doc-controller",
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",

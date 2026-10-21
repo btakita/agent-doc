@@ -14,6 +14,7 @@ name = "agent_doc_codex_stop_io"
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.532" }
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.532" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.35.532" }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.532" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.532" }
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.532" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.532" }

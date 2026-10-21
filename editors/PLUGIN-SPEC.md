@@ -43,6 +43,9 @@ Rust binary.
   holding the other line is always replaced with its own line's package.
 - A new agent-doc release retains each JetBrains package's existing update
   number when its recorded `pluginSourceDigest` still matches the source tree.
+  The digest covers runtime/main source sets and artifact-shaping build metadata,
+  not `src/test/`: verification sources compiled outside the distributable jars
+  cannot manufacture a package generation or an IDE restart (GH #340).
   Updating `pluginReleaseVersion` alone must not manufacture a package upgrade:
   the binary remains paired with the live generation and installed-plugin
   reconciliation is an `Unchanged` no-op (GH #295). A changed digest allocates

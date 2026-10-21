@@ -558,8 +558,10 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   sources, it retains that package's `pluginVersion`, updates only the
   `pluginReleaseVersion` ownership metadata, and reconciliation reports the
   already-running generation as unchanged without replacing files or requiring
-  a restart (GH #295). Only a changed source digest receives a fresh update
-  version.
+  a restart (GH #295). The digest excludes `src/test/` inputs that Gradle
+  compiles for verification but does not package; test-only edits therefore do
+  not force a new generation or IDE restart (GH #340). Only a changed packaged
+  runtime source/build-input digest receives a fresh update version.
   When a live IDE owns a 262 or 263 target, the modular package exposes no safe
   restart-free dynamic upgrade entry point. Exact-262 has no synchronous
   classloader-retirement receipt, and a backend attach cannot atomically replace

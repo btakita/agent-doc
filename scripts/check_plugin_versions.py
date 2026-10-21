@@ -35,6 +35,7 @@ class Target:
     primary_version: str
     version_files: tuple[str, ...]
     source_digest_key: str | None = None
+    excluded_source_fragments: tuple[str, ...] = ()
 
 
 TARGETS = (
@@ -45,6 +46,7 @@ TARGETS = (
         "editors/jetbrains/gradle.properties",
         ("editors/jetbrains/gradle.properties",),
         DIGEST_KEY,
+        ("/src/test/",),
     ),
     Target(
         "JetBrains 262",
@@ -53,6 +55,7 @@ TARGETS = (
         "editors/jetbrains-262/gradle.properties",
         ("editors/jetbrains-262/gradle.properties",),
         DIGEST_KEY,
+        ("/src/test/",),
     ),
     Target(
         "JetBrains 263",
@@ -61,6 +64,7 @@ TARGETS = (
         "editors/jetbrains-263/gradle.properties",
         ("editors/jetbrains-263/gradle.properties",),
         DIGEST_KEY,
+        ("/src/test/",),
     ),
     Target(
         "VS Code",
@@ -91,11 +95,15 @@ def git(*args: str) -> list[str]:
 
 
 def is_source(target: Target, path: str) -> bool:
-    return path.startswith(target.source_prefixes) and path.endswith(target.source_suffixes)
+    return (
+        path.startswith(target.source_prefixes)
+        and path.endswith(target.source_suffixes)
+        and not any(fragment in path for fragment in target.excluded_source_fragments)
+    )
 
 
 def source_digest(target: Target) -> str:
-    """Digest of the exact source bytes a build would compile.
+    """Digest of the source and build metadata that shape the packaged plugin.
 
     Content, not git history, is the right basis. A commit-derived predicate
     ("sources changed since the version file was last committed") stays true for
@@ -103,8 +111,9 @@ def source_digest(target: Target) -> str:
     for zero distinct builds, measured while writing this. A digest bumps once
     per distinct artifact, which is the actual invariant.
 
-    Tracked and untracked sources plus artifact-shaping build metadata count,
-    because gradlew packages whatever is on disk.
+    Tracked and untracked runtime sources plus artifact-shaping build metadata
+    count because gradlew packages whatever is on disk. Test source sets do not:
+    Gradle compiles them for verification but does not put them in the plugin.
     """
     paths = set(git("ls-files", "--", *target.source_prefixes))
     paths |= set(git("ls-files", "--others", "--exclude-standard", "--", *target.source_prefixes))
@@ -320,26 +329,45 @@ def self_test() -> int:
             os.makedirs(src)
             kt = f"{src}/A.kt"
             java = f"{src}/UpgradeAgent.java"
+            classic_test = f"{src}/test/kotlin/AContractTest.kt"
             build = f"{tmp}/editors/jetbrains/build.gradle.kts"
             modular_dir = f"{tmp}/editors/jetbrains-262"
             os.makedirs(modular_dir)
             modern_dir = f"{tmp}/editors/jetbrains-263"
             os.makedirs(modern_dir)
             modular_build = f"{modular_dir}/build.gradle.kts"
+            modular_test = f"{modular_dir}/backend/src/test/kotlin/BackendContractTest.kt"
+            os.makedirs(os.path.dirname(classic_test), exist_ok=True)
+            os.makedirs(os.path.dirname(modular_test), exist_ok=True)
             with open(kt, "w", encoding="utf-8") as handle:
                 handle.write("class A")
             with open(java, "w", encoding="utf-8") as handle:
                 handle.write("class UpgradeAgent {}")
+            with open(classic_test, "w", encoding="utf-8") as handle:
+                handle.write("class AContractTest")
             with open(build, "w", encoding="utf-8") as handle:
                 handle.write("plugins { java }")
             with open(modular_build, "w", encoding="utf-8") as handle:
                 handle.write("plugins { splitMode }")
+            with open(modular_test, "w", encoding="utf-8") as handle:
+                handle.write("class BackendContractTest")
             with open(f"{modular_dir}/gradle.properties", "w", encoding="utf-8") as handle:
                 handle.write("pluginVersion = 0.2.388\n")
             modern_props = f"{modern_dir}/gradle.properties"
             with open(modern_props, "w", encoding="utf-8") as handle:
                 handle.write("pluginVersion = 0.2.388\ncompatibilitySinceBuild = 263\n")
-            rels = [os.path.relpath(path, tmp) for path in (kt, java, build, modular_build, modern_props)]
+            rels = [
+                os.path.relpath(path, tmp)
+                for path in (
+                    kt,
+                    java,
+                    classic_test,
+                    build,
+                    modular_build,
+                    modular_test,
+                    modern_props,
+                )
+            ]
             git = lambda *a: rels if "ls-files" in a and "--others" not in a else []  # noqa: E731
             cwd = os.getcwd()
             os.chdir(tmp)
@@ -347,6 +375,21 @@ def self_test() -> int:
                 first = source_digest(jb)
                 assert source_digest(jb) == first, (
                     "an unchanged tree must digest identically, or every build bumps"
+                )
+                modular_first = source_digest(jb262)
+                modern_first = source_digest(jb263)
+                with open(classic_test, "w", encoding="utf-8") as handle:
+                    handle.write("class AContractTest { val changed = true }")
+                with open(modular_test, "w", encoding="utf-8") as handle:
+                    handle.write("class BackendContractTest { val changed = true }")
+                assert source_digest(jb) == first, (
+                    "test-only classic changes must not manufacture a package generation"
+                )
+                assert source_digest(jb262) == modular_first, (
+                    "test-only modular changes must not manufacture a 262 package generation"
+                )
+                assert source_digest(jb263) == modern_first, (
+                    "test-only modular changes must not manufacture a 263 package generation"
                 )
                 with open(jb.primary_version, "w", encoding="utf-8") as handle:
                     handle.write("pluginVersion = 0.2.388\n")

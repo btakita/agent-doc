@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.537
+
+- **Connected editor layouts are authoritative; the backend never guesses their structure (GH #343).** An
+  authenticated frontend lease establishes authority before its first snapshot. Exact frontend column vectors
+  replace stale tmux targets atomically; unknown, incomplete, or focus-only observations defer without adding,
+  removing, replacing, or reordering panes. Manual Sync uses the same exact replacement path.
+- **JetBrains package digests exclude test-only sources (GH #340).** Classic, 262, and 263 release digests track
+  runtime/build inputs without forcing a plugin generation for changes confined to `src/test/`.
+- **Focused extracts inherit their source harness (GH #341).** A missing `agent:` field now resumes with the source
+  document's harness instead of silently defaulting to Codex; explicit target harnesses remain unchanged.
+- **Delayed subagent completion feedback retires with its claim (GH #342).** A completion that arrives after close
+  or consume no longer appends a false “claim remains active” instruction.
+- **Subagent operator requests have unique IDs.** Multiple questions in one document use distinct markers, legacy
+  single-marker documents remain readable, and closeout rejects duplicate IDs before response capture.
+
 ## 0.35.536
 
 - **Queue claim projection is linearized against live document authority.** Claim/start marker writes now derive

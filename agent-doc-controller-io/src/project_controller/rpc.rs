@@ -41434,12 +41434,12 @@ mod tests {
         }
     }
 
-    /// GH #278 Ask 3: an escalation replaces the column of the LATEST focus.
+    /// GH #278/#343: a focus-only outcome never authorizes structural replacement.
     /// Published `[c | b]` with focus `c`; `b` then gets focus as `focus_only`
-    /// (no generation published); an uncovered `d` must replace `b`, giving
-    /// `[c | d]`, not `c`'s column (`[d | b]`, the reversal of GH #278).
+    /// (no generation published). An uncovered `d` must defer and preserve the
+    /// exact frontend-authored `[c | b]` target.
     #[test]
-    fn gh278_focus_escalation_replaces_the_latest_focus_only_column() {
+    fn gh278_focus_escalation_defers_without_positive_frontend_snapshot() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -41486,8 +41486,7 @@ mod tests {
         assert_eq!(desired.invocation.columns, vec![c.clone(), b.clone()]);
         assert_eq!(desired.invocation.focus.as_deref(), Some(c.as_str()));
 
-        // The escalation's own publication carries focus `d`, so an outcome
-        // recorded under the older generation no longer names the column.
+        // A covered document may be focused without changing membership or order.
         assert!(escalate_focus_to_structural_layout(
             &bootstrap,
             runtime.as_ref(),

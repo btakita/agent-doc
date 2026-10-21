@@ -831,36 +831,21 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   library that predates it (GH #326 phase 4). The plugin snapshots those
   client/editor collections and the backend-focused files on the EDT, then runs the fold from the
   generation-fenced surface delivery worker; direct synchronous detection also marshals only the
-  immutable fold off the EDT. The native bridge's EDT guard therefore remains intact and a
-  selection observation uses retained split memory (GH #157). The plugin keeps no memoryless
-  Kotlin fallback: with no native answer the layout is unknown. One client naming two or
-  more visible documents is a detected split; `selected` remains separate focus evidence and is
-  never unioned into that visible set. Remote Dev can leave the text half of a hidden
-  Editor/Preview tab active, so when the sole visible-set addition is also the newly selected
-  document, the fold retains the established width and replaces the previously focused column
-  instead of appending (GH #175). Every successful `[layout-detect] observed` line records each
-  client's raw `visible`, `selected`, and `open` lists. A later single-selection observation also
-  retains the known split, and documents whose tabs closed drop out. Only with no split
-  evidence and no retained split does the observation stay `unknown`. The controller's coalesced ingress receipt joins
+  immutable observation off the EDT. The native bridge's EDT guard therefore remains intact.
+  The plugin keeps no memoryless Kotlin fallback: with no native answer the layout is unknown.
+  Remote client `visible`, `selected`, and `open` lists are flat focus/liveness evidence, not split
+  geometry. They cannot establish, add, remove, replace, or reorder columns, regardless of how
+  often they repeat or whether one list changes. Every successful `[layout-detect] observed` line
+  records those raw lists for diagnosis. Without an exact local or connected-frontend column
+  vector, the observation stays structurally `unknown`. The controller's coalesced ingress receipt joins
   `layout=unknown|observed|focus_only` to `pane_action=none|focus_only|structural_sync` on one
   line so every pane effect names its authority.
-- A Remote Dev split observation is folded against retained memory, never against the client's
-  list order: the client `visible`/`open` lists prove membership, not geometry (GH #185, GH #234).
-  With previous columns `P`, new visible set `V`, survivors `P ∩ V`, and added documents `V \ P`
-  in visible order, the published columns hold exactly `V`, one document each, and:
-  survivors keep their previous relative order; added documents take the slots that departed
-  documents vacated, left to right, so at the same width every survivor keeps its exact slot;
-  a width change never moves a survivor across the split — a surviving `P[0]` stays leftmost,
-  and when `P` had two or more columns a surviving last column stays rightmost, so extra added
-  documents are inserted just before that surviving rightmost column (otherwise appended) and
-  shrinking drops the vacated slots no added document filled; added documents keep their
-  visible order among themselves. A structural fold with any survivor is memory-derived and
-  published
-  as `column_order=retained`, never `editor`; with none it is the visible order as
-  `column_order=unknown`. Example: `[a | b]` → `[c | b]` → visible `{d,b,e}` → `[d | e | b]`
-  → visible `{g,b}` → `[g | b]`, so a later `{a,b}` publishes `[a | b]`, not `[b | a]`. A
-  retained publication is already resolved and passes through controller ordering unchanged.
-  Selection-first evidence never changes pane membership or order (GH #343).
+- Remote Dev backend observations never reconstruct a split from retained slots or flat client
+  lists (GH #185, GH #234, GH #343). Retained layout memory is only the last exact column vector
+  authored by a geometry-capable editor frontend. Focus/liveness evidence may focus a document
+  already present in that vector, but an uncovered document defers; it cannot replace a column.
+  Until an exact vector arrives, the backend performs no structural tmux effect. Between exact
+  vectors it preserves the last accepted target byte-for-byte.
 - When the frontend module is connected, its generation-fenced measured layout is the source
   of truth. The backend forwards that exact vector as `column_order=editor`; the controller
   copies it into the desired tmux effect without folding, reordering, or reconstructing it.
@@ -872,15 +857,13 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   label is the surface's own `column_order`, carried by the controller. Only locally detected
   multi-column geometry is `editor`; the undetected fallback lists `selectedFiles`, which IntelliJ
   orders focused-window first, so it is `unknown`. The controller resolves an `unknown` order
-  against the order it already retains for those documents (`agent_doc_tmux::order_layout_columns`):
-  focus never reorders columns, and a newly visible document appends. On a Remote Dev backend
-  whose detector stays `unknown` (no single client reports a multi-file split set, GH #97) tmux
-  pane order is therefore stable but is **not** a mirror of the editor's split order; the backend
-  has no input from which to derive it (with the 262/263 frontend module installed on both sides,
-  the client's measured columns supply that order instead, GH #320 option B, below).
-  A cold no-survivor `unknown` publication may remain the controller's stable fold basis, but it
-  does not become order authority and cannot anchor a restarted editor fold; its provenance stays
-  `unknown` until an order-bearing editor/manual publication arrives (GH #332).
+  against the order it already retains for those documents (`agent_doc_tmux::order_layout_columns`)
+  only outside an active connected-frontend authority lease. During that lease, an `unknown`
+  publication cannot mutate the exact frontend target. On a Remote Dev backend whose detector
+  stays `unknown` (GH #97), the backend therefore performs no structural tmux effect before the
+  first frontend snapshot and preserves the last exact frontend target between snapshots. A cold
+  `unknown` publication is not a fold basis, does not become order authority, and cannot anchor a
+  restarted editor reconstruction (GH #332).
   `pane_layout_desired_published` and every
   `tmux_layout_effect_state` line record `caller_kind` and
   `column_order=editor|retained|unknown`.
@@ -889,17 +872,16 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   The surface payload's `column_order` is `editor` only for local windows laid out at distinct
   origins (and for the JetBrains Client's measured windows forwarded by the 262/263 backend,
   below); windows that share an origin (never measured) publish `unknown`. Legacy Remote Dev
-  fallback folds publish `unknown` or `retained` when anchored; selection-only input publishes
-  no structural replacement. The controller carries that label
-  from `SurfaceIntent::Sync` (and a focus escalation over the surface's columns) into the desired
-  layout, so a membership order is ordered against the retained layout and never applied as
-  geometry; a payload without the field reads as `editor`. Without geometry the surface signature
-  and the tmux drift check compare columns as a set, so a permutation of the same documents is
-  neither a new layout nor drift. On a Remote Dev backend the capture reads the remote clients'
+  fallback observations carry only focus/liveness evidence and publish no structural replacement.
+  The controller carries an exact `editor` vector from `SurfaceIntent::Sync` directly into the
+  desired tmux effect; `unknown` or selection-only input cannot be converted into geometry. While
+  frontend authority is active, surface and tmux drift checks compare against the last exact
+  frontend vector. On a Remote Dev backend the diagnostic capture reads the remote clients'
   `visible`/`selected` session documents (mapped to the open session documents' absolute paths)
   together with the backend's own selection; it never defers with
   `no_visible_session_documents` because the backend's `selectedFiles` names no session document
-  (`activeWindow=<none>`), so a split change publishes without a Run.
+  (`activeWindow=<none>`); those flat lists remain non-structural until the frontend publishes an
+  exact vector.
 - **Remote Dev pane structure is authored by the connected JetBrains Client (GH #320/#343).** The
   backend has no client split structure to observe: `GuestFileEditorManager` (the
   backend's `ClientFileEditorManager` for a Remote Dev client) holds a flat composite list and one

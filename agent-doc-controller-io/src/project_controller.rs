@@ -472,20 +472,39 @@ pub(crate) struct PaneLayoutDesired {
 }
 
 impl PaneLayoutDesired {
-    /// Columns that authoritatively seed unknown-order folds and editor-surface
-    /// order memory.
+    /// Columns used to keep an unknown-order publisher stable across repeated
+    /// observations, whether or not that basis has positive order authority.
     ///
-    /// A focus escalation can only guess which retained slot a newly focused
-    /// document replaced. Keep folding against the last positive basis even
-    /// after a chain of escalations replaces every document in that basis;
-    /// otherwise the newest guessed slot becomes order authority (GH #311).
-    pub(crate) fn order_authority_columns(&self) -> &[String] {
+    /// A cold no-survivor guess is still useful as a fold basis: keeping it
+    /// prevents focus-first observations from swapping panes. It must not,
+    /// however, be exported as editor-surface order authority (GH #332).
+    pub(crate) fn order_fold_basis_columns(&self) -> &[String] {
         self.provenance
             .provisional_order_basis
             .as_deref()
             .unwrap_or(&self.invocation.columns)
     }
 
+    /// Columns that authoritatively seed editor-surface order memory.
+    ///
+    /// A focus escalation can only guess which retained slot a newly focused
+    /// document replaced. Keep folding against the last positive basis even
+    /// after a chain of escalations replaces every document in that basis;
+    /// otherwise the newest guessed slot becomes order authority (GH #311).
+    /// A cold `Unknown` generation has membership but no left-to-right
+    /// authority. Keep returning no authority through later unknown folds;
+    /// otherwise the first tab-open guess anchors itself after one round trip
+    /// (GH #332). A provisional basis, when present, came from the last
+    /// positive observation and remains authoritative across slot guesses.
+    pub(crate) fn order_authority_columns(&self) -> Option<&[String]> {
+        self.provenance
+            .provisional_order_basis
+            .as_deref()
+            .or_else(|| {
+                (self.invocation.column_order != agent_doc_tmux::LayoutColumnOrder::Unknown)
+                    .then_some(self.invocation.columns.as_slice())
+            })
+    }
 }
 
 /// The publisher that produced a desired pane-layout generation (GH #111).

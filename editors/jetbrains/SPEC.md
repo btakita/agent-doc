@@ -813,6 +813,9 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   pane order is therefore stable but is **not** a mirror of the editor's split order; the backend
   has no input from which to derive it (with the 262/263 frontend module installed on both sides,
   the client's measured columns supply that order instead, GH #320 option B, below).
+  A cold no-survivor `unknown` publication may remain the controller's stable fold basis, but it
+  does not become order authority and cannot anchor a restarted editor fold; its provenance stays
+  `unknown` until an order-bearing editor/manual publication arrives (GH #332).
   `pane_layout_desired_published` and every
   `pane_layout_projection` line record `caller_kind` and `column_order=editor|retained|unknown`.
 - The automatic editor surface is state, and it names its column-order provenance the same way

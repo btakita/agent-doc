@@ -2512,9 +2512,12 @@ balanced component markers, and at most one live exchange boundary marker.
 - A JetBrains native save can fail with either a runtime exception or the
   `AssertionError` IntelliJ Local History emits when its private record store is
   corrupt. The editor bridge treats those two classes as recoverable save
-  refusals: it logs the failure, rereads disk, and follows the same exact-plane
-  persist/rollback/preserve reconciliation without ACKing an unpersisted cut.
-  Other VM and linkage errors remain fatal rather than being swallowed.
+  refusals. A remote CRDT projection logs the failure, rereads disk, and follows
+  the same exact-plane persist/rollback/preserve reconciliation without ACKing
+  an unpersisted cut. A `persist_current` save logs the failure and returns a
+  rejected persist without publishing a disk receipt, leaving the retained
+  persistence Effect responsible for retry. Other VM and linkage errors remain
+  fatal rather than being swallowed on either path.
 - Repeated refusal of one immutable retained native-save projection is an
   Effect receipt, not a second polling authority. On every third refusal the
   existing persistence Effect requests an idempotent editor-replica rebuild,

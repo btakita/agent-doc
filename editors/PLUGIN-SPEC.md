@@ -107,7 +107,7 @@ Rust, JetBrains, and VS Code use the same `EditorIntent` names:
 | `reposition` | Move the exchange boundary without changing user text |
 | `refresh_content` | Republish the already-open editor value to Lazily |
 | `observe_lazily_current` | Legacy compatibility input only; current runtimes observe the Lazily projection and emit no request |
-| `persist_current` | Save the exact already-visible revision through the editor's native save lifecycle; reject a hash/length mismatch without replacing the buffer |
+| `persist_current` | Save the exact already-visible revision through the editor's native save lifecycle; reject a hash/length mismatch without replacing the buffer, and report recoverable host-save failures (including Local History `AssertionError`) as a rejected persist while propagating fatal VM/linkage errors |
 | `deliver_crdt_remote` | Integrate a remote Lazily change |
 | `refresh_vcs` | Refresh VCS decoration for the required absolute `file` after a durable commit |
 | `reload_library` | Reload a compatible native library only when the adapter can prove a safe boundary; otherwise require process restart |

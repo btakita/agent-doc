@@ -130,6 +130,8 @@ class RefreshBeforeApplyConflictTest {
 
         assertTrue(persist.contains("readRawDiskText(filePath)"))
         assertTrue(persist.contains("reconcileRemotePersistence("))
+        assertTrue(persist.contains("catch (failure: Throwable)"))
+        assertTrue(persist.contains("recoverableRemoteDocumentSaveFailureUtil(failure)"))
         assertTrue(reconcile.contains("RemotePersistReconciliation.RollbackToBefore"))
         assertTrue(reconcile.contains("applyMinimalDocumentEditUtil(document, targetText, beforeText)"))
         assertTrue(reconcile.contains("reloadFromDisk(document)"))

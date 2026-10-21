@@ -704,6 +704,14 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `remote save reconciles local history assertions without swallowing fatal errors`() {
+        assertTrue(recoverableRemoteDocumentSaveFailureUtil(RuntimeException("save failed")))
+        assertTrue(recoverableRemoteDocumentSaveFailureUtil(AssertionError("local history corrupt")))
+        assertFalse(recoverableRemoteDocumentSaveFailureUtil(OutOfMemoryError("fatal")))
+        assertFalse(recoverableRemoteDocumentSaveFailureUtil(LinkageError("fatal")))
+    }
+
+    @Test
     fun `failed remote persistence rolls back only when both exact planes prove it safe`() {
         assertEquals(
             RemotePersistReconciliation.Persisted,

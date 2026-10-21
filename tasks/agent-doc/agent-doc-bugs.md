@@ -49,6 +49,9 @@ Compacted content:
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
+- #gh-fix https://github.com/btakita/agent-doc/issues/340
+- #gh-fix https://github.com/btakita/agent-doc/issues/341
+- #gh-fix https://github.com/btakita/agent-doc/issues/342
 <!-- /agent:queue -->
 
 ## Queue: Issues

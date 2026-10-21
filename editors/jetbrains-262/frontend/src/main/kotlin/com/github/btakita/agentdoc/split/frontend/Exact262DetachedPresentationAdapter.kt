@@ -121,9 +121,10 @@ internal object FrontendSurfaceCollector {
     }
 
     /**
-     * GH #320 option B: the window's measured on-screen rectangle, the client-side state the
-     * backend derives Remote Dev column order from. Null unless the component is showing: an
-     * unrealized splitter has no screen geometry, and a parent-relative location is not one.
+     * GH #320/#343: the window's measured on-screen rectangle. Schema 3 groups it into the exact
+     * client-authored `layoutColumns` vector before transport; only schema-2 compatibility lets the
+     * backend derive columns from bounds. Null unless the component is showing: an unrealized
+     * splitter has no screen geometry, and a parent-relative location is not one.
      */
     private fun measuredBounds(component: Component): EditorWindowBounds? =
         if (!component.isShowing) {

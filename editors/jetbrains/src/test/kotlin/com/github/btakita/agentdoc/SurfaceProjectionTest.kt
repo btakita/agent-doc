@@ -42,16 +42,16 @@ class SurfaceProjectionTest {
         return gson.fromJson(complete, SurfaceProjection.SurfaceProjectionEvidence::class.java)
     }
 
-    /** The frozen floor over [case], with the case's Remote Dev fold answer and no native layout. */
+    /** The frozen floor over [case], with its Remote Dev compatibility answer and no native layout. */
     private fun frozen(case: JsonObject): SurfaceProjection.Result {
-        val foldAnswer = case.get("remote_fold")?.toString()
+        val remoteAnswer = case.get("remote_resolution")?.toString()
         return SurfaceProjection.frozen(
             evidenceOf(case),
             windowLayout = { windows -> LayoutDetector.detectEditorLayout(windows, EditorDerivation.Unavailable) },
             remoteLayout = { snapshot ->
                 LayoutDetector.detectEditorLayout(snapshot) { root, _ ->
                     assertEquals("/repo", root)
-                    foldAnswer ?: error("${case.get("name").asString}: unexpected Remote Dev fold")
+                    remoteAnswer ?: error("${case.get("name").asString}: unexpected Remote Dev resolution")
                 }
             },
         )

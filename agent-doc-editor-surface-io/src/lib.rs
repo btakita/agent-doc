@@ -359,20 +359,20 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             ))?
         }
         "remote_layout" => {
-            // GH #326 phase 4: the Remote Dev fold (GH #134) through the
-            // derivation channel. It shares the per-project memory of the
+            // GH #326 phase 4: Remote Dev compatibility observation (GH #134/#343)
+            // through the derivation channel. It shares legacy compatibility state with the
             // pre-#326 `agent_doc_editor_surface_resolve_remote_layout_json`
-            // symbol and of `surface_projection`, so every caller folds one
-            // history. The plugin's memoryless Kotlin fallback is retired: with
-            // no native answer the Remote Dev layout is unknown.
+            // symbol and `surface_projection`. Flat backend evidence is always non-structural.
+            // The plugin's memoryless Kotlin fallback is retired: with no native answer the
+            // Remote Dev layout is unknown.
             let evidence: agent_doc_editor_surface::RemoteSurfaceEvidence =
                 serde_json::from_value(input).context("parse remote layout evidence")?;
-            let fold = RemoteLayoutEvidence {
+            let observation = RemoteLayoutEvidence {
                 clients: evidence.clients,
                 focused: evidence.focused,
             };
             let root = Path::new(&evidence.project_root);
-            let resolution = resolve_remote_layout(root, &fold);
+            let resolution = resolve_remote_layout(root, &observation);
             serde_json::to_value(resolution)?
         }
         "remote_client_surface" => {
@@ -625,14 +625,17 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let evidence: agent_doc_editor_surface::SurfaceProjectionEvidence =
                 serde_json::from_value(case["input"].clone()).unwrap();
-            let mut folded = false;
+            let mut resolved_remote = false;
             let projection =
                 agent_doc_editor_surface::project_surface(&evidence, |root, remote| {
-                    folded = true;
-                    assert_eq!(root, "/repo", "{name}: fold key");
-                    assert!(!remote.clients.is_empty(), "{name}: fold evidence");
-                    serde_json::from_value(case["remote_fold"].clone())
-                        .unwrap_or_else(|error| panic!("{name}: remote_fold: {error}"))
+                    resolved_remote = true;
+                    assert_eq!(root, "/repo", "{name}: remote observation key");
+                    assert!(
+                        !remote.clients.is_empty(),
+                        "{name}: remote observation evidence"
+                    );
+                    serde_json::from_value(case["remote_resolution"].clone())
+                        .unwrap_or_else(|error| panic!("{name}: remote_resolution: {error}"))
                 });
             let output = serde_json::to_value(&projection).unwrap();
             let expected = &case["expected"];
@@ -652,16 +655,16 @@ mod tests {
                 "{name}: layout_source"
             );
             assert_eq!(
-                folded,
+                resolved_remote,
                 expected["layout_source"] == "remote",
-                "{name}: the Remote Dev fold runs only for a ready remote projection"
+                "{name}: Remote Dev resolution runs only for a ready remote projection"
             );
         }
     }
 
     /// GH #326 phase 2: the derivation channel answers `surface_projection` with
-    /// the log lines the plugin used to compute, and the Remote Dev fold it runs
-    /// is the native per-project memory.
+    /// the log lines the plugin used to compute and the Remote Dev compatibility
+    /// resolution it runs.
     #[test]
     fn gh326_surface_projection_round_trips_through_the_derivation_channel() {
         let ready = derive_editor_from_json(
@@ -845,9 +848,9 @@ mod tests {
         std::fs::remove_dir_all(&scratch).unwrap();
     }
 
-    /// GH #326 phase 4: the Remote Dev fold answers every shared contract case,
-    /// each folded in order from an empty memory with no controller authority.
-    /// The plugin keeps no Kotlin copy of the fold (its memoryless fallback was
+    /// GH #326 phase 4: Remote Dev compatibility resolution answers every shared
+    /// contract case in order from empty compatibility state with no controller authority.
+    /// The plugin keeps no Kotlin copy of the rule (its memoryless fallback was
     /// retired); `LayoutDetectorTest` pins that it sends each step's input
     /// exactly and publishes each answer.
     #[test]

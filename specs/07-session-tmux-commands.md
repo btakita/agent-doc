@@ -539,16 +539,12 @@ editor columns it republishes the retained desired layout **unchanged** when
 that layout already covers the document. It must never append the asking
 document as a new column (GH #106): the escalation's output is its own next
 input, so appending grew the column count by one per tab switch. A document the
-retained layout does not cover takes the place of the retained **focus column**
-(else the rightmost), the same rule as an `ensure` route (GH #120), so the width
-never changes and the document is focused
-(`controller_editor_surface_focus_escalated source=retained_focus_column replaced=<column>`).
-It is never skipped (GH #126): a passive single-column plugin publication (a tab
-switch, the norm on a Remote Dev / Coder backend where splits are undetected)
-legitimately supersedes a route's layout by plane version, and a later explicit
-focus or Sync Tmux Layout on the evicted document must bring its pane back
-rather than leave it stashed with no `select-pane` and no error. Only an empty
-retained layout still skips (`cause=no_editor_columns`).
+retained layout does not cover cannot identify a structural column and therefore
+defers (`cause=focus_requires_frontend_layout`); it never replaces the focus or
+rightmost column. A covered document may update focus intent without changing
+membership or order (GH #120, GH #126, GH #343). A later complete positive
+frontend snapshot may include the uncovered document and replaces the cached
+target atomically.
 An `outside_agent_doc_window` refusal always publishes a fresh structural effect generation even
 when its columns, order, and focus are identical to the retained escalation: selecting the
 `agent-doc` tmux window is itself the missing consequence. Other identical escalation reasons may

@@ -11,10 +11,10 @@
 //! *is* ([`SurfaceProjectionEvidence`]) and the delivery worker asks the
 //! `surface_projection` derivation what it *means*.
 //!
-//! [`project_surface`] is pure except for the Remote Dev fold, which keeps a
-//! per-project memory and is injected by the IO crate. The fold runs only for a
-//! projection that is ready to publish, exactly as before: a deferred capture
-//! never advances the fold's memory.
+//! [`project_surface`] is pure except for the injected Remote Dev compatibility
+//! resolver. Flat backend evidence is non-structural and production resolution
+//! returns no columns. It runs only for a projection that is ready to publish;
+//! the modular exact frontend vector reaches the controller on a separate lane.
 //!
 //! The plugin keeps a frozen Kotlin copy of these rules for a native library
 //! that cannot answer; one parity fixture
@@ -35,10 +35,10 @@ use crate::{
 };
 
 /// Remote Dev client state captured on the EDT (GH #134 / #157). Paths are
-/// project relative, as the remote fold publishes them.
+/// project relative, as the Remote Dev observation boundary receives them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteSurfaceEvidence {
-    /// The key the remote fold remembers its split under.
+    /// The project key for the Remote Dev observation.
     #[serde(default)]
     pub project_root: String,
     #[serde(default)]
@@ -401,7 +401,7 @@ fn unknown_remote_layout_line(remote: &RemoteSurfaceEvidence, reason: &str) -> S
     )
 }
 
-/// Resolve the Remote Dev layout through the fold and describe it.
+/// Resolve the Remote Dev observation. Production flat evidence yields no columns.
 fn remote_layout(
     remote: &RemoteSurfaceEvidence,
     resolution: RemoteLayoutResolution,
@@ -502,12 +502,12 @@ fn window_layout(
 
 /// Derive the editor surface from one observation.
 ///
-/// `remote_fold` answers the Remote Dev fold for `(project_root, evidence)`;
+/// `remote_resolver` answers the compatibility observation for `(project_root, evidence)`;
 /// it is called at most once, and only for a ready projection whose layout is
 /// the Remote Dev one.
 pub fn project_surface(
     evidence: &SurfaceProjectionEvidence,
-    remote_fold: impl FnOnce(&str, &RemoteLayoutEvidence) -> RemoteLayoutResolution,
+    remote_resolver: impl FnOnce(&str, &RemoteLayoutEvidence) -> RemoteLayoutResolution,
 ) -> SurfaceProjection {
     let empty_remote = RemoteSurfaceEvidence::default();
     let remote = evidence.remote.as_ref().unwrap_or(&empty_remote);
@@ -640,12 +640,12 @@ pub fn project_surface(
         ..SurfaceProjection::default()
     };
     // GH #157 / #326: the layout resolves only for a ready projection, so a
-    // deferred capture never advances the Remote Dev fold's memory.
+    // deferred capture never advances Remote Dev observation state.
     let uses_remote_layout = use_remote || windows.is_empty();
     let local = !uses_remote_layout && !evidence.window_geometry_unavailable;
     let layout = if uses_remote_layout {
         projection.layout_source = SurfaceLayoutSource::Remote;
-        let resolution = remote_fold(
+        let resolution = remote_resolver(
             &remote.project_root,
             &RemoteLayoutEvidence {
                 clients: remote.clients.clone(),
@@ -744,11 +744,11 @@ mod tests {
         }
     }
 
-    fn no_fold(_: &str, _: &RemoteLayoutEvidence) -> RemoteLayoutResolution {
-        panic!("the remote fold must not run")
+    fn no_remote_resolution(_: &str, _: &RemoteLayoutEvidence) -> RemoteLayoutResolution {
+        panic!("the remote resolver must not run")
     }
 
-    fn retained_fold(_: &str, _: &RemoteLayoutEvidence) -> RemoteLayoutResolution {
+    fn synthetic_retained_resolution(_: &str, _: &RemoteLayoutEvidence) -> RemoteLayoutResolution {
         RemoteLayoutResolution {
             columns: vec![SurfaceColumn::new(["c.md"]), SurfaceColumn::new(["b.md"])],
             source: crate::RemoteLayoutSource::RetainedRemoteColumns,
@@ -773,7 +773,7 @@ mod tests {
             remaining_selection_passes: Some(3),
             ..Default::default()
         };
-        let projection = project_surface(&evidence, no_fold);
+        let projection = project_surface(&evidence, no_remote_resolution);
         assert_eq!(projection.outcome, SurfaceProjectionOutcome::Ready);
         assert_eq!(projection.layout_source, SurfaceLayoutSource::Windows);
         let surface = projection.surface.unwrap();
@@ -791,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn a_deferred_projection_never_advances_the_remote_fold() {
+    fn a_deferred_projection_never_advances_remote_observation_state() {
         let evidence = SurfaceProjectionEvidence {
             remote: Some(RemoteSurfaceEvidence {
                 project_root: "/repo".into(),
@@ -800,7 +800,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let projection = project_surface(&evidence, no_fold);
+        let projection = project_surface(&evidence, no_remote_resolution);
         assert_eq!(projection.outcome, SurfaceProjectionOutcome::Deferred);
         assert_eq!(
             projection.reason.as_deref(),
@@ -809,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn a_remote_retained_fold_reaches_the_surface_unchanged() {
+    fn an_injected_synthetic_retained_resolution_reaches_the_surface_unchanged() {
         let evidence = SurfaceProjectionEvidence {
             base_path: Some("/repo".into()),
             manager_selected: vec!["/repo/c.md".into()],
@@ -828,7 +828,7 @@ mod tests {
             selected_text_editor_session: Some("/repo/c.md".into()),
             ..Default::default()
         };
-        let projection = project_surface(&evidence, retained_fold);
+        let projection = project_surface(&evidence, synthetic_retained_resolution);
         assert_eq!(projection.outcome, SurfaceProjectionOutcome::Ready);
         assert_eq!(projection.layout_source, SurfaceLayoutSource::Remote);
         assert_eq!(

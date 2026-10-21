@@ -90,8 +90,9 @@ pub struct RemoteLayoutResolution {
     pub reason: Option<String>,
 }
 
-/// The last exact frontend snapshot and focus observed by this compatibility
-/// fold. This type never constructs or edits `columns` itself.
+/// Compatibility state for the legacy flat-observation resolver. Production starts empty and
+/// [`RemoteLayoutMemory::advance`] never populates or edits `columns`; non-empty columns are
+/// accepted only for legacy deserialization and explicit synthetic tests.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteLayoutMemory {
     #[serde(default)]
@@ -101,7 +102,7 @@ pub struct RemoteLayoutMemory {
 }
 
 impl RemoteLayoutMemory {
-    /// Fold one legacy flat observation.
+    /// Classify one legacy flat observation.
     ///
     /// The observation can update focus only. It cannot add, remove, replace,
     /// group, or reorder any column. Repetition is still the same incomplete

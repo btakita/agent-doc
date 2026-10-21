@@ -21,8 +21,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * GH #320 option B: Remote Dev pane order comes from the JetBrains Client's measured editor-window
- * bounds, grouped exactly like the classic `LayoutDetector.buildColumnsFromSnapshots`.
+ * GH #320/#343: schema-3 Remote Dev pane order is the JetBrains Client's exact `layoutColumns`
+ * vector. Bounds grouping remains only for schema-2 compatibility and matches classic
+ * `LayoutDetector.buildColumnsFromSnapshots`.
  *
  * GH #326: the native `client_measured_layout` derivation owns these rules (pinned by the Rust
  * `window_layout` tests with the same cases); the cases here pin the frozen Kotlin floor a native

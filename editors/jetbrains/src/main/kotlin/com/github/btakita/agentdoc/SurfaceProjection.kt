@@ -13,8 +13,9 @@ import javax.swing.SwingUtilities
  * [EditorTabSyncListener] captures what IntelliJ state *is* on the EDT ([SurfaceProjectionEvidence])
  * and the surface delivery worker asks the native `surface_projection` derivation what it *means*:
  * the visible-document union (including the GH #320 Remote Dev union), readiness, active-document
- * resolution, open-tab proximity, stale-selection settling, the layout (local `window_layout` or the
- * Remote Dev fold), and the controller payload including `column_order`. A rule change there is a
+ * resolution, open-tab proximity, stale-selection settling, the local `window_layout`, and the
+ * controller payload including `column_order`. Modular exact frontend vectors bypass this legacy
+ * surface and reach the controller through `RemoteClientLayoutForwarder`. A rule change here is a
  * native change with no plugin generation. [frozen] answers only when no native generation does;
  * it is a compatibility floor and is never extended.
  */

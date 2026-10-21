@@ -308,8 +308,8 @@ class SyncLayoutAction : AnAction(), DumbAware {
         /**
          * GH #112/#185: the order source of [buildSyncColumns] / route `--col` lists.
          * Only local detected geometry carries an `editor` left-to-right split order.
-         * Remote Dev's native fold labels memory-derived order `retained`; its editor
-         * collections expose membership and tab-open order, not split geometry.
+         * Remote Dev backend collections expose focus/liveness and tab-open order, not split
+         * geometry; they remain structurally `unknown`.
          * The undetected fallback lists `selectedFiles`, which IntelliJ orders
          * focused-window first, so its order is `unknown` and the controller keeps
          * the order it already retains for those documents. On a Remote Dev
@@ -850,7 +850,7 @@ object LayoutDetector {
         /** Local editor windows of the mirrored frame (`window_layout`). */
         data class Windows(val evidence: WindowLayoutEvidence) : EditorLayoutEvidence
 
-        /** Remote Dev client sessions (the native Remote Dev fold, GH #134/#157). */
+        /** Remote Dev client sessions (native non-structural classification, GH #134/#157/#343). */
         data class Remote(val snapshot: RemoteLayoutSnapshot) : EditorLayoutEvidence
     }
 
@@ -1190,8 +1190,8 @@ object LayoutDetector {
     )
 
     /**
-     * GH #157: all IntelliJ-owned state needed for the Remote Dev fold, captured while the caller
-     * is on the EDT. The native fold consumes only these immutable strings and lists, so it can run
+     * GH #157: all IntelliJ-owned state needed for Remote Dev backend observation, captured while
+     * the caller is on the EDT. Native classification consumes only these immutable strings and lists, so it can run
      * later on the observation worker without touching client editor services off the EDT.
      */
     internal data class RemoteLayoutSnapshot(
@@ -1300,17 +1300,17 @@ object LayoutDetector {
 
     /**
      * Finish zero-window detection from an EDT snapshot. Direct callers may still enter on the
-     * EDT, so only the immutable native fold is marshalled to a worker. The selection projection
+     * EDT, so only the immutable native observation is marshalled to a worker. The selection projection
      * calls this overload from its generation-owned delivery worker and pays no extra dispatch.
      */
     internal fun detectEditorLayout(
         snapshot: RemoteLayoutSnapshot,
-        nativeFold: (String, String) -> String? = { projectRoot, evidenceJson ->
+        nativeResolver: (String, String) -> String? = { projectRoot, evidenceJson ->
             nativeRemoteLayout(projectRoot, evidenceJson)
         },
     ): EditorLayout? {
         val resolve = {
-            resolveRemoteLayout(snapshot, nativeFold)
+            resolveRemoteLayout(snapshot, nativeResolver)
         }
         val resolution =
             if (SwingUtilities.isEventDispatchThread()) {
@@ -1364,17 +1364,18 @@ object LayoutDetector {
 
     private fun resolveRemoteLayout(
         snapshot: RemoteLayoutSnapshot,
-        nativeFold: (String, String) -> String?,
+        nativeResolver: (String, String) -> String?,
     ): RemoteLayoutResolution {
-        // GH #134: resolve through the shared native fold (`#ffi-first`), which keeps the previous
-        // split per project. GH #326 phase 4: the plugin keeps no Kotlin copy of that rule, so with
-        // no native answer the layout is unknown (structurally inert, GH #105).
+        // GH #134/#343: resolve through the shared native compatibility boundary (`#ffi-first`).
+        // Flat backend evidence is non-structural and production resolution returns no columns.
+        // The modular exact frontend vector uses a separate forwarding lane. With no native answer
+        // the layout is unknown (structurally inert, GH #105).
         val evidenceJson = remoteLayoutEvidenceJson(snapshot.clients, snapshot.focusedSessionFiles)
-        return nativeFold(snapshot.projectRoot, evidenceJson)?.let(::parseRemoteLayoutResolution)
+        return nativeResolver(snapshot.projectRoot, evidenceJson)?.let(::parseRemoteLayoutResolution)
             ?: NO_NATIVE_REMOTE_LAYOUT
     }
 
-    /** `reason` of the unknown Remote Dev layout when no native generation answers the fold. */
+    /** `reason` of the unknown Remote Dev layout when no native generation answers. */
     internal const val NO_NATIVE_REMOTE_LAYOUT_REASON = "native_remote_layout_unavailable"
 
     private val NO_NATIVE_REMOTE_LAYOUT =
@@ -1386,21 +1387,21 @@ object LayoutDetector {
         )
 
     /**
-     * GH #326 phase 4: the Remote Dev fold, asked through the `remote_layout` derivation of the
+     * GH #326 phase 4: the Remote Dev compatibility observation, asked through `remote_layout` in the
      * hot-reloaded native library. A library that predates the derivation is asked through the
-     * pre-#326 `agent_doc_editor_surface_resolve_remote_layout_json` symbol, which folds into the
-     * same per-project memory. `null` when neither answers. Never call it on the EDT.
+     * pre-#326 `agent_doc_editor_surface_resolve_remote_layout_json` symbol. Both paths classify flat
+     * evidence as non-structural. `null` when neither answers. Never call it on the EDT.
      */
     internal fun nativeRemoteLayout(
         projectRoot: String,
         evidenceJson: String,
         derivation: EditorDerivation = EditorDerivation.Native,
-        legacyFold: (String, String) -> String? = NativeAdminControls::resolveRemoteLayout,
+        legacyResolver: (String, String) -> String? = NativeAdminControls::resolveRemoteLayout,
     ): String? =
         derivation.derive("remote_layout", remoteLayoutDerivationInput(projectRoot, evidenceJson))
-            ?: legacyFold(projectRoot, evidenceJson)
+            ?: legacyResolver(projectRoot, evidenceJson)
 
-    /** The `remote_layout` input: the fold evidence keyed by the project root its memory uses. */
+    /** The `remote_layout` input: flat observation evidence keyed by project root. */
     internal fun remoteLayoutDerivationInput(projectRoot: String, evidenceJson: String): String =
         com.google.gson.JsonParser.parseString(evidenceJson).asJsonObject
             .apply { addProperty("project_root", projectRoot) }

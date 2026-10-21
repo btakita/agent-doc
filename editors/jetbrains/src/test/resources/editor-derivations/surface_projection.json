@@ -1,6 +1,6 @@
 {
   "derivation": "surface_projection",
-  "about": "GH #326 phase 2 parity cases. The Rust `surface_projection` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (SurfaceProjectionTest) both answer every case. `remote_fold` is the Remote Dev fold's answer for a case whose layout is the remote one. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "about": "GH #326 phase 2 parity cases. The Rust `surface_projection` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (SurfaceProjectionTest) both answer every case. `remote_resolution` is the compatibility answer for a case whose layout is remote. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
   "cases": [
     {
       "name": "a two-window split publishes absolute columns with proximity-ordered open tabs",
@@ -388,7 +388,7 @@
       }
     },
     {
-      "name": "Remote Dev joins the clients' visible documents and folds their split",
+      "name": "Remote Dev records client-visible documents as non-structural evidence",
       "input": {
         "base_path": "/repo",
         "remote": {
@@ -429,7 +429,7 @@
         "authority": "document_selection",
         "remaining_selection_passes": 3
       },
-      "remote_fold": {
+      "remote_resolution": {
         "columns": [
           {
             "files": [
@@ -517,7 +517,7 @@
         "remaining_selection_passes": 3,
         "preserve_focus": true
       },
-      "remote_fold": {
+      "remote_resolution": {
         "columns": [],
         "source": "unknown",
         "column_order": "unknown",

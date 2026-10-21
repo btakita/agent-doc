@@ -40541,8 +40541,8 @@ mod tests {
         );
     }
 
-    /// The JetBrains plugin's automatic undetected-layout publication on a
-    /// Remote Dev backend: one column per visible document, listed focus-first.
+    /// A synthetic legacy unknown-order publication used to exercise generic
+    /// controller provenance rules. Flat Remote Dev backend evidence no longer creates columns.
     fn plugin_unknown_order_publication(
         columns: &[&str],
         focus: &str,
@@ -40896,10 +40896,7 @@ mod tests {
             PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
-        assert_eq!(
-            desired.invocation.columns,
-            vec![ad.clone(), mr.clone()]
-        );
+        assert_eq!(desired.invocation.columns, vec![ad.clone(), mr.clone()]);
         assert_eq!(desired.invocation.focus.as_deref(), Some(infra.as_str()));
     }
 
@@ -40995,14 +40992,12 @@ mod tests {
         );
     }
 
-    /// GH #320, hazard at the controller: a Remote Dev surface reports
-    /// membership without geometry, so its columns arrive labelled `unknown`
-    /// (or `retained` from an anchored fold). After the operator's manual
-    /// remedy `agent-doc sync --col b --col a` (an `editor` publication), the
-    /// next automatic Remote Dev surface `[a | b]` keeps `[b | a]`: membership
-    /// order never overwrites the layout the controller retains.
+    /// GH #320 generic provenance fixture: synthetic legacy membership without geometry arrives
+    /// as `unknown`. After `agent-doc sync --col b --col a` publishes editor order, another
+    /// synthetic `[a | b]` membership observation keeps `[b | a]`. This does not model current
+    /// Remote Dev capture, whose flat backend evidence carries no structural columns.
     #[test]
-    fn gh320_remote_surface_without_geometry_keeps_the_manual_col_order() {
+    fn gh320_synthetic_unknown_surface_keeps_the_manual_col_order() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);

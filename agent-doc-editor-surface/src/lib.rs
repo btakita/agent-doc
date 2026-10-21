@@ -131,11 +131,11 @@ impl SurfaceColumn {
 ///
 /// The order is part of the observed state, so it carries its own provenance:
 /// only `Editor` (positive split geometry the editor measured) may order tmux.
-/// `Unknown` is membership without geometry (JetBrains Remote Dev, whose
-/// backend has no client split structure, or a local layout whose windows
-/// could not be measured); `Retained` is an order an upstream fold kept from
-/// its own memory, never measured. Selection-only and timing evidence never
-/// appear here because they cannot change structural membership or order. The
+/// `Unknown` is legacy/synthetic membership without geometry, or a local layout whose windows
+/// could not be measured; it is never created from flat Remote Dev backend evidence.
+/// `Retained` is legacy/synthetic explicit provenance; schema-3 frontend vectors use `Editor`.
+/// Selection-only and timing evidence never appear here because they cannot change structural
+/// membership or order. The
 /// controller derives the tmux order for all non-editor states from the layout it already retains,
 /// exactly as for a `--col` route publication with the same label. The serde
 /// default is `Editor`, so a plugin that predates the field keeps its previous
@@ -716,18 +716,17 @@ mod tests {
         assert_eq!(layout_matches(&swapped, Some(&tmux)), Some(false));
     }
 
-    /// GH #320, Remote Dev: the same two states without geometry are one
-    /// membership, so the order permutation implies no structural sync and
-    /// tmux in either order is not drift. The surface never claims an order
-    /// it cannot know; the controller keeps the order it retains.
+    /// GH #320: synthetic legacy membership without geometry treats the same two
+    /// states as one membership, so permutation implies no structural sync and tmux
+    /// in either order is not drift. Flat Remote Dev evidence never creates these columns.
     #[test]
-    fn gh320_a_remote_state_without_geometry_never_claims_an_order() {
-        let remote = |columns: &[&[&str]]| EditorSurface {
+    fn gh320_synthetic_unknown_membership_never_claims_an_order() {
+        let synthetic_unknown = |columns: &[&[&str]]| EditorSurface {
             column_order: SurfaceColumnOrder::Unknown,
             ..surface("/a.md", columns)
         };
-        let before = remote(&[&["/a.md"], &["/b.md"]]);
-        let after = remote(&[&["/b.md"], &["/a.md"]]);
+        let before = synthetic_unknown(&[&["/a.md"], &["/b.md"]]);
+        let after = synthetic_unknown(&[&["/b.md"], &["/a.md"]]);
         assert_eq!(before.visible_signature(), after.visible_signature());
         let (tracking, first) = SurfaceTracking::default().advance(&before, MATCHES);
         assert!(matches!(

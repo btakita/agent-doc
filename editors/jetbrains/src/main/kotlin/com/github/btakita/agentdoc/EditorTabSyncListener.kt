@@ -734,7 +734,8 @@ internal data class CapturedSurface(
          * so deferring on it threw the remote-client state away and a split change reached tmux only
          * on the next Run. The remote clients' visible and selected session documents (project
          * relative, mapped back to absolute paths through the open session documents) are the same
-         * state the remote fold publishes as columns, so they join the backend's own selection.
+         * focus/liveness evidence used for diagnosis, so they join the backend's own selection;
+         * they never become structural columns.
          */
         fun remoteClientVisibleSessionFiles(
             backendVisible: List<String>,

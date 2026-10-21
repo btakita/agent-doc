@@ -670,7 +670,8 @@ class SyncLayoutActionTest {
 
     /**
      * GH #112/#185: only detected local geometry carries an `editor` order.
-     * A Remote Dev fold carries its memory-derived order as `retained`.
+     * The `retained` case is explicit legacy/synthetic provenance; schema-3 exact Remote Dev
+     * vectors are `editor` order and pass through unchanged.
      * The undetected fallback is `selectedFiles` order (focused window first), so
      * it is published as `unknown` and the controller keeps the retained order.
      */

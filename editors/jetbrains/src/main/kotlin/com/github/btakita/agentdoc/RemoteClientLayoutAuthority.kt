@@ -10,10 +10,9 @@ import java.util.concurrent.ConcurrentHashMap
  * The modular 262/263 backend forwards the client's measured editor-window columns into the
  * controller surface Source labelled `column_order=editor` and registers itself here while that
  * forward is live. While a project is registered, [EditorTabSyncListener]'s Remote Dev capture
- * (the remote-client membership fold, labelled `unknown`/`retained`) does not publish the layout
- * surface, so membership order never competes with measured order. The remembered-order fallback
- * therefore remains only for classic and one-sided installs, and for a frontend that predates
- * schema 2. Nothing in a classic (242-261) build ever registers.
+ * (flat focus/liveness evidence, labelled `unknown`) does not publish a structural layout surface,
+ * so backend membership order never competes with measured order. One-sided and pre-schema-2
+ * installs remain structurally unknown. Nothing in a classic (242-261) build ever registers.
  */
 internal object RemoteClientLayoutAuthority {
     private val owners = ConcurrentHashMap<Project, MutableSet<String>>()

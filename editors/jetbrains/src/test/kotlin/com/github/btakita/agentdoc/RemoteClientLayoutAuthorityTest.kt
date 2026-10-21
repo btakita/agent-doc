@@ -8,8 +8,8 @@ import org.junit.Test
 
 /**
  * GH #320 option B: while the modular backend forwards the JetBrains Client's measured columns,
- * the Remote Dev membership fold must not publish the layout; with no forward it stays the
- * fallback. Ownership is per forwarded endpoint, so one retiring connection never releases
+ * flat Remote Dev backend evidence must not publish structural layout; with no forward it stays
+ * unknown. Ownership is per forwarded endpoint, so one retiring connection never releases
  * another's authority.
  */
 class RemoteClientLayoutAuthorityTest {

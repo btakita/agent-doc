@@ -304,14 +304,13 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   authority and remaining settling passes, and its `force_reconcile` /
   `preserve_focus` flags. Native owns the remote-client authority decision
   (GH #154/#177), every readiness deferral (`capture deferred reason=...`), the
-  `#stickymdpane` visible-document union including the GH #320 Remote Dev union,
+  `#stickymdpane` visible-document union including the GH #320 Remote Dev diagnostic union,
   active-document resolution, open-tab proximity, stale-selection settling (the
-  exhausted-pass old-to-new edge, on visible documents and columns), the local or
-  Remote Dev layout and its withholding when it omits the preferred document,
+  exhausted-pass old-to-new edge, on visible documents and local columns), the local layout and
+  its withholding when it omits the preferred document,
   the `[layout-detect]` lines, and the controller payload including
-  `column_order`. The Remote Dev fold keeps its per-project memory in the native
-  library and runs only for a projection that is ready, so a deferred capture
-  never advances it. The plugin keeps the payload as JSON, so a payload field a
+  `column_order`. Flat Remote Dev backend evidence remains focus/liveness-only; deferred capture
+  and repeated observations cannot advance structural state. The plugin keeps the payload as JSON, so a payload field a
   newer library adds reaches the controller without a plugin generation.
 - `sync_layout` (phase 3): the manual Sync Tmux Layout `--col` snapshot
   decisions, and the root choice and path normalization the automatic surface
@@ -344,13 +343,15 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   layout mode. The plugin's only step is the wire shape: the one empty column
   answered for an observation with no visible document becomes no `--col`. The
   `TmuxPaneFocusSync` poll asks the controllers in `candidate_roots`.
-- `remote_layout` (phase 4): the GH #134 Remote Dev fold. Evidence is the
-  project root the fold remembers its split under, each Remote Dev client's
+- `remote_layout` (phase 4): the legacy GH #134 Remote Dev observation boundary. Evidence is the
+  project root, each Remote Dev client's
   visible/selected/open session documents, and the backend-focused session
-  documents. Native owns detection, retention, and order (GH #134/#175/#185/#234)
-  and keeps the per-project memory it shares with `surface_projection` and with
-  the pre-#326 `agent_doc_editor_surface_resolve_remote_layout_json` symbol, so
-  every channel continues one history. The plugin asks this derivation first and
+  documents. Native classifies this flat evidence as focus/liveness-only and never derives,
+  retains, or reconstructs structural columns from it (GH #134/#175/#185/#234/#343).
+  Per-project memory, when present, is only an exact vector previously authored by a
+  geometry-capable frontend; legacy observations preserve it byte-for-byte or remain unknown.
+  The derivation shares this behavior with `surface_projection` and with the pre-#326
+  `agent_doc_editor_surface_resolve_remote_layout_json` symbol. The plugin asks this derivation first and
   that symbol only when the loaded library predates the derivation.
 - `remote_client_surface` (phase 4): what the 262/263 backend's
   `RemoteClientLayoutForwarder` publishes for a JetBrains Client's measured main
@@ -416,7 +417,7 @@ state on the EDT (the focused and visible session documents, then the command
 surface or, for the `--col` snapshot, the split layout evidence:
 `LayoutDetector.captureEditorLayoutEvidence`). Its background thread resolves
 the focused root, derives the layout from that evidence (`window_layout` or the
-Remote Dev fold, with no EDT budget), asks `sync_layout`, refuses before
+Remote Dev non-structural observation, with no EDT budget), asks `sync_layout`, refuses before
 preparing the terminal, and then prepares the terminal and submits. A direct
 EDT caller of `window_layout` (claim, terminal and layout-change detectors)
 marshals only the immutable evidence to a worker and waits at most 250 ms. Run
@@ -425,7 +426,7 @@ focused documents and the split layout evidence); its route thread derives the
 layout from that evidence and asks `sync_layout`. The `TmuxPaneFocusSync` poll
 resolves the focused root and asks `sync_layout` on its own poll thread. The
 measured-layout forwarder already runs on its own worker, where it also resolves the focused document's root and asks
-`remote_client_surface`. The Remote Dev fold runs on whichever worker holds the
+`remote_client_surface`. Remote Dev backend observation runs on whichever worker holds the
 captured client evidence; a direct EDT caller marshals only that evidence. No
 register failure is recorded on the EDT (phase 5b): the register retry timer
 reads the editor file and document on the EDT and hands an unavailable one to
@@ -474,10 +475,10 @@ floor's rules. `sync_layout.json` and
 place of the filesystem; the 262/263 backend's test resources include the
 directory so its floor answers the same file.
 
-**The Remote Dev fold has no frozen copy.** It has been native since GH #134;
+**The Remote Dev compatibility observation has no frozen copy.** It has been native since GH #134;
 the plugin's only Kotlin rule for it was a memoryless fallback
 (`uniqueRemoteSplitSelection`: one client naming two or more visible, else
-selected, documents) for a library without the fold symbol. Phase 4 retired it.
+selected, documents) for a library without the compatibility symbol. Phase 4 retired it.
 With no native answer, through neither `remote_layout` nor the pre-#326 symbol,
 the Remote Dev layout is unknown (`[layout-detect] unknown ...
 reason=native_remote_layout_unavailable`), which is structurally inert (an
@@ -485,9 +486,9 @@ observation without columns, GH #105): the automatic surface publishes no
 columns, so it may select the focused document's pane but never changes pane
 membership, and Sync Tmux Layout refuses the unreadable split (GH #154). Only a
 plugin with no loaded library, or one beside a library older than v0.35.454 (the
-first with the fold symbol), reaches that answer.
+first with the compatibility symbol), reaches that answer.
 `remote_layout.json` is therefore a contract file, not a parity file: the Rust
-fold answers its steps in order from an empty memory, and `LayoutDetectorTest`
+classifier answers its steps in order from an empty memory, and `LayoutDetectorTest`
 pins that the plugin sends each step's input exactly and publishes each answer.
 
 **Still restart-bound.** Changing the *evidence* a derivation needs (a new
@@ -690,11 +691,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   editor window still has no selected file; the completed file lifecycle edge
   republishes the settled surface without invoking tmux directly.
 - A Remote Dev selection can arrive before its visible-editor membership update.
-  That selection updates focus intent only and preserves the last authoritative
-  columns exactly; it never chooses a replacement slot. Positive visible-set
-  evidence may later change membership. An ambiguous one-column growth must
-  repeat before confirmation, and the pending candidate is evidence under
-  evaluation, never pane structure (GH #250, GH #253, GH #343).
+  That selection and every later flat visible/selected/open observation update focus/liveness
+  evidence only and preserve the last authoritative columns exactly; they never choose a
+  replacement slot or change membership, even after indefinite repetition. Only a complete
+  positive vector from a geometry-capable frontend may change structure (GH #250, GH #253,
+  GH #343).
 - In the exact-262/263 modular package, an accepted frontend surface snapshot is the
   authoritative Remote Dev selection/layout source. If no frontend generation has delivered an
   accepted snapshot (including a one-sided backend install), the backend subscribes to each remote
@@ -827,9 +828,9 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   backend window count is not remote-layout authority. Remote client-selected files name only the
   focused document, so the plugin reports per-client `visible` (the Remote Dev editor tracker's active client editors),
   `selected`, and `open` session documents to the shared native fold (GH #134): the
-  `remote_layout` derivation, or `agent_doc_editor_surface_resolve_remote_layout_json` on a
+  `remote_layout` compatibility resolver, or `agent_doc_editor_surface_resolve_remote_layout_json` on a
   library that predates it (GH #326 phase 4). The plugin snapshots those
-  client/editor collections and the backend-focused files on the EDT, then runs the fold from the
+  client/editor collections and the backend-focused files on the EDT, then runs the resolver from the
   generation-fenced surface delivery worker; direct synchronous detection also marshals only the
   immutable observation off the EDT. The native bridge's EDT guard therefore remains intact.
   The plugin keeps no memoryless Kotlin fallback: with no native answer the layout is unknown.
@@ -841,11 +842,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `layout=unknown|observed|focus_only` to `pane_action=none|focus_only|structural_sync` on one
   line so every pane effect names its authority.
 - Remote Dev backend observations never reconstruct a split from retained slots or flat client
-  lists (GH #185, GH #234, GH #343). Retained layout memory is only the last exact column vector
-  authored by a geometry-capable editor frontend. Focus/liveness evidence may focus a document
-  already present in that vector, but an uncovered document defers; it cannot replace a column.
-  Until an exact vector arrives, the backend performs no structural tmux effect. Between exact
-  vectors it preserves the last accepted target byte-for-byte.
+  lists (GH #185, GH #234, GH #343). The legacy `remote_layout` resolver owns no production
+  structural memory and always returns no columns. Separately, the controller retains the last
+  exact vector delivered by the modular frontend lane. Focus/liveness evidence may focus a
+  document already present in that controller target, but an uncovered document defers; it cannot
+  replace a column. Until an exact vector arrives, the backend performs no structural tmux effect.
+  Between exact vectors the controller preserves the last accepted target byte-for-byte.
 - When the frontend module is connected, its generation-fenced measured layout is the source
   of truth. The backend forwards that exact vector as `column_order=editor`; the controller
   copies it into the desired tmux effect without folding, reordering, or reconstructing it.
@@ -873,10 +875,10 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   origins (and for the JetBrains Client's measured windows forwarded by the 262/263 backend,
   below); windows that share an origin (never measured) publish `unknown`. Legacy Remote Dev
   fallback observations carry only focus/liveness evidence and publish no structural replacement.
-  The controller carries an exact `editor` vector from `SurfaceIntent::Sync` directly into the
-  desired tmux effect; `unknown` or selection-only input cannot be converted into geometry. While
-  frontend authority is active, surface and tmux drift checks compare against the last exact
-  frontend vector. On a Remote Dev backend the diagnostic capture reads the remote clients'
+  The modular `RemoteClientLayoutForwarder` separately carries the exact `editor` vector directly
+  into the controller's desired tmux effect; `unknown` or selection-only input cannot be converted
+  into geometry. While frontend authority is active, tmux drift checks compare against the last
+  exact frontend vector. On a Remote Dev backend the diagnostic capture reads the remote clients'
   `visible`/`selected` session documents (mapped to the open session documents' absolute paths)
   together with the backend's own selection; it never defers with
   `no_visible_session_documents` because the backend's `selectedFiles` names no session document
@@ -1266,7 +1268,7 @@ Binary auto-start forensics also land in `/tmp/agent-doc-sync.log` and the per-d
 - Closing plain Markdown with no attached CRDT replica is a successful no-op: there is no editor authority or final cut to publish, so the plugin emits the ordinary native close hint, clears local unsynced-edit bookkeeping, and does not warn. This decision precedes editor-text access when no project owns the path or the owning manager has already classified the path as non-agent-doc. If classification still requires the current text, the dedicated close worker waits for IntelliJ read access rather than treating a transient read-action refusal as a failed publish. If a file still has an attached replica (including an agent-doc whose markers were removed before close), its exact final editor cut must settle before authority is released; a real publish failure remains fail-closed and retains authority (GH #287, GH #298).
 - `PluginLifecycleListener` handles `projectOpened`/`projectClosing`.
 - Startup root discovery and native listener registration run on the pooled application executor, not the IDEA event-dispatch thread. This keeps fallback scans away from UI startup when Linux inotify watches are exhausted.
-- Editor layout/window snapshots and document mutations are captured on the event-dispatch thread, while project-root discovery, filesystem walks, patch-watch registration, command-plane/native work, and tmux consequences run in background executors. Remote Dev's zero-window layout path snapshots client-visible, selected, open, and focused session documents on the EDT, but resolves the native retained-split fold on the surface delivery worker. Socket patch apply first captures an immutable document text/stamp proof on the EDT, performs every native replay/component/normalization calculation on the listener worker, then returns only the computed target to the EDT for a proof-fenced minimal edit. The immutable post-write content receipt is published from the socket worker before acknowledgement. The native generation bridge rejects event-dispatch-thread calls so a busy controller cannot freeze IDEA, and an adapter path must not catch that rejection as an ordinary patch failure caused by scheduling native computation inside an EDT closure.
+- Editor layout/window snapshots and document mutations are captured on the event-dispatch thread, while project-root discovery, filesystem walks, patch-watch registration, command-plane/native work, and tmux consequences run in background executors. Remote Dev's zero-window layout path snapshots client-visible, selected, open, and focused session documents on the EDT, but classifies that flat evidence as non-structural on the surface delivery worker; exact frontend column vectors pass through unchanged. Socket patch apply first captures an immutable document text/stamp proof on the EDT, performs every native replay/component/normalization calculation on the listener worker, then returns only the computed target to the EDT for a proof-fenced minimal edit. The immutable post-write content receipt is published from the socket worker before acknowledgement. The native generation bridge rejects event-dispatch-thread calls so a busy controller cannot freeze IDEA, and an adapter path must not catch that rejection as an ordinary patch failure caused by scheduling native computation inside an EDT closure.
 - `fileClosed` fires when ONE editor for a file is removed, not only when the file stops being open (GH #241: a Remote Dev guest opened a second editor for an open document and one was removed). `PluginLifecycleListener.fileClosed` and `ReliableSyncLivenessListener.fileClosed` route through `DocumentCloseDecision.route`, which observes `FileEditorManager.isFileOpen` on the backend manager and on the event's source manager plus every Remote Dev `ClientFileEditorManager.getAllFiles()`. Only when no client still has the file open does it release (`TypingTracker.clearOpenDocumentReport`: closing cut, replica deregister, `agent_doc_document_closed_for_editor`; liveness: the observed-tag `Close`). A still-open verdict keeps the replica, calls `CrdtReplicaManager.ensureOpenDocumentReplica(..., "editor-removed-file-still-open")` (a no-op while attached), logs `decision=keep_still_open`, and re-observes once after `DocumentCloseDecision.STILL_OPEN_RECHECK_MS`, releasing then if every client has dropped the file. `EditorTracker.activeEditors` is deliberately not an input (GH #175 hidden tabs). `selectionChanged` on a markdown document also calls `ensureOpenDocumentReplica(..., "selection")`, so an open document whose replica went missing without a transport loss re-attaches on the next selection instead of waiting for a peer replica pull.
 - Project close and plugin unload dispose CRDT replica, patch watcher, layout detector, and visual highlighter resources. Queued visual-refresh callbacks check their manager generation's disposed state before scheduling or applying, and a scheduler-shutdown race is inert rather than an IDE exception.
 

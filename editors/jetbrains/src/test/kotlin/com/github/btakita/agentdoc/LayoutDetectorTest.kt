@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicBoolean
@@ -11,8 +12,8 @@ import javax.swing.SwingUtilities
 class LayoutDetectorTest {
 
     @Test
-    fun `GH 157 zero-window detection entered on EDT runs native fold on worker`() {
-        val nativeFoldRan = AtomicBoolean(false)
+    fun `GH 157 zero-window detection entered on EDT classifies flat evidence on worker`() {
+        val nativeObservationRan = AtomicBoolean(false)
         val detected = AtomicReference<EditorLayout?>()
 
         SwingUtilities.invokeAndWait {
@@ -30,28 +31,19 @@ class LayoutDetectorTest {
                         ),
                         focusedSessionFiles = listOf("tasks/a.md"),
                     ),
-                    nativeFold = { projectRoot, evidenceJson ->
-                        nativeFoldRan.set(true)
+                    nativeResolver = { projectRoot, evidenceJson ->
+                        nativeObservationRan.set(true)
                         assertFalse(SwingUtilities.isEventDispatchThread())
                         assertEquals("/repo", projectRoot)
                         assertTrue(evidenceJson.contains("tasks/b.md"))
-                        """{"columns":[{"files":["tasks/a.md"]},{"files":["tasks/b.md"]}],"source":"retained_remote_columns","column_order":"retained","reason":"single_selection_within_retained_layout"}"""
+                        """{"columns":[],"source":"unknown","column_order":"unknown","reason":"flat_remote_evidence_non_structural"}"""
                     },
                 ),
             )
         }
 
-        assertTrue("the GH #134 retained-split fold must run", nativeFoldRan.get())
-        assertEquals(
-            EditorLayout(
-                listOf(
-                    LayoutColumn(listOf("tasks/a.md")),
-                    LayoutColumn(listOf("tasks/b.md")),
-                ),
-                columnOrder = "retained",
-            ),
-            detected.get(),
-        )
+        assertTrue("the GH #134 compatibility observation must run", nativeObservationRan.get())
+        assertNull(detected.get())
     }
 
     @Test
@@ -302,7 +294,7 @@ class LayoutDetectorTest {
     }
 
     @Test
-    fun `GH 326 the remote_layout derivation is asked before the pre-326 fold symbol`() {
+    fun `GH 326 the remote_layout derivation is asked before the pre-326 compatibility symbol`() {
         val evidence = LayoutDetector.remoteLayoutEvidenceJson(
             listOf(LayoutDetector.RemoteClientSessionEditors(listOf("a.md", "b.md"), listOf("a.md"), listOf("a.md"))),
             focusedSessionFiles = listOf("a.md"),

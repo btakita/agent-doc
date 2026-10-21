@@ -401,7 +401,7 @@
               }
             ],
             "source": "retained_remote_columns",
-            "column_order": "unknown",
+            "column_order": "provisional",
             "reason": "selected_visible_change_replaced_focus_column"
           }
         }

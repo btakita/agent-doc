@@ -450,6 +450,9 @@ fn remote_layout(
     let column_order = match resolution.column_order {
         crate::remote_layout::RemoteLayoutColumnOrder::Unknown => SurfaceColumnOrder::Unknown,
         crate::remote_layout::RemoteLayoutColumnOrder::Retained => SurfaceColumnOrder::Retained,
+        crate::remote_layout::RemoteLayoutColumnOrder::Provisional => {
+            SurfaceColumnOrder::Provisional
+        }
     };
     Some(Layout {
         columns,
@@ -748,6 +751,15 @@ mod tests {
         panic!("the remote fold must not run")
     }
 
+    fn provisional_fold(_: &str, _: &RemoteLayoutEvidence) -> RemoteLayoutResolution {
+        RemoteLayoutResolution {
+            columns: vec![SurfaceColumn::new(["c.md"]), SurfaceColumn::new(["b.md"])],
+            source: crate::RemoteLayoutSource::RetainedRemoteColumns,
+            column_order: crate::remote_layout::RemoteLayoutColumnOrder::Provisional,
+            reason: Some("selected_visible_change_replaced_focus_column".into()),
+        }
+    }
+
     #[test]
     fn a_two_window_split_projects_absolute_columns_and_proximity_order() {
         let evidence = SurfaceProjectionEvidence {
@@ -796,6 +808,35 @@ mod tests {
         assert_eq!(
             projection.reason.as_deref(),
             Some("no_visible_session_documents")
+        );
+    }
+
+    #[test]
+    fn a_remote_provisional_fold_reaches_the_surface_unchanged() {
+        let evidence = SurfaceProjectionEvidence {
+            base_path: Some("/repo".into()),
+            manager_selected: vec!["/repo/c.md".into()],
+            open_session_documents: ["/repo/a.md", "/repo/b.md", "/repo/c.md"]
+                .map(String::from)
+                .to_vec(),
+            remote: Some(RemoteSurfaceEvidence {
+                project_root: "/repo".into(),
+                clients: vec![RemoteClientEditors {
+                    visible: vec!["a.md".into(), "b.md".into()],
+                    selected: vec!["c.md".into()],
+                    open: vec!["a.md".into(), "b.md".into(), "c.md".into()],
+                }],
+                focused: vec!["c.md".into()],
+            }),
+            selected_text_editor_session: Some("/repo/c.md".into()),
+            ..Default::default()
+        };
+        let projection = project_surface(&evidence, provisional_fold);
+        assert_eq!(projection.outcome, SurfaceProjectionOutcome::Ready);
+        assert_eq!(projection.layout_source, SurfaceLayoutSource::Remote);
+        assert_eq!(
+            projection.surface.unwrap().column_order,
+            SurfaceColumnOrder::Provisional
         );
     }
 

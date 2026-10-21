@@ -4376,7 +4376,7 @@ fn automatic_editor_surface_sync_invocation(
 }
 
 /// GH #320: the surface wire label and the controller's order label name the
-/// same three provenances.
+/// same four provenances.
 fn layout_column_order_from_surface(
     order: agent_doc_editor_surface::SurfaceColumnOrder,
 ) -> agent_doc_tmux::LayoutColumnOrder {
@@ -4389,6 +4389,9 @@ fn layout_column_order_from_surface(
         }
         agent_doc_editor_surface::SurfaceColumnOrder::Retained => {
             agent_doc_tmux::LayoutColumnOrder::Retained
+        }
+        agent_doc_editor_surface::SurfaceColumnOrder::Provisional => {
+            agent_doc_tmux::LayoutColumnOrder::Provisional
         }
     }
 }
@@ -35561,7 +35564,7 @@ fn publish_pane_layout_desired_invocation_in_lane(
     publication: PaneLayoutPublication,
     claim: impl Into<PaneLayoutClaim>,
 ) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
-    let claim = claim.into();
+    let mut claim = claim.into();
     let publisher = claim.publisher;
     let graph = runtime.pane_layout_graph_for_lane(lane);
     let store_lane_layout_state = |columns: &[String]| -> Result<()> {
@@ -35618,6 +35621,23 @@ fn publish_pane_layout_desired_invocation_in_lane(
         .as_ref()
         .and_then(PaneLayoutDesired::order_authority_columns)
         .is_some();
+    if incoming_order == agent_doc_tmux::LayoutColumnOrder::Provisional
+        && claim.provisional_order_basis.is_none()
+        && let Some(basis) = retained
+            .as_ref()
+            .map(PaneLayoutDesired::order_fold_basis_columns)
+            .filter(|basis| !basis.is_empty())
+    {
+        // GH #343: Remote Dev selection evidence can arrive before its
+        // structural visible-set update. Apply the guessed replacement now,
+        // but carry the pre-guess fold basis through the graph so the next
+        // structural publication cannot fold against its own guess.
+        claim = if retained_order_authoritative {
+            claim.with_provisional_order_basis(Some(basis.to_vec()))
+        } else {
+            claim.with_unanchored_provisional_order_basis(Some(basis.to_vec()))
+        };
+    }
     // GH #338: a manual Sync Tmux Layout click is the operator asserting the
     // order the editor just submitted. When the retained basis is only a cold
     // `unknown` guess, folding the click against that guess makes the manual
@@ -35634,10 +35654,14 @@ fn publish_pane_layout_desired_invocation_in_lane(
         retained
             .as_ref()
             .map(|desired| {
-                if invocation.column_order == agent_doc_tmux::LayoutColumnOrder::Unknown {
-                    // GH #302/#311: an escalation's slot placement is provisional,
-                    // even when later escalations have replaced every document in
-                    // the last positively observed basis.
+                if matches!(
+                    invocation.column_order,
+                    agent_doc_tmux::LayoutColumnOrder::Unknown
+                        | agent_doc_tmux::LayoutColumnOrder::Provisional
+                ) {
+                    // GH #302/#311/#343: an escalation or editor fold's slot
+                    // placement is provisional, even when later guesses have
+                    // replaced every document in the last positive basis.
                     desired.order_fold_basis_columns()
                 } else {
                     desired.invocation.columns.as_slice()
@@ -40739,6 +40763,15 @@ mod tests {
         invocation
     }
 
+    fn plugin_provisional_order_publication(
+        columns: &[&str],
+        focus: &str,
+    ) -> ControllerTmuxLayoutSyncInvocation {
+        let mut invocation = plugin_unknown_order_publication(columns, focus);
+        invocation.column_order = agent_doc_tmux::LayoutColumnOrder::Provisional;
+        invocation
+    }
+
     fn session_document(dir: &tempfile::TempDir, name: &str) -> String {
         let path = dir.path().join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -40838,6 +40871,126 @@ mod tests {
             agent_doc_tmux::LayoutColumnOrder::Editor
         );
         assert_eq!(pane_layout_order_authority(runtime.as_ref()), vec![mr, ad]);
+    }
+
+    /// GH #343: Remote Dev reports the selection before its structural
+    /// visible-set update. The first publication guesses `[c | b]` from the
+    /// confirmed `[a | b]`; the follow-up proves `[a | c]`. The guess changes
+    /// membership immediately but must never become the follow-up's fold basis
+    /// or controller-to-editor order authority.
+    #[test]
+    fn provisional_editor_replacement_keeps_the_pre_guess_order_basis() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let c = session_document(&dir, "c.md");
+
+        let mut measured = plugin_unknown_order_publication(&[&a, &b], &a);
+        measured.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        let (measured, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            measured,
+            Some(1),
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(measured.invocation.columns, vec![a.clone(), b.clone()]);
+
+        let (guessed, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_provisional_order_publication(&[&c, &b], &c),
+            Some(2),
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(guessed.invocation.columns, vec![c.clone(), b.clone()]);
+        assert_eq!(
+            guessed.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Provisional
+        );
+        assert_eq!(
+            guessed.provenance.provisional_order_basis,
+            Some(vec![a.clone(), b.clone()])
+        );
+        assert_eq!(
+            pane_layout_order_authority(runtime.as_ref()),
+            vec![a.clone(), b]
+        );
+
+        let (corrected, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&a, &c], &c),
+            Some(3),
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(corrected.invocation.columns, vec![a, c]);
+        assert_eq!(corrected.provenance.provisional_order_basis, None);
+    }
+
+    /// GH #343 over GH #332: cold Remote Dev membership is useful fold
+    /// ancestry, but carrying it across a provisional replacement must not
+    /// upgrade it into editor-anchor authority.
+    #[test]
+    fn provisional_replacement_keeps_a_cold_basis_unanchored() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let c = session_document(&dir, "c.md");
+
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&a, &b], &a),
+            Some(1),
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        let (guessed, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_provisional_order_publication(&[&c, &b], &c),
+            Some(2),
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(
+            guessed.provenance.provisional_order_basis,
+            Some(vec![a.clone(), b])
+        );
+        assert!(!guessed.provenance.provisional_order_basis_authoritative);
+        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
+
+        let (corrected, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&a, &c], &c),
+            Some(3),
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(corrected.invocation.columns, vec![a, c]);
+        assert_eq!(
+            corrected.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Unknown
+        );
+        assert_eq!(corrected.provenance.provisional_order_basis, None);
+        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
     }
 
     /// GH #338: Remote Dev has membership but no backend split geometry. A
@@ -41200,6 +41353,7 @@ mod tests {
         for order in [
             agent_doc_editor_surface::SurfaceColumnOrder::Unknown,
             agent_doc_editor_surface::SurfaceColumnOrder::Retained,
+            agent_doc_editor_surface::SurfaceColumnOrder::Provisional,
         ] {
             let (desired, _) = publish_pane_layout_desired_invocation(
                 &bootstrap,

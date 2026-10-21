@@ -490,6 +490,16 @@ decide it.
   module measures its editor windows (surface snapshot schema 2), and the
   backend forwards the derived columns as `column_order=editor` (GH #320
   option B). The `unknown` label remains only where no such publisher exists.
+- **Label a transient guess as provisional and retain its ancestry.** Some
+  propagated observations contain current membership before they contain
+  structural confirmation. A JetBrains Remote Dev selection may identify a new
+  focused document before the client-visible set proves which split changed.
+  The fold publishes the guessed slot as `column_order=provisional`; the pane
+  layout graph applies that membership while retaining the pre-guess order
+  basis as provenance. The next structural publication folds against that
+  basis and clears it. A provisional vector is neither measured geometry nor
+  retained order authority, and it must cross every transport layer with its
+  label intact rather than being inferred from event timing (GH #343).
 - **A manual order assertion is a bounded override, not inferred state.** Both
   editor plugins submit `Sync Tmux Layout` as `caller_kind=manual`. If that
   command carries `column_order=unknown`, the controller adopts its submitted

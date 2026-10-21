@@ -344,7 +344,11 @@ mod tests {
 
     #[test]
     fn sync_carries_the_published_order_label_never_upgrading_it() {
-        for order in [SurfaceColumnOrder::Unknown, SurfaceColumnOrder::Retained] {
+        for order in [
+            SurfaceColumnOrder::Unknown,
+            SurfaceColumnOrder::Retained,
+            SurfaceColumnOrder::Provisional,
+        ] {
             let mut observed = surface(
                 &[&["/p/a.md"], &["/p/b.md"]],
                 &["/p/a.md", "/p/b.md"],

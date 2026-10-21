@@ -491,18 +491,25 @@ impl PaneLayoutDesired {
     /// document replaced. Keep folding against the last positive basis even
     /// after a chain of escalations replaces every document in that basis;
     /// otherwise the newest guessed slot becomes order authority (GH #311).
-    /// A cold `Unknown` generation has membership but no left-to-right
-    /// authority. Keep returning no authority through later unknown folds;
+    /// A cold `Unknown` generation and a `Provisional` replacement have
+    /// membership but no left-to-right authority. Keep returning no authority
+    /// through later unknown folds;
     /// otherwise the first tab-open guess anchors itself after one round trip
-    /// (GH #332). A provisional basis, when present, came from the last
-    /// positive observation and remains authoritative across slot guesses.
+    /// (GH #332). A provisional basis remains authoritative across slot
+    /// guesses only when its explicit authority bit says it came from a
+    /// positive observation.
     pub(crate) fn order_authority_columns(&self) -> Option<&[String]> {
         self.provenance
             .provisional_order_basis
             .as_deref()
+            .filter(|_| self.provenance.provisional_order_basis_authoritative)
             .or_else(|| {
-                (self.invocation.column_order != agent_doc_tmux::LayoutColumnOrder::Unknown)
-                    .then_some(self.invocation.columns.as_slice())
+                matches!(
+                    self.invocation.column_order,
+                    agent_doc_tmux::LayoutColumnOrder::Editor
+                        | agent_doc_tmux::LayoutColumnOrder::Retained
+                )
+                .then_some(self.invocation.columns.as_slice())
             })
     }
 }
@@ -578,9 +585,13 @@ pub(crate) struct PaneLayoutProvenance {
     /// inside the structure they derived from, so they inherit it; a plugin
     /// publication and an `exact` route own the structure they publish.
     pub structure_owner: PaneLayoutPublisher,
-    /// Last positively observed order while this generation contains a slot
-    /// placement guessed by focus escalation (GH #302).
+    /// Order fold ancestry while this generation contains a provisional slot
+    /// placement (GH #302, GH #343).
     pub provisional_order_basis: Option<Vec<String>>,
+    /// Whether `provisional_order_basis` came from positive order authority.
+    /// A cold unknown basis stabilizes later folds but must not anchor an
+    /// editor after one round trip (GH #332).
+    pub provisional_order_basis_authoritative: bool,
 }
 
 impl PaneLayoutProvenance {
@@ -619,9 +630,11 @@ pub(crate) struct PaneLayoutClaim {
     /// columns. The layout graph rebases an escalation when another publisher
     /// advances the retained generation before the escalation is committed.
     pub derived_from_generation: Option<u64>,
-    /// Positive order retained while an escalation's replacement slot is only
-    /// a guess. Structural editor publication clears this provenance.
+    /// Order fold ancestry retained while a replacement slot is only a guess.
+    /// Structural editor publication clears this provenance.
     pub provisional_order_basis: Option<Vec<String>>,
+    /// Whether the retained ancestry has positive order authority.
+    pub provisional_order_basis_authoritative: bool,
 }
 
 impl From<PaneLayoutPublisher> for PaneLayoutClaim {
@@ -633,6 +646,7 @@ impl From<PaneLayoutPublisher> for PaneLayoutClaim {
             asserted_columns: None,
             derived_from_generation: None,
             provisional_order_basis: None,
+            provisional_order_basis_authoritative: false,
         }
     }
 }
@@ -646,6 +660,7 @@ impl PaneLayoutClaim {
             asserted_columns: None,
             derived_from_generation: None,
             provisional_order_basis: None,
+            provisional_order_basis_authoritative: false,
         }
     }
 
@@ -663,7 +678,17 @@ impl PaneLayoutClaim {
     }
 
     pub(crate) fn with_provisional_order_basis(mut self, basis: Option<Vec<String>>) -> Self {
+        self.provisional_order_basis_authoritative = basis.is_some();
         self.provisional_order_basis = basis;
+        self
+    }
+
+    pub(crate) fn with_unanchored_provisional_order_basis(
+        mut self,
+        basis: Option<Vec<String>>,
+    ) -> Self {
+        self.provisional_order_basis = basis;
+        self.provisional_order_basis_authoritative = false;
         self
     }
 
@@ -2151,6 +2176,8 @@ impl ControllerPaneLayoutGraph {
     ) -> PaneLayoutDesired {
         let publisher = claim.publisher;
         let provisional_order_basis = claim.provisional_order_basis.clone();
+        let provisional_order_basis_authoritative =
+            claim.provisional_order_basis_authoritative;
         let editor_publication = current_pane_layout_editor_publication();
         // GH #322: a positive editor split observation propagates the set of
         // documents the editor shows; a derived publication (escalation,
@@ -2177,6 +2204,9 @@ impl ControllerPaneLayoutGraph {
                     == agent_doc_controller::pane_layout::LayoutWidthAuthority::EditorSplitObservation
             {
                 current.provenance.provisional_order_basis = None;
+                current
+                    .provenance
+                    .provisional_order_basis_authoritative = false;
             }
             self.attempt_ledger.lock().note_published(
                 current.generation,
@@ -2245,6 +2275,7 @@ impl ControllerPaneLayoutGraph {
             plane_basis,
             structure_owner,
             provisional_order_basis,
+            provisional_order_basis_authoritative,
         };
         let desired = PaneLayoutDesired {
             generation,

@@ -119,14 +119,16 @@ impl RemoteLayoutSource {
 ///
 /// Remote client collections expose membership and tab-open order, not split
 /// geometry. A cold observation is therefore `Unknown`; once the fold preserves
-/// surviving columns or replaces a document in a remembered slot, the resulting
-/// order is `Retained`.
+/// surviving columns the resulting order is `Retained`. A selection-first
+/// replacement is `Provisional`: it names the guessed slot without allowing
+/// that guess to replace the pre-guess fold basis.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteLayoutColumnOrder {
     #[default]
     Unknown,
     Retained,
+    Provisional,
 }
 
 /// The columns to publish, and why.
@@ -190,7 +192,10 @@ impl RemoteLayoutMemory {
                 || (resolution.column_order == RemoteLayoutColumnOrder::Unknown
                     && resolution.columns.len() >= 2)
         };
-        if unanchored && !resolution.columns.is_empty() {
+        if unanchored
+            && !resolution.columns.is_empty()
+            && resolution.column_order != RemoteLayoutColumnOrder::Provisional
+        {
             resolution.column_order = RemoteLayoutColumnOrder::Unknown;
         }
         let provisional_base_columns = match (resolution.source, resolution.reason.as_deref()) {
@@ -372,10 +377,15 @@ impl RemoteLayoutMemory {
                 _ if ambiguous => "ambiguous_remote_clients",
                 _ => "single_selection_within_retained_layout",
             };
+            let column_order = match reason {
+                "selected_visible_change_replaced_focus_column"
+                | "tab_switch_replaced_focus_column" => RemoteLayoutColumnOrder::Provisional,
+                _ => RemoteLayoutColumnOrder::Retained,
+            };
             return RemoteLayoutResolution {
                 columns: retained,
                 source: RemoteLayoutSource::RetainedRemoteColumns,
-                column_order: RemoteLayoutColumnOrder::Retained,
+                column_order,
                 reason: Some(reason.to_string()),
             };
         }
@@ -792,6 +802,10 @@ mod tests {
         assert_eq!(
             resolution.reason.as_deref(),
             Some("selected_visible_change_replaced_focus_column")
+        );
+        assert_eq!(
+            resolution.column_order,
+            RemoteLayoutColumnOrder::Provisional
         );
 
         // GH #250: selection arrives before Remote Dev's visible set. The

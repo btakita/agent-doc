@@ -134,10 +134,13 @@ impl SurfaceColumn {
 /// `Unknown` is membership without geometry (JetBrains Remote Dev, whose
 /// backend has no client split structure, or a local layout whose windows
 /// could not be measured); `Retained` is an order an upstream fold kept from
-/// its own memory, never measured. The controller derives the tmux order for
-/// both from the layout it already retains, exactly as for a `--col` route
-/// publication with the same label. The serde default is `Editor`, so a
-/// plugin that predates the field keeps its previous meaning on the wire.
+/// its own memory, never measured; `Provisional` is an upstream slot-replacement
+/// guess whose membership applies while its pre-guess fold basis and that
+/// basis's original authority status are retained. The controller derives the
+/// tmux order for all non-editor states from the layout it already retains,
+/// exactly as for a `--col` route publication with the same label. The serde
+/// default is `Editor`, so a plugin that predates the field keeps its previous
+/// meaning on the wire.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceColumnOrder {
@@ -145,6 +148,7 @@ pub enum SurfaceColumnOrder {
     Editor,
     Unknown,
     Retained,
+    Provisional,
 }
 
 impl SurfaceColumnOrder {
@@ -153,6 +157,7 @@ impl SurfaceColumnOrder {
             Self::Editor => "editor",
             Self::Unknown => "unknown",
             Self::Retained => "retained",
+            Self::Provisional => "provisional",
         }
     }
 

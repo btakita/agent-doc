@@ -691,10 +691,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   republishes the settled surface without invoking tmux directly.
 - A Remote Dev selection can arrive before its visible-editor membership update. A
   width-preserving focused-column replacement from that selection is provisional:
-  the fold retains the pre-replacement columns, and the next structural visible set
+  the fold publishes `column_order=provisional`, the controller retains the
+  pre-replacement columns as order provenance, and the next structural visible set
   uses those columns as its ordering base. Thus the later membership evidence assigns
   the selected file to the split it actually replaced instead of preserving the
-  provisional side (GH #250). This ancestry rule also applies when the retained base
+  provisional side (GH #250, GH #343). This ancestry rule also applies when the
+  retained base
   has only one column: after a provisional `[a] -> [c]` focus replacement, a repeated
   structural `visible=[a,c] selected=[c]` observation resolves to `[a,c]`, then clears
   the provisional base (GH #253).
@@ -857,11 +859,15 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   and when `P` had two or more columns a surviving last column stays rightmost, so extra added
   documents are inserted just before that surviving rightmost column (otherwise appended) and
   shrinking drops the vacated slots no added document filled; added documents keep their
-  visible order among themselves. With any survivor the result is memory-derived and published
+  visible order among themselves. A structural fold with any survivor is memory-derived and
+  published
   as `column_order=retained`, never `editor`; with none it is the visible order as
   `column_order=unknown`. Example: `[a | b]` → `[c | b]` → visible `{d,b,e}` → `[d | e | b]`
   → visible `{g,b}` → `[g | b]`, so a later `{a,b}` publishes `[a | b]`, not `[b | a]`. A
   retained publication is already resolved and passes through controller ordering unchanged.
+  A selection-first focused-column replacement is instead `column_order=provisional`:
+  the guessed membership applies immediately, but its placement cannot become the basis for
+  the next structural fold (GH #343).
 - A focus-only structural escalation may guess which retained slot a newly focused document
   replaced, but that guess is provisional order, never geometry authority (GH #302). The
   controller retains the pre-escalation positive order as provenance. If the next structural
@@ -870,6 +876,15 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   becomes the new authority. The read-only retained-columns endpoint used to seed or re-anchor
   Remote Dev memory likewise returns the positive basis while a guess is outstanding, so an IDE
   restart cannot anchor the guessed order and make a reversal self-perpetuating.
+- A Remote Dev fold's `provisional` publication has the same controller contract as a
+  focus-only escalation guess (GH #343). The controller slot-folds its membership against
+  the current desired layout, stores the pre-guess order basis in the desired generation's
+  provenance, and preserves whether that basis had positive authority. The editor's next
+  structural fold uses the same ancestry; a controller-side `unknown` fold also uses the
+  stored basis, then clears it. The read-only authority endpoint returns that basis only when
+  it was already positive, so a cold `unknown` order never anchors itself (GH #332).
+  Thus `[a | b]` → provisional `[c | b]` → structural `[a | c]` converges to `[a | c]`,
+  never the reversed `[c | a]` produced by treating the provisional generation as authority.
 - Explicit layout publications (`Sync Tmux Pane`, claim, resync, and the Run Agent Doc route's
   `--col` list) name their order source as `column_order` (GH #112). By surface reference the
   label is the surface's own `column_order`, carried by the controller. Only locally detected
@@ -885,13 +900,15 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   does not become order authority and cannot anchor a restarted editor fold; its provenance stays
   `unknown` until an order-bearing editor/manual publication arrives (GH #332).
   `pane_layout_desired_published` and every
-  `pane_layout_projection` line record `caller_kind` and `column_order=editor|retained|unknown`.
+  `pane_layout_projection` line record `caller_kind` and
+  `column_order=editor|retained|unknown|provisional`.
 - The automatic editor surface is state, and it names its column-order provenance the same way
   (GH #320; the rule is `specs/13-state-backbone.md`, "State Propagation, Not Effect Inference").
   The surface payload's `column_order` is `editor` only for local windows laid out at distinct
   origins (and for the JetBrains Client's measured windows forwarded by the 262/263 backend,
-  below); windows that share an origin (never measured) and every Remote Dev fold result publish
-  `unknown`, or `retained` when the fold memory is anchored. The controller carries that label
+  below); windows that share an origin (never measured) publish `unknown`. Remote Dev folds
+  publish `unknown`, `retained` when anchored, or `provisional` for a selection-first slot
+  replacement. The controller carries that label
   from `SurfaceIntent::Sync` (and a focus escalation over the surface's columns) into the desired
   layout, so a membership order is ordered against the retained layout and never applied as
   geometry; a payload without the field reads as `editor`. Without geometry the surface signature

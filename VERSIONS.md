@@ -16,6 +16,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   or consume no longer appends a false “claim remains active” instruction.
 - **Subagent operator requests have unique IDs.** Multiple questions in one document use distinct markers, legacy
   single-marker documents remain readable, and closeout rejects duplicate IDs before response capture.
+- **Post-commit Codex steering yields to the reactive supervisor instead of surfacing as “Blocked by hook.”** A
+  drain-ready supervisor consumes fresh work through its existing idle wake; missing or stale supervisors retain
+  the bounded successor-cycle fallback.
 
 ## 0.35.536
 

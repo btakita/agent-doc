@@ -2008,6 +2008,26 @@ fn active_session_prompt_requires_writeback(
     state: &SessionState,
     input: &StopInput,
 ) -> Result<Option<StopResponse>> {
+    active_session_prompt_requires_writeback_with(
+        file,
+        roots,
+        loaded_root,
+        state,
+        input,
+        agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc,
+    )
+}
+
+/// [`active_session_prompt_requires_writeback`] with the supervisor readiness
+/// probe injected.
+fn active_session_prompt_requires_writeback_with(
+    file: &Path,
+    roots: &[PathBuf],
+    loaded_root: &Path,
+    state: &SessionState,
+    input: &StopInput,
+    drain_readiness: impl FnOnce(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
+) -> Result<Option<StopResponse>> {
     let prompt = match active_session_prompt_or_queue_head(file)? {
         Some(prompt) => prompt,
         None => {
@@ -2029,13 +2049,44 @@ fn active_session_prompt_requires_writeback(
     // observe a queue item that appeared after that cycle while Codex still
     // supplies the predecessor turn's closing chat summary. Textual novelty is
     // not proof that the summary answers the new item: the committed cycle's
-    // prompt binding is the durable ownership fact. Open an empty successor so
-    // this Stop hands the new work back in-pane and only the recursive Stop can
-    // capture the continuation's actual answer.
+    // prompt binding is the durable ownership fact. A ready supervisor already
+    // owns a reactive idle steering wake for this document, so let Codex finish
+    // this turn without emitting its necessarily `Blocked by hook` Stop wire
+    // response. Crucially, do this BEFORE opening the successor: its baseline
+    // would otherwise absorb the new prompt and hide it from the steering wake.
+    // Without a proven receiver, retain the bounded in-pane successor fallback
+    // so the prompt cannot be stranded.
     if !input.stop_hook_active
         && let Some(previous_cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file)
         && committed_cycle_settled_prompt_debt(file, state)?
     {
+        let readiness = drain_readiness(file);
+        if let agent_doc_controller::status::SupervisorDrainReadiness::Ready { supervisor_pid } =
+            readiness
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_post_commit_prompt_supervisor_yield previous_cycle_id={} supervisor_pid={} prompt_bytes={} prompt_sha256={} successor_opened=false capture_skipped=true action=allow_exit source=settled_prompt_debt (#steeringwake)",
+                    previous_cycle_id,
+                    supervisor_pid,
+                    prompt.len(),
+                    agent_doc_hash::content_hash(&prompt),
+                ),
+            );
+            return Ok(Some(StopResponse::AllowExit));
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_post_commit_prompt_supervisor_yield_unavailable previous_cycle_id={} supervisor_drain_readiness={} supervisor_pid={} action=open_successor source=settled_prompt_debt (#steeringwake)",
+                previous_cycle_id,
+                readiness.reason(),
+                readiness
+                    .supervisor_pid()
+                    .map_or_else(|| "-".to_string(), |pid| pid.to_string()),
+            ),
+        );
         let current = current_document_content(file, "codex_stop_post_commit_prompt_successor")?;
         let head = agent_doc_git_io::revision::show_head(file)?.ok_or_else(|| {
             anyhow::anyhow!(
@@ -9069,7 +9120,7 @@ Reviewed the gated items.\n\
         );
         let roots = tracking_roots(dir.path(), Some(&doc));
         let stale_summary = "No—the PR title does not generally trigger it.";
-        let response = active_session_prompt_requires_writeback(
+        let response = active_session_prompt_requires_writeback_with(
             &doc,
             &roots,
             &loaded_root,
@@ -9081,6 +9132,7 @@ Reviewed the gated items.\n\
                 last_assistant_message: stale_summary.to_string(),
                 stop_hook_active: false,
             },
+            |_| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor,
         )
         .unwrap()
         .expect("new queue work must block the first Stop");
@@ -9110,8 +9162,103 @@ Reviewed the gated items.\n\
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops.contains("codex_stop_post_commit_prompt_successor_opened")
+                && ops.contains("codex_stop_post_commit_prompt_supervisor_yield_unavailable")
+                && ops.contains("supervisor_drain_readiness=no_live_supervisor")
                 && ops.contains("capture_skipped=true")
                 && !ops.contains("codex_stop_capture_saved"),
+            "{ops}"
+        );
+    }
+
+    /// A ready supervisor already watches the settled steering set reactively.
+    /// Yield before opening a successor so the new prompt remains visible to
+    /// that wake and Codex never has to render its continuation as
+    /// `Blocked by hook` (`#postcommitpromptownership`, `#steeringwake`).
+    #[test]
+    fn stop_yields_fresh_post_commit_prompt_to_ready_supervisor() {
+        let dir = setup_project();
+        let doc = write_manual_queue_doc(&dir, &[]);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        let predecessor =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+
+        let fresh_prompt = "I merged https://github.com/haiven-dev/haiven-api/pull/740 into main. Will the Release Please run?";
+        let with_new_work = original.replace(
+            "<!-- /agent:exchange -->",
+            &format!(
+                "\n<!-- agent:boundary:committed -->\n❯ {fresh_prompt}\n<!-- /agent:exchange -->"
+            ),
+        );
+        fs::write(&doc, &with_new_work).unwrap();
+        invalidate_stop_document_cache();
+
+        let (loaded_root, tracked) = load_bound_session_for_stop(dir.path(), "codex-session")
+            .unwrap()
+            .expect("bound session");
+        let roots = tracking_roots(dir.path(), Some(&doc));
+        let response = active_session_prompt_requires_writeback_with(
+            &doc,
+            &roots,
+            &loaded_root,
+            &tracked,
+            &StopInput {
+                session_id: "codex-session".to_string(),
+                turn_id: "turn-1".to_string(),
+                cwd: dir.path().display().to_string(),
+                last_assistant_message: "The predecessor is complete.".to_string(),
+                stop_hook_active: false,
+            },
+            |_| agent_doc_controller::status::SupervisorDrainReadiness::Ready {
+                supervisor_pid: 42,
+            },
+        )
+        .unwrap()
+        .expect("ready supervisor must own the wake");
+
+        assert_eq!(response, StopResponse::AllowExit);
+        let still_predecessor = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("committed predecessor");
+        assert_eq!(still_predecessor.cycle_id, predecessor.cycle_id);
+        assert_eq!(still_predecessor.phase.as_str(), "committed");
+        assert!(still_predecessor.capture_id.is_some());
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains(fresh_prompt));
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_post_commit_prompt_supervisor_yield")
+                && ops.contains("supervisor_pid=42")
+                && ops.contains("successor_opened=false")
+                && ops.contains("action=allow_exit")
+                && !ops.contains("codex_stop_post_commit_prompt_successor_opened"),
             "{ops}"
         );
     }

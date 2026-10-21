@@ -1257,12 +1257,17 @@ internal data class CapturedSurface(
             anchorWindow?.owner?.let { owner ->
                 editorWindows.filter { it.owner === owner }
             } ?: editorWindows.toList()
-        val allOpenSessionFiles = manager.openFiles.filter(AgentDocSessionFiles::isSessionDocument)
-        val allSessionDocumentPaths = allOpenSessionFiles.map { it.path }.toSet()
+        val backendOpenSessionFiles = manager.openFiles.filter(AgentDocSessionFiles::isSessionDocument)
         // GH #177: Remote Dev client evidence is captured with the backend windows; the derivation
         // decides which of the two owns the layout.
-        val remoteLayoutCandidate =
-            LayoutDetector.snapshotRemoteLayout(project, allSessionDocumentPaths)
+        // GH #334: classify the client-scoped files through ClientFileEditorManager. Restricting
+        // this read to the backend manager's open set erased the whole Remote Dev surface.
+        val remoteLayoutCandidate = LayoutDetector.snapshotRemoteLayout(project)
+        val allOpenSessionDocumentPaths =
+            (backendOpenSessionFiles.map { it.path } +
+                LayoutDetector.remoteSessionDocumentPaths(remoteLayoutCandidate))
+                .distinct()
+        val allSessionDocumentPaths = allOpenSessionDocumentPaths.toSet()
         val windows =
             try {
                 LayoutDetector.captureEditorWindows(project, surfaceWindows, sessionDocumentPaths = null)
@@ -1297,7 +1302,7 @@ internal data class CapturedSurface(
                 windowGeometryUnavailable = windows.geometryUnavailable,
                 history = windows.evidence.history,
                 managerSelected = manager.selectedFiles.map { it.path },
-                openSessionDocuments = allOpenSessionFiles.map { it.path },
+                openSessionDocuments = allOpenSessionDocumentPaths,
                 remote =
                     SurfaceProjection.RemoteSurfaceEvidence(
                         projectRoot = remoteLayoutCandidate.projectRoot,

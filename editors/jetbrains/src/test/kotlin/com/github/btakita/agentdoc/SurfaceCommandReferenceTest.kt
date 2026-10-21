@@ -245,9 +245,16 @@ class SurfaceCommandReferenceTest {
         assertTrue(byReference.contains("surfaceReference = reference"))
         assertTrue(byReference.contains("columnsJson = \"[]\""))
         assertFalse(byReference.contains("detectEditorLayout"))
+        // GH #334: the publication fallback must preserve the first pass's client-scoped focus.
+        // Re-entering syncLayout under the backend ClientId loses the Remote Dev selection.
+        assertFalse(byReference.contains("syncLayout("))
+        assertTrue(byReference.contains("syncLayoutBySnapshot("))
+        assertTrue(byReference.contains("request.copy("))
+        assertTrue(byReference.contains("terminalPrepared = true"))
         assertTrue(byReference.contains("allowSurfaceReference = false"))
+        assertTrue(byReference.contains("request.visibleMdFiles.toSet()"))
 
-        val sync = source.substringAfter("fun syncLayout(").substringBefore("private class SyncRequest(")
+        val sync = source.substringAfter("fun syncLayout(").substringBefore("private data class SyncRequest(")
         val capture = sync.indexOf("captureCommandSurface(project, focusedVFile)")
         assertTrue(
             "the reference path is chosen before the plugin reads its own split",

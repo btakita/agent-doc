@@ -71,6 +71,28 @@ class LayoutDetectorTest {
     }
 
     @Test
+    fun `GH 334 remote client session documents survive an empty backend manager`() {
+        val snapshot =
+            LayoutDetector.RemoteLayoutSnapshot(
+                projectRoot = "/repo",
+                clients =
+                    listOf(
+                        LayoutDetector.RemoteClientSessionEditors(
+                            visible = listOf("tasks/c.md", "tasks/a.md"),
+                            selected = listOf("tasks/a.md"),
+                            open = listOf("tasks/a.md", "tasks/c.md"),
+                        ),
+                    ),
+                focusedSessionFiles = emptyList(),
+            )
+
+        assertEquals(
+            listOf("/repo/tasks/a.md", "/repo/tasks/c.md"),
+            LayoutDetector.remoteSessionDocumentPaths(snapshot),
+        )
+    }
+
+    @Test
     fun `buildColumnsFromSnapshots keeps screen order when focused window is listed first`() {
         val columns = LayoutDetector.buildColumnsFromSnapshots(
             listOf(

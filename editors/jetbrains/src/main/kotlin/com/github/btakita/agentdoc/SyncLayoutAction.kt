@@ -472,7 +472,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
         }
 
     /** What one Sync Tmux Layout read from the editor on the EDT. */
-    private class SyncRequest(
+    private data class SyncRequest(
         val project: com.intellij.openapi.project.Project,
         val notify: Boolean,
         val noAutostart: Boolean,
@@ -646,13 +646,19 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         )
                         ApplicationManager.getApplication().invokeLater {
                             if (!project.isDisposed) {
-                                syncLayout(
-                                    project = project,
-                                    notify = request.notify,
-                                    noAutostart = request.noAutostart,
-                                    callerKind = request.callerKind,
-                                    terminalPrepared = true,
-                                    allowSurfaceReference = false,
+                                // GH #334: keep the first pass's client-scoped focus. Re-entering
+                                // syncLayout here runs under the backend ClientId in Remote Dev and
+                                // can no longer see the selected ClientFileEditorManager document.
+                                val layoutEvidence = LayoutDetector.captureEditorLayoutEvidence(
+                                    project,
+                                    request.visibleMdFiles.toSet(),
+                                )
+                                syncLayoutBySnapshot(
+                                    request.copy(
+                                        terminalPrepared = true,
+                                        allowSurfaceReference = false,
+                                    ),
+                                    layoutEvidence,
                                 )
                             }
                         }
@@ -1211,6 +1217,29 @@ object LayoutDetector {
             focusedSessionFiles = focusedSessionFiles,
         )
     }
+
+    /**
+     * GH #334: Remote Dev client files do not necessarily appear in the backend-local
+     * FileEditorManager. The client managers have already classified these paths as session
+     * documents, so carry their absolute paths into the automatic surface projection directly.
+     */
+    internal fun remoteSessionDocumentPaths(snapshot: RemoteLayoutSnapshot): List<String> =
+        snapshot.clients
+            .asSequence()
+            .flatMap { client ->
+                sequenceOf(client.open.asSequence(), client.visible.asSequence(), client.selected.asSequence())
+                    .flatten()
+            }
+            .filter(String::isNotBlank)
+            .map { path ->
+                val file = File(path)
+                (if (file.isAbsolute) file else File(snapshot.projectRoot, path))
+                    .toPath()
+                    .normalize()
+                    .toString()
+            }
+            .distinct()
+            .toList()
 
     /** Remote client-session evidence outranks incidental backend-local editor windows (GH #154). */
     internal fun shouldUseRemoteClientLayout(

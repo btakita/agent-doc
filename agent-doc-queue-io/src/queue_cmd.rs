@@ -86,6 +86,8 @@ pub struct ClaimRuntimeProjection {
     pub changed: bool,
 }
 
+const CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS: usize = 8;
+
 static QUEUE_INVARIANT_LOG_DEDUPE: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
@@ -207,9 +209,9 @@ pub fn derive_claim_runtime_projection(
         .map(|(head, _)| agent_doc_document::queue_projection::strip_priority_markers(head))
         .collect::<Vec<_>>();
     Ok(ClaimRuntimeProjection {
+        changed: target_content != current,
         target_content,
         persisted_heads,
-        changed: projection.is_some(),
     })
 }
 
@@ -270,21 +272,66 @@ pub fn project_claim_runtime_state_with_effects(
     file: &Path,
     cleared_item: Option<&str>,
 ) -> Result<bool> {
-    let current = effects.current_document_content(file, "queue_claim_runtime_projection")?;
-    // A completion cell is durable attempt-scoped evidence. Reconcile it into
-    // the ledger before deriving markers, including after process restart.
-    crate::queue_claim::reconcile_completion_evidence(file, &current)?;
-    let projection = derive_claim_runtime_projection(file, &current, cleared_item)?;
-    if projection.changed {
-        effects.converge_document_or_disk(
+    let mut wrote_successor = false;
+    for attempt in 1..=CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS {
+        // Start every attempt from the live authority. This first absorbs any
+        // operator/editor normalization that raced the ledger transition; the
+        // marker overlay below is then rederived by stable work identity.
+        let current = effects.current_document_content(file, "queue_claim_runtime_projection")?;
+        // A completion cell is durable attempt-scoped evidence. Reconcile it
+        // into the ledger before deriving markers, including after restart.
+        crate::queue_claim::reconcile_completion_evidence(file, &current)?;
+        let projection = derive_claim_runtime_projection(file, &current, cleared_item)?;
+        if projection.changed {
+            effects.converge_document_or_disk(
+                file,
+                &projection.target_content,
+                &current,
+                "queue_claim_runtime_projection",
+            )?;
+            wrote_successor = true;
+        }
+
+        // Convergence may legitimately preserve a concurrent editor cell over
+        // this cosmetic successor. Success is therefore a property of a fresh
+        // authoritative cut, not of the write call returning `Ok(())`.
+        let authoritative =
+            effects.current_document_content(file, "queue_claim_runtime_projection_verify")?;
+        let settled = derive_claim_runtime_projection(file, &authoritative, cleared_item)?;
+        if !settled.changed {
+            let accepted = ClaimRuntimeProjection {
+                target_content: authoritative,
+                persisted_heads: settled.persisted_heads,
+                changed: wrote_successor,
+            };
+            record_claim_runtime_projection(file, &accepted, cleared_item)?;
+            return Ok(wrote_successor);
+        }
+
+        agent_doc_ops_log_io::log_op(
             file,
-            &projection.target_content,
-            &current,
-            "queue_claim_runtime_projection",
-        )?;
+            &format!(
+                "queue_claim_runtime_projection_retry attempt={attempt} max={} (#queueclaimprojectionrace)",
+                CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS
+            ),
+        );
     }
-    record_claim_runtime_projection(file, &projection, cleared_item)?;
-    Ok(projection.changed)
+
+    bail!(
+        "queue claim runtime projection did not converge after {} authoritative retries; the claim ledger transition is durable but its live queue marker is not yet verified",
+        CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS
+    )
+}
+
+/// Read claim reports from the same live document authority used by claim
+/// mutation and marker projection. Disk is only the detached-document fallback
+/// supplied by the effect adapter.
+pub fn claim_reports_with_effects(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+) -> Result<Vec<crate::queue_claim::ClaimReport>> {
+    let current = effects.current_document_content(file, "queue_claims")?;
+    crate::queue_claim::claim_reports_for_content(file, &current)
 }
 
 /// Explicitly strike the leading `count` free-text queue head(s) — the agent
@@ -549,6 +596,8 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier, Mutex};
 
     #[test]
     fn orphaned_completion_never_regresses_to_bare() {
@@ -703,6 +752,87 @@ mod tests {
                 remaining: 0,
                 drained: true,
             }))
+        }
+
+        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+            Ok(0)
+        }
+    }
+
+    struct RacingClaimEffects {
+        current: Mutex<String>,
+        discarded_convergences: AtomicUsize,
+        first_convergence_round: Barrier,
+    }
+
+    impl RacingClaimEffects {
+        fn new(current: String) -> Self {
+            Self {
+                current: Mutex::new(current),
+                discarded_convergences: AtomicUsize::new(0),
+                first_convergence_round: Barrier::new(2),
+            }
+        }
+
+        fn current(&self) -> String {
+            self.current.lock().unwrap().clone()
+        }
+    }
+
+    impl QueueCommandEffects for RacingClaimEffects {
+        fn current_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+            Ok(self.current())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            let ordinal = self.discarded_convergences.fetch_add(1, Ordering::SeqCst);
+            if ordinal < 2 {
+                // Model two concurrent cell merges choosing the editor's
+                // normalized text instead of either marker successor.
+                self.first_convergence_round.wait();
+                return Ok(());
+            }
+            *self.current.lock().unwrap() = target_content.to_string();
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+
+        fn consume_free_text_queue_prompts_force_disk(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn consume_free_text_queue_prompts_with_outcome(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn acknowledge_paused_free_text_queue_head(
+            &self,
+            _file: &Path,
+            _expected_head: &str,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
         }
 
         fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
@@ -1010,6 +1140,57 @@ mod tests {
                 && !released_snapshot.contains("- 🟡 dispatched worker work"),
             "{released_snapshot}"
         );
+    }
+
+    #[test]
+    fn concurrent_claim_start_projection_retries_editor_normalization_and_lists_both_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc =
+            write_claim_projection_doc(dir.path(), "- free text worker\n- [#normalized-worker]\n");
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        let editor_normalized =
+            disk.replace("- [#normalized-worker]\n", "- do [#normalized-worker]\n");
+        let effects = Arc::new(RacingClaimEffects::new(editor_normalized));
+        let claimed = Arc::new(Barrier::new(2));
+        let started = Arc::new(Barrier::new(2));
+
+        let attempts = [
+            ("free text worker", "subagent:free", "worker:free"),
+            (
+                "[#normalized-worker]",
+                "subagent:normalized",
+                "worker:normalized",
+            ),
+        ];
+        let mut workers = Vec::new();
+        for (item, owner, worker_id) in attempts {
+            let doc = doc.clone();
+            let effects = Arc::clone(&effects);
+            let claimed = Arc::clone(&claimed);
+            let started = Arc::clone(&started);
+            workers.push(std::thread::spawn(move || {
+                crate::queue_claim::claim_with_session(&doc, item, owner, 600, None).unwrap();
+                claimed.wait();
+                crate::queue_claim::start_attempt(&doc, item, owner, worker_id, 600, 1).unwrap();
+                started.wait();
+                project_claim_runtime_state_with_effects(effects.as_ref(), &doc, None).unwrap();
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        let live = effects.current();
+        assert!(live.contains("- 🚧 free text worker\n"), "{live}");
+        assert!(live.contains("- 🚧 do [#normalized-worker]\n"), "{live}");
+        assert_eq!(live.matches("free text worker").count(), 1, "{live}");
+        assert_eq!(live.matches("normalized-worker").count(), 1, "{live}");
+
+        let reports = claim_reports_with_effects(effects.as_ref(), &doc).unwrap();
+        assert_eq!(reports.len(), 2, "{reports:#?}");
+        assert!(reports.iter().all(|report| {
+            report.claim.state == agent_doc_queue::queue_claim::QueueClaimState::Running
+        }));
     }
 
     #[test]

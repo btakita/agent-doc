@@ -3368,7 +3368,7 @@ pub fn pane_layout_retained_columns_existing(project_root: &Path) -> Result<Vec<
 fn pane_layout_order_authority(runtime: &ControllerRuntime) -> Vec<String> {
     runtime
         .pane_layout_desired()
-        .map(|desired| desired.order_authority_columns().to_vec())
+        .and_then(|desired| desired.order_authority_columns().map(<[_]>::to_vec))
         .unwrap_or_default()
 }
 
@@ -27968,11 +27968,8 @@ fn focus_escalation_columns(
     let (mut retained, mut retained_focus, mut provisional_order_basis) = retained_desired
         .map(|desired| {
             let focus = runtime.pane_layout_graph().latest_focus(&desired);
-            (
-                desired.invocation.columns,
-                focus,
-                desired.provenance.provisional_order_basis,
-            )
+            let order_authority = desired.order_authority_columns().map(<[_]>::to_vec);
+            (desired.invocation.columns, focus, order_authority)
         })
         .unwrap_or_default();
     retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &retained);
@@ -28013,7 +28010,7 @@ fn focus_escalation_columns(
             return Err("no_main_layout_eligible_columns");
         }
         retained_focus = None;
-        provisional_order_basis = None;
+        provisional_order_basis = Some(retained.clone());
         basis_source = "live_tmux_layout";
     }
     if retained
@@ -28056,7 +28053,7 @@ fn focus_escalation_columns(
         replaced,
         choice: Some(slot.choice),
         basis_generation,
-        provisional_order_basis: Some(provisional_order_basis.unwrap_or(retained)),
+        provisional_order_basis,
     })
 }
 
@@ -35616,6 +35613,11 @@ fn publish_pane_layout_desired_invocation_in_lane(
     // Dev `unknown`) lists documents focus-first, so its order is resolved
     // against the retained desired layout instead of being applied verbatim.
     let retained = graph.desired();
+    let incoming_order = invocation.column_order;
+    let retained_order_authoritative = retained
+        .as_ref()
+        .and_then(PaneLayoutDesired::order_authority_columns)
+        .is_some();
     let order_basis = retained
         .as_ref()
         .map(|desired| {
@@ -35623,17 +35625,27 @@ fn publish_pane_layout_desired_invocation_in_lane(
                 // GH #302/#311: an escalation's slot placement is provisional,
                 // even when later escalations have replaced every document in
                 // the last positively observed basis.
-                desired.order_authority_columns()
+                desired.order_fold_basis_columns()
             } else {
                 desired.invocation.columns.as_slice()
             }
         })
         .unwrap_or_default();
-    let ordered = agent_doc_tmux::order_layout_columns(
+    let mut ordered = agent_doc_tmux::order_layout_columns(
         order_basis,
         &desired_columns,
         invocation.column_order,
     );
+    // GH #332: resolving an unknown publication against a retained *guess*
+    // may stabilize its order, but it cannot manufacture positive order
+    // authority. Keep the generation unknown until it folds against a basis
+    // established by editor geometry, explicit sync, or another order-bearing
+    // publisher. The editor-surface anchor endpoint therefore returns no
+    // columns for the cold no-survivor chain.
+    if incoming_order == agent_doc_tmux::LayoutColumnOrder::Unknown && !retained_order_authoritative
+    {
+        ordered.order = agent_doc_tmux::LayoutColumnOrder::Unknown;
+    }
     // GH #136 follow-up (a): every publisher is width-bounded against what the
     // last layout pass accounted for — a derived publication (escalation,
     // `ensure` route, recycle republish) never widens it; a positive editor
@@ -40712,11 +40724,13 @@ mod tests {
         path.canonicalize().unwrap().display().to_string()
     }
 
-    /// GH #112: consecutive converged two-column projections for the same two
+    /// GH #112/#332: consecutive converged two-column projections for the same two
     /// documents alternated their column order, placing the focused document
     /// first, because the publisher's order was focus-first and nothing
     /// upstream of the order-preserving stages questioned it. An `unknown`
     /// order must resolve to the retained one, so focus toggles move focus only.
+    /// When that retained basis began as a cold no-survivor guess, resolution
+    /// stays `unknown`: a stable guess is not positive order authority.
     #[test]
     fn unknown_order_publications_keep_the_retained_column_order_across_focus_toggles() {
         let dir = tempfile::tempdir().unwrap();
@@ -40752,7 +40766,11 @@ mod tests {
                 .unwrap()
                 .invocation
                 .column_order,
-            agent_doc_tmux::LayoutColumnOrder::Retained
+            agent_doc_tmux::LayoutColumnOrder::Unknown
+        );
+        assert!(
+            pane_layout_order_authority(runtime.as_ref()).is_empty(),
+            "a cold no-survivor guess must not be exported as Remote Dev anchor authority"
         );
         assert_eq!(
             load_layout_state(&bootstrap.project_root).unwrap_or_default(),
@@ -40774,20 +40792,37 @@ mod tests {
         assert!(
             ops_log.contains(&format!(
                 "pane_layout_desired_published generation={} caller_kind=manual plane_version=none \
-                 column_order=retained reordered=true incoming={:?} columns={:?}",
+                 column_order=unknown reordered=true incoming={:?} columns={:?}",
                 generations[1],
                 [&mr, &ad],
                 [&ad, &mr]
             )),
-            "the publisher and both the received and resolved order must be logged: {ops_log}"
+            "the publisher and both the received and stable-but-unknown order must be logged: {ops_log}"
         );
+
+        let mut measured = plugin_unknown_order_publication(&[&mr, &ad], &mr);
+        measured.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        let (measured, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            measured,
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(
+            measured.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+        assert_eq!(pane_layout_order_authority(runtime.as_ref()), vec![mr, ad]);
     }
 
     /// GH #112: a focus escalation that republishes a `retained`-order layout
     /// keeps that label, so the unchanged layout coalesces rather than minting
     /// a new generation per tab switch.
     #[test]
-    fn a_retained_layout_escalation_coalesces_but_outside_window_mints_an_effect() {
+    fn an_unanchored_layout_escalation_coalesces_but_outside_window_mints_an_effect() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -40823,7 +40858,7 @@ mod tests {
         assert_eq!(first.invocation.columns, vec![ad.clone(), mr.clone()]);
         assert_eq!(
             first.invocation.column_order,
-            agent_doc_tmux::LayoutColumnOrder::Retained
+            agent_doc_tmux::LayoutColumnOrder::Unknown
         );
         escalate_focus_to_structural_layout(
             &bootstrap,
@@ -40835,7 +40870,7 @@ mod tests {
         assert_eq!(
             runtime.pane_layout_desired().unwrap().generation,
             first.generation,
-            "an identical retained escalation must coalesce"
+            "an identical unanchored escalation must coalesce"
         );
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
@@ -40929,8 +40964,10 @@ mod tests {
         assert_eq!(desired.invocation.columns, vec![c.clone(), b.clone()]);
         assert_eq!(
             desired.invocation.column_order,
-            agent_doc_tmux::LayoutColumnOrder::Retained
+            agent_doc_tmux::LayoutColumnOrder::Unknown,
+            "slot placement is stable but remains a no-survivor-derived guess (GH #332)"
         );
+        assert!(pane_layout_order_authority(runtime.as_ref()).is_empty());
     }
 
     /// GH #320, state propagation: tmux order is a pure derivation of the

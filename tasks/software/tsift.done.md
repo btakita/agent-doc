@@ -577,3 +577,4 @@
   • Failed (exit 1) tsift --envelope symbol-read parse_args --file scripts/check-godot.py --budget normal
   └ Error: no indexed symbol matched "parse_args" in scripts/check-godot.py; searched: <root>
   ```
+- 2026-10-21 [#databasefiledecisions] Could we have a database and/or file of decisions to provide context to the agent? Would the decision database be a good feature for tsift or a separate tool/library?

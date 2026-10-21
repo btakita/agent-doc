@@ -58,14 +58,37 @@ Released `v0.1.106` from `8dfa9c5`; [Issue #29](https://github.com/btakita/tsift
 - Replaced mtime-based Markdown freshness with content-hashed watermarks, captured the source snapshot before traversal reads, and made concurrent source drift nonfatal for refresh while preserving fail-closed reads.
 - Published the [GitHub release](https://github.com/btakita/tsift/releases/tag/v0.1.106) with six binary/checksum assets, all workspace crates to crates.io, and `opencode-tsift@0.1.106` to npm.
 - Verified the full `make check` suite, a local `tsift 0.1.106` install, main CI, the successful [release workflow](https://github.com/btakita/tsift/actions/runs/39544595646), registry visibility, release assets, and issue closure.
+
+### Re: do [#databasefiledecisions] — gpt-5 · 2026-10-21T02:35-04:00
+
+Yes. Decision knowledge should be a first-class **tsift feature**, not a separate user-facing tool. The clean design is a dual representation:
+
+- **Version-controlled Markdown/ADR files are authoritative.** They are reviewable, mergeable, portable, and readable without tsift.
+- **`.tsift/memory.db` and `.tsift/graph.db` are derived retrieval indexes.** They provide lexical/semantic lookup, code-symbol anchoring, relationships, recency, and bounded context injection, but should not be the only copy of a durable project decision.
+
+This is already the direction of the codebase. `tsift-memory` has a SQLite memory-event store; the shared graph supports authored `finding`, `decision`, and `note` nodes anchored to stable symbol handles; and the CLI already exposes `tsift memory finding-add --kind decision`, `tsift memory findings --kind decision`, and `tsift graph-db ... related`. A separate product would duplicate storage, provenance, graph linkage, and retrieval machinery that tsift already owns.
+
+The missing layer is a durable decision contract and file importer. A useful first version would:
+
+1. Index a conventional repository path such as `decisions/**/*.md` (and optionally existing ADR directories).
+2. Give every decision a stable ID, status (`proposed`, `accepted`, `superseded`, `rejected`), statement, rationale, consequences, code/source anchors, provenance, and optional `supersedes` links.
+3. Project those records into the shared graph with content hashes, making the projection rebuildable from files.
+4. Let `context-pack`, search, and `graph-db related` retrieve only the relevant accepted decisions within a token budget.
+5. Keep transient session observations in `memory.db`; promote them to an authoritative decision file only when they become durable project policy.
+
+A reusable internal crate such as `tsift-decisions` could be worthwhile once parsing and lifecycle rules grow, but it should remain behind the tsift CLI/API. A genuinely separate service is justified only for organization-wide approval workflows, permissions, or cross-repository governance; tsift can ingest or federate those records rather than owning that workflow.
+
+So the recommendation is: **file as source of truth, tsift database as projection, tsift as the product boundary**.
+
+Evidence: no repository paths changed because this cycle was classified as a design response. I verified the current boundary with `tsift status`, bounded tsift searches/source reads, `tsift memory findings --help`, `tsift memory finding-add --help`, and `tsift memory status . --json`. Confidence is high; no escalation is needed.
 <!-- agent:boundary:bf6d00d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#databasefiledecisions]~~
 - #gh-fix https://github.com/btakita/tsift/issues/29
-- ~~release + publish: include Issue #29~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

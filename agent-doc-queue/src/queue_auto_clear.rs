@@ -5,9 +5,12 @@
 //! the next head is dispatched, the supervisor resets the harness context and
 //! then dispatches the next head to that fresh context.
 //!
-//! `<!-- agent:queue disable-auto-clear -->` turns this off; the queue then
-//! drains in the same context and only an explicit operator Clear resets the
-//! session.
+//! `clear` is the positive queue-marker spelling for this policy. It is
+//! deliberately redundant with the enabled-by-default behavior so generated
+//! templates make the context hygiene visible. A direct queue clears once per
+//! completed turn; a `subagents` / `fan-out` queue waits for the next safe idle
+//! boundary, including settlement of every in-flight claim. The legacy
+//! `disable-auto-clear` flag remains the opt-out for existing documents.
 //!
 //! The rule is deliberately "every item boundary", not "only when accretion
 //! warrants it": it is the contract the skill already states ("the drain
@@ -41,22 +44,67 @@
 
 use agent_doc_element::element;
 
-/// Queue-marker attribute that turns queue auto-clear off.
+/// Positive queue-marker attribute that documents queue auto-clear.
+pub const QUEUE_CLEAR_ATTR: &str = "clear";
+
+/// Legacy queue-marker attribute that turns queue auto-clear off.
 pub const QUEUE_DISABLE_AUTO_CLEAR_ATTR: &str = "disable-auto-clear";
 
 /// Provenance recorded on the context-clear projection of an auto-clear.
 pub const QUEUE_AUTO_CLEAR_SOURCE: &str = "queue_auto_clear";
 
+/// When an enabled queue asks for its clear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueClearCadence {
+    /// Clear after each completed coordinator turn.
+    PerTurn,
+    /// In subagent mode, clear only at the next safe idle boundary.
+    NextIdle,
+    /// The legacy opt-out disabled automatic clears.
+    Disabled,
+}
+
+/// Resolve the queue's clear cadence from its opening-marker attributes.
+///
+/// Omission stays backward compatible: auto-clear remains enabled. `clear` is
+/// therefore an explicit, discoverable declaration rather than a new opt-in.
+/// Subagent queues use the same controller-owned delivery path, but name their
+/// cadence `NextIdle` because a live claim prevents the boundary from being
+/// safe until the claim settles.
+pub fn queue_clear_cadence_for_attrs<'a, I>(attrs: I) -> QueueClearCadence
+where
+    I: IntoIterator<Item = (&'a String, &'a String)>,
+{
+    let attrs = attrs.into_iter().collect::<Vec<_>>();
+    if attrs.iter().any(|(key, value)| {
+        key.as_str() == QUEUE_DISABLE_AUTO_CLEAR_ATTR && attr_value_is_truthy(value)
+    }) {
+        return QueueClearCadence::Disabled;
+    }
+    if attrs
+        .iter()
+        .any(|(key, value)| key.as_str() == QUEUE_CLEAR_ATTR && !attr_value_is_truthy(value))
+    {
+        return QueueClearCadence::Disabled;
+    }
+    if attrs
+        .iter()
+        .any(|(key, _)| matches!(key.as_str(), "subagents" | "fan-out"))
+    {
+        QueueClearCadence::NextIdle
+    } else {
+        QueueClearCadence::PerTurn
+    }
+}
+
 /// Whether queue auto-clear is enabled for an `agent:queue` marker's
-/// attributes. Enabled unless `disable-auto-clear` is present as a bare flag
-/// (or with a truthy value); `disable-auto-clear=false` keeps it enabled.
+/// attributes. Enabled by default and by a bare/truthy `clear`. The legacy
+/// `disable-auto-clear` opt-out wins if both spellings are present.
 pub fn queue_auto_clear_enabled_for_attrs<'a, I>(attrs: I) -> bool
 where
     I: IntoIterator<Item = (&'a String, &'a String)>,
 {
-    !attrs
-        .into_iter()
-        .any(|(key, value)| key == QUEUE_DISABLE_AUTO_CLEAR_ATTR && attr_value_is_truthy(value))
+    queue_clear_cadence_for_attrs(attrs) != QueueClearCadence::Disabled
 }
 
 fn attr_value_is_truthy(value: &str) -> bool {
@@ -408,6 +456,30 @@ mod tests {
     }
 
     #[test]
+    fn clear_is_a_positive_explicit_declaration() {
+        assert_eq!(queue_auto_clear_setting(&doc("clear go")), Some(true));
+        assert_eq!(
+            queue_auto_clear_setting(&doc("clear=false go")),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn clear_cadence_is_per_turn_direct_and_next_idle_for_subagents() {
+        let direct = element::parse(&doc("clear go")).unwrap();
+        assert_eq!(
+            queue_clear_cadence_for_attrs(&direct[0].attrs),
+            QueueClearCadence::PerTurn
+        );
+
+        let subagents = element::parse(&doc("clear subagents go")).unwrap();
+        assert_eq!(
+            queue_clear_cadence_for_attrs(&subagents[0].attrs),
+            QueueClearCadence::NextIdle
+        );
+    }
+
+    #[test]
     fn disable_auto_clear_bare_flag_turns_it_off() {
         assert_eq!(
             queue_auto_clear_setting(&doc("disable-auto-clear go")),
@@ -432,6 +504,11 @@ mod tests {
         assert_eq!(
             queue_auto_clear_setting(&doc("disable-auto-clear=false")),
             Some(true)
+        );
+        assert_eq!(
+            queue_auto_clear_setting(&doc("clear disable-auto-clear")),
+            Some(false),
+            "the compatibility opt-out wins over the positive declaration"
         );
     }
 

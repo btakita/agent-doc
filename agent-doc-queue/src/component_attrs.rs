@@ -19,6 +19,7 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
     "after",
     "model",
     "effort",
+    crate::queue_auto_clear::QUEUE_CLEAR_ATTR,
     crate::queue_auto_clear::QUEUE_DISABLE_AUTO_CLEAR_ATTR,
     crate::queue_schedule::QUEUE_TIME_ATTR,
     crate::queue_schedule::QUEUE_LOOP_ATTR,
@@ -64,6 +65,7 @@ pub fn is_queue_bare_flag_attr(key: &str) -> bool {
             | "stop"
             | "subagents"
             | "fan-out"
+            | "clear"
             | "disable-auto-clear"
             | "loop"
     )
@@ -262,6 +264,18 @@ mod tests {
         assert!(body.contains("agent:backlog"));
         assert!(body.contains("agent:queue auto"));
         assert!(body.contains("no mutation"));
+    }
+
+    #[test]
+    fn clear_is_queue_only_and_valid_as_a_bare_queue_flag() {
+        let queue = "<!-- agent:queue clear subagents -->\n- a\n<!-- /agent:queue -->\n";
+        assert!(component_attr_warning(queue).is_none());
+
+        let backlog =
+            "<!-- agent:backlog clear -->\n- [ ] [#x1] keep this\n<!-- /agent:backlog -->\n";
+        let warning = component_attr_warning(backlog).expect("clear on backlog must warn");
+        assert!(warning.message_body().contains("queue-only attribute"));
+        assert!(warning.message_body().contains("agent:queue clear"));
     }
 
     #[test]

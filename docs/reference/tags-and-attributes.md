@@ -162,7 +162,8 @@ Only `agent:queue` accepts the full queue vocabulary.
 | `start`, `go` | Bare, one-shot activation controls. `go` is the normal continuous-drain spelling; `start` is its start-trigger alias. |
 | `pause` | Bare operator hold. The legacy marker spelling `stop` is read as `pause`. |
 | `auto` | Deprecated bare activation flag retained for compatibility. Prefer the default running state, `go`, or frontmatter `queue: go`. Binary-owned rewrites remove it. |
-| `disable-auto-clear` | Bare or truthy disables the fresh-context reset between queue items. `false`, `0`, `no`, or `off` leaves auto-clear enabled. |
+| `clear` | Bare positive declaration of the default fresh-context policy. Direct queues clear once per completed turn; `subagents`/`fan-out` queues clear at the next safe idle boundary after in-flight claims settle. Omission remains enabled for compatibility. |
+| `disable-auto-clear` | Legacy opt-out. Bare or truthy disables the fresh-context reset; `false`, `0`, `no`, or `off` leaves it enabled. When both spellings appear, this opt-out wins. |
 | `preset` | One or more whitespace-separated prompt-preset references. Quote a multi-reference value. `preset=""` explicitly selects no component default. |
 | `presets` | Compatibility alias for `preset`; a nonempty canonical `preset` wins when both appear. |
 | `subagents`, `fan-out` | Bare dispatches every eligible head to subagents; `=N` sets a positive concurrency cap. If both aliases appear, the most restrictive valid cap wins. On `agent:exchange`, only the bare form is valid because one prompt is dispatched at a time. |
@@ -173,7 +174,7 @@ Only `agent:queue` accepts the full queue vocabulary.
 | `time` | One or more comma-separated local times in `HH:MM` form. It may be combined with `interval`; the earlier next deadline wins. |
 | `loop` | Bare repeats passes without limit; `loop=N` runs a positive number of passes. Without `interval` or `time`, the scheduler floor separates passes. |
 
-`start`, `go`, `pause`, `stop`, `auto`, `disable-auto-clear`, and bare
+`start`, `go`, `pause`, `stop`, `auto`, `clear`, `disable-auto-clear`, and bare
 `subagents`/`fan-out` are flags, not `key=true` settings. Queue maintenance
 canonicalizes boolean-serialized forms when it safely can.
 

@@ -2601,7 +2601,7 @@ fn queue_tag_token_key(token: &str) -> &str {
 fn is_queue_boolean_attr(key: &str) -> bool {
     matches!(
         key,
-        "auto" | "priority" | "go" | "start" | "stop" | "pause" | "disable-auto-clear"
+        "auto" | "priority" | "go" | "start" | "stop" | "pause" | "clear" | "disable-auto-clear"
     )
 }
 

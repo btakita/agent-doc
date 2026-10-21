@@ -56,7 +56,7 @@ fn validate_set(set: &QueueAttrSet) -> Result<()> {
     validate_mutation_key(&set.key)?;
     let value = set.value.as_deref();
     match set.key.as_str() {
-        "auto" | "start" | "go" | "stop" | "priority" | "disable-auto-clear" => {
+        "auto" | "start" | "go" | "stop" | "priority" | "clear" | "disable-auto-clear" => {
             if let Some(value) = value {
                 bail!(
                     "queue attr: `{}` is a bare flag; use `--set {}` instead of `--set {}={value}`",
@@ -260,6 +260,30 @@ mod tests {
         let second =
             plan_queue_attr_edit(&first.target_content, "issues", &[], &["loop".into()]).unwrap();
         assert!(!second.changed);
+    }
+
+    #[test]
+    fn clear_flag_can_be_set_and_removed_exactly() {
+        let valid = TWO_QUEUES.replace("interval=\"1 hour\"", "interval=1h");
+        let set = plan_queue_attr_edit(
+            &valid,
+            "issues",
+            &[QueueAttrSet::parse("clear").unwrap()],
+            &[],
+        )
+        .unwrap();
+        assert!(set.changed);
+        assert!(
+            set.target_content
+                .contains("id=issues interval=1h loop clear -->"),
+            "{}",
+            set.target_content
+        );
+
+        let removed =
+            plan_queue_attr_edit(&set.target_content, "issues", &[], &["clear".into()]).unwrap();
+        assert!(removed.changed);
+        assert_eq!(removed.target_content, valid);
     }
 
     #[test]

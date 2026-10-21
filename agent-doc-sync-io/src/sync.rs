@@ -10699,7 +10699,11 @@ mod tests {
             components[2].attrs.get("subagents").map(String::as_str),
             Some("")
         );
-        assert_eq!(components[2].attrs.len(), 2);
+        assert_eq!(
+            components[2].attrs.get("clear").map(String::as_str),
+            Some("")
+        );
+        assert_eq!(components[2].attrs.len(), 3);
         let todo = components
             .iter()
             .find(|component| component.name == "todo")

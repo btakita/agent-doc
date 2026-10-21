@@ -985,8 +985,11 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   re-triggers the document. Codex is never typed `/clear`. Each decision is logged
   to `ops.log` as `queue_auto_clear ... delivery=native_clear|restart_fresh
   result=...` or `queue_auto_clear_skipped reason=...`.
-  `<!-- agent:queue disable-auto-clear -->` turns it off; the queue then drains in
-  one context and only an explicit operator Clear resets the session. Auto-clear
+  Bare `clear` positively declares this default policy and is present in generated
+  templates. Direct queues clear per completed turn; `subagents`/`fan-out` queues
+  wait for the next safe idle boundary after claims settle. Omission remains
+  enabled for existing queues. Legacy `disable-auto-clear` turns it off; the queue
+  then drains in one context and only an explicit operator Clear resets the session. Auto-clear
   does not reduce session accretion: `block` measures the document's exchange
   size, which only compaction reduces.
   - The in-session drains hand the boundary over only when the supervisor can

@@ -2401,8 +2401,8 @@ mod tests {
             "<!-- agent:todo priority -->\n- [ ] [#legal1] Ask counsel\n- [ ] [#dev1] Ship SDK\n",
         )
         .replace(
-            "<!-- agent:queue priority subagents -->\n",
-            "<!-- agent:queue priority subagents -->\n- [#legal1]: Draft request\n- do [#dev1]\n",
+            "<!-- agent:queue priority subagents clear -->\n",
+            "<!-- agent:queue priority subagents clear -->\n- [#legal1]: Draft request\n- do [#dev1]\n",
         )
         .replace(
             "<!-- agent:backlog priority queue -->\n",

@@ -26,7 +26,7 @@
 //!   deregister only unproven stashed panes;
 //!   `WrongWindow` → stash the outlier pane so the next route consolidates it.
 //! - Stash management: visible pane placement belongs to the retained controller
-//!   layout projection. Resync never bulk-promotes registered stash panes;
+//!   authoritative frontend layout target. Resync never bulk-promotes registered stash panes;
 //!   `purge_stash_windows` kills entire stash windows where all panes are idle
 //!   shells and the window is older than 30 seconds; `purge_unregistered_stash_panes`
 //!   kills individual unregistered idle shell panes in stash windows. Unregistered
@@ -492,7 +492,7 @@ fn pane_hosts_live_supervisor_session(
 }
 
 /// Stash cleanup primitives. Visible placement is deliberately excluded from
-/// resync: the retained controller layout projection is the sole authority that
+/// resync: the cached authoritative frontend layout target is the sole authority that
 /// may promote a registered pane into the editor-visible `agent-doc` window.
 mod stash;
 pub(crate) use stash::*;
@@ -1159,7 +1159,7 @@ fn apply_fixes_to_registry_with_main_layout_eligibility(
                     }) || registered_pane_still_owns_file(tmux, key, file, pane);
                 if proves_live_owner {
                     eprintln!(
-                        "  preserving live owner pane {} for {} in reactive stash parking; the pane-layout projection owns visibility",
+                        "  preserving live owner pane {} for {} in reactive stash parking; the frontend layout target owns visibility",
                         pane, file
                     );
                     continue;
@@ -1788,11 +1788,7 @@ mod th {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
 
-    pub(crate) fn respawn_pane_with_shell_command(
-        tmux: &IsolatedTmux,
-        pane: &str,
-        command: &str,
-    ) {
+    pub(crate) fn respawn_pane_with_shell_command(tmux: &IsolatedTmux, pane: &str, command: &str) {
         let shell_command = format!("exec /bin/sh -c {}", shell_quote(command));
         tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, &shell_command])
             .unwrap_or_else(|error| panic!("failed to respawn pane {pane}: {error}"));

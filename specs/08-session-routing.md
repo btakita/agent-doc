@@ -227,9 +227,9 @@ Source for the payload's `client_id` (pure derivation in
 - `sync_tmux_layout`: the payload carries no `columns`, `column_order`, or
   `focus`. The controller takes the surface's columns in the automatic
   `SurfaceIntent::Sync` shape (one comma-joined entry per column), its
-  `column_order`, and its focus. The order label is propagated unchanged,
-  including `provisional` for a Remote Dev replacement whose pre-guess basis
-  the pane-layout graph must retain (GH #343). An unknown split (`columns=[]`)
+  `column_order`, and its focus. A connected frontend's authoritative column
+  vector is propagated unchanged as the desired tmux effect; retained backend
+  state cannot reorder or reconstruct it (GH #343). An unknown split (`columns=[]`)
   is refused as
   `surface_reference_unknown_layout`, and a foreground sync whose focus is in no
   column as `surface_reference_stale_focus`, with the sentences the editor
@@ -271,11 +271,11 @@ surface reference derives the same modes in the controller.
 `controller_editor_route_layout_mode` logs the mode, whether it was explicit,
 the merge (`exact`, `seeded`, `focus_only`, `replaced:N`, `added:N+replaced:M`,
 `dropped:N+replaced:M`) and the route, retained
-and published column counts. Every `pane_layout_projection` line carries
+and published column counts. Every `tmux_layout_effect_state` line carries
 `publisher=` (`route`, `plugin_publication`, `escalation`, `editor_surface`,
 `command`), `plane_version=`, `columns=`, `retained_columns=` and
 `observed_panes=`; a generation that applies fewer columns than the retained
-layout it replaced also logs `pane_layout_projection_narrowed`.
+layout it replaced also logs `tmux_layout_effect_state_narrowed`.
 
 **Fresh-controller `ensure` basis (GH #153):** after a controller restart or
 handoff, the layout graph may be empty while several supervisor-owned panes are
@@ -398,12 +398,12 @@ controller. The invariants:
 - A desired layout names each document at most once
   (`collapse_duplicate_layout_documents`; the first occurrence keeps its
   column; `pane_layout_publication_duplicate_columns_collapsed`).
-- One desired generation spends at most `PROJECTION_RETRY_ATTEMPT_LIMIT` (12)
-  projection attempts. The count, the retirement and the window-claim stamp
-  live in the layout graph's `ProjectionAttemptLedger`, not on the worker
+- One desired generation spends at most `TMUX_EFFECT_RETRY_ATTEMPT_LIMIT` (12)
+  tmux effect attempts. The count, the retirement and the window-claim stamp
+  live in the layout graph's `TmuxEffectAttemptLedger`, not on the worker
   thread, so a restarted worker never re-applies a retired generation. A
   retirement writes a terminal `Refused` receipt and one
-  `pane_layout_projection_retired reason=retry_budget_exhausted|yielded_to_newer_window_claim|editor_surface_forgotten`
+  `tmux_layout_effect_state_retired reason=retry_budget_exhausted|yielded_to_newer_window_claim|editor_surface_forgotten`
   line.
 - Every controller that projects into a window stamps it with a
   `WindowLayoutClaim` (tmux window option `@agent_doc_layout_claim`: root,
@@ -445,20 +445,18 @@ projection schedule converges to the newest publication with only the owner
 writing the window; per-controller routing reproduces the flip) and the
 `cross_root_editor_route_*` controller tests.
 
-*A plugin win never strands a routed document (GH #126).* A passive
+*A plugin win never licenses backend reconstruction (GH #126, GH #343).* A passive
 single-column plugin publication (a tab switch; on a Remote Dev / Coder backend
 every publication is one undetected column) correctly supersedes a route by
 `newer_plane_version`, which takes the routed document out of the retained
 layout and lets tmux stash its pane. A later explicit focus of that document —
 Sync Tmux Layout or a tab switch back — refused
 `actor_pane_not_visible`/`outside_agent_doc_window` escalates, and the
-escalation puts the document into the retained focus column (the `ensure` rule
-above, `source=retained_focus_column replaced=<column>`) instead of skipping
-with `cause=document_outside_retained_layout`. The escalation keeps the column
-count and therefore the plugin's `structure_owner`. The replaced column is chosen
-against the editor-visible set the last positive split observation propagated, so
-a column no editor split shows is replaced before the latest focus's column
-(GH #322; see `07-session-tmux-commands.md`).
+escalation republishes cached frontend columns unchanged only when they already
+contain the document. Otherwise it defers with
+`cause=focus_requires_frontend_layout` until a positive frontend snapshot
+names the new membership. Tmux observation is a receipt and never supplies a
+replacement slot (GH #322; see `07-session-tmux-commands.md`).
 
 **Cross-document child-route boundary:** A route with no layout columns that is
 invoked from explicit live tmux process context inside a pane owned by another
@@ -490,7 +488,7 @@ still dispatch in place and log
 `route_stash_rescue_skipped ... reason=controller_layout_owns_topology` when an
 explicit superseding layout legitimately moved the pane;
 it must never raw-`join-pane` the pane back, because that adds a column no
-publisher requested, no `pane_layout_projection` records, and no projection
+publisher requested, no `tmux_layout_effect_state` records, and no projection
 ever reconciles (observed 2026-10-09: a converged two-pane window grew a
 silent third column). Standalone CLI routes keep the legacy stash rescue.
 
@@ -516,7 +514,7 @@ Claude artifact and IDE-context UI must be distinguished by stable shape rather 
 
 **Unwatched target pane (GH #243):** A process that is not inside a tmux pane (the project controller serving `editor_route`, an IDE helper) has no session of its own, and tmux's ambient "current session" (`display-message -p '#{session_name}'`) is only the most recently used session, which can be one no client is attached to. Every ambient lookup (route `current_tmux_session`, sync `current_tmux_session_name`) goes through `agent_doc_tmux_io::ambient_current_session`: a caller inside a live pane keeps that pane's session; otherwise the ambient session is kept only when a client shows it, and a client-less ambient session yields to the session of the most recently active attached client (`#{client_activity}`), never to an agent-doc navigation lane (`@agent_doc_navigation_lane`, which belongs to one installation). With no attached client anywhere the ambient session is kept. Explicit sessions, document bindings, a live `tmux_session` pin, and per-installation lane retargeting are unchanged; only the unpinned ambient fallback is affected. Observed: after a workspace restart, route-owned panes started in client-less session `0` while the operator's only client was attached to session `1`.
 
-A route that starts a route-owned pane, dispatches into it, or successfully hands an explicit reopen/steering prompt to its live owner reports an off-screen target rather than plain success. `agent_doc_tmux_io::unwatched_pane` is the policy owner: one bounded tmux observation classifies an unattached session, an inactive window in an attached session, or a non-active pane hidden behind a zoomed sibling; an unreadable placement fails quiet rather than inventing a warning. Route logs the applicable `*_target_not_visible` event with `file`, `pane`, `session`, typed `reason`, `window`, and `watched_sessions`, then prints a `[route] pane-not-visible:` notice. An unattached-session notice provides the socket-qualified `tmux attach-session -t <session>` command. An inactive-window or zoom notice names the window and provides an exact `select-window` / `select-pane` reveal command; it does not mutate layout itself, because the editor's newer focus projection remains authoritative. The controller's `editor_route` appends the notice to its exit-0 output. The delivery itself stands (`proof_scope=transport_only` is still a delivery); JetBrains raises a warning notification for the notice instead of a silent `[route] SUCCESS`, and VS Code shows the route output. This notice remains the fallback for a genuinely off-screen authoritative target; it must not be produced merely because the main-window owner dropped a cross-root route lease before the child dispatched. Observed 2026-10-13: the authoritative pane `%192` was healthy in the inactive one-row `stash` window of an attached session while the client showed another window, so the earlier session-only check silently treated it as visible.
+A route that starts a route-owned pane, dispatches into it, or successfully hands an explicit reopen/steering prompt to its live owner reports an off-screen target rather than plain success. `agent_doc_tmux_io::unwatched_pane` is the policy owner: one bounded tmux observation classifies an unattached session, an inactive window in an attached session, or a non-active pane hidden behind a zoomed sibling; an unreadable placement fails quiet rather than inventing a warning. Route logs the applicable `*_target_not_visible` event with `file`, `pane`, `session`, typed `reason`, `window`, and `watched_sessions`, then prints a `[route] pane-not-visible:` notice. An unattached-session notice provides the socket-qualified `tmux attach-session -t <session>` command. An inactive-window or zoom notice names the window and provides an exact `select-window` / `select-pane` reveal command; it does not mutate layout itself, because the editor's newer focus snapshot remains authoritative. The controller's `editor_route` appends the notice to its exit-0 output. The delivery itself stands (`proof_scope=transport_only` is still a delivery); JetBrains raises a warning notification for the notice instead of a silent `[route] SUCCESS`, and VS Code shows the route output. This notice remains the fallback for a genuinely off-screen authoritative target; it must not be produced merely because the main-window owner dropped a cross-root route lease before the child dispatched. Observed 2026-10-13: the authoritative pane `%192` was healthy in the inactive one-row `stash` window of an attached session while the client showed another window, so the earlier session-only check silently treated it as visible.
 
 **One live supervisor pane per document (GH #243 follow-up):** the pane that wins is the controller's authoritative actor pane: it holds the newest actor generation, the queue claims, and the route target, and the controller already refuses writes from any other pane ("pane execution authority rejected before mutation"). Before a foreground route dispatches to that pane (`dispatch_only_send_reopen`, only when the dispatch pane *is* the authoritative actor pane), it retires every other live pane whose process tree proves an `agent-doc start … <doc>` supervisor for the same document, through the same retirement as `start --force` (SIGTERM, SIGKILL after 5s, stop surviving descendants, close the pane), logging `route_duplicate_owner_retired` (or `route_duplicate_owner_left reason=…` / `route_duplicate_owner_retire_failed`). A bare harness pane, a pane without that proof, and background or cross-document routes (which stay topology-neutral) are never touched. Observed: after `start --force` from session `1`, the operator re-attached to session `0`, where the old route-owned pane `%2` stayed alive and visible but every write from it was refused, while the owner `%4`, the route target, and the queue worker ran in the now-unattached session `1`. Retiring the duplicate leaves one pane; when that winner sits in a session no client is attached to, the route's `pane-not-visible` notice names it and its attach command. The route does not move the winner into the watched session itself: tmux topology belongs to the layout plane, whose ambient session resolution prefers an attached session (above).
 
@@ -798,7 +796,7 @@ When the user navigates to a document in the editor:
 3. **File resolution** — `resolve_file()` reads frontmatter. Files with `agent_doc_session` → `FileResolution::Registered`. Non-`.md` files or files with content but no frontmatter → `Unmanaged`. For mixed-root editor layouts, resolution and later registry write-back must canonicalize each file path and consult the nearest `.agent-doc` ancestor for that file, not the caller's current working directory, so sibling repos in the same IDE window cannot borrow or overwrite each other's pane bindings.
 4. **Reconciliation** — `tmux_router::sync` matches the declared layout to tmux panes:
    - Pane exists for this session → **focus it** (Binding found)
-   - Pane in stash → **rescue it** (join-pane it back to the agent-doc window without evicting a visible pane). A route that runs inside a controller `editor_route` after its layout converged never performs this rescue (`#routelaterescue`); the layout projection owns topology there.
+   - Pane in stash → **rescue it** (join-pane it back to the agent-doc window without evicting a visible pane). A route that runs inside a controller `editor_route` after its layout converged never performs this rescue (`#routelaterescue`); the accepted frontend snapshot and its tmux effect own topology there.
    - No pane exists → trigger **Provisioning**
 5. **Provisioning** — `route::provision_pane()` creates a new tmux pane:
 - Serializes concurrent provisioning with per-document and per-session startup flocks before choosing the split target

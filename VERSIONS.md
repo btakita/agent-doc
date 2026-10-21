@@ -4188,7 +4188,7 @@ published release carrying the 0.35.481 notes below.
   projection stays `retry_pending` while documents, panes and focus pane all
   match. All 9 occurrences of that signature in one day's ops log carried
   `observation=synced`. Convergence now reads the observation
-  (`pane_layout_projection_converged`), the reusable-structure branch observes
+  (`tmux_layout_effect_state_converged`), the reusable-structure branch observes
   before cancelling instead of short-circuiting on the supersede, and
   `focus_applied` remains the fallback only when the observation could not
   speak for focus. The supersede guard still keeps a stale generation from
@@ -8092,7 +8092,7 @@ and dead registrations cannot.
 - **Fix (`#panewindowdrift`): editor auto-focus was mirrored onto a pane the
   operator could not see.**
 
-  The pane-layout projection's file→pane assignment, the actor row, and the
+  The tmux layout effect state's file→pane assignment, the actor row, and the
   registry entry each carry the window captured when the pane was *bound*, and
   nothing re-derives it. Move that pane into a `stash` window and every
   record-vs-record comparison still agrees — so the layout survey admitted a
@@ -8870,7 +8870,7 @@ consequence, plan item 1) follows in a separate release.
 
 - **Collapse the `/proc` ownership walk to one pass per sync (`#tmuxautosyncreactive`).** `ProcessObservationState::tree_source` called `observe_proc_children()` — a full `/proc` directory walk — **per new pane root pid**, so a cold first pass over `P` panes paid `P` whole-table walks (each opening+parsing `/proc/<pid>/stat` for every process, plus a `ps` fork-exec per exiting process). `ops.log` showed `ownership_proof` at 9,010 ms and `ownership_per_file_loop` at 8,825 ms against a 750 ms budget (115 / 113 over-budget occurrences), with retry churning a single generation 40+ times. The map is now memoized once per `ProcessObservationScope` (`children_handle`) — matching what `refresh()` already did for re-observation — so the cold first pass is one walk regardless of pane count. The drift survey `tmux_layout_sync_state_for_invocation_with_effect_assignment` additionally opened NO `ProcessObservationScope`, so its per-pane `active_pane_process_owner_document` resolutions took the uncached path even mid-sync; it now opens a scope so its panes share the same memoized walk. A `pane_layout_survey_timing elapsed_ms=…` op-log entry meters the survey across every return path (it was previously unmetered, hiding its share of the worker convergence latency).
 
-- **Interruptible structural sync effect (`#tmuxautosyncreactive`).** Rapid editor tab switches queued `pane_layout` generations faster than the ~850ms structural effect could converge, so every intermediate generation ran the **full** structural sync then was discarded (`pane_layout_projection_cancelled … reason=superseded`) — only the final switch converged, multiplying perceived lag. The pane-layout worker now binds its generation to the graph's latest published generation (`published_generation`), and `run_with_options_internal_at_root` polls `structural_effect_superseded` at the after-lock and after-prune phase boundaries, returning early when a newer layout supersedes it. The worker's existing post-effect supersession gate remains authoritative, so the bail is a pure optimization: a superseded generation stops spending ~850ms of tmux mutations that get thrown away. The standalone `agent-doc sync` CLI never binds the cancellation scope, so it is unaffected.
+- **Interruptible structural sync effect (`#tmuxautosyncreactive`).** Rapid editor tab switches queued `pane_layout` generations faster than the ~850ms structural effect could converge, so every intermediate generation ran the **full** structural sync then was discarded (`tmux_layout_effect_state_cancelled … reason=superseded`) — only the final switch converged, multiplying perceived lag. The pane-layout worker now binds its generation to the graph's latest published generation (`published_generation`), and `run_with_options_internal_at_root` polls `structural_effect_superseded` at the after-lock and after-prune phase boundaries, returning early when a newer layout supersedes it. The worker's existing post-effect supersession gate remains authoritative, so the bail is a pure optimization: a superseded generation stops spending ~850ms of tmux mutations that get thrown away. The standalone `agent-doc sync` CLI never binds the cancellation scope, so it is unaffected.
 
 - **`reload-lib` reliably reloads a build-mismatched editor (`#replicarefusalstorm` / `#editorendpointzero`).** After a controller version bump, `reload-lib` reported endpoints "failed" while the editor listener was demonstrably alive (socket present, `connect` OK): the build-mismatch reload-compat path (`send_legacy_reload_to_pid`) shared the generic **6 s** `IPC_RECEIPT_TIMEOUT_SECS`, but the native generation handoff it triggers — drain in-flight native calls, unmap the old cdylib, prove the mapping is gone, load the replacement, re-register open projects — takes far longer. The receipt timed out mid-handoff, so the reload was delivered but never acknowledged, the editor stayed on the stale cdylib, and `replica_register` was refused as `detached_authority` in a chronic retry storm. `reload_library` now uses a dedicated `IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS` (90 s) budget, so the handoff completes and the editor re-attaches without an IDE restart. New regression `reload_library_receipt_outlives_a_slow_generation_handoff`.
 
@@ -9912,8 +9912,8 @@ validated `agent-doc` window, and resolve an existing nested-root pane from
 that root's controller actor projection before any editor-content read. A
 temporary content-authority outage can no longer drop the right-side pane or
 stall the parent sync; no-autostart still forbids foreign pane creation.
-- **Published pane-layout projections are successful command admissions.**
-The command-plane terminal now distinguishes applying the desired projection
+- **Published tmux layout targets are successful command admissions.**
+The command-plane terminal now distinguishes applying the desired target
 from observing the later tmux effect: `projection_published` returns an applied
 command receipt while the embedded layout payload keeps `applied: false` until
 the reactive effect converges. Automatic editor sync no longer reports a false

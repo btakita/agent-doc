@@ -230,7 +230,7 @@ work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 isolate_run "${work_dir}"
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutProvisional EditorTransportHealth ControllerLifecycle)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutNoGuess EditorTransportHealth ControllerLifecycle)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
@@ -473,11 +473,10 @@ must_violate=(
     # widening and a later derived trim both remain possible under adversity.
     LayoutWidthBound:LayoutWidthBoundWedge
     LayoutWidthBound:LayoutWidthBoundReach
-    # GH #250: a Coder/Remote Dev selection can precede visible membership.
-    # Wedge restores the guessed-layout-as-authority bug; reach proves the
-    # selection-first correction trace is exercised rather than vacuous.
-    RemoteLayoutProvisional:RemoteLayoutProvisionalWedge
-    RemoteLayoutProvisional:RemoteLayoutProvisionalReach
+    # GH #343: selection-only input never changes structure. Wedge restores
+    # slot replacement; reach proves the later positive correction is live.
+    RemoteLayoutNoGuess:RemoteLayoutNoGuessWedge
+    RemoteLayoutNoGuess:RemoteLayoutNoGuessReach
     # GH #138: two refusal-producing editor paths logged their definitive NO
     # without moving transport health. Wedge proves that transition carries the
     # invariant; Reach proves the unregister state remains attainable.

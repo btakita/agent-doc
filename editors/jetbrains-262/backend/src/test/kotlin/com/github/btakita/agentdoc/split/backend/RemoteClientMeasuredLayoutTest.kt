@@ -4,7 +4,9 @@ import com.github.btakita.agentdoc.EditorDerivation
 import com.github.btakita.agentdoc.split.EditorWindowBounds
 import com.github.btakita.agentdoc.split.EditorWindowSnapshot
 import com.github.btakita.agentdoc.split.FrontendSurface
+import com.github.btakita.agentdoc.split.FrontendLayoutColumn
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.github.btakita.agentdoc.split.forSchema
@@ -82,6 +84,33 @@ class RemoteClientMeasuredLayoutTest {
     }
 
     @Test
+    fun schemaThreeFrontendColumnVectorWinsUnchangedOverConflictingBounds() {
+        val snapshot = FrontendSurfaceSnapshot(
+            frontendInstanceId = "frontend-1",
+            sequence = 1,
+            projectId = projectId,
+            complete = true,
+            surfaces = listOf(
+                FrontendSurface(
+                    "root", 1, SurfaceRole.MAIN, true,
+                    windows = listOf(
+                        window(0, "/repo/a.md", x = 0),
+                        window(1, "/repo/b.md", x = 640),
+                    ),
+                    layoutColumns = listOf(
+                        FrontendLayoutColumn(listOf("/repo/b.md")),
+                        FrontendLayoutColumn(listOf("/repo/a.md")),
+                    ),
+                ),
+            ),
+        )
+        assertEquals(
+            listOf(listOf("/repo/b.md"), listOf("/repo/a.md")),
+            (RemoteClientMeasuredLayout.derive(snapshot, isSession) as MeasuredMainLayout.Measured).columns,
+        )
+    }
+
+    @Test
     fun unmeasuredOrSharedOriginWindowsNeverClaimEditorOrder() {
         assertEquals(
             MeasuredMainLayout.Unavailable("window_unmeasured"),
@@ -122,7 +151,14 @@ class RemoteClientMeasuredLayoutTest {
 
     @Test
     fun detachedSurfacesNeverContributeMainColumns() {
-        val main = FrontendSurface("root", 1, SurfaceRole.MAIN, true, listOf(window(0, "/repo/a.md", x = 0)))
+        val main = FrontendSurface(
+            "root",
+            1,
+            SurfaceRole.MAIN,
+            true,
+            listOf(window(0, "/repo/a.md", x = 0)),
+            layoutColumns = listOf(FrontendLayoutColumn(listOf("/repo/a.md"))),
+        )
         val detached = FrontendSurface(
             "detached-1",
             2,
@@ -309,6 +345,7 @@ class RemoteClientMeasuredLayoutTest {
     ) = EditorWindowSnapshot(ordinal, path, listOf(path), listOf(path), bounds)
 
     private fun snapshot(vararg windows: EditorWindowSnapshot) = FrontendSurfaceSnapshot(
+        schemaVersion = GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION,
         frontendInstanceId = "frontend-1",
         sequence = 1,
         projectId = projectId,

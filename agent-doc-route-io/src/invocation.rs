@@ -45,7 +45,7 @@ thread_local! {
     /// project root's controller sharing the window), so route must dispatch
     /// to it in place instead of raw-joining it back as an extra column.
     static LAYOUT_OWNED_BY_CONTROLLER: Cell<bool> = const { Cell::new(false) };
-/// Layout reconciliation owns the final visible pane and focus projection.
+/// Layout reconciliation owns the final visible pane and focus effect.
 ///
 /// Pane provisioning performed inside that transaction must remain
 /// focus-neutral until tmux-router has placed every pane. Standalone route
@@ -239,7 +239,7 @@ pub const fn background_owner_reentry(facts: BackgroundOwnerReentryFacts) -> boo
         && !facts.controller_layout_owned
 }
 
-/// Whether the controller layout projection owns tmux topology for this route
+/// Whether the controller tmux layout effect owns topology for this route
 /// (`#routelaterescue`). See [`LayoutOwnedByControllerGuard`].
 pub fn layout_owned_by_controller() -> bool {
     LAYOUT_OWNED_BY_CONTROLLER.with(Cell::get)

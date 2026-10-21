@@ -33,7 +33,7 @@ class BackendGuestSelectionFallbackResumeTest {
             source()
                 .substringAfter("ApplicationManager.getApplication().invokeLater {")
                 .substringBefore("FileEditorManagerEvent(")
-        val fence = delivery.indexOf("ingress.frontendSnapshotAvailable.value")
+        val fence = delivery.indexOf("ingress.frontendAuthorityActive.value")
         val resume = delivery.indexOf("listener.resumeControllerProjection()")
         val forward = delivery.indexOf("listener.selectionChanged(")
         assertTrue(fence >= 0 && resume >= 0 && forward >= 0, delivery)

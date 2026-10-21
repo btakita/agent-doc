@@ -17593,7 +17593,6 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
         "pub fn socket_path(",
         "pub fn state_path(",
         "fn actor_projection_path(",
-        "fn layout_projection_path(",
         "fn sessions_projection_entry(",
     ] {
         assert!(

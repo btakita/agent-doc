@@ -998,7 +998,7 @@ pub fn run_controller_layout_with_main_layout_eligibility_in_project_root(
     window: Option<&str>,
     focus: Option<&str>,
     no_autostart: bool,
-    exact_visible_projection: bool,
+    exact_visible_target: bool,
     route_created_panes: bool,
     actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
     main_layout_eligibility: &MainLayoutEligibility,
@@ -1013,7 +1013,7 @@ pub fn run_controller_layout_with_main_layout_eligibility_in_project_root(
         } else {
             AutoStartMode::Full
         },
-        exact_visible_projection,
+        exact_visible_target,
         route_created_panes,
         actor_bindings,
         main_layout_eligibility,
@@ -1345,10 +1345,10 @@ fn refresh_durable_registry_for_actor_record(
 /// the actor store.
 fn resolve_actor_pane_after_content(
     file_path: &Path,
-    exact_visible_projection: bool,
+    exact_visible_target: bool,
     is_cross_root: bool,
 ) -> Result<Option<String>> {
-    if !exact_visible_projection {
+    if !exact_visible_target {
         // `#ownershipbindingfirst`: the binding-first lookup above already
         // asked the controller for this document and got nothing back. Asking
         // again would repeat the same RPC — including its 5s timeout — for a
@@ -2423,9 +2423,9 @@ fn safe_passive_prune_cleanup_mode_at_root(
 
 fn exact_visible_safe_passive(
     auto_start_mode: AutoStartMode,
-    exact_visible_projection: bool,
+    exact_visible_target: bool,
 ) -> bool {
-    matches!(auto_start_mode, AutoStartMode::SafePassive) && exact_visible_projection
+    matches!(auto_start_mode, AutoStartMode::SafePassive) && exact_visible_target
 }
 
 /// `#exact-visible-focus-swap` eligibility (cheap gate): whether an exact-visible
@@ -3137,7 +3137,7 @@ fn run_with_options_internal(
     window: Option<&str>,
     focus: Option<&str>,
     auto_start_mode: AutoStartMode,
-    exact_visible_projection: bool,
+    exact_visible_target: bool,
     route_created_panes: bool,
     tmux: &Tmux,
 ) -> Result<()> {
@@ -3148,7 +3148,7 @@ fn run_with_options_internal(
         window,
         focus,
         auto_start_mode,
-        exact_visible_projection,
+        exact_visible_target,
         route_created_panes,
         &[],
         &MainLayoutEligibility::default(),
@@ -3319,7 +3319,7 @@ fn run_with_options_internal_at_root(
     window: Option<&str>,
     focus: Option<&str>,
     auto_start_mode: AutoStartMode,
-    exact_visible_projection: bool,
+    exact_visible_target: bool,
     route_created_panes: bool,
     reactive_actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
     main_layout_eligibility: &MainLayoutEligibility,
@@ -3489,7 +3489,7 @@ fn run_with_options_internal_at_root(
     // owned actor binding without corrupting mixed-root layout memory.
     let sync_project_root = canonical_sync_project_root(project_root);
     let (saved_layout, dropped) =
-        sanitize_cross_root_layout(saved_layout, &sync_project_root, exact_visible_projection);
+        sanitize_cross_root_layout(saved_layout, &sync_project_root, exact_visible_target);
     for path in &dropped {
         eprintln!(
             "[sync] dropping cross-root document from remembered layout: {} (sync root {})",
@@ -3534,7 +3534,7 @@ fn run_with_options_internal_at_root(
         ))
     });
     let skip_autostart_diagnostics =
-        exact_visible_safe_passive(auto_start_mode, exact_visible_projection);
+        exact_visible_safe_passive(auto_start_mode, exact_visible_target);
     let skip_sync_status_updates = skip_sync_status_updates_for_mode(auto_start_mode);
     let proof_cache = if skip_autostart_diagnostics {
         let controller_local_actor_lookup =
@@ -3801,12 +3801,12 @@ fn run_with_options_internal_at_root(
         &remembered_layout,
         active_column_index,
         focus_only_mode,
-        exact_visible_projection,
+        exact_visible_target,
     );
     match &focus_only_expansion.event {
         Some(agent_doc_tmux::TmuxFocusOnlyExpansionEvent::ExactVisibleProjection) => {
             sync_log(&format!(
-                "safe_passive_exact_visible_projection columns={:?}",
+                "safe_passive_exact_visible_target columns={:?}",
                 col_args
             ));
         }
@@ -3877,14 +3877,14 @@ fn run_with_options_internal_at_root(
     // idle shells), not layout convergence, and its per-pane kill-pane spawns
     // (~20ms each) dominate the prune. Defer it to the periodic housekeeping
     // pass so the editor-triggered sync is faster.
-    if exact_visible_projection
+    if exact_visible_target
         && !matches!(
             prune_cleanup_mode,
             agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         )
     {
         prune_cleanup_mode = agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup;
-        sync_log("exact_visible_prune_cleanup_skipped reason=editor_projection_known_layout");
+        sync_log("exact_visible_prune_cleanup_skipped reason=frontend_snapshot_known_layout");
     }
     if matches!(
         prune_cleanup_mode,
@@ -3972,9 +3972,9 @@ fn run_with_options_internal_at_root(
     // populated for the desired files. Log the count so a slow ownership loop
     // is attributable to empty bindings (actor store miss) vs. stale panes.
     sync_log(&format!(
-        "reactive_actor_bindings count={} exact_visible_projection={}",
+        "reactive_actor_bindings count={} exact_visible_target={}",
         reactive_actor_bindings.len(),
-        exact_visible_projection,
+        exact_visible_target,
     ));
     let mut pre_resolved_panes: HashMap<PathBuf, String> = HashMap::new();
 
@@ -4153,7 +4153,7 @@ fn run_with_options_internal_at_root(
             // ledger, and the durable registry merely to reconstruct the same
             // file→pane relationship. Missing/ambiguous actors still fall
             // through to the full fail-closed proof path below.
-            if exact_visible_projection
+            if exact_visible_target
                 && let Some(binding) = reactive_actor_bindings.get(file_path)
                 && pane_projection_is_reusable_for_document(tmux, &binding.pane_id, file_path)
             {
@@ -4191,7 +4191,7 @@ fn run_with_options_internal_at_root(
             // (cross-root) when the in-memory binding was evicted but the pane
             // is still registered. `skip_autostart_diagnostics` keeps its own
             // dedicated branch below.
-            if exact_visible_projection && !skip_autostart_diagnostics {
+            if exact_visible_target && !skip_autostart_diagnostics {
                 let reused: Option<(String, String, u64, &'static str)> = if is_cross_root {
                     agent_doc_project_root_io::project_root_containing(file_path)
                         .and_then(|owner_root| {
@@ -4267,7 +4267,7 @@ fn run_with_options_internal_at_root(
                 }
             }
             if skip_autostart_diagnostics && is_cross_root {
-                // A mixed-root exact-visible layout is a pane-only projection.
+                // A mixed-root exact-visible layout is a pane-only tmux target.
                 // Ask the owning controller for its existing actor binding before
                 // touching editor content. This observation never focuses,
                 // resumes, provisions, or copies the foreign actor into the
@@ -4363,7 +4363,7 @@ fn run_with_options_internal_at_root(
             // being filtered out by it. That is the direction `#lazily-hot-path`
             // and `rpc.rs::authoritative_actor_binding` both prescribe: the
             // actor is the hot-path authority and frontmatter may lag a reroute.
-            let binding_first = if exact_visible_projection {
+            let binding_first = if exact_visible_target {
                 // Neither exact-visible branch below wants this lookup. The
                 // same-root case deliberately goes straight to provisioning, and
                 // the cross-root case already asked the owning controller at the
@@ -4443,7 +4443,7 @@ fn run_with_options_internal_at_root(
                 };
                 let pane = resolve_actor_pane_after_content(
                     file_path,
-                    exact_visible_projection,
+                    exact_visible_target,
                     is_cross_root,
                 )?;
                 (session_id, pane)
@@ -5410,7 +5410,7 @@ fn run_with_options_internal_at_root(
     blocked_files.sort();
     if blocked_owner_layout_decision(
         auto_start_mode,
-        exact_visible_projection,
+        exact_visible_target,
         route_created_panes,
         blocked_files.len(),
     ) == GatedLayoutDecision::PreserveCurrent
@@ -5434,7 +5434,7 @@ fn run_with_options_internal_at_root(
             "blocked_owner_layout_preserved blocked_files={} mode={} exact_visible={} route_created_panes={}",
             blocked_summary,
             auto_start_mode.log_label(),
-            exact_visible_projection,
+            exact_visible_target,
             route_created_panes,
         ));
         return Ok(());
@@ -5731,7 +5731,7 @@ fn run_with_options_internal_at_root(
                 .collect();
             if unprotected_extras.is_empty() {
                 sync_log(&format!(
-                    "layout_projection_exceeded_by_open_cycles window={} desired_panes={} actual_visible_panes={} extras={:?}",
+                    "tmux_layout_target_exceeded_by_open_cycles window={} desired_panes={} actual_visible_panes={} extras={:?}",
                     w, projected, pane_count, extra_panes
                 ));
             } else {
@@ -5741,7 +5741,7 @@ fn run_with_options_internal_at_root(
                 );
                 eprintln!("{}", warning);
                 sync_log(&format!(
-                    "layout_projection_exceeded window={} desired_panes={} actual_visible_panes={} unprotected_extras={:?}",
+                    "tmux_layout_target_exceeded window={} desired_panes={} actual_visible_panes={} unprotected_extras={:?}",
                     w, projected, pane_count, unprotected_extras
                 ));
             }
@@ -7623,7 +7623,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_visible_projection_rejects_live_pane_owned_by_another_document() {
+    fn exact_visible_target_rejects_live_pane_owned_by_another_document() {
         assert!(pane_projection_reuse_allowed(true, false));
         assert!(!pane_projection_reuse_allowed(false, false));
         assert!(
@@ -7899,7 +7899,7 @@ mod tests {
             Some(&target_window),
             Some(doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
-            // `exact_visible_projection=false` is the measured slow shape: no
+            // `exact_visible_target=false` is the measured slow shape: no
             // reactive bindings are carried in, so every editor fast path above
             // the ownership loop is disabled and the loop must resolve ownership
             // itself.
@@ -8027,7 +8027,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn exact_visible_cross_root_full_mode_resolves_via_owning_controller() {
         // The editor tab-switch path runs `AutoStartMode::Full` with
-        // `exact_visible_projection=true` (`skip_autostart_diagnostics` is
+        // `exact_visible_target=true` (`skip_autostart_diagnostics` is
         // false), so the cross-root reactive branch at the top of the per-file
         // loop does not fire. The cross-root child pane must still resolve
         // through the owning controller's reactive binding

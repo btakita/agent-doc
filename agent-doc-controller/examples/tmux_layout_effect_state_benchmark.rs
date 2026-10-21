@@ -1,6 +1,6 @@
-//! Run with `cargo run --release -p agent-doc-controller --example pane_layout_projection_benchmark`.
+//! Run with `cargo run --release -p agent-doc-controller --example tmux_layout_effect_state_benchmark`.
 
-use agent_doc_controller::pane_layout::LatestProjectionWorkerState;
+use agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState;
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -10,7 +10,7 @@ const WRITES_PER_BATCH: u64 = 256;
 fn main() {
     let collapse_started = Instant::now();
     for batch in 0..BATCHES {
-        let mut state = LatestProjectionWorkerState::default();
+        let mut state = LatestTmuxEffectWorkerState::default();
         let first_generation = batch * WRITES_PER_BATCH + 1;
         assert!(black_box(&mut state).schedule(black_box(first_generation)));
         for offset in 1..WRITES_PER_BATCH {
@@ -25,7 +25,7 @@ fn main() {
 
     let cancellation_started = Instant::now();
     for batch in 0..(BATCHES * WRITES_PER_BATCH) {
-        let mut state = LatestProjectionWorkerState::default();
+        let mut state = LatestTmuxEffectWorkerState::default();
         assert!(black_box(&mut state).schedule(black_box(batch * 2 + 1)));
         assert!(!black_box(&mut state).schedule(black_box(batch * 2 + 2)));
         assert!(black_box(&state).is_superseded(black_box(batch * 2 + 1)));

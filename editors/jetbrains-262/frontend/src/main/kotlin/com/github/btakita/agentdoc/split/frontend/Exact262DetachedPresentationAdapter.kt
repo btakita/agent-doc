@@ -3,6 +3,7 @@
 package com.github.btakita.agentdoc.split.frontend
 
 import com.github.btakita.agentdoc.split.FrontendPresentationCapability
+import com.github.btakita.agentdoc.split.FrontendLayoutColumn
 import com.github.btakita.agentdoc.split.EditorWindowBounds
 import com.github.btakita.agentdoc.split.EditorWindowSnapshot
 import com.github.btakita.agentdoc.split.FrontendSurface
@@ -76,6 +77,12 @@ internal object FrontendSurfaceCollector {
                     editorWindowSnapshot(taggedWindow.editorWindow)
                         .copy(ordinal = ordinal, bounds = taggedWindow.bounds)
                 },
+                layoutColumns = frontendLayoutColumns(
+                    windows.mapIndexed { ordinal, taggedWindow ->
+                        editorWindowSnapshot(taggedWindow.editorWindow)
+                            .copy(ordinal = ordinal, bounds = taggedWindow.bounds)
+                    },
+                ),
             )
         }.sortedWith(compareBy({ it.role != SurfaceRole.MAIN }, FrontendSurface::paneId))
         val targets = ordered.associate { (identity, frameAndWindows) ->
@@ -143,6 +150,30 @@ internal object FrontendSurfaceCollector {
         val bounds: EditorWindowBounds?,
         val editorWindow: EditorWindow,
     )
+}
+
+/**
+ * Convert positive frontend geometry into the exact column vector carried on the wire. Unknown or
+ * shared geometry yields no vector: absence defers structure instead of legitimizing a guess.
+ */
+internal fun frontendLayoutColumns(
+    windows: List<EditorWindowSnapshot>,
+    columnTolerancePx: Int = 8,
+): List<FrontendLayoutColumn>? {
+    if (windows.isEmpty()) return emptyList()
+    if (windows.any { it.bounds == null }) return null
+    val measured = windows.map { it to requireNotNull(it.bounds) }
+    if (measured.groupBy { (_, bounds) -> bounds.x to bounds.y }.any { it.value.size > 1 }) return null
+    val grouped = mutableListOf<MutableList<Pair<EditorWindowSnapshot, EditorWindowBounds>>>()
+    for (window in measured.sortedWith(compareBy({ it.second.x }, { it.second.y }))) {
+        val column = grouped.lastOrNull()?.takeIf {
+            kotlin.math.abs(it.first().second.x - window.second.x) <= columnTolerancePx
+        }
+        if (column == null) grouped += mutableListOf(window) else column += window
+    }
+    return grouped.map { column ->
+        FrontendLayoutColumn(column.sortedBy { it.second.y }.mapNotNull { it.first.selectedPath })
+    }
 }
 
 internal data class CapturedFrontendSurfaces(

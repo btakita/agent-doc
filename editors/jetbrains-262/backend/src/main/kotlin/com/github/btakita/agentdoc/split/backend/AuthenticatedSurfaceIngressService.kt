@@ -35,7 +35,8 @@ internal class AuthenticatedSurfaceIngressService(project: Project) : Disposable
         layoutForwarder.dispose()
     }
 
-    val frontendSnapshotAvailable: StateFlow<Boolean> = state.frontendSnapshotAvailable
+    /** True from authenticated lease open through explicit retirement, including pre-snapshot. */
+    val frontendAuthorityActive: StateFlow<Boolean> = state.frontendAuthorityActive
 
     suspend fun open(authenticatedClientId: String, frontendInstanceId: String): SurfaceIngressLease =
         state.open(authenticatedClientId, frontendInstanceId)
@@ -67,8 +68,8 @@ internal class AuthenticatedSurfaceIngressState(
     private val generation = AtomicLong(0)
     private val mutex = Mutex()
     private val connections = mutableMapOf<String, ConnectionState>()
-    private val mutableFrontendSnapshotAvailable = MutableStateFlow(false)
-    val frontendSnapshotAvailable: StateFlow<Boolean> = mutableFrontendSnapshotAvailable.asStateFlow()
+    private val mutableFrontendAuthorityActive = MutableStateFlow(false)
+    val frontendAuthorityActive: StateFlow<Boolean> = mutableFrontendAuthorityActive.asStateFlow()
 
     suspend fun open(
         authenticatedClientId: String,
@@ -89,7 +90,10 @@ internal class AuthenticatedSurfaceIngressState(
             acceptedSequence = 0,
             acceptedSurfaces = emptyMap(),
         )
-        refreshFrontendSnapshotAvailability()
+        // The authenticated frontend owns layout immediately. Its first snapshot can be delayed by
+        // debounce, EDT scheduling, schema negotiation, or transport; none authorizes fallback.
+        layoutForwarder.open(authenticatedClientId, lease.connectionGeneration)
+        refreshFrontendAuthority()
         lease
     }
 
@@ -129,7 +133,6 @@ internal class AuthenticatedSurfaceIngressState(
             acceptedSequence = snapshot.sequence,
             acceptedSurfaces = snapshot.surfaces.associate { it.paneId to it.surfaceGeneration },
         )
-        refreshFrontendSnapshotAvailability()
         // GH #320 option B: the controller policy has now seen the complete snapshot, so its
         // measured main-window geometry may drive pane layout. The pane-layout surface fences
         // its own generation/sequence; the policy's projection status (frozen without terminal
@@ -189,11 +192,11 @@ internal class AuthenticatedSurfaceIngressState(
         connections.remove(authenticatedClientId)
         layoutForwarder.retire(authenticatedClientId, lease.connectionGeneration)
         publisher.retire(authenticatedClientId, lease.connectionGeneration)
-        refreshFrontendSnapshotAvailability()
+        refreshFrontendAuthority()
     }
 
-    private fun refreshFrontendSnapshotAvailability() {
-        mutableFrontendSnapshotAvailable.value = connections.values.any { it.acceptedSequence > 0 }
+    private fun refreshFrontendAuthority() {
+        mutableFrontendAuthorityActive.value = connections.isNotEmpty()
     }
 
     private fun rejected(

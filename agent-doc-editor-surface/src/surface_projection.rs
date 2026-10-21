@@ -450,9 +450,6 @@ fn remote_layout(
     let column_order = match resolution.column_order {
         crate::remote_layout::RemoteLayoutColumnOrder::Unknown => SurfaceColumnOrder::Unknown,
         crate::remote_layout::RemoteLayoutColumnOrder::Retained => SurfaceColumnOrder::Retained,
-        crate::remote_layout::RemoteLayoutColumnOrder::Provisional => {
-            SurfaceColumnOrder::Provisional
-        }
     };
     Some(Layout {
         columns,
@@ -751,12 +748,12 @@ mod tests {
         panic!("the remote fold must not run")
     }
 
-    fn provisional_fold(_: &str, _: &RemoteLayoutEvidence) -> RemoteLayoutResolution {
+    fn retained_fold(_: &str, _: &RemoteLayoutEvidence) -> RemoteLayoutResolution {
         RemoteLayoutResolution {
             columns: vec![SurfaceColumn::new(["c.md"]), SurfaceColumn::new(["b.md"])],
             source: crate::RemoteLayoutSource::RetainedRemoteColumns,
-            column_order: crate::remote_layout::RemoteLayoutColumnOrder::Provisional,
-            reason: Some("selected_visible_change_replaced_focus_column".into()),
+            column_order: crate::remote_layout::RemoteLayoutColumnOrder::Retained,
+            reason: Some("selected_visible_change_preserved_structure".into()),
         }
     }
 
@@ -812,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn a_remote_provisional_fold_reaches_the_surface_unchanged() {
+    fn a_remote_retained_fold_reaches_the_surface_unchanged() {
         let evidence = SurfaceProjectionEvidence {
             base_path: Some("/repo".into()),
             manager_selected: vec!["/repo/c.md".into()],
@@ -831,12 +828,12 @@ mod tests {
             selected_text_editor_session: Some("/repo/c.md".into()),
             ..Default::default()
         };
-        let projection = project_surface(&evidence, provisional_fold);
+        let projection = project_surface(&evidence, retained_fold);
         assert_eq!(projection.outcome, SurfaceProjectionOutcome::Ready);
         assert_eq!(projection.layout_source, SurfaceLayoutSource::Remote);
         assert_eq!(
             projection.surface.unwrap().column_order,
-            SurfaceColumnOrder::Provisional
+            SurfaceColumnOrder::Retained
         );
     }
 

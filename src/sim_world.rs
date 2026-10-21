@@ -60,8 +60,8 @@ fn thread_cpu_time() -> Option<Duration> {
 /// published while the current effect is finishing remains owned by one active
 /// worker. The production IO layer adds a Condvar wake; this model exercises the
 /// pure publish/retire boundary across the race.
-mod pane_layout_projection_model {
-    use agent_doc_controller::pane_layout::LatestProjectionWorkerState;
+mod tmux_layout_effect_model {
+    use agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState;
 
     #[derive(Clone, Copy)]
     enum Action {
@@ -71,7 +71,7 @@ mod pane_layout_projection_model {
 
     #[derive(Default)]
     struct World {
-        worker: LatestProjectionWorkerState,
+        worker: LatestTmuxEffectWorkerState,
         starts: usize,
     }
 
@@ -301,7 +301,7 @@ mod pane_layout_stashed_column_model {
 ///
 /// Each controller is an arbiter with its own latest-wins projection worker: a
 /// newer publication on the same arbiter cancels the older one
-/// (`pane_layout_projection_cancelled reason=superseded`), but nothing orders
+/// (`tmux_layout_effect_cancelled reason=superseded`), but nothing orders
 /// projections across arbiters. Publications are routed by the production
 /// policy `agent_doc_controller::layout_owner::main_window_layout_owner`; the
 /// `legacy` flag routes each publication to the controller that produced it,
@@ -485,11 +485,11 @@ mod cross_root_main_window_layout_model {
 /// frame's documents, after telling the previous root to forget its surface.
 /// Delivery to each controller is FIFO but the two queues interleave on a
 /// seeded schedule, so a busy controller can process an OLDER frame after the
-/// other controller already projected a newer one (the "heavy CPU load" in the
-/// report). Each controller runs a retrying projection worker.
+/// other controller already accepted a newer one (the "heavy CPU load" in the
+/// report). Each controller runs a retrying tmux effect worker.
 ///
 /// The fixed policy is the production one:
-/// [`collapse_duplicate_layout_documents`], [`ProjectionAttemptLedger`]
+/// [`collapse_duplicate_layout_documents`], [`TmuxEffectAttemptLedger`]
 /// (bounded retries, stamps minted at publication, editor order),
 /// [`window_claim_requires_yield`], forget-retirement and claim-conditional
 /// foreign-pane protection ([`pane_owner_is_foreign`]). The other policies are
@@ -501,8 +501,8 @@ mod stale_controller_shared_window_model {
         window_claim_requires_yield,
     };
     use agent_doc_controller::pane_layout::{
-        PROJECTION_RETRY_ATTEMPT_LIMIT, ProjectionAttemptAdmission, ProjectionAttemptLedger,
-        ProjectionRetirement, collapse_duplicate_layout_documents,
+        TMUX_EFFECT_RETRY_ATTEMPT_LIMIT, TmuxEffectAttemptAdmission, TmuxEffectAttemptLedger,
+        TmuxEffectRetirement, collapse_duplicate_layout_documents,
     };
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
@@ -546,7 +546,7 @@ mod stale_controller_shared_window_model {
         forget_retires: false,
         protection: Protection::Never,
     };
-    /// The first attempt: claim stamped at the first projection attempt and an
+    /// The first attempt: claim stamped at the first tmux effect attempt and an
     /// unconditional foreign-pane guard.
     const ATTEMPT_STAMPS: Policy = Policy {
         collapse_duplicates: true,
@@ -600,7 +600,7 @@ mod stale_controller_shared_window_model {
         desired: Vec<String>,
         by_editor: Option<EditorPublicationOrder>,
         done: bool,
-        ledger: ProjectionAttemptLedger,
+        ledger: TmuxEffectAttemptLedger,
         inbox: VecDeque<Message>,
         attempts: u64,
     }
@@ -613,7 +613,7 @@ mod stale_controller_shared_window_model {
                 desired: Vec::new(),
                 by_editor: None,
                 done: true,
-                ledger: ProjectionAttemptLedger::default(),
+                ledger: TmuxEffectAttemptLedger::default(),
                 inbox: VecDeque::new(),
                 attempts: 0,
             }
@@ -685,7 +685,7 @@ mod stale_controller_shared_window_model {
                         && controller.by_editor.is_some()
                         && controller.ledger.retire(
                             controller.generation,
-                            ProjectionRetirement::EditorSurfaceForgotten,
+                            TmuxEffectRetirement::EditorSurfaceForgotten,
                         )
                     {
                         controller.done = true;
@@ -741,7 +741,7 @@ mod stale_controller_shared_window_model {
                 ) {
                     controller
                         .ledger
-                        .retire(generation, ProjectionRetirement::YieldedToNewerWindowClaim);
+                        .retire(generation, TmuxEffectRetirement::YieldedToNewerWindowClaim);
                     controller.done = true;
                     return;
                 }
@@ -753,7 +753,7 @@ mod stale_controller_shared_window_model {
                 });
             }
             if policy.retry_budget
-                && let ProjectionAttemptAdmission::Retired(_) =
+                && let TmuxEffectAttemptAdmission::Retired(_) =
                     self.controllers[index].ledger.begin_attempt(generation)
             {
                 self.controllers[index].done = true;
@@ -777,11 +777,13 @@ mod stale_controller_shared_window_model {
             if self.converged(index) {
                 self.controllers[index].done = true;
             } else if policy.retry_budget
-                && self.controllers[index].ledger.retry_budget_spent(generation)
+                && self.controllers[index]
+                    .ledger
+                    .retry_budget_spent(generation)
             {
                 self.controllers[index]
                     .ledger
-                    .retire(generation, ProjectionRetirement::RetryBudgetExhausted);
+                    .retire(generation, TmuxEffectRetirement::RetryBudgetExhausted);
                 self.controllers[index].done = true;
             }
         }
@@ -817,7 +819,13 @@ mod stale_controller_shared_window_model {
 
     /// 2 -> 1 -> 2 panes, with the split briefly showing `sdk.md` twice, then
     /// the operator's "Sync Tmux Panes" re-sending the 2-pane frame.
-    const TWO_ONE_TWO: &[&[&str]] = &[&[BUGS, SDK], &[SDK], &[SDK, SDK], &[BUGS, SDK], &[BUGS, SDK]];
+    const TWO_ONE_TWO: &[&[&str]] = &[
+        &[BUGS, SDK],
+        &[SDK],
+        &[SDK, SDK],
+        &[BUGS, SDK],
+        &[BUGS, SDK],
+    ];
     /// The reverse round trip ends on the nested root's 1-pane frame.
     const ONE_TWO_ONE: &[&[&str]] = &[&[SDK], &[BUGS, SDK], &[SDK]];
 
@@ -887,7 +895,7 @@ mod stale_controller_shared_window_model {
                 assert!(world.controllers.iter().all(|c| c.done), "seed {seed}");
                 for controller in &world.controllers {
                     assert!(
-                        controller.attempts <= 6 * PROJECTION_RETRY_ATTEMPT_LIMIT,
+                        controller.attempts <= 6 * TMUX_EFFECT_RETRY_ATTEMPT_LIMIT,
                         "seed {seed}: retries are bounded ({})",
                         controller.attempts
                     );
@@ -905,7 +913,10 @@ mod stale_controller_shared_window_model {
             .map(|seed| run(NO_EDITOR_ORDER, TWO_ONE_TWO, seed, 400))
             .filter(|world| world.window == vec![SDK.to_string()])
             .count();
-        assert!(collapsed > 0, "some schedule must reproduce the 1-pane collapse");
+        assert!(
+            collapsed > 0,
+            "some schedule must reproduce the 1-pane collapse"
+        );
     }
 
     /// An unconditional foreign-pane guard makes the nested root's genuine
@@ -945,19 +956,26 @@ mod stale_controller_shared_window_model {
     #[test]
     fn a_current_controller_wedged_on_a_stale_generation_stops_without_a_recycle() {
         let mut world = World::new(FIXED, &[BUGS, SDK]);
-        world.controllers[INNER_INDEX].inbox.push_back(Message::Publish {
-            sequence: 1,
-            columns: vec![SDK.to_string(), UNSTARTABLE.to_string()],
-        });
+        world.controllers[INNER_INDEX]
+            .inbox
+            .push_back(Message::Publish {
+                sequence: 1,
+                columns: vec![SDK.to_string(), UNSTARTABLE.to_string()],
+            });
         world.deliver(INNER_INDEX);
-        for _ in 0..(10 * PROJECTION_RETRY_ATTEMPT_LIMIT) {
+        for _ in 0..(10 * TMUX_EFFECT_RETRY_ATTEMPT_LIMIT) {
             world.attempt(INNER_INDEX);
         }
         let inner = &world.controllers[INNER_INDEX];
         assert!(inner.done, "the worker retired without any recycle");
-        assert!(inner.attempts <= PROJECTION_RETRY_ATTEMPT_LIMIT);
+        assert!(inner.attempts <= TMUX_EFFECT_RETRY_ATTEMPT_LIMIT);
         let generation = inner.generation;
-        assert!(world.controllers[INNER_INDEX].ledger.retired(generation).is_some());
+        assert!(
+            world.controllers[INNER_INDEX]
+                .ledger
+                .retired(generation)
+                .is_some()
+        );
         // Many more idle ticks re-apply nothing.
         let window = world.window.clone();
         for _ in 0..100 {
@@ -4909,8 +4927,8 @@ mod operator_todo_check_model {
                 Action::AgentWritesFromStaleCut => {
                     let ours = apply_response(&self.agent_cut);
                     let base = CrdtDoc::from_text(&self.agent_cut).encode_state();
-                    self.editor = merge_by_component(Some(&base), &ours, &self.editor)
-                        .expect("todo merge");
+                    self.editor =
+                        merge_by_component(Some(&base), &ours, &self.editor).expect("todo merge");
                     self.agent_cut = self.editor.clone();
                 }
                 Action::AgentWritesFromFreshRead => {
@@ -4951,7 +4969,11 @@ mod operator_todo_check_model {
         direct.step(Action::OperatorChecks);
         direct.step(Action::AgentWritesFromStaleCut);
         direct.step(Action::AgentWritesFromFreshRead);
-        assert!(direct.editor.contains("- [x] [#gate1] Verify [#gate1] live in the 263 IDE\n"));
+        assert!(
+            direct
+                .editor
+                .contains("- [x] [#gate1] Verify [#gate1] live in the 263 IDE\n")
+        );
         explore(World::new(), 4);
     }
 }

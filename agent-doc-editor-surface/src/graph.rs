@@ -758,7 +758,7 @@ mod tests {
         state.observe(layout);
         assert!(
             state.intent().is_idle(),
-            "tmux already shows this layout, so the handoff needs no re-projection"
+            "tmux already shows this layout, so the handoff needs no republication"
         );
         assert_eq!(state.fold().authority_epoch, Some(7));
     }

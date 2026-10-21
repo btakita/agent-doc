@@ -13,7 +13,8 @@ import com.github.btakita.agentdoc.RemoteClientLayoutAuthority
 import com.github.btakita.agentdoc.SyncLayoutAction
 import com.github.btakita.agentdoc.TerminalUtil
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
-import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
+import com.github.btakita.agentdoc.split.FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION
+import com.github.btakita.agentdoc.split.GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.intellij.openapi.client.ClientKind
 import com.intellij.openapi.client.ClientSessionsManager
@@ -66,7 +67,27 @@ internal object RemoteClientMeasuredLayout {
         isSessionDocument: (String) -> Boolean,
         derivation: EditorDerivation = EditorDerivation.Native,
     ): MeasuredMainLayout {
-        if (snapshot.schemaVersion < SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+        if (snapshot.schemaVersion >= FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+            val main = snapshot.surfaces.singleOrNull { it.role == SurfaceRole.MAIN }
+                ?: return MeasuredMainLayout.Unavailable("no_main_surface")
+            val authoritative = main.layoutColumns
+                ?: return MeasuredMainLayout.Unavailable("frontend_columns_missing")
+            for (window in main.windows) {
+                if (window.selectedPath?.takeIf(isSessionDocument) == null &&
+                    window.openPaths.any(isSessionDocument)
+                ) {
+                    return MeasuredMainLayout.Unavailable("split_shows_non_session_tab")
+                }
+            }
+            val columns = authoritative.map { column ->
+                column.paths.filter(isSessionDocument).distinct()
+            }.filter(List<String>::isNotEmpty)
+            if (columns.isEmpty()) return MeasuredMainLayout.Unavailable("no_session_documents")
+            val focused = main.windows.firstOrNull { it.selectedPath in columns.flatten() }?.selectedPath
+                ?: columns.first().first()
+            return MeasuredMainLayout.Measured(columns, focused)
+        }
+        if (snapshot.schemaVersion < GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
             return MeasuredMainLayout.Unavailable("schema_${snapshot.schemaVersion}_without_geometry")
         }
         val main = snapshot.surfaces.singleOrNull { it.role == SurfaceRole.MAIN }
@@ -256,11 +277,16 @@ internal object RemoteClientSurfacePayload {
  * main/detached policy sees the complete snapshot before any layout effect.
  */
 internal interface RemoteClientLayoutForwarder {
+    /** Establish pending frontend authority before schema negotiation or the first snapshot. */
+    fun open(clientId: String, generation: Long)
+
     fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot)
 
     fun retire(clientId: String, generation: Long)
 
     object Disabled : RemoteClientLayoutForwarder {
+        override fun open(clientId: String, generation: Long) = Unit
+
         override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) = Unit
 
         override fun retire(clientId: String, generation: Long) = Unit
@@ -288,9 +314,14 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     private val lastUnavailable = mutableMapOf<String, String>()
     private val familyRetiredRoots = mutableSetOf<String>()
 
-    override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) {
+    override fun open(clientId: String, generation: Long) {
         val surfaceId = remoteClientSurfaceId(clientId, generation)
         liveSurfaces += surfaceId
+        RemoteClientLayoutAuthority.activate(project, surfaceId)
+    }
+
+    override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) {
+        val surfaceId = remoteClientSurfaceId(clientId, generation)
         execute { deliver(clientId, surfaceId, snapshot) }
     }
 
@@ -301,8 +332,11 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     }
 
     fun dispose() {
+        val retiring = liveSurfaces.toList()
         liveSurfaces.clear()
-        execute { forwarded.keys.toList().forEach { retireSurface(it, reason = "backend_disposed") } }
+        // Pending leases may not have forwarded a first snapshot yet, but they
+        // already own frontend authority and must release it on disposal.
+        execute { retiring.forEach { retireSurface(it, reason = "backend_disposed") } }
         executor.shutdown()
     }
 
@@ -359,7 +393,6 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
             return
         }
         forwarded[surfaceId] = pending
-        RemoteClientLayoutAuthority.activate(project, surfaceId)
         LOG.info(
             "[rd-layout] forwarded measured columns surface=$surfaceId root=${pending.projectRoot} " +
                 "columns=${layout.columns.size} [${layout.columns.joinToString(" | ") { it.joinToString(",") }}] " +

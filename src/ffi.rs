@@ -5349,12 +5349,12 @@ mod tests {
         assert!(wire.get("client_id").is_none(), "{wire}");
     }
 
-    /// GH #134: the Remote Dev shape from the issue (`windows=0`, one remote
-    /// client, one selected file) resolves to two columns once the client's
-    /// visible editors name both splits, and a following single-selection
-    /// observation keeps both instead of handing the controller zero columns.
+    /// GH #343: the legacy Remote Dev shape (`windows=0`, one remote client)
+    /// contains only flat visible/selected/open sets. The compatibility FFI
+    /// must not turn those sets into split columns, even after repetition or a
+    /// following single-selection observation.
     #[test]
-    fn gh134_remote_layout_ffi_resolves_and_retains_split_columns() {
+    fn gh343_remote_layout_ffi_never_invents_split_columns() {
         let root = CString::new("/tmp/gh134-ffi-remote-layout").unwrap();
         let split = CString::new(
             r#"{"clients":[{"visible":["tasks/pmt2/mr/1061.md","tasks/agent-doc/agent-doc.ad.md"],"selected":["tasks/pmt2/mr/1061.md"],"open":["tasks/pmt2/mr/1061.md","tasks/agent-doc/agent-doc.ad.md"]}],"focused":["tasks/pmt2/mr/1061.md"]}"#,
@@ -5364,16 +5364,19 @@ mod tests {
             r#"{"clients":[{"selected":["tasks/agent-doc/agent-doc.ad.md"],"open":["tasks/pmt2/mr/1061.md","tasks/agent-doc/agent-doc.ad.md"]}],"focused":["tasks/agent-doc/agent-doc.ad.md"]}"#,
         )
         .unwrap();
-        let first = ffi_json_value(unsafe {
-            agent_doc_editor_surface_resolve_remote_layout_json(root.as_ptr(), split.as_ptr())
-        });
-        assert_eq!(first["source"], "remote_client_visible_editors");
-        assert_eq!(first["columns"].as_array().unwrap().len(), 2);
+        for _ in 0..100 {
+            let flat = ffi_json_value(unsafe {
+                agent_doc_editor_surface_resolve_remote_layout_json(root.as_ptr(), split.as_ptr())
+            });
+            assert_eq!(flat["source"], "unknown");
+            assert_eq!(flat["columns"], serde_json::json!([]));
+            assert_eq!(flat["column_order"], "unknown");
+        }
         let second = ffi_json_value(unsafe {
             agent_doc_editor_surface_resolve_remote_layout_json(root.as_ptr(), single.as_ptr())
         });
-        assert_eq!(second["source"], "retained_remote_columns");
-        assert_eq!(second["columns"], first["columns"]);
+        assert_eq!(second["source"], "unknown");
+        assert_eq!(second["columns"], serde_json::json!([]));
         let bad = CString::new("not json").unwrap();
         let result = unsafe {
             agent_doc_editor_surface_resolve_remote_layout_json(root.as_ptr(), bad.as_ptr())

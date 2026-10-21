@@ -689,17 +689,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   across bounded later-EDT reads. A surface is not published while any restored
   editor window still has no selected file; the completed file lifecycle edge
   republishes the settled surface without invoking tmux directly.
-- A Remote Dev selection can arrive before its visible-editor membership update. A
-  width-preserving focused-column replacement from that selection is provisional:
-  the fold publishes `column_order=provisional`, the controller retains the
-  pre-replacement columns as order provenance, and the next structural visible set
-  uses those columns as its ordering base. Thus the later membership evidence assigns
-  the selected file to the split it actually replaced instead of preserving the
-  provisional side (GH #250, GH #343). This ancestry rule also applies when the
-  retained base
-  has only one column: after a provisional `[a] -> [c]` focus replacement, a repeated
-  structural `visible=[a,c] selected=[c]` observation resolves to `[a,c]`, then clears
-  the provisional base (GH #253).
+- A Remote Dev selection can arrive before its visible-editor membership update.
+  That selection updates focus intent only and preserves the last authoritative
+  columns exactly; it never chooses a replacement slot. Positive visible-set
+  evidence may later change membership. An ambiguous one-column growth must
+  repeat before confirmation, and the pending candidate is evidence under
+  evaluation, never pane structure (GH #250, GH #253, GH #343).
 - In the exact-262/263 modular package, an accepted frontend surface snapshot is the
   authoritative Remote Dev selection/layout source. If no frontend generation has delivered an
   accepted snapshot (including a one-sided backend install), the backend subscribes to each remote
@@ -865,26 +860,13 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `column_order=unknown`. Example: `[a | b]` → `[c | b]` → visible `{d,b,e}` → `[d | e | b]`
   → visible `{g,b}` → `[g | b]`, so a later `{a,b}` publishes `[a | b]`, not `[b | a]`. A
   retained publication is already resolved and passes through controller ordering unchanged.
-  A selection-first focused-column replacement is instead `column_order=provisional`:
-  the guessed membership applies immediately, but its placement cannot become the basis for
-  the next structural fold (GH #343).
-- A focus-only structural escalation may guess which retained slot a newly focused document
-  replaced, but that guess is provisional order, never geometry authority (GH #302). The
-  controller retains the pre-escalation positive order as provenance. If the next structural
-  publication revives a document displaced by the guess, an `unknown` publication is ordered
-  against that positive basis; otherwise the observation confirms the guessed membership and
-  becomes the new authority. The read-only retained-columns endpoint used to seed or re-anchor
-  Remote Dev memory likewise returns the positive basis while a guess is outstanding, so an IDE
-  restart cannot anchor the guessed order and make a reversal self-perpetuating.
-- A Remote Dev fold's `provisional` publication has the same controller contract as a
-  focus-only escalation guess (GH #343). The controller slot-folds its membership against
-  the current desired layout, stores the pre-guess order basis in the desired generation's
-  provenance, and preserves whether that basis had positive authority. The editor's next
-  structural fold uses the same ancestry; a controller-side `unknown` fold also uses the
-  stored basis, then clears it. The read-only authority endpoint returns that basis only when
-  it was already positive, so a cold `unknown` order never anchors itself (GH #332).
-  Thus `[a | b]` → provisional `[c | b]` → structural `[a | c]` converges to `[a | c]`,
-  never the reversed `[c | a]` produced by treating the provisional generation as authority.
+  Selection-first evidence never changes pane membership or order (GH #343).
+- When the frontend module is connected, its generation-fenced measured layout is the source
+  of truth. The backend forwards that exact vector as `column_order=editor`; the controller
+  copies it into the desired tmux effect without folding, reordering, or reconstructing it.
+  Conflicting retained backend state is stale. Incomplete frontend evidence preserves the last
+  accepted frontend snapshot or defers, and focus-only escalation cannot invent a column.
+  Backend tmux observation is solely a convergence receipt.
 - Explicit layout publications (`Sync Tmux Pane`, claim, resync, and the Run Agent Doc route's
   `--col` list) name their order source as `column_order` (GH #112). By surface reference the
   label is the surface's own `column_order`, carried by the controller. Only locally detected
@@ -900,15 +882,15 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   does not become order authority and cannot anchor a restarted editor fold; its provenance stays
   `unknown` until an order-bearing editor/manual publication arrives (GH #332).
   `pane_layout_desired_published` and every
-  `pane_layout_projection` line record `caller_kind` and
-  `column_order=editor|retained|unknown|provisional`.
+  `tmux_layout_effect_state` line record `caller_kind` and
+  `column_order=editor|retained|unknown`.
 - The automatic editor surface is state, and it names its column-order provenance the same way
   (GH #320; the rule is `specs/13-state-backbone.md`, "State Propagation, Not Effect Inference").
   The surface payload's `column_order` is `editor` only for local windows laid out at distinct
   origins (and for the JetBrains Client's measured windows forwarded by the 262/263 backend,
-  below); windows that share an origin (never measured) publish `unknown`. Remote Dev folds
-  publish `unknown`, `retained` when anchored, or `provisional` for a selection-first slot
-  replacement. The controller carries that label
+  below); windows that share an origin (never measured) publish `unknown`. Legacy Remote Dev
+  fallback folds publish `unknown` or `retained` when anchored; selection-only input publishes
+  no structural replacement. The controller carries that label
   from `SurfaceIntent::Sync` (and a focus escalation over the surface's columns) into the desired
   layout, so a membership order is ordered against the retained layout and never applied as
   geometry; a payload without the field reads as `editor`. Without geometry the surface signature
@@ -918,18 +900,16 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   together with the backend's own selection; it never defers with
   `no_visible_session_documents` because the backend's `selectedFiles` names no session document
   (`activeWindow=<none>`), so a split change publishes without a Run.
-- **Remote Dev pane order follows the JetBrains Client's measured split geometry (GH #320 option
-  B).** The backend has no client split structure to observe: `GuestFileEditorManager` (the
+- **Remote Dev pane structure is authored by the connected JetBrains Client (GH #320/#343).** The
+  backend has no client split structure to observe: `GuestFileEditorManager` (the
   backend's `ClientFileEditorManager` for a Remote Dev client) holds a flat composite list and one
   selected composite, the RD `FileEditorCompositeModel` carries a per-composite `visible` flag but
   no window or split identity, and `RdServerEditorTracker.activeEditors` is a flat list. agent-doc
   does not infer order from the editor remove/re-open events. Geometry exists only in the JetBrains
-  Client, so the 262/263 frontend module publishes it as state: surface snapshot schema 2 adds
-  each editor window's measured on-screen bounds (`EditorWindowSnapshot.bounds`, null unless the
-  window is showing with a positive size). The backend derives the main window's columns from
-  those bounds with the classic grouping (`LayoutDetector.buildColumnsFromSnapshots`, the
-  8 px x-tolerance; windows sharing a column stack top to bottom) and its provenance
-  (`LayoutDetector.measuredColumnOrder`). After the same snapshot's
+  Client. Snapshot schema 2 carries measured bounds; schema 3 additionally carries the frontend's
+  typed `layoutColumns` vector, grouped there with the 8 px x-tolerance and top-to-bottom stacking.
+  The backend validates session-document paths but neither regroups nor reorders that vector.
+  After the same snapshot's
   `editor_view_snapshot_observe` was delivered (whatever the detached-view projection status: 263
   freezes it without terminal capability), it forwards
   them into the controller surface Source (`editor_surface_observe`) as `column_order=editor`,
@@ -937,34 +917,41 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   has keyboard focus). The forward publishes on its own family,
   `jetbrains-rd@<installation>-pid:<pid>`: the same installation as the classic surface and focus
   lanes (so the same navigation lane and focus owner), with its own generation, because the
-  frontend authority handoff retires the whole classic `jetbrains@` family. Each frontend
+  frontend authority handoff retires the whole classic `jetbrains@` family. Authority begins when
+  the authenticated ingress lease opens, before its first snapshot: the frontend intentionally
+  waits 75 ms to coalesce event bursts, then captures on the EDT; first-lease schema negotiation
+  may wait up to 5 s, and transport may fail. Throughout that pending window the backend fallback
+  is fenced and may only leave the last accepted frontend structure in force. It cannot invent,
+  fold, or publish a replacement. Each frontend
   connection publishes its own endpoint `remote-client:<clientId>:<connectionGeneration>`, retired
   when that connection retires or the backend project closes; before this JVM's first forward to
   a root it retires the installation's `jetbrains-rd` family there, so a dead backend JVM's forward
   cannot keep driving. Only a remote session (`ClientType.isRemote`) is forwarded; a monolithic
-  IDE's own frontend is already measured by the classic window path. Derivation is
-  `Unavailable` (the last forwarded layout stays in force) for a schema-1 snapshot, a contributing
-  window without bounds, a shared origin, or a split whose selected tab is not a session document
+  IDE's own frontend is already measured by the classic window path. A schema-1 peer has no
+  geometry and a schema-2 peer uses its positive bounds only for compatibility. For schema 3,
+  a missing column vector is `Unavailable` and the last accepted frontend snapshot stays in force.
+  The same hold applies to a split whose selected tab is not a session document
   while its tabs hold one (`#stickymdpane`: that column is unknown, not gone); a split holding no
   session document contributes no column, so closing a split still collapses the layout. While a
-  forward is live for a project (`RemoteClientLayoutAuthority`), the backend's remote-client
+  authenticated frontend lease is live for a project (`RemoteClientLayoutAuthority`), the backend's remote-client
   membership fold defers (`capture deferred reason=frontend_measured_layout_authority`), so the
-  remembered-order fallback, labelled `unknown`/`retained`, remains only for classic installs,
-  one-sided installs, and a frontend that predates schema 2. Schema negotiation keeps old peers
+  remembered-order fallback, labelled `unknown`/`retained`, remains only for classic installs and
+  one-sided installs with no authenticated frontend lease. Schema negotiation keeps old peers
   working: Fleet RPC decodes with `ignoreUnknownKeys = false` and `encodeDefaults = true`, so the
   bounds key is never encoded while null (`@EncodeDefault(NEVER)`), and the frontend asks
   `SurfaceSnapshotRpcApi.supportedSnapshotSchemaVersion()` once per lease; a backend that predates
   the call fails it (or does not answer within 5 s) and the frontend publishes schema 1 without
-  geometry. The backend validator accepts schemas 1 and 2. Evidence: the client logs
+  geometry. The backend validator accepts schemas 1 through 3. Explicit retirement/release is the
+  only transition that hands authority back to the backend fallback. Evidence: the client logs
   `[split-surface] snapshot schema negotiated version=<n> backend_offered=<n|none>
   geometry=measured|unavailable`; the backend logs `[rd-layout] forwarded measured columns
   surface=<id> root=<root> columns=<n> [<left> | <right>] column_order=editor`,
   `[rd-layout] measured layout unavailable surface=<id> reason=<reason>`, and `[rd-layout] retired
   measured layout surface=<id>`; ops.log records `controller_editor_surface_observed
   client=jetbrains-rd@<installation>-pid:<pid> surface=remote-client:<clientId>:<generation>` and
-  `pane_layout_desired_published ... column_order=editor`. The manual remedy for an install
-  without the frontend module stays `agent-doc sync --col <left> --col <right>` (an `editor`
-  publication), which later automatic `unknown`/`retained` observations keep.
+  `pane_layout_desired_published ... column_order=editor`. `Sync Tmux Layout` recovers stale tmux
+  structure only by publishing the current positive frontend column vector; an unknown or partial
+  capture preserves/defer structure and may update focus intent only.
 - **Run Agent Doc and Sync Tmux Layout act on the propagated surface, not a click-time snapshot**
   (`surface_layout_reference_v1`; the rule is `specs/13-state-backbone.md`, "State Propagation, Not
   Effect Inference"). On the EDT the command captures the surface through the same
@@ -996,10 +983,10 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   the plugin refuses the stale/interstitial snapshot before controller submission and asks the
   operator to retry after selection settles.
 - A fresh editor selection is authoritative for the next projection even if the split component tree is briefly interstitial and still exposes the opposite editor as selected. When a tab-chrome click initially looks like a background-split selection, the listener performs one generation-fenced authority check after IntelliJ's focus manager reports settled focus; it emits focus only if that exact file has become the active editor window while the project frame is active. A generic next-EDT check is insufficient because real split/tab transfers can span multiple EDT turns. This closes the opposite-tab event gap without promoting programmatic or genuinely background selections. Component-focus republishes the spanning surface when no selection is pending, but cannot replace a pending document-selection observation; the shared generation guard still collapses repeated focus callbacks.
-- The listener first re-reads an interstitial selection projection on bounded later EDT turns. If it still contains the old selected file when that budget is exhausted, the listener applies the selection event's old-to-new file edge to the stale visible/layout projection before publishing; it never synthesizes a replacement unless the old event file is actually present.
+- The listener first re-reads an interstitial selection snapshot on bounded later EDT turns. If it still contains the old selected file when that budget is exhausted, the listener preserves the last authoritative visible/layout snapshot and publishes only focus intent; it never synthesizes structural placement.
 - Reverse tmux-to-editor focus sync is installed at project startup and reads the Project Controller-owned `tmux_focus_state` projection through the Project Controller socket. That projection yields a document only when the configured tmux session's current window is `agent-doc`, so switching to another tmux window must not recall the editor selection from the stale active pane in the hidden agent-doc window. If the active pane still has an exact route-owned process-tree binding but its actor projection was pruned, the controller reports that bound document instead of `active_pane_unbound`; foreign-root and ambiguous owners remain unbound. An actually focused editor component remains authoritative over background controller focus changes. The IDE frame alone is not focus authority: selecting a pane in an embedded terminal leaves the frame active but permits the corresponding visible editor document to be selected, including a document from another project root in the same split surface. A hidden foreign-root target remains suppressed. A reverse mirror may select a different editor tab but must pass `focusEditor=false`, so it cannot reactivate the JetBrains desktop window after the operator moves to another i3 window. Before `Claim for Tmux Pane` starts a CLI claim, JetBrains records the current tmux-focused document as already seen; if the claim fails and tmux focus remains on the previous pane, the reverse focus mirror must not reopen that previous document over the editor-selected claim target.
 - The plugin applies only a short event-storm debounce and generation guard before reporting the final surface. Its separate focus lane keeps only an in-memory generation and a micro-coalescing delay, then publishes retained focus state to the Project Controller; it does not submit an editor command. The controller-owned Lazily graph supplies transition deduplication and the exact selection effect receipt. The plugin stores no previous layout signature, last-focused file, pending retry, or durable controller copy.
-- A `sync` projection is the product of columns and focused document. The controller first reconciles the passive layout, then applies the requested pane through a generation-fenced effect. Matching columns or a successful `select-pane` receipt alone cannot retire the projection: observation must show the focused document's actor pane active in the target window. A repeated foreground command republishes a physical observation even when its desired value is identical, reactivating the retained effect after focus or geometry drift. A newer surface generation cancels stale focus before it reaches tmux.
+- A `sync` effect target is the product of columns and focused document. The controller first reconciles the passive layout, then applies the requested pane through a generation-fenced effect. Matching columns or a successful `select-pane` receipt alone cannot retire the target: observation must show the focused document's actor pane active in the target window. A repeated foreground command republishes a physical observation even when its desired value is identical, reactivating the retained effect after focus or geometry drift. A newer surface generation cancels stale focus before it reaches tmux.
 - Safe-passive exact-visible reconciliation is atomic across stale-supervisor admission. If any requested editor column is gated while its pane recycles, automatic sync preserves the current tmux layout instead of realizing a narrower subset; the recycle-settled generation republishes the complete surface. Manual `Sync Tmux Layout` keeps full repair authority and may realize a non-empty admitted remainder.
 - The retained focus projection may surface a proven live pane from stash inside
   the controller's latest-wins focus fence, then selects only after a live-window
@@ -1017,7 +1004,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   active-window guard: a stashed selected pane therefore requests layout repair,
   while a pane already in the `agent-doc` window still reports
   `outside_agent_doc_window` when the operator is viewing another tmux window.
-- If a Project Controller-backed manual `Sync Tmux Layout` terminal outcome later reports that the current layout was preserved because a visible protected pane could not detach yet, the command projection/log must retain the protected pane id, open-cycle phase, and document path so the user can tell which pane is delaying sync. Current controller builds should attach/focus the requested document around the protected pane instead of emitting that deferred-sync marker.
+- If a Project Controller-backed manual `Sync Tmux Layout` terminal outcome later reports that the current layout was preserved because a visible protected pane could not detach yet, the command receipt/log must retain the protected pane id, open-cycle phase, and document path so the user can tell which pane is delaying sync. Current controller builds should attach/focus the requested document around the protected pane instead of emitting that deferred-sync marker.
 - Automatic layout sync completes at desired-state publication rather than waiting for that exact plane version to become observed. The controller owns a single latest-wins worker, interrupts obsolete retry waits when a newer generation arrives, and never reports a superseded automatic version as a user-visible failure. Manual sync keeps its terminal receipt boundary.
 - **Resync / Fix Sessions** first runs registry/liveness cleanup, which must not
   promote registered stash panes. On successful cleanup the same operator
@@ -1035,7 +1022,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   any failure is shown with the controller diagnostic. Its nested deadlines are strictly ordered:
   the pane effect owns 30 seconds, the controller waits 35 seconds for the effect's terminal projection,
   and the plugin waits 40 seconds for the controller command. Thus a still-current `Applying` projection
-  cannot win a same-deadline race and surface as a terminal `projection_effect_in_flight` error. The
+  cannot win a same-deadline race and surface as a terminal `tmux_effect_in_flight` error. The
   manual action uses the same live-buffer session classification and ignores non-agent Markdown tabs;
   if the focused split currently shows one, its last classified agent document
   remains the requested member. Automatic editor-surface

@@ -73,7 +73,7 @@ impl FromStr for RouteOwnedReapPolicy {
 
 /// Why a new route-owned supervisor lifecycle is being started.
 ///
-/// Layout provisioning may create an idle harness owner so an editor projection
+/// Layout provisioning may create an idle harness owner so an editor layout target
 /// can converge, but it never carries a prompt dispatch. Queue control therefore
 /// fences `Dispatch` while allowing `LayoutProvision`; the idle supervisor's
 /// queue watcher continues to honor the same pause before any later dispatch.
@@ -144,7 +144,7 @@ pub enum RouteOwnedStartAdmission {
 ///
 /// This is the single policy owner shared by route provisioning and the spawned
 /// `agent-doc start` process, closing their pause-vs-start race without making a
-/// layout projection retry forever.
+/// tmux layout effect retry forever.
 pub const fn route_owned_start_blocked_by_queue_control(
     route_owned: bool,
     admission: RouteOwnedStartAdmission,
@@ -665,7 +665,10 @@ mod tests {
         let orphan = route_owned_visible_column_stashed_orphan_decision(Some(
             RouteOwnedLivenessReason::BacklogNonEmpty,
         ));
-        assert!(orphan.reap, "a steady-state backlog must not pin a stashed pane");
+        assert!(
+            orphan.reap,
+            "a steady-state backlog must not pin a stashed pane"
+        );
         assert_eq!(orphan.reason, "visible_column_pane_stashed_orphan");
         let pending = route_owned_visible_column_stashed_orphan_decision(Some(
             RouteOwnedLivenessReason::QueueNonEmpty,

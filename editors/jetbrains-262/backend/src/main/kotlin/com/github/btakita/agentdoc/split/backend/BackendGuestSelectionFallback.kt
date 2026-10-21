@@ -34,9 +34,9 @@ import kotlinx.coroutines.launch
  * Marketplace plugin synchronization normally installs the modular frontend, but a local ZIP or
  * custom-repository install can leave only the backend module present. Remote client selection
  * lives in [ClientFileEditorManager] (the platform's `GuestFileEditorManager`) and does not publish
- * the project [FileEditorManager] topic in that topology. The frontend snapshot remains
- * authoritative whenever it has delivered an accepted generation; this fallback observes the
- * remote selection flow only while that authority is absent.
+ * the project [FileEditorManager] topic in that topology. An authenticated frontend lease is
+ * authoritative before its first snapshot; this fallback observes the remote selection flow only
+ * while no frontend lease owns the project.
  *
  * "Remote" means every session [BackendRemoteSessionGate] admits: a JetBrains Remote Dev client
  * (`ClientType.CONTROLLER`) as well as a Code With Me guest (`ClientType.GUEST`). Observing only
@@ -54,7 +54,7 @@ internal object BackendGuestSelectionFallback {
             scope.cancel()
         }
         scope.launch {
-            ingress.frontendSnapshotAvailable
+            ingress.frontendAuthorityActive
                 .filter { it }
                 .collect {
                     log.info("[layout-sync] frontend surface authority accepted; retiring backend fallback")
@@ -79,15 +79,15 @@ internal object BackendGuestSelectionFallback {
                     }
                     val gate = BackendGuestSelectionGate<FileEditorWithProvider>()
                     manager.getSelectedEditorWithProviderFlow()
-                        .combine(ingress.frontendSnapshotAvailable) { selection, frontendAvailable ->
-                            selection to frontendAvailable
+                        .combine(ingress.frontendAuthorityActive) { selection, frontendActive ->
+                            selection to frontendActive
                         }
-                        .collect { (selection, frontendAvailable) ->
-                            val edge = gate.observe(selection, frontendAvailable) ?: return@collect
+                        .collect { (selection, frontendActive) ->
+                            val edge = gate.observe(selection, frontendActive) ?: return@collect
                             ApplicationManager.getApplication().invokeLater {
                                 // One-shot effect-time fence: an accepted frontend snapshot may
                                 // arrive after the flow edge but before this EDT delivery.
-                                if (project.isDisposed || ingress.frontendSnapshotAvailable.value) {
+                                if (project.isDisposed || ingress.frontendAuthorityActive.value) {
                                     return@invokeLater
                                 }
                                 log.info(

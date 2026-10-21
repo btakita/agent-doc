@@ -68,16 +68,21 @@ class AuthenticatedSurfaceIngressStateTest {
     }
 
     @Test
-    fun frontendAvailabilityTracksAcceptedSnapshotsRatherThanOpenConnections() = runBlocking {
-        val state = AuthenticatedSurfaceIngressState(RecordingPublisher())
+    fun authenticatedOpenOwnsLayoutBeforeFirstSnapshotAndThroughDeliveryFailure() = runBlocking {
+        val publisher = RecordingPublisher()
+        val state = AuthenticatedSurfaceIngressState(publisher)
         val lease = state.open("client-a", "frontend-a")
 
-        assertFalse(state.frontendSnapshotAvailable.value)
-        state.publish("client-a", lease, snapshot("frontend-a", 1))
-        assertTrue(state.frontendSnapshotAvailable.value)
+        assertTrue(state.frontendAuthorityActive.value, "the debounce/schema/transport window is fenced")
+        publisher.deliver = false
+        assertEquals(
+            SurfaceIngressStatus.DELIVERY_FAILED,
+            state.publish("client-a", lease, snapshot("frontend-a", 1)).status,
+        )
+        assertTrue(state.frontendAuthorityActive.value, "transport failure cannot revive backend guessing")
 
-        state.open("client-a", "frontend-a-2")
-        assertFalse(state.frontendSnapshotAvailable.value)
+        state.retire("client-a", lease)
+        assertFalse(state.frontendAuthorityActive.value)
     }
 
     @Test
@@ -115,6 +120,7 @@ class AuthenticatedSurfaceIngressStateTest {
         val publisher = RecordingPublisher()
         val state = AuthenticatedSurfaceIngressState(publisher, forwarder)
         val lease = state.open("client-a", "frontend-a")
+        assertEquals(listOf("client-a" to lease.connectionGeneration), forwarder.opened)
 
         state.publish("client-a", lease, snapshot("frontend-a", 1))
         state.publish("client-a", lease, snapshot("frontend-a", 1))
@@ -154,8 +160,13 @@ class AuthenticatedSurfaceIngressStateTest {
     )
 
     private class RecordingForwarder : RemoteClientLayoutForwarder {
+        val opened = mutableListOf<Pair<String, Long>>()
         val forwarded = mutableListOf<Triple<String, Long, Long>>()
         val retired = mutableListOf<Pair<String, Long>>()
+
+        override fun open(clientId: String, generation: Long) {
+            opened += clientId to generation
+        }
 
         override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) {
             forwarded += Triple(clientId, generation, snapshot.sequence)

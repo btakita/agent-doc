@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
+#[cfg(test)]
 use agent_doc_editor_surface::SurfaceColumn;
 use agent_doc_editor_surface::{
     CurrentDocumentAuthority, DocumentAuthority, EditorSurface, EditorSurfaceObservation,
@@ -253,9 +254,8 @@ static EDITOR_SURFACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static REGISTRY: LazyLock<Registry> =
     LazyLock::new(|| Registry::new(Arc::new(|_, _| Ok(String::new()))));
 
-// GH #134: the previous Remote Dev split resolution per project root. A pure
-// value fold (`RemoteLayoutMemory::advance`); losing it on a native reload only
-// costs one cold observation, never authority.
+// GH #134/#343: the last frontend-authoritative snapshot per project root.
+// Legacy flat evidence can update focus but never creates or edits columns.
 static REMOTE_LAYOUT_MEMORY: LazyLock<Mutex<HashMap<PathBuf, RemoteLayoutMemory>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -265,127 +265,16 @@ fn remote_layout_memory() -> std::sync::MutexGuard<'static, HashMap<PathBuf, Rem
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Resolve a Remote Dev backend's split layout (GH #134).
-///
-/// A Remote Dev backend has no local editor windows; the plugin reports each
-/// remote client's visible/selected/open session documents instead. The fold
-/// keeps the previous resolution per project so a degenerate single-selection
-/// observation retains a known split instead of collapsing it to one pane.
+/// Resolve legacy Remote Dev focus evidence without deriving structure.
 pub fn resolve_remote_layout(
     project_root: &Path,
     evidence: &RemoteLayoutEvidence,
 ) -> RemoteLayoutResolution {
-    resolve_remote_layout_with_authority(project_root, evidence, remote_layout_authority)
-}
-
-/// `#tmuxpanesreversed`: Remote Dev reports no split geometry, so the layout
-/// the Project Controller retains (what tmux shows) is the only order
-/// authority. A memory that is cold (dropped by a native reload, an IDE
-/// restart, or never filled) or unanchored would otherwise adopt the visible
-/// list's tab-open order and later publish it as `retained`; anchor it to the
-/// authority first. At most one controller read per root per
-/// [`REMOTE_LAYOUT_ANCHOR_RETRY`], outside the memory lock.
-fn resolve_remote_layout_with_authority(
-    project_root: &Path,
-    evidence: &RemoteLayoutEvidence,
-    authority: impl FnOnce(&Path) -> Option<Vec<SurfaceColumn>>,
-) -> RemoteLayoutResolution {
-    let needs_anchor = remote_layout_memory()
-        .get(project_root)
-        .is_none_or(|memory| memory.columns.is_empty() || memory.unanchored);
-    let authority = (needs_anchor && remote_layout_anchor_attempt_due(project_root))
-        .then(|| authority(project_root))
-        .flatten();
     let mut memories = remote_layout_memory();
     let memory = memories.entry(project_root.to_path_buf()).or_default();
-    if let Some(authority) = authority {
-        let anchored = memory.anchor(&authority);
-        if anchored != *memory {
-            eprintln!(
-                "[editor-surface] remote_layout_anchored root={} authority={:?} before={:?} after={:?} (#tmuxpanesreversed)",
-                project_root.display(),
-                column_files(&authority),
-                column_files(&memory.columns),
-                column_files(&anchored.columns),
-            );
-        }
-        *memory = anchored;
-    }
     let (next, resolution) = memory.advance(evidence);
     *memory = next;
     resolution
-}
-
-/// Minimum spacing between two authority reads for one project root.
-const REMOTE_LAYOUT_ANCHOR_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
-
-static REMOTE_LAYOUT_ANCHOR_ATTEMPTS: LazyLock<Mutex<HashMap<PathBuf, std::time::Instant>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn remote_layout_anchor_attempt_due(project_root: &Path) -> bool {
-    let mut attempts = REMOTE_LAYOUT_ANCHOR_ATTEMPTS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let now = std::time::Instant::now();
-    match attempts.get(project_root) {
-        Some(last) if now.duration_since(*last) < REMOTE_LAYOUT_ANCHOR_RETRY => false,
-        _ => {
-            attempts.insert(project_root.to_path_buf(), now);
-            true
-        }
-    }
-}
-
-/// The controller's retained layout, in the fold's project-relative path
-/// space. `None` when no controller answers or it retains nothing here.
-fn remote_layout_authority(project_root: &Path) -> Option<Vec<SurfaceColumn>> {
-    let columns =
-        agent_doc_controller_io::project_controller::pane_layout_retained_columns_existing(
-            project_root,
-        )
-        .ok()?;
-    let authority = authority_columns_in_root(project_root, &columns);
-    (!authority.is_empty()).then_some(authority)
-}
-
-/// Map the controller's columns (comma-joined canonical document paths) into
-/// the plugin's path space: paths relative to the IDE project root. Documents
-/// outside the root are dropped: this editor can never report them visible,
-/// so they can neither anchor nor be anchored.
-fn authority_columns_in_root(project_root: &Path, columns: &[String]) -> Vec<SurfaceColumn> {
-    let canonical_root = project_root.canonicalize().ok();
-    let relative = |file: &str| -> Option<String> {
-        let path = Path::new(file);
-        if path.is_relative() {
-            return Some(file.to_string());
-        }
-        [Some(project_root), canonical_root.as_deref()]
-            .into_iter()
-            .flatten()
-            .find_map(|root| path.strip_prefix(root).ok())
-            .map(|rest| rest.to_string_lossy().into_owned())
-            .filter(|rest| !rest.is_empty())
-    };
-    columns
-        .iter()
-        .map(|column| {
-            SurfaceColumn::new(
-                column
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|file| !file.is_empty())
-                    .filter_map(relative),
-            )
-        })
-        .filter(|column| !column.files.is_empty())
-        .collect()
-}
-
-fn column_files(columns: &[SurfaceColumn]) -> Vec<String> {
-    columns
-        .iter()
-        .map(|column| column.files.join(","))
-        .collect()
 }
 
 pub fn resolve_remote_layout_from_json(
@@ -483,12 +372,7 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
                 focused: evidence.focused,
             };
             let root = Path::new(&evidence.project_root);
-            let resolution = if evidence.project_root.trim().is_empty() {
-                // No root to key the memory or ask the controller by.
-                resolve_remote_layout_with_authority(root, &fold, |_| None)
-            } else {
-                resolve_remote_layout(root, &fold)
-            };
+            let resolution = resolve_remote_layout(root, &fold);
             serde_json::to_value(resolution)?
         }
         "remote_client_surface" => {
@@ -994,11 +878,10 @@ mod tests {
         }
     }
 
-    /// GH #326 phase 4: the derivation channel folds into the same per-project
-    /// memory as the pre-#326 `resolve_remote_layout` symbol, so a plugin that
-    /// asks through either channel continues one history.
+    /// GH #326/#343: both compatibility entrypoints share focus history, but
+    /// neither upgrades flat evidence into structural columns.
     #[test]
-    fn gh326_remote_layout_shares_the_legacy_fold_memory() {
+    fn gh326_remote_layout_entrypoints_share_focus_only_memory() {
         let root = format!("/tmp/gh326-remote-layout-{}", std::process::id());
         let split = serde_json::json!({
             "derivation": "remote_layout",
@@ -1010,23 +893,13 @@ mod tests {
         });
         let detected = derive_editor_from_json(&split.to_string()).unwrap();
         assert_eq!(detected["derivation"], "remote_layout");
-        assert_eq!(
-            detected["output"]["columns"],
-            serde_json::json!([{"files": ["a.md"]}, {"files": ["b.md"]}])
-        );
-        assert_eq!(
-            detected["output"]["source"],
-            "remote_client_visible_editors"
-        );
+        assert_eq!(detected["output"]["columns"], serde_json::json!([]));
+        assert_eq!(detected["output"]["source"], "unknown");
         let single =
             r#"{"clients":[{"selected":["b.md"],"open":["a.md","b.md"]}],"focused":["b.md"]}"#;
         let retained = resolve_remote_layout_from_json(Path::new(&root), single).unwrap();
-        assert_eq!(
-            retained.columns.len(),
-            2,
-            "the legacy symbol continues the history"
-        );
-        assert_eq!(retained.source.as_str(), "retained_remote_columns");
+        assert!(retained.columns.is_empty());
+        assert_eq!(retained.source.as_str(), "unknown");
         remote_layout_memory().remove(Path::new(&root));
 
         let empty = derive_editor_from_json(r#"{"derivation":"remote_layout"}"#).unwrap();
@@ -1279,122 +1152,60 @@ mod tests {
         );
     }
 
-    /// GH #134: the native fold remembers a project's Remote Dev split across
-    /// observations, so the single-selection observations that follow a
-    /// detected split keep both columns; another root is independent.
+    /// GH #343: flat legacy observations never invent structure, even when the
+    /// same apparent visible set repeats for one project root.
     #[test]
-    fn gh134_remote_layout_memory_is_per_project_root() {
+    fn gh343_remote_layout_memory_never_promotes_repeated_flat_evidence() {
         let root = Path::new("/tmp/gh134-remote-layout-root");
         let other = Path::new("/tmp/gh134-remote-layout-other");
         let split = r#"{"clients":[{"visible":["a.md","b.md"],"selected":["a.md"],"open":["a.md","b.md"]}],"focused":["a.md"]}"#;
-        let single =
-            r#"{"clients":[{"selected":["b.md"],"open":["a.md","b.md"]}],"focused":["b.md"]}"#;
-        let first = resolve_remote_layout_from_json(root, split).unwrap();
-        assert_eq!(first.columns.len(), 2);
-        let retained = resolve_remote_layout_from_json(root, single).unwrap();
-        assert_eq!(retained.columns, first.columns);
-        let cold = resolve_remote_layout_from_json(other, single).unwrap();
-        assert!(cold.columns.is_empty(), "a different root starts cold");
-        remote_layout_memory().remove(root);
-        let after_forget = resolve_remote_layout_from_json(root, single).unwrap();
-        assert!(after_forget.columns.is_empty());
+        for _ in 0..1_000 {
+            assert!(
+                resolve_remote_layout_from_json(root, split)
+                    .unwrap()
+                    .columns
+                    .is_empty()
+            );
+        }
+        assert!(
+            resolve_remote_layout_from_json(other, split)
+                .unwrap()
+                .columns
+                .is_empty()
+        );
         remote_layout_memory().remove(root);
         remote_layout_memory().remove(other);
     }
 
-    /// GH #250: the process-wide fold must preserve the layout from before a
-    /// selection-only replacement until Remote Dev's visible membership catches
-    /// up and identifies which split actually changed.
+    /// A cached exact frontend snapshot is preserved byte-for-byte across
+    /// unknown, partial, reordered, and selection-only legacy evidence.
     #[test]
-    fn gh250_visible_correction_uses_pre_guess_layout() {
+    fn gh343_flat_evidence_preserves_cached_frontend_snapshot() {
         let root = Path::new("/tmp/gh250-remote-layout-root");
-        let initial = r#"{"clients":[{"visible":["b.md","c.md"],"selected":["c.md"],"open":["a.md","b.md","c.md"]}],"focused":["c.md"]}"#;
-        let selection_first = r#"{"clients":[{"visible":["b.md","c.md"],"selected":["a.md"],"open":["a.md","b.md","c.md"]}],"focused":["a.md"]}"#;
-        let visible_catches_up = r#"{"clients":[{"visible":["a.md","c.md"],"selected":["a.md"],"open":["a.md","b.md","c.md"]}],"focused":["a.md"]}"#;
-
-        let first = resolve_remote_layout_from_json(root, initial).unwrap();
-        assert_eq!(first.columns[0].files, ["b.md"]);
-        assert_eq!(first.columns[1].files, ["c.md"]);
-
-        let guessed = resolve_remote_layout_from_json(root, selection_first).unwrap();
-        assert_eq!(guessed.columns[0].files, ["b.md"]);
-        assert_eq!(guessed.columns[1].files, ["a.md"]);
-
-        let corrected = resolve_remote_layout_from_json(root, visible_catches_up).unwrap();
-        assert_eq!(corrected.columns[0].files, ["a.md"]);
-        assert_eq!(corrected.columns[1].files, ["c.md"]);
-        remote_layout_memory().remove(root);
-    }
-
-    /// `#tmuxpanesreversed`: a native reload drops the fold memory. The next
-    /// observation lists the visible documents in tab-open order — here the
-    /// reverse of the editor's `[a | b]` split — and the memory used to adopt
-    /// it, so the following tab switch in the LEFT split (a -> c) used to
-    /// publish `[b | c]` as retained order: reversed panes. Anchoring the cold
-    /// memory to the controller's retained layout first keeps `[c | b]`; the
-    /// selection-first replacement remains explicitly provisional until its
-    /// structural follow-up.
-    #[test]
-    fn a_reloaded_fold_anchors_to_the_retained_layout_before_folding() {
-        let root = Path::new("/tmp/tmuxpanesreversed-reload-root");
-        remote_layout_memory().remove(root);
-        let authority = || {
-            Some(vec![
-                SurfaceColumn::new(["a.md"]),
-                SurfaceColumn::new(["b.md"]),
-            ])
-        };
-        let reversed_tab_order = r#"{"clients":[{"visible":["b.md","a.md"],"selected":["a.md"],"open":["b.md","a.md","c.md"]}],"focused":["a.md"]}"#;
-        let left_split_switch = r#"{"clients":[{"visible":["c.md","b.md"],"selected":["c.md"],"open":["b.md","a.md","c.md"]}],"focused":["c.md"]}"#;
-        let parse = |json: &str| serde_json::from_str::<RemoteLayoutEvidence>(json).unwrap();
-
-        let first =
-            resolve_remote_layout_with_authority(root, &parse(reversed_tab_order), |_| authority());
-        assert_eq!(column_files(&first.columns), ["a.md", "b.md"]);
-        assert_eq!(
-            first.column_order,
-            agent_doc_editor_surface::remote_layout::RemoteLayoutColumnOrder::Retained
-        );
-        let switched =
-            resolve_remote_layout_with_authority(root, &parse(left_split_switch), |_| None);
-        assert_eq!(column_files(&switched.columns), ["c.md", "b.md"]);
-        remote_layout_memory().remove(root);
-    }
-
-    /// Without an authority (no controller yet), a cold fold keeps the
-    /// tab-open order but never labels it `retained`, so the controller orders
-    /// it against the layout tmux shows.
-    #[test]
-    fn an_unanchored_fold_never_claims_retained_order() {
-        let root = Path::new("/tmp/tmuxpanesreversed-unanchored-root");
-        remote_layout_memory().remove(root);
-        let parse = |json: &str| serde_json::from_str::<RemoteLayoutEvidence>(json).unwrap();
-        let cold = parse(
-            r#"{"clients":[{"visible":["b.md","a.md"],"selected":["a.md"],"open":["a.md","b.md","c.md"]}],"focused":["a.md"]}"#,
-        );
-        let switched = parse(
-            r#"{"clients":[{"visible":["c.md","b.md"],"selected":["c.md"],"open":["a.md","b.md","c.md"]}],"focused":["c.md"]}"#,
-        );
-        use agent_doc_editor_surface::remote_layout::RemoteLayoutColumnOrder;
-        let first = resolve_remote_layout_with_authority(root, &cold, |_| None);
-        assert_eq!(first.column_order, RemoteLayoutColumnOrder::Unknown);
-        let second = resolve_remote_layout_with_authority(root, &switched, |_| None);
-        assert_eq!(second.column_order, RemoteLayoutColumnOrder::Unknown);
-        remote_layout_memory().remove(root);
-    }
-
-    #[test]
-    fn authority_columns_map_into_the_project_relative_path_space() {
-        let root = Path::new("/work/project");
-        let columns = vec![
-            "/work/project/tasks/a.md,/work/project/tasks/b.md".to_string(),
-            "/elsewhere/c.md".to_string(),
-            "tasks/d.md".to_string(),
+        let exact = vec![
+            SurfaceColumn::new(["right.md"]),
+            SurfaceColumn::new(["left.md", "left-tab.md"]),
         ];
-        assert_eq!(
-            column_files(&authority_columns_in_root(root, &columns)),
-            ["tasks/a.md,tasks/b.md", "tasks/d.md"]
+        remote_layout_memory().insert(
+            root.to_path_buf(),
+            RemoteLayoutMemory {
+                columns: exact.clone(),
+                focused: Some("right.md".to_string()),
+            },
         );
+        for observation in [
+            r#"{}"#,
+            r#"{"clients":[{"visible":["left.md"],"selected":["left.md"]}]}"#,
+            r#"{"clients":[{"visible":["x.md","right.md","left.md"],"selected":["x.md"],"open":["x.md"]}]}"#,
+        ] {
+            assert_eq!(
+                resolve_remote_layout_from_json(root, observation)
+                    .unwrap()
+                    .columns,
+                exact
+            );
+        }
+        remote_layout_memory().remove(root);
     }
 
     fn mirrored(surface: &EditorSurface) -> TmuxLayout {

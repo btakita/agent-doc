@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.535
+
+- **Due loop queues recover lost restore intent from their durable struck roster (GH #335).** The idle scheduler
+  rehydrates missing `restore_pending` work from queue-local struck rows while preserving pause, stop, busy,
+  non-loop, and exhausted-pass guards, so a crash between strike and restore cannot strand a loop item.
+- **Oversized canonical CRDT history compacts automatically at a delivery-safe frontier (GH #336).** When encoded
+  state exceeds the larger of 1 MiB or eight times visible UTF-8 plus 64 KiB, compaction waits for outstanding
+  delivery acknowledgement, starts a fresh lineage, and reboots connected replicas with replace semantics.
+
 ## 0.35.534
 
 - **Remote Dev sync fallback preserves the originating client focus context (GH #334).** Reference-publication

@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 2f70e722-90c5-4918-b28b-0cf7bc1660eb
-  codex: 01a11754-12ab-7700-8938-4ec9298bb945
+  codex: 01a15c95-31b2-79b0-a7cc-b2aa26f82720
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -21,6 +21,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -48,14 +49,23 @@ Compacted content:
 ### Re: recovered response
 
 Session is now assigned to Codex. `#gh-fix` for [tsift issue #29](https://github.com/btakita/tsift/issues/29) is queued for the next agent-doc cycle.
-<!-- agent:boundary:d4c17bb5:tsift -->
+> **Queue prompt:** release + publish: include Issue #29
+
+### Re: v0.1.106 release and Issue #29 — gpt-5 · 2026-10-21T01:06:46-04:00
+
+Released `v0.1.106` from `8dfa9c5`; [Issue #29](https://github.com/btakita/tsift/issues/29) is fixed by `f9c92e7` and closed.
+
+- Replaced mtime-based Markdown freshness with content-hashed watermarks, captured the source snapshot before traversal reads, and made concurrent source drift nonfatal for refresh while preserving fail-closed reads.
+- Published the [GitHub release](https://github.com/btakita/tsift/releases/tag/v0.1.106) with six binary/checksum assets, all workspace crates to crates.io, and `opencode-tsift@0.1.106` to npm.
+- Verified the full `make check` suite, a local `tsift 0.1.106` install, main CI, the successful [release workflow](https://github.com/btakita/tsift/actions/runs/39544595646), registry visibility, release assets, and issue closure.
+<!-- agent:boundary:bf6d00d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 - #gh-fix https://github.com/btakita/tsift/issues/29
-- release + publish: include P
+- ~~release + publish: include Issue #29~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

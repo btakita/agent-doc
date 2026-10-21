@@ -41,6 +41,19 @@ Latest published release: [v0.35.536](https://github.com/btakita/agent-doc/relea
 Compacted content:
 - Archived 5 response topic(s): #gh-fix issue 331; #gh-fix issue 332; releases, realtime fixes, and queue lifecycle; 2 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): Response; Subagent completed: `subagent:release531` returned w...
+
+### Re: recovered response
+
+The primary guess was the **editor layout**.
+
+When a selection event arrived before complete visible-layout evidence, the plugin guessed which editor column the newly selected document belonged to by replacing the previously focused column.
+
+Then the controller/tmux layer compounded it: it treated that uncertain editor projection as structural input and folded it against retained tmux pane order. So:
+
+- Editor plugin: guessed a document’s column.
+- Controller/tmux: converted that guess into actual pane placement and retained it.
+
+The ban applies to both layers: the editor must not invent a column, and tmux must not derive pane order from unknown or partial editor evidence.
 <!-- agent:boundary:0861e8e1 -->
 <!-- /agent:exchange -->
 
@@ -48,10 +61,13 @@ Compacted content:
 -->
 
 ## Queue: Main
-<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/340
-- #gh-fix https://github.com/btakita/agent-doc/issues/341
-- #gh-fix https://github.com/btakita/agent-doc/issues/342
+<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/340
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/341
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/342
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/343: Make sure all layers have the correct tmux pane behavior.
+- 🚧 release + publish: include 340-343.
+- 🚧 api.md has 2 subagent questions with the same id `[#subagent-operator-request]`. The ids should be unique. Can you include this fix into `release + publish: include 340-343`.? sdk-dev.md also has duplicate ids `[#subagent-operator-request]` for subagent question prompts.
 <!-- /agent:queue -->
 
 ## Queue: Issues

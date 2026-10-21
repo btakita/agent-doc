@@ -3488,7 +3488,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 }
             }
             PersistCurrentResult.Applied
-        } catch (failure: RuntimeException) {
+        } catch (failure: Throwable) {
+            if (!recoverableRemoteDocumentSaveFailureUtil(failure)) throw failure
             log.warn("[crdt-replica] native persist-current failed for $filePath", failure)
             PersistCurrentResult.Rejected
         }

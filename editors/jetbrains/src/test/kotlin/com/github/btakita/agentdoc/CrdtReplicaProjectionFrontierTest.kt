@@ -122,6 +122,9 @@ class CrdtReplicaProjectionFrontierTest {
         assertTrue(body.contains("\"visible_hash_mismatch\""))
         assertTrue(body.contains("\"post_save_projection_mismatch\""))
         assertTrue(body.contains("PersistCurrentResult.ProjectionChanged"))
+        assertTrue(body.contains("catch (failure: Throwable)"))
+        assertTrue(body.contains("if (!recoverableRemoteDocumentSaveFailureUtil(failure)) throw failure"))
+        assertFalse(body.contains("catch (failure: RuntimeException)"))
         assertTrue(
             body.contains("projectSettledVisibleState(filePath, forwarder, visibleText, true)"),
         )

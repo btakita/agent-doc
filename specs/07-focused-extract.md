@@ -71,6 +71,12 @@ without making an agent manually copy managed document regions.
   To work the extracted document immediately, provision its routing explicitly
   with `agent-doc claim TARGET --new-pane` (or start it through the normal
   routing workflow) after apply succeeds.
+- **Target harness inheritance:** a newly scaffolded destination records the
+  source document's effective harness. An explicit source `agent:` value is
+  preserved; when the source predates `agent:`, the canonical
+  `Frontmatter::active_resume_harness()` compatibility rule selects Claude.
+  Extraction never substitutes the harness running the command or a separate
+  hardcoded default.
 - **Allowed edit surfaces:** the focused-extract module, CLI routing, target
   scaffold shared with transfer, this command spec, its runbook, and regression
   tests.

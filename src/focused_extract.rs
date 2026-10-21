@@ -1449,7 +1449,7 @@ fn prepare_with_recovery(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Focused session");
-    let agent = source_fm.agent.as_deref().unwrap_or("codex");
+    let agent = source_fm.active_resume_harness();
     let target_before = target_content;
     let mut target_after = match target_before.clone() {
         Some(content) => content,

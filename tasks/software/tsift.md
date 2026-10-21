@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 2f70e722-90c5-4918-b28b-0cf7bc1660eb
-  codex: 01a15c95-31b2-79b0-a7cc-b2aa26f82720
+  codex: 01a15d28-8695-7123-9a88-36e8d9223ccf
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -21,7 +21,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -129,15 +128,45 @@ The current `tsift finding` layer already supplies most of the database behavior
 Features I would defer from v1: approval workflows, organization-wide ACLs, elaborate templates, automatic prose rewriting, and mandatory one-file-per-decision layout. Those can be layered later without changing the core record contract.
 
 Evidence: no repository paths changed because the planning contract classified this cycle as a design response. I verified the existing surface with `tsift status`, bounded searches/source reads, and the `FindingCommand` definition. Confidence is high; no escalation is needed.
-<!-- agent:boundary:bf6d00d6 -->
+> **Queue prompt:** Would you consider the decision md a decision index that links to full context of the decision in another document?
+
+Yes. I would use a hybrid design: `decisions.md` is the compact, stable index, while dedicated ADRs, specs, issues, or session documents hold the full context.
+
+The index should own only the fields needed for discovery and lifecycle management:
+
+- stable decision ID;
+- one-sentence decision;
+- status and date;
+- affected scope or stable code anchors;
+- canonical `source` link to the detailed record;
+- lightweight relationships such as `supersedes` and `related`.
+
+The linked record should own the long-form context, rationale, alternatives, evidence, and consequences. That avoids duplicating mutable prose while keeping the repository's decision set cheap for humans and agents to scan. The authority boundary should be explicit: the index owns identity, lifecycle status, summary, and the canonical context pointer; the detailed document owns the explanation. If both carry status metadata, `tsift decision lint` should require equality or generate one copy so they cannot drift.
+
+Tsift can index both layers and connect them with a `documents` edge. Search and `context-pack` should return the compact index entry first, then expand the linked record only when it is relevant and the token budget permits. Small, self-contained decisions can remain inline in the index, so the scheme does not force a separate document for every minor choice.
+
+In short: **make `decisions.md` a decision manifest, allow inline details for small decisions, and link out for full context when the rationale deserves its own durable document.**
+
+### Re: #gh-fix https://github.com/btakita/tsift/issues/29 — gpt-5 · 2026-10-21T09:53:42-04:00
+
+> **Queue prompt:**
+>
+> #gh-fix https://github.com/btakita/tsift/issues/29
+
+
+Preset expansion `fix then close` is complete: Issue #29 is already fixed and closed, so this queue item is a verified no-op rather than a new code change. The fix is commit `f9c92e7`, which replaces mtime-based Markdown freshness with content-hashed watermarks and handles concurrent source drift without invalidating a completed refresh. That commit is contained in release tag `v0.1.106`; GitHub reports the issue as `CLOSED` with reason `COMPLETED`.
+
+- Changed paths: none in the tsift repository this cycle; the existing dirty worktree paths were left untouched.
+- Commands: `gh issue view 29 --repo btakita/tsift --json ...`, `git tag --contains f9c92e7`, and `tsift diff-digest --revision f9c92e7 . --json`.
+- Verification: the issue is closed, the fix commit is in `v0.1.106`, and the commit digest contains the content-watermark implementation and its regression test.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:a2b805d7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#needfeaturesdecisions]~~
-- ~~do [#databasefiledecisions]~~
-- #gh-fix https://github.com/btakita/tsift/issues/29
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

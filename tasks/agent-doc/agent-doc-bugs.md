@@ -22,12 +22,10 @@ queue: go
 ## Status
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
-
-📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
-Main is at `0b5909927f` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49` and includes GitHub issue #330. Post-release main adds the current-visible-revision Local History recovery and Codex Stop next-cycle typed-edit handoff; both queue items handled in this cycle are complete.
+Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published release: [v0.35.532](https://github.com/btakita/agent-doc/releases/tag/v0.35.532), published on GitHub at 2026-10-21 04:54:19 UTC (15 assets); PyPI 0.35.532 followed at 2026-10-21 04:55:01 UTC; installed locally (agent-doc 0.35.532). Published JetBrains packages: 0.2.756 (classic), 0.2.758 (IDE 262), and 0.2.757 (IDE 263), published with the release at 2026-10-21 04:54:19 UTC. Current main/source generations after the Local History follow-up are 0.2.759 (classic), 0.2.760 (IDE 262), and 0.2.761 (IDE 263); installed IDE targets were reconciled locally. VS Code extension 0.2.83.
+Latest published release: [v0.35.532](https://github.com/btakita/agent-doc/releases/tag/v0.35.532), published on GitHub at 2026-10-21 04:54:19 UTC (15 assets); PyPI 0.35.532 followed at 2026-10-21 04:55:01 UTC; installed locally (agent-doc 0.35.532). Published JetBrains packages: 0.2.756 (classic), 0.2.758 (IDE 262), and 0.2.757 (IDE 263), published with the release at 2026-10-21 04:54:19 UTC. Current main/source generations are 0.2.759 (classic), 0.2.760 (IDE 262), and 0.2.761 (IDE 263); installed IDE targets were reconciled locally. VS Code extension 0.2.83.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -42,7 +40,25 @@ Latest published release: [v0.35.532](https://github.com/btakita/agent-doc/relea
 Compacted content:
 - Archived 7 response topic(s): Response; Subagent completed: `subagent:release531` returned work for queue item “release + publish”; Subagent completed: `subagent:sdklegalhistory` returned work for queue item “Run Agent Doc on sdk-legal.md issue: ```...; 4 more
 - Prior summary/context: prior compacted content: Archived 29 response topic(s): nested status:sync, reported-item integration, four new subag...
-<!-- agent:boundary:7e1bb993 -->
+
+### Re: #gh-fix issue 331 — gpt-5 · 2026-10-21T02:26-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/331
+
+Fixed and closed [GH #331](https://github.com/btakita/agent-doc/issues/331). Queue preset authorization now ignores preset names inside balanced inline-code spans and preserves preset expansion order by textual occurrence instead of map order. The implementation, specification, and CLI/unit regressions landed on `main` as `bef5b08236`.
+
+Verification passed: focused unit and queue-brief CLI regressions each 1/1; the worker's full suite passed 11,378 nextest tests, 1,982 batched tests, 202 VS Code tests, cross-editor simulation, Python bootstrap, all three JetBrains builds, and TLA validation.
+
+### Re: #gh-fix issue 332 — gpt-5 · 2026-10-21T02:26-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/332
+
+Fixed and closed [GH #332](https://github.com/btakita/agent-doc/issues/332). Cold Remote Dev layout observations may still provide a stable fold basis, but they no longer become positive exported column-order authority; order stays unknown until an editor/manual order-bearing signal arrives, and focus escalation carries only a genuinely positive basis. The implementation, JetBrains specification, and regressions landed on `main` as `b6b9af6e15`.
+
+Verification passed: focused controller tests, 810/810 controller-library tests, and 27/27 editor-surface tests; the worker's full suite passed 11,376 nextest tests, 202 VS Code tests, cross-editor simulation, Python bootstrap, all JetBrains builds, and TLA validation.
+
+The two commits were integrated serially from `0b5909927f` and pushed to `origin/main` at `b6b9af6e15`. A single authoritative combined `make check` then passed with exit 0 and zero detected failures. The single batch `make install` also passed, installing agent-doc 0.35.532, VS Code 0.2.83, and JetBrains generations 0.2.759/0.2.760/0.2.761. The latest pre-integration main CI run was green; the new push will receive its own CI run asynchronously.
+<!-- agent:boundary:9d4ce1fd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -50,6 +66,8 @@ Compacted content:
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/331~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/332~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues

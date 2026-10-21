@@ -997,6 +997,23 @@ impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects
         atomic_write_through_authority(file, content)
     }
 
+    fn retained_completion_feedback_keys_for_heads(
+        &self,
+        file: &Path,
+        consumed_heads: &[String],
+    ) -> Result<std::collections::HashSet<String>> {
+        let Some(pending) = pending_document_write(file) else {
+            return Ok(std::collections::HashSet::new());
+        };
+        Ok(
+            agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+                &pending.target_content,
+                consumed_heads,
+            )
+            .1,
+        )
+    }
+
     fn converge_document_or_disk(
         &self,
         file: &Path,
@@ -5739,9 +5756,16 @@ fn ensure_deferred_document_write_intent_with_mode(
                 };
                 let base_state =
                     agent_doc_merge::crdt::CrdtDoc::from_text(&merge_base).encode_state();
+                let retained_target = retire_consumed_completion_feedback_before_composition(
+                    file,
+                    source,
+                    &merge_base,
+                    &pending.target_content,
+                    content,
+                );
                 target_content = agent_doc_merge::crdt::merge_by_component_with_operator_rearmed(
                     Some(&base_state),
-                    &pending.target_content,
+                    &retained_target,
                     content,
                     operator_rearm_evidence_for_merge(file, &merge_base, source)?,
                 )
@@ -5836,6 +5860,43 @@ fn ensure_deferred_document_write_intent_with_mode(
         )?;
     }
     Ok(intent_id)
+}
+
+/// A completion cell is a transient projection of a live queue claim. Queue
+/// closeout is the authoritative tombstone for that projection, including when
+/// the cell exists only in an older retained controller target. Remove those
+/// cells before CRDT branch composition so a late delivery cannot resurrect a
+/// closed claim.
+fn retire_consumed_completion_feedback_before_composition(
+    file: &Path,
+    source: &str,
+    merge_base: &str,
+    retained_target: &str,
+    requested_target: &str,
+) -> String {
+    if source != "queue_consume" {
+        return retained_target.to_string();
+    }
+    let consumed_heads = agent_doc_queue::queue_prompt_drift::queue_prompt_deletions_between(
+        merge_base,
+        requested_target,
+    );
+    let (retired, retired_keys) =
+        agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+            retained_target,
+            &consumed_heads,
+        );
+    if !retired_keys.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_consume_deferred_completion_feedback_retired file={} retired_keys={} #subagentcompletionfeedback",
+                file.display(),
+                retired_keys.len(),
+            ),
+        );
+    }
+    retired
 }
 
 /// Reconcile a reappearing editor buffer with the newest durable deferred
@@ -15222,6 +15283,99 @@ mod tests {
             1,
             "reconnected document:\n{reconnected}"
         );
+    }
+
+    /// GH #342: report-complete can retain its binary cell while an attached
+    /// editor is disconnected. If coordinator closeout then strikes the same
+    /// head, retained-write composition must treat that strike as a tombstone;
+    /// otherwise reconnect delivers a false "claim remains active" cell after
+    /// the claim was pruned and leaves the just-committed document dirty.
+    #[test]
+    fn queue_consume_retires_completion_feedback_hidden_in_retained_target() {
+        let item = "#gh-fix https://github.com/example/project/issues/342";
+        let prioritized_item = format!("🚧 {item}");
+        let base = format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {item}\n",
+                "<!-- agent:boundary:base -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents priority go -->\n",
+                "- {prioritized_item}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            item = item,
+            prioritized_item = prioritized_item,
+        );
+        let completion = agent_doc_document::subagent_completion::cell(
+            "subagent:gh342",
+            item,
+            "attempt-342",
+        );
+        let retained_completion = base.replace(
+            "<!-- agent:boundary:base -->",
+            &format!("{completion}\n<!-- agent:boundary:base -->"),
+        );
+        let closeout = base
+            .replace(
+                "<!-- agent:boundary:base -->",
+                concat!(
+                    "### Re: #342 — gpt-5\n\n",
+                    "Fixed and verified.\n",
+                    "<!-- agent:boundary:closeout -->",
+                ),
+            )
+            .replace(
+                &format!("- {prioritized_item}"),
+                &format!("- ~~{prioritized_item}~~ — answered this cycle (#ftstrike)"),
+            );
+        let (_dir, file, _canonical) = temp_doc(&base);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            &base,
+            &retained_completion,
+            "queue_subagent_completion_feedback",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+
+        let hidden_keys = agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects::retained_completion_feedback_keys_for_heads(
+            &RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            &file,
+            std::slice::from_ref(&prioritized_item),
+        )
+        .unwrap();
+        assert_eq!(hidden_keys, ["attempt-342".to_string()].into());
+
+        ensure_deferred_document_write_intent(
+            &file,
+            &base,
+            &closeout,
+            "queue_consume",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+
+        let pending = pending_document_write(&file).expect("closeout target retained");
+        assert_eq!(
+            pending
+                .target_content
+                .matches("### Re: #342 — gpt-5")
+                .count(),
+            1
+        );
+        assert_eq!(pending.target_content.matches("agent:boundary:").count(), 1);
+        assert!(
+            pending
+                .target_content
+                .contains(&format!("~~{prioritized_item}~~"))
+        );
+        assert!(!pending.target_content.contains("claim remains active"));
+        assert!(!pending
+            .target_content
+            .contains("agent-doc-subagent-completion"));
     }
 
     #[test]

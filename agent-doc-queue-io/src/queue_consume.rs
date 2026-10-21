@@ -48,6 +48,19 @@ pub trait QueueConsumeWriteEffects {
         reason: &str,
     ) -> Result<()>;
 
+    /// Completion feedback can be durable in a retained controller target
+    /// without being visible in `current_document_content`. Return the keys
+    /// for consumed heads so the closeout landing proof also fences those
+    /// hidden cells from being delivered after their claims are closed.
+    fn retained_completion_feedback_keys_for_heads(
+        &self,
+        file: &Path,
+        consumed_heads: &[String],
+    ) -> Result<HashSet<String>> {
+        let _ = (file, consumed_heads);
+        Ok(HashSet::new())
+    }
+
     /// Converge a batch of CRDT structural ops (`#crdtstructops` Phase D). The
     /// default impl projects the ops onto `source_content` via
     /// [`apply_structural_ops_to_content`] and delegates to
@@ -795,11 +808,16 @@ fn consume_queue_prompts_with_options_fenced(
     // recovery placeholder, not the integrated response. Retire only cells for
     // heads this exact closeout proved and struck; concurrent/unmatched reports
     // remain durable. Keep the snapshot aligned with the same semantic change.
-    let (new_document, retired_completion_keys) =
+    let (new_document, mut retired_completion_keys) =
         agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
             &plan.new_document,
             &plan.consumed_texts,
         );
+    retired_completion_keys.extend(
+        effects
+            .retained_completion_feedback_keys_for_heads(file, &plan.consumed_texts)
+            .context("queue consume: failed to inspect retained completion feedback")?,
+    );
     plan.new_document = new_document;
     plan.new_snapshot = agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
         &plan.new_snapshot,

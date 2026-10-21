@@ -107,11 +107,16 @@ pub fn restore_loop_items_for_queue_with_effects(
     // `#sqedit-race`: one queue writer at a time.
     let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let current = effects.current_document_content(file, "queue_schedule_loop_restore")?;
-    let Some(updated) = queue_schedule::plan_loop_restore_for_queue(&current, queue_id, roster)?
-    else {
-        return Ok(0);
-    };
     let before = queue_schedule::live_heads_for_queue(&current, queue_id)?.len();
+    let updated = queue_schedule::plan_loop_restore_for_queue(&current, queue_id, roster)?
+        .unwrap_or_else(|| {
+            // GH #330: a retained restore can be visible in the live authority
+            // before its delivery is settled. Do not turn that transient
+            // visibility into `Ok(0)`: the convergence call's already-current
+            // path still runs the delivery guard. Until that proof succeeds,
+            // the scheduler must keep `restore_pending` and retry after backoff.
+            current.clone()
+        });
     effects.converge_document_or_disk(file, &updated, &current, "queue_schedule_loop_restore")?;
     let restored = queue_schedule::live_heads_for_queue(&updated, queue_id)?
         .len()
@@ -286,8 +291,13 @@ mod tests {
     use super::*;
     use crate::queue_cmd::QueueCommandConsumeOutcome;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct DiskEffects;
+
+    struct RetainedNoopEffects {
+        converges: AtomicUsize,
+    }
 
     impl QueueCommandEffects for DiskEffects {
         fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
@@ -301,6 +311,57 @@ mod tests {
             _reason: &str,
         ) -> Result<()> {
             Ok(std::fs::write(file, target_content)?)
+        }
+        fn consume_free_text_queue_prompts_force_disk(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            unreachable!()
+        }
+        fn consume_free_text_queue_prompts_with_outcome(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            unreachable!()
+        }
+        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            unreachable!()
+        }
+        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            unreachable!()
+        }
+        fn acknowledge_paused_free_text_queue_head(
+            &self,
+            _file: &Path,
+            _expected_head: &str,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            unreachable!()
+        }
+        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+            unreachable!()
+        }
+    }
+
+    impl QueueCommandEffects for RetainedNoopEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+        fn converge_document_or_disk(
+            &self,
+            _file: &Path,
+            target_content: &str,
+            source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            self.converges.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(target_content, source_content, "the item is already live");
+            anyhow::bail!(
+                "visible document write retained [{}] [recovery={}]",
+                agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+                agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+            )
         }
         fn consume_free_text_queue_prompts_force_disk(
             &self,
@@ -465,6 +526,30 @@ mod tests {
             restore_loop_items_with_effects(&DiskEffects, &file, &roster).unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn already_live_restore_still_requires_delivery_convergence() {
+        // GH #330: the first retained write made the restored row temporarily
+        // visible. The retry used to return `Ok(0)` without proving delivery,
+        // which cleared `restore_pending`; a later closeout projection could
+        // then put the struck row back with no owner left to restore it.
+        let content = doc("loop interval=1h", "- #upgrade\n");
+        let (_dir, file) = project(&content);
+        let effects = RetainedNoopEffects {
+            converges: AtomicUsize::new(0),
+        };
+
+        let err = restore_loop_items_with_effects(&effects, &file, &["#upgrade".to_string()])
+            .expect_err("unsettled delivery must keep the restore pending");
+
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&format!(
+                "{err:#}"
+            )),
+            "the scheduler needs the retained marker to back off and retry: {err:#}"
+        );
+        assert_eq!(effects.converges.load(Ordering::SeqCst), 1);
     }
 
     #[test]

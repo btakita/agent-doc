@@ -30,9 +30,30 @@ internal object SurfaceCommandReference {
 
     const val SURFACE_LAYOUT_REFERENCE_CAPABILITY = "surface_layout_reference_v1"
 
+    /** The structural authority an explicit editor command requires. */
+    enum class Command {
+        /** A route may ensure the flat surface's visible documents without replacing structure. */
+        Route,
+
+        /** A manual sync may replace structure only from measured editor columns. */
+        ExactSync,
+    }
+
+    /** Whether the publication carries measured column membership and order. */
+    enum class ColumnGeometry {
+        Known,
+        Unknown,
+    }
+
     sealed interface Decision {
         /** Act by reference to the publication the controller just retained. */
         data class Reference(val reference: SurfaceLayoutReference) : Decision
+
+        /**
+         * The flat publication is already retained, so keep its focus consequence but do not
+         * submit an exact structural sync that the publication cannot authorize.
+         */
+        data class PreserveRetainedLayout(val reference: SurfaceLayoutReference) : Decision
 
         /** Send the explicit `--col` snapshot, and log [reason]. */
         data class SnapshotFallback(val reason: String) : Decision
@@ -54,6 +75,9 @@ internal object SurfaceCommandReference {
      * - A rejected or failed publication was not retained, so there is nothing to name.
      * - A reply without the capability is an older controller: keep the snapshot so a new plugin
      *   still works against an old binary.
+     * - A route can use flat evidence as an `ensure` request. An exact sync cannot: once the
+     *   capable controller has retained that flat publication, preserving the retained layout is
+     *   the successful no-guess terminal rather than a user-facing command failure.
      */
     fun decide(
         surfaceRoot: String,
@@ -62,6 +86,8 @@ internal object SurfaceCommandReference {
         publishExitCode: Int,
         receiptJson: String,
         publishedSequence: Long?,
+        command: Command,
+        columnGeometry: ColumnGeometry,
     ): Decision {
         if (surfaceRoot != commandRoot) {
             return Decision.SnapshotFallback("cross_root surface_root=$surfaceRoot command_root=$commandRoot")
@@ -80,7 +106,12 @@ internal object SurfaceCommandReference {
             return Decision.SnapshotFallback("controller_lacks_$SURFACE_LAYOUT_REFERENCE_CAPABILITY")
         }
         val sequence = publishedSequence ?: return Decision.SnapshotFallback("surface_sequence_unknown")
-        return Decision.Reference(SurfaceLayoutReference(surfaceId, sequence))
+        val reference = SurfaceLayoutReference(surfaceId, sequence)
+        return if (command == Command.ExactSync && columnGeometry == ColumnGeometry.Unknown) {
+            Decision.PreserveRetainedLayout(reference)
+        } else {
+            Decision.Reference(reference)
+        }
     }
 
     /**

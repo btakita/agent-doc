@@ -535,6 +535,14 @@ decide it.
   derives their layout from its surface Source (`specs/08-session-routing.md`,
   "Editor commands name the propagated surface"). The plugin's `--col` snapshot
   survives only as a logged fallback for a controller without the capability.
+- **Command applicability is derived from the retained Source's authority.** A
+  route may consume flat Remote Dev evidence as a non-structural `ensure`
+  request. An exact `Sync Tmux Panes` command requires measured columns; after
+  its flat publication is retained, it finishes as an idempotent preserve
+  terminal instead of submitting an unauthorized structural effect or turning
+  the expected absence of geometry into a user-facing failure. The pure
+  `SurfaceCommandReference` decision owns this table; action callers only apply
+  its typed result (`Reference`, `PreserveRetainedLayout`, or rollout fallback).
 
 ## Regression Rule
 

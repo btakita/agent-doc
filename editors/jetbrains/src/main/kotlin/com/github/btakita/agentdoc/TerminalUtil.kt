@@ -817,7 +817,13 @@ object TerminalUtil {
                 listener == null -> "no_surface_listener"
                 commandSurface == null -> "surface_capture_deferred"
                 else ->
-                    when (val publication = listener.publishCommandSurface(commandSurface, cwd)) {
+                    when (
+                        val publication = listener.publishCommandSurface(
+                            commandSurface,
+                            cwd,
+                            SurfaceCommandReference.Command.Route,
+                        )
+                    ) {
                         is EditorTabSyncListener.CommandSurfacePublication.Published -> {
                             LOG.warn(
                                 "[route] layout by surface reference surface=${publication.reference.surfaceId} " +
@@ -826,6 +832,13 @@ object TerminalUtil {
                             return RouteLayoutRequest.bySurfaceReference(publication.reference)
                         }
                         is EditorTabSyncListener.CommandSurfacePublication.Unavailable -> publication.reason
+                        is EditorTabSyncListener.CommandSurfacePublication.PreservedLayout -> {
+                            LOG.warn(
+                                "[route] exact-sync preservation reached route adapter; " +
+                                    "routing the retained surface by reference",
+                            )
+                            return RouteLayoutRequest.bySurfaceReference(publication.reference)
+                        }
                     }
             }
         LOG.warn("[route] surface reference unavailable reason=$reason; sending the --col snapshot")

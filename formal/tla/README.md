@@ -260,11 +260,15 @@ stated boundary.
 
 `RemoteLayoutNoGuess.tla` checks the recurring Coder/Remote Dev ordering race
 from GH #250/#343. It exhausts ordered two-column layouts, selection-only input,
-repeated flat visible-set/timing input, and later exact frontend snapshots.
+repeated flat visible-set/timing input, explicit route/sync commands over flat
+evidence, and later exact frontend snapshots.
 `CachedColumnsEqualFrontendAuthority` and
 `NonExactInputNeverMutatesStructure` require every incomplete observation to
 preserve authoritative membership and order; only the exact frontend vector
 may replace both cached authority and the desired tmux target.
+`FlatSyncIsSuccessfulPreservation` requires an exact sync over flat evidence to
+finish as an idempotent preserve terminal, while a route may still emit a
+non-structural ensure request.
 `RemoteLayoutNoGuessWedge.cfg` lets a repeated flat observation swap columns and
 must violate the no-guess invariant, while `RemoteLayoutNoGuessReach.cfg` proves
 the exact-snapshot path is reachable.

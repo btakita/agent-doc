@@ -47,6 +47,9 @@ class SurfaceCommandReferenceTest {
         surfaceRoot: String = "/proj",
         commandRoot: String = "/proj",
         sequence: Long? = 42,
+        command: SurfaceCommandReference.Command = SurfaceCommandReference.Command.Route,
+        columnGeometry: SurfaceCommandReference.ColumnGeometry =
+            SurfaceCommandReference.ColumnGeometry.Known,
     ) = SurfaceCommandReference.decide(
         surfaceRoot = surfaceRoot,
         commandRoot = commandRoot,
@@ -54,6 +57,8 @@ class SurfaceCommandReferenceTest {
         publishExitCode = exitCode,
         receiptJson = receipt,
         publishedSequence = sequence,
+        command = command,
+        columnGeometry = columnGeometry,
     )
 
     @Test
@@ -61,6 +66,29 @@ class SurfaceCommandReferenceTest {
         assertEquals(
             SurfaceCommandReference.Decision.Reference(SurfaceLayoutReference("frame-1", 42)),
             decide(),
+        )
+    }
+
+    @Test
+    fun `flat geometry routes by reference but exact sync preserves retained layout`() {
+        val flat = SurfaceCommandReference.ColumnGeometry.Unknown
+        val reference = SurfaceLayoutReference("frame-1", 42)
+
+        assertEquals(
+            SurfaceCommandReference.Decision.Reference(reference),
+            decide(command = SurfaceCommandReference.Command.Route, columnGeometry = flat),
+        )
+        assertEquals(
+            SurfaceCommandReference.Decision.PreserveRetainedLayout(reference),
+            decide(command = SurfaceCommandReference.Command.ExactSync, columnGeometry = flat),
+        )
+    }
+
+    @Test
+    fun `exact geometry syncs by reference`() {
+        assertEquals(
+            SurfaceCommandReference.Decision.Reference(SurfaceLayoutReference("frame-1", 42)),
+            decide(command = SurfaceCommandReference.Command.ExactSync),
         )
     }
 
@@ -85,6 +113,14 @@ class SurfaceCommandReferenceTest {
         assertEquals(
             SurfaceCommandReference.Decision.SnapshotFallback("surface_publish_failed"),
             decide(exitCode = 1),
+        )
+        assertEquals(
+            SurfaceCommandReference.Decision.SnapshotFallback("surface_publish_failed"),
+            decide(
+                exitCode = 1,
+                command = SurfaceCommandReference.Command.ExactSync,
+                columnGeometry = SurfaceCommandReference.ColumnGeometry.Unknown,
+            ),
         )
         assertEquals(
             SurfaceCommandReference.Decision.SnapshotFallback("surface_publication_rejected=stale"),
@@ -236,6 +272,7 @@ class SurfaceCommandReferenceTest {
             resolve.indexOf("publishCommandSurface(") < resolve.indexOf("bySurfaceReference("),
         )
         assertTrue(resolve.contains("sending the --col snapshot"))
+        assertTrue(resolve.contains("SurfaceCommandReference.Command.Route"))
     }
 
     @Test
@@ -258,6 +295,13 @@ class SurfaceCommandReferenceTest {
         assertTrue(byReference.contains("terminalPrepared = true"))
         assertTrue(byReference.contains("allowSurfaceReference = false"))
         assertTrue(byReference.contains("request.visibleMdFiles.toSet()"))
+        assertTrue(byReference.contains("SurfaceCommandReference.Command.ExactSync"))
+        val preserve = byReference
+            .substringAfter("is EditorTabSyncListener.CommandSurfacePublication.PreservedLayout ->")
+            .substringBefore("} catch")
+        assertTrue(preserve.contains("flat_evidence_preserves_retained_layout"))
+        assertFalse(preserve.contains("CpRouteClient.submitSyncTmuxLayout("))
+        assertFalse(preserve.contains("request.notifyFailure("))
 
         val sync = source.substringAfter("fun syncLayout(").substringBefore("private data class SyncRequest(")
         val capture = sync.indexOf("captureCommandSurface(project, focusedVFile)")

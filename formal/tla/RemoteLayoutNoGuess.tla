@@ -17,10 +17,10 @@ SeqSet(seq) == {seq[index] : index \in 1..Len(seq)}
 Swap(seq) == <<seq[2], seq[1]>>
 
 VARIABLES columns, frontendSnapshot, focused, generation, flatCount,
-          lastAction, sawExact
+          lastAction, sawExact, commandOutcome
 
 vars == <<columns, frontendSnapshot, focused, generation, flatCount,
-          lastAction, sawExact>>
+          lastAction, sawExact, commandOutcome>>
 
 TypeOK ==
     /\ columns \in Layouts
@@ -28,8 +28,9 @@ TypeOK ==
     /\ focused \in Docs
     /\ generation \in 1..3
     /\ flatCount \in 0..2
-    /\ lastAction \in {"init", "selection", "flat", "exact"}
+    /\ lastAction \in {"init", "selection", "flat", "exact", "flat_route", "flat_sync"}
     /\ sawExact \in BOOLEAN
+    /\ commandOutcome \in {"none", "ensure", "preserve"}
 
 Init ==
     /\ columns \in Layouts
@@ -39,11 +40,13 @@ Init ==
     /\ flatCount = 0
     /\ lastAction = "init"
     /\ sawExact = FALSE
+    /\ commandOutcome = "none"
 
 SelectionOnly ==
     /\ \E selected \in Docs : focused' = selected
     /\ lastAction' = "selection"
-    /\ UNCHANGED <<columns, frontendSnapshot, generation, flatCount, sawExact>>
+    /\ UNCHANGED <<columns, frontendSnapshot, generation, flatCount, sawExact,
+                    commandOutcome>>
 
 FlatEvidence ==
     /\ flatCount < 2
@@ -52,7 +55,8 @@ FlatEvidence ==
                    ELSE IF flatCount = 1 THEN Swap(columns) ELSE columns
     /\ flatCount' = flatCount + 1
     /\ lastAction' = "flat"
-    /\ UNCHANGED <<frontendSnapshot, focused, generation, sawExact>>
+    /\ UNCHANGED <<frontendSnapshot, focused, generation, sawExact,
+                    commandOutcome>>
 
 ExactFrontendSnapshot ==
     /\ generation < 3
@@ -64,13 +68,38 @@ ExactFrontendSnapshot ==
     /\ flatCount' = 0
     /\ lastAction' = "exact"
     /\ sawExact' = TRUE
+    /\ UNCHANGED commandOutcome
+
+(***************************************************************************)
+(* Explicit editor commands consume the same retained Source. A route may   *)
+(* turn flat visibility into a non-structural ensure request. Exact Sync    *)
+(* Tmux Panes cannot claim missing geometry, so successful handling is an   *)
+(* idempotent preserve terminal rather than a structural effect or error.   *)
+(***************************************************************************)
+FlatRouteCommand ==
+    /\ \E selected \in Docs : focused' = selected
+    /\ lastAction' = "flat_route"
+    /\ commandOutcome' = "ensure"
+    /\ UNCHANGED <<columns, frontendSnapshot, generation, flatCount, sawExact>>
+
+FlatSyncCommand ==
+    /\ lastAction' = "flat_sync"
+    /\ commandOutcome' = "preserve"
+    /\ UNCHANGED <<columns, frontendSnapshot, focused, generation, flatCount,
+                    sawExact>>
 
 Next == SelectionOnly \/ FlatEvidence \/ ExactFrontendSnapshot
+        \/ FlatRouteCommand \/ FlatSyncCommand
 Spec == Init /\ [][Next]_vars
 
 CachedColumnsEqualFrontendAuthority == columns = frontendSnapshot
 NonExactInputNeverMutatesStructure ==
-    lastAction \in {"selection", "flat"} => columns = frontendSnapshot
+    lastAction \in {"selection", "flat", "flat_route", "flat_sync"}
+        => columns = frontendSnapshot
+FlatSyncIsSuccessfulPreservation ==
+    lastAction = "flat_sync"
+        => /\ commandOutcome = "preserve"
+           /\ columns = frontendSnapshot
 
 NeverAcceptsExact == ~sawExact
 

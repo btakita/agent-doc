@@ -28117,6 +28117,45 @@ struct FocusEscalationColumns {
     basis_generation: Option<u64>,
 }
 
+/// Terminal disposition of the structural handoff for a refused focus.
+///
+/// A missing positive frontend layout is a policy deferral, not a failed
+/// effect. Keeping it distinct from `Failed` prevents the editor-surface retry
+/// cell from replaying the same focus and prevents the editor plugin from
+/// answering a known deferral with a `sync_tmux_layout` request that the
+/// controller must reject for the same missing geometry (GH #357).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FocusEscalationDisposition {
+    Published,
+    Deferred(&'static str),
+    Failed,
+}
+
+impl FocusEscalationDisposition {
+    fn effect_failed(self) -> bool {
+        matches!(self, Self::Failed)
+    }
+
+    fn receipt_reason(self) -> Option<String> {
+        match self {
+            Self::Published => Some("focus_escalated_to_structural_layout".to_string()),
+            Self::Deferred(cause) => Some(format!("focus_deferred:{cause}")),
+            Self::Failed => None,
+        }
+    }
+
+    /// Project the handoff result into the focus receipt and return whether the
+    /// editor-surface effect remains retryable.
+    fn apply_to(self, focus_result: &mut Result<ControllerTmuxFocusReceipt>) -> bool {
+        if let Some(reason) = self.receipt_reason()
+            && let Ok(outcome) = focus_result.as_mut()
+        {
+            outcome.reason = reason;
+        }
+        self.effect_failed()
+    }
+}
+
 /// Hand a `Focus` intent the selection lane could not apply to the structural
 /// layout owner (`#focusstashescalate`).
 ///
@@ -28148,6 +28187,7 @@ fn escalate_focus_to_structural_layout(
 /// [`escalate_focus_to_structural_layout`] with the surface columns' order
 /// provenance (GH #320): editor-surface columns whose order is not geometry
 /// are republished with that label, never as `editor`.
+#[cfg(test)]
 fn escalate_focus_to_structural_layout_ordered(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -28156,6 +28196,27 @@ fn escalate_focus_to_structural_layout_ordered(
     surface_column_order: agent_doc_editor_surface::SurfaceColumnOrder,
     reason: &str,
 ) -> bool {
+    matches!(
+        escalate_focus_to_structural_layout_disposition(
+            bootstrap,
+            runtime,
+            document,
+            columns,
+            surface_column_order,
+            reason,
+        ),
+        FocusEscalationDisposition::Published
+    )
+}
+
+fn escalate_focus_to_structural_layout_disposition(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    document: &str,
+    columns: &[SurfaceColumn],
+    surface_column_order: agent_doc_editor_surface::SurfaceColumnOrder,
+    reason: &str,
+) -> FocusEscalationDisposition {
     let FocusEscalationColumns {
         columns,
         source,
@@ -28169,7 +28230,7 @@ fn escalate_focus_to_structural_layout_ordered(
                     "controller_editor_surface_focus_escalation_skipped document={document} reason={reason} cause={cause}"
                 ),
             );
-            return false;
+            return FocusEscalationDisposition::Deferred(cause);
         }
     };
     agent_doc_ops_log_io::log_op(
@@ -28258,10 +28319,10 @@ fn escalate_focus_to_structural_layout_ordered(
                     "controller_editor_surface_focus_escalation_failed document={document} reason={reason} error={error:#}"
                 ),
             );
-            return false;
+            return FocusEscalationDisposition::Failed;
         }
     }
-    true
+    FocusEscalationDisposition::Published
 }
 
 /// An outside-window focus failure requires a new effect even when the retained columns and focus
@@ -29085,7 +29146,7 @@ fn handle_editor_surface_observe(
                         diagnostic_payload: None,
                         sequence: None,
                     };
-                    let focus_result = handle_focus_document_pane_with_policy(
+                    let mut focus_result = handle_focus_document_pane_with_policy(
                         bootstrap,
                         Some(runtime),
                         focus_request,
@@ -29124,23 +29185,19 @@ fn handle_editor_surface_observe(
                     // `#netadv3` F14/F15: an effect that ERRORED was lost, not
                     // refused; keep the intent for the next observation.
                     let mut effect_failed = focus_result.is_err();
-                    record_editor_surface_focus_outcome(
-                        &bootstrap.project_root,
-                        &mut receipt,
-                        focus_result,
-                    )?;
                     if let Some(reason) = structural_refusal {
-                        effect_failed = if navigation_lane.is_shared() {
-                            !escalate_focus_to_structural_layout_ordered(
+                        if navigation_lane.is_shared() {
+                            let disposition = escalate_focus_to_structural_layout_disposition(
                                 bootstrap,
                                 runtime,
                                 &document,
                                 &surface_columns,
                                 surface_column_order,
                                 &reason,
-                            )
+                            );
+                            effect_failed = disposition.apply_to(&mut focus_result);
                         } else {
-                            !escalate_focus_to_lane_layout_ordered(
+                            let published = escalate_focus_to_lane_layout_ordered(
                                 bootstrap,
                                 runtime,
                                 &navigation_lane,
@@ -29148,9 +29205,18 @@ fn handle_editor_surface_observe(
                                 &surface_columns,
                                 surface_column_order,
                                 &reason,
-                            )
-                        };
+                            );
+                            effect_failed = !published;
+                            if published && let Ok(outcome) = focus_result.as_mut() {
+                                outcome.reason = "focus_escalated_to_lane_layout".to_string();
+                            }
+                        }
                     }
+                    record_editor_surface_focus_outcome(
+                        &bootstrap.project_root,
+                        &mut receipt,
+                        focus_result,
+                    )?;
                     record_editor_surface_effect(
                         &bootstrap.project_root,
                         &focus_client_id,
@@ -40455,45 +40521,83 @@ mod tests {
             previous_controller_pid: None,
         };
         let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let path = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let ledger = path("payments-ledger.md");
+        let infra = path("infra.md");
 
-        escalate_focus_to_structural_layout(
+        let deferred = escalate_focus_to_structural_layout_disposition(
             &bootstrap,
             runtime.as_ref(),
-            "/project/payments-ledger.md",
+            &ledger,
             &[],
+            agent_doc_editor_surface::SurfaceColumnOrder::Editor,
             "actor_pane_not_visible",
         );
-        escalate_focus_to_structural_layout(
+        assert_eq!(
+            deferred,
+            FocusEscalationDisposition::Deferred("no_frontend_layout_snapshot")
+        );
+        assert!(!deferred.effect_failed());
+        assert_eq!(
+            deferred.receipt_reason().as_deref(),
+            Some("focus_deferred:no_frontend_layout_snapshot")
+        );
+        let mut deferred_focus = Ok(tmux_focus_receipt(
+            false,
+            "actor_pane_not_visible",
+            Some(ledger.clone()),
+            Some("%60".to_string()),
+            Some("project".to_string()),
+            Some("@1".to_string()),
+            Some("stash".to_string()),
+        ));
+        assert!(!deferred.apply_to(&mut deferred_focus));
+        assert_eq!(
+            deferred_focus.unwrap().reason,
+            "focus_deferred:no_frontend_layout_snapshot"
+        );
+
+        let published = escalate_focus_to_structural_layout_disposition(
             &bootstrap,
             runtime.as_ref(),
-            "/project/payments-ledger.md",
+            &ledger,
             &[
                 SurfaceColumn {
-                    files: vec!["/project/payments-ledger.md".to_string()],
+                    files: vec![ledger.clone()],
                 },
                 SurfaceColumn {
-                    files: vec!["/project/infra.md".to_string()],
+                    files: vec![infra],
                 },
             ],
+            agent_doc_editor_surface::SurfaceColumnOrder::Editor,
             "actor_pane_not_visible",
+        );
+        assert_eq!(published, FocusEscalationDisposition::Published);
+        assert!(!published.effect_failed());
+        assert_eq!(
+            published.receipt_reason().as_deref(),
+            Some("focus_escalated_to_structural_layout")
         );
 
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            ops_log.contains(
+            ops_log.contains(&format!(
                 "controller_editor_surface_focus_escalation_skipped \
-                 document=/project/payments-ledger.md \
-                 reason=actor_pane_not_visible cause=no_frontend_layout_snapshot"
-            ),
+                 document={ledger} reason=actor_pane_not_visible \
+                 cause=no_frontend_layout_snapshot"
+            )),
             "an empty editor layout must be refused, not republished: {ops_log}"
         );
         assert!(
-            ops_log.contains(
-                "controller_editor_surface_focus_escalated \
-                 document=/project/payments-ledger.md \
+            ops_log.contains(&format!(
+                "controller_editor_surface_focus_escalated document={ledger} \
                  reason=actor_pane_not_visible columns=2"
-            ),
+            )),
             "the handoff to the structural layout owner must be provable: {ops_log}"
         );
     }

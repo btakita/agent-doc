@@ -42,7 +42,7 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- 🟡 [#subagent:grok_backlog#1] Support grok build: Add backlog + queue items
+- 🚧 [#subagent:grok_backlog#1] Support grok build: Add backlog + queue items
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

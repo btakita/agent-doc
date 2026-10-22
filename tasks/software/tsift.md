@@ -311,6 +311,7 @@ Released and published **tsift v0.1.108**, including the fixes for Issues #30–
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+- Support grok build: Add backlog + queue items
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

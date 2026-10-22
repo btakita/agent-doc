@@ -73,6 +73,23 @@ class VisibleRollForwardTest {
     }
 
     @Test
+    fun `a structurally invalid visible buffer is a terminal socket refusal`() {
+        val source = source("CrdtReplicaManager.kt")
+        val body = source
+            .substringAfter("private fun rollVisibleBufferForward(")
+            .substringBefore("private fun scheduleUnforwardedOperatorTextRecovery(")
+        val missingReplica = body
+            .substringAfter("if (forwarder == null || !forwarder.attached || root == null)")
+            .substringBefore("val canonical =")
+        assertTrue(missingReplica.contains("VisibleRollForwardResult.Deferred"))
+        assertFalse(missingReplica.contains("VisibleRollForwardResult.Rejected"))
+        assertTrue(body.contains("VisibleRollForwardDecision.VisibleStructureInvalid"))
+        assertTrue(body.contains("VisibleRollForwardResult.Rejected"))
+        assertTrue(body.contains("\"admin_recycle\""))
+        assertTrue(source.contains("guard_diagnostic="))
+    }
+
+    @Test
     fun `roll forward happens only under every safety fact, across all combinations`() {
         val hashes = listOf(null, expected, "d5e3a7b1", "21456910")
         for (canonical in hashes) for (replica in hashes) for (visible in hashes) {
@@ -174,9 +191,11 @@ class VisibleRollForwardTest {
         val body = source("CrdtReplicaManager.kt")
             .substringAfter("fun rollVisibleBufferForward(\n            project: Project,")
             .substringBefore("/**\n         * #jbmanagerbyfile")
-        assertTrue(body.contains("submit<Boolean>"))
+        assertTrue(body.contains("submit<VisibleRollForwardResult>"))
+        assertTrue(body.contains("manager.disposed.get()"))
+        assertTrue(body.substringAfter("manager.disposed.get()").contains("VisibleRollForwardResult.Deferred"))
         assertTrue(body.contains(".get(CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)"))
-        assertTrue(body.contains("if (applied) VisibleRollForwardResult.Applied else VisibleRollForwardResult.Deferred"))
+        assertTrue(body.contains("manager.rollVisibleBufferForward(filePath, expectedCanonicalHash, reason)"))
         assertTrue(body.contains("TimeoutException"))
         assertTrue(body.contains("VisibleRollForwardResult.Deferred"))
         assertFalse(body.contains("scheduleVisibleRollForward"))

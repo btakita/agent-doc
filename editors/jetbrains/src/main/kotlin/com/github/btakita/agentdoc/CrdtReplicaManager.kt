@@ -1285,7 +1285,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val templateValidation =
         TemplateValidationPlane(
             ownershipContext,
-            NativePatching::normalizeTemplateStructure,
+            NativePatching::inspectTemplateStructure,
             ::contentHash,
         )
     private val fileCacheConflicts = FileCacheConflictPlane(ownershipContext)
@@ -3903,11 +3903,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     ): TemplateStructureProjectionState {
         val started = System.nanoTime()
         return try {
-            templateValidation.publish(filePath, lane, text).state.also { state ->
+            val projection = templateValidation.publish(filePath, lane, text)
+            projection.state.also { state ->
                 if (state != TemplateStructureProjectionState.Exact) {
+                    val diagnostic = projection.diagnostic
+                        ?.replace('\n', ' ')
+                        ?.replace('\r', ' ')
+                        ?.take(512)
+                        ?: "normalization_changed_visible_structure"
                     log.warn(
                         "[crdt-replica] $source text rejected by template-structure guard for $filePath; " +
-                            "state=$state lane=$lane revision_hash=${contentHash(text)}",
+                            "state=$state lane=$lane revision_hash=${contentHash(text)} " +
+                            "guard_diagnostic=$diagnostic",
                     )
                 }
             }
@@ -4795,7 +4802,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * controller's retained transition re-applies the pending write on top of
      * it. Nothing here writes controller text into the buffer.
      */
-    private fun rollVisibleBufferForward(filePath: String, expectedCanonicalHash: String, reason: String): Boolean {
+    private fun rollVisibleBufferForward(
+        filePath: String,
+        expectedCanonicalHash: String,
+        reason: String,
+    ): VisibleRollForwardResult {
         val name = File(filePath).name
         val forwarder = forwarders[filePath]
         val root = resolveProjectRoot(filePath)
@@ -4804,7 +4815,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "[crdt-replica] visible roll-forward declined for $name; decision=no_attached_replica " +
                     "expected_canonical_hash=$expectedCanonicalHash reason=$reason (#jetbrainsreplicaloops)",
             )
-            return false
+            return VisibleRollForwardResult.Deferred
         }
         val canonical = CpSocketReplicaTransport(root).currentCanonicalText(filePath)
         val replica = forwarder.replicaText()
@@ -4834,21 +4845,31 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "reason=$reason (#jetbrainsreplicaloops)",
                 )
                 requestUrgentRemoteDrain(filePath, "visible-roll-forward-converged")
-                return true
+                return VisibleRollForwardResult.Applied
             }
             else -> {
+                val recovery =
+                    if (decision == VisibleRollForwardDecision.VisibleStructureInvalid) {
+                        "admin_recycle"
+                    } else {
+                        "await_next_controller_request"
+                    }
                 log.warn(
                     "[crdt-replica] visible roll-forward declined for $name; decision=${decision.token} " +
                         "expected_canonical_hash=$expectedCanonicalHash " +
                         "canonical_hash=${canonical?.let(::contentHash) ?: "unavailable"} " +
                         "replica_hash=${replica?.let(::contentHash) ?: "missing"} " +
                         "buffer_hash=${visible?.let(::contentHash) ?: "unavailable"} reason=$reason " +
-                        "recovery=await_next_controller_request (#jetbrainsreplicaloops)",
+                        "recovery=$recovery (#jetbrainsreplicaloops)",
                 )
                 if (decision == VisibleRollForwardDecision.ReplicaBehind) {
                     requestUrgentRemoteDrain(filePath, "visible-roll-forward-replica-behind")
                 }
-                return false
+                return if (decision == VisibleRollForwardDecision.VisibleStructureInvalid) {
+                    VisibleRollForwardResult.Rejected
+                } else {
+                    VisibleRollForwardResult.Deferred
+                }
             }
         }
         val visibleText = visible!!
@@ -4864,7 +4885,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "and the controller's next request retries; reason=$reason (#jetbrainsreplicaloops)",
             )
             requestRemoteDrain(filePath, "visible-roll-forward-retry")
-            return false
+            return VisibleRollForwardResult.Deferred
         }
         // The replica now holds exactly the visible cut. Re-base local
         // bookkeeping on it: the quarantined stale-baseline batch is subsumed,
@@ -4891,7 +4912,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "canonical_hash=${canonicalAfter?.let(::contentHash) ?: "unavailable"} published=$published " +
                 "settled=$settled reason=$reason recovery=editor_visible_roll_forward (#jetbrainsreplicaloops)",
         )
-        return true
+        return VisibleRollForwardResult.Applied
     }
 
     /**
@@ -5353,11 +5374,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 return VisibleRollForwardResult.Rejected
             }
             return try {
-                val applied = manager.documentWorkers.forDocument(filePath).submit<Boolean> {
-                    !manager.disposed.get() &&
+                manager.documentWorkers.forDocument(filePath).submit<VisibleRollForwardResult> {
+                    if (manager.disposed.get()) {
+                        VisibleRollForwardResult.Deferred
+                    } else {
                         manager.rollVisibleBufferForward(filePath, expectedCanonicalHash, reason)
+                    }
                 }.get(CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                if (applied) VisibleRollForwardResult.Applied else VisibleRollForwardResult.Deferred
             } catch (_: TimeoutException) {
                 manager.log.warn(
                     "[crdt-replica] visible roll-forward deferred reason=document_lane_timeout " +

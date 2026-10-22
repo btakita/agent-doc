@@ -1021,7 +1021,9 @@ class TypingTrackerEdtBudgetTest {
             "remote CRDT template validation should publish into the shared reactive plane before the EDT apply",
             source.contains("private fun templateStructureState(") &&
                 source.substringAfter("private fun templateStructureState(")
-                    .contains("templateValidation.publish(filePath, lane, text).state"),
+                    .contains("templateValidation.publish(filePath, lane, text)") &&
+                source.substringAfter("private fun templateStructureState(")
+                    .contains("projection.state.also"),
         )
         val guardRecoveryBody = source.substringAfter("private fun recoverRejectedRemoteCanonical")
             .substringBefore("private fun scheduleTemplateGuardRecoveryRetry")

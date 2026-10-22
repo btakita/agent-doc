@@ -669,6 +669,20 @@ pub fn editor_holds_unmerged_visible_text_remedy(file: &str) -> String {
     )
 }
 
+/// Terminal counterpart of [`editor_holds_unmerged_visible_text_remedy`].
+/// The editor answered the roll-forward request and proved waiting cannot help.
+pub fn editor_visible_roll_forward_refused_remedy(file: &str, refusal: &str) -> String {
+    format!(
+        "The editor definitively refused the controller's visible roll-forward for {file} \
+         (roll_forward_refusal={refusal}); retrying the same request cannot change this state. \
+         Run `agent-doc admin recycle` now so a fresh controller reseeds from the editor's retained \
+         replica and re-applies the retained write. Do NOT force disk or run `agent-doc commit \
+         {file}` because either can discard or mis-base the operator's visible text. If recycle \
+         leaves the state in place, ask the operator to reconcile the editor buffer with the \
+         retained write, keeping the text they typed; then run `agent-doc session-check {file}`"
+    )
+}
+
 /// When `admin reload-lib` is sanctioned, stated once for every remedy that
 /// How an unanswered document edit is answered, stated once for every caller
 /// of the [`RetainedWriteVerdict::UnansweredEditPending`] remedy

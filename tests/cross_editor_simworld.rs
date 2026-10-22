@@ -1450,6 +1450,7 @@ fn session_check_reports_exhausted_replica_rebuilds_as_an_operator_state() {
             controller_generation: 1,
             refusals: 9,
             rebuilds: 2,
+            roll_forward_refusal: None,
             recorded_at_ms: 1,
         },
     )

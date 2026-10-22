@@ -1358,8 +1358,14 @@ fn editor_holds_unmerged_visible_text_interruption(
         read_only_terminal_projection_detail(
             ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText
         ),
-        agent_doc_turn::write_ownership::editor_holds_unmerged_visible_text_remedy(
-            &file.display().to_string()
+        exhausted.roll_forward_refusal.as_deref().map_or_else(
+            || agent_doc_turn::write_ownership::editor_holds_unmerged_visible_text_remedy(
+                &file.display().to_string(),
+            ),
+            |refusal| agent_doc_turn::write_ownership::editor_visible_roll_forward_refused_remedy(
+                &file.display().to_string(),
+                refusal,
+            ),
         ),
     )
 }
@@ -5725,6 +5731,7 @@ mod settle_window_tests {
             controller_generation: 2,
             refusals: 9,
             rebuilds: 2,
+            roll_forward_refusal: None,
             recorded_at_ms: 1,
         };
         let line =
@@ -5741,6 +5748,14 @@ mod settle_window_tests {
         }
         assert!(!line.contains("acknowledgement is pending"), "{line}");
         assert!(!is_self_converging_interruption(&line), "{line}");
+
+        let mut refused = exhausted;
+        refused.roll_forward_refusal = Some("visible_structure_invalid".to_string());
+        let refused_line =
+            editor_holds_unmerged_visible_text_interruption(Path::new("doc-a.md"), &refused);
+        assert!(refused_line.contains("roll_forward_refusal=visible_structure_invalid"));
+        assert!(refused_line.contains("Run `agent-doc admin recycle` now"));
+        assert!(!refused_line.contains("Re-run `agent-doc session-check"));
         let detail = read_only_terminal_projection_detail(
             ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText,
         );

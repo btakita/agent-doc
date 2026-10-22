@@ -14,7 +14,10 @@ class TemplateValidationPlaneTest {
                 ThreadSafeContext(),
                 normalize = { text ->
                     normalizations.incrementAndGet()
-                    text.takeUnless { it == "invalid" }
+                    NativePatching.TemplateStructureNormalization(
+                        text.takeUnless { it == "invalid" },
+                        if (text == "invalid") "rule=duplicate_exchange_boundary offset=17" else null,
+                    )
                 },
                 hash = { text -> "hash:$text" },
             )
@@ -33,6 +36,7 @@ class TemplateValidationPlaneTest {
             plane.publish("session.md", TemplateValidationPlane.Lane.Editor, "invalid")
         assertEquals(TemplateStructureProjectionState.Invalid, changed.state)
         assertEquals("hash:invalid", changed.revisionHash)
+        assertEquals("rule=duplicate_exchange_boundary offset=17", changed.diagnostic)
         assertEquals(2, normalizations.get())
     }
 
@@ -44,7 +48,7 @@ class TemplateValidationPlaneTest {
                 ThreadSafeContext(),
                 normalize = { text ->
                     normalizations.incrementAndGet()
-                    text
+                    NativePatching.TemplateStructureNormalization(text, null)
                 },
                 hash = { text -> "hash:$text" },
             )

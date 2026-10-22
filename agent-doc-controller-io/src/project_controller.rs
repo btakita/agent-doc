@@ -5287,6 +5287,20 @@ fn refund_undelivered_retained_persistence_roll_forward(
     }
 }
 
+/// A live endpoint's rejected receipt is terminal for this content. Spend the
+/// remaining roll-forward budget at once; only changed content may re-arm it.
+fn terminalize_retained_persistence_roll_forward(
+    retries: &mut std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
+    key: &str,
+    content_hash: &str,
+) {
+    if let Some(entry) = retries.get_mut(key)
+        && entry.content_hash == content_hash
+    {
+        entry.roll_forwards = RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS;
+    }
+}
+
 /// `#splicesessionack`: the retained-persistence worker's refusal bookkeeping
 /// for out-of-crate SimWorld models. Each call runs the SAME per-content streak
 /// step and durable exhausted-state projection the worker runs after a native
@@ -6019,6 +6033,7 @@ impl RetainedWriteSettleSink {
                         controller_generation: generation,
                         refusals: retry.refusals,
                         rebuilds: retry.rebuilds,
+                        roll_forward_refusal: None,
                         recorded_at_ms: SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .map(|elapsed| elapsed.as_millis() as u64)
@@ -6676,7 +6691,7 @@ impl ControllerDocumentGraphs {
                                 // re-applies the pending write on top of the
                                 // operator's text. Never a controller write
                                 // over that buffer.
-                                let delivered = match agent_doc_crdt_relay_io::signal_editor_visible_roll_forward(
+                                let (delivered, terminal_refusal) = match agent_doc_crdt_relay_io::signal_editor_visible_roll_forward(
                                     &file,
                                     agent_doc_crdt_relay_io::ReplicaEventExpectedContent {
                                         content_hash: &content_hash,
@@ -6701,7 +6716,12 @@ impl ControllerDocumentGraphs {
                                                 RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS,
                                             ),
                                         );
-                                        outcome.notified > 0
+                                        (
+                                            outcome.notified > 0,
+                                            outcome.found > 0
+                                                && outcome.notified == 0
+                                                && outcome.definitive_refusals == outcome.found,
+                                        )
                                     }
                                     Err(error) => {
                                         agent_doc_ops_log_io::log_op(
@@ -6714,10 +6734,39 @@ impl ControllerDocumentGraphs {
                                                 content_hash,
                                             ),
                                         );
-                                        false
+                                        (false, false)
                                     }
                                 };
-                                if !delivered
+                                if terminal_refusal {
+                                    if let Some(runtime) = worker_sink.runtime.upgrade() {
+                                        runtime
+                                            .document_graphs
+                                            .terminalize_retained_persistence_roll_forward(
+                                                &document_hash,
+                                                &content_hash,
+                                            );
+                                    }
+                                    let refusal = "editor_endpoint_rejected";
+                                    match crate::retained_persistence_exhaustion::mark_roll_forward_refusal(
+                                        &worker_sink.project_root,
+                                        &file,
+                                        &content_hash,
+                                        refusal,
+                                    ) {
+                                        Ok(marked) => agent_doc_ops_log_io::log_op(
+                                            &file,
+                                            &format!(
+                                                "retained_persistence_visible_roll_forward_refused document_hash={document_hash} generation={generation} epoch={epoch} content_hash={content_hash} terminal=true state=editor_holds_unmerged_visible_text roll_forward_refusal={refusal} durable_state_marked={marked} recovery=agent_doc_admin_recycle",
+                                            ),
+                                        ),
+                                        Err(error) => agent_doc_ops_log_io::log_op(
+                                            &file,
+                                            &format!(
+                                                "retained_persistence_visible_roll_forward_refusal_record_failed document_hash={document_hash} generation={generation} epoch={epoch} content_hash={content_hash} error={error:#}",
+                                            ),
+                                        ),
+                                    }
+                                } else if !delivered
                                     && let Some(runtime) = worker_sink.runtime.upgrade()
                                 {
                                     runtime
@@ -8070,6 +8119,18 @@ impl ControllerDocumentGraphs {
     /// `#jetbrainsreplicaloops`: return an undelivered roll-forward request.
     fn refund_retained_persistence_roll_forward(&self, document_hash: &str, content_hash: &str) {
         refund_undelivered_retained_persistence_roll_forward(
+            &mut self.retained_persistence_retries.lock(),
+            document_hash,
+            content_hash,
+        );
+    }
+
+    fn terminalize_retained_persistence_roll_forward(
+        &self,
+        document_hash: &str,
+        content_hash: &str,
+    ) {
+        terminalize_retained_persistence_roll_forward(
             &mut self.retained_persistence_retries.lock(),
             document_hash,
             content_hash,
@@ -25710,6 +25771,33 @@ mod retained_persistence_retry_tests {
         assert_eq!(
             retries["doc"].rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
             "a roll-forward refund never refunds a rebuild"
+        );
+    }
+
+    #[test]
+    fn a_definitive_roll_forward_refusal_spends_the_remaining_budget() {
+        let mut retries = std::collections::HashMap::new();
+        loop {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
+                    .unwrap();
+            if decision.request_visible_roll_forward {
+                break;
+            }
+        }
+        terminalize_retained_persistence_roll_forward(&mut retries, "doc", CONTENT.0);
+        for _ in 0..90 {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
+                    .unwrap();
+            assert!(
+                !decision.request_visible_roll_forward,
+                "the same immutable content must not re-request after a terminal refusal"
+            );
+        }
+        assert_eq!(
+            retries["doc"].roll_forwards,
+            RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS
         );
     }
 

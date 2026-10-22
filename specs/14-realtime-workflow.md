@@ -2342,8 +2342,12 @@ editor update is visibly projected by every live replica, the relay compares the
 encoded canonical state with a proportional budget: the greater of 1 MiB or
 eight times the visible UTF-8 text plus 64 KiB. State above that budget rotates
 through the same fresh-lineage, replace-capable re-bootstrap fence as Compact
-Exchange. The relay must not rotate while a live delivery is unacknowledged, and
-must signal every live editor to consume and persist the compact frontier. Thus
+Exchange. The relay must not rotate while a live delivery is unacknowledged. It
+retains the automatic epoch request until the final matching visible projection
+settles the delivery cut; the request does not depend on a later editor update.
+The deferred observation emits an operations-log record naming the unsatisfied
+visible-delivery gate, and settlement emits the automatic-compaction receipt.
+The relay must signal every live editor to consume and persist the compact frontier. Thus
 a later full registration or controller-recycle resume sends the compact epoch,
 not the document's complete historical insert/delete stream.
 

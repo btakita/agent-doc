@@ -76,6 +76,17 @@ pub const AUTO_COMPACT_TEXT_MULTIPLIER: usize = 8;
 /// Leave room for state vectors and encoding metadata around the text payload.
 pub const AUTO_COMPACT_STATE_SLACK_BYTES: usize = 64 * 1024;
 
+pub const fn automatic_history_compaction_limit(text_bytes: usize) -> usize {
+    let proportional = text_bytes
+        .saturating_mul(AUTO_COMPACT_TEXT_MULTIPLIER)
+        .saturating_add(AUTO_COMPACT_STATE_SLACK_BYTES);
+    if AUTO_COMPACT_MIN_STATE_BYTES > proportional {
+        AUTO_COMPACT_MIN_STATE_BYTES
+    } else {
+        proportional
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AutomaticHistoryCompaction {
     pub before_bytes: usize,
@@ -668,6 +679,8 @@ pub struct RetainedCanonicalProjection {
     pub last_committed_text: Option<String>,
     pub last_committed_state_vector: Option<Vec<u8>>,
     pub compact_epoch_requested: bool,
+    /// The retained epoch request was raised by the automatic history budget.
+    pub automatic_history_compaction_requested: bool,
     /// A replacement controller temporarily starts with an empty canonical so
     /// a retained editor can publish its complete missing delta. Until that
     /// round trip lands, the empty hub is transport state, not document
@@ -709,10 +722,13 @@ pub struct RelayHub {
     /// `RebuiltFromDisk`; drained by the caller which delivers the replace and
     /// calls [`Self::clear_rebootstrap`].
     pending_rebootstrap: HashSet<u64>,
-    /// Compact Exchange requested a fresh lineage, but a newer canonical
-    /// delivery still lacks the all-live visible-state proof. The final matching
-    /// projection settles this retained effect and then queues rebootstrap.
+    /// Compact Exchange or the automatic history budget requested a fresh
+    /// lineage, but a newer canonical delivery still lacks the all-live
+    /// visible-state proof. The final matching projection settles this retained
+    /// effect and then queues rebootstrap.
     compact_epoch_requested: bool,
+    /// Distinguishes the automatic request at its eventual settlement edge.
+    automatic_history_compaction_requested: bool,
     /// Members carrying retained state into a restarted relay, whether
     /// registration or update arrives first. Their retained CRDT lineage cannot
     /// be union-merged with a canonical freshly seeded from disk: both lineages
@@ -1500,6 +1516,7 @@ impl RelayHub {
             last_committed_state_vector: None,
             pending_rebootstrap: HashSet::new(),
             compact_epoch_requested: false,
+            automatic_history_compaction_requested: false,
             canonical_projection_required,
             replica_updates_fenced,
             live_document_projection,
@@ -1588,6 +1605,8 @@ impl RelayHub {
         hub.last_committed_text = projection.last_committed_text.clone();
         hub.last_committed_state_vector = projection.last_committed_state_vector.clone();
         hub.compact_epoch_requested = projection.compact_epoch_requested;
+        hub.automatic_history_compaction_requested =
+            projection.automatic_history_compaction_requested;
         hub.ctx.set(
             &hub.retained_replica_reseed_pending,
             projection.retained_replica_reseed_pending,
@@ -1609,6 +1628,8 @@ impl RelayHub {
             last_committed_text: self.last_committed_text.clone(),
             last_committed_state_vector: self.last_committed_state_vector.clone(),
             compact_epoch_requested: self.compact_epoch_requested,
+            automatic_history_compaction_requested: self
+                .automatic_history_compaction_requested,
             retained_replica_reseed_pending: self.retained_replica_reseed_pending(),
         }
     }
@@ -3095,22 +3116,19 @@ impl RelayHub {
         }
         self.rebuild_authoritative_epoch(&before_text, expected_text)?;
         self.compact_epoch_requested = false;
+        self.automatic_history_compaction_requested = false;
         Ok(())
     }
 
     /// Rotate an oversized, fully visible CRDT history into a fresh epoch.
     ///
-    /// This is deliberately opportunistic. A queued delivery means at least one
-    /// live editor has not proved the current text, so automatic compaction waits
-    /// for a later update instead of retaining a background compaction request.
-    /// The explicit Compact Exchange path remains the owner of deferred fences.
+    /// A queued delivery means at least one live editor has not proved the
+    /// current text. The oversized observation is retained on the same epoch
+    /// fence used by Compact Exchange, and the final matching visible projection
+    /// settles it without requiring another editor update (#345).
     pub fn compact_oversized_history(&mut self) -> Result<Option<AutomaticHistoryCompaction>> {
         let text_bytes = self.canonical.text().len();
-        let limit_bytes = AUTO_COMPACT_MIN_STATE_BYTES.max(
-            text_bytes
-                .saturating_mul(AUTO_COMPACT_TEXT_MULTIPLIER)
-                .saturating_add(AUTO_COMPACT_STATE_SLACK_BYTES),
-        );
+        let limit_bytes = automatic_history_compaction_limit(text_bytes);
         self.compact_oversized_history_with_limit(limit_bytes)
     }
 
@@ -3118,13 +3136,15 @@ impl RelayHub {
         &mut self,
         limit_bytes: usize,
     ) -> Result<Option<AutomaticHistoryCompaction>> {
-        if !self.visible_delivery_projected() {
-            return Ok(None);
-        }
         let text = self.canonical.text();
         let text_bytes = text.len();
         let before_bytes = self.canonical.encode_state().len();
         if before_bytes <= limit_bytes {
+            return Ok(None);
+        }
+        self.compact_epoch_requested = true;
+        self.automatic_history_compaction_requested = true;
+        if !self.visible_delivery_projected() {
             return Ok(None);
         }
         self.compact_authoritative_epoch(&text)?;
@@ -3148,6 +3168,10 @@ impl RelayHub {
 
     pub fn compact_epoch_requested(&self) -> bool {
         self.compact_epoch_requested
+    }
+
+    pub fn automatic_history_compaction_requested(&self) -> bool {
+        self.automatic_history_compaction_requested
     }
 
     fn settle_requested_epoch_compaction(&mut self) -> Result<bool> {
@@ -4775,7 +4799,19 @@ mod tests {
 
         assert_eq!(hub.compact_oversized_history_with_limit(1).unwrap(), None);
         assert_eq!(hub.lineage(), prior_lineage);
+        assert!(hub.compact_epoch_requested());
+        assert!(hub.automatic_history_compaction_requested());
+
+        assert!(
+            hub.observe_delivery_projection(3, &content_hash("keep\nnext\n"))
+                .unwrap()
+        );
+
+        assert_ne!(hub.lineage(), prior_lineage);
+        assert_eq!(hub.canonical_text(), "keep\nnext\n");
         assert!(!hub.compact_epoch_requested());
+        assert!(!hub.automatic_history_compaction_requested());
+        assert_eq!(hub.pending_rebootstrap_members(), vec![2, 3]);
     }
 
     #[test]

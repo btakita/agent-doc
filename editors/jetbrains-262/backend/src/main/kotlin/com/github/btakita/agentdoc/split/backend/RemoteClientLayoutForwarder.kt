@@ -12,6 +12,7 @@ import com.github.btakita.agentdoc.LayoutDetector
 import com.github.btakita.agentdoc.RemoteClientLayoutAuthority
 import com.github.btakita.agentdoc.SyncLayoutAction
 import com.github.btakita.agentdoc.TerminalUtil
+import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION
@@ -67,26 +68,6 @@ internal object RemoteClientMeasuredLayout {
         isSessionDocument: (String) -> Boolean,
         derivation: EditorDerivation = EditorDerivation.Native,
     ): MeasuredMainLayout {
-        if (snapshot.schemaVersion >= FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
-            val main = snapshot.surfaces.singleOrNull { it.role == SurfaceRole.MAIN }
-                ?: return MeasuredMainLayout.Unavailable("no_main_surface")
-            val authoritative = main.layoutColumns
-                ?: return MeasuredMainLayout.Unavailable("frontend_columns_missing")
-            for (window in main.windows) {
-                if (window.selectedPath?.takeIf(isSessionDocument) == null &&
-                    window.openPaths.any(isSessionDocument)
-                ) {
-                    return MeasuredMainLayout.Unavailable("split_shows_non_session_tab")
-                }
-            }
-            val columns = authoritative.map { column ->
-                column.paths.filter(isSessionDocument).distinct()
-            }.filter(List<String>::isNotEmpty)
-            if (columns.isEmpty()) return MeasuredMainLayout.Unavailable("no_session_documents")
-            val focused = main.windows.firstOrNull { it.selectedPath in columns.flatten() }?.selectedPath
-                ?: columns.first().first()
-            return MeasuredMainLayout.Measured(columns, focused)
-        }
         if (snapshot.schemaVersion < GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
             return MeasuredMainLayout.Unavailable("schema_${snapshot.schemaVersion}_without_geometry")
         }
@@ -105,7 +86,38 @@ internal object RemoteClientMeasuredLayout {
         )
         return derivation.derive("client_measured_layout", GSON.toJson(evidence))
             ?.let(::parseMeasuredLayout)
-            ?: frozenDerive(evidence)
+            ?: if (snapshot.schemaVersion >= FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+                frozenFrontendDerive(main, isSessionDocument)
+            } else {
+                frozenDerive(evidence)
+            }
+    }
+
+    /**
+     * GH #343 compatibility floor for schema 3. The frontend-authored vector is retained only for
+     * a native library that predates the schema; a live native generation always receives the
+     * measured evidence above, so grouping-rule changes remain restart-free (GH #346).
+     */
+    private fun frozenFrontendDerive(
+        main: FrontendSurface,
+        isSessionDocument: (String) -> Boolean,
+    ): MeasuredMainLayout {
+        val authoritative = main.layoutColumns
+            ?: return MeasuredMainLayout.Unavailable("frontend_columns_missing")
+        for (window in main.windows) {
+            if (window.selectedPath?.takeIf(isSessionDocument) == null &&
+                window.openPaths.any(isSessionDocument)
+            ) {
+                return MeasuredMainLayout.Unavailable("split_shows_non_session_tab")
+            }
+        }
+        val columns = authoritative.map { column ->
+            column.paths.filter(isSessionDocument).distinct()
+        }.filter(List<String>::isNotEmpty)
+        if (columns.isEmpty()) return MeasuredMainLayout.Unavailable("no_session_documents")
+        val focused = main.windows.firstOrNull { it.selectedPath in columns.flatten() }?.selectedPath
+            ?: columns.first().first()
+        return MeasuredMainLayout.Measured(columns, focused)
     }
 
     /** Parse the native `client_measured_layout` output (`outcome` = `measured` | `unavailable`). */

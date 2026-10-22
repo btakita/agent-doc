@@ -131,9 +131,10 @@ class FrontendSurfaceSnapshotService(
     }
 
     /**
-     * Publish frontend-authored columns (schema 3) only to a backend that accepts them. Fleet RPC
-     * decodes with `ignoreUnknownKeys = false`; negotiation prevents older peers from seeing new
-     * keys. The authenticated lease already owns structure while this call is pending.
+     * Publish the frontend-authored compatibility columns (schema 3) only to a backend that
+     * accepts them. Fleet RPC decodes with `ignoreUnknownKeys = false`; negotiation prevents older
+     * peers from seeing new keys. The authenticated lease already owns structure while this call
+     * is pending; native derives the live vector from the same snapshot's measured evidence.
      */
     private suspend fun negotiateSnapshotSchema(): Int {
         val offered = try {

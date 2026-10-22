@@ -21,9 +21,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * GH #320/#343: schema-3 Remote Dev pane order is the JetBrains Client's exact `layoutColumns`
- * vector. Bounds grouping remains only for schema-2 compatibility and matches classic
- * `LayoutDetector.buildColumnsFromSnapshots`.
+ * GH #320/#343/#346: schema-3 Remote Dev pane order comes from the hot-reloaded native
+ * `client_measured_layout` derivation over JetBrains Client geometry. The exact frontend
+ * `layoutColumns` vector remains only as the compatibility floor for an older native library.
  *
  * GH #326: the native `client_measured_layout` derivation owns these rules (pinned by the Rust
  * `window_layout` tests with the same cases); the cases here pin the frozen Kotlin floor a native
@@ -85,7 +85,7 @@ class RemoteClientMeasuredLayoutTest {
     }
 
     @Test
-    fun schemaThreeFrontendColumnVectorWinsUnchangedOverConflictingBounds() {
+    fun schemaThreeFrontendColumnVectorIsTheFrozenFallbackOverConflictingBounds() {
         val snapshot = FrontendSurfaceSnapshot(
             frontendInstanceId = "frontend-1",
             sequence = 1,
@@ -107,7 +107,45 @@ class RemoteClientMeasuredLayoutTest {
         )
         assertEquals(
             listOf(listOf("/repo/b.md"), listOf("/repo/a.md")),
-            (RemoteClientMeasuredLayout.derive(snapshot, isSession) as MeasuredMainLayout.Measured).columns,
+            (RemoteClientMeasuredLayout.derive(snapshot, isSession, EditorDerivation.Unavailable)
+                as MeasuredMainLayout.Measured).columns,
+        )
+    }
+
+    @Test
+    fun schemaThreeStillAsksNativeAndItsGroupingWinsOverTheFrozenVector() {
+        val snapshot = FrontendSurfaceSnapshot(
+            frontendInstanceId = "frontend-1",
+            sequence = 1,
+            projectId = projectId,
+            complete = true,
+            surfaces = listOf(
+                FrontendSurface(
+                    "root", 1, SurfaceRole.MAIN, true,
+                    windows = listOf(
+                        window(0, "/repo/a.md", x = 0),
+                        window(1, "/repo/b.md", x = 640),
+                    ),
+                    layoutColumns = listOf(
+                        FrontendLayoutColumn(listOf("/repo/b.md")),
+                        FrontendLayoutColumn(listOf("/repo/a.md")),
+                    ),
+                ),
+            ),
+        )
+        var asked: String? = null
+        var evidence: JsonObject? = null
+        val layout = RemoteClientMeasuredLayout.derive(snapshot, isSession) { derivation, inputJson ->
+            asked = derivation
+            evidence = JsonParser.parseString(inputJson).asJsonObject
+            """{"outcome":"measured","columns":[["/repo/a.md"],["/repo/b.md"]],"focused":"/repo/a.md"}"""
+        }
+
+        assertEquals("client_measured_layout", asked)
+        assertEquals(0, evidence!!.getAsJsonArray("windows")[0].asJsonObject.get("x").asInt)
+        assertEquals(
+            listOf(listOf("/repo/a.md"), listOf("/repo/b.md")),
+            (layout as MeasuredMainLayout.Measured).columns,
         )
     }
 

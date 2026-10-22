@@ -138,7 +138,12 @@ recorded `pluginSourceDigest` still matches its source tree, while updating the
 package's `pluginReleaseVersion` ownership metadata; this keeps the binary paired
 with the already-running generation and makes installed-plugin reconciliation a
 no-op without a restart (GH #295). A changed digest allocates a fresh version
-above every compatibility line. `agent-doc plugin install|update
+above every compatibility line. The release generation fence refuses a Kotlin
+delta made only of comments/formatting or consistent identifier renames and
+guards the `client_measured_layout` native-before-floor call order, so a
+restart-only exact-263 package is not regenerated for non-behavioral churn or
+for a grouping rule that belongs in the hot-reloaded library (GH #346).
+`agent-doc plugin install|update
 jetbrains`, the `agent-doc upgrade` installed-plugin reconciliation, and `plugin install jetbrains --local
 --all-installed` derive each target's platform build from its versioned IDE data
 directory (`IntelliJIdea2026.3` -> 263) and select only that range's asset or
@@ -292,7 +297,9 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   by the modular backend (GH #320 option B). Evidence per window is its ordinal,
   selected session document, whether it holds any session document, and its
   measured origin. The schema-version and main-surface checks stay with the RPC
-  contract in Kotlin.
+  contract in Kotlin. Schema 3's frontend-authored `layoutColumns` is a frozen
+  compatibility floor only: every live native generation receives the measured
+  evidence first, so grouping changes remain restart-free (GH #346).
 - `surface_projection` (phase 2): the automatic editor surface that
   `EditorTabSyncListener` publishes. Evidence is what one EDT turn reads: the
   surface frame's windows (`window_layout` evidence plus whether the frame could be
@@ -891,8 +898,10 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   no window or split identity, and `RdServerEditorTracker.activeEditors` is a flat list. agent-doc
   does not infer order from the editor remove/re-open events. Geometry exists only in the JetBrains
   Client. Snapshot schema 2 carries measured bounds; schema 3 additionally carries the frontend's
-  typed `layoutColumns` vector, grouped there with the 8 px x-tolerance and top-to-bottom stacking.
-  The backend validates session-document paths but neither regroups nor reorders that vector.
+  typed `layoutColumns` compatibility vector, frozen at the 8 px x-tolerance and top-to-bottom
+  stacking rule. The backend sends the window evidence to the hot-reloaded native
+  `client_measured_layout` derivation before consulting that floor, so the connected frontend
+  remains the source of structural evidence without making Kotlin the live grouping authority.
   After the same snapshot's
   `editor_view_snapshot_observe` was delivered (whatever the detached-view projection status: 263
   freezes it without terminal capability), it forwards
@@ -913,7 +922,9 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   cannot keep driving. Only a remote session (`ClientType.isRemote`) is forwarded; a monolithic
   IDE's own frontend is already measured by the classic window path. A schema-1 peer has no
   geometry and a schema-2 peer uses its positive bounds only for compatibility. For schema 3,
-  a missing column vector is `Unavailable` and the last accepted frontend snapshot stays in force.
+  a missing column vector is `Unavailable` only when no native generation can answer; a native
+  answer is authoritative and the last accepted frontend snapshot stays in force when it reports
+  unavailable.
   The same hold applies to a split whose selected tab is not a session document
   while its tabs hold one (`#stickymdpane`: that column is unknown, not gone); a split holding no
   session document contributes no column, so closing a split still collapses the layout. While a

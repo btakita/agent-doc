@@ -29,7 +29,7 @@ class SurfaceSnapshotContractTest {
         assertTrue(FrontendPresentationCapability.EXACT_262_INTERNAL.admitsTerminalPresentation())
     }
 
-    /** Schema 3 adds frontend columns; geometry schema 2 and legacy schema 1 remain accepted. */
+    /** Schema 3 adds the frontend column floor; geometry schema 2 and legacy schema 1 remain accepted. */
     @Test
     fun schemaThreeIsCurrentAndOlderSchemasStaySupported() {
         assertEquals(3, SURFACE_SNAPSHOT_SCHEMA_VERSION)

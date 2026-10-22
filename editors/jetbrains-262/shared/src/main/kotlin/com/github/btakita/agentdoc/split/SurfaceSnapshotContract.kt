@@ -14,7 +14,8 @@ import kotlinx.serialization.Serializable
 
 /**
  * Current snapshot schema. Schema 2 added measured window bounds. Schema 3 adds the frontend's
- * authoritative column vector so the backend never reconstructs editor structure from geometry.
+ * frozen compatibility column vector; the hot-reloaded native library remains the live grouping
+ * authority over those bounds (GH #346).
  */
 const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 3
 const val GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 2
@@ -155,8 +156,8 @@ data class FrontendSurface(
     val focused: Boolean,
     val windows: List<EditorWindowSnapshot>,
     /**
-     * Schema 3 authoritative editor structure. The backend may validate/filter non-session paths,
-     * but must never regroup or reorder this vector.
+     * Schema 3 compatibility floor for a native library that cannot derive measured geometry.
+     * A live native generation derives the authoritative vector from [windows] instead.
      */
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val layoutColumns: List<FrontendLayoutColumn>? = null,

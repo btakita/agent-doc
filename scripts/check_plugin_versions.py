@@ -11,6 +11,11 @@ The bump predicate and every digest-aware check deliberately include the
 UNSTAGED working tree. `gradlew buildPlugin` compiles whatever is on disk, so an
 unstaged `.kt` edit is already in the artifact. That is the exact gap the
 duplicate 0.2.388 pair came through.
+
+GH #346 additionally rejects a JetBrains generation whose Kotlin delta is only
+comments/formatting or a consistent identifier rename, and pins the schema-3
+Remote Dev grouping path behind the hot-reloaded `client_measured_layout`
+derivation before its frozen compatibility floor.
 """
 
 from __future__ import annotations
@@ -25,6 +30,29 @@ from dataclasses import dataclass
 
 DIGEST_KEY = "pluginSourceDigest"
 RELEASE_KEY = "pluginReleaseVersion"
+MEASURED_LAYOUT_FORWARDER = (
+    "editors/jetbrains-262/backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/"
+    "RemoteClientLayoutForwarder.kt"
+)
+
+KOTLIN_KEYWORDS = {
+    "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if",
+    "in", "interface", "is", "null", "object", "package", "return", "super", "this",
+    "throw", "true", "try", "typealias", "typeof", "val", "var", "when", "while",
+}
+KOTLIN_TOKEN = re.compile(
+    r'''(?sx)
+    (?P<space>\s+)
+    |(?P<line_comment>//[^\n]*)
+    |(?P<block_comment>/\*.*?\*/)
+    |(?P<triple_string>""".*?""")
+    |(?P<string>"(?:\\.|[^"\\])*")
+    |(?P<char>'(?:\\.|[^'\\])*')
+    |(?P<identifier>[A-Za-z_][A-Za-z0-9_]*)
+    |(?P<number>\d+(?:\.\d+)?)
+    |(?P<symbol>.)
+    ''',
+)
 
 
 @dataclass(frozen=True)
@@ -92,6 +120,128 @@ def git(*args: str) -> list[str]:
         ("git", *args), check=True, text=True, capture_output=True
     )
     return [line for line in result.stdout.splitlines() if line]
+
+
+def git_text(*args: str) -> str | None:
+    """Read one git object without conflating an empty file with a missing object."""
+    result = subprocess.run(("git", *args), text=True, capture_output=True)
+    return result.stdout if result.returncode == 0 else None
+
+
+def kotlin_tokens(source: str) -> list[tuple[str, str]]:
+    """Tokenize enough Kotlin to distinguish comments and consistent identifier renames."""
+    return [
+        (match.lastgroup or "symbol", match.group())
+        for match in KOTLIN_TOKEN.finditer(source)
+        if match.lastgroup not in {"space", "line_comment", "block_comment"}
+    ]
+
+
+def nonbehavioral_kotlin_change(before: str, after: str) -> str | None:
+    """Classify source-only churn that should not force an exact-263 IDE restart."""
+    left = kotlin_tokens(before)
+    right = kotlin_tokens(after)
+    if left == right:
+        return "comments/formatting only"
+    if len(left) != len(right):
+        return None
+
+    forward: dict[str, str] = {}
+    reverse: dict[str, str] = {}
+    changed = False
+    for (left_kind, left_token), (right_kind, right_token) in zip(left, right, strict=True):
+        if (left_kind, left_token) == (right_kind, right_token):
+            continue
+        if (
+            left_kind != "identifier"
+            or right_kind != "identifier"
+            or left_token in KOTLIN_KEYWORDS
+            or right_token in KOTLIN_KEYWORDS
+        ):
+            return None
+        if forward.setdefault(left_token, right_token) != right_token:
+            return None
+        if reverse.setdefault(right_token, left_token) != left_token:
+            return None
+        changed = True
+    return "identifier rename only" if changed else None
+
+
+def client_measured_layout_boundary_failure(source: str) -> str | None:
+    """Keep schema-3 grouping behind the hot-reloaded native derivation (GH #346)."""
+    start = source.find("fun derive(")
+    end = source.find("/** Parse the native `client_measured_layout` output", start)
+    if start < 0 or end < 0:
+        return "JetBrains 262/263: client_measured_layout derive boundary is missing"
+    body = source[start:end]
+    native = body.find('derivation.derive("client_measured_layout"')
+    floor = body.find("frozenFrontendDerive(main, isSessionDocument)")
+    if native < 0:
+        return "JetBrains 262/263: schema-3 grouping bypasses client_measured_layout"
+    if floor < 0 or floor < native:
+        return (
+            "JetBrains 262/263: the schema-3 frontend vector must remain a post-native "
+            "compatibility floor"
+        )
+    schema_three_branch = body.find(
+        "if (snapshot.schemaVersion >= FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION)"
+    )
+    if 0 <= schema_three_branch < native:
+        return (
+            "JetBrains 262/263: schema 3 returns before client_measured_layout; move grouping "
+            "behind the hot-reloaded native boundary"
+        )
+    return None
+
+
+def previous_release_ref(current_version: str) -> str | None:
+    """Return the newest release tag other than the version currently being checked."""
+    current_tag = f"v{current_version}"
+    return next(
+        (tag for tag in git("tag", "--list", "v*", "--sort=-version:refname") if tag != current_tag),
+        None,
+    )
+
+
+def nonbehavioral_generation_failure(target: Target, current_version: str) -> str | None:
+    """Reject a plugin generation allocated solely for Kotlin comments or renames."""
+    previous = previous_release_ref(current_version)
+    if previous is None:
+        return None
+    old_properties = git_text("show", f"{previous}:{target.primary_version}")
+    if old_properties is None:
+        return None
+    match = re.search(r"(?m)^pluginVersion\s*=\s*(\d+\.\d+\.\d+)\s*$", old_properties)
+    if match is None or match.group(1) == ".".join(map(str, read_gradle_version(target.primary_version))):
+        return None
+
+    changed = set(git("diff", "--name-only", previous, "--", *target.source_prefixes))
+    changed |= set(git("ls-files", "--others", "--exclude-standard", "--", *target.source_prefixes))
+    runtime = sorted(path for path in changed if is_source(target, path))
+    if not runtime:
+        return f"{target.name}: plugin generation changed without packaged runtime source changes"
+
+    classifications: list[tuple[str, str]] = []
+    for path in runtime:
+        if not path.endswith(".kt"):
+            return None
+        before = git_text("show", f"{previous}:{path}")
+        try:
+            after = open(path, encoding="utf-8").read()
+        except FileNotFoundError:
+            return None
+        if before is None:
+            return None
+        classification = nonbehavioral_kotlin_change(before, after)
+        if classification is None:
+            return None
+        classifications.append((path, classification))
+
+    details = ", ".join(f"{path} ({kind})" for path, kind in classifications)
+    return (
+        f"{target.name}: plugin generation changes only comments/formatting or identifier names: "
+        f"{details}; keep the existing generation or pair the edit with required runtime behavior"
+    )
 
 
 def is_source(target: Target, path: str) -> bool:
@@ -283,6 +433,27 @@ def bump(target_name: str) -> int:
 def self_test() -> int:
     """`#jbversionbumpperbuild` regressions, run from `make check`."""
     import tempfile
+
+    assert nonbehavioral_kotlin_change(
+        "/** old wording */\nfun answer(nativeFold: String) = nativeFold\n",
+        "/** clearer wording */\nfun answer(nativeFold: String) = nativeFold\n",
+    ) == "comments/formatting only"
+    assert nonbehavioral_kotlin_change(
+        "fun answer(nativeFold: String, legacyFold: String) = nativeFold + legacyFold\n",
+        "fun answer(nativeResolver: String, legacyResolver: String) = nativeResolver + legacyResolver\n",
+    ) == "identifier rename only"
+    assert nonbehavioral_kotlin_change(
+        "fun answer(value: Int) = value + 1\n",
+        "fun answer(value: Int) = value + 2\n",
+    ) is None
+    boundary_source = open(MEASURED_LAYOUT_FORWARDER, encoding="utf-8").read()
+    assert client_measured_layout_boundary_failure(boundary_source) is None
+    bypass = boundary_source.replace(
+        'return derivation.derive("client_measured_layout", GSON.toJson(evidence))',
+        "return frozenFrontendDerive(main, isSessionDocument)",
+        1,
+    )
+    assert "schema-3 grouping bypasses" in client_measured_layout_boundary_failure(bypass)
 
     jb = TARGETS[0]
     jb262 = TARGETS[1]
@@ -643,6 +814,14 @@ def check() -> int:
                     f"{target.name}: {RELEASE_KEY} {actual_release!r}, expected {expected_release}; "
                     "run `make release-version VERSION=" + expected_release + "`"
                 )
+            nonbehavioral = nonbehavioral_generation_failure(target, expected_release)
+            if nonbehavioral is not None:
+                failures.append(nonbehavioral)
+
+    measured_layout_source = open(MEASURED_LAYOUT_FORWARDER, encoding="utf-8").read()
+    boundary_failure = client_measured_layout_boundary_failure(measured_layout_source)
+    if boundary_failure is not None:
+        failures.append(boundary_failure)
 
     modular_build = open("editors/jetbrains-262/build.gradle.kts", encoding="utf-8").read()
     modular_properties = open("editors/jetbrains-262/gradle.properties", encoding="utf-8").read()

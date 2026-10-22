@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.538
+
+- **Interrupted Codex turns retire state on the authoritative document pane.** Stop now clears the exact actor
+  pane's turn-status lease and dispatch receipt instead of the hook executor's ambient pane, so **Clear Session
+  Context** succeeds after an interrupted run without repeated clicks while sibling panes remain untouched.
+
 ## 0.35.537
 
 - **Connected editor layouts are authoritative; the backend never guesses their structure (GH #343).** An

@@ -23,6 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
+📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -199,6 +200,10 @@ The two worker completions are reconciled:
 **Deferred:** dispatched to worker `/root/release_publish_538` under claim `subagent:release_publish_538`, generation 1. It is auditing the post-v0.35.537 mainline and preparing the release batch in an isolated worktree; the coordinator will integrate its report and own the single install/release/publish boundary.
 
 The exchange is over the accretion warning threshold (179 lines), but the queue is active, so I am keeping the drain moving rather than compacting mid-claim.
+
+### Re: recovered response
+
+Yes. It’s redundant because the existing cumulative release item now explicitly includes #344–#348, plus the bold-choice and sdk-demo fixes. Removing the fallback item avoids a duplicate release/audit path.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -207,7 +212,16 @@ The exchange is over the accretion warning threshold (179 lines), but the queue 
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 release + publish
+- 📥 release + publish
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/344
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/345
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/346
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/347
+- 📥 For subagent choices, make the title of each choice **bold**.
+- 📥 sdk-demo.md: `- Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?` queue item is not annotated with an emoji despite being worked on by a subagent. If the fix makes it into the `Include 344-347...` release, add it.
+- 🚧 The sdk-demo.md queue item annotations were not refreshed after the queue items were completed. If there is a choice, the choice should also be added into `agent:todo` with the same id as the choice expressed in the `agent:exchange`. Can we make an indicator for the queue items being blocked by a subagent choice? What do you recommend to add local visibility to the agent:queue? Can we have another emoji representing a user action with the same id as the choice + todo item?
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/348
+- 🚧 release + publish: Include 344-348 + For subagent choices, make the title of each choice **bold**.
 <!-- /agent:queue -->
 
 ## Queue: Issues

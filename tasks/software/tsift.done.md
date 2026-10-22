@@ -581,3 +581,4 @@
 - 2026-10-21 [#needfeaturesdecisions] Do we need any features for the decisions markdown?
 - 2026-10-21 [#needfeaturesdecisions] : This seems similar to agent-doc's id system for backlog + todo + icebox items. Should we extract a common library?
 - 2026-10-22 [#decisionmanifest] [recommended] Prototype tsift decision-manifest import and lint with a tsift-local DecisionId and lifecycle schema; reassess a shared ID crate only after another domain needs the same grammar and collision semantics.
+- 2026-10-22 [#updatestatus] Update the agent:status

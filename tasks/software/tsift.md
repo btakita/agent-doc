@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 2f70e722-90c5-4918-b28b-0cf7bc1660eb
-  codex: 01a15d28-8695-7123-9a88-36e8d9223ccf
+  codex: 01a1642c-d307-71c2-b7b1-fb1136e4d122
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -10,17 +10,8 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
-  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-  '#bugs-observed': Please add any bugs from observed behavior to the backlog.,
-  '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
-  '#gh-fix': fix then close
-  '#mermaid': Include explanatory mermaid diagram(s).
-  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
-  '#subagent': 'run in a subagent'
-  '#subagents': 'run the remaining items in subagents'
-  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
-  '#spec-test-commit-push': update spec + tests. commit + push
+  '#repo': 'https://github.com/btakita/agent-doc'
 queue: go
 ---
 
@@ -28,7 +19,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-complete
+in progress — v0.1.106 is published; decision-manifest commit 3f713cf is on main with green CI but is not yet released; Issues #30–#32 and their release/publish item remain queued
 <!-- /agent:status -->
 
 ## Spec
@@ -217,17 +208,35 @@ Commands and verification:
 - `origin/main` resolves to `3f713cf0f56aa088ebdc9b49b7e83e3ac09cc8bf`, and the isolated source worktree is clean.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:a2b805d7 -->
+> **Chat prompt (#chatprompt:0c5fadf86580):** Is the release published
+
+### Re: release publication and do [#updatestatus] — gpt-5 · 2026-10-22T12:55-04:00
+
+> **Queue prompt:** do [#updatestatus]
+
+Yes—`v0.1.106` is published. The GitHub release is live with six binary/checksum assets, crates.io reports `tsift`/`tsift-cli` `0.1.106`, and npm reports `opencode-tsift` `0.1.106`.
+
+The newer decision-manifest work is **not released yet**. Commit `3f713cf` is on `origin/main` and its CI run completed successfully, while the `v0.1.106` tag points to the earlier commit `08c2170`. Issues #30–#32 and the release/publish item that includes them remain queued.
+
+I updated `agent:status` to reflect that split: v0.1.106 is published; the decision-manifest commit is green on main but unreleased; Issues #30–#32 and their release remain queued.
+
+- Changed paths: no tsift source paths; only the managed session status/response and tracked-work completion are changed by this closeout.
+- Commands: `gh release view v0.1.106`, `cargo search tsift`, `npm view opencode-tsift version`, `gh run view 39805878940`, and `git ls-remote`.
+- Verification: GitHub reports a non-draft, non-prerelease release published at `2026-10-21T04:49:45Z`; both registries report `0.1.106`; CI for `3f713cf` is green; remote tag/main SHAs differ as described.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:22a17f67 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#decisionmanifest]~~
+- ~~do [#updatestatus]~~
 - 📥 #gh-fix https://github.com/btakita/tsift/issues/30
 - 📥 #gh-fix https://github.com/btakita/tsift/issues/31
 - 📥 #gh-fix https://github.com/btakita/tsift/issues/32
 - 📥 release + publish: include Issue 30-32
+- release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -5454,9 +5454,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     let dispatching_projection = fs::read_to_string(&doc).unwrap();
     assert!(
         dispatching_projection.contains(&format!(
-            "- 🟡 ⟦owner=subagent:page-status-enum;generation=1⟧ {question}\n"
+            "- 🟡 ⟦subagent:page-status-enum#1⟧ {question}\n"
         )) && dispatching_projection.contains(&format!(
-            "- 🚧 ⟦owner=subagent:setup;generation=1⟧ {setup}\n"
+            "- 🚧 ⟦subagent:setup#1⟧ {setup}\n"
         )),
         "a fresh claim projects dispatching beside a worker-bound row:\n{dispatching_projection}"
     );
@@ -5480,9 +5480,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     let claimed_projection = fs::read_to_string(&doc).unwrap();
     assert!(
         claimed_projection.contains(&format!(
-            "- 🚧 ⟦owner=subagent:setup;generation=1⟧ {setup}\n"
+            "- 🚧 ⟦subagent:setup#1⟧ {setup}\n"
         )) && claimed_projection.contains(&format!(
-            "- 🚧 ⟦owner=subagent:page-status-enum;generation=1⟧ {question}\n"
+            "- 🚧 ⟦subagent:page-status-enum#1⟧ {question}\n"
         )),
         "start advances only its own generation to worker-bound:\n{claimed_projection}"
     );
@@ -5509,9 +5509,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     let released_projection = fs::read_to_string(&doc).unwrap();
     assert!(
         released_projection.contains(&format!(
-            "- 🚧 ⟦owner=subagent:setup;generation=1⟧ {setup}\n"
+            "- 🚧 ⟦subagent:setup#1⟧ {setup}\n"
         )) && released_projection.contains(&format!(
-            "- 📤 ⟦owner=subagent:page-status-enum;generation=1⟧ {question}\n"
+            "- 📤 ⟦subagent:page-status-enum#1⟧ {question}\n"
         ))
             && !released_projection.contains(&format!("- 🟡 {question}\n")),
         "reported release must retain a distinct awaiting-integration marker:\n{released_projection}"
@@ -5558,7 +5558,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     );
     assert!(
         head.contains(&format!(
-            "- 🚧 ⟦owner=subagent:setup;generation=1⟧ {setup}\n"
+            "- 🚧 ⟦subagent:setup#1⟧ {setup}\n"
         )),
         "the unrelated claimed head stays queued:\n{head}"
     );

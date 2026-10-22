@@ -63,8 +63,11 @@ pub const UNKNOWN_MARKER: &str = "❔";
 pub const OPERATOR_ACTION_MARKER: &str = "🙋";
 /// Delimiters for the compact owner/generation annotation carried by worker
 /// attempt projections. Ordinary pending/coordinator rows omit it.
-pub const OWNER_ANNOTATION_OPEN: &str = "⟦owner=";
+pub const OWNER_ANNOTATION_OPEN: &str = "⟦";
 pub const OWNER_ANNOTATION_CLOSE: &str = "⟧";
+const LEGACY_OWNER_ANNOTATION_PREFIX: &str = "owner=";
+const LEGACY_OWNER_GENERATION_SEPARATOR: &str = ";generation=";
+const OWNER_GENERATION_SEPARATOR: char = '#';
 /// Visible projection marker for a queue head the binary has SKIPPED: it was
 /// dispatched, came back unconsumed, and the queue advanced past it to a
 /// non-dependent drainable head (`#orphanqhead` / `#queueskip`). Like `🚧`, it is
@@ -177,10 +180,20 @@ pub struct QueueOwnerProjection {
     pub generation: u64,
 }
 
-fn strip_owner_annotation_prefix(text: &str) -> Option<(QueueOwnerProjection, &str)> {
+/// Parse and remove one leading exact-attempt owner annotation.
+///
+/// New projections use `⟦<owner>#<generation>⟧`. The longer
+/// `⟦owner=<owner>;generation=<generation>⟧` spelling remains readable so an
+/// installed binary can normalize documents written by an older release.
+pub fn strip_owner_annotation_prefix(text: &str) -> Option<(QueueOwnerProjection, &str)> {
     let after_open = text.strip_prefix(OWNER_ANNOTATION_OPEN)?;
     let (payload, rest) = after_open.split_once(OWNER_ANNOTATION_CLOSE)?;
-    let (owner, generation) = payload.rsplit_once(";generation=")?;
+    let (owner, generation) =
+        if let Some(legacy) = payload.strip_prefix(LEGACY_OWNER_ANNOTATION_PREFIX) {
+            legacy.rsplit_once(LEGACY_OWNER_GENERATION_SEPARATOR)?
+        } else {
+            payload.rsplit_once(OWNER_GENERATION_SEPARATOR)?
+        };
     if owner.is_empty() || owner.chars().any(|ch| ch == '\n' || ch == '\r') {
         return None;
     }
@@ -192,6 +205,17 @@ fn strip_owner_annotation_prefix(text: &str) -> Option<(QueueOwnerProjection, &s
         },
         rest,
     ))
+}
+
+fn format_owner_annotation(owner: &QueueOwnerProjection) -> String {
+    let safe_owner = owner
+        .owner
+        .replace(['\n', '\r'], " ")
+        .replace(OWNER_ANNOTATION_CLOSE, "?");
+    format!(
+        "{OWNER_ANNOTATION_OPEN}{safe_owner}{OWNER_GENERATION_SEPARATOR}{}{OWNER_ANNOTATION_CLOSE}",
+        owner.generation
+    )
 }
 
 /// Read the first exact-attempt owner annotation from a leading projection
@@ -275,14 +299,7 @@ pub fn apply_owner_projection(
         prefixes.insert(0, lifecycle);
     }
     if let Some(owner) = owner {
-        let safe_owner = owner
-            .owner
-            .replace(['\n', '\r'], " ")
-            .replace(OWNER_ANNOTATION_CLOSE, "?");
-        let annotation = format!(
-            "{OWNER_ANNOTATION_OPEN}{safe_owner};generation={}{OWNER_ANNOTATION_CLOSE}",
-            owner.generation
-        );
+        let annotation = format_owner_annotation(owner);
         let insert_at = prefixes
             .first()
             .is_some_and(|prefix| LIFECYCLE_MARKERS.contains(&prefix.as_str())) as usize;
@@ -346,10 +363,7 @@ fn strip_operator_action_annotations_preserving_markers(text: &str) -> String {
             continue;
         }
         if let Some((owner, after)) = strip_owner_annotation_prefix(trimmed) {
-            kept_prefixes.push(format!(
-                "{OWNER_ANNOTATION_OPEN}{};generation={}{OWNER_ANNOTATION_CLOSE}",
-                owner.owner, owner.generation
-            ));
+            kept_prefixes.push(format_owner_annotation(&owner));
             rest = after.trim_start();
             continue;
         }
@@ -962,7 +976,7 @@ mod tests {
         );
         assert_eq!(
             projected,
-            "  🚧 ⟦owner=subagent:sdk-demo;generation=7⟧ 🙋 [#choice] 📌 fix sdk demo  "
+            "  🚧 ⟦subagent:sdk-demo#7⟧ 🙋 [#choice] 📌 fix sdk demo  "
         );
         assert_eq!(owner_projection(&projected), Some(owner));
         assert_eq!(strip_priority_markers(&projected), "fix sdk demo");
@@ -975,6 +989,22 @@ mod tests {
             apply_owner_projection(&projected, None),
             "  🚧 🙋 [#choice] 📌 fix sdk demo  "
         );
+    }
+
+    #[test]
+    fn legacy_owner_generation_annotation_is_read_and_normalized_to_compact_form() {
+        let legacy = "🚧 ⟦owner=subagent:sdk-demo;generation=7⟧ fix sdk demo";
+        let owner = QueueOwnerProjection {
+            owner: "subagent:sdk-demo".to_string(),
+            generation: 7,
+        };
+
+        assert_eq!(owner_projection(legacy), Some(owner.clone()));
+        assert_eq!(
+            apply_owner_projection(legacy, Some(&owner)),
+            "🚧 ⟦subagent:sdk-demo#7⟧ fix sdk demo"
+        );
+        assert_eq!(strip_priority_markers(legacy), "fix sdk demo");
     }
 
     #[test]

@@ -1557,7 +1557,7 @@ pub fn set_prompt_runtime_projections(
             _ => entry.clone(),
         })
         .collect::<Vec<_>>();
-    changed.then_some(out)
+    (changed && out != entries).then_some(out)
 }
 
 fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {
@@ -4564,8 +4564,11 @@ mod tests {
     #[test]
     fn set_first_prompt_in_progress_moves_visible_marker() {
         let entries = parse("- 🚧 do [#old]\n- do [#new]\n").unwrap();
-        let marked = set_first_prompt_in_progress(&entries, true).unwrap();
-        assert_eq!(render(&marked), "- 🚧 do [#old]\n- do [#new]\n");
+        assert_eq!(
+            set_first_prompt_in_progress(&entries, true),
+            None,
+            "an already-set first marker is idempotent"
+        );
 
         let entries = parse("- ~~🚧 do [#old]~~\n- do [#new]\n").unwrap();
         let marked = set_first_prompt_in_progress(&entries, true).unwrap();
@@ -4673,9 +4676,32 @@ mod tests {
             .expect("durable evidence must reopen manual strike");
         assert_eq!(
             projected,
-            "- ❔ ⟦owner=subagent:sdk;generation=4⟧ 🙋 [#choice] fix sdk demo\n- untouched\n"
+            "- ❔ ⟦subagent:sdk#4⟧ 🙋 [#choice] fix sdk demo\n- untouched\n"
         );
         assert!(matches!(entries[0], QueueEntry::Prompt(_)));
+    }
+
+    #[test]
+    fn terse_owner_runtime_projection_is_idempotent() {
+        use agent_doc_document::queue_projection::{
+            QueueLifecycleMarker, QueueOwnerProjection,
+        };
+        let targets = vec![QueueRowProjection {
+            text: "dispatched worker work".to_string(),
+            marker: QueueLifecycleMarker::Claimed,
+            owner: Some(QueueOwnerProjection {
+                owner: "subagent:worker".to_string(),
+                generation: 1,
+            }),
+            reopen_completed: false,
+        }];
+        let projected = project_prompt_runtime_projections("- dispatched worker work\n", &targets)
+            .unwrap()
+            .expect("bare work should gain an attempt projection")
+            .0;
+
+        assert_eq!(projected, "- 🟡 ⟦subagent:worker#1⟧ dispatched worker work\n");
+        assert_eq!(project_prompt_runtime_projections(&projected, &targets).unwrap(), None);
     }
 
     #[test]

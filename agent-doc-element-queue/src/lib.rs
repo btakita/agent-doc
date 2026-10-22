@@ -335,9 +335,17 @@ pub fn strip_priority_markers(text: &str) -> String {
             Some(after)
         })
         .or_else(|| {
-            let rest = trimmed.strip_prefix("⟦owner=")?;
-            let (_, after) = rest.split_once('⟧')?;
-            Some(after)
+            let rest = trimmed.strip_prefix('⟦')?;
+            let (payload, after) = rest.split_once('⟧')?;
+            let (owner, generation) = if let Some(legacy) = payload.strip_prefix("owner=") {
+                legacy.rsplit_once(";generation=")?
+            } else {
+                payload.rsplit_once('#')?
+            };
+            (!owner.is_empty()
+                && !owner.chars().any(|ch| ch == '\n' || ch == '\r')
+                && generation.parse::<u64>().is_ok())
+            .then_some(after)
         });
         match stripped {
             Some(rest) => t = rest.trim_start(),
@@ -427,6 +435,10 @@ mod tests {
             format!("🚧 #subagents: #gh-fix {url}"),
             format!("📥 #subagents: #gh-fix {url}"),
             format!("⚠️ #subagents: #gh-fix {url}"),
+            format!("🟡 ⟦subagent:worker#2⟧ #subagents: #gh-fix {url}"),
+            format!(
+                "🟡 ⟦owner=subagent:worker;generation=2⟧ #subagents: #gh-fix {url}"
+            ),
             format!("#gh-fix {url}"),
             format!("#subagent: {url}"),
             format!("⏭\u{fe0f} #subagents 📌 {url}"),

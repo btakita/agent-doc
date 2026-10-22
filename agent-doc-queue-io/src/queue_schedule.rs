@@ -104,23 +104,66 @@ pub fn restore_loop_items_for_queue_with_effects(
     queue_id: &str,
     roster: &[String],
 ) -> Result<usize> {
-    // `#sqedit-race`: one queue writer at a time.
+    // `#sqedit-race`: one queue writer at a time, including the source read.
     let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let current = effects.current_document_content(file, "queue_schedule_loop_restore")?;
-    let before = queue_schedule::live_heads_for_queue(&current, queue_id)?.len();
-    let updated = queue_schedule::plan_loop_restore_for_queue(&current, queue_id, roster)?
+    restore_loop_items_for_queue_from_source_locked(effects, file, queue_id, roster, &current)
+}
+
+/// Restore `roster` from the exact authoritative queue cut that proved the
+/// pass complete. The scheduler passes that observation through so a later
+/// read cannot silently replace the compare-and-swap base with a stale
+/// pre-strike projection (GH #348).
+pub fn restore_loop_items_for_queue_from_source_with_effects(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    queue_id: &str,
+    roster: &[String],
+    source_content: &str,
+) -> Result<usize> {
+    // `#sqedit-race`: one queue writer at a time.
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    restore_loop_items_for_queue_from_source_locked(effects, file, queue_id, roster, source_content)
+}
+
+fn restore_loop_items_for_queue_from_source_locked(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    queue_id: &str,
+    roster: &[String],
+    source_content: &str,
+) -> Result<usize> {
+    let before = live_roster_count(source_content, queue_id, roster)?;
+    let updated = queue_schedule::plan_loop_restore_for_queue(source_content, queue_id, roster)?
         .unwrap_or_else(|| {
             // GH #330: a retained restore can be visible in the live authority
             // before its delivery is settled. Do not turn that transient
             // visibility into `Ok(0)`: the convergence call's already-current
             // path still runs the delivery guard. Until that proof succeeds,
             // the scheduler must keep `restore_pending` and retry after backoff.
-            current.clone()
+            source_content.to_string()
         });
-    effects.converge_document_or_disk(file, &updated, &current, "queue_schedule_loop_restore")?;
-    let restored = queue_schedule::live_heads_for_queue(&updated, queue_id)?
-        .len()
-        .saturating_sub(before);
+    effects.converge_document_or_disk(
+        file,
+        &updated,
+        source_content,
+        "queue_schedule_loop_restore",
+    )?;
+
+    // The write transport may accept a semantic/exact no-op after rebasing
+    // over a concurrently settling closeout. That transport receipt is not
+    // proof that the loop roster is live. Re-read the authoritative document
+    // and keep `restore_pending` when any item is still struck or absent.
+    let settled = effects.current_document_content(file, "queue_schedule_loop_restore_verify")?;
+    if queue_schedule::plan_loop_restore_for_queue(&settled, queue_id, roster)?.is_some() {
+        anyhow::bail!(
+            "queue loop restore for queue {queue_id} did not make its roster visible (source_hash={} target_hash={} observed_hash={})",
+            agent_doc_hash::content_hash(source_content),
+            agent_doc_hash::content_hash(&updated),
+            agent_doc_hash::content_hash(&settled),
+        );
+    }
+    let restored = live_roster_count(&settled, queue_id, roster)?.saturating_sub(before);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -129,6 +172,18 @@ pub fn restore_loop_items_for_queue_with_effects(
         ),
     );
     Ok(restored)
+}
+
+fn live_roster_count(content: &str, queue_id: &str, roster: &[String]) -> Result<usize> {
+    let live = queue_schedule::live_heads_for_queue(content, queue_id)?
+        .into_iter()
+        .map(|item| agent_doc_queue::queue_claim::claim_identity(&item))
+        .collect::<std::collections::HashSet<_>>();
+    let roster = roster
+        .iter()
+        .map(|item| agent_doc_queue::queue_claim::claim_identity(item))
+        .collect::<std::collections::HashSet<_>>();
+    Ok(live.intersection(&roster).count())
 }
 
 /// The document's schedule, as `agent-doc queue schedule` reports it.
@@ -299,6 +354,8 @@ mod tests {
         converges: AtomicUsize,
     }
 
+    struct AcceptedStaleEffects;
+
     impl QueueCommandEffects for DiskEffects {
         fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
             Ok(std::fs::read_to_string(file)?)
@@ -362,6 +419,55 @@ mod tests {
                 agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
                 agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
             )
+        }
+        fn consume_free_text_queue_prompts_force_disk(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            unreachable!()
+        }
+        fn consume_free_text_queue_prompts_with_outcome(
+            &self,
+            _file: &Path,
+            _count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            unreachable!()
+        }
+        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            unreachable!()
+        }
+        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            unreachable!()
+        }
+        fn acknowledge_paused_free_text_queue_head(
+            &self,
+            _file: &Path,
+            _expected_head: &str,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            unreachable!()
+        }
+        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+            unreachable!()
+        }
+    }
+
+    impl QueueCommandEffects for AcceptedStaleEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+        fn converge_document_or_disk(
+            &self,
+            _file: &Path,
+            target_content: &str,
+            source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            assert!(source_content.contains("- ~~#upgrade~~\n"));
+            assert!(target_content.contains("- #upgrade\n"));
+            // Model a transport that accepted a semantic/exact no-op on a
+            // newer struck authority cut instead of applying the restore.
+            Ok(())
         }
         fn consume_free_text_queue_prompts_force_disk(
             &self,
@@ -550,6 +656,27 @@ mod tests {
             "the scheduler needs the retained marker to back off and retry: {err:#}"
         );
         assert_eq!(effects.converges.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn accepted_transport_noop_does_not_claim_a_struck_roster_was_restored() {
+        let struck = doc("loop interval=1h", "- ~~#upgrade~~\n");
+        let (_dir, file) = project(&struck);
+
+        let err = restore_loop_items_for_queue_from_source_with_effects(
+            &AcceptedStaleEffects,
+            &file,
+            agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID,
+            &["#upgrade".to_string()],
+            &struck,
+        )
+        .expect_err("a transport receipt cannot replace visible roster proof");
+
+        assert!(
+            err.to_string().contains("did not make its roster visible"),
+            "{err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), struck);
     }
 
     #[test]

@@ -937,6 +937,15 @@ fn observe_inner(
     completed_heads: Option<&[String]>,
     now: u64,
 ) -> (QueueScheduleState, ObserveOutcome) {
+    // A recovered pass starts with its old struck roster in the document and
+    // keeps that roster in `restore_pending` until the restore is visibly
+    // proven. Those struck rows are evidence for the previous/lost restore,
+    // not evidence that the newly opened pass ran. Letting observation proceed
+    // here immediately completed the recovered pass before any head could be
+    // dispatched (GH #348).
+    if state.restore_pending.is_some() {
+        return (state, ObserveOutcome::Unchanged);
+    }
     let ScheduleWindow::Open {
         pass, roster, ran, ..
     } = &mut state.window

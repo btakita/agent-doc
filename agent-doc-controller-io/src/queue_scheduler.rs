@@ -49,7 +49,13 @@ pub trait QueueScheduleIo: Send + Sync + 'static {
     fn current_text(&self, file: &Path) -> Result<String>;
     /// Put a completed `loop` pass's items back into the queue. Returns how
     /// many items were restored.
-    fn restore_loop_items(&self, file: &Path, queue_id: &str, roster: &[String]) -> Result<usize>;
+    fn restore_loop_items(
+        &self,
+        file: &Path,
+        queue_id: &str,
+        roster: &[String],
+        source_content: &str,
+    ) -> Result<usize>;
     fn now_secs(&self) -> u64;
     fn log(&self, file: &Path, line: &str) {
         agent_doc_ops_log_io::log_op(file, line);
@@ -92,9 +98,19 @@ impl QueueScheduleIo for ProductionIo {
         }
     }
 
-    fn restore_loop_items(&self, file: &Path, queue_id: &str, roster: &[String]) -> Result<usize> {
-        crate::project_controller::runtime_effects()?
-            .restore_queue_loop_items(file, queue_id, roster)
+    fn restore_loop_items(
+        &self,
+        file: &Path,
+        queue_id: &str,
+        roster: &[String],
+        source_content: &str,
+    ) -> Result<usize> {
+        crate::project_controller::runtime_effects()?.restore_queue_loop_items(
+            file,
+            queue_id,
+            roster,
+            source_content,
+        )
     }
 
     fn now_secs(&self) -> u64 {
@@ -506,15 +522,24 @@ impl QueueScheduleWorker {
                     ),
                 );
                 if !restore.is_empty() {
-                    self.restore(&key, file, &queue_id, &restore);
+                    self.restore(&key, file, &queue_id, &restore, &text);
                 }
             }
         }
         Ok(())
     }
 
-    fn restore(&self, key: &str, file: &Path, queue_id: &str, roster: &[String]) {
-        let restored = self.io.restore_loop_items(file, queue_id, roster);
+    fn restore(
+        &self,
+        key: &str,
+        file: &Path,
+        queue_id: &str,
+        roster: &[String],
+        source_content: &str,
+    ) {
+        let restored = self
+            .io
+            .restore_loop_items(file, queue_id, roster, source_content);
         let now = self.io.now_secs();
         let applied = restored.is_ok();
         let committed = mutate_schedule_state(file, queue_id, now, |prev| {
@@ -550,6 +575,37 @@ impl QueueScheduleWorker {
                 &format!("queue_schedule_state_write_failed queue_id={queue_id} error={err:#}"),
             ),
         }
+    }
+
+    fn log_tick(
+        &self,
+        due: &DueSchedule,
+        state: &QueueScheduleState,
+        spec: &queue_schedule::QueueScheduleSpec,
+        decision: FireDecision,
+        live_heads: usize,
+    ) {
+        let next_run = queue_schedule::wake_deadline(state, spec, self.graph.tz());
+        self.io.log(
+            &due.file,
+            &format!(
+                "queue_schedule_tick queue_id={} decision={} pass={} passes_completed={} live_heads={} coalesced_ticks={} next_run={}",
+                due.queue_id,
+                serde_json::to_string(&decision)
+                    .unwrap_or_default()
+                    .trim_matches('"'),
+                state
+                    .current_pass()
+                    .map_or_else(|| "-".to_string(), |pass| pass.to_string()),
+                state.passes_completed,
+                live_heads,
+                state.coalesced_ticks,
+                next_run.map_or_else(
+                    || "never".to_string(),
+                    agent_doc_log_time::format_log_timestamp,
+                ),
+            ),
+        );
     }
 
     /// Run one due tick (or a pending restore) for `due`.
@@ -616,7 +672,7 @@ impl QueueScheduleWorker {
         if let Some(state) = load_schedule_state_for_queue(&due.file, &due.queue_id)?
             && let Some(roster) = state.restore_pending.clone()
         {
-            self.restore(&due.key, &due.file, &due.queue_id, &roster);
+            self.restore(&due.key, &due.file, &due.queue_id, &roster, &text);
             return Ok(self.graph.state(&due.key));
         }
         let now = self.io.now_secs();
@@ -636,32 +692,25 @@ impl QueueScheduleWorker {
             };
             (Some(state.clone()), (state, decision))
         })?;
-        if decision != FireDecision::NotDue {
-            let next_run = queue_schedule::wake_deadline(&state, &spec, tz);
-            self.io.log(
-                &due.file,
-                &format!(
-                    "queue_schedule_tick queue_id={} decision={} pass={} passes_completed={} live_heads={} coalesced_ticks={} next_run={}",
-                    due.queue_id,
-                    serde_json::to_string(&decision)
-                        .unwrap_or_default()
-                        .trim_matches('"'),
-                    state
-                        .current_pass()
-                        .map_or_else(|| "-".to_string(), |pass| pass.to_string()),
-                    state.passes_completed,
-                    facts.live_heads.len(),
-                    state.coalesced_ticks,
-                    next_run.map_or_else(
-                        || "never".to_string(),
-                        agent_doc_log_time::format_log_timestamp
-                    ),
-                ),
-            );
-        }
         if decision == FireDecision::Recovered {
-            self.restore(&due.key, &due.file, &due.queue_id, &facts.completed_heads);
-            return Ok(self.graph.state(&due.key));
+            self.restore(
+                &due.key,
+                &due.file,
+                &due.queue_id,
+                &facts.completed_heads,
+                &text,
+            );
+            let restored_state = self.graph.state(&due.key);
+            if let Some(restored_state) = restored_state.as_ref() {
+                // Log the post-restore state. Before GH #348 this ran while
+                // `restore_pending` had no backoff and rendered epoch zero as
+                // the next run even though the restore immediately followed.
+                self.log_tick(due, restored_state, &spec, decision, facts.live_heads.len());
+            }
+            return Ok(restored_state);
+        }
+        if decision != FireDecision::NotDue {
+            self.log_tick(due, &state, &spec, decision, facts.live_heads.len());
         }
         Ok(Some(state))
     }
@@ -864,6 +913,7 @@ mod tests {
             _file: &Path,
             queue_id: &str,
             roster: &[String],
+            source_content: &str,
         ) -> Result<usize> {
             if self.fail_restore.load(std::sync::atomic::Ordering::SeqCst) {
                 anyhow::bail!("editor unavailable");
@@ -871,7 +921,7 @@ mod tests {
             self.restores.lock().push(roster.to_vec());
             let mut text = self.text.lock();
             if let Some(updated) =
-                queue_schedule::plan_loop_restore_for_queue(&text, queue_id, roster)?
+                queue_schedule::plan_loop_restore_for_queue(source_content, queue_id, roster)?
             {
                 *text = updated;
             }
@@ -1395,6 +1445,58 @@ mod tests {
         assert!(io.logs.lock().iter().any(|line| {
             line.contains("queue_schedule_tick") && line.contains("decision=recovered")
         }));
+    }
+
+    /// GH #348: a failed self-heal still sees the old struck row. That row is
+    /// the pending restore's input, not proof that the recovered pass ran.
+    #[test]
+    fn failed_idle_recovery_neither_completes_the_new_pass_nor_logs_epoch_deadline() {
+        let struck = doc("interval=1h loop", "- ~~#upgrade~~\n");
+        let (_dir, file) = project(&struck);
+        let io = FakeIo::new(&struck);
+        let worker = worker(&io);
+        worker.refresh(&file);
+        mutate_schedule_state(
+            &file,
+            agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID,
+            1_000,
+            |prev| {
+                let mut state = prev.expect("schedule admitted");
+                state.passes_completed = 14;
+                state.window = queue_schedule::ScheduleWindow::Closed;
+                state.restore_pending = None;
+                (Some(state), ())
+            },
+        )
+        .unwrap();
+        io.fail_restore
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        worker.run_due(&due(&file));
+        worker.refresh(&file);
+
+        let state = load_schedule_state(&file).unwrap().unwrap();
+        assert_eq!(state.passes_completed, 14);
+        assert_eq!(
+            state.current_pass(),
+            Some(15),
+            "the recovered pass remains open until its roster is visibly restored"
+        );
+        assert_eq!(state.restore_pending, Some(vec!["#upgrade".into()]));
+        assert_eq!(state.backoff_until_secs, Some(1_030));
+        let logs = io.logs.lock();
+        assert!(logs.iter().all(|line| {
+            !line.contains("queue_schedule_pass_completed queue_id=default pass=15")
+        }));
+        let recovered = logs
+            .iter()
+            .find(|line| line.contains("decision=recovered"))
+            .expect("recovered tick log");
+        assert!(
+            recovered.contains("next_run=1970-01-01T00:17:10Z"),
+            "{recovered}"
+        );
+        assert!(!recovered.contains("next_run=1970-01-01T00:00:00Z"));
     }
 
     #[test]

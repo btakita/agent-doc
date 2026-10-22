@@ -3331,7 +3331,7 @@ Old.
             "⟦owner=subagent:sdk;generation=7⟧",
         ] {
             let content = format!(
-                "<!-- agent:queue -->\n- 📤 {annotation} finish sdk demo\n- do [#tail]\n<!-- /agent:queue -->\n"
+                "<!-- agent:queue -->\n- 📫 {annotation} finish sdk demo\n- do [#tail]\n<!-- /agent:queue -->\n"
             );
             let key = queue_prompt_node_keys_for_count(&content, 1)
                 .unwrap()

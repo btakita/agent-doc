@@ -379,6 +379,10 @@ internal fun shouldUrgentDrainForRemoteEventUtil(@Suppress("UNUSED_PARAMETER") r
 internal fun registerFailureNeedsLivenessRepublishUtil(reason: String?): Boolean =
     reason?.contains("replica_register_stale_editor_endpoint") == true
 
+/** A copied session identity cannot become valid by retrying the same path. */
+internal fun terminalReplicaRegistrationRefusalUtil(reason: String?): Boolean =
+    reason == "controller_refused: duplicate_session_identity"
+
 internal const val STALE_ENDPOINT_REGISTER_RETRY_MS = 1_000L
 
 /**
@@ -4027,8 +4031,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             provisionalReplacement = replaceCached && cached != null,
         )
         if (!forwarder.register()) {
-            recordRegisterFailure(filePath, forwarder.lastRegisterFailureReason ?: "controller-register")
-            forwarder.lastRegisterFailureReason?.let { attachFailureReasons[filePath] = it }
+            val failureReason = forwarder.lastRegisterFailureReason ?: "controller-register"
+            if (terminalReplicaRegistrationRefusalUtil(failureReason)) {
+                // GH #349: retrying cannot change which path owns this durable
+                // session identity. Retaining a previously attached endpoint
+                // would also let the copied path keep forwarding after the
+                // controller refused its next registration.
+                recordTerminalRegisterRefusal(filePath, failureReason)
+                if (cached != null && forwarders.remove(filePath, cached)) {
+                    cached.deregister()
+                }
+                return null
+            }
+            recordRegisterFailure(filePath, failureReason)
+            attachFailureReasons[filePath] = failureReason
             if (cached != null) {
                 log.warn("[crdt-replica] replacement register failed for ${File(filePath).name}; retained cached forwarder")
             }
@@ -4559,12 +4575,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /** Record a text-terminal classification without leaving either retry loop armed. */
     private fun recordNotAgentDocDocument(filePath: String) {
+        recordTerminalRegisterRefusal(filePath, "not_agent_doc_document")
+    }
+
+    private fun recordTerminalRegisterRefusal(filePath: String, reason: String) {
         retainedProjectionHoldPaths.remove(filePath)
         registerFailureCounts.remove(filePath)
         registerRetryAfterMs.remove(filePath)
         registerRetryProjections.remove(filePath)
         registerRetryTasks.remove(filePath)?.cancel(false)
-        attachFailureReasons[filePath] = "not_agent_doc_document"
+        attachFailureReasons[filePath] = reason
     }
 
     /** Persist and surface a fail-closed attach hold without waiting for an editor action. */

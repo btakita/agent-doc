@@ -11265,6 +11265,26 @@ fn is_agent_doc_document(file: &Path) -> bool {
     result
 }
 
+pub(super) fn replica_registration_session_identity_refusal(
+    project_root: &Path,
+    file: &Path,
+    method: ControllerCrdtReplicaMethod,
+) -> Result<Option<&'static str>> {
+    if method != ControllerCrdtReplicaMethod::Register {
+        return Ok(None);
+    }
+    let Some(session_id) = agent_doc_frontmatter_io::session::read_session_id(file) else {
+        return Ok(None);
+    };
+    let claim =
+        agent_doc_session_registry_io::session_identity_claim_in(project_root, &session_id, file)?;
+    Ok(matches!(
+        claim,
+        agent_doc_session_registry_io::SessionIdentityClaim::Conflicting(_)
+    )
+    .then_some("duplicate_session_identity"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DetachedReplicaAdmission {
     DelegateRegistration,
@@ -11327,6 +11347,16 @@ fn handle_crdt_replica_rpc(
     // stale attached hub cannot grandfather the path back in.
     if is_agent_doc_internal_path(&canonical) {
         return Ok(crdt_replica_refused_data("internal_agent_doc_path"));
+    }
+    // GH #349: a plain copy of a session document carries the original's
+    // `agent_doc_session` value. Content-only admission would give the copy its
+    // own hub and let retained queue effects rewrite a file the operator never
+    // routed. Session identity ownership is already durable and rename-aware;
+    // consult that owner before an attached relay can grandfather this path.
+    if let Some(reason) =
+        replica_registration_session_identity_refusal(&bootstrap.project_root, &canonical, method)?
+    {
+        return Ok(crdt_replica_refused_data(reason));
     }
     let authority = crdt_authority_for_file(&file_arg);
     // `#replicarefusalstorm` / `#replicaendpointtakeover`: a non-agent-doc

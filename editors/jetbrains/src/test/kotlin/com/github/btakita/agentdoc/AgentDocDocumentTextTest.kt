@@ -78,6 +78,37 @@ class AgentDocDocumentTextTest {
     }
 
     @Test
+    fun `duplicate session identity refusal is terminal`() {
+        assertTrue(
+            terminalReplicaRegistrationRefusalUtil(
+                "controller_refused: duplicate_session_identity",
+            ),
+        )
+        assertFalse(terminalReplicaRegistrationRefusalUtil("controller_refused: detached_authority"))
+        assertFalse(terminalReplicaRegistrationRefusalUtil("controller_error: timeout"))
+        assertFalse(terminalReplicaRegistrationRefusalUtil(null))
+
+        val manager = managerSource()
+        val forwarderFor =
+            manager.substringAfter("private fun forwarderFor(")
+                .substringBefore("private fun finalizeRegistrationProjection(")
+        val terminalBranch = forwarderFor.indexOf("terminalReplicaRegistrationRefusalUtil(failureReason)")
+        val retryBranch = forwarderFor.indexOf("recordRegisterFailure(filePath, failureReason)")
+        assertTrue("duplicate identity must be classified before retry bookkeeping", terminalBranch >= 0)
+        assertTrue("terminal refusal must precede retry bookkeeping", terminalBranch < retryBranch)
+        assertTrue(forwarderFor.contains("recordTerminalRegisterRefusal(filePath, failureReason)"))
+        assertTrue(forwarderFor.contains("forwarders.remove(filePath, cached)"))
+        assertTrue(forwarderFor.contains("cached.deregister()"))
+
+        val terminal =
+            manager.substringAfter("private fun recordTerminalRegisterRefusal(")
+                .substringBefore("private fun recordRetainedProjectionHold(")
+        assertTrue(terminal.contains("registerRetryTasks.remove(filePath)?.cancel(false)"))
+        assertFalse(terminal.contains("scheduleRegisterRetry("))
+        assertFalse(terminal.contains("recordRegisterFailure("))
+    }
+
+    @Test
     fun `known plain markdown close does not reacquire a read permit`() {
         assertFalse(
             closingDocumentCutRequiresTextUtil(
@@ -124,7 +155,7 @@ class AgentDocDocumentTextTest {
         assertTrue("the text guard must precede the controller round trip", factoryGuard < transportRegister)
 
         val terminal =
-            manager.substringAfter("private fun recordNotAgentDocDocument(")
+            manager.substringAfter("private fun recordTerminalRegisterRefusal(")
                 .substringBefore("private fun recordRetainedProjectionHold(")
         assertTrue(terminal.contains("registerRetryTasks.remove(filePath)?.cancel(false)"))
         assertFalse(terminal.contains("scheduleRegisterRetry("))

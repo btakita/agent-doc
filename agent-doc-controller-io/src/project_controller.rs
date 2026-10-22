@@ -15725,6 +15725,73 @@ mod tests {
         )));
     }
 
+    #[test]
+    fn copied_session_identity_is_refused_before_replica_registration() {
+        use super::rpc::{
+            ControllerCrdtReplicaMethod, replica_registration_session_identity_refusal,
+        };
+        use tmux_router::{Registry, RegistryEntry};
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let original = dir.path().join("tasks/original.md");
+        let copy = dir.path().join("scratch/copy.md");
+        std::fs::create_dir_all(original.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        let session_document = "---\nagent_doc_session: copied-session\n---\n\n# Session\n";
+        std::fs::write(&original, session_document).unwrap();
+        std::fs::write(&copy, session_document).unwrap();
+
+        let mut registry = Registry::new();
+        registry.insert(
+            tmux_router::registry::canonical_registry_key_in(
+                dir.path(),
+                &original.display().to_string(),
+            ),
+            RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 42,
+                cwd: dir.path().display().to_string(),
+                started: "2026-10-22T05:00:00Z".to_string(),
+                session_id: "copied-session".to_string(),
+                file: original.display().to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
+
+        assert_eq!(
+            replica_registration_session_identity_refusal(
+                dir.path(),
+                &original,
+                ControllerCrdtReplicaMethod::Register,
+            )
+            .unwrap(),
+            None,
+            "the durable owner must remain eligible for registration",
+        );
+        assert_eq!(
+            replica_registration_session_identity_refusal(
+                dir.path(),
+                &copy,
+                ControllerCrdtReplicaMethod::Register,
+            )
+            .unwrap(),
+            Some("duplicate_session_identity"),
+            "a copied session identity must be terminal before relay authority lookup",
+        );
+        assert_eq!(
+            replica_registration_session_identity_refusal(
+                dir.path(),
+                &copy,
+                ControllerCrdtReplicaMethod::Update,
+            )
+            .unwrap(),
+            None,
+            "the ownership lookup is a one-shot registration boundary, not edit-path polling",
+        );
+    }
+
     struct ReliableSyncOpenFixture {
         document_hash: String,
         pid: u64,

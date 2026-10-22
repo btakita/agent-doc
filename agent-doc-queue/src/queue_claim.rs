@@ -183,6 +183,20 @@ pub struct QueueClaimCancellationReceipt {
     pub completion_key: Option<String>,
 }
 
+impl QueueClaimCancellationReceipt {
+    /// Whether this tombstone retires the exact attempt that produced a
+    /// reported-release receipt. Identity alone is insufficient because the
+    /// operator may later re-add the same work under a fresh generation.
+    pub fn cancels_attempt(&self, identity: &QueueItemIdentity, generation: u64) -> bool {
+        self.claim.identity == *identity && self.claim.generation == generation
+    }
+
+    /// Whether this tombstone retires one exact binary completion cell.
+    pub fn cancels_completion_key(&self, key: &str) -> bool {
+        self.completion_key.as_deref() == Some(key)
+    }
+}
+
 /// Optional per-dispatch harness launch overrides recorded for cost attribution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentDispatchPolicy {

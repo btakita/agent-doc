@@ -164,8 +164,9 @@ pub fn derive_claim_runtime_projection(
         );
     }
     let now = crate::queue_claim::claim_clock_now_secs();
+    let claim_ledger = claim_ledger.unwrap_or_default();
+    let cancellations = claim_ledger.cancellations;
     let claim_states = claim_ledger
-        .unwrap_or_default()
         .claims
         .into_iter()
         .map(|mut claim| {
@@ -181,11 +182,21 @@ pub fn derive_claim_runtime_projection(
         .unwrap_or_default()
         .receipts
         .into_iter()
+        .filter(|receipt| {
+            !cancellations
+                .iter()
+                .any(|cancelled| cancelled.cancels_attempt(&receipt.identity, receipt.generation))
+        })
         .map(|receipt| (receipt.identity.clone(), receipt))
         .collect::<std::collections::HashMap<_, _>>();
-    let completion_evidence = crate::queue_claim::completion_evidence_head_texts(current)
+    let completion_evidence = agent_doc_document::subagent_completion::completion_evidence(current)
         .into_iter()
-        .map(|head| agent_doc_queue::queue_claim::claim_identity(&head))
+        .filter(|evidence| {
+            !cancellations
+                .iter()
+                .any(|cancelled| cancelled.cancels_completion_key(&evidence.key))
+        })
+        .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
         .collect::<std::collections::HashSet<_>>();
     let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
     let selected = agent_doc_cycle_state_io::load(file)
@@ -1250,6 +1261,67 @@ mod tests {
             "{released_snapshot}"
         );
         assert_eq!(released.item_text, "dispatched worker work");
+    }
+
+    #[test]
+    fn cancelled_generation_never_projects_stale_report_or_completion_onto_readded_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = "finish sdk demo";
+        let doc = write_claim_projection_doc(dir.path(), &format!("- {item}\n"));
+        let (_, claim) =
+            crate::queue_claim::claim(&doc, item, "subagent:sdk", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:sdk",
+            "worker:sdk",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(&doc, item, Some(claim.generation)).unwrap();
+        crate::claim_release_receipt::release_attempt(
+            &doc,
+            item,
+            crate::claim_release_receipt::ReleaseKind::Reported,
+            Some(claim.generation),
+        )
+        .unwrap()
+        .unwrap();
+        let stale = crate::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts
+            .remove(0);
+        crate::queue_claim::record_released_cancellation(&doc, &stale).unwrap();
+
+        // Model the cancellation crash boundary: both the old outbox receipt
+        // and its completion cell remain physically present. Their exact
+        // generation/key tombstone makes them non-governing.
+        let key = stale.completion_key.as_deref().unwrap();
+        let cell = agent_doc_document::subagent_completion::cell(&stale.owner, item, key);
+        let current = std::fs::read_to_string(&doc).unwrap().replace(
+            "<!-- agent:queue go -->",
+            &format!(
+                "<!-- agent:exchange -->\n{cell}\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->"
+            ),
+        );
+        let cancelled = derive_claim_runtime_projection(&doc, &current, None).unwrap();
+        assert!(cancelled.target_content.contains(&format!("- 📥 {item}\n")));
+        assert!(!cancelled.target_content.contains("📤"));
+        assert!(!cancelled.target_content.contains("🔄"));
+        assert!(!cancelled.target_content.contains("⟦owner="));
+
+        let (_, replacement) =
+            crate::queue_claim::claim(&doc, item, "subagent:sdk-retry", 600).unwrap();
+        assert_eq!(replacement.generation, claim.generation + 1);
+        let replacement_projection =
+            derive_claim_runtime_projection(&doc, &cancelled.target_content, None).unwrap();
+        assert!(replacement_projection.target_content.contains(&format!(
+            "- 🟡 ⟦owner=subagent:sdk-retry;generation={}⟧ {item}\n",
+            replacement.generation
+        )));
+        assert!(!replacement_projection.target_content.contains("📤"));
+        assert!(!replacement_projection.target_content.contains("🔄"));
     }
 
     #[test]

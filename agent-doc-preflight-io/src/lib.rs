@@ -6931,9 +6931,11 @@ pub fn run_queue_maintenance_with_coin_gate(
         eprintln!("[preflight] queue: failed to read reported outbox ({err:#})");
     }
     let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
-    let claim_states = claim_ledger
+    let claim_ledger = claim_ledger
         .and_then(Result::ok)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let cancellations = claim_ledger.cancellations;
+    let claim_states = claim_ledger
         .claims
         .into_iter()
         .map(|mut claim| {
@@ -6948,7 +6950,14 @@ pub fn run_queue_maintenance_with_coin_gate(
     let report_receipts = receipt_ledger
         .and_then(Result::ok)
         .unwrap_or_default()
-        .receipts;
+        .receipts
+        .into_iter()
+        .filter(|receipt| {
+            !cancellations
+                .iter()
+                .any(|cancelled| cancelled.cancels_attempt(&receipt.identity, receipt.generation))
+        })
+        .collect::<Vec<_>>();
     let mut in_progress_queue_prompt_texts = active_queue_prompt_texts.clone();
     in_progress_queue_prompt_texts.extend(
         claim_states
@@ -6994,9 +7003,14 @@ pub fn run_queue_maintenance_with_coin_gate(
         .map(|receipt| (receipt.identity.clone(), receipt))
         .collect::<std::collections::HashMap<_, _>>();
     let completion_identities =
-        agent_doc_queue_io::queue_claim::completion_evidence_head_texts(&current_content)
+        agent_doc_document::subagent_completion::completion_evidence(&current_content)
             .into_iter()
-            .map(|text| agent_doc_queue::queue_claim::claim_identity(&text))
+            .filter(|evidence| {
+                !cancellations
+                    .iter()
+                    .any(|cancelled| cancelled.cancels_completion_key(&evidence.key))
+            })
+            .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
             .collect::<std::collections::HashSet<_>>();
     let lifecycle_targets = activation
         .entries_after

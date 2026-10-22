@@ -8505,9 +8505,9 @@ mod tests {
         persist_queue_claim_ledger(dir.path(), &doc, &ledger);
 
         let projected = durable_queue_attempt_projection(&doc, stale).unwrap();
-        assert!(projected.contains("- 🟡 ⟦subagent:claimed#1⟧ claimed item\n"), "{projected}");
-        assert!(projected.contains("- 🚧 ⟦subagent:running#1⟧ running item\n"), "{projected}");
-        assert!(projected.contains("- 📤 ⟦subagent:reported#1⟧ reported item\n"), "{projected}");
+        assert!(projected.contains("- 🟡 [#subagent:claimed#1] claimed item\n"), "{projected}");
+        assert!(projected.contains("- 🚧 [#subagent:running#1] running item\n"), "{projected}");
+        assert!(projected.contains("- 📤 [#subagent:reported#1] reported item\n"), "{projected}");
         assert!(
             projected.contains("- ⏳ unrelated operator hold\n"),
             "an unrelated row must remain byte-identical:\n{projected}"
@@ -8566,11 +8566,11 @@ mod tests {
         );
         let stale = format!(
             "<!-- agent:exchange -->\n{completion}\n<!-- /agent:exchange -->\n\n\
-             <!-- agent:queue -->\n- 📤 ⟦subagent:sdk#1⟧ {item}\n<!-- /agent:queue -->\n"
+             <!-- agent:queue -->\n- 📤 [#subagent:sdk#1] {item}\n<!-- /agent:queue -->\n"
         );
         let projected = durable_queue_attempt_projection(&doc, &stale).unwrap();
         assert!(projected.contains(&format!("- 📥 {item}\n")), "{projected}");
-        assert!(!projected.contains("⟦subagent:sdk#"), "{projected}");
+        assert!(!projected.contains("[#subagent:sdk#"), "{projected}");
         assert!(!projected.contains("🔄"), "{projected}");
 
         claims.claim(item, "subagent:sdk-retry", now + 3, 3600);
@@ -8579,7 +8579,7 @@ mod tests {
         let replacement = durable_queue_attempt_projection(&doc, &projected).unwrap();
         assert!(
             replacement.contains(
-                "- 🟡 ⟦subagent:sdk-retry#2⟧ finish sdk demo\n"
+                "- 🟡 [#subagent:sdk-retry#2] finish sdk demo\n"
             ),
             "{replacement}"
         );
@@ -8615,7 +8615,7 @@ mod tests {
 
         with_hub_seeded_from_file(&doc, |hub| {
             let canonical = hub.canonical_text();
-            assert!(canonical.contains(&format!("- 🚧 ⟦subagent:gh299#1⟧ {item}\n")), "{canonical}");
+            assert!(canonical.contains(&format!("- 🚧 [#subagent:gh299#1] {item}\n")), "{canonical}");
             assert!(canonical.contains("- 📥 unrelated pending work\n"), "{canonical}");
         })
         .unwrap();
@@ -9595,7 +9595,7 @@ mod tests {
             let canonical = hub.canonical_text();
             assert!(
                 canonical.contains(&format!(
-                    "- 🚧 ⟦subagent:gh299#1⟧ {item}\n"
+                    "- 🚧 [#subagent:gh299#1] {item}\n"
                 )),
                 "the durable Running attempt must dominate the stale retained cut:\n{canonical}"
             );

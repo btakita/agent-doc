@@ -4676,7 +4676,7 @@ mod tests {
             .expect("durable evidence must reopen manual strike");
         assert_eq!(
             projected,
-            "- ❔ ⟦subagent:sdk#4⟧ 🙋 [#choice] fix sdk demo\n- untouched\n"
+            "- ❔ [#subagent:sdk#4] 🙋 [#choice] fix sdk demo\n- untouched\n"
         );
         assert!(matches!(entries[0], QueueEntry::Prompt(_)));
     }
@@ -4700,7 +4700,7 @@ mod tests {
             .expect("bare work should gain an attempt projection")
             .0;
 
-        assert_eq!(projected, "- 🟡 ⟦subagent:worker#1⟧ dispatched worker work\n");
+        assert_eq!(projected, "- 🟡 [#subagent:worker#1] dispatched worker work\n");
         assert_eq!(project_prompt_runtime_projections(&projected, &targets).unwrap(), None);
     }
 

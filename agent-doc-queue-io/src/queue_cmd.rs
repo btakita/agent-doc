@@ -1187,7 +1187,7 @@ mod tests {
         assert!(claimed.contains("- 📥 inline coordinator work"), "{claimed}");
         assert!(
             claimed.contains(
-                "- 🟡 ⟦subagent:worker#1⟧ dispatched worker work"
+                "- 🟡 [#subagent:worker#1] dispatched worker work"
             ),
             "{claimed}"
         );
@@ -1196,7 +1196,7 @@ mod tests {
             .unwrap();
         assert!(
             claimed_snapshot.contains(
-                "- 🟡 ⟦subagent:worker#1⟧ dispatched worker work"
+                "- 🟡 [#subagent:worker#1] dispatched worker work"
             ),
             "{claimed_snapshot}"
         );
@@ -1214,7 +1214,7 @@ mod tests {
         let running = std::fs::read_to_string(&doc).unwrap();
         assert!(
             running.contains(
-                "- 🚧 ⟦subagent:worker#1⟧ dispatched worker work"
+                "- 🚧 [#subagent:worker#1] dispatched worker work"
             ),
             "{running}"
         );
@@ -1224,7 +1224,7 @@ mod tests {
         let reported = std::fs::read_to_string(&doc).unwrap();
         assert!(
             reported.contains(
-                "- 📤 ⟦subagent:worker#1⟧ dispatched worker work"
+                "- 📤 [#subagent:worker#1] dispatched worker work"
             ),
             "{reported}"
         );
@@ -1245,7 +1245,7 @@ mod tests {
         );
         assert!(
             released_projection.contains(
-                "- 📤 ⟦subagent:worker#1⟧ dispatched worker work"
+                "- 📤 [#subagent:worker#1] dispatched worker work"
             )
                 && !released_projection.contains("- 🟡 dispatched worker work"),
             "{released_projection}"
@@ -1256,7 +1256,7 @@ mod tests {
         assert!(
             released_snapshot.contains("- 📥 inline coordinator work")
                 && released_snapshot.contains(
-                    "- 📤 ⟦subagent:worker#1⟧ dispatched worker work"
+                    "- 📤 [#subagent:worker#1] dispatched worker work"
                 )
                 && !released_snapshot.contains("- 🟡 dispatched worker work"),
             "{released_snapshot}"
@@ -1310,7 +1310,7 @@ mod tests {
         assert!(cancelled.target_content.contains(&format!("- 📥 {item}\n")));
         assert!(!cancelled.target_content.contains("📤"));
         assert!(!cancelled.target_content.contains("🔄"));
-        assert!(!cancelled.target_content.contains("⟦subagent:sdk#"));
+        assert!(!cancelled.target_content.contains("[#subagent:sdk#"));
 
         let (_, replacement) =
             crate::queue_claim::claim(&doc, item, "subagent:sdk-retry", 600).unwrap();
@@ -1318,7 +1318,7 @@ mod tests {
         let replacement_projection =
             derive_claim_runtime_projection(&doc, &cancelled.target_content, None).unwrap();
         assert!(replacement_projection.target_content.contains(&format!(
-            "- 🟡 ⟦subagent:sdk-retry#{}⟧ {item}\n",
+            "- 🟡 [#subagent:sdk-retry#{}] {item}\n",
             replacement.generation
         )));
         assert!(!replacement_projection.target_content.contains("📤"));
@@ -1364,8 +1364,8 @@ mod tests {
         }
 
         let live = effects.current();
-        assert!(live.contains("- 🚧 ⟦subagent:free#1⟧ free text worker\n"), "{live}");
-        assert!(live.contains("- 🚧 ⟦subagent:normalized#1⟧ do [#normalized-worker]\n"), "{live}");
+        assert!(live.contains("- 🚧 [#subagent:free#1] free text worker\n"), "{live}");
+        assert!(live.contains("- 🚧 [#subagent:normalized#1] do [#normalized-worker]\n"), "{live}");
         assert_eq!(live.matches("free text worker").count(), 1, "{live}");
         assert_eq!(live.matches("normalized-worker").count(), 1, "{live}");
 
@@ -1404,7 +1404,7 @@ mod tests {
         assert!(
             projection
                 .target_content
-                .contains("- 🟡 ⟦subagent:release-2#1⟧ release + publish ⟦effect:2⟧\n"),
+                .contains("- 🟡 [#subagent:release-2#1] release + publish ⟦effect:2⟧\n"),
             "{}",
             projection.target_content
         );
@@ -1446,7 +1446,7 @@ mod tests {
         assert!(projection.changed);
         assert!(
             projection.target_content.contains(&format!(
-                "- 🚧 ⟦subagent:gh299#1⟧ {item}\n"
+                "- 🚧 [#subagent:gh299#1] {item}\n"
             )),
             "{}",
             projection.target_content
@@ -1503,7 +1503,7 @@ mod tests {
             projection
                 .target_content
                 .contains(&format!(
-                    "- 🚧 ⟦subagent:project_rebase_review#1⟧ {question}\n"
+                    "- 🚧 [#subagent:project_rebase_review#1] {question}\n"
                 )),
             "{}",
             projection.target_content
@@ -1542,7 +1542,7 @@ mod tests {
             live_projection
                 .target_content
                 .matches(&format!(
-                    "- 🚧 ⟦subagent:gh299#1⟧ {item}\n"
+                    "- 🚧 [#subagent:gh299#1] {item}\n"
                 ))
                 .count(),
             1,
@@ -1553,7 +1553,7 @@ mod tests {
         // Markdown strike styling cannot retire an exact live attempt. The
         // projection reopens the row as degraded, preserving owner/generation.
         let terminal = live_projection.target_content.replace(
-            &format!("- 🚧 ⟦subagent:gh299#1⟧ {item}\n"),
+            &format!("- 🚧 [#subagent:gh299#1] {item}\n"),
             &format!("- ~~{item}~~\n"),
         );
         let terminal_projection = derive_claim_runtime_projection(&doc, &terminal, None).unwrap();
@@ -1561,7 +1561,7 @@ mod tests {
             terminal_projection
                 .target_content
                 .contains(&format!(
-                    "- ❔ ⟦subagent:gh299#1⟧ {item}\n"
+                    "- ❔ [#subagent:gh299#1] {item}\n"
                 )),
             "{}",
             terminal_projection.target_content
@@ -1588,7 +1588,7 @@ mod tests {
         );
         assert!(
             projected.contains(
-                "- 🟡 ⟦subagent:worker#1⟧ dispatched worker work"
+                "- 🟡 [#subagent:worker#1] dispatched worker work"
             ),
             "{projected}"
         );

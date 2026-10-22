@@ -119,6 +119,121 @@ mod tmux_layout_effect_model {
     }
 }
 
+/// `#autoclearbaseline`: deterministic scheduling model for the race where an
+/// externally dispatched queue item commits before the idle watch resolves its
+/// first authoritative queue observation. The model drives the production
+/// baseline refinement and decision seams; no tmux timing is involved.
+mod queue_auto_clear_first_observation_model {
+    use agent_doc_queue::queue_auto_clear::{
+        AutoClearComposer, LatestCycle, QueueAutoClearBaseline, QueueAutoClearDecision,
+        QueueAutoClearFacts, queue_auto_clear_decision,
+    };
+
+    const FIRST_HEAD: &str = "answer item one";
+    const NEXT_HEAD: &str = "answer item two";
+    const COMMITTED_CYCLE: &str = "cycle-1";
+
+    #[derive(Clone, Copy)]
+    enum Action {
+        CommitAndAdvanceBeforeFirstObservation,
+        FirstWatchObservation,
+    }
+
+    struct World {
+        baseline: QueueAutoClearBaseline,
+        latest_cycle: Option<&'static str>,
+        active_head: &'static str,
+    }
+
+    impl World {
+        fn new() -> Self {
+            Self {
+                baseline: QueueAutoClearBaseline::observe(None, Some(FIRST_HEAD)),
+                latest_cycle: None,
+                active_head: FIRST_HEAD,
+            }
+        }
+
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::CommitAndAdvanceBeforeFirstObservation => {
+                    self.latest_cycle = Some(COMMITTED_CYCLE);
+                    self.active_head = NEXT_HEAD;
+                }
+                Action::FirstWatchObservation => {
+                    self.baseline = self.baseline.clone().refine_with_first_observation(
+                        self.latest_cycle.map(|cycle_id| LatestCycle {
+                            cycle_id,
+                            committed: true,
+                        }),
+                        Some(self.active_head),
+                    );
+                }
+            }
+        }
+
+        fn decision(&self) -> QueueAutoClearDecision {
+            queue_auto_clear_decision(QueueAutoClearFacts {
+                enabled: true,
+                baseline: &self.baseline,
+                latest_cycle: self.latest_cycle.map(|cycle_id| LatestCycle {
+                    cycle_id,
+                    committed: true,
+                }),
+                active_head: Some(self.active_head),
+                composer: AutoClearComposer {
+                    observed: true,
+                    dispatch_ready: true,
+                    busy: false,
+                    operator_draft: false,
+                },
+                exchange_steering_pending: false,
+                claims_in_flight: false,
+            })
+        }
+    }
+
+    #[test]
+    fn completion_before_first_observation_still_requires_auto_clear() {
+        let mut world = World::new();
+        world.step(Action::CommitAndAdvanceBeforeFirstObservation);
+
+        let late_tick_baseline = QueueAutoClearBaseline::observe(
+            Some(LatestCycle {
+                cycle_id: COMMITTED_CYCLE,
+                committed: true,
+            }),
+            Some(NEXT_HEAD),
+        );
+        assert_eq!(
+            queue_auto_clear_decision(QueueAutoClearFacts {
+                enabled: true,
+                baseline: &late_tick_baseline,
+                latest_cycle: Some(LatestCycle {
+                    cycle_id: COMMITTED_CYCLE,
+                    committed: true,
+                }),
+                active_head: Some(NEXT_HEAD),
+                composer: AutoClearComposer {
+                    observed: true,
+                    dispatch_ready: true,
+                    busy: false,
+                    operator_draft: false,
+                },
+                exchange_steering_pending: false,
+                claims_in_flight: false,
+            }),
+            QueueAutoClearDecision::SkipNoCompletedItem,
+            "a baseline first recorded on the late watch tick loses the boundary"
+        );
+
+        world.step(Action::FirstWatchObservation);
+        assert_eq!(world.baseline.committed_cycle_id, None);
+        assert_eq!(world.baseline.head.as_deref(), Some(FIRST_HEAD));
+        assert_eq!(world.decision(), QueueAutoClearDecision::Clear);
+    }
+}
+
 /// `#panewindowdrift` reference model: a layout column whose pane was moved into
 /// the stash window after it was bound.
 ///

@@ -950,6 +950,9 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   an externally dispatched item committed), the generation-start baseline is
   kept, so that completion still earns its clear instead of being counted as
   already seen (CI 39463326025 dispatched item two with no `/clear` that way).
+  Queue-row presentation is not boundary evidence: the completed row may remain
+  struck and the next head may carry a live status marker such as `📥`; head
+  advancement is determined by the queue parser, never raw row text.
   A harness generation is the harness CONTEXT, not the supervisor process: when
   the supervisor re-`execve`s itself and adopts the live child
   (`via=execve_preserve_child`, a stale-binary/explicit recycle or a

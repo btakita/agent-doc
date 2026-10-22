@@ -1411,8 +1411,17 @@ fn queue_auto_clear_counts_an_item_committed_before_the_watch_first_observes() {
     scenario.answer_head("answer item one");
     let committed = std::fs::read_to_string(&scenario.doc).unwrap();
     assert!(
-        !committed.contains("- answer item one") && committed.contains("- answer item two"),
-        "item one is consumed before the watch observes: {committed}"
+        committed.contains("- ~~answer item one~~"),
+        "item one is committed before the watch observes: {committed}"
+    );
+    assert_eq!(
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &committed,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        )
+        .as_deref(),
+        Some("answer item two"),
+        "item two is the next drainable head despite its live status marker: {committed}"
     );
     assert_eq!(
         (scenario.triggers(), scenario.clears()),

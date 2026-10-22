@@ -35610,12 +35610,12 @@ fn publish_pane_layout_desired_invocation_in_lane(
         && retained.is_none()
         && incoming_order == agent_doc_tmux::LayoutColumnOrder::Unknown;
     if incoming_order != agent_doc_tmux::LayoutColumnOrder::Editor && !cold_live_tmux_replacement {
-        let retained = retained.as_ref().context(
+        let retained = retained.as_ref().context(format!(
             "sync_tmux_layout deferred: incomplete frontend layout has no authoritative snapshot; \
              reason=flat_evidence_has_no_column_geometry; frontend_publisher=unavailable; \
-             remedy=install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and \
-             the Remote Dev backend, restart both, then retry Run Agent Doc",
-        )?;
+             remedy={}, then retry Run Agent Doc",
+            agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY,
+        ))?;
         invocation.columns = retained.invocation.columns.clone();
         invocation.column_order = retained.invocation.column_order;
         desired_columns = retained.invocation.columns.clone();

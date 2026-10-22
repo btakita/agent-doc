@@ -45,6 +45,9 @@ pub struct RetainedPersistenceRebuildExhausted {
     pub controller_generation: u64,
     pub refusals: u32,
     pub rebuilds: u32,
+    /// Terminal editor refusal of the in-place roll-forward, if one arrived.
+    #[serde(default)]
+    pub roll_forward_refusal: Option<String>,
     pub recorded_at_ms: u64,
 }
 
@@ -69,9 +72,14 @@ impl RetainedPersistenceRebuildExhausted {
 
     /// The `key=value` facts every rendering of the state carries.
     pub fn facts(&self) -> String {
+        let refusal = self
+            .roll_forward_refusal
+            .as_deref()
+            .map(|reason| format!(" roll_forward_refusal={reason}"))
+            .unwrap_or_default();
         format!(
-            "state={STATE} content_hash={} content_len={} refusals={} rebuilds={} operator_action={OPERATOR_ACTION}",
-            self.content_hash, self.content_len, self.refusals, self.rebuilds,
+            "state={STATE} content_hash={} content_len={} refusals={} rebuilds={}{} operator_action={OPERATOR_ACTION}",
+            self.content_hash, self.content_len, self.refusals, self.rebuilds, refusal,
         )
     }
 }
@@ -101,6 +109,24 @@ pub fn record(
             updated_at_ms: exhausted.recorded_at_ms,
         },
     )
+}
+
+/// Mark the current exhausted content as terminally refused by the editor.
+pub fn mark_roll_forward_refusal(
+    project_root: &Path,
+    file: &Path,
+    content_hash: &str,
+    reason: &str,
+) -> Result<bool> {
+    let Some(mut exhausted) = load(project_root, file)? else {
+        return Ok(false);
+    };
+    if !exhausted.content_hash.eq_ignore_ascii_case(content_hash) {
+        return Ok(false);
+    }
+    exhausted.roll_forward_refusal = Some(reason.to_string());
+    record(project_root, file, &exhausted)?;
+    Ok(true)
 }
 
 /// Load the record for `file`. A malformed payload reads as absent.
@@ -195,6 +221,7 @@ mod tests {
             controller_generation: 2,
             refusals: 9,
             rebuilds: 2,
+            roll_forward_refusal: None,
             recorded_at_ms: 1,
         }
     }
@@ -219,6 +246,7 @@ mod tests {
             facts.contains("operator_action=reconcile_editor_buffer_with_retained_write"),
             "{facts}"
         );
+        assert!(!facts.contains("roll_forward_refusal="), "{facts}");
     }
 
     #[test]
@@ -235,6 +263,18 @@ mod tests {
         assert_eq!(
             load(project.path(), &file).unwrap(),
             Some(exhausted.clone())
+        );
+        assert!(mark_roll_forward_refusal(
+            project.path(),
+            &file,
+            &exhausted.content_hash,
+            "visible_structure_invalid",
+        )
+        .unwrap());
+        let refused = load(project.path(), &file).unwrap().unwrap();
+        assert_eq!(
+            refused.roll_forward_refusal.as_deref(),
+            Some("visible_structure_invalid")
         );
         assert!(
             !clear_unless(project.path(), &file, Some(&exhausted.content_hash)).unwrap(),

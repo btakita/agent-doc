@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 internal class TemplateValidationPlane(
     private val context: ThreadSafeContext,
-    private val normalize: (String) -> String?,
+    private val normalize: (String) -> NativePatching.TemplateStructureNormalization,
     private val hash: (String) -> String,
 ) {
     internal enum class Lane {
@@ -38,6 +38,7 @@ internal class TemplateValidationPlane(
     internal data class Projection(
         val revisionHash: String,
         val state: TemplateStructureProjectionState,
+        val diagnostic: String?,
     )
 
     private data class Nodes(
@@ -58,13 +59,15 @@ internal class TemplateValidationPlane(
             val revisionSource = context.source(revision)
             val validation = context.computed {
                 val current = get(revisionSource)
+                val normalization = normalize(current.text)
                 Projection(
                     revisionHash = current.hash,
                     state =
                         templateStructureProjectionStateUtil(
                             current.text,
-                            normalize(current.text),
+                            normalization.text,
                         ),
+                    diagnostic = normalization.diagnostic,
                 )
             }
             Nodes(revisionSource, validation)

@@ -2334,26 +2334,34 @@ object NativePatching {
         }
     }
 
-    /**
-     * Normalize/fail-close template structure using the shared Rust guard. Returns null when FFI is
-     * unavailable or when the guard rejects the document.
-     */
-    fun normalizeTemplateStructure(doc: String): String? {
-        val lib = AgentDocLib.get() ?: return null
+    internal data class TemplateStructureNormalization(
+        val text: String?,
+        val diagnostic: String?,
+    )
+
+    /** Normalize/fail-close template structure and retain the guard's exact refusal. */
+    internal fun inspectTemplateStructure(doc: String): TemplateStructureNormalization {
+        val lib = AgentDocLib.get()
+            ?: return TemplateStructureNormalization(null, "native_template_guard_unavailable")
         val result = lib.agent_doc_normalize_template_structure(doc)
         try {
             if (result.error != null) {
                 val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] normalize_template_structure error: $error")
                 lib.agent_doc_free_string(result.error)
-                return null
+                return TemplateStructureNormalization(null, error)
             }
-            if (result.text == null) return null
-            return result.text!!.readNativeUtf8()
+            if (result.text == null) {
+                return TemplateStructureNormalization(null, "native_template_guard_returned_no_text")
+            }
+            return TemplateStructureNormalization(result.text!!.readNativeUtf8(), null)
         } finally {
             lib.agent_doc_free_string(result.text)
         }
     }
+
+    /** Backward-compatible text-only adapter for ordinary patch application. */
+    fun normalizeTemplateStructure(doc: String): String? = inspectTemplateStructure(doc).text
 
     /**
      * CRDT 3-way merge from plain text. Returns the conflict-free merged text, or null if FFI is

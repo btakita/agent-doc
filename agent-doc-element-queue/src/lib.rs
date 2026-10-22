@@ -298,8 +298,23 @@ fn id_prefix(text: &str) -> &str {
 /// dedup all normalize the same marker set.
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
+    let mut canonical_operator_action = false;
     loop {
         let trimmed = t.trim_start();
+        if let Some(after_marker) = trimmed.strip_prefix("🙋") {
+            let after_marker = after_marker.trim_start();
+            if let Some(after_open) = after_marker.strip_prefix("[#")
+                && let Some((_, after)) = after_open.split_once(']')
+            {
+                // Legacy form: the request id was part of the prefix.
+                t = after.trim_start();
+            } else {
+                // Canonical form: the request id is local to the tail.
+                canonical_operator_action = true;
+                t = after_marker;
+            }
+            continue;
+        }
         let stripped = [
             "**prioritized**",
             "__prioritized__",
@@ -331,12 +346,6 @@ pub fn strip_priority_markers(text: &str) -> String {
         .iter()
         .find_map(|marker| trimmed.strip_prefix(marker))
         .or_else(|| {
-            let rest = trimmed.strip_prefix("🙋")?.trim_start();
-            let rest = rest.strip_prefix("[#")?;
-            let (_, after) = rest.split_once(']')?;
-            Some(after)
-        })
-        .or_else(|| {
             let (payload, after, legacy_delimiters) =
                 if let Some(rest) = trimmed.strip_prefix("[#") {
                     let (payload, after) = rest.split_once(']')?;
@@ -365,7 +374,27 @@ pub fn strip_priority_markers(text: &str) -> String {
             None => break,
         }
     }
-    t.trim().to_string()
+    let mut bare = t.trim();
+    if let Some(start) = bare.rfind("[#")
+        && (start == 0
+            || bare[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace))
+        && let Some((id, after)) = bare[start + 2..].split_once(']')
+        && !id.is_empty()
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        && (after.is_empty() || after.trim_start().starts_with(':'))
+        && (canonical_operator_action
+            || id
+                .to_ascii_lowercase()
+                .starts_with("subagent-operator-request-"))
+    {
+        bare = bare[..start].trim_end();
+    }
+    bare.to_string()
 }
 
 /// The **work identity** of a live queue head: the one key queue claims,
@@ -566,6 +595,8 @@ mod tests {
             "📍 fix the flaky test",
             "⏭\u{fe0f} fix the flaky test",
             "⏳ fix the flaky test",
+            "🙋🚧 fix the flaky test [#subagent-operator-request-flaky]",
+            "🚧 fix the flaky test [#subagent-operator-request-flaky]: coordinator releases",
             ":pushpin: fix the flaky test",
             "**pin** fix the flaky test",
         ] {

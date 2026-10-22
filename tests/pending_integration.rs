@@ -2462,7 +2462,7 @@ fn write_blocking_operator_request_projects_and_clears_queue_indicator() {
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
         component_body(&content, "queue")
-            .contains("🙋 [#subagent-operator-request-pending-rows] do [#apipendingorphans]"),
+            .contains("🙋 do [#apipendingorphans] [#subagent-operator-request-pending-rows]"),
         "{content}"
     );
     assert!(
@@ -2470,9 +2470,14 @@ fn write_blocking_operator_request_projects_and_clears_queue_indicator() {
         "{content}"
     );
 
-    write_packet_closeout(
+    let answered = content.replace(
+        "- 🙋 do [#apipendingorphans] [#subagent-operator-request-pending-rows]\n",
+        "- 🙋 do [#apipendingorphans] [#subagent-operator-request-pending-rows]: withdraw\n",
+    );
+    fs::write(&doc, answered).unwrap();
+    let stderr = write_packet_closeout(
         &doc,
-        &["--todo-done", "subagent-operator-request-pending-rows"],
+        &[],
         "<!-- patch:exchange -->\nOperator answered.\n<!-- /patch:exchange -->\n",
     );
     let content = fs::read_to_string(&doc).unwrap();
@@ -2485,6 +2490,12 @@ fn write_blocking_operator_request_projects_and_clears_queue_indicator() {
             .contains("- [x] [#subagent-operator-request-pending-rows]"),
         "{content}"
     );
+    assert!(
+        component_body(&content, "queue")
+            .contains("[#subagent-operator-request-pending-rows]: withdraw"),
+        "the local answer remains beside its request id: {content}"
+    );
+    assert!(stderr.contains("#queueoperatoranswer"), "stderr: {stderr}");
 }
 
 /// `#packettodo`: a non-blocking packet, a packet quoted in a code fence, or a

@@ -1690,7 +1690,7 @@ pub fn project_prompt_runtime_projections(
     Ok(Some((projected, reparsed)))
 }
 
-/// Project request-linked operator actions (`🙋 [#id]`) without changing queue
+/// Project request-linked operator actions (`🙋 ... [#id]`) without changing queue
 /// identity or the mutually-exclusive worker lifecycle marker. `actions` holds
 /// `(queue_item, request_id)` pairs captured with the closeout; an existing
 /// annotation is retained only while its same-id `agent:todo` row is open.
@@ -4661,7 +4661,7 @@ mod tests {
         use agent_doc_document::queue_projection::{
             QueueLifecycleMarker, QueueOwnerProjection,
         };
-        let body = "- ~~  🙋 [#choice] fix sdk demo  ~~\n- untouched\n";
+        let body = "- ~~  🙋 [#subagent-operator-request-choice] fix sdk demo  ~~\n- untouched\n";
         let targets = vec![QueueRowProjection {
             text: "fix sdk demo".to_string(),
             marker: QueueLifecycleMarker::Unknown,
@@ -4676,7 +4676,7 @@ mod tests {
             .expect("durable evidence must reopen manual strike");
         assert_eq!(
             projected,
-            "- ❔ [#subagent:sdk#4] 🙋 [#choice] fix sdk demo\n- untouched\n"
+            "- 🙋❔ [#subagent:sdk#4] fix sdk demo [#subagent-operator-request-choice]\n- untouched\n"
         );
         assert!(matches!(entries[0], QueueEntry::Prompt(_)));
     }
@@ -8990,13 +8990,16 @@ mod tests {
             .expect("annotation added");
         assert_eq!(
             projected,
-            "- 🙋 [#subagent-operator-request-sdk-demo] 🚧 sdk-demo.md queue annotation fix\n- another task\n"
+            "- 🙋🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
         );
         let (cleared, _) =
             project_prompt_operator_actions(&projected, &[], &std::collections::HashSet::new())
                 .unwrap()
                 .expect("completed todo clears annotation");
-        assert_eq!(cleared, body);
+        assert_eq!(
+            cleared,
+            "- 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
+        );
     }
 }
 

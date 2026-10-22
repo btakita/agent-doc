@@ -29,6 +29,66 @@ use agent_doc_element_review::{
     resolve_review_items_in_document,
 };
 
+fn operator_request_queue_item(action: &str) -> Option<&str> {
+    let (_, rest) = action.split_once(" for queue item ‘")?;
+    rest.split_once("’ in agent:exchange:")
+        .map(|(queue_item, _)| queue_item)
+}
+
+/// Open operator-request todos answered inline on their linked queue row.
+///
+/// The canonical local answer is `[#request-id]: <answer>`. Legacy prefix
+/// rows are also recognized when their original queue item gained a non-empty
+/// `: <answer>` suffix.
+pub fn answered_queue_operator_action_ids(content: &str) -> Result<Vec<String>> {
+    let Some(todo) = agent_doc_element::todo::find_todo_component(content)? else {
+        return Ok(Vec::new());
+    };
+    let requests = todo
+        .content(content)
+        .lines()
+        .filter_map(agent_doc_element::todo::parse_todo_line)
+        .filter(|item| item.state.is_open())
+        .filter_map(|item| {
+            let id = item.own_id?;
+            let queue_item = operator_request_queue_item(item.action)?;
+            Some((id.to_ascii_lowercase(), queue_item.to_string()))
+        })
+        .collect::<Vec<_>>();
+    if requests.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let components = element::parse(content).context("failed to parse components")?;
+    let queues = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    let Some(queue) = queues.selected().or_else(|| queues.blocks().first()) else {
+        return Ok(Vec::new());
+    };
+    let Some(component) =
+        agent_doc_queue::queue_set::component_for_id(content, &components, &queue.id)?
+    else {
+        return Ok(Vec::new());
+    };
+    let entries = agent_doc_queue::document_queue::parse(component.content(content))?;
+    let mut answered = Vec::new();
+    for entry in entries {
+        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        for (id, queue_item) in &requests {
+            if agent_doc_document::queue_projection::operator_action_is_answered(
+                &prompt.text,
+                id,
+                queue_item,
+            ) && !answered.contains(id)
+            {
+                answered.push(id.clone());
+            }
+        }
+    }
+    Ok(answered)
+}
+
 /// Project blocking operator requests onto their originating selected-queue
 /// rows. Existing annotations survive only while the same-id todo remains open.
 pub fn sync_queue_operator_actions(file: &Path, actions: &[(String, String)]) -> Result<bool> {

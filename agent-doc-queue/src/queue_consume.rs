@@ -2252,8 +2252,9 @@ mod tests {
     #[test]
     fn operator_action_gate_blocks_closeout_consumption_until_annotation_clears() {
         let free_text = "publish the release after operator confirmation";
-        let blocked_free_text =
-            format!("🙋 [#publish-confirmation] 🚧 ⟦subagent:publisher#1⟧ {free_text}");
+        let blocked_free_text = format!(
+            "🙋 [#subagent-operator-request-publish-confirmation] 🚧 ⟦subagent:publisher#1⟧ {free_text}"
+        );
         let blocked_document = active_queue_doc(&format!("- {blocked_free_text}\n"));
         let response = format!(
             "### Re: publication\n\n> **Queue prompt:** {free_text}\n\nThe release is ready.\n"
@@ -2270,7 +2271,9 @@ mod tests {
             "an exact answer echo cannot consume work that still needs operator action"
         );
 
-        let blocked_tracked = active_queue_doc("- 🙋 [#deploy-approval] do [#deploy]\n");
+        let blocked_tracked = active_queue_doc(
+            "- 🙋 [#subagent-operator-request-deploy-approval] do [#deploy]\n",
+        );
         assert!(
             !queue_consumption_allowed_for_response(
                 Path::new("session.md"),
@@ -3704,7 +3707,9 @@ Old.
     #[test]
     fn operator_action_gate_blocks_reactive_free_text_strike_until_annotation_clears() {
         let head = "publish the release after operator confirmation";
-        let blocked_head = format!("🙋 [#publish-confirmation] 🚧 ⟦subagent:publisher#1⟧ {head}");
+        let blocked_head = format!(
+            "🙋 [#subagent-operator-request-publish-confirmation] 🚧 ⟦subagent:publisher#1⟧ {head}"
+        );
         let document = active_queue_doc(&format!("- {blocked_head}\n- do [#later]\n"));
         let response =
             format!("### Re: publication\n\n> **Queue prompt:** {head}\n\nThe release is ready.\n");

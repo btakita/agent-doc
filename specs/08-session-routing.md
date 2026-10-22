@@ -471,6 +471,13 @@ cannot seed editor-order memory, cannot widen the live window, and does not
 authorize automatic selection escalation or manual Sync. Manual `Sync Tmux
 Layout` still refuses unknown geometry with `surface_reference_unknown_layout`
 and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence.
+When passive focus escalation cannot use a positive frontend snapshot, its
+receipt is `focus_deferred:<cause>` and is terminal for that observation: it is
+not retained as a failed effect, and the plugin must not translate it into a
+forced Sync Tmux Layout. A successful handoff likewise reports
+`focus_escalated_to_structural_layout` rather than the original
+`actor_pane_not_visible` refusal. Only a true handoff publication failure keeps
+the original actionable refusal (GH #357).
 If no frontend publisher connects, the backend and route failure identify it as
 unavailable and give the working local/custom-install remedy: install the same
 modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend,

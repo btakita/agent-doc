@@ -545,6 +545,16 @@ rightmost column. A covered document may update focus intent without changing
 membership or order (GH #120, GH #126, GH #343). A later complete positive
 frontend snapshot may include the uncovered document and replaces the cached
 target atomically.
+The structural handoff's result is terminal for that focus observation. A
+successful publication returns `focus_escalated_to_structural_layout`; a policy
+deferral returns `focus_deferred:<cause>` (for example
+`focus_deferred:no_frontend_layout_snapshot`). Neither is an effect failure:
+the controller clears the editor-surface retry instead of replaying the same
+focus, and the editor retains the receipt instead of forcing a complete layout
+reconcile. Only an actual publication error leaves the original focus refusal
+actionable. This is load-bearing when Remote Dev supplies flat evidence: a
+forced `sync_tmux_layout` has the same missing geometry and is certain to be
+refused, so it cannot be a recovery for the deferral (GH #357).
 An `outside_agent_doc_window` refusal always publishes a fresh structural effect generation even
 when its columns, order, and focus are identical to the retained escalation: selecting the
 `agent-doc` tmux window is itself the missing consequence. Other identical escalation reasons may

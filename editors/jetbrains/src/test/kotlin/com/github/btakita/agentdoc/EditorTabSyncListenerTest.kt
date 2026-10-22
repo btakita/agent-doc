@@ -205,6 +205,35 @@ class EditorTabSyncListenerTest {
                 projectWindowActive = true,
             ),
         )
+
+        for (
+            reason in
+                listOf(
+                    "focus_escalated_to_structural_layout",
+                    "focus_escalated_to_lane_layout",
+                    "focus_deferred:no_frontend_layout_snapshot",
+                    "focus_deferred:focus_requires_frontend_layout",
+                )
+        ) {
+            val terminalResponse =
+                stashedResponse.copy(
+                    transport =
+                        CpEditorRouteResult(
+                            exitCode = 0,
+                            output =
+                                """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"$reason\"}"}""",
+                        ),
+                )
+            assertEquals(
+                reason,
+                EditorTabSyncListener.FocusProjectionReceiptDecision.Retained,
+                EditorTabSyncListener.decideFocusProjectionReceipt(
+                    response = terminalResponse,
+                    currentGeneration = 7,
+                    projectWindowActive = true,
+                ),
+            )
+        }
     }
 
     @Test

@@ -11776,7 +11776,7 @@ fn publish_editor_route_layout_locally<'a>(
 ) -> Result<(
     ControllerTmuxLayoutSyncReceipt,
     u32,
-    PaneLayoutRouteLeaseGuard<'a>,
+    Option<PaneLayoutRouteLeaseGuard<'a>>,
 )> {
     let main_layout_eligibility = runtime.main_layout_eligibility();
     let layout_mode =
@@ -11849,6 +11849,12 @@ fn publish_editor_route_layout_locally<'a>(
         &main_layout_eligibility,
         &retained_columns,
     );
+    let live_basis_holds_route = live_basis_columns.is_some()
+        && retained_columns
+            .iter()
+            .flat_map(|column| column.split(','))
+            .map(str::trim)
+            .any(|document| document == routed_document);
     let (merged_columns, layout_merge, dropped_columns) = merge_editor_route_columns_within(
         layout_mode,
         &retained_columns,
@@ -11890,6 +11896,46 @@ fn publish_editor_route_layout_locally<'a>(
     if let Some(refusal) = editor_route_focus_refusal(&layout_invocation, routed_document) {
         anyhow::bail!(refusal);
     }
+    // GH #347: a one-sided Remote Dev install can provide positive focus and
+    // live-tmux evidence without frontend geometry. After a controller restart
+    // there is no retained frontend snapshot to publish, but that must defer
+    // only the structural effect, not the route itself, when the routed
+    // document already has a live pane. Publishing the live observation would
+    // incorrectly promote tmux to editor-layout authority, so leave the graph
+    // empty and let dispatch address the existing pane focus-only.
+    if layout_invocation.column_order != agent_doc_tmux::LayoutColumnOrder::Editor
+        && lane_graph.desired().is_none()
+        && live_basis_holds_route
+    {
+        agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "controller_editor_route_layout_deferred file={} reason=incomplete_frontend_layout_no_authoritative_snapshot action=dispatch_focus_only columns={} focus={}",
+                canonical.display(),
+                layout_invocation.columns.len(),
+                routed_document,
+            ),
+        );
+        let routes_created_panes = layout_invocation.routes_created_panes();
+        return Ok((
+            ControllerTmuxLayoutSyncReceipt {
+                gated_documents: Vec::new(),
+                applied: false,
+                reason: "layout_deferred_focus_only".to_string(),
+                columns: layout_invocation.columns,
+                layout_generation: None,
+                layout_publisher: None,
+                window: layout_invocation.window,
+                focus: layout_invocation.focus,
+                no_autostart: layout_invocation.no_autostart,
+                exact_visible: layout_invocation.exact_visible,
+                routes_created_panes,
+                file_panes: Vec::new(),
+            },
+            1,
+            None,
+        ));
+    }
     // Publish exactly once; the lease holds passive publications back until
     // dispatch settles. The gates then re-observe this publication.
     let (first_receipt, route_layout_lease, published_layout) = handle_editor_route_layout(
@@ -11923,7 +11969,11 @@ fn publish_editor_route_layout_locally<'a>(
             reobserve_editor_route_layout(bootstrap, runtime, &published_layout, remaining)
         },
     )?;
-    Ok((layout_receipt, layout_observations, route_layout_lease))
+    Ok((
+        layout_receipt,
+        layout_observations,
+        Some(route_layout_lease),
+    ))
 }
 
 /// Derive a surface-referencing route's layout from the retained surface
@@ -12155,7 +12205,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
                         .as_secs(),
                 ),
             );
-            Some(route_layout_lease)
+            route_layout_lease
         }
     };
     let harness_ready_secs = route_deadline
@@ -12381,7 +12431,7 @@ fn route_editor_layout_with_owner<'a>(
 ) -> Result<(
     ControllerTmuxLayoutSyncReceipt,
     u32,
-    EditorRouteLayoutLease<'a>,
+    Option<EditorRouteLayoutLease<'a>>,
 )> {
     let controller_root = bootstrap
         .project_root
@@ -12422,7 +12472,11 @@ fn route_editor_layout_with_owner<'a>(
             route_deadline,
             live_tmux,
         )?;
-        return Ok((receipt, observations, EditorRouteLayoutLease::Local(lease)));
+        return Ok((
+            receipt,
+            observations,
+            lease.map(EditorRouteLayoutLease::Local),
+        ));
     };
     let delegation = EditorRouteLayoutDelegation {
         invocation: layout_invocation.clone(),
@@ -12439,7 +12493,7 @@ fn route_editor_layout_with_owner<'a>(
         Ok(EditorRouteLayoutDelegationReceipt {
             receipt: Some(receipt),
             observations,
-            lease_generation: Some(lease_generation),
+            lease_generation,
             refusal: None,
         }) => {
             agent_doc_ops_log_io::log_op(
@@ -12455,18 +12509,17 @@ fn route_editor_layout_with_owner<'a>(
                     observations,
                 ),
             );
-            Ok((
-                receipt,
-                observations,
+            let lease = lease_generation.map(|generation| {
                 EditorRouteLayoutLease::Delegated(DelegatedEditorRouteLayoutLease {
                     owner_root: owner_root.to_path_buf(),
                     release: EditorRouteLayoutRelease {
-                        generation: lease_generation,
+                        generation,
                         routed_document: routed_document.to_string(),
                         delegated_by: controller_root.display().to_string(),
                     },
-                }),
-            ))
+                })
+            });
+            Ok((receipt, observations, lease))
         }
         Ok(answer) => {
             let refusal = answer.refusal.unwrap_or_else(|| {
@@ -12513,7 +12566,11 @@ fn route_editor_layout_with_owner<'a>(
                 route_deadline,
                 live_tmux,
             )?;
-            Ok((receipt, observations, EditorRouteLayoutLease::Local(lease)))
+            Ok((
+                receipt,
+                observations,
+                lease.map(EditorRouteLayoutLease::Local),
+            ))
         }
     }
 }
@@ -12573,7 +12630,7 @@ fn publish_delegated_editor_route_layout(
         route_deadline,
         None,
     ) {
-        Ok((receipt, observations, mut lease)) => {
+        Ok((receipt, observations, Some(mut lease))) => {
             let generation = lease.detach();
             let graph = runtime
                 .pane_layout_graph_for_lane(&agent_doc_editor_surface::NavigationLane::Shared);
@@ -12598,6 +12655,12 @@ fn publish_delegated_editor_route_layout(
                 refusal: None,
             }
         }
+        Ok((receipt, observations, None)) => EditorRouteLayoutDelegationReceipt {
+            receipt: Some(receipt),
+            observations,
+            lease_generation: None,
+            refusal: None,
+        },
         Err(error) => EditorRouteLayoutDelegationReceipt {
             receipt: None,
             observations: 0,
@@ -48101,6 +48164,86 @@ mod tests {
             ),
             "{}",
             fixture.ops_log()
+        );
+    }
+
+    /// GH #347: a one-sided Remote Dev installation reports unknown column
+    /// order. A fresh controller has no retained frontend snapshot, but a
+    /// positive live tmux observation can still prove that the routed document
+    /// already has a pane. Dispatch must proceed without publishing that tmux
+    /// observation as desired editor structure.
+    #[test]
+    fn gh347_unknown_route_dispatches_focus_only_without_publishing_live_tmux_structure() {
+        struct LiveLayoutGuard;
+        impl Drop for LiveLayoutGuard {
+            fn drop(&mut self) {
+                TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| *documents.borrow_mut() = None);
+            }
+        }
+        let _guard = LiveLayoutGuard;
+
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        let successor = test_controller_runtime(&fixture.bootstrap);
+        let live = vec![fixture.id("alpha"), fixture.id("beta")];
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| *documents.borrow_mut() = Some(live));
+
+        let mut request = fixture.route_request("beta", &["beta"], Some("ensure"));
+        let mut payload: serde_json::Value = serde_json::from_str(
+            request
+                .diagnostic_payload
+                .as_deref()
+                .expect("route diagnostic payload"),
+        )
+        .unwrap();
+        payload["column_order"] = serde_json::json!("unknown");
+        request.diagnostic_payload = Some(payload.to_string());
+
+        let routed = handle_editor_route_rpc(&fixture.bootstrap, successor.as_ref(), request)
+            .expect("the existing live pane keeps route dispatch available");
+        assert_eq!(routed.exit_code, 0);
+        assert!(
+            successor.pane_layout_desired().is_none(),
+            "the live tmux observation is dispatch evidence, never desired editor structure"
+        );
+
+        // A live window is insufficient by itself: the observation must prove
+        // that this document already occupies a pane. Otherwise the structural
+        // guard still fails closed and dispatch does not invent placement.
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| {
+            *documents.borrow_mut() = Some(vec![fixture.id("alpha")])
+        });
+        let successor_without_beta = test_controller_runtime(&fixture.bootstrap);
+        let mut request = fixture.route_request("beta", &["beta"], Some("ensure"));
+        let mut payload: serde_json::Value = serde_json::from_str(
+            request
+                .diagnostic_payload
+                .as_deref()
+                .expect("route diagnostic payload"),
+        )
+        .unwrap();
+        payload["column_order"] = serde_json::json!("unknown");
+        request.diagnostic_payload = Some(payload.to_string());
+        let error = handle_editor_route_rpc(
+            &fixture.bootstrap,
+            successor_without_beta.as_ref(),
+            request,
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains(
+                "sync_tmux_layout deferred: incomplete frontend layout has no authoritative snapshot"
+            ),
+            "{error:#}"
+        );
+        assert!(successor_without_beta.pane_layout_desired().is_none());
+
+        let ops = fixture.ops_log();
+        assert!(
+            ops.contains("controller_editor_route_layout_deferred file=")
+                && ops.contains(
+                    "reason=incomplete_frontend_layout_no_authoritative_snapshot action=dispatch_focus_only"
+                ),
+            "{ops}"
         );
     }
 

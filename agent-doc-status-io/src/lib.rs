@@ -88,13 +88,20 @@ impl StatusWriteEffects for RuntimeStatusWriteEffects {
     }
 }
 
-/// The tree inner-leaf text that reproduces the legacy `\n{text}\n` status content
-/// framing. The lossless tree's open-marker token leaf owns the newline *after*
-/// `-->` (matching `element`'s `open_end`), so the body leaf spans exactly the
-/// same region `replace_status_content` overwrites — hence the identical `\n{text}\n`.
-/// Pure so the parity test and the live shadow agree.
-fn status_tree_inner(text: &str) -> String {
-    format!("\n{text}\n")
+/// Reapply the authoritative status projection through the bounded lossless-tree
+/// primitive. Extracting the projected component body keeps the shadow faithful
+/// to both full replacement and `sync`-managed updates without duplicating status
+/// policy in the IO adapter.
+fn status_tree_candidate(full_content: &str, legacy_new_doc: &str) -> Option<String> {
+    let status = agent_doc_element::element::parse(legacy_new_doc)
+        .ok()?
+        .into_iter()
+        .find(|component| component.name == "status")?;
+    agent_doc_markdown_lossless::replace_component_inner(
+        full_content,
+        "status",
+        status.content(legacy_new_doc),
+    )
 }
 
 /// Phase 2 strangler shadow (`#lzlosstree`): log whether the bounded lossless-tree
@@ -103,14 +110,9 @@ fn log_status_tree_parity<E: StatusWriteEffects + ?Sized>(
     effects: &E,
     file: &Path,
     full_content: &str,
-    text: &str,
     legacy_new_doc: &str,
 ) {
-    let candidate = agent_doc_markdown_lossless::replace_component_inner(
-        full_content,
-        "status",
-        &status_tree_inner(text),
-    );
+    let candidate = status_tree_candidate(full_content, legacy_new_doc);
     let result = match &candidate {
         Some(tree_doc) if tree_doc == legacy_new_doc => "match",
         Some(_) => "mismatch",
@@ -176,13 +178,11 @@ fn set_with_options_and_attribution<E: StatusWriteEffects + ?Sized>(
     .context("failed to read document")?;
     let new_doc =
         agent_doc_document::status_projection::update_status_content(&full_content, text)?;
-    // Phase 2 strangler shadow (#lzlosstree): compute the same status-body replace
-    // through a bounded lossless-tree mutation and log whether it is byte-identical
-    // to the legacy projection. Measurement only — `new_doc` stays the authority
-    // until parity is proven green on live writes, at which point the flip is a
-    // one-line swap of the authoritative value. See `status_tree_inner` and the
-    // parity test below for the `\n{text}\n` inner mapping.
-    log_status_tree_parity(effects, file, &full_content, text, &new_doc);
+    // Phase 2 strangler shadow (#lzlosstree): compute the same projected status
+    // body through a bounded lossless-tree mutation and log whether it is
+    // byte-identical to the legacy projection. Measurement only — `new_doc` stays
+    // the authority until parity is proven green on live writes.
+    log_status_tree_parity(effects, file, &full_content, &new_doc);
     land_status_projection(
         effects,
         file,
@@ -308,8 +308,8 @@ mod tests {
     fn tree_status_replace_is_byte_identical_to_legacy_projection() {
         // The strangler shadow is only meaningful if the tree mutation reproduces
         // the legacy `replace_status_content` result for the standard status shape.
-        // This proves the `\n{text}\n` inner mapping for the common newline-framed
-        // component; the live shadow logs match/mismatch for everything else.
+        // This proves that the projected component body is a sufficient bounded
+        // tree edit for the common newline-framed component.
         let doc = concat!(
             "---\ntitle: t\n---\n\n",
             "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n\n",
@@ -318,12 +318,7 @@ mod tests {
         for text in ["new status", "line one\nline two", "café ☕ 世界", ""] {
             let legacy =
                 agent_doc_document::status_projection::replace_status_content(doc, text).unwrap();
-            let tree = agent_doc_markdown_lossless::replace_component_inner(
-                doc,
-                "status",
-                &status_tree_inner(text),
-            )
-            .expect("status component exists");
+            let tree = status_tree_candidate(doc, &legacy).expect("status component exists");
             assert_eq!(
                 tree, legacy,
                 "tree/legacy status replace diverged for {text:?}"
@@ -574,12 +569,27 @@ mod tests {
         assert!(updated.contains(
             "<!-- agent:status patch=replace sync=\"Keep release current\" custom=kept -->"
         ));
+
+        set(&effects, &doc, "Published: v1.2.3").unwrap();
+
+        let reapplied = effects.updated.borrow().clone().unwrap();
+        assert_eq!(reapplied, updated);
+        assert_eq!(reapplied.matches("<!-- status:sync -->").count(), 1);
+        let logs = effects.logs.borrow();
+        assert_eq!(
+            logs.iter()
+                .filter(|line| {
+                    line.contains("lossless_write_parity op=status_set result=match")
+                })
+                .count(),
+            2,
+            "{logs:?}"
+        );
         assert!(
-            effects
-                .logs
-                .borrow()
+            !logs
                 .iter()
-                .any(|line| line.contains("lossless_write_parity op=status_set result=mismatch"))
+                .any(|line| line.contains("lossless_write_parity op=status_set result=mismatch")),
+            "{logs:?}"
         );
     }
 

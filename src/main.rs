@@ -2202,7 +2202,8 @@ struct WriteArgs {
     /// contract requires an assistant response; use `agent-doc write --commit` instead.
     #[arg(long = "backlog-only", alias = "pending-only")]
     pending_only: bool,
-    /// Replace the status component content (repeatable for multi-line).
+    /// Update status content; a sync-enabled component applies its managed sync policy.
+    /// Use one value with embedded newlines for multi-line content.
     #[arg(long = "status")]
     status: Option<String>,
     /// Override the tagpath agent-doc lint dialect mode for this run.

@@ -2451,8 +2451,29 @@ fn test_backlog_reopen_help_exposes_explicit_queue_reactivation() {
 fn test_respond_help_routes_backlog_only_to_write_commit() {
     let mut cmd = agent_doc_cmd();
     cmd.args(["respond", "--help"]);
-    cmd.assert().success().stdout(predicate::str::contains(
-        "use `agent-doc write --commit` instead",
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "use `agent-doc write --commit` instead",
+        ))
+        .stdout(predicate::str::contains("managed sync policy"))
+        .stdout(predicate::str::contains("embedded newlines"))
+        .stdout(predicate::str::contains("repeatable for multi-line").not());
+}
+
+#[test]
+fn test_respond_status_accepts_only_one_value() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args([
+        "respond",
+        "/nonexistent.md",
+        "--status",
+        "first",
+        "--status",
+        "second",
+    ]);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "the argument '--status <STATUS>' cannot be used multiple times",
     ));
 }
 

@@ -505,7 +505,7 @@ fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec
         .into_iter()
         .filter(|finding| {
             !is_registry_known_unknown_component_finding(finding)
-                && !is_agent_doc_queue_known_attr_finding(finding)
+                && !is_agent_doc_known_attr_finding(finding)
                 && !is_agent_doc_queue_bare_flag_finding(finding)
                 && !is_agent_doc_done_bare_archive_finding(finding)
                 && !is_explicit_no_preset_finding(finding)
@@ -514,11 +514,11 @@ fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec
         .collect()
 }
 
-/// Tagpath's queue attribute allowlist can lag the queue domain. Reconcile its
-/// `unknown-attr` findings against the queue crate's complete public marker
-/// vocabulary so runtime-valid queue identifiers and schedules also pass lint.
-/// Unknown keys and known keys on the wrong component remain findings.
-fn is_agent_doc_queue_known_attr_finding(finding: &LintFinding) -> bool {
+/// Tagpath's attribute allowlist can lag agent-doc's domain. Reconcile its
+/// `unknown-attr` findings against the queue crate's complete public queue and
+/// status marker vocabularies. Unknown keys and known keys on the wrong
+/// component remain findings.
+fn is_agent_doc_known_attr_finding(finding: &LintFinding) -> bool {
     if finding.rule != "agent-doc/unknown-attr" {
         return false;
     }
@@ -529,8 +529,11 @@ fn is_agent_doc_queue_known_attr_finding(finding: &LintFinding) -> bool {
     let Some(component) = quoted.nth(1) else {
         return false;
     };
-    component == "agent:queue"
-        && agent_doc_queue::component_attrs::is_queue_component_attr(attribute)
+    match component {
+        "agent:queue" => agent_doc_queue::component_attrs::is_queue_component_attr(attribute),
+        "agent:status" => agent_doc_queue::component_attrs::is_status_component_attr(attribute),
+        _ => false,
+    }
 }
 
 /// GH #227 (operator decision): `preset=""` on a prompt component
@@ -1232,6 +1235,25 @@ operator-owned scratch state\n\
         });
         run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
             panic!("valid queue `id` / `interval` attributes must pass strict lint: {error:#}")
+        });
+    }
+
+    #[test]
+    fn valid_status_sync_attributes_pass_lint() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:status sync=\"Keep release current\" sync-mode=additive interval=5m -->\n\
+            operator note\n\
+            <!-- /agent:status -->\n";
+        let file = write_doc(&dir, "status-sync.md", doc);
+        run(&file, None).unwrap_or_else(|error| {
+            panic!("valid status sync attributes must pass lint: {error:#}")
+        });
+        run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+            panic!("valid status sync attributes must pass strict lint: {error:#}")
         });
     }
 

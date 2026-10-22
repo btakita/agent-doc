@@ -2504,6 +2504,7 @@ version = "0.35.540"
 dependencies = [
  "agent-doc-document",
  "agent-doc-document-realtime-io",
+ "agent-doc-element",
  "agent-doc-hash",
  "agent-doc-markdown-lossless",
  "agent-doc-ops-log-io",

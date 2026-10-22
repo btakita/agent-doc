@@ -59,9 +59,9 @@ use serde::{Deserialize, Serialize};
 
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
 use agent_doc_document_realtime::crdt_relay::{
-    AwarenessState, DiskChangeOutcome, DocumentOpDeltaOutcome, DocumentOpOriginFence,
-    PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot, RetainedCanonicalProjection,
-    mint_client_id,
+    AutomaticHistoryCompaction, AwarenessState, DiskChangeOutcome, DocumentOpDeltaOutcome,
+    DocumentOpOriginFence, PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot,
+    RetainedCanonicalProjection, automatic_history_compaction_limit, mint_client_id,
 };
 use agent_doc_document_realtime::watch_authority::{
     WatchAction, WatchDelivery, decide_watch_action,
@@ -3561,6 +3561,7 @@ pub fn relay_replica_update_for_file(
         isolation_regions_restored,
         queue_attempt_projection,
         automatic_history_compaction,
+        automatic_history_compaction_deferred,
     ) = with_hub_seeded_from_file(file, |hub| -> Result<_> {
         let retained_reseed_was_pending = hub.retained_replica_reseed_pending();
         let registered = hub.is_registered(client_id);
@@ -3674,11 +3675,24 @@ pub fn relay_replica_update_for_file(
         // fence used by Compact Exchange. The pending re-bootstrap makes the
         // editor persist the compact frontier, so later controller recycles do
         // not require the old multi-megabyte resume suffix again (#336).
+        let automatic_history_was_requested = hub.automatic_history_compaction_requested();
+        let automatic_state_bytes = hub.canonical_encoded_state().len();
+        let automatic_text_bytes = hub.canonical_text().len();
+        let automatic_limit_bytes = automatic_history_compaction_limit(automatic_text_bytes);
         let automatic_history_compaction = if packet.is_some() {
             hub.compact_oversized_history()?
         } else {
             None
         };
+        let automatic_history_compaction_deferred = (packet.is_some()
+            && automatic_history_compaction.is_none()
+            && !automatic_history_was_requested
+            && hub.automatic_history_compaction_requested())
+        .then_some((
+            automatic_state_bytes,
+            automatic_text_bytes,
+            automatic_limit_bytes,
+        ));
         Ok((
             packet,
             reattached,
@@ -3689,6 +3703,7 @@ pub fn relay_replica_update_for_file(
             isolation_regions_restored,
             queue_attempt_projection,
             automatic_history_compaction,
+            automatic_history_compaction_deferred,
         ))
     })??;
     if editor_reseed_requested {
@@ -3834,6 +3849,19 @@ pub fn relay_replica_update_for_file(
                 compaction.text_bytes,
                 compaction.limit_bytes,
                 signal,
+            ),
+        );
+    }
+    if let Some((before_bytes, text_bytes, limit_bytes)) = automatic_history_compaction_deferred {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_history_auto_compaction_deferred file={} authority=multi_replica client_id={} before_bytes={} text_bytes={} limit_bytes={} gate=visible_delivery_projected_false recovery=retained_until_visible_projection",
+                file.display(),
+                client_id,
+                before_bytes,
+                text_bytes,
+                limit_bytes,
             ),
         );
     }
@@ -4869,7 +4897,10 @@ pub fn observe_replica_projection_for_file(
     let client_id = mint_client_id(identity);
     let Some(observation) = with_existing_hub(file, |hub| {
         let prior_lineage = hub.lineage().to_string();
+        let automatic_history_was_requested = hub.automatic_history_compaction_requested();
         let state_bytes_before = hub.canonical_encoded_state().len();
+        let text_bytes = hub.canonical_text().len();
+        let limit_bytes = automatic_history_compaction_limit(text_bytes);
         let projected = hub.observe_delivery_projection(client_id, visible_content_hash)?;
         let compacted = (hub.lineage() != prior_lineage).then(|| CompactEpochOutcome {
             prior_lineage,
@@ -4878,12 +4909,24 @@ pub fn observe_replica_projection_for_file(
             state_bytes_after: hub.canonical_encoded_state().len(),
             rebootstrap_members: hub.pending_rebootstrap_members().len(),
         });
-        Ok::<_, anyhow::Error>((projected, compacted))
+        let automatic_history_compaction = if automatic_history_was_requested {
+            compacted
+                .as_ref()
+                .map(|outcome| AutomaticHistoryCompaction {
+                    before_bytes: outcome.state_bytes_before,
+                    after_bytes: outcome.state_bytes_after,
+                    text_bytes,
+                    limit_bytes,
+                })
+        } else {
+            None
+        };
+        Ok::<_, anyhow::Error>((projected, compacted, automatic_history_compaction))
     })?
     else {
         return Ok(None);
     };
-    let (projected, compacted) = observation?;
+    let (projected, compacted, automatic_history_compaction) = observation?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -4895,10 +4938,13 @@ pub fn observe_replica_projection_for_file(
         ),
     );
     if let Some(outcome) = compacted {
+        let signal =
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::CanonicalProjection, 0)
+                .map_or_else(|err| format!("failed:{err}"), |()| "requested".to_string());
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_compact_epoch_settled_from_projection file={} client_id={} prior_lineage={} lineage={} state_bytes_before={} state_bytes_after={} rebootstrap_members={} content_hash={}",
+                "crdt_compact_epoch_settled_from_projection file={} client_id={} prior_lineage={} lineage={} state_bytes_before={} state_bytes_after={} rebootstrap_members={} content_hash={} rebootstrap={}",
                 file.display(),
                 client_id,
                 outcome.prior_lineage,
@@ -4907,6 +4953,21 @@ pub fn observe_replica_projection_for_file(
                 outcome.state_bytes_after,
                 outcome.rebootstrap_members,
                 visible_content_hash,
+                signal,
+            ),
+        );
+    }
+    if let Some(compaction) = automatic_history_compaction {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_history_auto_compacted file={} authority=multi_replica client_id={} before_bytes={} after_bytes={} text_bytes={} limit_bytes={} trigger=visible_projection recovery=fresh_epoch",
+                file.display(),
+                client_id,
+                compaction.before_bytes,
+                compaction.after_bytes,
+                compaction.text_bytes,
+                compaction.limit_bytes,
             ),
         );
     }

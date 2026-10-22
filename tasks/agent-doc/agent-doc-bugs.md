@@ -355,6 +355,14 @@ Current release status:
 - JetBrains: classic 0.2.776, 262 0.2.779, 263 0.2.780, published simultaneously
 
 The editor changed the document again during commit, so agent-doc reported a convergence defect. The status update is durable in Git; I did not retry and risk overwriting the newer editor content.
+
+### Re: terse subagent lineage marker — gpt-5 · 2026-10-22T02:48-04:00
+
+> **Queue prompt:** `⟦owner=subagent:runtime_fix_switch;generation=2⟧`: Can we make this more terse? It takes too much space. `⟦subagent:runtime_fix_switch#2⟧` perhaps?
+
+Implemented the compact form. Runtime queue state now renders as `⟦subagent:<label>#<generation>⟧`, so the suggested `⟦subagent:runtime_fix_switch#2⟧` shape is canonical. Legacy `⟦owner=…;generation=…⟧` markers remain readable and normalize on the next projection; lifecycle annotations are excluded from work identity so claim-following stays stable and projection is idempotent.
+
+Integrated and pushed agent-doc commit `61715cf113d50b9e6c29b1168868ead65262a36a` to `main`. The authoritative suite passed 11,398/11,398 tests (177 skipped), all focused lifecycle/compatibility/idempotence tests passed, and the coordinator-owned `make install` completed successfully for the CLI, native library, JetBrains plugins, and VS Code extension. GitHub CI for `main` run `39735904034` is in progress; local verification is green.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -363,7 +371,6 @@ The editor changed the document again during commit, so agent-doc reported a con
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- `⟦owner=subagent:runtime_fix_switch;generation=2⟧`: Can we make this more terse? It takes too much space. `⟦subagent:runtime_fix_switch#2⟧` perhaps?
 <!-- /agent:queue -->
 
 ## Queue: Issues

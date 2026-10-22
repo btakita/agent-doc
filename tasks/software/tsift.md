@@ -19,7 +19,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-in progress — v0.1.107 is published, but Issues #30–#32 remain open and reproducible against the released source; their fix queue items remain pending
+complete — Issues #30–#32 are fixed on main, locally verified, installed, and closed on GitHub; CI run 39835340283 is in progress; release/publish remains queued
 <!-- /agent:status -->
 
 ## Spec
@@ -260,16 +260,41 @@ The v0.1.107 release published the decision-manifest updates; it did not include
 - Verification: all three GitHub issues are open; #30 and #31 reproduced directly; released source and tests retain #32's budget/per-line truncation behavior; release worktree remained clean. No full test suite was needed because this was a read-only status audit with no source change.
 - Confidence: high.
 - Escalation: none. The exchange is above its size warning threshold, but the active auto-clear queue should continue through the normal fresh-context supervisor handoff rather than pausing for compaction.
-<!-- agent:boundary:4e151c8c -->
+> **Chat prompt (#chatprompt:bb85d43d9d1f):** Fix these issues in subagents
+
+### Re: Fix Issues #30–#32 in subagents — gpt-5 · 2026-10-22T14:55-04:00
+
+Completed through three isolated subagents, then integrated and verified serially.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/tsift/issues/30
+
+Fixed and closed. Commit `c4b641e` makes `rewrite` reject compound shell commands before any non-tsift rewriter can drop later commands. Detection now covers semicolons, newlines, command substitution, and backticks while preserving authored `tsift` passthrough. The original compound-command repro now exits with the no-rewrite safety message.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/tsift/issues/31
+
+Fixed and closed. Commit `f26173f` carries explicit `sed`, `head`, and `tail` windows into `session-digest --start/--lines` and includes the requested bounded excerpt in human and JSON output. The original synthetic window repro now returns `body line token ZQ001`.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/tsift/issues/32
+
+Fixed and closed. Commit `4551137` adds byte-faithful `source-read --style raw` ranges for rewrites, removes envelope/budget truncation from that path, makes whole-file rewrites request all lines, and reports clipped-line counts in annotated preview modes. A rewritten 119-line source window is byte-identical to the same `sed` range (`cmp` exit 0).
+
+The combined branch was pushed to `main`; `origin/main` resolves to `4551137766a454fb612681fdb36c8b385e9b342c`. GitHub reports Issues #30, #31, and #32 as `CLOSED / COMPLETED`, each with a fix comment. CI run [39835340283](https://github.com/btakita/tsift/actions/runs/39835340283) started for the pushed SHA and was still in progress at closeout; the local authoritative suite is green, so the turn does not wait on that asynchronous run. Release/publish remains a separate queued item.
+
+- Changed paths: `packages/tsift-cli/src/cli.rs`, `packages/tsift-cli/src/commands/digests.rs`, `packages/tsift-cli/src/lib.rs`, `packages/tsift-cli/src/rewrite.rs`, `packages/tsift-cli/tests/exit_code.rs`, `packages/tsift-sim-world/tests/sim_world.rs`, `specs/digests-sessions.md`, and `specs/release-integration.md`; this session document records the coordinated result.
+- Commands: three fenced agent-doc queue claims and isolated Codex subagents; targeted Cargo tests in each worktree; combined `tsift digest-runner --kind test --shell-command 'make check'`; `cargo install --path .`; live `tsift rewrite`, `session-digest`, raw-window `cmp`, `git push`, `gh issue comment/close/view`, and `gh run list` checks.
+- Verification: every worker's targeted tests and full `make check` passed; the combined `make check` passed with exit 0, 5,235 captured lines, and zero failures (`tart-d52a2b037a`); `git diff --check` passed; the integration worktree is clean; the installed binary exercises all three corrected repros. `make check-fast` and `make install` are not defined targets on current `main`, so the full suite and `cargo install --path .` were used.
+- Confidence: high.
+- Escalation: none. No follow-up work was reported by the subagents; release/publish is intentionally not part of this fix cycle.
+<!-- agent:boundary:b8a000d9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#issuesopengithub]~~
-- ⏭️ #gh-fix https://github.com/btakita/tsift/issues/30
-- ⏭️ #gh-fix https://github.com/btakita/tsift/issues/31
-- ⏭️ #gh-fix https://github.com/btakita/tsift/issues/32
+- ~~#gh-fix https://github.com/btakita/tsift/issues/30~~
+- ~~#gh-fix https://github.com/btakita/tsift/issues/31~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/tsift/issues/32~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 release + publish: include Issue 30-32
 <!-- /agent:queue -->
 <!--

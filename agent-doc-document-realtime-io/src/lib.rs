@@ -14438,7 +14438,7 @@ mod tests {
     fn acknowledged_operator_cut_short_circuits_retained_response_reapply() {
         let baseline = concat!(
             "<!-- agent:exchange -->\n❯ Question.\n<!-- /agent:exchange -->\n",
-            "<!-- agent:queue go -->\n- do [#deleted]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue go -->\n- 📥 do [#deleted]\n<!-- /agent:queue -->\n",
         );
         let target = baseline.replace(
             "<!-- /agent:exchange -->",
@@ -14446,7 +14446,7 @@ mod tests {
         );
         let operator_cut = target
             .replace("❯ Question.\n", "❯ Question.\n❯ New prompt.\n")
-            .replace("- do [#deleted]\n", "");
+            .replace("- 📥 do [#deleted]\n", "");
         let (_dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-acknowledged-operator-cut-no-reapply";
         seed_reliable_sync_open(&file, identity);
@@ -17807,7 +17807,7 @@ mod tests {
             "❯ Original prompt.\n",
             "<!-- agent:boundary:base -->\n",
             "<!-- /agent:exchange -->\n",
-            "<!-- agent:queue -->\n- do [#deleted]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- 📥 do [#deleted]\n<!-- /agent:queue -->\n",
         );
         let response_target = editor_base.replace(
             "<!-- agent:boundary:base -->",
@@ -17818,7 +17818,7 @@ mod tests {
                 "❯ Original prompt.\n",
                 "❯ Original prompt.\n❯ Prompt typed after socket delivery.\n",
             )
-            .replace("- do [#deleted]\n", "");
+            .replace("- 📥 do [#deleted]\n", "");
         let (_dir, file, _canonical) = temp_doc(editor_base);
         let identity = "test-ack-pending-semantic-response-settlement";
         seed_reliable_sync_open(&file, identity);

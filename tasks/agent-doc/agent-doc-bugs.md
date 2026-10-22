@@ -23,11 +23,10 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published release: [v0.35.536](https://github.com/btakita/agent-doc/releases/tag/v0.35.536), published on GitHub at 2026-10-21 18:37:51 UTC (15 assets); PyPI 0.35.536 followed at 2026-10-21 18:38:38 UTC and passed clean-install verification. Release commit c7cab9758a. Published JetBrains packages: 0.2.765 (classic), 0.2.766 (IDE 262), and 0.2.767 (IDE 263); VS Code 0.2.83. The exact release tree passed the 11,387-test full gate and the separate real-tmux gate and is installed locally; one active mid-cycle native reload is deferred to its next idle boundary.
+Latest published release: [v0.35.537](https://github.com/btakita/agent-doc/releases/tag/v0.35.537), published on GitHub at 2026-10-22 00:13:39 UTC with 17 assets; PyPI 0.35.537 followed and passed clean-install verification. Release commit ac8ad5c3cd. Published editor packages: JetBrains classic 0.2.770, JetBrains 262 0.2.771, JetBrains 263 0.2.772, and VS Code 0.2.83. Main is now b3f985e863 with the post-release exact-pane Clear Session Context fix; that mainline build is tested and installed locally.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -55,6 +54,10 @@ Then the controller/tmux layer compounded it: it treated that uncertain editor p
 - Controller/tmux: converted that guess into actual pane placement and retained it.
 
 The ban applies to both layers: the editor must not invent a column, and tmux must not derive pane order from unknown or partial editor evidence.
+
+### Re: Subagent completed: `subagent:unique_request_ids` returned work for queue item “api.md has 2 subagent questions with the same id `[#subagent-operator-request]`. The ids should be unique. Can you include this fix into `release + publish: include 340-343`.? sdk-dev.md also has duplicate ids `[#subagent-operator-request]` for subagent question prompts.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=7bd13e8d1eeab9b45359f3a554ed3e01d4daf09d7eec1fa4a3090f5b650185dd -->
 > **Chat prompt (#chatprompt):** "pre-guess", why are we guessing at all. we should not be guessing
 
 > **Chat prompt (#chatprompt):** ban guessing
@@ -128,6 +131,74 @@ Verification: the exact v0.35.537 candidate passed `make check` (11,373 Rust tes
 > **Queue prompt:** api.md has 2 subagent questions with the same id `[#subagent-operator-request]`. The ids should be unique. Can you include this fix into `release + publish: include 340-343`.? sdk-dev.md also has duplicate ids `[#subagent-operator-request]` for subagent question prompts.
 
 > **Queue prompt:** If I interrupt a run, Clear Session Context does not work the first time. Sometimes it works the second time. In sdk-demo.md, it did not work the second or third time.
+### Re: recovered response
+
+The primary guess was the **editor layout**.
+
+When a selection event arrived before complete visible-layout evidence, the plugin guessed which editor column the newly selected document belonged to by replacing the previously focused column.
+
+Then the controller/tmux layer compounded it: it treated that uncertain editor projection as structural input and folded it against retained tmux pane order. So:
+
+- Editor plugin: guessed a document’s column.
+- Controller/tmux: converted that guess into actual pane placement and retained it.
+
+The ban applies to both layers: the editor must not invent a column, and tmux must not derive pane order from unknown or partial editor evidence.
+> **Chat prompt (#chatprompt):** "pre-guess", why are we guessing at all. we should not be guessing
+
+> **Chat prompt (#chatprompt):** ban guessing
+
+> **Chat prompt (#chatprompt):** What were you guessing about? The editor layout or the tmux layout?
+
+> **Chat prompt (#chatprompt):** Why does the editor need to guess when the plugin is running in the editor?
+
+> **Chat prompt (#chatprompt):** The frontend should be the source of truth when the editor is connected. The backend should effect the tmux pane layout.
+
+> **Chat prompt (#chatprompt):** So why do we need to guess again?
+
+> **Chat prompt (#chatprompt):** Why does the backend need to have a projected layout?
+
+> **Chat prompt (#chatprompt):** How long does it take for the frontend to project to the backend? What happens before the backend receives the projection?
+
+> **Chat prompt (#chatprompt):** When the backend guessed incorrectly, why did the recovery not happen? Even with Sync Tmux Layout
+
+> **Chat prompt (#chatprompt):** subagent: fix: • Blocked by hook
+>   └ Session persistence continuation, not a refusal or error: agent-doc Stop hook opened successor cycle cycle-
+> 1792624058142 for fresh post-commit session work in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md.
+> The previous closing assistant text belongs to committed predecessor cycle-1792623126838 and was deliberately not
+> captured. Active prompt: "I merged https://github.com/haiven-dev/haiven-api/pull/740 into main. Will the Release Please
+> run?". Continue THIS turn in-pane, answer that prompt, and persist through the normal agent-doc closeout. Do not send
+> the final answer yet.
+
+> **Chat prompt (#chatprompt):** subagent: fix: • Blocked by hook
+>   └ Session persistence continuation, not a refusal or error: agent-doc Stop hook opened successor cycle cycle-
+> 1792624058142 for fresh post-commit session work in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md.
+> The previous closing assistant text belongs to committed predecessor cycle-1792623126838 and was deliberately not
+> captured. Active prompt: "I merged https://github.com/haiven-dev/haiven-api/pull/740 into main. Will the Release Please
+> run?". Continue THIS turn in-pane, answer that prompt, and persist through the normal agent-doc closeout. Do not send
+> the final answer yet.
+
+### Re: layout authority, recovered prompts, and release handoff — gpt-5 · 2026-10-21T21:26:19-04:00
+
+The duplicated prompt/recovery block resolves to one consistent rule: **do not guess**.
+
+While an editor frontend is connected, its exact visible editor layout is the sole structural source of truth. The plugin must not invent a column, and the backend must not infer a competing editor layout. The backend’s “projected layout” is only a durable desired-state copy of the exact frontend snapshot so asynchronous tmux actions, retries, and convergence checks have a generation-fenced target. Before the first exact snapshot arrives, structural tmux action is suppressed; focus and liveness signals remain non-structural.
+
+The projection delay is transport scheduling, not an authority gap that permits guessing. Remote Dev uses a 75 ms debounce followed by the next EDT/Fleet RPC opportunity; initial schema authority can take up to 5 seconds. Classic local JetBrains publishes on the next EDT/background-socket opportunity, with a 12 ms focus micro-coalesce. Failed deliveries retry at 100/200/400/800/1600/2000 ms.
+
+The old recovery failed because the plugin recovered the right order but labelled it uncertain. The controller then folded that uncertainty against the already-corrupt retained order and recreated the wrong target. **Sync Tmux Layout** started a new generation but reused the same faulty fold, so it converged successfully to the same wrong layout. v0.35.537 removes that path: exact frontend state replaces stale target state, and unknown/partial evidence cannot move panes.
+
+The pasted `Blocked by hook` successor-cycle case is also addressed in v0.35.537. When a ready supervisor exists, Stop lets the predecessor turn exit and the reactive steering wake dispatches the fresh prompt; the in-pane successor fallback is retained only when no ready supervisor can be proven. That removes the misleading healthy-path `Blocked by hook` presentation.
+
+The two worker completions are reconciled:
+
+- Unique operator-request IDs are already integrated as `8972650c46` and are included in v0.35.537. The later worker commit `12ca8cd22b` is duplicate patch evidence, so it does not need another cherry-pick.
+- Interrupted **Clear Session Context** now retires state on the authoritative document-actor pane in `b3f985e863`. That fix is tested and installed on main, but it is post-v0.35.537 and therefore belongs in the next release.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** dispatched to worker `/root/release_publish_538` under claim `subagent:release_publish_538`, generation 1. It is auditing the post-v0.35.537 mainline and preparing the release batch in an isolated worktree; the coordinator will integrate its report and own the single install/release/publish boundary.
+
+The exchange is over the accretion warning threshold (179 lines), but the queue is active, so I am keeping the drain moving rather than compacting mid-claim.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -136,13 +207,7 @@ Verification: the exact v0.35.537 candidate passed `make check` (11,373 Rust tes
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/340~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/341~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/342~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/343: Make sure all layers have the correct tmux pane behavior.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: include 340-343.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~api.md has 2 subagent questions with the same id `[#subagent-operator-request]`. The ids should be unique. Can you include this fix into `release + publish: include 340-343`.? sdk-dev.md also has duplicate ids `[#subagent-operator-request]` for subagent question prompts.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~If I interrupt a run, Clear Session Context does not work the first time. Sometimes it works the second time. In sdk-demo.md, it did not work the second or third time.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Queue: Issues

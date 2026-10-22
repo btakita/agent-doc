@@ -12,6 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#repo': 'https://github.com/btakita/agent-doc'
+queue: go
 ---
 
 ## Status
@@ -41,7 +42,7 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- Support grok build: Add backlog + queue items
+- 🟡 [#subagent:grok_backlog#1] Support grok build: Add backlog + queue items
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -312,8 +312,8 @@ const ORPHAN_DOC: &str = concat!(
     "---\nagent_doc_session: binaryownedcli\nagent_doc_format: template\nqueue_active: true\n---\n\n",
     "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
     "<!-- agent:queue auto -->\n",
-    "- do [#orphangone]\n",
-    "- do [#liveone]\n",
+    "- 📥 do [#orphangone]\n",
+    "- 📥 do [#liveone]\n",
     "<!-- /agent:queue -->\n\n",
     "<!-- agent:backlog -->\n",
     "- [ ] [#liveone] still open and drainable\n",
@@ -341,7 +341,7 @@ fn queue_consume_id_converges_after_retention_and_succeeds() {
     assert_retained_then_converged(&file, awaits, result);
     let text = authority_text(&file);
     assert!(text.contains("~~do [#orphangone]~~"), "{text}");
-    assert!(text.contains("- do [#liveone]\n"), "{text}");
+    assert!(text.contains("- 📥 do [#liveone]\n"), "{text}");
     // The strike's snapshot sync runs after the converged write, so the next
     // preflight does not read the binary's strike as operator input.
     let baseline = agent_doc_snapshot_io::load_document_baseline(&file)

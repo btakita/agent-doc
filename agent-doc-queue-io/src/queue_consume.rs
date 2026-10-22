@@ -1605,7 +1605,15 @@ pub fn strike_orphan_id_backed_queue_head(
         None => None,
     };
     let base_hash = agent_doc_hash::content_hash(&content);
-    let strike_ops = queue_consume_node_ops(&keys);
+    // A lifecycle projection is derived, not terminal content. A bare
+    // structural `consume` would wrap the visible marker inside the strike
+    // (`~~📥 ...~~`) even though the full-text target correctly removes it.
+    // Carry the exact terminal node text through a replace op so attached and
+    // detached writers converge on the same marker-free tombstone.
+    let mut strike_ops = node_replace_ops_from_diff(&content, &new_document, "queue")?;
+    if strike_ops.is_empty() {
+        strike_ops = queue_consume_node_ops(&keys);
+    }
     effects
         .converge_structural_ops(file, &strike_ops, &content, "orphan_id_head_strike")
         .context("orphan strike: failed to write document")?;

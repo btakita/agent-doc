@@ -1023,6 +1023,7 @@ pub fn is_noise_freeform_line(line: &str) -> bool {
 /// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to
 /// lowercase. Returns `None` for prompts that do not reference an id.
 fn do_prompt_id(text: &str) -> Option<String> {
+    let text = agent_doc_document::queue_projection::strip_priority_markers(text);
     let marker = text.find('#')?;
     let id: String = text[marker + 1..]
         .chars()
@@ -1611,6 +1612,81 @@ pub fn project_prompt_lifecycle_markers(
         "queue lifecycle marker projection changed non-marker row structure"
     );
     Ok(Some((projected, reparsed)))
+}
+
+/// Project request-linked operator actions (`🙋 [#id]`) without changing queue
+/// identity or the mutually-exclusive worker lifecycle marker. `actions` holds
+/// `(queue_item, request_id)` pairs captured with the closeout; an existing
+/// annotation is retained only while its same-id `agent:todo` row is open.
+pub fn project_prompt_operator_actions(
+    body: &str,
+    actions: &[(String, String)],
+    open_todo_ids: &std::collections::HashSet<String>,
+) -> Result<Option<(String, Vec<QueueEntry>)>> {
+    let spans = parse_spans(body)?;
+    let entries = spans
+        .iter()
+        .map(|(entry, _)| entry.clone())
+        .collect::<Vec<_>>();
+    let Some(marked_entries) = set_prompt_operator_actions(&entries, actions, open_todo_ids) else {
+        return Ok(None);
+    };
+    validate_in_progress_marker_projection(&entries, &marked_entries)?;
+
+    let mut projected = body.to_string();
+    for ((before, range), after) in spans.iter().zip(&marked_entries).rev() {
+        if before != after {
+            projected.replace_range(range.clone(), &render(std::slice::from_ref(after)));
+        }
+    }
+    let reparsed = parse(&projected)?;
+    validate_in_progress_marker_projection(&entries, &reparsed)?;
+    anyhow::ensure!(
+        reparsed == marked_entries,
+        "queue operator-action projection changed non-marker row structure"
+    );
+    Ok(Some((projected, reparsed)))
+}
+
+pub fn set_prompt_operator_actions(
+    entries: &[QueueEntry],
+    actions: &[(String, String)],
+    open_todo_ids: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
+    let mut updated = entries.to_vec();
+    let mut changed = false;
+    for entry in &mut updated {
+        let (prompt, live) = match entry {
+            QueueEntry::Prompt(prompt) => (prompt, true),
+            QueueEntry::Completed(prompt) => (prompt, false),
+            _ => continue,
+        };
+        let mut ids = agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
+            .into_iter()
+            .filter(|id| open_todo_ids.contains(id))
+            .collect::<Vec<_>>();
+        if live {
+            let identity = crate::queue_claim::claim_identity(&prompt.text);
+            for (queue_item, request_id) in actions {
+                let request_id = request_id.to_ascii_lowercase();
+                if open_todo_ids.contains(&request_id)
+                    && crate::queue_claim::claim_identity(queue_item) == identity
+                    && !ids.contains(&request_id)
+                {
+                    ids.push(request_id);
+                }
+            }
+        } else {
+            ids.clear();
+        }
+        let projected =
+            agent_doc_document::queue_projection::apply_operator_action_ids(&prompt.text, &ids);
+        if projected != prompt.text {
+            prompt.text = projected;
+            changed = true;
+        }
+    }
+    changed.then_some(updated)
 }
 
 fn without_lifecycle_marker(entry: &QueueEntry) -> QueueEntry {
@@ -8747,6 +8823,26 @@ mod tests {
             prompt_texts(body),
             vec!["alpha.md issue\n```\nlog a\n```\nplease look at this"]
         );
+    }
+
+    #[test]
+    fn operator_action_projection_links_queue_and_open_todo_without_hiding_worker_state() {
+        let body = "- 🚧 sdk-demo.md queue annotation fix\n- another task\n";
+        let id = "subagent-operator-request-sdk-demo".to_string();
+        let actions = vec![("sdk-demo.md queue annotation fix".to_string(), id.clone())];
+        let open = std::collections::HashSet::from([id.clone()]);
+        let (projected, _) = project_prompt_operator_actions(body, &actions, &open)
+            .unwrap()
+            .expect("annotation added");
+        assert_eq!(
+            projected,
+            "- 🙋 [#subagent-operator-request-sdk-demo] 🚧 sdk-demo.md queue annotation fix\n- another task\n"
+        );
+        let (cleared, _) =
+            project_prompt_operator_actions(&projected, &[], &std::collections::HashSet::new())
+                .unwrap()
+                .expect("completed todo clears annotation");
+        assert_eq!(cleared, body);
     }
 }
 

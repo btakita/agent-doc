@@ -47,6 +47,12 @@ pub const LOST_MARKER: &str = "⚠️";
 /// generation. The coordinator must reconcile/close the row; it is not fresh
 /// pending work (`#queueworkevidence`).
 pub const RECONCILING_MARKER: &str = "🔄";
+/// A concrete operator action blocks this queue head. Unlike the mutually
+/// exclusive lifecycle markers, this annotation is orthogonal: a worker may
+/// still be running (`🚧`) while it waits for the operator's answer. The
+/// following `[#id]` links the queue row to the request packet in
+/// `agent:exchange` and the operator-owned row in `agent:todo`.
+pub const OPERATOR_ACTION_MARKER: &str = "🙋";
 /// Visible projection marker for a queue head the binary has SKIPPED: it was
 /// dispatched, came back unconsumed, and the queue advanced past it to a
 /// non-dependent drainable head (`#orphanqhead` / `#queueskip`). Like `🚧`, it is
@@ -133,6 +139,118 @@ fn strip_lifecycle_prefix(text: &str) -> Option<&str> {
         .find_map(|marker| text.strip_prefix(marker))
 }
 
+fn strip_operator_action_prefix(text: &str) -> Option<(&str, &str)> {
+    let after_marker = text.strip_prefix(OPERATOR_ACTION_MARKER)?.trim_start();
+    let after_open = after_marker.strip_prefix("[#")?;
+    let (id, rest) = after_open.split_once(']')?;
+    let mut chars = id.chars();
+    let first = chars.next()?;
+    if !first.is_ascii_alphanumeric() || !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-') {
+        return None;
+    }
+    Some((id, rest))
+}
+
+/// Request ids carried by leading `🙋 [#id]` queue annotations.
+pub fn operator_action_ids(text: &str) -> Vec<String> {
+    let mut rest = text.trim_start();
+    let mut ids = Vec::new();
+    loop {
+        if let Some((id, after)) = strip_operator_action_prefix(rest) {
+            let id = id.to_ascii_lowercase();
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = strip_lifecycle_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = PRIORITIZED_MARKERS
+            .iter()
+            .chain(AGENT_PRIORITIZED_MARKERS.iter())
+            .find_map(|marker| rest.strip_prefix(marker))
+        {
+            rest = after.trim_start();
+            continue;
+        }
+        break;
+    }
+    ids
+}
+
+fn strip_operator_action_annotations_preserving_markers(text: &str) -> String {
+    let mut rest = text.trim();
+    let mut kept_prefixes: Vec<String> = Vec::new();
+    loop {
+        let trimmed = rest.trim_start();
+        if let Some((_, after)) = strip_operator_action_prefix(trimmed) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((marker, after)) = LIFECYCLE_MARKERS
+            .iter()
+            .find_map(|marker| trimmed.strip_prefix(marker).map(|after| (*marker, after)))
+        {
+            kept_prefixes.push(marker.to_string());
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((marker, after)) = PRIORITIZED_MARKERS
+            .iter()
+            .chain(AGENT_PRIORITIZED_MARKERS.iter())
+            .find_map(|marker| trimmed.strip_prefix(marker).map(|after| (*marker, after)))
+        {
+            kept_prefixes.push(marker.to_string());
+            rest = after.trim_start();
+            continue;
+        }
+        rest = trimmed;
+        break;
+    }
+    if !rest.trim().is_empty() {
+        kept_prefixes.push(rest.trim().to_string());
+    }
+    kept_prefixes.join(" ")
+}
+
+/// Replace the leading operator-action annotations while preserving worker
+/// lifecycle and priority projections. `ids` are normalized and deduplicated.
+pub fn apply_operator_action_ids(text: &str, ids: &[String]) -> String {
+    let content_start = text.len() - text.trim_start().len();
+    let leading = &text[..content_start];
+    let (content, trailing) = split_trailing_whitespace(&text[content_start..]);
+    let mut normalized = Vec::new();
+    for id in ids {
+        let id = id.trim().trim_start_matches('#').to_ascii_lowercase();
+        let mut chars = id.chars();
+        if chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric())
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+            && !normalized.contains(&id)
+        {
+            normalized.push(id);
+        }
+    }
+    let bare = strip_operator_action_annotations_preserving_markers(content);
+    if normalized.is_empty() {
+        return format!("{leading}{bare}{trailing}");
+    }
+    let annotations = normalized
+        .iter()
+        .map(|id| format!("{OPERATOR_ACTION_MARKER} [#{id}]"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if bare.is_empty() {
+        format!("{leading}{annotations}{trailing}")
+    } else {
+        format!("{leading}{annotations} {bare}{trailing}")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueuePromptRow {
     pub text: String,
@@ -168,9 +286,14 @@ pub struct ActiveQueuePromptProjection {
 /// Strip the leading in-progress marker while preserving priority markers.
 pub fn strip_in_progress_marker(text: &str) -> String {
     let mut rest = text.trim();
-    let mut kept_prefixes = Vec::new();
+    let mut kept_prefixes: Vec<String> = Vec::new();
     loop {
         let trimmed = rest.trim_start();
+        if let Some((id, after_marker)) = strip_operator_action_prefix(trimmed) {
+            kept_prefixes.push(format!("{OPERATOR_ACTION_MARKER} [#{id}]"));
+            rest = after_marker.trim_start();
+            continue;
+        }
         if let Some(after_marker) = strip_lifecycle_prefix(trimmed) {
             rest = after_marker.trim_start();
             continue;
@@ -180,7 +303,7 @@ pub fn strip_in_progress_marker(text: &str) -> String {
             .chain(AGENT_PRIORITIZED_MARKERS.iter())
             .find_map(|marker| trimmed.strip_prefix(marker).map(|after| (*marker, after)))
         {
-            kept_prefixes.push(marker);
+            kept_prefixes.push(marker.to_string());
             rest = after_marker.trim_start();
             continue;
         }
@@ -273,6 +396,10 @@ fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
         if rest.starts_with(marker) {
             return true;
         }
+        if let Some((_, after_marker)) = strip_operator_action_prefix(rest) {
+            rest = after_marker.trim_start();
+            continue;
+        }
         if let Some(after_marker) = PRIORITIZED_MARKERS
             .iter()
             .chain(AGENT_PRIORITIZED_MARKERS.iter())
@@ -359,12 +486,14 @@ pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     loop {
         let trimmed = t.trim_start();
-        let stripped = strip_lifecycle_prefix(trimmed).or_else(|| {
-            PRIORITIZED_MARKERS
-                .iter()
-                .chain(AGENT_PRIORITIZED_MARKERS.iter())
-                .find_map(|m| trimmed.strip_prefix(m))
-        });
+        let stripped = strip_lifecycle_prefix(trimmed)
+            .or_else(|| strip_operator_action_prefix(trimmed).map(|(_, rest)| rest))
+            .or_else(|| {
+                PRIORITIZED_MARKERS
+                    .iter()
+                    .chain(AGENT_PRIORITIZED_MARKERS.iter())
+                    .find_map(|m| trimmed.strip_prefix(m))
+            });
         match stripped {
             Some(rest) => t = rest.trim_start(),
             None => break,
@@ -627,6 +756,31 @@ mod tests {
             strip_in_progress_marker("🚧 do [#alpha]"),
             "do [#alpha]",
             "legacy running marker stays compatible"
+        );
+    }
+
+    #[test]
+    fn operator_action_annotation_is_linked_and_orthogonal_to_worker_lifecycle() {
+        let id = "subagent-operator-request-sdk-route".to_string();
+        let annotated = apply_operator_action_ids("🚧 📌 fix sdk demo", std::slice::from_ref(&id));
+        assert_eq!(
+            annotated,
+            "🙋 [#subagent-operator-request-sdk-route] 🚧 📌 fix sdk demo"
+        );
+        assert_eq!(operator_action_ids(&annotated), vec![id]);
+        assert_eq!(strip_priority_markers(&annotated), "fix sdk demo");
+        assert_eq!(
+            apply_lifecycle_marker(&annotated, QueueLifecycleMarker::Reported),
+            "📥 🙋 [#subagent-operator-request-sdk-route] 📌 fix sdk demo"
+        );
+        assert_eq!(
+            apply_operator_action_ids(&annotated, &[]),
+            "🚧 📌 fix sdk demo"
+        );
+        assert_eq!(
+            apply_operator_action_ids("  /clear  ", &[]),
+            "  /clear  ",
+            "a no-op projection preserves literal prompt whitespace"
         );
     }
 

@@ -230,10 +230,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      available. Do not infer an answer from the task, choose on the operator's
      behalf, or convert a chat reply into a tool permission: a protected action
      may be retried only after the harness permission system grants that exact
-     action. The closeout that presents the blocking packet must also use
-     `--todo-add` to record one brief, concrete operator action. When the
-     operator's answer and the worker's result complete it, use `--todo-done`
-     in that completion closeout; do not leave a stale open TODO.
+     action. The closeout derives a same-packet-id todo and projects
+     `🙋 [#request-id]` onto the originating `queue_item`. If supplying the todo
+     explicitly, use `id=<request-id> ...`. When the operator's answer and the
+     worker's result complete it, use `--todo-done <request-id>` in that
+     completion closeout; do not leave a stale open TODO or queue annotation.
 
      Harness transport is capability-specific:
 
@@ -656,9 +657,10 @@ When a closeout opens an `agent:review` gate that `agent:todo` does not mention,
 the write prints `[todo] advisory (#operatortodo)`. If that gate waits on the
 operator, add the TODO next cycle (`--backlog-only --todo-add ...` for a
 tracked-work-only closeout); a gate waiting on CI or a third party needs none.
-A response that presents a blocking `[#subagent-operator-request-<unique-id>]` packet still
-owes `--todo-add` (`#wayposttodo`); if you omit it, the binary derives the todo
-from the packet's `request:` and choices and layers it on the one gated id
+A response that presents a blocking `[#subagent-operator-request-<unique-id>]`
+packet owes a same-id todo (`#wayposttodo`). The binary derives it from the
+packet's `request:` and choices unless `--todo-add` already supplies
+`id=<request-id>`, and links its `queue_item` with `🙋 [#request-id]`
 (`[todo] blocking operator request packet (#packettodo)`).
 Every operator ask in the response needs its own todo: an explicit request
 (`Say \`post\``, `needs your ok`), an unpublished draft path, and each item of

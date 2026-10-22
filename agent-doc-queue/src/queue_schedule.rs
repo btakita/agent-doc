@@ -507,7 +507,15 @@ fn identity(text: &str) -> QueueItemIdentity {
 /// in progress (`🚧`), fenced subagent attempt (`🟡`, `📥`, `⚠️`, `⏭️`), and
 /// awaiting operator (`⏳`). Pin markers (`📌`, `**pin**`, ...) are operator
 /// priority, not drain evidence, and are skipped over.
-const DRAIN_LIFECYCLE_MARKERS: &[&str] = &["🚧", "🟡", "📥", "⚠️", "⏭\u{fe0f}", "⏳"];
+const DRAIN_LIFECYCLE_MARKERS: &[&str] = &[
+    "🚧",
+    "🟡",
+    "📥",
+    "⚠️",
+    "⏭\u{fe0f}",
+    "⏳",
+    agent_doc_document::queue_projection::OPERATOR_ACTION_MARKER,
+];
 
 /// GH #327: whether a live head carries a drain lifecycle marker, i.e. the
 /// pass's drain already picked it up. An operator keystroke state never does.

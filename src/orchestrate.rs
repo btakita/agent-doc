@@ -985,6 +985,7 @@ mod th {
                     todo_edit: Vec::new(),
                     todo_reopen: Vec::new(),
                     todo_remove: Vec::new(),
+                    queue_operator_actions: Vec::new(),
                     queue_completion_ids: Vec::new(),
                     allow_replace_pending: false,
                     pending_only: false,

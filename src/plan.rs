@@ -7,7 +7,8 @@
 //!   snapshot via `diff::compute(file)`.
 //! - Produces an ordered record with prompt targets, execution scope, repo
 //!   actions, required binary commands, pending mutations that must be
-//!   resolved this cycle, a handoff target, and concrete blockers.
+//!   resolved this cycle, a handoff target, concrete blockers, and a compact
+//!   selected-path operation tree.
 //! - Does not fail closed solely on session-accretion heuristics; accretion
 //!   remains advisory while planning still derives prompt targets and actions.
 //! - Downgrades tsift graph evidence collection failures to `manual_packet_only`
@@ -21,6 +22,9 @@
 //!
 //! ## Agentic Contracts
 //! - The plan record is deterministic for a given document + snapshot pair.
+//! - `operation_tree` is binary-owned and selected-path-only: it names the
+//!   blocker decision and ordered executable phases without inviting the
+//!   harness agent to invent or narrate unselected alternatives.
 //! - `handoff=orchestrate` means the skill should execute the emitted
 //!   `agent-doc orchestrate ...` command before attempting a manual response.
 //! - `pending_mutations` captures pre-response pending work that must be
@@ -90,6 +94,34 @@ pub struct DispatchPlan {
     pub blockers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Binary-owned execution order for this plan. The tree contains only the
+    /// selected path through each decision so harness agents do not spend
+    /// context proposing speculative alternatives to the same contract.
+    pub operation_tree: OperationTree,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationTree {
+    pub policy: String,
+    pub root: OperationNode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationNode {
+    pub id: String,
+    pub operation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<OperationCondition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<OperationNode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationCondition {
+    pub expression: String,
+    pub result: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -243,6 +275,16 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
                 Vec::new(),
             ),
         };
+        let required_commands = finalize_placeholder_commands(file, &fm, &[]);
+        let blockers_for_tree = blockers.clone();
+        let operation_tree = build_operation_tree(
+            &[],
+            &[],
+            &required_commands,
+            &[],
+            HandoffTarget::None,
+            &blockers_for_tree,
+        );
         return Ok(DispatchPlan {
             prompt_targets: Vec::new(),
             graph_evidence: None,
@@ -261,11 +303,12 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             tsift_context: tsift_context_plan(file, &content, &[]),
             execution_scope: ExecutionScope::Normal,
             repo_actions: Vec::new(),
-            required_commands: finalize_placeholder_commands(file, &fm, &[]),
+            required_commands,
             pending_mutations: Vec::new(),
             handoff: HandoffTarget::None,
             blockers,
             warnings,
+            operation_tree,
         });
     };
 
@@ -459,6 +502,15 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         required_commands.extend(finalize_placeholder_commands(file, &fm, &pending_mutations));
     }
 
+    let operation_tree = build_operation_tree(
+        &prompt_targets,
+        &repo_actions,
+        &required_commands,
+        &pending_mutations,
+        handoff,
+        &blockers,
+    );
+
     Ok(DispatchPlan {
         prompt_targets,
         graph_evidence,
@@ -482,7 +534,169 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         handoff,
         blockers: std::mem::take(&mut blockers),
         warnings,
+        operation_tree,
     })
+}
+
+fn build_operation_tree(
+    prompt_targets: &[String],
+    repo_actions: &[String],
+    required_commands: &[String],
+    pending_mutations: &[PendingMutationPlan],
+    handoff: HandoffTarget,
+    blockers: &[String],
+) -> OperationTree {
+    let gate_passed = blockers.is_empty();
+    let selected_branch = if gate_passed {
+        OperationNode {
+            id: "path.execute".to_string(),
+            operation: "sequence".to_string(),
+            detail: Some(
+                "Execute the binary-selected phases in order; do not expand alternative paths."
+                    .to_string(),
+            ),
+            condition: None,
+            children: selected_operation_phases(
+                prompt_targets,
+                repo_actions,
+                required_commands,
+                pending_mutations,
+                handoff,
+            ),
+        }
+    } else {
+        OperationNode {
+            id: "path.stop".to_string(),
+            operation: "stop".to_string(),
+            detail: Some(blockers.join(" | ")),
+            condition: None,
+            children: Vec::new(),
+        }
+    };
+
+    OperationTree {
+        policy: "selected_path_only".to_string(),
+        root: OperationNode {
+            id: "cycle".to_string(),
+            operation: "evaluate_cycle".to_string(),
+            detail: None,
+            condition: None,
+            children: vec![OperationNode {
+                id: "gate.blockers".to_string(),
+                operation: "evaluate".to_string(),
+                detail: None,
+                condition: Some(OperationCondition {
+                    expression: "blockers.is_empty()".to_string(),
+                    result: gate_passed,
+                }),
+                children: vec![selected_branch],
+            }],
+        },
+    }
+}
+
+fn selected_operation_phases(
+    prompt_targets: &[String],
+    repo_actions: &[String],
+    required_commands: &[String],
+    pending_mutations: &[PendingMutationPlan],
+    handoff: HandoffTarget,
+) -> Vec<OperationNode> {
+    let mut phases = Vec::new();
+    push_operation_phase(
+        &mut phases,
+        "prompts",
+        "select_prompt_target",
+        prompt_targets,
+    );
+
+    if !matches!(handoff, HandoffTarget::None) {
+        phases.push(OperationNode {
+            id: "phase.handoff".to_string(),
+            operation: "perform_handoff".to_string(),
+            detail: Some(format!("{handoff:?}").to_ascii_lowercase()),
+            condition: None,
+            children: required_commands
+                .iter()
+                .enumerate()
+                .map(|(index, detail)| OperationNode {
+                    id: format!("required_commands.{index}"),
+                    operation: "run_required_command".to_string(),
+                    detail: Some(detail.clone()),
+                    condition: None,
+                    children: Vec::new(),
+                })
+                .collect(),
+        });
+        return phases;
+    }
+
+    push_operation_phase(
+        &mut phases,
+        "repo_actions",
+        "execute_repo_action",
+        repo_actions,
+    );
+
+    if !pending_mutations.is_empty() {
+        phases.push(OperationNode {
+            id: "phase.pending_mutations".to_string(),
+            operation: "resolve_pending_mutations".to_string(),
+            detail: None,
+            condition: None,
+            children: pending_mutations
+                .iter()
+                .enumerate()
+                .map(|(index, mutation)| OperationNode {
+                    id: format!("pending_mutations.{index}"),
+                    operation: match mutation.kind {
+                        PendingMutationKind::ResolveExisting => "resolve_existing",
+                        PendingMutationKind::ExpectAdd => "expect_add",
+                    }
+                    .to_string(),
+                    detail: Some(format!("{}: {}", mutation.id, mutation.text)),
+                    condition: None,
+                    children: Vec::new(),
+                })
+                .collect(),
+        });
+    }
+
+    push_operation_phase(
+        &mut phases,
+        "required_commands",
+        "run_required_command",
+        required_commands,
+    );
+    phases
+}
+
+fn push_operation_phase(
+    phases: &mut Vec<OperationNode>,
+    phase_id: &str,
+    leaf_operation: &str,
+    details: &[String],
+) {
+    if details.is_empty() {
+        return;
+    }
+    phases.push(OperationNode {
+        id: format!("phase.{phase_id}"),
+        operation: leaf_operation.to_string(),
+        detail: None,
+        condition: None,
+        children: details
+            .iter()
+            .enumerate()
+            .map(|(index, detail)| OperationNode {
+                id: format!("{phase_id}.{index}"),
+                operation: leaf_operation.to_string(),
+                detail: Some(detail.clone()),
+                condition: None,
+                children: Vec::new(),
+            })
+            .collect(),
+    });
 }
 
 fn orchestration_mode_arg(mode: diff::OrchestrationRequestMode) -> &'static str {
@@ -1149,6 +1363,91 @@ mod tests {
             text: format!("item {id}"),
             target_files: Vec::new(),
         }
+    }
+
+    #[test]
+    fn operation_tree_emits_only_the_selected_unblocked_path_in_phase_order() {
+        let tree = build_operation_tree(
+            &["fix the queue".to_string()],
+            &["edit parser".to_string()],
+            &["agent-doc finalize plan.md --stream".to_string()],
+            &[resolve_existing("bug-1")],
+            HandoffTarget::None,
+            &[],
+        );
+
+        assert_eq!(tree.policy, "selected_path_only");
+        let gate = &tree.root.children[0];
+        assert_eq!(
+            gate.condition,
+            Some(OperationCondition {
+                expression: "blockers.is_empty()".to_string(),
+                result: true,
+            })
+        );
+        let selected = &gate.children[0];
+        assert_eq!(selected.id, "path.execute");
+        assert_eq!(
+            selected
+                .children
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "phase.prompts",
+                "phase.repo_actions",
+                "phase.pending_mutations",
+                "phase.required_commands",
+            ]
+        );
+        assert!(
+            serde_json::to_string(&tree)
+                .expect("operation tree json")
+                .contains("selected_path_only")
+        );
+    }
+
+    #[test]
+    fn operation_tree_prunes_work_when_blocked() {
+        let tree = build_operation_tree(
+            &["fix the queue".to_string()],
+            &["edit parser".to_string()],
+            &["agent-doc finalize plan.md --stream".to_string()],
+            &[],
+            HandoffTarget::None,
+            &["security review required".to_string()],
+        );
+
+        let gate = &tree.root.children[0];
+        assert_eq!(
+            gate.condition.as_ref().map(|condition| condition.result),
+            Some(false)
+        );
+        assert_eq!(gate.children.len(), 1);
+        assert_eq!(gate.children[0].id, "path.stop");
+        assert!(gate.children[0].children.is_empty());
+    }
+
+    #[test]
+    fn operation_tree_routes_handoff_without_manual_repo_action_branch() {
+        let tree = build_operation_tree(
+            &["fan out fixes".to_string()],
+            &["edit parser".to_string()],
+            &["agent-doc orchestrate plan.md --mode parallel --from-exchange".to_string()],
+            &[],
+            HandoffTarget::Orchestrate,
+            &[],
+        );
+
+        let phases = &tree.root.children[0].children[0].children;
+        assert_eq!(phases.len(), 2);
+        assert_eq!(phases[0].id, "phase.prompts");
+        assert_eq!(phases[1].id, "phase.handoff");
+        assert!(
+            phases.iter().all(|node| node.id != "phase.repo_actions"),
+            "the orchestrator owns repo actions after handoff"
+        );
+        assert_eq!(phases[1].children[0].operation, "run_required_command");
     }
 
     /// `#planmassdone`: a bulk backlog→queue mirror must not produce a

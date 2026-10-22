@@ -1657,7 +1657,8 @@ fn apply_bound_stop(
             if is_committed_prompt_diff_interruption(&reason)
                 && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
                 && committed_cycle_settled_prompt_debt(file, state)?
-                && let Some(response) = committed_prompt_diff_stop_response(file, &reason)?
+                && let Some(response) =
+                    committed_prompt_diff_stop_response(file, &reason, input.stop_hook_active)?
             {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1738,8 +1739,11 @@ fn apply_bound_stop(
                         // interruption falls through to the plain hand-back
                         // below with capture skipped.
                         if is_committed_prompt_diff_interruption(&reason)
-                            && let Some(response) =
-                                committed_prompt_diff_stop_response(file, &reason)?
+                            && let Some(response) = committed_prompt_diff_stop_response(
+                                file,
+                                &reason,
+                                input.stop_hook_active,
+                            )?
                         {
                             return Ok(response);
                         }
@@ -1782,7 +1786,9 @@ fn apply_bound_stop(
             };
             let display = file.display();
             if input.stop_hook_active {
-                if let Some(response) = committed_prompt_diff_stop_response(file, &reason)? {
+                if let Some(response) =
+                    committed_prompt_diff_stop_response(file, &reason, input.stop_hook_active)?
+                {
                     return Ok(response);
                 }
                 return Ok(StopResponse::RefuseExit {
@@ -2026,7 +2032,25 @@ fn stop_steering_continuation_cycle_is_open(file: &Path) -> Result<bool> {
     }))
 }
 
-fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Option<StopResponse>> {
+fn committed_prompt_diff_stop_response(
+    file: &Path,
+    reason: &str,
+    stop_hook_active: bool,
+) -> Result<Option<StopResponse>> {
+    committed_prompt_diff_stop_response_with(
+        file,
+        reason,
+        stop_hook_active,
+        agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc,
+    )
+}
+
+fn committed_prompt_diff_stop_response_with(
+    file: &Path,
+    reason: &str,
+    stop_hook_active: bool,
+    drain_readiness: impl FnOnce(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
+) -> Result<Option<StopResponse>> {
     if !is_committed_prompt_diff_interruption(reason) {
         return Ok(None);
     }
@@ -2109,6 +2133,44 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
             .or_else(|| prompt_target_from_interruption_reason(reason))
     }
     .unwrap_or_else(|| "the unresolved exchange prompt".to_string());
+    // `#steeringwake`: session-check can surface the same fresh post-commit
+    // steering as `SteeringPending` instead of the clean-session path handled
+    // by `active_session_prompt_requires_writeback_with`. Preserve the same
+    // receiver-first contract here: on the first Stop, a ready supervisor owns
+    // the reactive idle wake, so do not emit Codex's `Blocked by hook` wire
+    // response. A recursive Stop has already handed this work in-pane and must
+    // retain that answer path rather than yielding it away.
+    if !stop_hook_active
+        && let Some(previous_cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file)
+    {
+        let readiness = drain_readiness(file);
+        if let agent_doc_controller::status::SupervisorDrainReadiness::Ready { supervisor_pid } =
+            readiness
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_post_commit_prompt_supervisor_yield previous_cycle_id={} supervisor_pid={} prompt_bytes={} prompt_sha256={} successor_opened=false capture_skipped=true action=allow_exit source=committed_prompt_diff (#steeringwake)",
+                    previous_cycle_id,
+                    supervisor_pid,
+                    prompt.len(),
+                    agent_doc_hash::content_hash(&prompt),
+                ),
+            );
+            return Ok(Some(StopResponse::AllowExit));
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_post_commit_prompt_supervisor_yield_unavailable previous_cycle_id={} supervisor_drain_readiness={} supervisor_pid={} action=continue_in_pane source=committed_prompt_diff (#steeringwake)",
+                previous_cycle_id,
+                readiness.reason(),
+                readiness
+                    .supervisor_pid()
+                    .map_or_else(|| "-".to_string(), |pid| pid.to_string()),
+            ),
+        );
+    }
     Ok(Some(StopResponse::ContinueTurn {
         class: StopContinuationClass::SessionWriteback,
         reason: format!(
@@ -10000,6 +10062,110 @@ Reviewed the gated items.\n\
         );
     }
 
+    /// `#steeringwake`: the committed-prompt-diff branch is selected when
+    /// session-check returns `SteeringPending`, so it must yield to the same
+    /// ready supervisor as the clean-session post-commit prompt path instead of
+    /// surfacing Codex's `Blocked by hook` continuation.
+    #[test]
+    fn stop_yields_committed_prompt_diff_to_ready_supervisor() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        let seeded = fs::read_to_string(&doc).unwrap().replace(
+            "❯ Hello\n<!-- /agent:exchange -->",
+            "❯ Hello\n\n### Re: Hello — gpt-5\n\nInitial response.\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &seeded).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &seeded,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        let predecessor =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: "Answer the recurring review head.".to_string(),
+        })
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        let fresh_prompt = "release + publish latest updates";
+        fs::write(
+            &doc,
+            original.replace(
+                "<!-- /agent:exchange -->",
+                &format!("\n❯ {fresh_prompt}\n<!-- /agent:exchange -->"),
+            ),
+        )
+        .unwrap();
+        invalidate_stop_document_cache();
+
+        let reason = match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message)
+            | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => message,
+            other => panic!("expected committed prompt-diff session-check status, got {other:?}"),
+        };
+        assert!(is_committed_prompt_diff_interruption(&reason), "{reason}");
+
+        let response = committed_prompt_diff_stop_response_with(&doc, &reason, false, |_| {
+            agent_doc_controller::status::SupervisorDrainReadiness::Ready { supervisor_pid: 42 }
+        })
+        .unwrap()
+        .expect("committed prompt diff response");
+
+        assert_eq!(response, StopResponse::AllowExit);
+        let still_predecessor = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("committed predecessor");
+        assert_eq!(still_predecessor.cycle_id, predecessor.cycle_id);
+        assert_eq!(still_predecessor.phase.as_str(), "committed");
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains(fresh_prompt));
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_post_commit_prompt_supervisor_yield")
+                && ops.contains("supervisor_pid=42")
+                && ops.contains("source=committed_prompt_diff")
+                && !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
+            "{ops}"
+        );
+    }
+
     #[test]
     fn stop_reopens_and_closes_prompt_debt_observed_after_cycle_committed() {
         let dir = setup_project();
@@ -10201,7 +10367,7 @@ Reviewed the gated items.\n\
         let doc = write_template_doc(&dir);
         let reason = "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), repaired committed historical committed_capture snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: content_edit: Even if formal logic code is not directly understandable, agents should explain the invariants.\nThis is realtime operator steering, not a failed closeout";
 
-        let response = committed_prompt_diff_stop_response(&doc, reason)
+        let response = committed_prompt_diff_stop_response(&doc, reason, true)
             .unwrap()
             .expect("content_edit steering after a commit must be handed back in-pane");
         assert!(
@@ -10253,7 +10419,7 @@ Reviewed the gated items.\n\
         );
         assert!(is_committed_prompt_diff_interruption(&reason), "{reason}");
         assert_eq!(
-            committed_prompt_diff_stop_response(&doc, &reason).unwrap(),
+            committed_prompt_diff_stop_response(&doc, &reason, false).unwrap(),
             Some(StopResponse::AllowExit),
             "claimed worker steering must not be re-admitted as coordinator work"
         );
@@ -10264,7 +10430,7 @@ Reviewed the gated items.\n\
         );
 
         agent_doc_queue_io::queue_claim::release(&doc, prompt).unwrap();
-        let response = committed_prompt_diff_stop_response(&doc, &reason)
+        let response = committed_prompt_diff_stop_response(&doc, &reason, false)
             .unwrap()
             .expect("released prompt must re-enter");
         assert!(
@@ -10331,7 +10497,7 @@ Reviewed the gated items.\n\
         let reason = format!(
             "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started; prompt_target: {prompt}"
         );
-        let response = committed_prompt_diff_stop_response(&doc, &reason)
+        let response = committed_prompt_diff_stop_response(&doc, &reason, false)
             .unwrap()
             .expect("an unpersisted reported result must be handed back");
         let StopResponse::ContinueTurn { reason, .. } = &response else {
@@ -10368,7 +10534,7 @@ Reviewed the gated items.\n\
             agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
         )
         .unwrap();
-        let response = committed_prompt_diff_stop_response(&doc, &reason_for(prompt))
+        let response = committed_prompt_diff_stop_response(&doc, &reason_for(prompt), false)
             .unwrap()
             .expect("requeued line re-enters");
         let StopResponse::ContinueTurn { reason, .. } = &response else {
@@ -10419,7 +10585,7 @@ Reviewed the gated items.\n\
         let reason = format!(
             "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started; prompt_target: {claimed}"
         );
-        let response = committed_prompt_diff_stop_response(&doc, &reason)
+        let response = committed_prompt_diff_stop_response(&doc, &reason, false)
             .unwrap()
             .expect("unclaimed work must re-enter");
         assert!(

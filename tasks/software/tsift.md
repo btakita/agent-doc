@@ -12,14 +12,13 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#repo': 'https://github.com/btakita/agent-doc'
-queue: go
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-complete — Issues #30–#32 are fixed on main, locally verified, installed, and closed on GitHub; CI run 39835340283 is in progress; release/publish remains queued
+complete — Issues #30–#32 are fixed and closed; v0.1.108 is published on GitHub, crates.io, and npm; release workflow succeeded and local tsift is v0.1.108
 <!-- /agent:status -->
 
 ## Spec
@@ -285,17 +284,33 @@ The combined branch was pushed to `main`; `origin/main` resolves to `4551137766a
 - Verification: every worker's targeted tests and full `make check` passed; the combined `make check` passed with exit 0, 5,235 captured lines, and zero failures (`tart-d52a2b037a`); `git diff --check` passed; the integration worktree is clean; the installed binary exercises all three corrected repros. `make check-fast` and `make install` are not defined targets on current `main`, so the full suite and `cargo install --path .` were used.
 - Confidence: high.
 - Escalation: none. No follow-up work was reported by the subagents; release/publish is intentionally not part of this fix cycle.
-<!-- agent:boundary:b8a000d9 -->
+### Re: Subagent completed: `subagent:issue32` returned work for queue item “#gh-fix https://github.com/btakita/tsift/issues/32” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=c83f131589cc6023648704fc36a061a6b835e713aa324151cb1cff191a404c2e -->
+> **Chat prompt (#chatprompt:bb85d43d9d1f):** Fix these issues in subagents
+> **Queue prompt:** release + publish: include Issue 30-32
+
+### Re: release + publish: include Issue 30-32 — gpt-5 · 2026-10-22T15:42-04:00
+
+Released and published **tsift v0.1.108**, including the fixes for Issues #30–#32.
+
+- Release commit: `f734e1d6ebfd55049e935b8010cee1b41512ce29` (`chore: prepare v0.1.108 release`), pushed to `main` and tagged `v0.1.108`.
+- GitHub Release: [v0.1.108](https://github.com/btakita/tsift/releases/tag/v0.1.108), published with macOS ARM64, Linux x86_64, and Windows x86_64 archives plus checksums.
+- Release workflow: [39837101373](https://github.com/btakita/tsift/actions/runs/39837101373) completed with `success`; verification, all three platform builds, GitHub publication, crates.io publication, and npm publication passed.
+- Registries: crates.io reports `tsift = "0.1.108"` and npm reports `opencode-tsift@0.1.108`.
+- Local installation: `cargo install --path .` replaced v0.1.107 with v0.1.108; `tsift --version` reports `tsift 0.1.108`.
+
+- Changed paths: `VERSIONS.md` plus the 49 tracked version-projection files across the root crate/workspace manifests, package manifests and fixtures, npm/OpenCode package metadata, skills, and release/version documentation. No additional behavioral source changes were needed after the three fix commits (`c4b641e`, `f26173f`, `4551137`).
+- Commands: release version projection and validation, `tsift digest-runner --kind test --shell-command 'make check'`, `git diff --cached --check`, release commit/push/tag, `gh run watch/view`, `gh release view`, `cargo search tsift`, `npm view opencode-tsift version`, `cargo install --path .`, and `tsift --version`.
+- Verification: release-prep `make check` exited 0 with 5,301 captured lines and zero failures (`tart-8aec30662d`); all 27 Cargo packages and npm metadata resolved to 0.1.108 before commit; the release workflow concluded successfully at the release commit; GitHub exposes six release assets; crates.io and npm independently expose 0.1.108; the release worktree is clean.
+- Confidence: high.
+- Escalation: none. Issues #30, #31, and #32 are closed as completed, their fixes are on `main`, and the release/publish queue item is complete.
+<!-- agent:boundary:7012ffbc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#issuesopengithub]~~
-- ~~#gh-fix https://github.com/btakita/tsift/issues/30~~
-- ~~#gh-fix https://github.com/btakita/tsift/issues/31~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/tsift/issues/32~~ — auto-struck: answered this cycle (#ftstrike)
-- 📥 release + publish: include Issue 30-32
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

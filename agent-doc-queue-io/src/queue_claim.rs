@@ -461,13 +461,23 @@ pub fn claim_with_session(
     // never a bare string: the CLI reports it as-is instead of wrapping it in
     // the generic turn-failure notice.
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim")?;
+    let identity = claim_identity(&target);
     let authorization = crate::subagent_dispatch::subagent_authorization_for_item(file, &target)?;
+    let tracked_item_aliases: Vec<String> = if identity.is_id_backed() {
+        authorization
+            .tracked_items
+            .iter()
+            .map(|item| item.text.trim().to_string())
+            .filter(|text| !text.is_empty())
+            .collect()
+    } else {
+        Vec::new()
+    };
     let dispatch_policy = (authorization.model.is_some() || authorization.effort.is_some())
         .then_some(agent_doc_queue::queue_claim::SubagentDispatchPolicy {
             model: authorization.model,
             effort: authorization.effort,
         });
-    let identity = claim_identity(&target);
     // `#queueeffectidentity`: preflight annotates intentional repeated effects,
     // so an exact identity normally names one occurrence. Keep the count in the
     // log as a rolling-upgrade diagnostic: a legacy unannotated claim still
@@ -487,6 +497,7 @@ pub fn claim_with_session(
             .find(|claim| claim.identity == identity)
             .context("claimed item missing from the ledger after claim")?;
         stored.dispatch_policy = dispatch_policy.clone();
+        stored.tracked_item_aliases = tracked_item_aliases.clone();
         Ok((outcome, stored.clone()))
     })?;
     if result.0 == ClaimOutcome::HeldByOther {

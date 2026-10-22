@@ -37,7 +37,9 @@
 //! `…/agent-doc/issues/272`; the text-keyed claim matched nothing, was pruned
 //! at closeout, and the edited line was offered to a second worker. A line
 //! with a different `#id`, or a claimed line deleted while a similar one is
-//! added elsewhere, is a different task and does not inherit the claim.
+//! added elsewhere, is a different task and does not inherit the claim. The
+//! narrow exception is an id-backed mirror replaced by the exact tracked item
+//! prose captured with the claim (`#claimtrackedalias`).
 //!
 //! # Lifetime
 //!
@@ -133,6 +135,12 @@ pub struct QueueClaim {
     /// `None` preserves the historical inherit-the-coordinator behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatch_policy: Option<SubagentDispatchPolicy>,
+    /// Exact tracked-item prose resolved when an id-backed queue head was
+    /// claimed. If queue synchronization later replaces the id directive with
+    /// that same prose, the claim follows the alias instead of disappearing
+    /// with the retired id (`#claimtrackedalias`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracked_item_aliases: Vec<String>,
     pub claimed_at_secs: u64,
     pub expires_at_secs: u64,
     /// The coordinator session that made (or last adopted) the claim
@@ -780,6 +788,7 @@ impl QueueClaimLedger {
             state: QueueClaimState::Claimed,
             worker: None,
             dispatch_policy: None,
+            tracked_item_aliases: Vec::new(),
             claimed_at_secs: now_secs,
             expires_at_secs,
             owner_session,
@@ -1247,6 +1256,29 @@ impl QueueClaimLedger {
             }
             if let Some(&first) = descendants[claim_idx].first() {
                 proposals.push((claim_idx, first));
+                continue;
+            }
+            if claim.identity.is_id_backed() {
+                // Backlog reconciliation can retire an id-backed mirror while
+                // leaving the exact operator-facing tracked-item prose as a
+                // free-text queue head. This is not a fuzzy id/free-text edit:
+                // the alias was captured from that id's tracked item when the
+                // claim was created, and it must identify one unheld live row.
+                let candidates: Vec<usize> = live
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, id)| !id.is_id_backed() && !held.contains(id))
+                    .filter(|(_, id)| {
+                        claim
+                            .tracked_item_aliases
+                            .iter()
+                            .any(|alias| claim_identity(alias) == **id)
+                    })
+                    .map(|(idx, _)| idx)
+                    .collect();
+                if let [only] = candidates.as_slice() {
+                    proposals.push((claim_idx, *only));
+                }
                 continue;
             }
             if claim.anchor.is_some() {
@@ -2319,6 +2351,7 @@ mod tests {
                     state: QueueClaimState::Claimed,
                     worker: None,
                     dispatch_policy: None,
+                    tracked_item_aliases: Vec::new(),
                     claimed_at_secs: 1,
                     expires_at_secs: 50,
                     owner_session: None,
@@ -2333,6 +2366,7 @@ mod tests {
                     state: QueueClaimState::Claimed,
                     worker: None,
                     dispatch_policy: None,
+                    tracked_item_aliases: Vec::new(),
                     claimed_at_secs: 2,
                     expires_at_secs: 90,
                     owner_session: None,
@@ -2767,6 +2801,55 @@ mod tests {
                 .is_empty(),
             "a different id is a different item"
         );
+    }
+
+    /// `#claimtrackedalias` (sdk-demo.md, 2026-10-21): a running worker held
+    /// `do [#rebaseexistingproject]`, then backlog reconciliation retired the
+    /// id-backed mirror while leaving the tracked item's exact question as a
+    /// free-text queue head. The claim-time tracked-item receipt supplies the
+    /// explicit identity bridge without weakening generic id/free-text edits.
+    #[test]
+    fn an_id_claim_follows_its_unique_exact_tracked_item_alias() {
+        let id_head = "do [#rebaseexistingproject]";
+        let question = "Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(id_head, "subagent:project_rebase_review", 100, 3600);
+        ledger.claims[0].tracked_item_aliases = vec![question.to_string()];
+        ledger.follow_edits(100, &strings(&["before", id_head, "after"]));
+
+        let live = strings(&["before", question, "after"]);
+        assert_eq!(
+            ledger.follow_edits(110, &live),
+            vec![(id_head.to_string(), question.to_string())]
+        );
+        assert_eq!(ledger.claims[0].identity, claim_identity(question));
+        assert_eq!(ledger.claims[0].item_text, question);
+        assert_eq!(ledger.claims[0].followed_from, vec![id_head.to_string()]);
+
+        let live_identities: HashSet<_> = live.iter().map(|head| claim_identity(head)).collect();
+        assert_eq!(ledger.prune(110, Some(&live_identities)), 0);
+        assert!(
+            ledger
+                .claimed_items(110, Some(&live_identities))
+                .claims(question)
+        );
+    }
+
+    #[test]
+    fn an_id_claim_does_not_guess_between_duplicate_tracked_item_aliases() {
+        let question = "Why can't we rebase the project?";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("do [#rebase]", "subagent:rebase", 100, 3600);
+        ledger.claims[0].tracked_item_aliases = vec![question.to_string()];
+        ledger.follow_edits(100, &strings(&["do [#rebase]"]));
+
+        assert!(
+            ledger
+                .follow_edits(110, &strings(&[question, question]))
+                .is_empty(),
+            "duplicate exact aliases are ambiguous and must not inherit ownership"
+        );
+        assert_eq!(ledger.claims[0].identity, claim_identity("do [#rebase]"));
     }
 
     /// An edited line another live claim already holds is never taken over,

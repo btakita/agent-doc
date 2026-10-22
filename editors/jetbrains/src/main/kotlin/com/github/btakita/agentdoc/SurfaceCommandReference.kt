@@ -22,6 +22,9 @@ import com.google.gson.JsonParser
  * fallback is logged with its reason.
  */
 internal object SurfaceCommandReference {
+    const val UNKNOWN_LAYOUT_MESSAGE =
+        "Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Restart the Remote Dev IDE so its frontend layout publisher loads, then retry Sync Tmux Layout."
+
     const val SURFACE_LAYOUT_REFERENCE_CAPABILITY = "surface_layout_reference_v1"
 
     sealed interface Decision {
@@ -79,13 +82,13 @@ internal object SurfaceCommandReference {
 
     /**
      * The controller refuses a reference whose surface cannot carry the command's layout with a
-     * `surface_reference_<reason>: <sentence>` diagnostic. The two layout refusals keep the exact
-     * sentences the plugin showed when it made these decisions itself.
+     * `surface_reference_<reason>: <sentence>` diagnostic. Keep the operator-facing remediation
+     * stable even when process output wraps the controller's sentence.
      */
     fun refusalMessage(output: String): String? =
         when {
             output.contains("surface_reference_unknown_layout") ->
-                "Editor split could not be read; the retained tmux layout was not changed."
+                UNKNOWN_LAYOUT_MESSAGE
             output.contains("surface_reference_stale_focus") ->
                 "Editor focus changed while the split layout was being read; retry after the selection settles."
             else -> null

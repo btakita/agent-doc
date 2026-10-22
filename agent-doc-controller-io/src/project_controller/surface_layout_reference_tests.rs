@@ -223,7 +223,7 @@ fn sync_by_reference_fails_closed_without_a_usable_source() {
         .unwrap_err();
     assert!(
         format!("{refused:#}").contains(
-            "surface_reference_unknown_layout: Editor split could not be read; the retained tmux layout was not changed."
+            "surface_reference_unknown_layout: Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Restart the Remote Dev IDE so its frontend layout publisher loads, then retry Sync Tmux Layout."
         ),
         "{refused:#}"
     );

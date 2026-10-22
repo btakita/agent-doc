@@ -19,7 +19,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-in progress — v0.1.106 is published; decision-manifest commit 3f713cf is on main with green CI but is not yet released; Issues #30–#32 and their release/publish item remain queued
+complete — v0.1.107 is published on GitHub, crates.io, and npm; the release workflow succeeded and the local tsift install is v0.1.107; Issues #30–#32 remain queued
 <!-- /agent:status -->
 
 ## Spec
@@ -225,7 +225,26 @@ I updated `agent:status` to reflect that split: v0.1.106 is published; the decis
 - Verification: GitHub reports a non-draft, non-prerelease release published at `2026-10-21T04:49:45Z`; both registries report `0.1.106`; CI for `3f713cf` is green; remote tag/main SHAs differ as described.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:22a17f67 -->
+> **Queue prompt:** release + publish latest updates
+
+### Re: release + publish latest updates — gpt-5 · 2026-10-22T13:38-04:00
+
+Published. The latest decision-manifest updates are now released as **tsift v0.1.107** across all three distribution surfaces:
+
+- GitHub Release: [v0.1.107](https://github.com/btakita/tsift/releases/tag/v0.1.107), with Linux, macOS ARM, and Windows archives plus checksums.
+- crates.io: `tsift = "0.1.107"` and the related workspace crates are visible in the registry.
+- npm: `opencode-tsift` reports version `0.1.107`.
+
+The release commit is `a07a72b9957bb29f8ac32fb61accc0804dfc8a71` (`chore: prepare v0.1.107 release`). It was pushed to `main`, tagged `v0.1.107`, and the [Release workflow](https://github.com/btakita/tsift/actions/runs/39819111081) completed successfully. That workflow passed its full CI suite, packaging checks, all three platform builds, GitHub Release publication, npm publication, and crates.io publication. The separately triggered main-branch CI run was still in progress at closeout, but the release workflow's full suite passed against the same commit.
+
+I also installed the released workspace build locally; `tsift --version` now reports `tsift 0.1.107`.
+
+- Changed paths: release-version projections across the workspace manifests, lockfile, npm package, skill/reference markers, fixtures/specs, and `VERSIONS.md`; this session document records the release result. No additional feature behavior was introduced by the release-preparation commit.
+- Commands: `make check` through `tsift digest-runner`, `git commit`, `git push`, tag creation/push, `gh run watch/view`, `gh release view`, `cargo search tsift`, `npm view opencode-tsift version`, `cargo install --path .`, and `tsift --version`.
+- Verification: local `make check` exited 0; the release workflow concluded `success`; all registries report `0.1.107`; the release worktree is clean; the installed binary reports `0.1.107`.
+- Confidence: high.
+- Escalation: none. Issues #30–#32 remain queued and were not changed or closed by this release.
+<!-- agent:boundary:4e151c8c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -236,7 +255,7 @@ I updated `agent:status` to reflect that split: v0.1.106 is published; the decis
 - 📥 #gh-fix https://github.com/btakita/tsift/issues/31
 - 📥 #gh-fix https://github.com/btakita/tsift/issues/32
 - 📥 release + publish: include Issue 30-32
-- release + publish
+- ~~release + publish latest updates~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

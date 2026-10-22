@@ -33,7 +33,7 @@ agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.542" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.542" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.542" }
 anyhow = "1"
-lazily = "0.57.1"
+lazily = "0.61.0"
 indexmap = { version = "2", features = ["serde"] }
 interprocess = { version = "2", default-features = false }
 libc = "0.2"

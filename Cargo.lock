@@ -157,8 +157,8 @@ dependencies = [
  "filetime",
  "indexmap",
  "instruction-files",
- "lazily 0.57.1",
  "lazily 0.58.0",
+ "lazily 0.61.0",
  "libc",
  "libloading",
  "module-harness",
@@ -490,7 +490,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -581,7 +581,7 @@ dependencies = [
  "base64 0.22.1",
  "fs2",
  "interprocess",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "libc",
  "parking_lot",
  "rusqlite",
@@ -619,7 +619,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "parking_lot",
  "rusqlite",
  "serde",
@@ -649,7 +649,7 @@ dependencies = [
  "agent-doc-supervisor-io",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -728,7 +728,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "parking_lot",
  "serde",
  "sha2",
@@ -775,7 +775,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -808,7 +808,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-state-scope",
  "agent-doc-turn",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "proptest",
  "serde",
  "serde_json",
@@ -825,7 +825,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-tmux-io",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
  "serde_json",
 ]
@@ -959,7 +959,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-queue-icons",
  "agent-doc-state-scope",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
 ]
 
@@ -1338,7 +1338,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-hash",
  "agent-doc-markdown-ast",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
  "serde_json",
 ]
@@ -1384,7 +1384,7 @@ dependencies = [
  "agent-doc-state-scope",
  "anyhow",
  "base64 0.22.1",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "parking_lot",
  "rmp-serde",
  "serde",
@@ -1455,7 +1455,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "parking_lot",
  "serde",
  "serde_json",
@@ -1640,7 +1640,7 @@ version = "0.35.542"
 dependencies = [
  "agent-doc-controller",
  "agent-doc-state-scope",
- "lazily 0.57.1",
+ "lazily 0.61.0",
 ]
 
 [[package]]
@@ -1695,7 +1695,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-session-accretion",
  "agent-doc-state-scope",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
  "serde_json",
 ]
@@ -1768,7 +1768,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-state-scope",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "libc",
  "parking_lot",
  "proptest",
@@ -1837,7 +1837,7 @@ dependencies = [
  "agent-doc-merge",
  "anyhow",
  "base64 0.22.1",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "libc",
  "parking_lot",
  "serde",
@@ -2063,7 +2063,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "parking_lot",
  "tempfile",
  "tmux-router",
@@ -2260,7 +2260,7 @@ dependencies = [
  "agent-doc-turn-status-io",
  "agent-doc-workflow",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -2465,7 +2465,7 @@ version = "0.35.542"
 dependencies = [
  "agent-doc-state-scope",
  "agent-doc-turn",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
  "serde_json",
 ]
@@ -2492,7 +2492,7 @@ dependencies = [
 name = "agent-doc-state-scope"
 version = "0.35.542"
 dependencies = [
- "lazily 0.57.1",
+ "lazily 0.61.0",
 ]
 
 [[package]]
@@ -2504,7 +2504,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "interprocess",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -2578,7 +2578,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-tmux-commands",
  "agent-doc-turn-executor-tmux",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "proptest",
  "serde",
  "serde_json",
@@ -2607,7 +2607,7 @@ dependencies = [
  "anyhow",
  "indexmap",
  "interprocess",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "libc",
  "parking_lot",
  "portable-pty",
@@ -2711,7 +2711,7 @@ dependencies = [
  "agent-doc-workflow-io",
  "anyhow",
  "fs2",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "libc",
  "parking_lot",
  "portable-pty",
@@ -2799,7 +2799,7 @@ name = "agent-doc-tmux"
 version = "0.35.542"
 dependencies = [
  "agent-doc-state-scope",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "serde",
  "tempfile",
 ]
@@ -2827,7 +2827,7 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "anyhow",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "libc",
  "serde",
  "serde_json",
@@ -2864,7 +2864,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-template",
  "agent-doc-topic",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "proptest",
  "regex",
  "serde",
@@ -3055,7 +3055,7 @@ dependencies = [
  "agent-doc-workflow",
  "anyhow",
  "fs2",
- "lazily 0.57.1",
+ "lazily 0.61.0",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -3291,7 +3291,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3302,7 +3302,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3800,7 +3800,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4389,14 +4389,25 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.57.1"
-source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=7643192f34935d3173a26a3a53e31d16095703a1#7643192f34935d3173a26a3a53e31d16095703a1"
+version = "0.58.0"
+source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d6840e9171b3e55a9e6b11205f820ec984c"
 dependencies = [
  "arc-swap",
- "lazily-macros 0.23.0 (git+https://github.com/lazily-hub/lazily-rs.git?rev=7643192f34935d3173a26a3a53e31d16095703a1)",
- "parking_lot",
+ "lazily-macros 0.23.0",
  "prost-build",
  "protoc-bin-vendored",
+ "smallvec",
+]
+
+[[package]]
+name = "lazily"
+version = "0.61.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dea0e947b3766b88f327012f0d8392fb5a5c702050933cbb19467dedd3273c12"
+dependencies = [
+ "arc-swap",
+ "lazily-macros 0.23.1",
+ "parking_lot",
  "rmp-serde",
  "rusqlite",
  "serde",
@@ -4405,21 +4416,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazily"
-version = "0.58.0"
-source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d6840e9171b3e55a9e6b11205f820ec984c"
-dependencies = [
- "arc-swap",
- "lazily-macros 0.23.0 (git+https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c)",
- "prost-build",
- "protoc-bin-vendored",
- "smallvec",
-]
-
-[[package]]
 name = "lazily-macros"
 version = "0.23.0"
-source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=7643192f34935d3173a26a3a53e31d16095703a1#7643192f34935d3173a26a3a53e31d16095703a1"
+source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d6840e9171b3e55a9e6b11205f820ec984c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4428,8 +4427,9 @@ dependencies = [
 
 [[package]]
 name = "lazily-macros"
-version = "0.23.0"
-source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d6840e9171b3e55a9e6b11205f820ec984c"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f0edc85c43920f8a62e201b652234f12a97780ed62689a564274971f35bd28d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4592,7 +4592,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "536bfad37a309d62069485248eeaba1e8d9853aaf951caaeaed0585a95346f08"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4670,7 +4670,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5309,7 +5309,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5648,7 +5648,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5795,7 +5795,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6493,7 +6493,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

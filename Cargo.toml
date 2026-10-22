@@ -328,7 +328,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 libc = "0.2"
-lazily = { version = "0.57.1", features = ["ipc", "durable-sqlite"] }
+lazily = { version = "0.61.0", features = ["ipc", "durable-sqlite"] }
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
@@ -385,9 +385,3 @@ lto = "off"
 codegen-units = 256
 incremental = true
 strip = false
-
-# GH #354: lazily 0.57.1's thread-safe effect disposal removed a recycled
-# non-effect node before checking its kind, poisoning the controller graph.
-# Pin the compatible upstream backport until the next crates.io release.
-[patch.crates-io]
-lazily = { git = "https://github.com/lazily-hub/lazily-rs.git", rev = "7643192f34935d3173a26a3a53e31d16095703a1" }

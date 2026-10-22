@@ -24,7 +24,7 @@ agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.542" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.542" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.542" }
 anyhow = "1"
-lazily = { version = "0.57.1", features = ["thread-safe"] }
+lazily = { version = "0.61.0", features = ["thread-safe"] }
 libc = "0.2"
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }

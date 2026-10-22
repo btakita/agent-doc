@@ -55,6 +55,13 @@ pub fn is_queue_component_attr(key: &str) -> bool {
         || key == "priority"
 }
 
+/// Whether `key` is part of the complete public `agent:status` marker
+/// vocabulary. Status projection and lint reconciliation share this owner so a
+/// supported sync policy cannot be writable-but-warned.
+pub fn is_status_component_attr(key: &str) -> bool {
+    STATUS_COMPONENT_ATTRS.contains(&key) || key == crate::queue_schedule::QUEUE_INTERVAL_ATTR
+}
+
 /// Whether `key` is valid on `agent:queue` without an explicit value.
 pub fn is_queue_bare_flag_attr(key: &str) -> bool {
     matches!(
@@ -566,6 +573,11 @@ mod tests {
 
     #[test]
     fn status_sync_attributes_are_status_only_and_require_an_instruction() {
+        assert!(is_status_component_attr("sync"));
+        assert!(is_status_component_attr("sync-mode"));
+        assert!(is_status_component_attr("interval"));
+        assert!(!is_status_component_attr("unknown"));
+
         let valid = concat!(
             "<!-- agent:status sync=\"Keep release current\" sync-mode=replace interval=5m -->\n",
             "old\n",

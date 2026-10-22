@@ -2454,7 +2454,7 @@ fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
     // the queue-level `subagents` plan holds back) is not this session's prompt
     // debt. A `Reported` claim is different: the worker has finished and its
     // result is now coordinator writeback debt. Keeping it visible here stops
-    // a post-commit coordinator exit from stranding a 📤 row in the outbox.
+    // a post-commit coordinator exit from stranding a ☑️ row in the outbox.
     let in_flight =
         agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(file, &content);
     Ok(first_active_queue_prompt_in_content(&content, &in_flight))
@@ -9853,7 +9853,7 @@ Reviewed the gated items.\n\
 
     /// A worker can report after the coordinator's predecessor cycle commits
     /// (and even after that coordinator session is replaced). Unlike a running
-    /// attempt, this 📤 row is coordinator writeback debt: Stop must hand it
+    /// attempt, this ☑️ row is coordinator writeback debt: Stop must hand it
     /// back instead of accepting the already-committed status and stranding the
     /// result in the outbox.
     #[test]

@@ -504,7 +504,7 @@ fn identity(text: &str) -> QueueItemIdentity {
 }
 
 /// Lifecycle projections only the drain writes onto a live head: claimed /
-/// in progress (`🚧`), fenced subagent attempt (`🟡`, `📫`, `⚠️`, `⏭️`), and
+/// in progress (`🚧`), fenced subagent attempt (`🟡`, `☑️`, `⚠️`, `⏭️`), and
 /// awaiting operator (`⏳`). Pin markers (`📌`, `**pin**`, ...) are operator
 /// priority, not drain evidence, and are skipped over.
 /// GH #327: whether a live head carries a drain lifecycle marker, i.e. the

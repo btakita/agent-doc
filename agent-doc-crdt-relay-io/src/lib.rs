@@ -8507,7 +8507,7 @@ mod tests {
         let projected = durable_queue_attempt_projection(&doc, stale).unwrap();
         assert!(projected.contains("- 🟡 [#subagent:claimed#1] claimed item\n"), "{projected}");
         assert!(projected.contains("- 🚧 [#subagent:running#1] running item\n"), "{projected}");
-        assert!(projected.contains("- 📫 [#subagent:reported#1] reported item\n"), "{projected}");
+        assert!(projected.contains("- ☑️ [#subagent:reported#1] reported item\n"), "{projected}");
         assert!(
             projected.contains("- ⏳ unrelated operator hold\n"),
             "an unrelated row must remain byte-identical:\n{projected}"
@@ -8583,6 +8583,7 @@ mod tests {
             ),
             "{replacement}"
         );
+        assert!(!replacement.contains("☑️"), "{replacement}");
         assert!(!replacement.contains("📫"), "{replacement}");
         assert!(!replacement.contains("📤"), "{replacement}");
         assert!(!replacement.contains("🔄"), "{replacement}");

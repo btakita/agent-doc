@@ -46,12 +46,14 @@ pub const CLAIMED_MARKER: &str = "🟡";
 /// The claimed worker has positive dispatch/liveness evidence.
 pub const RUNNING_MARKER: &str = IN_PROGRESS_MARKER;
 /// The worker reported and the result is awaiting coordinator integration.
-/// `📫` is deliberately asymmetric with pending `📥`, so the two remain
-/// distinguishable at small font sizes.
-pub const REPORTED_MARKER: &str = "📫";
-/// Reported/outbox marker projected by releases before the `📫` default.
+/// `☑️` communicates that the worker's part is complete while the live queue row
+/// still records coordinator integration/writeback debt.
+pub const REPORTED_MARKER: &str = "☑️";
+/// Reported/outbox marker projected by releases before the `☑️` default.
 /// Existing documents remain readable and normalize on the next projection.
-pub const LEGACY_REPORTED_MARKER: &str = "📤";
+pub const LEGACY_REPORTED_MARKER: &str = "📫";
+/// Older reported/outbox marker projected before the `📫` default.
+pub const OLDER_REPORTED_MARKER: &str = "📤";
 /// The attempt was lost or expired and is eligible for recovery/re-dispatch.
 pub const LOST_MARKER: &str = "⚠️";
 /// Durable work evidence exists, but it cannot be bound to a current claim
@@ -112,12 +114,13 @@ pub fn agent_prioritized_marker() -> &'static str {
 /// Every built-in leading lifecycle marker the binary projects onto or accepts
 /// from a queue head. Legacy spellings remain here so they never enter work
 /// identity even when a custom palette is installed.
-pub const LIFECYCLE_MARKERS: [&str; 10] = [
+pub const LIFECYCLE_MARKERS: [&str; 11] = [
     PENDING_MARKER,
     CLAIMED_MARKER,
     RUNNING_MARKER,
     REPORTED_MARKER,
     LEGACY_REPORTED_MARKER,
+    OLDER_REPORTED_MARKER,
     LOST_MARKER,
     RECONCILING_MARKER,
     UNKNOWN_MARKER,
@@ -238,6 +241,14 @@ fn lifecycle_prefix(text: &str) -> Option<(QueueLifecycleMarker, &str, &str)> {
                         state.default_prefix()
                     },
                 ),
+                (
+                    state,
+                    if state == QueueLifecycleMarker::Reported {
+                        OLDER_REPORTED_MARKER
+                    } else {
+                        state.default_prefix()
+                    },
+                ),
             ]
         })
         .filter_map(|(state, prefix)| text.strip_prefix(prefix).map(|rest| (state, prefix, rest)))
@@ -314,6 +325,7 @@ fn is_lifecycle_prefix(prefix: &str) -> bool {
         .into_iter()
         .any(|state| prefix == state.prefix() || prefix == state.default_prefix())
         || prefix == LEGACY_REPORTED_MARKER
+        || prefix == OLDER_REPORTED_MARKER
 }
 
 /// Human-readable identity of the exact durable worker attempt governing a
@@ -1164,16 +1176,21 @@ mod tests {
             "do [#alpha]",
             "legacy running marker stays compatible"
         );
-        assert_eq!(
-            lifecycle_marker("📤 do [#alpha]"),
-            Some(QueueLifecycleMarker::Reported),
-            "the former reported marker remains readable"
-        );
-        assert_eq!(
-            apply_lifecycle_marker("📤 do [#alpha]", QueueLifecycleMarker::Reported),
-            "📫 do [#alpha]",
-            "legacy reported input normalizes to the clearer default"
-        );
+        for legacy in [LEGACY_REPORTED_MARKER, OLDER_REPORTED_MARKER] {
+            assert_eq!(
+                lifecycle_marker(&format!("{legacy} do [#alpha]")),
+                Some(QueueLifecycleMarker::Reported),
+                "legacy reported marker remains readable"
+            );
+            assert_eq!(
+                apply_lifecycle_marker(
+                    &format!("{legacy} do [#alpha]"),
+                    QueueLifecycleMarker::Reported
+                ),
+                "☑️ do [#alpha]",
+                "legacy reported input normalizes to the completed-handoff default"
+            );
+        }
     }
 
     #[test]
@@ -1188,7 +1205,7 @@ mod tests {
         assert_eq!(strip_priority_markers(&annotated), "fix sdk demo");
         assert_eq!(
             apply_lifecycle_marker(&annotated, QueueLifecycleMarker::Reported),
-            "🙋📫 📌 fix sdk demo [#subagent-operator-request-sdk-route]"
+            "🙋☑️ 📌 fix sdk demo [#subagent-operator-request-sdk-route]"
         );
         assert_eq!(
             apply_operator_action_ids(&annotated, &[]),

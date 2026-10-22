@@ -25,7 +25,7 @@ ambiguous.
 pending = "📥"
 claimed = "🟡"
 running = "🚧"
-reported = "📫"
+reported = "☑️"
 lost = "⚠️"
 reconciling = "🔄"
 unknown = "❔"
@@ -40,8 +40,8 @@ Every field is optional and falls back independently to the shown built-in
 default. The configured palette governs both projection and parsing for the
 process. Built-in lifecycle spellings remain readable as migration aliases, so
 changing a prefix does not change queue work identity or strand an existing
-session document. In particular, the former reported/outbox prefix `📤` remains
-an accepted input alias for the default `📫`.
+session document. In particular, the former reported/outbox prefixes `📫` and
+`📤` remain accepted input aliases for the default `☑️`.
 
 ## agent_args
 

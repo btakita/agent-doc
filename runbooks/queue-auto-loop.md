@@ -81,7 +81,7 @@ The queue coordinator protocol is three-boundary and worker-fenced
    entry's `start_command` with that identity and printed generation; `🚧` means
    worker-bound/running.
 3. When that exact worker reports, run `queue report-complete` with the same
-   generation; `📫` means reported/outbox. Integrate and persist the result in the same
+   generation; `☑️` means worker-complete handoff/outbox. Integrate and persist the result in the same
    turn so closeout strikes the queue line and ends the claim.
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.

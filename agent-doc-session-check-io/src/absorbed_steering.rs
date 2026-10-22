@@ -593,6 +593,8 @@ mod tests {
             presets: Vec::new(),
             possibly_partial: false,
             owner: None,
+            generation: None,
+            worker_id: None,
             explicit: false,
         }
     }

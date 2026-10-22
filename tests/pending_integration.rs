@@ -2349,10 +2349,10 @@ blocking: true\n\
 request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?\n\
 context: PR #733 stops new stuck rows for refused sends and edits.\n\
 choices:\n\
-- withdraw: soft-delete the stuck sends.\n\
-- resubmit: send each stuck row to FPE again.\n\
-- release: set the stuck rows to `allowed` without screening.\n\
-- leave: change nothing.\n\
+- **withdraw**: soft-delete the stuck sends.\n\
+- **resubmit**: send each stuck row to FPE again.\n\
+- **release**: set the stuck rows to `allowed` without screening.\n\
+- **leave**: change nothing.\n\
 \n\
 **Recommendation:** withdraw, after STG gets migration `0022`.\n\
 <!-- /patch:exchange -->\n";

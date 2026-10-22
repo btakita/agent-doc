@@ -802,7 +802,8 @@ pub struct BlockingOperatorRequestPacket {
     pub kind: String,
     /// The packet's `request:` line, trimmed.
     pub request: String,
-    /// The label of every `- <label>: <effect>` choice line, in order.
+    /// The plain-text label of every `- **<label>**: <effect>` choice line, in order.
+    /// Legacy unbolded choice labels remain readable.
     pub choice_labels: Vec<String>,
 }
 
@@ -861,6 +862,11 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
                 let label = choice
                     .split_once(':')
                     .map_or(choice, |(label, _)| label)
+                    .trim();
+                let label = label
+                    .strip_prefix("**")
+                    .and_then(|label| label.strip_suffix("**"))
+                    .unwrap_or(label)
                     .trim();
                 if !label.is_empty() {
                     choice_labels.push(label.to_string());
@@ -1769,10 +1775,10 @@ blocking: true
 request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
 context: PR #733 stops new stuck rows.
 choices:
-- withdraw: soft-delete the stuck sends.
-- resubmit: send each stuck row to FPE again.
-- release: set the stuck rows to `allowed`.
-- leave: change nothing.
+- **withdraw**: soft-delete the stuck sends.
+- **resubmit**: send each stuck row to FPE again.
+- **release**: set the stuck rows to `allowed`.
+- **leave**: change nothing.
 
 **Recommendation:** withdraw.
 ";
@@ -1787,6 +1793,17 @@ choices:
         assert_eq!(
             packets[0].choice_labels,
             vec!["withdraw", "resubmit", "release", "leave"]
+        );
+
+        let legacy = BLOCKING_PACKET_RESPONSE
+            .replace("**withdraw**", "withdraw")
+            .replace("**resubmit**", "resubmit")
+            .replace("**release**", "release")
+            .replace("**leave**", "leave");
+        assert_eq!(
+            blocking_operator_request_packets(&legacy)[0].choice_labels,
+            packets[0].choice_labels,
+            "historical unbolded packets remain readable"
         );
     }
 

@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -210,6 +210,12 @@ Yes. It’s redundant because the existing cumulative release item now explicitl
 > **Chat prompt (#chatprompt):** I assume that removing struck queue items does not affect anything, correct?
 
 Correct—removing a genuinely struck queue item is presentation-only cleanup. A strike is terminal only when durable state confirms that completion was integrated and its claim/outbox was retired; deletion then must not cancel a worker or create a tombstone. Markdown strikethrough alone is not authority: if a manually struck row still has a live claim or outbox record, reconciliation must surface a degraded/mismatch state and preserve the underlying work until it is resolved.
+
+### Re: Response
+
+> **Chat prompt (#chatprompt):** My agent-doc sessions have [unwedge-watchdog]. What is this? [Image #1]
+
+It is not part of agent-doc. It is the enabled user service `unwedge-watchdog.service`, and it broadcasts warnings with `wall`, so the text appears in every logged-in terminal—including agent-doc/Codex panes. It probes Xorg every 10 seconds with a 5-second timeout. In this incident X stopped answering at 00:44:31, diagnostics were captured after 30 seconds at `~/.local/state/unwedge-freezes/20261022-004501/`, a non-destructive recovery was attempted, and X answered again at 00:45:22; Xorg was not killed. The banner can cosmetically overwrite or wrap a terminal prompt but is not shell or agent-doc input. The capture shows heavy concurrent Java, Unity, rustc, and tsift CPU load, but no proven cause; X itself was not answering property requests. With the current `UNWEDGE_AUTOKILL=1`, a freeze lasting 120 seconds would terminate Xorg to recover the desktop.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -222,7 +228,7 @@ Correct—removing a genuinely struck queue item is presentation-only cleanup. A
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/344
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/345
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/346
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/347
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/347
 - 📥 For subagent choices, make the title of each choice **bold**.
 - 📥 sdk-demo.md: `- Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?` queue item is not annotated with an emoji despite being worked on by a subagent. If the fix makes it into the `Include 344-347...` release, add it.
 - 📥 The sdk-demo.md queue item annotations were not refreshed after the queue items were completed. If there is a choice, the choice should also be added into `agent:todo` with the same id as the choice expressed in the `agent:exchange`. Can we make an indicator for the queue items being blocked by a subagent choice? What do you recommend to add local visibility to the agent:queue? Can we have another emoji representing a user action with the same id as the choice + todo item?

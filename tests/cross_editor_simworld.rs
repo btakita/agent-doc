@@ -865,7 +865,7 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
         "do the 🌍 thing\n",
         "<!-- /agent:exchange -->\n",
         "<!-- agent:queue -->\n",
-        "- fix bug\n",
+        "- 📥 fix bug\n",
         "<!-- /agent:queue -->\n",
     );
     let file = agent_doc_test_support::init_repo_with_doc(project_root, "splice.md", baseline);
@@ -915,7 +915,9 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
             splice(bug_offset + "queue ".chars().count(), 0, "retrieval"),
         ],
     );
-    assert!(captured.resulting_text.contains("- fix queue retrieval\n"));
+    assert!(captured
+        .resulting_text
+        .contains("- 📥 fix queue retrieval\n"));
 
     // Canonical advances independently while that burst is still retained.
     let response = "### Re: the thing — simworld\n";
@@ -929,7 +931,7 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
     let canonical = controller_canonical_text(project_root, &file).unwrap();
     assert!(canonical.contains(response), "canonical cut: {canonical:?}");
     assert!(
-        canonical.contains("- fix bug\n"),
+        canonical.contains("- 📥 fix bug\n"),
         "canonical cut: {canonical:?}"
     );
     assert_ne!(canonical, captured_base);
@@ -950,7 +952,7 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
         ],
         "each captured offset must translate through the independent response insertion"
     );
-    let expected = canonical.replacen("- fix bug\n", "- fix queue retrieval\n", 1);
+    let expected = canonical.replacen("- 📥 fix bug\n", "- 📥 fix queue retrieval\n", 1);
     assert_eq!(rebased.resulting_text, expected);
     assert_ne!(
         apply_splices(&canonical, &captured.edits),
@@ -997,7 +999,7 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
     assert_eq!(jetbrains.text(), expected);
     assert_eq!(vscode.text(), expected);
     assert!(vscode.text().contains(response));
-    assert!(vscode.text().contains("- fix queue retrieval\n"));
+    assert!(vscode.text().contains("- 📥 fix queue retrieval\n"));
 
     let ops = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log")).unwrap();
     assert!(ops.contains("source=jetbrains_plugin"));
@@ -1028,7 +1030,7 @@ fn held_captured_batch_beside_head_marker_and_closeout_merges_forward_across_pee
         "answer\n",
         "<!-- /agent:exchange -->\n",
         "<!-- agent:queue -->\n",
-        "- do [#a]: first\n",
+        "- 📥 do [#a]: first\n",
         "<!-- /agent:queue -->\n",
     );
     let file = agent_doc_test_support::init_repo_with_doc(project_root, "held.md", baseline);
@@ -1100,7 +1102,7 @@ fn held_captured_batch_beside_head_marker_and_closeout_merges_forward_across_pee
         "{canonical:?}"
     );
     assert!(
-        canonical.contains("- ~~do [#a]: first~~\n"),
+        canonical.contains("- 📥 ~~do [#a]: first~~\n"),
         "{canonical:?}"
     );
     let expected = concat!(
@@ -1112,7 +1114,7 @@ fn held_captured_batch_beside_head_marker_and_closeout_merges_forward_across_pee
         "\n### Re: closeout\n\nclosed it.\n",
         "<!-- /agent:exchange -->\n",
         "<!-- agent:queue -->\n",
-        "- ~~do [#a]: first~~\n",
+        "- 📥 ~~do [#a]: first~~\n",
         "- do [#b]: typed while detached\n",
         "<!-- /agent:queue -->\n",
     );
@@ -1187,7 +1189,7 @@ fn stale_baseline_roll_forward_case(retarget: bool) {
         "<!-- /agent:exchange -->\n",
         "<!-- agent:queue -->\n",
         "- ~~do [#tdc]~~\n",
-        "- do [#sdkdocs]\n",
+        "- 📥 do [#sdkdocs]\n",
         "<!-- /agent:queue -->\n",
     );
     let file = agent_doc_test_support::init_repo_with_doc(project_root, "sdk.md", baseline);
@@ -1237,7 +1239,7 @@ fn stale_baseline_roll_forward_case(retarget: bool) {
     splices.push(splice(typed_at + api.chars().count(), 0, typed));
     let captured = captured_splice_batch(&captured_base, splices);
     let visible = captured.resulting_text.clone();
-    let operator_item = format!("- do [#sdkdocs{api}]\n");
+    let operator_item = format!("- 📥 do [#sdkdocs{api}]\n");
     assert_eq!(
         visible,
         format!(
@@ -1278,9 +1280,9 @@ fn stale_baseline_roll_forward_case(retarget: bool) {
         "{canonical:?}"
     );
     let canonical_item = if retarget {
-        "- do [#sdkdocs-guide]\n"
+        "- 📥 do [#sdkdocs-guide]\n"
     } else {
-        "- do [#sdkdocs]\n"
+        "- 📥 do [#sdkdocs]\n"
     };
     assert!(canonical.contains(canonical_item), "{canonical:?}");
     assert!(canonical.contains("Here it is."), "{canonical:?}");

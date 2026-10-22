@@ -24,9 +24,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+
+internal const val FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS = 5_000L
+internal const val FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY =
+    "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, " +
+        "restart both, then retry Run Agent Doc"
+
+internal fun frontendAuthorityUnavailableDiagnostic(clientId: String, type: ClientType): String =
+    "[layout-sync] frontend layout publisher unavailable client=$clientId type=$type " +
+        "reason=flat_evidence_has_no_column_geometry remedy=$FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY"
 
 /**
  * Restores the classic editor-selection edge when a Remote Dev frontend module is unavailable.
@@ -68,6 +78,16 @@ internal object BackendGuestSelectionFallback {
             jobs.computeIfAbsent(sessionId) {
                 log.info("[layout-sync] backend selection fallback observing client=$sessionId type=${session.type}")
                 scope.launch {
+                    // A healthy split frontend establishes authority before its first snapshot.
+                    // After the schema-negotiation window, a still-inactive authority means this
+                    // process has only the backend fallback. Name the effective two-sided install
+                    // remedy instead of suggesting another backend-only IDE restart (GH #352).
+                    launch {
+                        delay(FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS)
+                        if (!ingress.frontendAuthorityActive.value) {
+                            log.warn(frontendAuthorityUnavailableDiagnostic(sessionId, session.type))
+                        }
+                    }
                     val manager = try {
                         session.getService(ClientFileEditorManager::class.java)
                     } catch (error: Throwable) {

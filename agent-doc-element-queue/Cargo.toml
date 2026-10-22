@@ -13,5 +13,6 @@ name = "agent_doc_element_queue"
 [dependencies]
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.542" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.542" }
+agent-doc-queue-icons = { path = "../agent-doc-queue-icons", version = "0.35.542" }
 lazily = { version = "0.57.1", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

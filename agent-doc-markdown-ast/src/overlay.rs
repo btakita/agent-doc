@@ -519,10 +519,17 @@ pub fn queue_fenced_title_block(
 
 fn strip_one_pin(text: &str) -> Option<(&str, bool)> {
     let t = text.trim_start();
+    let icons = agent_doc_queue_icons::queue_icons();
+    if let Some(rest) = t.strip_prefix(icons.prioritized.as_str()) {
+        return Some((rest.trim_start(), true));
+    }
     for m in OPERATOR_PIN_MARKERS {
         if let Some(rest) = t.strip_prefix(m) {
             return Some((rest.trim_start(), true));
         }
+    }
+    if let Some(rest) = t.strip_prefix(icons.agent_prioritized.as_str()) {
+        return Some((rest.trim_start(), false));
     }
     for m in AGENT_PIN_MARKERS {
         if let Some(rest) = t.strip_prefix(m) {

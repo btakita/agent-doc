@@ -39,8 +39,8 @@
 //! This module is I/O-free. Callers handle reading/writing files.
 
 use agent_doc_document::queue_projection::{
-    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKER, PRIORITIZED_MARKERS, strip_in_progress_marker,
-    strip_in_progress_marker_for_display, strip_priority_markers,
+    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKERS, prioritized_marker,
+    strip_in_progress_marker, strip_in_progress_marker_for_display, strip_priority_markers,
 };
 use agent_doc_element_queue::QueueItemLifecycle;
 use agent_doc_markdown_ast::overlay::{queue_bare_fence_close, queue_fenced_title_block};
@@ -1907,7 +1907,7 @@ pub fn set_prompts_lifecycle_markers(
 /// - **Re-pin no-op:** re-pinning an already-`:pushpin:` head yields the same
 ///   text (idempotent), never `:pushpin: :pushpin: do [#x]`.
 fn apply_operator_pin(text: &str) -> String {
-    format!("{} {}", PRIORITIZED_MARKER, strip_priority_markers(text))
+    format!("{} {}", prioritized_marker(), strip_priority_markers(text))
 }
 
 pub fn annotate_operator_priority_reorders(

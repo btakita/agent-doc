@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use agent_doc_frontmatter::frontmatter::{
-    CodexNetworkAccess, FreeTextExecutionMode, TerminalHostPreference,
+    CodexNetworkAccess, FreeTextExecutionMode, QueueIconConfig, TerminalHostPreference,
 };
 use agent_doc_model_tier::ModelConfig;
 
@@ -109,6 +109,11 @@ pub struct Config {
     /// Terminal emulator configuration for `agent-doc terminal`.
     #[serde(default)]
     pub terminal: Option<TerminalConfig>,
+    /// Visible prefixes projected onto queue rows. Every field is optional and
+    /// falls back to the documented built-in symbol. Values may contain more
+    /// than one Unicode character.
+    #[serde(default)]
+    pub queue_icons: QueueIconConfig,
     /// Model tier configuration: tier→model name maps per harness, plus
     /// gating preferences. Loaded from `[model]` and `[model.tiers.<harness>]`
     /// sections. See `model_tier::ModelConfig`.
@@ -245,6 +250,28 @@ attach_command = "tmux attach-session -t {session}"
         assert_eq!(
             terminal.attach_command.as_deref(),
             Some("tmux attach-session -t {session}")
+        );
+    }
+
+    #[test]
+    fn test_queue_icon_strings_deserialize_without_character_limits() {
+        let cfg: Config = toml::from_str(
+            r#"
+[queue_icons]
+pending = "INCOMING>"
+reported = "READY FOR COORDINATOR>"
+operator_action = "QUESTION::"
+"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.queue_icons.pending.as_deref(), Some("INCOMING>"));
+        assert_eq!(
+            cfg.queue_icons.reported.as_deref(),
+            Some("READY FOR COORDINATOR>")
+        );
+        assert_eq!(
+            cfg.queue_icons.operator_action.as_deref(),
+            Some("QUESTION::")
         );
     }
 

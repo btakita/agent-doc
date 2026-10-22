@@ -301,7 +301,17 @@ pub fn strip_priority_markers(text: &str) -> String {
     let mut canonical_operator_action = false;
     loop {
         let trimmed = t.trim_start();
-        if let Some(after_marker) = trimmed.strip_prefix("🙋") {
+        let icons = agent_doc_queue_icons::queue_icons();
+        if let Some(after_marker) = [icons.operator_action.as_str(), "🙋"]
+            .into_iter()
+            .filter_map(|marker| {
+                trimmed
+                    .strip_prefix(marker)
+                    .map(|rest| (marker.len(), rest))
+            })
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, rest)| rest)
+        {
             let after_marker = after_marker.trim_start();
             if let Some(after_open) = after_marker.strip_prefix("[#")
                 && let Some((_, after)) = after_open.split_once(']')
@@ -315,7 +325,20 @@ pub fn strip_priority_markers(text: &str) -> String {
             }
             continue;
         }
-        let stripped = [
+        let configured = [
+            icons.prioritized.as_str(),
+            icons.agent_prioritized.as_str(),
+            icons.claimed.as_str(),
+            icons.running.as_str(),
+            icons.pending.as_str(),
+            icons.reported.as_str(),
+            icons.lost.as_str(),
+            icons.reconciling.as_str(),
+            icons.unknown.as_str(),
+            icons.skipped.as_str(),
+            icons.awaiting_operator.as_str(),
+        ];
+        let defaults = [
             "**prioritized**",
             "__prioritized__",
             "**pin**",
@@ -342,33 +365,41 @@ pub fn strip_priority_markers(text: &str) -> String {
             "⏭\u{fe0f}",
             // `#queueawaitop`: awaiting-operator lifecycle projection.
             "⏳",
-        ]
-        .iter()
-        .find_map(|marker| trimmed.strip_prefix(marker))
-        .or_else(|| {
-            let (payload, after, legacy_delimiters) =
-                if let Some(rest) = trimmed.strip_prefix("[#") {
-                    let (payload, after) = rest.split_once(']')?;
-                    (payload, after, false)
-                } else {
-                    let rest = trimmed.strip_prefix('⟦')?;
-                    let (payload, after) = rest.split_once('⟧')?;
-                    (payload, after, true)
-                };
-            let (owner, generation) = if legacy_delimiters {
-                if let Some(legacy) = payload.strip_prefix("owner=") {
-                    legacy.rsplit_once(";generation=")?
+        ];
+        let stripped = configured
+            .iter()
+            .chain(defaults.iter())
+            .filter_map(|marker| {
+                trimmed
+                    .strip_prefix(marker)
+                    .map(|rest| (marker.len(), rest))
+            })
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, rest)| rest)
+            .or_else(|| {
+                let (payload, after, legacy_delimiters) =
+                    if let Some(rest) = trimmed.strip_prefix("[#") {
+                        let (payload, after) = rest.split_once(']')?;
+                        (payload, after, false)
+                    } else {
+                        let rest = trimmed.strip_prefix('⟦')?;
+                        let (payload, after) = rest.split_once('⟧')?;
+                        (payload, after, true)
+                    };
+                let (owner, generation) = if legacy_delimiters {
+                    if let Some(legacy) = payload.strip_prefix("owner=") {
+                        legacy.rsplit_once(";generation=")?
+                    } else {
+                        payload.rsplit_once('#')?
+                    }
                 } else {
                     payload.rsplit_once('#')?
-                }
-            } else {
-                payload.rsplit_once('#')?
-            };
-            (!owner.is_empty()
-                && !owner.chars().any(|ch| ch == '\n' || ch == '\r')
-                && generation.parse::<u64>().is_ok())
-            .then_some(after)
-        });
+                };
+                (!owner.is_empty()
+                    && !owner.chars().any(|ch| ch == '\n' || ch == '\r')
+                    && generation.parse::<u64>().is_ok())
+                .then_some(after)
+            });
         match stripped {
             Some(rest) => t = rest.trim_start(),
             None => break,
@@ -383,9 +414,7 @@ pub fn strip_priority_markers(text: &str) -> String {
                 .is_some_and(char::is_whitespace))
         && let Some((id, after)) = bare[start + 2..].split_once(']')
         && !id.is_empty()
-        && id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        && id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
         && (after.is_empty() || after.trim_start().starts_with(':'))
         && (canonical_operator_action
             || id
@@ -479,9 +508,7 @@ mod tests {
             format!("⚠️ #subagents: #gh-fix {url}"),
             format!("🟡 [#subagent:worker#2] #subagents: #gh-fix {url}"),
             format!("🟡 ⟦subagent:worker#2⟧ #subagents: #gh-fix {url}"),
-            format!(
-                "🟡 ⟦owner=subagent:worker;generation=2⟧ #subagents: #gh-fix {url}"
-            ),
+            format!("🟡 ⟦owner=subagent:worker;generation=2⟧ #subagents: #gh-fix {url}"),
             format!("#gh-fix {url}"),
             format!("#subagent: {url}"),
             format!("⏭\u{fe0f} #subagents 📌 {url}"),

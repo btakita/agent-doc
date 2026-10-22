@@ -12,6 +12,7 @@ name = "agent_doc_frontmatter"
 
 [dependencies]
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.542" }
+agent-doc-queue-icons = { path = "../agent-doc-queue-icons", version = "0.35.542" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }

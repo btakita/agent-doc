@@ -9,7 +9,39 @@ Location: `{XDG_CONFIG_HOME}/agent-doc/config.toml` (default `~/.config/agent-do
 `agent-doc env --json`. Every tmux-owning runtime path uses this same process-wide
 resolution.
 
-Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `opencode_args`, `codex_network_access`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
+Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `opencode_args`, `codex_network_access`, `[queue_icons]`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
+
+## Queue projection prefixes (`[queue_icons]`)
+
+Every visible queue-state and queue-priority prefix is configurable in the global
+config. Values are strings, not scalar characters: a prefix may contain several
+Unicode code points or an ASCII label such as `"OUT::"`. Values must be non-empty,
+single-line, free of surrounding whitespace, and distinct after defaults are
+resolved. Invalid palettes fail command startup instead of making queue identity
+ambiguous.
+
+```toml
+[queue_icons]
+pending = "📥"
+claimed = "🟡"
+running = "🚧"
+reported = "📫"
+lost = "⚠️"
+reconciling = "🔄"
+unknown = "❔"
+skipped = "⏭️"
+awaiting_operator = "⏳"
+operator_action = "🙋"
+prioritized = "📌"
+agent_prioritized = "📍"
+```
+
+Every field is optional and falls back independently to the shown built-in
+default. The configured palette governs both projection and parsing for the
+process. Built-in lifecycle spellings remain readable as migration aliases, so
+changing a prefix does not change queue work identity or strand an existing
+session document. In particular, the former reported/outbox prefix `📤` remains
+an accepted input alias for the default `📫`.
 
 ## agent_args
 

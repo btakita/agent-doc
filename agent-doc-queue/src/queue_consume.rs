@@ -7,9 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_doc_document::queue_projection::{
-    LEGACY_OWNER_ANNOTATION_OPEN, LIFECYCLE_MARKERS, OWNER_ANNOTATION_OPEN,
-    operator_action_ids, strip_in_progress_marker,
-    strip_owner_annotation_prefix, strip_priority_markers,
+    LEGACY_OWNER_ANNOTATION_OPEN, OWNER_ANNOTATION_OPEN, lifecycle_markers, operator_action_ids,
+    strip_in_progress_marker, strip_owner_annotation_prefix, strip_priority_markers,
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
@@ -994,8 +993,7 @@ pub fn answered_free_text_head_node_keys_with_authority(
         // exactly answered projected head survive its own atomic closeout.
         if let Some(baseline) = baseline
             && !crate::queue_response::free_text_head_present_in_baseline(baseline, text)
-            && !((claimed.claims(text) || selected.claims(text))
-                && has_explicit_answer_evidence)
+            && !((claimed.claims(text) || selected.claims(text)) && has_explicit_answer_evidence)
         {
             continue;
         }
@@ -1309,10 +1307,10 @@ pub fn queue_prompt_node_keys_for_done_ids(
 
 pub fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result<String> {
     let borrowed = node_keys.iter().map(String::as_str).collect::<Vec<_>>();
-    let consumed =
-        agent_doc_markdown_ast::mutations::consume_nodes_all(content, "queue", &borrowed).map_err(
-            |err| anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}"),
-        )?;
+    let consumed = agent_doc_markdown_ast::mutations::consume_nodes_all(
+        content, "queue", &borrowed,
+    )
+    .map_err(|err| anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}"))?;
     Ok(strip_in_progress_marker_from_struck_queue_items(&consumed))
 }
 
@@ -1817,10 +1815,13 @@ fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
         return content.to_string();
     };
     let mut edits = Vec::new();
-    for queue in components.iter().filter(|component| component.name == "queue") {
+    for queue in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
         let body = queue.content(content);
         let mut updated_body = body.to_string();
-        for marker in LIFECYCLE_MARKERS {
+        for marker in lifecycle_markers() {
             let needle_with_space = format!("~~{marker} ");
             let needle_bare = format!("~~{marker}");
             // `#multilinequeuehead`: a multi-line head struck into a `~~~done`
@@ -3317,7 +3318,10 @@ Old.
 
             let updated = consume_queue_nodes_by_key(&content, &[key]).unwrap();
 
-            assert!(updated.contains("- ~~do [#head]~~\n"), "{marker}: {updated}");
+            assert!(
+                updated.contains("- ~~do [#head]~~\n"),
+                "{marker}: {updated}"
+            );
             assert!(
                 !updated.contains(&format!("~~{marker}")),
                 "{marker}: {updated}"

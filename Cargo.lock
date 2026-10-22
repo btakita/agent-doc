@@ -94,6 +94,7 @@ dependencies = [
  "agent-doc-prompt-contract",
  "agent-doc-prompt-io",
  "agent-doc-queue",
+ "agent-doc-queue-icons",
  "agent-doc-queue-io",
  "agent-doc-reliable-sync-io",
  "agent-doc-repair-command-io",
@@ -956,6 +957,7 @@ name = "agent-doc-element-queue"
 version = "0.35.542"
 dependencies = [
  "agent-doc-element",
+ "agent-doc-queue-icons",
  "agent-doc-state-scope",
  "lazily 0.57.1",
  "serde",
@@ -1093,6 +1095,7 @@ name = "agent-doc-frontmatter"
 version = "0.35.542"
 dependencies = [
  "agent-doc-model-tier",
+ "agent-doc-queue-icons",
  "anyhow",
  "clap",
  "indexmap",
@@ -1322,6 +1325,7 @@ name = "agent-doc-markdown-ast"
 version = "0.35.542"
 dependencies = [
  "agent-doc-hash",
+ "agent-doc-queue-icons",
  "serde_json",
  "tree-sitter",
  "tree-sitter-md",
@@ -1772,6 +1776,14 @@ dependencies = [
  "serde_json",
  "similar 3.1.1",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-queue-icons"
+version = "0.35.542"
+dependencies = [
+ "anyhow",
+ "serde",
 ]
 
 [[package]]

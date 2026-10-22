@@ -179,7 +179,10 @@ impl PendingItem {
             _ => format!("[{}]", self.state.box_char()),
         };
         let in_progress = if self.in_progress {
-            format!(" {IN_PROGRESS_MARKER}")
+            format!(
+                " {}",
+                agent_doc_frontmatter::frontmatter::queue_icons().running
+            )
         } else {
             String::new()
         };
@@ -1072,7 +1075,16 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
 fn consume_in_progress_marker(text: &str) -> (bool, &str) {
     let mut rest = text.trim_start();
     let mut seen = false;
-    while let Some(after_marker) = rest.strip_prefix(IN_PROGRESS_MARKER) {
+    loop {
+        let configured = &agent_doc_frontmatter::frontmatter::queue_icons().running;
+        let Some(after_marker) = [configured.as_str(), IN_PROGRESS_MARKER]
+            .into_iter()
+            .filter_map(|marker| rest.strip_prefix(marker).map(|tail| (marker.len(), tail)))
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, tail)| tail)
+        else {
+            break;
+        };
         seen = true;
         rest = after_marker.trim_start();
     }
@@ -3685,22 +3697,54 @@ fn fenced_agent_doc_log_splice_end(segments: &[PendingSegment], start: usize) ->
 fn text_is_bare_queue_directive_reference(text: &str) -> bool {
     let mut rest = text.trim();
     // Priority markers are cosmetic and may ride along on an absorbed line.
-    for marker in [
-        "📌",
-        "📍",
-        "🟡",
-        "🚧",
-        "📥",
-        "⚠️",
-        "⏭️",
-        "⏭",
-        "⏳",
-        ":pushpin:",
-        "**pin**",
-        "**prioritized**",
-    ] {
-        while let Some(stripped) = rest.strip_prefix(marker) {
-            rest = stripped.trim_start();
+    let icons = agent_doc_frontmatter::frontmatter::queue_icons();
+    loop {
+        let before = rest.len();
+        for marker in [
+            icons.prioritized.as_str(),
+            icons.agent_prioritized.as_str(),
+            icons.claimed.as_str(),
+            icons.running.as_str(),
+            icons.pending.as_str(),
+            icons.reported.as_str(),
+            icons.lost.as_str(),
+            icons.reconciling.as_str(),
+            icons.unknown.as_str(),
+            icons.skipped.as_str(),
+            icons.awaiting_operator.as_str(),
+            "📌",
+            "📍",
+            "🟡",
+            "🚧",
+            "📥",
+            "📫",
+            "📤",
+            "⚠️",
+            "🔄",
+            "❔",
+            "⏭️",
+            "⏭",
+            "⏳",
+            ":pushpin:",
+            "**pin**",
+            "**prioritized**",
+        ] {
+            while let Some(stripped) = rest.strip_prefix(marker) {
+                rest = stripped.trim_start();
+            }
+        }
+        if let Some(after_marker) = [icons.operator_action.as_str(), "🙋"]
+            .into_iter()
+            .filter_map(|marker| rest.strip_prefix(marker).map(|tail| (marker.len(), tail)))
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, tail)| tail.trim_start())
+            && let Some(after_open) = after_marker.strip_prefix("[#")
+            && let Some((_, after_id)) = after_open.split_once(']')
+        {
+            rest = after_id.trim_start();
+        }
+        if rest.len() == before {
+            break;
         }
     }
     let Some(rest) = rest

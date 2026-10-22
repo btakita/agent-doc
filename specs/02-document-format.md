@@ -467,10 +467,15 @@ and gates, so a todo layered on an item this closeout gated names
 The current packet protocol also carries `queue_item: <origin-queue-item>`
 verbatim. Its derived todo owns `[#<packet-id>]`; an explicit todo suppresses
 derivation only when it owns that same id. While the todo is open, the matching
-live queue row carries identity-neutral `🙋 [#<packet-id>]` alongside any worker
-lifecycle marker and is not drainable. Completing the same-id todo clears the
-annotation. This request-linked rule supersedes the older tracked-id/surrogate
-layering described above for newly emitted packets.
+live queue row carries identity-neutral `🙋` immediately beside any worker
+lifecycle marker (`🙋🚧` while running), while `[#<packet-id>]` is appended to
+the row beside the secondary request instead of preceding the primary work.
+The row is not drainable while `🙋` is present. The operator may answer locally
+by extending the suffix to `[#<packet-id>]: <answer>`; the next closeout checks
+off the same-id todo and removes `🙋` in the same transaction while preserving
+the local request/answer evidence. Explicit todo completion has the same
+unblocking projection. This request-linked rule supersedes the older
+tracked-id/surrogate layering described above for newly emitted packets.
 
 **Todo-done advisory.** When a closeout resolves tracked work (`--done`,
 `--review-resolve`) and an OPEN `agent:todo` item still cites it (an item that

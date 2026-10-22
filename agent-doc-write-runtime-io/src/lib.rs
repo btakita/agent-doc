@@ -3363,6 +3363,30 @@ fn run_command_inner_within_pass(
         return finalize_commit(file, commit_mode, options.force_disk);
     }
 
+    // Queue-local operator answers are durable completion signals. Fold them
+    // into this closeout's todo mutations before deciding whether a tracked-work
+    // transaction is needed, so the same write clears `🙋` and checks the todo.
+    if !options.pending_only {
+        let current_content = if options.force_disk {
+            std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read {}", file.display()))?
+        } else {
+            resolve_current_document(file, "queue_operator_action_answers")?.into_content()
+        };
+        for id in backlog_cmd::answered_queue_operator_action_ids(&current_content)? {
+            if !options
+                .todo_done
+                .iter()
+                .any(|selector| selector.eq_ignore_ascii_case(&id))
+            {
+                eprintln!(
+                    "[todo] queue-local operator answer (#queueoperatoranswer): completing [#{id}]"
+                );
+                options.todo_done.push(id);
+            }
+        }
+    }
+
     // `#packettodo` / `#wayposttodo`: a closeout that presents a blocking
     // `[#subagent-operator-request-<unique-id>]` packet owes the operator decision an
     // `agent:todo` item. Derive it from the packet into this closeout's own

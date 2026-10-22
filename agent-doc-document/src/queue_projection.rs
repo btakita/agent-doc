@@ -164,8 +164,12 @@ fn strip_lifecycle_prefix(text: &str) -> Option<&str> {
         .find_map(|marker| text.strip_prefix(marker))
 }
 
+fn strip_operator_action_marker_prefix(text: &str) -> Option<&str> {
+    text.strip_prefix(OPERATOR_ACTION_MARKER)
+}
+
 fn strip_operator_action_prefix(text: &str) -> Option<(&str, &str)> {
-    let after_marker = text.strip_prefix(OPERATOR_ACTION_MARKER)?.trim_start();
+    let after_marker = strip_operator_action_marker_prefix(text)?.trim_start();
     let after_open = after_marker.strip_prefix("[#")?;
     let (id, rest) = after_open.split_once(']')?;
     let mut chars = id.chars();
@@ -174,6 +178,42 @@ fn strip_operator_action_prefix(text: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((id, rest))
+}
+
+fn trailing_operator_action_annotation(text: &str) -> Option<(&str, &str, usize)> {
+    let start = text.rfind("[#")?;
+    if start > 0
+        && !text[..start]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace)
+    {
+        return None;
+    }
+    let after_open = &text[start + 2..];
+    let (id, after) = after_open.split_once(']')?;
+    let mut chars = id.chars();
+    let first = chars.next()?;
+    if !first.is_ascii_alphanumeric()
+        || !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        || !(after.is_empty() || after.trim_start().starts_with(':'))
+    {
+        return None;
+    }
+    Some((id, after, start))
+}
+
+fn render_projection_parts(parts: &[String]) -> String {
+    let mut rendered = String::new();
+    for part in parts {
+        if !rendered.is_empty()
+            && !(rendered == OPERATOR_ACTION_MARKER && LIFECYCLE_MARKERS.contains(&part.as_str()))
+        {
+            rendered.push(' ');
+        }
+        rendered.push_str(part);
+    }
+    rendered
 }
 
 /// Human-readable identity of the exact durable worker attempt governing a
@@ -254,6 +294,10 @@ pub fn owner_projection(text: &str) -> Option<QueueOwnerProjection> {
             rest = after.trim_start();
             continue;
         }
+        if let Some(after) = strip_operator_action_marker_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
         if let Some(after) = PRIORITIZED_MARKERS
             .iter()
             .chain(AGENT_PRIORITIZED_MARKERS.iter())
@@ -269,15 +313,13 @@ pub fn owner_projection(text: &str) -> Option<QueueOwnerProjection> {
 /// Replace the exact-attempt owner annotation while preserving lifecycle,
 /// operator-action, priority, leading, and trailing whitespace. The annotation
 /// is placed immediately after a lifecycle marker when one exists.
-pub fn apply_owner_projection(
-    text: &str,
-    owner: Option<&QueueOwnerProjection>,
-) -> String {
+pub fn apply_owner_projection(text: &str, owner: Option<&QueueOwnerProjection>) -> String {
     let content_start = text.len() - text.trim_start().len();
     let leading = &text[..content_start];
     let (content, trailing) = split_trailing_whitespace(&text[content_start..]);
     let mut rest = content.trim_start();
     let mut prefixes = Vec::<String>::new();
+    let mut legacy_operator_ids = Vec::<String>::new();
     loop {
         if let Some((_, after)) = strip_owner_annotation_prefix(rest) {
             rest = after.trim_start();
@@ -292,7 +334,13 @@ pub fn apply_owner_projection(
             continue;
         }
         if let Some((id, after)) = strip_operator_action_prefix(rest) {
-            prefixes.push(format!("{OPERATOR_ACTION_MARKER} [#{id}]"));
+            prefixes.push(OPERATOR_ACTION_MARKER.to_string());
+            legacy_operator_ids.push(id.to_ascii_lowercase());
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = strip_operator_action_marker_prefix(rest) {
+            prefixes.push(OPERATOR_ACTION_MARKER.to_string());
             rest = after.trim_start();
             continue;
         }
@@ -312,31 +360,51 @@ pub fn apply_owner_projection(
         .position(|prefix| LIFECYCLE_MARKERS.contains(&prefix.as_str()))
     {
         let lifecycle = prefixes.remove(index);
-        prefixes.insert(0, lifecycle);
+        let insert_at = prefixes
+            .first()
+            .is_some_and(|prefix| prefix == OPERATOR_ACTION_MARKER)
+            as usize;
+        prefixes.insert(insert_at, lifecycle);
     }
     if let Some(owner) = owner {
         let annotation = format_owner_annotation(owner);
         let insert_at = prefixes
-            .first()
-            .is_some_and(|prefix| LIFECYCLE_MARKERS.contains(&prefix.as_str())) as usize;
+            .iter()
+            .position(|prefix| LIFECYCLE_MARKERS.contains(&prefix.as_str()))
+            .map_or(0, |index| index + 1);
         prefixes.insert(insert_at, annotation);
     }
     if !rest.is_empty() {
-        prefixes.push(rest.to_string());
+        let mut body = rest.to_string();
+        for id in legacy_operator_ids {
+            if !body.is_empty() {
+                body.push(' ');
+            }
+            body.push_str(&format!("[#{id}]"));
+        }
+        prefixes.push(body);
     }
-    format!("{leading}{}{trailing}", prefixes.join(" "))
+    format!("{leading}{}{trailing}", render_projection_parts(&prefixes))
 }
 
-/// Request ids carried by leading `🙋 [#id]` queue annotations.
+/// Request ids carried by canonical trailing `[#id]` annotations or legacy
+/// leading `🙋 [#id]` annotations while `🙋` is active.
 pub fn operator_action_ids(text: &str) -> Vec<String> {
     let mut rest = text.trim_start();
     let mut ids = Vec::new();
+    let mut marked = false;
     loop {
         if let Some((id, after)) = strip_operator_action_prefix(rest) {
+            marked = true;
             let id = id.to_ascii_lowercase();
             if !ids.contains(&id) {
                 ids.push(id);
             }
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = strip_operator_action_marker_prefix(rest) {
+            marked = true;
             rest = after.trim_start();
             continue;
         }
@@ -358,15 +426,54 @@ pub fn operator_action_ids(text: &str) -> Vec<String> {
         }
         break;
     }
+    if marked && let Some((id, _, _)) = trailing_operator_action_annotation(text.trim()) {
+        let id = id.to_ascii_lowercase();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
     ids
+}
+
+/// Whether the operator supplied a non-empty answer beside `request_id`.
+///
+/// Canonical rows append `[#request-id]`; adding `: <answer>` resolves the
+/// request locally. Legacy prefix rows are also recognized when the operator
+/// appended `: <answer>` to the original queue item.
+pub fn operator_action_is_answered(text: &str, request_id: &str, queue_item: &str) -> bool {
+    if !operator_action_ids(text)
+        .iter()
+        .any(|id| id.eq_ignore_ascii_case(request_id))
+    {
+        return false;
+    }
+    if let Some((id, after, _)) = trailing_operator_action_annotation(text.trim())
+        && id.eq_ignore_ascii_case(request_id)
+        && after
+            .trim_start()
+            .strip_prefix(':')
+            .is_some_and(|answer| !answer.trim().is_empty())
+    {
+        return true;
+    }
+    let bare = strip_priority_markers(text);
+    bare.strip_prefix(queue_item)
+        .and_then(|tail| tail.trim_start().strip_prefix(':'))
+        .is_some_and(|answer| !answer.trim().is_empty())
 }
 
 fn strip_operator_action_annotations_preserving_markers(text: &str) -> String {
     let mut rest = text.trim();
     let mut kept_prefixes: Vec<String> = Vec::new();
+    let mut legacy_ids: Vec<String> = Vec::new();
     loop {
         let trimmed = rest.trim_start();
-        if let Some((_, after)) = strip_operator_action_prefix(trimmed) {
+        if let Some((id, after)) = strip_operator_action_prefix(trimmed) {
+            legacy_ids.push(id.to_ascii_lowercase());
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = strip_operator_action_marker_prefix(trimmed) {
             rest = after.trim_start();
             continue;
         }
@@ -398,7 +505,14 @@ fn strip_operator_action_annotations_preserving_markers(text: &str) -> String {
     if !rest.trim().is_empty() {
         kept_prefixes.push(rest.trim().to_string());
     }
-    kept_prefixes.join(" ")
+    let mut rendered = render_projection_parts(&kept_prefixes);
+    for id in legacy_ids {
+        if !rendered.is_empty() {
+            rendered.push(' ');
+        }
+        rendered.push_str(&format!("[#{id}]"));
+    }
+    rendered
 }
 
 /// Replace the leading operator-action annotations while preserving worker
@@ -424,16 +538,26 @@ pub fn apply_operator_action_ids(text: &str, ids: &[String]) -> String {
     if normalized.is_empty() {
         return format!("{leading}{bare}{trailing}");
     }
-    let annotations = normalized
-        .iter()
-        .map(|id| format!("{OPERATOR_ACTION_MARKER} [#{id}]"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if bare.is_empty() {
-        format!("{leading}{annotations}{trailing}")
-    } else {
-        format!("{leading}{annotations} {bare}{trailing}")
+    let mut projected = bare;
+    for id in &normalized {
+        let already_local = trailing_operator_action_annotation(&projected)
+            .is_some_and(|(existing, _, _)| existing.eq_ignore_ascii_case(id));
+        if !already_local {
+            if !projected.is_empty() {
+                projected.push(' ');
+            }
+            projected.push_str(&format!("[#{id}]"));
+        }
     }
+    let separator = if LIFECYCLE_MARKERS
+        .iter()
+        .any(|marker| projected.starts_with(marker))
+    {
+        ""
+    } else {
+        " "
+    };
+    format!("{leading}{OPERATOR_ACTION_MARKER}{separator}{projected}{trailing}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -472,10 +596,17 @@ pub struct ActiveQueuePromptProjection {
 pub fn strip_in_progress_marker(text: &str) -> String {
     let mut rest = text.trim();
     let mut kept_prefixes: Vec<String> = Vec::new();
+    let mut legacy_operator_ids: Vec<String> = Vec::new();
     loop {
         let trimmed = rest.trim_start();
         if let Some((id, after_marker)) = strip_operator_action_prefix(trimmed) {
-            kept_prefixes.push(format!("{OPERATOR_ACTION_MARKER} [#{id}]"));
+            kept_prefixes.push(OPERATOR_ACTION_MARKER.to_string());
+            legacy_operator_ids.push(id.to_ascii_lowercase());
+            rest = after_marker.trim_start();
+            continue;
+        }
+        if let Some(after_marker) = strip_operator_action_marker_prefix(trimmed) {
+            kept_prefixes.push(OPERATOR_ACTION_MARKER.to_string());
             rest = after_marker.trim_start();
             continue;
         }
@@ -499,16 +630,23 @@ pub fn strip_in_progress_marker(text: &str) -> String {
         rest = trimmed;
         break;
     }
-    if kept_prefixes.is_empty() {
+    let mut out = if kept_prefixes.is_empty() {
         rest.trim().to_string()
     } else {
-        let mut out = kept_prefixes.join(" ");
+        let mut out = render_projection_parts(&kept_prefixes);
         if !rest.trim().is_empty() {
             out.push(' ');
             out.push_str(rest.trim());
         }
         out
+    };
+    for id in legacy_operator_ids {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("[#{id}]"));
     }
+    out
 }
 
 pub fn apply_in_progress_marker(text: &str) -> String {
@@ -519,11 +657,16 @@ pub fn apply_in_progress_marker(text: &str) -> String {
 /// trailing whitespace.
 pub fn apply_lifecycle_marker(text: &str, marker: QueueLifecycleMarker) -> String {
     let (content, trailing) = split_trailing_whitespace(text);
-    format!(
-        "{} {}{trailing}",
-        marker.prefix(),
-        strip_in_progress_marker(content)
-    )
+    let stripped = strip_in_progress_marker(content);
+    if let Some(after_operator) = stripped.strip_prefix(OPERATOR_ACTION_MARKER) {
+        format!(
+            "{OPERATOR_ACTION_MARKER}{} {}{trailing}",
+            marker.prefix(),
+            after_operator.trim_start()
+        )
+    } else {
+        format!("{} {stripped}{trailing}", marker.prefix())
+    }
 }
 
 /// Prepend the skip projection marker (`⏭️`) to a queue head, preserving pins and
@@ -588,6 +731,10 @@ fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
             return true;
         }
         if let Some((_, after_marker)) = strip_operator_action_prefix(rest) {
+            rest = after_marker.trim_start();
+            continue;
+        }
+        if let Some(after_marker) = strip_operator_action_marker_prefix(rest) {
             rest = after_marker.trim_start();
             continue;
         }
@@ -679,10 +826,16 @@ pub fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: 
 /// identity, so a marker- or pin-decorated head compares equal to its bare form.
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
+    let mut canonical_operator_action = false;
     loop {
         let trimmed = t.trim_start();
         let stripped = strip_lifecycle_prefix(trimmed)
             .or_else(|| strip_operator_action_prefix(trimmed).map(|(_, rest)| rest))
+            .or_else(|| {
+                strip_operator_action_marker_prefix(trimmed).inspect(|_| {
+                    canonical_operator_action = true;
+                })
+            })
             .or_else(|| strip_owner_annotation_prefix(trimmed).map(|(_, rest)| rest))
             .or_else(|| {
                 PRIORITIZED_MARKERS
@@ -695,7 +848,16 @@ pub fn strip_priority_markers(text: &str) -> String {
             None => break,
         }
     }
-    t.trim().to_string()
+    let mut bare = t.trim();
+    if let Some((id, _, start)) = trailing_operator_action_annotation(bare)
+        && (canonical_operator_action
+            || id
+                .to_ascii_lowercase()
+                .starts_with("subagent-operator-request-"))
+    {
+        bare = bare[..start].trim_end();
+    }
+    bare.to_string()
 }
 
 /// True when the operator moved the `🚧` marker onto a head the binary would
@@ -961,18 +1123,33 @@ mod tests {
         let annotated = apply_operator_action_ids("🚧 📌 fix sdk demo", std::slice::from_ref(&id));
         assert_eq!(
             annotated,
-            "🙋 [#subagent-operator-request-sdk-route] 🚧 📌 fix sdk demo"
+            "🙋🚧 📌 fix sdk demo [#subagent-operator-request-sdk-route]"
         );
         assert_eq!(operator_action_ids(&annotated), vec![id]);
         assert_eq!(strip_priority_markers(&annotated), "fix sdk demo");
         assert_eq!(
             apply_lifecycle_marker(&annotated, QueueLifecycleMarker::Reported),
-            "📤 🙋 [#subagent-operator-request-sdk-route] 📌 fix sdk demo"
+            "🙋📤 📌 fix sdk demo [#subagent-operator-request-sdk-route]"
         );
         assert_eq!(
             apply_operator_action_ids(&annotated, &[]),
-            "🚧 📌 fix sdk demo"
+            "🚧 📌 fix sdk demo [#subagent-operator-request-sdk-route]"
         );
+        assert!(!operator_action_is_answered(
+            &annotated,
+            "subagent-operator-request-sdk-route",
+            "fix sdk demo"
+        ));
+        assert!(operator_action_is_answered(
+            &format!("{annotated}: coordinator releases"),
+            "subagent-operator-request-sdk-route",
+            "fix sdk demo"
+        ));
+        assert!(operator_action_is_answered(
+            "🙋 [#subagent-operator-request-sdk-route] 🚧 fix sdk demo: coordinator releases",
+            "subagent-operator-request-sdk-route",
+            "fix sdk demo"
+        ));
         assert_eq!(
             apply_operator_action_ids("  /clear  ", &[]),
             "  /clear  ",
@@ -986,24 +1163,21 @@ mod tests {
             owner: "subagent:sdk-demo".to_string(),
             generation: 7,
         };
-        let projected = apply_owner_projection(
-            "  🙋 [#choice] 🚧 📌 fix sdk demo  ",
-            Some(&owner),
-        );
+        let projected = apply_owner_projection("  🙋 [#choice] 🚧 📌 fix sdk demo  ", Some(&owner));
         assert_eq!(
             projected,
-            "  🚧 [#subagent:sdk-demo#7] 🙋 [#choice] 📌 fix sdk demo  "
+            "  🙋🚧 [#subagent:sdk-demo#7] 📌 fix sdk demo [#choice]  "
         );
         assert_eq!(owner_projection(&projected), Some(owner));
         assert_eq!(strip_priority_markers(&projected), "fix sdk demo");
         assert_eq!(
             strip_in_progress_marker(&projected),
-            "🙋 [#choice] 📌 fix sdk demo",
+            "🙋 📌 fix sdk demo [#choice]",
             "terminalization strips attempt ownership with lifecycle state"
         );
         assert_eq!(
             apply_owner_projection(&projected, None),
-            "  🚧 🙋 [#choice] 📌 fix sdk demo  "
+            "  🙋🚧 📌 fix sdk demo [#choice]  "
         );
     }
 

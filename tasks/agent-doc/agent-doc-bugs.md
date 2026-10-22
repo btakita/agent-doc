@@ -345,6 +345,17 @@ The exact post-release integration passed `make check`: 11,396/11,396 Rust tests
 
 > **Chat prompt (#chatprompt):** Did you see it before I asked?
 ```
+
+### Re: recovered response
+
+Status checkpoint updated and committed as `298fc3ccd0`.
+
+Current release status:
+
+- agent-doc: v0.35.540, published 2026-10-22 05:52:14 UTC
+- JetBrains: classic 0.2.776, 262 0.2.779, 263 0.2.780, published simultaneously
+
+The editor changed the document again during commit, so agent-doc reported a convergence defect. The status update is durable in Git; I did not retry and risk overwriting the newer editor content.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -353,6 +364,7 @@ The exact post-release integration passed `make check`: 11,396/11,396 Rust tests
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- `⟦owner=subagent:runtime_fix_switch;generation=2⟧`: Can we make this more terse? It takes too much space. `⟦subagent:runtime_fix_switch#2⟧` perhaps?
 <!-- /agent:queue -->
 
 ## Queue: Issues

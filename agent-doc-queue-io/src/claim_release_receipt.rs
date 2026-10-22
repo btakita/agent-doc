@@ -67,6 +67,35 @@ pub fn load(file: &Path) -> Result<ClaimReleaseReceiptLedger> {
     load_from_conn(&conn, &document_hash)
 }
 
+/// Remove and return the exact reported-release receipt cancelled by operator
+/// row deletion. A stale generation never consumes a replacement receipt.
+pub fn cancel_reported_attempt(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+) -> Result<Option<ClaimReleaseReceipt>> {
+    let identity = agent_doc_queue::queue_claim::claim_identity(item);
+    let cancelled = mutate(file, |ledger| {
+        let index = ledger.receipts.iter().position(|receipt| {
+            receipt.identity == identity
+                && (receipt.generation == 0 || generation == Some(receipt.generation))
+        })?;
+        Some(ledger.receipts.remove(index))
+    })?;
+    if let Some(receipt) = &cancelled {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_release_receipt_cancelled owner={} generation={} item_bytes={} (#queue-removal-cancels)",
+                receipt.owner,
+                receipt.generation,
+                receipt.item_text.trim().len(),
+            ),
+        );
+    }
+    Ok(cancelled)
+}
+
 /// Apply `mutate` to the receipts in one immediate transaction. A document
 /// outside any agent-doc project has no state.db and nothing to record.
 fn mutate<T: Default>(
@@ -232,7 +261,25 @@ fn apply_release_receipt(
 
 fn ledger_or_warn(file: &Path) -> ClaimReleaseReceiptLedger {
     match load(file) {
-        Ok(ledger) => ledger,
+        Ok(mut ledger) => {
+            // Cancellation is a terminal generation fence. If a crash lands
+            // the cancellation audit before the old reported receipt is
+            // physically retired, the receipt is already non-governing and
+            // cannot attach to a same-text re-add.
+            match crate::queue_claim::load_ledger(file) {
+                Ok(claims) => ledger.receipts.retain(|receipt| {
+                    !claims.cancellations.iter().any(|cancelled| {
+                        cancelled.claim.identity == receipt.identity
+                            && cancelled.claim.generation == receipt.generation
+                    })
+                }),
+                Err(err) => eprintln!(
+                    "[queue-claim] WARNING: could not read cancellation receipts for {}; reported receipts remain fail-closed work evidence: {err:#}",
+                    file.display()
+                ),
+            }
+            ledger
+        }
         Err(err) => {
             eprintln!(
                 "[queue-claim] WARNING: could not read release receipts for {}; treating every released line as unreported: {err:#}",
@@ -484,5 +531,42 @@ mod tests {
         assert_eq!(prune_closed(&doc, &content).unwrap(), 0);
         assert_eq!(prune_closed(&doc, &struck).unwrap(), 1);
         assert!(load(&doc).unwrap().receipts.is_empty());
+    }
+
+    #[test]
+    fn cancellation_tombstone_fences_a_receipt_left_by_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = "finish sdk demo";
+        let doc = write_doc(dir.path(), &[item]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (_, claim) = crate::queue_claim::claim(&doc, item, "subagent:sdk", 3600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:sdk",
+            "worker:sdk",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        release_attempt(&doc, item, ReleaseKind::Reported, Some(claim.generation))
+            .unwrap()
+            .expect("reported claim");
+        let stale = load(&doc).unwrap().receipts.remove(0);
+
+        // Model the crash boundary after the cancellation audit commits but
+        // before the stale receipt is physically removed.
+        crate::queue_claim::record_released_cancellation(&doc, &stale).unwrap();
+        assert_eq!(load(&doc).unwrap().receipts, vec![stale]);
+        assert!(
+            governing_receipt(&doc, &content, item).is_none(),
+            "an exact cancellation tombstone makes the leftover receipt non-governing"
+        );
+        assert!(!reported_items_for_content(&doc, &content).claims(item));
+
+        let (_, replacement) =
+            crate::queue_claim::claim(&doc, item, "subagent:sdk-retry", 3600).unwrap();
+        assert_eq!(replacement.generation, claim.generation + 1);
+        assert!(governing_receipt(&doc, &content, item).is_none());
     }
 }

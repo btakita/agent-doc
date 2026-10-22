@@ -21,8 +21,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_queue::queue_claim::{
     ClaimHeadSource, ClaimOutcome, ClaimOwnerLiveness, ClaimOwnerSession, ClaimedQueueItems,
-    OwnerSessionObservation, QueueClaim, QueueClaimLedger, QueueClaimMiss,
-    QueueClaimRefreshRefused, claim_identity, owner_session_liveness,
+    OwnerSessionObservation, QueueClaim, QueueClaimCancellationReceipt, QueueClaimLedger,
+    QueueClaimMiss, QueueClaimRefreshRefused, claim_identity, owner_session_liveness,
     resolve_claim_target_in_views,
 };
 use agent_doc_queue::queue_continuation::{live_queue_head_identities, live_queue_head_texts};
@@ -230,7 +230,7 @@ fn mutate_ledger<T>(
             log_followed(file, &ledger.follow_edits(now_secs(), &heads));
         }
         let value = mutate(&mut ledger)?;
-        if ledger.claims.is_empty() {
+        if ledger.claims.is_empty() && ledger.cancellations.is_empty() {
             agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
                 &conn,
                 &document_hash,
@@ -918,6 +918,101 @@ pub fn abandon_attempt(
             claim
         }))
     })
+}
+
+/// Move one exact attempt into the durable operator-cancellation audit ledger.
+/// The generation fence makes delayed cancellation harmless after a same-text
+/// re-add has already created a replacement attempt.
+pub fn cancel_removed_attempt(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+) -> Result<QueueClaimCancellationReceipt> {
+    let cancelled_at_secs = now_secs();
+    let receipt = mutate_ledger(file, |ledger| {
+        ledger
+            .cancel_attempt(item, generation, cancelled_at_secs)
+            .map_err(anyhow::Error::from)
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_cancelled owner={} worker={} generation={} item_bytes={} completion_key={} reason=operator_removed (#queue-removal-cancels)",
+            receipt.claim.owner,
+            receipt
+                .claim
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str())
+                .unwrap_or("-"),
+            receipt.claim.generation,
+            receipt.claim.item_text.trim().len(),
+            receipt.completion_key.as_deref().unwrap_or("-"),
+        ),
+    );
+    Ok(receipt)
+}
+
+/// Preserve a cancellation tombstone when the worker's reported claim was
+/// already converted into a durable release receipt.
+pub fn record_released_cancellation(
+    file: &Path,
+    reported: &agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt,
+) -> Result<QueueClaimCancellationReceipt> {
+    let worker = reported.worker_id.as_ref().map(|worker_id| {
+        agent_doc_queue::queue_claim::QueueWorkerBinding {
+            worker_id: worker_id.clone(),
+            started_at_secs: reported.claimed_at_secs,
+        }
+    });
+    let claim = QueueClaim {
+        identity: reported.identity.clone(),
+        item_text: reported.item_text.clone(),
+        owner: reported.owner.clone(),
+        generation: reported.generation,
+        state: agent_doc_queue::queue_claim::QueueClaimState::Reported,
+        worker,
+        dispatch_policy: None,
+        claimed_at_secs: reported.claimed_at_secs,
+        expires_at_secs: reported.released_at_secs,
+        owner_session: None,
+        anchor: None,
+        followed_from: Vec::new(),
+    };
+    let cancelled_at_secs = now_secs();
+    let receipt = mutate_ledger(file, |ledger| {
+        Ok(ledger.record_cancellation(claim, cancelled_at_secs, reported.completion_key.clone()))
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_cancelled owner={} worker={} generation={} item_bytes={} completion_key={} reason=operator_removed_after_reported_release (#queue-removal-cancels)",
+            receipt.claim.owner,
+            receipt
+                .claim
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str())
+                .unwrap_or("-"),
+            receipt.claim.generation,
+            receipt.claim.item_text.trim().len(),
+            receipt.completion_key.as_deref().unwrap_or("-"),
+        ),
+    );
+    Ok(receipt)
+}
+
+/// Cross-process lock shared by `queue report-complete` and operator removal.
+/// Whichever wins publishes a monotonic successor; report replay can never
+/// slip a completion cell behind the cancellation tombstone.
+pub fn completion_feedback_lock_path(file: &Path) -> Result<PathBuf> {
+    let root = agent_doc_fs::find_project_root(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    Ok(root
+        .join(".agent-doc/locks")
+        .join(format!("subagent-completion-{document_hash}.lock")))
 }
 
 /// Release the claim on a head the binary itself just closed (`#claimstrike`:

@@ -159,6 +159,22 @@ pub struct QueueClaim {
     pub followed_from: Vec<String>,
 }
 
+/// Durable audit tombstone for one exact operator-cancelled claim attempt.
+///
+/// This is deliberately separate from live claims: cancellation never
+/// projects lifecycle state onto a queue row. Keeping the full fenced attempt
+/// preserves worker/artifact provenance and supplies the generation floor if
+/// the operator later re-adds identical text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueClaimCancellationReceipt {
+    pub claim: QueueClaim,
+    pub cancelled_at_secs: u64,
+    /// Exact completion-cell key for a bound worker attempt. A missing key
+    /// means the attempt never reached a keyable worker binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_key: Option<String>,
+}
+
 /// Optional per-dispatch harness launch overrides recorded for cost attribution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentDispatchPolicy {
@@ -470,6 +486,10 @@ pub fn owner_session_liveness(
 pub struct QueueClaimLedger {
     #[serde(default)]
     pub claims: Vec<QueueClaim>,
+    /// Exact attempts explicitly cancelled by operator row removal. Receipts
+    /// are audit/generation evidence only and never count as live claims.
+    #[serde(default)]
+    pub cancellations: Vec<QueueClaimCancellationReceipt>,
 }
 
 /// Why [`QueueClaimLedger::prune_detailed`] dropped a claim.
@@ -752,7 +772,23 @@ impl QueueClaimLedger {
             }
         }
         self.claims = merged;
+        for receipt in &mut self.cancellations {
+            let identity = claim_identity(&receipt.claim.item_text);
+            if identity != receipt.claim.identity {
+                receipt.claim.identity = identity;
+                changed = true;
+            }
+        }
         changed
+    }
+
+    fn cancellation_generation_floor(&self, identity: &QueueItemIdentity) -> u64 {
+        self.cancellations
+            .iter()
+            .filter(|receipt| &receipt.claim.identity == identity)
+            .map(|receipt| receipt.claim.generation)
+            .max()
+            .unwrap_or(0)
     }
 
     /// Claim `item` for `owner` until `now_secs + ttl_secs`.
@@ -771,6 +807,7 @@ impl QueueClaimLedger {
         owner_session: Option<ClaimOwnerSession>,
     ) -> ClaimOutcome {
         let identity = claim_identity(item);
+        let cancellation_generation_floor = self.cancellation_generation_floor(&identity);
         let expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         let mut fresh = QueueClaim {
             identity: identity.clone(),
@@ -809,7 +846,11 @@ impl QueueClaimLedger {
             }
             Some(existing) => {
                 let outcome = ClaimOutcome::Reassigned;
-                fresh.generation = existing.generation.saturating_add(1).max(1);
+                fresh.generation = existing
+                    .generation
+                    .max(cancellation_generation_floor)
+                    .saturating_add(1)
+                    .max(1);
                 // Re-claim after lost/expired handling keeps line anchoring but
                 // starts a new fenced attempt.
                 fresh.anchor = existing.anchor.take();
@@ -818,10 +859,71 @@ impl QueueClaimLedger {
                 outcome
             }
             None => {
+                fresh.generation = cancellation_generation_floor.saturating_add(1).max(1);
                 self.claims.push(fresh);
                 ClaimOutcome::Created
             }
         }
+    }
+
+    /// Tombstone one exact claim generation after authoritative operator
+    /// removal. Repeating the same cancellation is idempotent; a stale
+    /// generation can never cancel a replacement attempt.
+    pub fn cancel_attempt(
+        &mut self,
+        item: &str,
+        expected_generation: Option<u64>,
+        cancelled_at_secs: u64,
+    ) -> Result<QueueClaimCancellationReceipt, QueueClaimTransitionRefused> {
+        let identity = claim_identity(item);
+        if let Some(existing) = self.cancellations.iter().find(|receipt| {
+            receipt.claim.identity == identity
+                && expected_generation == Some(receipt.claim.generation)
+        }) {
+            return Ok(existing.clone());
+        }
+        let Some(index) = self
+            .claims
+            .iter()
+            .position(|claim| claim.identity == identity)
+        else {
+            return Err(QueueClaimTransitionRefused::Missing);
+        };
+        validate_generation(&self.claims[index], expected_generation)?;
+        let claim = self.claims.remove(index);
+        let completion_key = claim.worker.as_ref().and_then(|worker| {
+            completion_attestation_key(
+                &claim.identity,
+                &claim.owner,
+                claim.generation,
+                claim.claimed_at_secs,
+                &worker.worker_id,
+            )
+            .ok()
+        });
+        Ok(self.record_cancellation(claim, cancelled_at_secs, completion_key))
+    }
+
+    /// Record cancellation for an exact attempt reconstructed from a durable
+    /// reported-release receipt after the live claim was already removed.
+    pub fn record_cancellation(
+        &mut self,
+        claim: QueueClaim,
+        cancelled_at_secs: u64,
+        completion_key: Option<String>,
+    ) -> QueueClaimCancellationReceipt {
+        if let Some(existing) = self.cancellations.iter().find(|receipt| {
+            receipt.claim.identity == claim.identity && receipt.claim.generation == claim.generation
+        }) {
+            return existing.clone();
+        }
+        let receipt = QueueClaimCancellationReceipt {
+            claim,
+            cancelled_at_secs,
+            completion_key,
+        };
+        self.cancellations.push(receipt.clone());
+        receipt
     }
 
     /// Bind one concrete harness worker to one exact live claim generation.
@@ -2340,6 +2442,7 @@ mod tests {
                     followed_from: Vec::new(),
                 },
             ],
+            cancellations: Vec::new(),
         };
         assert!(ledger.rekey());
         assert_eq!(ledger.claims.len(), 1, "one work identity, one claim");
@@ -2469,6 +2572,44 @@ mod tests {
             QueueClaimState::Reported
         );
         assert!(ledger.claims[0].blocks_dispatch(10_000));
+    }
+
+    #[test]
+    fn cancellation_tombstone_fences_stale_completion_and_advances_readd_generation() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("work", "subagent:a", 100, 100);
+        ledger
+            .start("work", "subagent:a", "worker:a", 100, 100, Some(1))
+            .unwrap();
+        ledger.report("work", Some(1)).unwrap();
+
+        let receipt = ledger.cancel_attempt("work", Some(1), 105).unwrap();
+        assert_eq!(receipt.claim.generation, 1);
+        assert_eq!(receipt.claim.state, QueueClaimState::Reported);
+        assert_eq!(receipt.cancelled_at_secs, 105);
+        assert!(receipt.completion_key.is_some());
+        assert!(ledger.claims.is_empty());
+        assert_eq!(ledger.cancellations, vec![receipt.clone()]);
+        assert_eq!(
+            ledger.cancel_attempt("work", Some(1), 106).unwrap(),
+            receipt,
+            "replayed removal is idempotent"
+        );
+
+        assert_eq!(
+            ledger.claim("work", "subagent:b", 110, 100),
+            ClaimOutcome::Created
+        );
+        assert_eq!(ledger.claims[0].generation, 2);
+        assert!(matches!(
+            ledger.cancel_attempt("work", Some(1), 111),
+            Ok(old) if old.claim.generation == 1
+        ));
+        assert_eq!(ledger.claims[0].generation, 2);
+        assert!(matches!(
+            ledger.report("work", Some(1)),
+            Err(QueueClaimTransitionRefused::StaleGeneration { current: 2, .. })
+        ));
     }
 
     #[test]
@@ -2934,14 +3075,7 @@ mod tests {
         let mut ledger = QueueClaimLedger::default();
         ledger.claim("fix queue", "subagent:q", 100, 600);
         ledger
-            .start(
-                "fix queue",
-                "subagent:q",
-                "worker:q",
-                101,
-                600,
-                Some(1),
-            )
+            .start("fix queue", "subagent:q", "worker:q", 101, 600, Some(1))
             .unwrap();
         ledger.refresh("fix queue", "subagent:q", 102, 600).unwrap();
         let claim = &ledger.claims[0];

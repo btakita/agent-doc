@@ -1,5 +1,23 @@
 # agent-doc Functional Specification
 
+- Removing a claimed `agent:queue` row is authoritative cancellation
+  (`#queue-removal-cancels`), not a best-effort request. Steering identifies the
+  exact owner, bound harness worker, and claim generation. The binary first
+  tombstones that exact identity+generation and retires any pending completion
+  delivery so replay cannot resurrect or integrate it; a same-text re-add uses a
+  fresh generation. The harness interrupts the old attempt only if still alive,
+  at the nearest safe consistency boundary, preserves recoverable
+  branch/worktree/commit artifacts, stops further implementation, tests,
+  integration, publication, release, and external issue closure, then
+  generation-fenced releases the claim. Best judgment controls only shutdown
+  mechanics, never whether sunk-cost work continues. Irreversible effects already
+  crossed are reported rather than undone. The binary emits this binary-to-harness
+  contract without pretending it can kill a harness worker directly, and
+  ambiguous edit or duplicate lineage does not cancel a worker. Deleting a
+  durably terminal struck row is presentation-only cleanup; a strikethrough that
+  conflicts with claim, receipt, or outbox evidence emits a degraded mismatch
+  and preserves/fences the work instead of cancelling or integrating it.
+
 - Newly scaffolded and auto-created todo components use `<!-- agent:todo priority -->`; existing todo markers remain operator-owned and unchanged.
 
 - systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming

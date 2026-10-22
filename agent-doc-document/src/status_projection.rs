@@ -10,9 +10,10 @@ use agent_doc_element::element::{is_backlog_component, is_tracked_work_component
 pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your supervisor)";
 
 /// Prefix for the binary-owned queue handoff summary projected into
-/// `agent:status`. Reported queue rows (`📥`) are not stale or finished: their
+/// `agent:status`. Reported queue rows (`📤`) are not stale or finished: their
 /// worker result still needs coordinator integration, verification, and closeout.
-pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
+pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📤 Queue handoff:";
+const LEGACY_REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
 
 use crate::status_sync_tree::{
     ManagedStatusSyncBlock, ensure_well_formed_output, managed_status_sync_block,
@@ -190,6 +191,7 @@ fn is_protected_status_line(line: &str) -> bool {
     let line = line.trim();
     line == STALE_SUPERVISOR_STATUS_MARKER
         || line.starts_with(REPORTED_QUEUE_STATUS_PREFIX)
+        || line.starts_with(LEGACY_REPORTED_QUEUE_STATUS_PREFIX)
         || [
             "[agent-doc sync]",
             "[agent-doc merge]",
@@ -579,7 +581,11 @@ pub fn apply_reported_queue_status(
     let mut existing = Vec::new();
     for segment in status_body.split_inclusive('\n') {
         let line = segment.strip_suffix('\n').unwrap_or(segment);
-        if line.trim().starts_with(REPORTED_QUEUE_STATUS_PREFIX) {
+        if line.trim().starts_with(REPORTED_QUEUE_STATUS_PREFIX)
+            || line
+                .trim()
+                .starts_with(LEGACY_REPORTED_QUEUE_STATUS_PREFIX)
+        {
             existing.push(line.trim().to_string());
         } else {
             retained.push_str(segment);
@@ -786,7 +792,7 @@ mod tests {
         let one = reconcile_reported_queue_status_content(doc, 1)
             .unwrap()
             .expect("reported work should add a status summary");
-        assert!(one.contains("📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."));
+        assert!(one.contains("📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."));
         assert!(one.contains("Operator-authored summary."));
         assert!(
             reconcile_reported_queue_status_content(&one, 1)
@@ -797,7 +803,7 @@ mod tests {
         let many = reconcile_reported_queue_status_content(&one, 3)
             .unwrap()
             .expect("a changed count should replace the summary");
-        assert!(many.contains("📥 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout."));
+        assert!(many.contains("📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout."));
         assert_eq!(many.matches(REPORTED_QUEUE_STATUS_PREFIX).count(), 1);
 
         let cleared = reconcile_reported_queue_status_content(&many, 0)
@@ -805,6 +811,13 @@ mod tests {
             .expect("zero reported items should clear the summary");
         assert!(!cleared.contains(REPORTED_QUEUE_STATUS_PREFIX));
         assert!(cleared.contains("Operator-authored summary."));
+
+        let legacy = one.replace(REPORTED_QUEUE_STATUS_PREFIX, LEGACY_REPORTED_QUEUE_STATUS_PREFIX);
+        let migrated = reconcile_reported_queue_status_content(&legacy, 1)
+            .unwrap()
+            .expect("the former pending/report marker should migrate deterministically");
+        assert!(migrated.contains(REPORTED_QUEUE_STATUS_PREFIX));
+        assert!(!migrated.contains(LEGACY_REPORTED_QUEUE_STATUS_PREFIX));
     }
 
     #[test]
@@ -941,7 +954,7 @@ mod tests {
             "before\n",
             "<!-- agent:status patch=replace sync=\"Keep release current\" custom=kept -->\n",
             "Operator summary.\n",
-            "📥 Queue handoff: 1 reported item awaiting coordinator integration.\n",
+            "📤 Queue handoff: 1 reported item awaiting coordinator integration.\n",
             "<!-- /agent:status -->\n",
             "after\n"
         );
@@ -968,7 +981,7 @@ mod tests {
         let doc = concat!(
             "<!-- agent:status sync=\"Keep release current\" sync-mode=replace keep=yes -->\n",
             "Ordinary prose to replace.\n\n",
-            "📥 Queue handoff: 2 reported items awaiting coordinator integration.\n\n",
+            "📤 Queue handoff: 2 reported items awaiting coordinator integration.\n\n",
             "[agent-doc repair] retained response warning.\n",
             "repair detail remains available.\n\n",
             "🔴 (restart/recycle your supervisor)\n",
@@ -1018,7 +1031,7 @@ mod tests {
     const INCIDENT_PRIOR_STATUS: &str = concat!(
         "<!-- agent:status patch=replace sync=\"Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time.\" -->\n",
         "\n",
-        "📥 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.\n",
+        "📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.\n",
         "Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).\n",
         "\n",
         "<!-- status:sync -->\n",
@@ -1029,7 +1042,7 @@ mod tests {
     const INCIDENT_NESTED_STATUS: &str = concat!(
         "<!-- agent:status patch=replace sync=\"Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time.\" -->\n",
         "\n",
-        "📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
+        "📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
         "Review pass done. frontendlivedispatch closed on live evidence. Two review items remain, both genuinely gated: an operator decision (jb262dynlauncherrecommen) and an external PyPI reply (pypiquotarecheck).\n",
         "\n",
         "<!-- status:sync -->\n",
@@ -1089,7 +1102,7 @@ mod tests {
         let updated = update_status_content(&doc, &text).unwrap();
         assert_single_incident_region(&updated);
         assert!(updated.contains(concat!(
-            "📥 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.\n\n",
+            "📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.\n\n",
             "Review pass done.",
         )));
 
@@ -1159,13 +1172,13 @@ mod tests {
     fn replace_mode_full_body_write_keeps_operational_lines_and_caller_prose() {
         let doc = concat!(
             "<!-- agent:status sync=\"Keep release current\" sync-mode=replace -->\n",
-            "\n📥 Queue handoff: 2 reported items awaiting coordinator integration.\n",
+            "\n📤 Queue handoff: 2 reported items awaiting coordinator integration.\n",
             "Old summary.\n\n",
             "<!-- status:sync -->\nPublished: v1\n<!-- /status:sync -->\n",
             "<!-- /agent:status -->\n"
         );
         let text = concat!(
-            "📥 Queue handoff: 1 reported item awaiting coordinator integration.\n",
+            "📤 Queue handoff: 1 reported item awaiting coordinator integration.\n",
             "New summary.\n\n",
             "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
         );
@@ -1174,7 +1187,7 @@ mod tests {
             updated,
             concat!(
                 "<!-- agent:status sync=\"Keep release current\" sync-mode=replace -->\n",
-                "\n📥 Queue handoff: 2 reported items awaiting coordinator integration.\n\n",
+                "\n📤 Queue handoff: 2 reported items awaiting coordinator integration.\n\n",
                 "New summary.\n\n",
                 "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
                 "<!-- /agent:status -->\n"

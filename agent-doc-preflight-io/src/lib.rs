@@ -6916,15 +6916,39 @@ pub fn run_queue_maintenance_with_coin_gate(
     {
         eprintln!("[preflight] queue: completion evidence recovery failed ({err:#})");
     }
-    let claim_states = if activation.active {
-        agent_doc_queue_io::queue_claim::claim_states_for_content(file, &current_content)
-            .unwrap_or_else(|err| {
-                eprintln!("[preflight] queue: failed to read typed claim states ({err:#})");
-                Vec::new()
-            })
-    } else {
-        Vec::new()
-    };
+    let claim_ledger = activation
+        .active
+        .then(|| agent_doc_queue_io::queue_claim::load_ledger_following(file, &current_content));
+    let receipt_ledger = activation
+        .active
+        .then(|| agent_doc_queue_io::claim_release_receipt::load(file));
+    let lifecycle_state_degraded = claim_ledger.as_ref().is_some_and(Result::is_err)
+        || receipt_ledger.as_ref().is_some_and(Result::is_err);
+    if let Some(Err(err)) = &claim_ledger {
+        eprintln!("[preflight] queue: failed to read typed claim states ({err:#})");
+    }
+    if let Some(Err(err)) = &receipt_ledger {
+        eprintln!("[preflight] queue: failed to read reported outbox ({err:#})");
+    }
+    let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+    let claim_states = claim_ledger
+        .and_then(Result::ok)
+        .unwrap_or_default()
+        .claims
+        .into_iter()
+        .map(|mut claim| {
+            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
+                && claim.is_expired(now)
+            {
+                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            }
+            claim
+        })
+        .collect::<Vec<_>>();
+    let report_receipts = receipt_ledger
+        .and_then(Result::ok)
+        .unwrap_or_default()
+        .receipts;
     let mut in_progress_queue_prompt_texts = active_queue_prompt_texts.clone();
     in_progress_queue_prompt_texts.extend(
         claim_states
@@ -6956,55 +6980,85 @@ pub fn run_queue_maintenance_with_coin_gate(
     .context("queue maintenance: queue component vanished before in-progress marker")?
     .content(&current_content)
     .to_string();
-    let reported_queue_prompt_texts =
-        agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
-            file,
-            &current_content,
-        );
-    let reported_queue_prompt_identities = reported_queue_prompt_texts
+    let active_identities = active_queue_prompt_texts
         .iter()
         .map(|text| agent_doc_queue::queue_claim::claim_identity(text))
         .collect::<std::collections::HashSet<_>>();
-    let mut lifecycle_targets = active_queue_prompt_texts
+    let claim_by_identity = claim_states
         .iter()
-        .filter(|text| {
-            !reported_queue_prompt_identities
-                .contains(&agent_doc_queue::queue_claim::claim_identity(text))
-        })
-        .cloned()
-        .map(|text| {
-            (
-                text,
-                agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
-            )
-        })
-        .collect::<Vec<_>>();
-    lifecycle_targets.extend(
-        claim_states
-            .iter()
-            .map(|claim| (claim.item_text.clone(), claim.state.projection_marker())),
-    );
-    lifecycle_targets.extend(
-        reported_queue_prompt_texts.into_iter()
-        .map(|text| {
-            (
-                text,
-                agent_doc_document::queue_projection::QueueLifecycleMarker::Reported,
-            )
-        }),
-    );
-    lifecycle_targets.extend(
+        .map(|claim| (claim.identity.clone(), claim))
+        .collect::<std::collections::HashMap<_, _>>();
+    let receipt_by_identity = report_receipts
+        .iter()
+        .filter(|receipt| !claim_by_identity.contains_key(&receipt.identity))
+        .map(|receipt| (receipt.identity.clone(), receipt))
+        .collect::<std::collections::HashMap<_, _>>();
+    let completion_identities =
         agent_doc_queue_io::queue_claim::completion_evidence_head_texts(&current_content)
             .into_iter()
-            .map(|text| {
-                (
-                    text,
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling,
-                )
-            }),
-    );
+            .map(|text| agent_doc_queue::queue_claim::claim_identity(&text))
+            .collect::<std::collections::HashSet<_>>();
+    let lifecycle_targets = activation
+        .entries_after
+        .iter()
+        .filter_map(|entry| {
+            let prompt = match entry {
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => prompt,
+                _ => return None,
+            };
+            let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+            let claim = claim_by_identity.get(&identity).copied();
+            let receipt = receipt_by_identity.get(&identity).copied();
+            let durable_on_struck = matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Completed(_)
+            ) && (claim.is_some()
+                || receipt.is_some()
+                || completion_identities.contains(&identity));
+            if matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Completed(_)
+            ) && !durable_on_struck
+            {
+                return None;
+            }
+            let marker = if lifecycle_state_degraded || durable_on_struck {
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+            } else if let Some(claim) = claim {
+                claim.state.projection_marker()
+            } else if receipt.is_some() {
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+            } else if completion_identities.contains(&identity) {
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
+            } else if active_identities.contains(&identity) {
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Running
+            } else {
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+            };
+            let owner = claim
+                .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: claim.owner.clone(),
+                    generation: claim.generation,
+                })
+                .or_else(|| {
+                    receipt.map(|receipt| {
+                        agent_doc_document::queue_projection::QueueOwnerProjection {
+                            owner: receipt.owner.clone(),
+                            generation: receipt.generation,
+                        }
+                    })
+                });
+            Some(agent_doc_queue::document_queue::QueueRowProjection {
+                text: prompt.text.clone(),
+                marker,
+                owner,
+                reopen_completed: durable_on_struck,
+            })
+        })
+        .collect::<Vec<_>>();
     if let Some((new_body, marked_entries)) =
-        agent_doc_queue::document_queue::project_prompt_lifecycle_markers(
+        agent_doc_queue::document_queue::project_prompt_runtime_projections(
             &marker_body,
             &lifecycle_targets,
         )?
@@ -8940,7 +8994,7 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.queue_prompts, vec!["#upgrade".to_string()]);
         let authoritative = state.authoritative_content.as_deref().unwrap();
-        assert!(authoritative.contains("- #upgrade"), "{authoritative}");
+        assert!(authoritative.contains("- 📥 #upgrade"), "{authoritative}");
         assert_eq!(
             agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
                 &doc,
@@ -9567,7 +9621,7 @@ mod tests {
             let updated = std::fs::read_to_string(&doc).unwrap();
             assert_eq!(
                 queue_line(&updated, "claimed"),
-                "- 🟡 do [#claimed]",
+                "- 🟡 ⟦owner=subagent:worker;generation=1⟧ do [#claimed]",
                 "pass {pass}: a live claim keeps its in-flight marker:\n{updated}"
             );
             assert_eq!(
@@ -9624,7 +9678,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             queue_line(&updated, "verify"),
-            "- 🟡 do [#verify]",
+            "- 🟡 ⟦owner=subagent:worker;generation=1⟧ do [#verify]",
             "{updated}"
         );
         let warning = state
@@ -9801,7 +9855,7 @@ mod tests {
             updated.contains("- 🚧 do [#alpha]"),
             "synced queue:\n{updated}"
         );
-        assert!(updated.contains("- do [#beta]"));
+        assert!(updated.contains("- 📥 do [#beta]"));
         assert!(
             !updated.contains("- do [#gated]"),
             "gated item must not be queued:\n{updated}"
@@ -10659,7 +10713,7 @@ mod tests {
             "queue fallback must opt into the existing priority/auto-DAG path:\n{updated}"
         );
         assert!(
-            queue.contains("- 🚧 do [#setup]\n- do [#ship]"),
+            queue.contains("- 🚧 do [#setup]\n- 📥 do [#ship]"),
             "auto-DAG fallback must run prerequisites before dependents:\n{updated}"
         );
         assert!(!queue.contains("/goal"), "{updated}");
@@ -13033,7 +13087,7 @@ mod tests {
             "running head stays:\n{updated}"
         );
         assert!(
-            updated.contains("- do [#alpha]"),
+            updated.contains("- 📥 do [#alpha]"),
             "marked item should append:\n{updated}"
         );
         assert!(
@@ -13139,7 +13193,7 @@ mod tests {
             "go-mode must repopulate a drained active queue:\n{updated}"
         );
         assert!(
-            updated.contains("- do [#beta]"),
+            updated.contains("- 📥 do [#beta]"),
             "go-mode must repopulate ALL open backlog ids:\n{updated}"
         );
         assert!(
@@ -13344,7 +13398,7 @@ mod tests {
             "the running head stays:\n{updated}"
         );
         assert!(
-            updated.contains("- do [#beta]"),
+            updated.contains("- 📥 do [#beta]"),
             "go-mode must append a fresh backlog `queue`-attr item even when the queue is not drained:\n{updated}"
         );
         assert!(
@@ -14026,7 +14080,7 @@ mod tests {
         assert_ne!(state.queue_active, Some(true));
         assert!(halted.contains("queue: pause"), "{halted}");
         assert!(!halted.contains("stop"), "{halted}");
-        assert!(halted.contains("- do the remaining thing"), "{halted}");
+        assert!(halted.contains("- 📥 do the remaining thing"), "{halted}");
     }
     #[test]
     fn run_queue_maintenance_no_warning_when_queue_already_synced() {
@@ -14675,7 +14729,7 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#fast]\n- do [#slow]"),
+            updated.contains("- 🚧 do [#fast]\n- 📥 do [#slow]"),
             // `#pinoperatoronly`: priority sorting reorders; it does not pin.
             // A marker in the queue now means the operator put it there.
             "backlog `queue priority` must sort synced queue prompts by position, \
@@ -14719,7 +14773,7 @@ mod tests {
         assert_eq!(state.queue_prompts[0], "do [#alpha]");
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#alpha]\n- do [#beta]"),
+            updated.contains("- 🚧 do [#alpha]\n- 📥 do [#beta]"),
             "queue marker must move to active head:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#alpha] active work"));
@@ -14813,7 +14867,7 @@ mod tests {
         assert_eq!(state.queue_drainable_head_count, 2);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#a]\n- 🟡 do [#b]\n- 🟡 do [#c]\n- do [#d]"),
+            updated.contains("- 🚧 do [#a]\n- 🟡 ⟦owner=subagent:b;generation=1⟧ do [#b]\n- 🟡 ⟦owner=subagent:c;generation=1⟧ do [#c]\n- 📥 do [#d]"),
             "selected and all claimed queue heads must be marked:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#a] inline work"));
@@ -14825,7 +14879,7 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- do [#b]\n- 🟡 do [#c]\n- do [#d]"));
+        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- 🟡 ⟦owner=subagent:c;generation=1⟧ do [#c]\n- 📥 do [#d]"));
         assert!(updated.contains("- [ ] [#b] worker one"));
         assert!(updated.contains("- [ ] 🚧 [#c] worker two"));
 
@@ -14833,7 +14887,7 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- do [#b]\n- ⚠️ do [#c]\n- do [#d]"));
+        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ⚠️ ⟦owner=subagent:c;generation=1⟧ do [#c]\n- 📥 do [#d]"));
         assert!(updated.contains("- [ ] [#c] worker two"));
     }
 
@@ -14873,7 +14927,7 @@ mod tests {
         assert_eq!(state.queue_drainable_head_count, 1);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- ⏳ do [#verify]\n- do [#focused]\n- 🚧 do [#ready]"),
+            updated.contains("- ⏳ do [#verify]\n- 📥 do [#focused]\n- 🚧 do [#ready]"),
             "in-progress marker must project the first in-session drainable head \
              (`#queueawaitop`: the operator-verify head shows ⏳, `[focused-cycle]` none):\n{updated}"
         );
@@ -14961,7 +15015,7 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#a]\n- do [#b]\n- release + publish\n"),
+            updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- 📥 release + publish\n"),
             "a stale binary-projected marker must move to the operator's first head:\n{updated}"
         );
     }
@@ -15016,7 +15070,7 @@ mod tests {
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#setup]\n- 🚧 do [#ship]\n- do [#ops]"),
+            updated.contains("- 🚧 do [#setup]\n- 🚧 do [#ship]\n- 📥 do [#ops]"),
             "operator retarget must project the selected head and its auto-DAG prerequisite as active:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#setup] priority=1 prerequisite work"));
@@ -15151,7 +15205,7 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 📌 do [#slow]\n- do [#fast]\n- do [#medium]"),
+            updated.contains("- 🚧 📌 do [#slow]\n- 📥 do [#fast]\n- 📥 do [#medium]"),
             "operator-moved queue prompt should become sticky with an operator pin (📌):\n{updated}"
         );
     }
@@ -15193,9 +15247,9 @@ mod tests {
         assert!(
             updated.contains(
                 "- 🚧 :pushpin: do [#ops]\n\
-                 - :round_pushpin: do [#setup]\n\
-                 - :pushpin: do [#ship]\n\
-                 - :pushpin: do [#notify]"
+                 - 📥 :round_pushpin: do [#setup]\n\
+                 - 📥 :pushpin: do [#ship]\n\
+                 - 📥 :pushpin: do [#notify]"
             ),
             "auto-dag must let dependency blockers intersperse a pinned batch:\n{updated}"
         );
@@ -15277,7 +15331,7 @@ mod tests {
 
         let consumed = std::fs::read_to_string(&doc).unwrap();
         assert!(consumed.contains("- ~~do [#newhead]~~"));
-        assert!(consumed.contains("- do [#nexthead]"));
+        assert!(consumed.contains("- 📥 do [#nexthead]"));
     }
     #[test]
     fn queue_maintenance_drains_all_done_queue_without_item_modified_halt() {
@@ -15992,7 +16046,7 @@ mod tests {
         );
         // The retained tail is preserved, and maintenance is idempotent.
         let before = std::fs::read_to_string(&doc).unwrap();
-        assert!(before.contains("- do [#second-live]"));
+        assert!(before.contains("- 📥 do [#second-live]"));
         let _ = run_queue_maintenance(&doc, None).unwrap();
         let after = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(before, after, "stable inactive queue must not be mutated");
@@ -16104,7 +16158,7 @@ mod tests {
         run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
             .unwrap();
 
-        let expected = "📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.";
+        let expected = "📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.";
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(file_after.contains(expected), "{file_after}");
         assert!(
@@ -18711,7 +18765,12 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains(&format!("- ~~{done}~~")), "{updated}");
-        assert!(updated.contains(&format!("- 🟡 {pending}\n")), "{updated}");
+        assert!(
+            updated.contains(&format!(
+                "- 🟡 ⟦owner=subagent:palette;generation=1⟧ {pending}\n"
+            )),
+            "{updated}"
+        );
         let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
         let owners: Vec<&str> = ledger.claims.iter().map(|c| c.owner.as_str()).collect();
         assert_eq!(
@@ -19539,7 +19598,7 @@ mod tests {
             vec!["do [#qsr]", "do [#rsc]", "do [#g76]", "#release"],
             "{body}"
         );
-        assert!(body.trim_end().ends_with("- #release"), "{body}");
+        assert!(body.trim_end().ends_with("- 📥 #release"), "{body}");
     }
 
     /// `#queuemovepinneighbors`: parking one line at the tail must not stamp an

@@ -586,7 +586,7 @@ mod tests {
     const NESTED_SYNC_DOC: &str = concat!(
         "## Status\n\n",
         "<!-- agent:status patch=replace sync=\"Keep release current\" -->\n",
-        "\n📥 Queue handoff: 5 reported items awaiting coordinator integration.\n",
+        "\n📤 Queue handoff: 5 reported items awaiting coordinator integration.\n",
         "Review pass done.\n\n",
         "<!-- status:sync -->\n",
         "Review pass done.\n\n",
@@ -611,7 +611,7 @@ mod tests {
             concat!(
                 "## Status\n\n",
                 "<!-- agent:status patch=replace sync=\"Keep release current\" -->\n",
-                "\n📥 Queue handoff: 5 reported items awaiting coordinator integration.\n",
+                "\n📤 Queue handoff: 5 reported items awaiting coordinator integration.\n",
                 "Review pass done.\n\n",
                 "<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->\n",
                 "<!-- /agent:status -->\n",

@@ -291,7 +291,7 @@ fn id_prefix(text: &str) -> &str {
         .unwrap_or("")
 }
 
-/// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🟡`/`🚧`/`📥`/`⚠️`/`⏭️`/`⏳`
+/// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🟡`/`🚧`/`📥`/`📤`/`⚠️`/`⏭️`/`⏳`
 /// and the `**pin**`/`**prioritized**` word forms) from a queue head so a
 /// marker-decorated line keys to the same durable identity as the bare line.
 /// Shared with the CRDT cell-merge free-text keyer so merge, convergence, and
@@ -318,13 +318,27 @@ pub fn strip_priority_markers(text: &str) -> String {
             "🟡",
             "🚧",
             "📥",
+            "📤",
             "⚠️",
+            "🔄",
+            "❔",
             "⏭\u{fe0f}",
             // `#queueawaitop`: awaiting-operator lifecycle projection.
             "⏳",
         ]
         .iter()
-        .find_map(|marker| trimmed.strip_prefix(marker));
+        .find_map(|marker| trimmed.strip_prefix(marker))
+        .or_else(|| {
+            let rest = trimmed.strip_prefix("🙋")?.trim_start();
+            let rest = rest.strip_prefix("[#")?;
+            let (_, after) = rest.split_once(']')?;
+            Some(after)
+        })
+        .or_else(|| {
+            let rest = trimmed.strip_prefix("⟦owner=")?;
+            let (_, after) = rest.split_once('⟧')?;
+            Some(after)
+        });
         match stripped {
             Some(rest) => t = rest.trim_start(),
             None => break,

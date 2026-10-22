@@ -1455,59 +1455,104 @@ pub fn set_prompt_lifecycle_markers(
         agent_doc_document::queue_projection::QueueLifecycleMarker,
     )],
 ) -> Option<Vec<QueueEntry>> {
-    let mut target_counts = std::collections::BTreeMap::<
-        (
-            String,
-            agent_doc_document::queue_projection::QueueLifecycleMarker,
-        ),
-        usize,
-    >::new();
-    for (text, marker) in targets {
-        let key = strip_priority_markers(text);
-        if key.is_empty() {
-            continue;
-        }
-        *target_counts.entry((key, *marker)).or_default() += 1;
-    }
+    let targets = targets
+        .iter()
+        .map(|(text, marker)| QueueRowProjection {
+            text: text.clone(),
+            marker: *marker,
+            owner: None,
+            reopen_completed: false,
+        })
+        .collect::<Vec<_>>();
+    set_prompt_runtime_projections(entries, &targets)
+}
+
+/// Complete visible projection for one queue occurrence. `owner` names only a
+/// generation-fenced worker attempt; pending/coordinator/unknown rows omit it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueRowProjection {
+    pub text: String,
+    pub marker: agent_doc_document::queue_projection::QueueLifecycleMarker,
+    pub owner: Option<agent_doc_document::queue_projection::QueueOwnerProjection>,
+    /// Set only when durable live evidence contradicts a struck presentation.
+    /// A target for a later live duplicate must not reopen an earlier terminal
+    /// row that happens to have the same work identity.
+    pub reopen_completed: bool,
+}
+
+/// Derive every projected prefix from an exact occurrence target. A target on
+/// a struck row reopens it with the supplied degraded marker: Markdown strike
+/// styling alone cannot retire durable claim/report evidence.
+pub fn set_prompt_runtime_projections(
+    entries: &[QueueEntry],
+    targets: &[QueueRowProjection],
+) -> Option<Vec<QueueEntry>> {
+    let mut targets = targets
+        .iter()
+        .filter_map(|target| {
+            let key = strip_priority_markers(&target.text);
+            (!key.is_empty()).then_some((key, target.clone(), false))
+        })
+        .collect::<Vec<_>>();
     let mut changed = false;
     let out = entries
         .iter()
         .map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => {
+            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                 let mut next = prompt.clone();
                 if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
                     next.text = stripped;
                     changed = true;
                 }
                 let key = strip_priority_markers(&next.text);
-                if let Some((marker, remaining)) =
-                    target_counts
-                        .iter_mut()
-                        .find_map(|((target_key, marker), remaining)| {
-                            (target_key == &key && *remaining > 0).then_some((*marker, remaining))
-                        })
-                {
-                    *remaining -= 1;
+                let target = targets
+                    .iter_mut()
+                    .find(|(target_key, target, consumed)| {
+                        target_key == &key
+                            && !*consumed
+                            && (!matches!(entry, QueueEntry::Completed(_))
+                                || target.reopen_completed)
+                    })
+                    .map(|(_, target, consumed)| {
+                        *consumed = true;
+                        target
+                    });
+                let has_target = target.is_some();
+                if let Some(target) = target {
                     if !crate::queue_command::is_slash_command(&next.text) {
-                        let marked_text =
+                        let marked =
                             agent_doc_document::queue_projection::apply_lifecycle_marker(
-                                &next.text, marker,
+                                &next.text,
+                                target.marker,
+                            );
+                        let marked_text =
+                            agent_doc_document::queue_projection::apply_owner_projection(
+                                &marked,
+                                target.owner.as_ref(),
                             );
                         if marked_text != next.text {
                             next.text = marked_text;
                             changed = true;
                         }
                     }
+                } else {
+                    let without_owner =
+                        agent_doc_document::queue_projection::apply_owner_projection(
+                            &next.text, None,
+                        );
+                    if without_owner != next.text {
+                        next.text = without_owner;
+                        changed = true;
+                    }
                 }
-                QueueEntry::Prompt(next)
-            }
-            QueueEntry::Completed(prompt) => {
-                let mut next = prompt.clone();
-                if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
-                    next.text = stripped;
+                if has_target && matches!(entry, QueueEntry::Completed(_)) {
                     changed = true;
+                    QueueEntry::Prompt(next)
+                } else if matches!(entry, QueueEntry::Completed(_)) {
+                    QueueEntry::Completed(next)
+                } else {
+                    QueueEntry::Prompt(next)
                 }
-                QueueEntry::Completed(next)
             }
             _ => entry.clone(),
         })
@@ -1610,6 +1655,37 @@ pub fn project_prompt_lifecycle_markers(
     anyhow::ensure!(
         reparsed == marked_entries,
         "queue lifecycle marker projection changed non-marker row structure"
+    );
+    Ok(Some((projected, reparsed)))
+}
+
+/// [`project_prompt_lifecycle_markers`] with exact-attempt owner/generation
+/// annotations and struck-with-live-evidence recovery.
+pub fn project_prompt_runtime_projections(
+    body: &str,
+    targets: &[QueueRowProjection],
+) -> Result<Option<(String, Vec<QueueEntry>)>> {
+    let spans = parse_spans(body)?;
+    let entries = spans
+        .iter()
+        .map(|(entry, _)| entry.clone())
+        .collect::<Vec<_>>();
+    let Some(marked_entries) = set_prompt_runtime_projections(&entries, targets) else {
+        return Ok(None);
+    };
+    validate_in_progress_marker_projection(&entries, &marked_entries)?;
+
+    let mut projected = body.to_string();
+    for ((before, range), after) in spans.iter().zip(&marked_entries).rev() {
+        if before != after {
+            projected.replace_range(range.clone(), &render(std::slice::from_ref(after)));
+        }
+    }
+    let reparsed = parse(&projected)?;
+    validate_in_progress_marker_projection(&entries, &reparsed)?;
+    anyhow::ensure!(
+        reparsed == marked_entries,
+        "queue runtime projection changed non-marker row structure"
     );
     Ok(Some((projected, reparsed)))
 }
@@ -1788,6 +1864,7 @@ pub fn set_prompts_lifecycle_markers(
                             | qp::QueueLifecycleMarker::Reported
                             | qp::QueueLifecycleMarker::Lost
                             | qp::QueueLifecycleMarker::Reconciling
+                            | qp::QueueLifecycleMarker::Unknown
                     )
                 ) =>
             {
@@ -4563,7 +4640,7 @@ mod tests {
     fn typed_lifecycle_projection_replaces_state_without_retargeting_identity() {
         use agent_doc_document::queue_projection::QueueLifecycleMarker;
 
-        let entries = parse("- 🚧 do [#a]\n- do [#b]\n- 📥 do [#c]\n").unwrap();
+        let entries = parse("- 🚧 do [#a]\n- do [#b]\n- 📤 do [#c]\n").unwrap();
         let targets = vec![
             ("do [#a]".to_string(), QueueLifecycleMarker::Reported),
             ("do [#b]".to_string(), QueueLifecycleMarker::Lost),
@@ -4572,8 +4649,33 @@ mod tests {
         let marked = set_prompt_lifecycle_markers(&entries, &targets).unwrap();
         assert_eq!(
             render(&marked),
-            "- 📥 do [#a]\n- ⚠️ do [#b]\n- 🟡 do [#c]\n"
+            "- 📤 do [#a]\n- ⚠️ do [#b]\n- 🟡 do [#c]\n"
         );
+    }
+
+    #[test]
+    fn runtime_projection_reopens_struck_work_and_preserves_choice_and_whitespace() {
+        use agent_doc_document::queue_projection::{
+            QueueLifecycleMarker, QueueOwnerProjection,
+        };
+        let body = "- ~~  🙋 [#choice] fix sdk demo  ~~\n- untouched\n";
+        let targets = vec![QueueRowProjection {
+            text: "fix sdk demo".to_string(),
+            marker: QueueLifecycleMarker::Unknown,
+            owner: Some(QueueOwnerProjection {
+                owner: "subagent:sdk".to_string(),
+                generation: 4,
+            }),
+            reopen_completed: true,
+        }];
+        let (projected, entries) = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("durable evidence must reopen manual strike");
+        assert_eq!(
+            projected,
+            "- ❔ ⟦owner=subagent:sdk;generation=4⟧ 🙋 [#choice] fix sdk demo\n- untouched\n"
+        );
+        assert!(matches!(entries[0], QueueEntry::Prompt(_)));
     }
 
     #[test]

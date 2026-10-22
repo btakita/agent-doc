@@ -1234,19 +1234,39 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
     let document_hash = agent_doc_hash::path_hash(file)
         .with_context(|| format!("canonicalize queue-attempt document: {}", file.display()))?;
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    let Some(record) = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+    let claim_record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
         &conn,
         &document_hash,
         agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
-    )?
-    else {
-        return Ok(current.to_string());
-    };
-    let mut ledger =
-        agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(&record.payload_json)?;
-    if ledger.claims.is_empty() {
-        return Ok(current.to_string());
-    }
+    )?;
+    let receipt_record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+        &conn,
+        &document_hash,
+        agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND,
+    )?;
+    let claim_ledger = claim_record
+        .as_ref()
+        .map(|record| {
+            agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
+                &record.payload_json,
+            )
+        })
+        .transpose();
+    let receipt_ledger = receipt_record
+        .as_ref()
+        .map(|record| {
+            serde_json::from_str::<agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger>(
+                &record.payload_json,
+            )
+            .context("parse durable queue report outbox")
+        })
+        .transpose();
+    let state_degraded = claim_ledger.is_err() || receipt_ledger.is_err();
+    let mut ledger = claim_ledger.unwrap_or_default().unwrap_or_default();
+    let receipts = receipt_ledger
+        .unwrap_or_default()
+        .unwrap_or_default()
+        .receipts;
 
     let components = agent_doc_element::element::parse(current)?;
     let Some(queue_component) =
@@ -1270,51 +1290,85 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .unwrap_or_default()
         .as_secs();
     ledger.follow_edits(now_secs, &live_heads);
-    let live_identities = live_heads
-        .iter()
-        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
-        .collect::<HashSet<_>>();
     let claim_states = ledger
         .claims
         .into_iter()
-        .filter(|claim| live_identities.contains(&claim.identity))
         .map(|mut claim| {
             if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
                 && claim.is_expired(now_secs)
             {
                 claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
             }
-            (claim.identity.clone(), claim.state.projection_marker())
+            (claim.identity.clone(), claim)
         })
         .collect::<HashMap<_, _>>();
-    if claim_states.is_empty() {
-        return Ok(current.to_string());
-    }
+    let receipts = receipts
+        .into_iter()
+        .filter(|receipt| !claim_states.contains_key(&receipt.identity))
+        .map(|receipt| (receipt.identity.clone(), receipt))
+        .collect::<HashMap<_, _>>();
     let targets = entries
         .iter()
         .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+            | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
                 let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
-                claim_states
-                    .get(&identity)
-                    .copied()
+                let claim = claim_states.get(&identity);
+                let receipt = receipts.get(&identity);
+                let durable_on_struck = matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Completed(_)
+                ) && (claim.is_some() || receipt.is_some());
+                if matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Completed(_)
+                ) && !durable_on_struck
+                {
+                    return None;
+                }
+                let marker = if state_degraded || durable_on_struck {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+                } else if let Some(claim) = claim {
+                    claim.state.projection_marker()
+                } else if receipt.is_some() {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                } else if matches!(
+                    agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
+                    Some(
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Skipped
+                            | agent_doc_document::queue_projection::QueueLifecycleMarker::AwaitingOperator
+                    )
+                ) {
+                    agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                        .expect("matched Some lifecycle marker")
+                } else {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                };
+                let owner = claim
+                    .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
+                        owner: claim.owner.clone(),
+                        generation: claim.generation,
+                    })
                     .or_else(|| {
-                        agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
-                    })
-                    .map(|marker| {
-                        (
-                            agent_doc_document::queue_projection::strip_in_progress_marker(
-                                &prompt.text,
-                            ),
-                            marker,
-                        )
-                    })
+                        receipt.map(|receipt| {
+                            agent_doc_document::queue_projection::QueueOwnerProjection {
+                                owner: receipt.owner.clone(),
+                                generation: receipt.generation,
+                            }
+                        })
+                    });
+                Some(agent_doc_queue::document_queue::QueueRowProjection {
+                    text: prompt.text.clone(),
+                    marker,
+                    owner,
+                    reopen_completed: durable_on_struck,
+                })
             }
             _ => None,
         })
         .collect::<Vec<_>>();
     let Some((projected_body, _)) =
-        agent_doc_queue::document_queue::project_prompt_lifecycle_markers(body, &targets)?
+        agent_doc_queue::document_queue::project_prompt_runtime_projections(body, &targets)?
     else {
         return Ok(current.to_string());
     };
@@ -8388,9 +8442,9 @@ mod tests {
         persist_queue_claim_ledger(dir.path(), &doc, &ledger);
 
         let projected = durable_queue_attempt_projection(&doc, stale).unwrap();
-        assert!(projected.contains("- 🟡 claimed item\n"), "{projected}");
-        assert!(projected.contains("- 🚧 running item\n"), "{projected}");
-        assert!(projected.contains("- 📥 reported item\n"), "{projected}");
+        assert!(projected.contains("- 🟡 ⟦owner=subagent:claimed;generation=1⟧ claimed item\n"), "{projected}");
+        assert!(projected.contains("- 🚧 ⟦owner=subagent:running;generation=1⟧ running item\n"), "{projected}");
+        assert!(projected.contains("- 📤 ⟦owner=subagent:reported;generation=1⟧ reported item\n"), "{projected}");
         assert!(
             projected.contains("- ⏳ unrelated operator hold\n"),
             "an unrelated row must remain byte-identical:\n{projected}"
@@ -8430,8 +8484,8 @@ mod tests {
 
         with_hub_seeded_from_file(&doc, |hub| {
             let canonical = hub.canonical_text();
-            assert!(canonical.contains(&format!("- 🚧 {item}\n")), "{canonical}");
-            assert!(canonical.contains("- unrelated pending work\n"), "{canonical}");
+            assert!(canonical.contains(&format!("- 🚧 ⟦owner=subagent:gh299;generation=1⟧ {item}\n")), "{canonical}");
+            assert!(canonical.contains("- 📥 unrelated pending work\n"), "{canonical}");
         })
         .unwrap();
         // Disk remains a stale recovery cut. The fix repairs canonical authority,
@@ -9409,10 +9463,15 @@ mod tests {
         let canonical = with_hub(&doc, |hub| {
             let canonical = hub.canonical_text();
             assert!(
-                canonical.contains(&format!("- 🚧 {item}\n")),
+                canonical.contains(&format!(
+                    "- 🚧 ⟦owner=subagent:gh299;generation=1⟧ {item}\n"
+                )),
                 "the durable Running attempt must dominate the stale retained cut:\n{canonical}"
             );
-            assert!(canonical.contains("- unrelated pending work\n"), "{canonical}");
+            assert!(
+                canonical.contains("- 📥 unrelated pending work\n"),
+                "{canonical}"
+            );
             assert_eq!(canonical.matches('🚧').count(), 1, "{canonical}");
             canonical
         })

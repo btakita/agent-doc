@@ -133,9 +133,13 @@ pub fn derive_claim_runtime_projection(
     cleared_item: Option<&str>,
 ) -> Result<ClaimRuntimeProjection> {
     let components = agent_doc_element::element::parse(current)?;
-    let Some(queue_component) =
-        agent_doc_queue::queue_set::selected_component(current, &components)?
-    else {
+    let selected = agent_doc_queue::queue_set::selected_component(current, &components)?;
+    let only_queue = || {
+        let mut queues = components.iter().filter(|component| component.name == "queue");
+        let first = queues.next()?;
+        queues.next().is_none().then_some(first)
+    };
+    let Some(queue_component) = selected.or_else(only_queue) else {
         return Ok(ClaimRuntimeProjection {
             target_content: current.to_string(),
             persisted_heads: Vec::new(),
@@ -144,16 +148,59 @@ pub fn derive_claim_runtime_projection(
     };
     let body = queue_component.content(current);
     let entries = agent_doc_queue::document_queue::parse(body)?;
-    let claim_states = crate::queue_claim::claim_states_for_content(file, current)?
+    let claim_ledger = crate::queue_claim::load_ledger_following(file, current);
+    let receipt_ledger = crate::claim_release_receipt::load(file);
+    let state_degraded = claim_ledger.is_err() || receipt_ledger.is_err();
+    if let Err(err) = &claim_ledger {
+        eprintln!(
+            "[queue] lifecycle projection degraded: cannot read claims for {}: {err:#}",
+            file.display()
+        );
+    }
+    if let Err(err) = &receipt_ledger {
+        eprintln!(
+            "[queue] lifecycle projection degraded: cannot read report outbox for {}: {err:#}",
+            file.display()
+        );
+    }
+    let now = crate::queue_claim::claim_clock_now_secs();
+    let claim_states = claim_ledger
+        .unwrap_or_default()
+        .claims
         .into_iter()
-        .map(|claim| (claim.identity.clone(), claim))
+        .map(|mut claim| {
+            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
+                && claim.is_expired(now)
+            {
+                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            }
+            (claim.identity.clone(), claim)
+        })
         .collect::<std::collections::HashMap<_, _>>();
-    let reported = crate::claim_release_receipt::reported_items_for_content(file, current);
+    let receipts = receipt_ledger
+        .unwrap_or_default()
+        .receipts
+        .into_iter()
+        .map(|receipt| (receipt.identity.clone(), receipt))
+        .collect::<std::collections::HashMap<_, _>>();
     let completion_evidence = crate::queue_claim::completion_evidence_head_texts(current)
         .into_iter()
         .map(|head| agent_doc_queue::queue_claim::claim_identity(&head))
         .collect::<std::collections::HashSet<_>>();
     let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
+    let selected = agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .filter(|state| {
+            state.queue_selection_authority
+                == agent_doc_cycle_state_io::QueueSelectionAuthority::Preflight
+                && !state.queue_selection_preempted
+        })
+        .map(|state| {
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+                .with_heads(&state.selected_free_text_queue_heads)
+        })
+        .unwrap_or_else(agent_doc_queue::queue_claim::ClaimedQueueItems::none);
 
     // Build one target per queue occurrence. This retains marker cardinality
     // for duplicate heads while avoiding a union that could mark an unrelated
@@ -161,11 +208,8 @@ pub fn derive_claim_runtime_projection(
     let targets = entries
         .iter()
         .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => {
+            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                 let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
-                let prior = (cleared_identity.as_ref() != Some(&identity))
-                    .then(|| agent_doc_document::queue_projection::lifecycle_marker(&prompt.text))
-                    .flatten();
                 let observed = agent_doc_document::queue_projection::lifecycle_marker(&prompt.text);
                 if let Some(claim) = claim_states.get(&identity)
                     && let Some(diagnosis) = agent_doc_queue::queue_claim::diagnose_lifecycle(
@@ -177,21 +221,60 @@ pub fn derive_claim_runtime_projection(
                 {
                     log_queue_invariant_once(file, claim, diagnosis);
                 }
-                let marker = agent_doc_document::queue_projection::worker_evidence_marker(
-                    claim_states
-                        .get(&identity)
-                        .map(|claim| claim.state.projection_marker()),
-                    reported.claims(&prompt.text),
-                    completion_evidence.contains(&identity),
-                )
-                .or(prior);
-                marker.map(|marker| {
-                    (
-                        agent_doc_document::queue_projection::strip_in_progress_marker(
-                            &prompt.text,
-                        ),
-                        marker,
+                let durable_on_struck = matches!(entry, QueueEntry::Completed(_))
+                    && (claim_states.contains_key(&identity)
+                        || receipts.contains_key(&identity)
+                        || completion_evidence.contains(&identity));
+                if matches!(entry, QueueEntry::Completed(_)) && !durable_on_struck {
+                    return None;
+                }
+                let claim = (cleared_identity.as_ref() != Some(&identity))
+                    .then(|| claim_states.get(&identity))
+                    .flatten();
+                let receipt = (cleared_identity.as_ref() != Some(&identity) && claim.is_none())
+                    .then(|| receipts.get(&identity))
+                    .flatten();
+                let marker = if state_degraded || durable_on_struck {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+                } else if let Some(claim) = claim {
+                    claim.state.projection_marker()
+                } else if receipt.is_some() {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                } else if completion_evidence.contains(&identity) {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
+                } else if selected.claims(&prompt.text) {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Running
+                } else if matches!(
+                    observed,
+                    Some(
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Skipped
+                            | agent_doc_document::queue_projection::QueueLifecycleMarker::AwaitingOperator
                     )
+                ) {
+                    observed.expect("matched Some lifecycle marker")
+                } else {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                };
+                let owner = claim
+                    .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
+                        owner: claim.owner.clone(),
+                        generation: claim.generation,
+                    })
+                    .or_else(|| {
+                        receipt.map(|receipt| {
+                            agent_doc_document::queue_projection::QueueOwnerProjection {
+                                owner: receipt.owner.clone(),
+                                generation: receipt.generation,
+                            }
+                        })
+                    });
+                Some(agent_doc_queue::document_queue::QueueRowProjection {
+                    text: agent_doc_document::queue_projection::strip_in_progress_marker(
+                        &prompt.text,
+                    ),
+                    marker,
+                    owner,
+                    reopen_completed: durable_on_struck,
                 })
             }
             _ => None,
@@ -199,14 +282,23 @@ pub fn derive_claim_runtime_projection(
         .collect::<Vec<_>>();
 
     let projection =
-        agent_doc_queue::document_queue::project_prompt_lifecycle_markers(body, &targets)?;
+        agent_doc_queue::document_queue::project_prompt_runtime_projections(body, &targets)?;
     let target_content = projection
         .as_ref()
         .map(|(projected_body, _)| queue_component.replace_content(current, projected_body))
         .unwrap_or_else(|| current.to_string());
     let persisted_heads = targets
         .iter()
-        .map(|(head, _)| agent_doc_document::queue_projection::strip_priority_markers(head))
+        .filter(|target| {
+            !matches!(
+                target.marker,
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+            )
+        })
+        .map(|target| {
+            agent_doc_document::queue_projection::strip_priority_markers(&target.text)
+        })
         .collect::<Vec<_>>();
     Ok(ClaimRuntimeProjection {
         changed: target_content != current,
@@ -621,9 +713,9 @@ mod tests {
         assert!(
             projection
                 .target_content
-                .contains("- 🚧 worked but ledger lost\n")
+                .contains("- 📥 worked but ledger lost\n")
         );
-        assert!(projection.target_content.contains("- never started\n"));
+        assert!(projection.target_content.contains("- 📥 never started\n"));
         assert!(!projection.target_content.contains("- 🔄 never started\n"));
         let unavailable = crate::queue_claim::claimed_items_for_content(&doc, &content);
         assert!(unavailable.claims(item));
@@ -1069,7 +1161,7 @@ mod tests {
     }
 
     #[test]
-    fn claim_and_release_project_runtime_marker_without_clobbering_inline_marker() {
+    fn claim_start_report_and_release_project_the_complete_visible_lifecycle() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_claim_projection_doc(
             dir.path(),
@@ -1080,16 +1172,20 @@ mod tests {
         let effects = FakeEffects::default();
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let claimed = std::fs::read_to_string(&doc).unwrap();
+        assert!(claimed.contains("- 📥 inline coordinator work"), "{claimed}");
         assert!(
-            claimed.contains("- 🚧 inline coordinator work"),
+            claimed.contains(
+                "- 🟡 ⟦owner=subagent:worker;generation=1⟧ dispatched worker work"
+            ),
             "{claimed}"
         );
-        assert!(claimed.contains("- 🟡 dispatched worker work"), "{claimed}");
         let claimed_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
         assert!(
-            claimed_snapshot.contains("- 🟡 dispatched worker work"),
+            claimed_snapshot.contains(
+                "- 🟡 ⟦owner=subagent:worker;generation=1⟧ dispatched worker work"
+            ),
             "{claimed_snapshot}"
         );
 
@@ -1104,30 +1200,41 @@ mod tests {
         .unwrap();
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let running = std::fs::read_to_string(&doc).unwrap();
-        assert!(running.contains("- 🚧 dispatched worker work"), "{running}");
+        assert!(
+            running.contains(
+                "- 🚧 ⟦owner=subagent:worker;generation=1⟧ dispatched worker work"
+            ),
+            "{running}"
+        );
 
         crate::queue_claim::report_attempt(&doc, "dispatched worker work", Some(1)).unwrap();
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let reported = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            reported.contains("- 📥 dispatched worker work"),
+            reported.contains(
+                "- 📤 ⟦owner=subagent:worker;generation=1⟧ dispatched worker work"
+            ),
             "{reported}"
         );
 
-        let released = crate::queue_claim::release(&doc, "dispatched worker work")
+        let released = crate::claim_release_receipt::release_attempt(
+            &doc,
+            "dispatched worker work",
+            crate::claim_release_receipt::ReleaseKind::Reported,
+            Some(1),
+        )
             .unwrap()
             .unwrap();
-        assert!(
-            project_claim_runtime_state_with_effects(&effects, &doc, Some(&released.item_text),)
-                .unwrap()
-        );
+        project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap();
         let released_projection = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            released_projection.contains("- 🚧 inline coordinator work"),
+            released_projection.contains("- 📥 inline coordinator work"),
             "{released_projection}"
         );
         assert!(
-            released_projection.contains("- dispatched worker work")
+            released_projection.contains(
+                "- 📤 ⟦owner=subagent:worker;generation=1⟧ dispatched worker work"
+            )
                 && !released_projection.contains("- 🟡 dispatched worker work"),
             "{released_projection}"
         );
@@ -1135,11 +1242,14 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(
-            released_snapshot.contains("- 🚧 inline coordinator work")
-                && released_snapshot.contains("- dispatched worker work")
+            released_snapshot.contains("- 📥 inline coordinator work")
+                && released_snapshot.contains(
+                    "- 📤 ⟦owner=subagent:worker;generation=1⟧ dispatched worker work"
+                )
                 && !released_snapshot.contains("- 🟡 dispatched worker work"),
             "{released_snapshot}"
         );
+        assert_eq!(released.item_text, "dispatched worker work");
     }
 
     #[test]
@@ -1181,8 +1291,8 @@ mod tests {
         }
 
         let live = effects.current();
-        assert!(live.contains("- 🚧 free text worker\n"), "{live}");
-        assert!(live.contains("- 🚧 do [#normalized-worker]\n"), "{live}");
+        assert!(live.contains("- 🚧 ⟦owner=subagent:free;generation=1⟧ free text worker\n"), "{live}");
+        assert!(live.contains("- 🚧 ⟦owner=subagent:normalized;generation=1⟧ do [#normalized-worker]\n"), "{live}");
         assert_eq!(live.matches("free text worker").count(), 1, "{live}");
         assert_eq!(live.matches("normalized-worker").count(), 1, "{live}");
 
@@ -1214,14 +1324,14 @@ mod tests {
         assert!(
             projection
                 .target_content
-                .contains("- release + publish ⟦effect:1⟧\n"),
+                .contains("- 📥 release + publish ⟦effect:1⟧\n"),
             "{}",
             projection.target_content
         );
         assert!(
             projection
                 .target_content
-                .contains("- 🟡 release + publish ⟦effect:2⟧\n"),
+                .contains("- 🟡 ⟦owner=subagent:release-2;generation=1⟧ release + publish ⟦effect:2⟧\n"),
             "{}",
             projection.target_content
         );
@@ -1262,12 +1372,16 @@ mod tests {
 
         assert!(projection.changed);
         assert!(
-            projection.target_content.contains(&format!("- 🚧 {item}\n")),
+            projection.target_content.contains(&format!(
+                "- 🚧 ⟦owner=subagent:gh299;generation=1⟧ {item}\n"
+            )),
             "{}",
             projection.target_content
         );
         assert!(
-            projection.target_content.contains(&format!("- {unrelated}\n")),
+            projection
+                .target_content
+                .contains(&format!("- 📥 {unrelated}\n")),
             "{}",
             projection.target_content
         );
@@ -1332,7 +1446,7 @@ mod tests {
     }
 
     #[test]
-    fn worked_live_row_is_marked_but_struck_terminal_row_is_not() {
+    fn manually_struck_row_with_live_claim_reopens_as_explicit_unknown() {
         let dir = tempfile::tempdir().unwrap();
         let item = "#gh-issue https://github.com/example/project/issues/299";
         let doc = write_claim_projection_doc(dir.path(), &format!("- {item}\n"));
@@ -1352,32 +1466,29 @@ mod tests {
         assert_eq!(
             live_projection
                 .target_content
-                .matches(&format!("- 🚧 {item}\n"))
+                .matches(&format!(
+                    "- 🚧 ⟦owner=subagent:gh299;generation=1⟧ {item}\n"
+                ))
                 .count(),
             1,
             "a live worked row must project exactly one typed lifecycle marker: {}",
             live_projection.target_content
         );
 
-        // A completed row is no longer live. Its strike is explicit terminal
-        // evidence, so lifecycle projection must not decorate it as active work.
-        let terminal = live.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n"));
+        // Markdown strike styling cannot retire an exact live attempt. The
+        // projection reopens the row as degraded, preserving owner/generation.
+        let terminal = live_projection.target_content.replace(
+            &format!("- 🚧 ⟦owner=subagent:gh299;generation=1⟧ {item}\n"),
+            &format!("- ~~{item}~~\n"),
+        );
         let terminal_projection = derive_claim_runtime_projection(&doc, &terminal, None).unwrap();
-        assert_eq!(terminal_projection.target_content, terminal);
         assert!(
             terminal_projection
                 .target_content
-                .contains(&format!("- ~~{item}~~\n")),
+                .contains(&format!(
+                    "- ❔ ⟦owner=subagent:gh299;generation=1⟧ {item}\n"
+                )),
             "{}",
-            terminal_projection.target_content
-        );
-        assert!(
-            !agent_doc_document::queue_projection::LIFECYCLE_MARKERS
-                .iter()
-                .any(|marker| terminal_projection
-                    .target_content
-                    .contains(&format!("- {marker} ~~{item}~~\n"))),
-            "terminal rows must not retain an active lifecycle projection: {}",
             terminal_projection.target_content
         );
     }
@@ -1397,11 +1508,13 @@ mod tests {
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let projected = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            projected.contains("- operator unsaved sibling"),
+            projected.contains("- 📥 operator unsaved sibling"),
             "{projected}"
         );
         assert!(
-            projected.contains("- 🟡 dispatched worker work"),
+            projected.contains(
+                "- 🟡 ⟦owner=subagent:worker;generation=1⟧ dispatched worker work"
+            ),
             "{projected}"
         );
     }

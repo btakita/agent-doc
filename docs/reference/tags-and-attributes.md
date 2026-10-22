@@ -144,7 +144,7 @@ For explicit ordinary-prose replacement, opt into the destructive mode:
 ```
 
 `sync-mode="replace"` updates the managed block and removes ordinary status
-prose. It preserves the `📥 Queue handoff:` projection, the
+prose. It preserves the `📤 Queue handoff:` projection (and migrates its legacy `📥` spelling), the
 `🔴 (restart/recycle your supervisor)` stale marker, and warning paragraphs
 whose prefixes are `[agent-doc sync]`, `[agent-doc merge]`,
 `[agent-doc repair]`, `[sync]`, `[merge]`, or `[repair]`. The opening marker

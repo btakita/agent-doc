@@ -560,7 +560,7 @@ mod tests {
     /// and all, was written verbatim as the payload of the existing region.
     pub(crate) const NESTED_INCIDENT_BODY: &str = concat!(
         "\n",
-        "📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
+        "📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
         "Review pass done. Two review items remain gated (pypiquotarecheck).\n",
         "\n",
         "<!-- status:sync -->\n",
@@ -620,7 +620,7 @@ mod tests {
             healed,
             concat!(
                 "\n",
-                "📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
+                "📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
                 "Review pass done. Two review items remain gated (pypiquotarecheck).\n",
                 "\n",
                 "<!-- status:sync -->\n",

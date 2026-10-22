@@ -230,6 +230,40 @@ pub fn queue_continuation_line(line: &str) -> bool {
     queue_prompt_content_line(line)
 }
 
+/// Stateful boundary policy for continuation text beneath one queue list item.
+///
+/// Ordinary queue continuation remains indentation-sensitive: column-zero prose
+/// starts another free-text head (`#queuefreetextsplit`). Terminal diagnostics,
+/// however, commonly start with an indented tree branch and then hard-wrap back
+/// to column zero. Once an indented terminal-tree line has been observed, keep
+/// subsequent prompt-content lines in the same item until a real queue boundary
+/// (blank, list marker, fence, directive, heading, or component marker).
+///
+/// Keeping this transition state here gives both the typed Markdown overlay and
+/// `document_queue::parse_spans` one policy owner (`#queueterminalwrap`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QueueContinuationState {
+    terminal_tree_evidence: bool,
+}
+
+impl QueueContinuationState {
+    /// Return whether `line` belongs to the open item and advance the state.
+    pub fn accepts_line(&mut self, line: &str) -> bool {
+        if queue_continuation_line(line) {
+            self.terminal_tree_evidence |= terminal_tree_evidence_line(line);
+            return true;
+        }
+        self.terminal_tree_evidence && queue_bare_prompt_continuation_line(line)
+    }
+}
+
+fn terminal_tree_evidence_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    ["└", "├", "│", "╰", "╭", "╮", "╯"]
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+}
+
 /// True when a column-zero line can start a bare free-text queue paragraph.
 /// The paragraph is represented by the same multiline item surface as legacy
 /// prompt fences, so node-keyed claim/strike/remove operations have one model.
@@ -852,28 +886,28 @@ pub fn components(source: &str) -> Vec<Component> {
     let mut offset = 0usize;
     // `#queuecruft`: byte offset where the open queue list item's content
     // starts, while that item still accepts continuation lines.
-    let mut continuable_item_start: Option<usize> = None;
+    let mut continuable_item: Option<(usize, QueueContinuationState)> = None;
     for line in source.split_inclusive('\n') {
         let line_start = offset;
         offset += line.len();
         if in_code(&ranges, line_start) {
-            continuable_item_start = None;
+            continuable_item = None;
             continue;
         }
         let content = line.trim_end_matches('\n');
         let content = content.strip_suffix('\r').unwrap_or(content);
         let trimmed = content.trim();
 
-        if let Some(raw_start) = continuable_item_start {
-            if queue_continuation_line(content)
+        if let Some((raw_start, state)) = continuable_item.as_mut() {
+            if state.accepts_line(content)
                 && let Some(comp) = open.as_mut()
                 && let Some(last) = comp.items.last_mut()
             {
-                let joined = &source[raw_start..line_start + content.len()];
+                let joined = &source[*raw_start..line_start + content.len()];
                 *last = parse_item(joined, last.start_byte, offset);
                 continue;
             }
-            continuable_item_start = None;
+            continuable_item = None;
         }
 
         if let Some(name) = parse_close_marker(trimmed) {
@@ -912,7 +946,10 @@ pub fn components(source: &str) -> Vec<Component> {
             if comp.name == "queue" && queue_item_accepts_continuation(item_content) {
                 // `item_content` is a suffix slice of `content`, which starts at
                 // `line_start`.
-                continuable_item_start = Some(line_start + (content.len() - item_content.len()));
+                continuable_item = Some((
+                    line_start + (content.len() - item_content.len()),
+                    QueueContinuationState::default(),
+                ));
             }
         }
     }
@@ -991,6 +1028,34 @@ trailing residue
         assert!(!queue.items[3].text.contains("beta"));
         assert!(queue.items[4].struck);
         assert!(!queue.items[4].text.contains("residue"));
+    }
+
+    #[test]
+    fn terminal_tree_hard_wrap_stays_inside_the_diagnostic_item() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- In tsift.md session: • Blocked by hook\n",
+            "  └ Session persistence continuation found fresh unresolved exchange work\n",
+            "for /workspace/tasks/software/tsift.md after the previous cycle was committed.\n",
+            "Continue THIS turn in-pane and persist it with agent-doc finalize.\n",
+            "- next item\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let queue = components(source)
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        assert_eq!(queue.items.len(), 2, "{:?}", queue.items);
+        assert_eq!(
+            queue.items[0].text,
+            concat!(
+                "In tsift.md session: • Blocked by hook\n",
+                "  └ Session persistence continuation found fresh unresolved exchange work\n",
+                "for /workspace/tasks/software/tsift.md after the previous cycle was committed.\n",
+                "Continue THIS turn in-pane and persist it with agent-doc finalize."
+            )
+        );
+        assert_eq!(queue.items[1].text, "next item");
     }
 
     #[test]

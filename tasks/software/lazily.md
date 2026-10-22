@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a14df7-ee2d-7ae0-a71a-258c82094a4b
+  codex: 01a15c94-c9b7-77a3-bb1e-b2ee5552c0b6
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -744,18 +744,59 @@ choices:
 - **Defer release**: I finish and push the implementation branch, and the release/publish request remains open for a later authorized cycle.
 
 Please answer each packet. A concise answer such as “Coordinator releases for all six” is sufficient if that is your choice.
-<!-- agent:boundary:aa7e9c64 -->
+
+### Re: Subagent completed: `subagent:spec` returned work for queue item “do [#lzstalehandlespec]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=20e0471ff01655aac7254e3b6a7aed5701fc0106ebe365df094a1008ea6853c9 -->
+
+### Re: Subagent completed: `subagent:conformance` returned work for queue item “do [#lzstalehandleconformance]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=30779fbf0122268365617d201255334b53822758183226b6d273cae8b3dbe18b -->
+
+### Re: Subagent completed: `subagent:paritykt` returned work for queue item “do [#lzstalehandleparitykt]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=2831c46291559d3f3b151176bd384e07ae59acbe65dd609fea85c1841bc274ec -->
+
+### Re: Subagent completed: `subagent:parityjs` returned work for queue item “do [#lzstalehandleparityjs]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=8999e98ff297d2ed314a668e4eeac843998b29110fd067d17ef8fe8e20cc0dd9 -->
+> **Chat prompt (#chatprompt:6ed120f7bea0):** Is lazily-rs + lazily-kt + lazily-js released + published?
+
+> **Chat prompt (#chatprompt:d4ae7636ddd3):** Do I need to make any decisions?
+
+### Re: release status and Rust scope — gpt-5 · 2026-10-22T14:48-04:00
+
+No. None of lazily-rs, lazily-kt, or lazily-js has been released or published.
+
+- **lazily-rs:** not released, published, or pushed. The worker has the original cross-kind repair passing locally on main and v0.57.1, but the broadened canonical fixture requires generation-aware same-kind ABA protection. That scope decision blocks completion.
+- **lazily-kt:** implementation and tests are complete on pushed branch `task/lzstalehandleparitykt-20261022` at `9f5fc401b269b179988a581fc33330895c1ea2d1`; it is awaiting coordinator integration and release.
+- **lazily-js:** implementation and tests are complete on pushed branch `task/lzstalehandleparityjs-20261022` at `68158c9c3b2333be2a7cee25bcd9fd58a914cb74`; it is awaiting spec integration, CI rerun, coordinator integration, and release.
+
+Your “Coordinator releases” decisions are recorded, so no further release-ownership decision is needed.
+
+One substantive decision remains for Rust. I recommend **Expand to generations**, because the new normative spec and canonical 3×3 fixture require stale same-kind handles to be no-ops; keeping only the cross-kind fix would leave Rust knowingly short of parity.
+
+[#subagent-operator-request-generation-scope] subagent operator request
+queue_item: do [#lzstalehandleparityrs]
+kind: question
+blocking: true
+request: Should this Rust item remain the authorized kind-before-remove/cross-kind repair, or expand to generational handle identity so the newly broadened 3×3 canonical fixture has zero same-kind ABA divergences on main and 0.57.x?
+context: The cross-kind fix and runner adaptation are implemented in isolated main and v0.57.1 worktrees. The canonical fixture at lazily-spec `c4fa242` was broadened after dispatch to require same-kind ABA safety. Exact replay proves the current gap: stale Cell→Cell removes its successor, then aborts with `set_cell on non-cell id`. Full compliance requires a materially larger public-handle and arena-generation redesign across Context, ThreadSafeContext, AsyncContext, and both supported Rust lines.
+choices:
+- **Keep cross-kind scope**: Commit and push the requested kind-before-remove repair and runner checks, report the three same-kind rows as a blocking follow-up, and do not claim full 3×3 conformance.
+- **Expand to generations**: Implement per-occupant generations for every Rust handle kind and execution model on main and v0.57.x, then replay the full matrix with zero stale-handle divergences.
+<!-- agent:boundary:e44be660 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- 🚧 [#subagent:spec#1] do [#lzstalehandlespec]: release + publish
-- 🚧 [#subagent:conformance#1] do [#lzstalehandleconformance]: release + publish
-- 🚧 [#subagent:parityrs#1] do [#lzstalehandleparityrs]: release + publish
-- 🚧 [#subagent:paritypy#1] do [#lzstalehandleparitypy]: release + publish
-- 🚧 [#subagent:paritykt#1] do [#lzstalehandleparitykt]: release + publish
-- 🚧 [#subagent:parityjs#1] do [#lzstalehandleparityjs]: release + publish
+- 📤 [#subagent:spec#1] 🙋 [#subagent-operator-request-lzstale-release] do [#lzstalehandlespec]: release + publish: Coordinator releases
+- 📤 [#subagent:conformance#1] 🙋 [#subagent-operator-request-releasepublish354] do [#lzstalehandleconformance]: release + publish: Coordinator releases
+- 🚧 [#subagent:parityrs#1] 🙋 [#subagent-operator-request-release-owner] do [#lzstalehandleparityrs]: release + publish: Coordinator releases
+- 🚧 [#subagent:paritypy#1] 🙋 [#subagent-operator-request-release-owner-py] do [#lzstalehandleparitypy]: release + publish: Coordinator releases
+- 📤 [#subagent:paritykt#1] 🙋 [#subagent-operator-request-paritykt-release] do [#lzstalehandleparitykt]: release + publish: Coordinator releases
+- 📤 [#subagent:parityjs#1] 🙋 [#subagent-operator-request-parityjs-release] do [#lzstalehandleparityjs]: release + publish: Coordinator releases
 - 📥 do [#lzstalehandleparitydart]: release + publish
 - 📥 do [#lzstalehandleparityzig]: release + publish
 - 📥 do [#lzstalehandleparitygo]: release + publish
@@ -767,6 +808,18 @@ Please answer each packet. A concise answer such as “Coordinator releases for 
 ## Todo
 
 <!-- agent:todo -->
+- [ ] [#lzstalehandleparitykt] Choose release owner for [#lzstalehandleparitykt] (source: agent:backlog [#lzstalehandleparitykt])
+- [ ] [#lzstalehandleparityrs] Choose release owner for [#lzstalehandleparityrs] (source: agent:backlog [#lzstalehandleparityrs])
+- [ ] [#lzstalehandleparityjs] Choose release owner for [#lzstalehandleparityjs] (source: agent:backlog [#lzstalehandleparityjs])
+- [ ] [#lzstalehandleconformance] Choose release owner for [#lzstalehandleconformance] (source: agent:backlog [#lzstalehandleconformance])
+- [ ] [#lzstalehandlespec] Choose release owner for [#lzstalehandlespec] (source: agent:backlog [#lzstalehandlespec])
+- [ ] [#lzstalehandleparitypy] Choose release owner for [#lzstalehandleparitypy] (source: agent:backlog [#lzstalehandleparitypy])
+- [ ] [#subagent-operator-request-paritykt-release] Answer the blocking subagent question for queue item ‘do [#lzstalehandleparitykt]’ in agent:exchange: How should the newly appended `release + publish` instruction be handled when the worker coordinator rules explicitly forbid this subagent from running a release, version bump, tag, or publish? (choices: Coordinator releases (Recommended), Defer release) (source: agent:backlog [#lzstalehandleparitykt])
+- [ ] [#subagent-operator-request-release-owner] Answer the blocking subagent question for queue item ‘do [#lzstalehandleparityrs]’ in agent:exchange: Who should execute the newly requested release + publish after this worker lands and pushes the code/spec/test commits? (choices: Coordinator release, Separate release worker) (source: agent:backlog [#lzstalehandleparityrs])
+- [ ] [#subagent-operator-request-parityjs-release] Answer the blocking subagent question for queue item ‘do [#lzstalehandleparityjs]’ in agent:exchange: Should the coordinator perform the requested lazily-js release + publish after integrating this worker's tested commit? (choices: Coordinator release (Recommended), Defer release) (source: agent:backlog [#lzstalehandleparityjs])
+- [ ] [#subagent-operator-request-releasepublish354] Answer the blocking subagent question for queue item ‘do [#lzstalehandleconformance]’ in agent:exchange: Should I complete the authorized spec/tests commit+push and leave the requested release + publish to the coordinator after integration? (choices: Coordinator releases, Stop before release) (source: agent:backlog [#lzstalehandleconformance])
+- [ ] [#subagent-operator-request-lzstale-release] Answer the blocking subagent question for queue item ‘do [#lzstalehandlespec]’ in agent:exchange: Should the coordinator perform the newly requested release + publish after integrating this worker's tested commits, or should this worker's authorized result remain commit + push only? (choices: Coordinator releases (Recommended), Commit + push only) (source: agent:backlog [#lzstalehandlespec])
+- [ ] [#subagent-operator-request-release-owner-py] Answer the blocking subagent question for queue item ‘do [#lzstalehandleparitypy]’ in agent:exchange: Should the coordinator retain “release + publish” as coordinator-owned follow-up after integrating my committed and pushed lazily-py branch? (choices: Coordinator releases (Recommended), Defer release) (source: agent:backlog [#lzstalehandleparitypy])
 <!-- /agent:todo -->
 
 ## Backlog

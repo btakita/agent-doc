@@ -582,3 +582,4 @@
 - 2026-10-21 [#needfeaturesdecisions] : This seems similar to agent-doc's id system for backlog + todo + icebox items. Should we extract a common library?
 - 2026-10-22 [#decisionmanifest] [recommended] Prototype tsift decision-manifest import and lint with a tsift-local DecisionId and lifecycle schema; reassess a shared ID crate only after another domain needs the same grammar and collision semantics.
 - 2026-10-22 [#updatestatus] Update the agent:status
+- 2026-10-22 [#issuesopengithub] Issues 30-32 are still open on github. Are they done?

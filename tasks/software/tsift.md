@@ -19,7 +19,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-complete — v0.1.107 is published on GitHub, crates.io, and npm; the release workflow succeeded and the local tsift install is v0.1.107; Issues #30–#32 remain queued
+in progress — v0.1.107 is published, but Issues #30–#32 remain open and reproducible against the released source; their fix queue items remain pending
 <!-- /agent:status -->
 
 ## Spec
@@ -244,18 +244,33 @@ I also installed the released workspace build locally; `tsift --version` now rep
 - Verification: local `make check` exited 0; the release workflow concluded `success`; all registries report `0.1.107`; the release worktree is clean; the installed binary reports `0.1.107`.
 - Confidence: high.
 - Escalation: none. Issues #30–#32 remain queued and were not changed or closed by this release.
+
+### Re: do [#issuesopengithub] — gpt-5 · 2026-10-22T13:49-04:00
+
+No. **Issues [#30](https://github.com/btakita/tsift/issues/30), [#31](https://github.com/btakita/tsift/issues/31), and [#32](https://github.com/btakita/tsift/issues/32) are not done.** GitHub reports all three as `OPEN`, with no closing timestamp or completion comment, and their reported behavior still exists in the published v0.1.107 source at commit `a07a72b9957bb29f8ac32fb61accc0804dfc8a71`.
+
+- **#30 still reproduces:** each compound `grep`/`rg` example is rewritten as a single tsift search whose path ends in `;`, silently dropping the later command. The released `has_shell_metacharacters` still checks only `|`, `>`, `<`, and `&`; it does not catch `;`, newlines, `$(`, or backticks.
+- **#31 still reproduces:** `sed -n 8,10p doc.md` on a synthetic agent-doc document rewrites to `tsift session-digest` with no range arguments, and the digest output contains counts but neither requested source line nor its unique token. The released `build_session_digest_command` still accepts only path, input, and source.
+- **#32 remains unresolved:** file-window rewrites still emit `source-read ... --budget normal`, and the released source still builds token-capped previews. Its own `token_capped_preview_per_line_truncation_applied` test asserts that a 500-character line is shortened and ends in `...` without treating the body as capped.
+
+The v0.1.107 release published the decision-manifest updates; it did not include fixes for these three rewrite/read-fidelity issues. Their three `#gh-fix` queue items remain pending. This cycle closes only the status question `#issuesopengithub`.
+
+- Changed paths: no tsift repository paths; only this session document's managed status/response/tracked status-question lifecycle changes at closeout. A synthetic fixture was created outside the repository under `/tmp` for the #31 reproduction.
+- Commands: `gh issue view` for #30–#32, `gh issue list`, the three reported `tsift rewrite` repros for #30, a windowed agent-doc rewrite plus `tsift session-digest` for #31, and tsift symbol reads of `has_shell_metacharacters`, `build_session_digest_command`, and `token_capped_preview_per_line_truncation_applied` against the v0.1.107 release worktree.
+- Verification: all three GitHub issues are open; #30 and #31 reproduced directly; released source and tests retain #32's budget/per-line truncation behavior; release worktree remained clean. No full test suite was needed because this was a read-only status audit with no source change.
+- Confidence: high.
+- Escalation: none. The exchange is above its size warning threshold, but the active auto-clear queue should continue through the normal fresh-context supervisor handoff rather than pausing for compaction.
 <!-- agent:boundary:4e151c8c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#updatestatus]~~
-- 📥 #gh-fix https://github.com/btakita/tsift/issues/30
-- 📥 #gh-fix https://github.com/btakita/tsift/issues/31
-- 📥 #gh-fix https://github.com/btakita/tsift/issues/32
+- ~~do [#issuesopengithub]~~
+- ⏭️ #gh-fix https://github.com/btakita/tsift/issues/30
+- ⏭️ #gh-fix https://github.com/btakita/tsift/issues/31
+- ⏭️ #gh-fix https://github.com/btakita/tsift/issues/32
 - 📥 release + publish: include Issue 30-32
-- ~~release + publish latest updates~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

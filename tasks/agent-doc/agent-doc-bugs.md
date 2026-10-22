@@ -226,6 +226,16 @@ If the display remains garbled:
 1. In tmux, press `Ctrl+B`, then `:`.
 2. Enter `refresh-client` and press Enter.
 3. As a last resort, run `reset` in the shell.
+
+### Re: Response
+
+> **Chat prompt (#chatprompt):** How do I redraw?
+
+Press `Ctrl+L` first. If the tmux display remains garbled, press `Ctrl+B`, then `:`, enter `refresh-client`, and press Enter. As a last resort, run `reset` in the shell.
+
+> **Chat prompt (#chatprompt):** How is the release going?
+
+All v0.35.540 source work is integrated at `ba96f57522`: #347, #348, bold subagent-choice titles, and the sdk-demo claim-alias fix. The combined build and clippy stages passed. The first combined `check-fast` returned non-zero during nextest, but its console output was truncated before the failure summary, so the same gate is running through a bounded test-log capture to identify the exact failure. The release auditor is checking this exact integrated head in parallel. No version bump, tag, install, or publication has happened yet. After a clean combined gate, the remaining path is v0.35.540 projection, one authoritative full `make check`, the release commit and push, local install, and GitHub/PyPI publication.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 

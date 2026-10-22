@@ -27,7 +27,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published agent-doc release: v0.35.541, published on GitHub at 2026-10-22 10:14:33 UTC. JetBrains plugin packages published with that release at the same time: classic 0.2.787, 262 0.2.789, and 263 0.2.788 (latest numeric JetBrains package: 0.2.789). VS Code extension 0.2.83 was also published with the release. Release commit 34e41d9e22ba590124f2561630ec03111c5535c5 is on main, PyPI has agent_doc-0.35.541-py3-none-any.whl, and the Homebrew tap is updated by commit 28a351f.
+Latest published agent-doc release: v0.35.542, published on GitHub at 2026-10-22 16:18:25 UTC. JetBrains plugin packages published with that release at the same time: classic 0.2.787, 262 0.2.790, and 263 0.2.791 (latest numeric JetBrains package: 0.2.791). VS Code extension 0.2.83 was also published with the release. Release commit 7e149122474e7a51d3d403af3b722bd7f7013707 is on main, and PyPI publication for agent-doc 0.35.542 passed the release verifier. Post-release main 04673e2feefdcd66e2ee7a8e9b61954b2280fd98 contains the integrated queue-selection and scheduler-recovery fixes and is installed locally. The Homebrew tap still visibly points at v0.35.541 pending its asynchronous bump.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -74,7 +74,7 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 
 ## Queue: Issues
 <!-- agent:queue id=issues loop interval=1h -->
-- Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:queue -->
 
 ## Todo

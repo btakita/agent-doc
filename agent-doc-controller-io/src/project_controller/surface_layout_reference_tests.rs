@@ -7,8 +7,8 @@
 
 use super::*;
 use agent_doc_editor_surface::{
-    EditorSurface, EditorSurfaceObservation, SURFACE_LAYOUT_REFERENCE_CAPABILITY, SurfaceColumn,
-    SurfaceColumnOrder,
+    EditorSurface, EditorSurfaceObservation, FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY,
+    SURFACE_LAYOUT_REFERENCE_CAPABILITY, SurfaceColumn, SurfaceColumnOrder,
 };
 
 const CLIENT: &str = "jetbrains@IU.test-pid:1";
@@ -221,12 +221,16 @@ fn sync_by_reference_fails_closed_without_a_usable_source() {
     let refused = fixture
         .resolve_sync(&fixture.sync_payload(4, false))
         .unwrap_err();
+    let refused = format!("{refused:#}");
     assert!(
-        format!("{refused:#}").contains(
-            "surface_reference_unknown_layout: Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Restart the Remote Dev IDE so its frontend layout publisher loads, then retry Sync Tmux Layout."
-        ),
-        "{refused:#}"
+        refused.contains("surface_reference_unknown_layout: Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry)"),
+        "{refused}"
     );
+    assert!(
+        refused.contains(FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY),
+        "{refused}"
+    );
+    assert!(refused.contains("then retry Sync Tmux Layout"), "{refused}");
 
     let no_client = serde_json::json!({
         "project_root": fixture.bootstrap.project_root,

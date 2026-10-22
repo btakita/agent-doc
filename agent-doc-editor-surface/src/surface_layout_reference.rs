@@ -30,6 +30,13 @@ use crate::{EditorSurface, SurfaceColumnOrder};
 /// keep sending the explicit `--col` publication.
 pub const SURFACE_LAYOUT_REFERENCE_CAPABILITY: &str = "surface_layout_reference_v1";
 
+/// The repair for a Remote Dev backend that never receives frontend geometry.
+///
+/// Keep controller admission failures and editor-facing surface refusals on this
+/// one phrase; the command-specific retry instruction may follow it.
+pub const FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY: &str =
+    "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, restart both";
+
 /// Every editor-command capability this build of the controller advertises.
 pub const CONTROLLER_SURFACE_CAPABILITIES: &[&str] = &[SURFACE_LAYOUT_REFERENCE_CAPABILITY];
 
@@ -115,7 +122,7 @@ impl SurfaceReferenceRefusal {
             }
             Self::Inert => "No agent-doc session document focused",
             Self::UnknownLayout => {
-                "Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Restart the Remote Dev IDE so its frontend layout publisher loads, then retry Sync Tmux Layout."
+                "Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, restart both, then retry Sync Tmux Layout."
             }
             Self::StaleFocus => {
                 "Editor focus changed while the split layout was being read; retry after the selection settles."
@@ -427,10 +434,12 @@ mod tests {
 
     #[test]
     fn refusal_diagnostics_carry_a_stable_token() {
+        let diagnostic = SurfaceReferenceRefusal::UnknownLayout.diagnostic();
         assert_eq!(
-            SurfaceReferenceRefusal::UnknownLayout.diagnostic(),
-            "surface_reference_unknown_layout: Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Restart the Remote Dev IDE so its frontend layout publisher loads, then retry Sync Tmux Layout."
+            diagnostic,
+            "surface_reference_unknown_layout: Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, restart both, then retry Sync Tmux Layout."
         );
+        assert!(diagnostic.contains(FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY));
         assert!(
             SurfaceReferenceRefusal::StaleFocus
                 .diagnostic()

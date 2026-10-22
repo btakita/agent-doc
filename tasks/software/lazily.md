@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a15c94-c9b7-77a3-bb1e-b2ee5552c0b6
+  codex: 01a16540-55d7-7e03-bf60-4b6b37955117
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -25,7 +25,6 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-📤 Queue handoff: 14 reported items awaiting coordinator integration, verification, and closeout.
 Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0.46.0, lazily-js v0.37.0, and lazily-rs v0.61.0. Rust v0.57.2 compatibility and remaining bindings are pending; operator-deleted queue claims remain cancelled.
 <!-- /agent:status -->
 
@@ -922,27 +921,54 @@ The shared contract now defines occupant generation and kind checks, the discrim
 Verification is green across the spec/formal gates and every binding's full local gate. GitHub CI is green for spec, Python, Dart, JavaScript, Zig, Go, C++, C#, and GDScript. Registry queries confirm `lazily==0.45.0` on PyPI, `lazily 0.35.0` on pub.dev, `Lazily` and `Lazily.R3` 0.9.0 on NuGet, and `lazily 0.57.3` on crates.io. Rust main's exhaustive CI matrix is still running its redundant Loom lane; the same current-main full gate passed in the isolated worker, and the 0.57.3 release workflow completed successfully.
 
 No queue work or operator action remains.
+
+### Re: #actionable-review — gpt-5 · 2026-10-22T18:08-04:00
+
+Review triage is complete.
+
+Moved back to actionable backlog and queue:
+
+- `#lzcorecireachaudit`: its prerequisite evidence fix, CI activation work, and Phases 1–5 integration are complete, so the settled-commit audit can run now.
+- `#fixrunturn`: the old worktree is gone and its branch contains no preserved fix beyond the recorded base; the actionable task is now to reproduce against current `agent-doc` main, recreate the route-race fix if still needed, or prove later changes subsumed it.
+- `#lzcorecohort`: the schema/verifier and Spec-side qualification caller are on main, while `#lzreleasepins` and `#lzrustpublish` are resolved; the remaining Phase 6 manifest, adoption, and gate work is executable.
+- `#lzambienttokenresolve`: refresh the stale Makefile evidence and rerun the two non-publishing proof targets, then return only the operator-owned application and credential steps to review.
+
+Resolved `#lzagentdocartifactrefresh` as stale/completed: the refreshed audit, durable-only purge, and post-delete verification already landed in `agent-doc` main at `63aae9a568`.
+
+Kept genuinely gated:
+
+- `#lzcorebeta1`: it still waits on the immutable Phase 6 cohort manifest and the two-RC-cohort or four-week timing gate.
+- `#lzgithubbudget20`: payment-method and budget configuration remains operator-only and API-unprobeable, with no agent-executable slice.
+
+The 14 earlier removed stale-handle claims were also checked through their generation fences; all were already tombstoned, no matching worker remained live, and no work was restarted or published.
+
+Changed paths: none outside this binary-owned session update. Commands/evidence: `agent-doc review list`, session/archive and repository history inspection, worker-fenced queue claim/start/report-complete, and all 14 idempotent cancellation releases. Verification: current branches, commits, missing historical worktrees, resolved dependencies, and retained external gates were checked read-only. Confidence: high overall; medium only on whether current `agent-doc` main already subsumes `#fixrunturn`, which its re-queued regression task now proves. Escalation: none for this triage.
 <!-- agent:boundary:368b8d27 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- 📤 [#subagent:genkt#1] do [#lzstalehandlegenkt]: release + publish: Coordinator releases
-- 📤 [#subagent:genjs#1] do [#lzstalehandlegenjs]: release + publish: Coordinator releases
-- 📤 [#subagent:parityspec#1] do [#lzstalehandlegenparityspec]
-- 📤 [#subagent:parityspec#1] do [#lzstalehandlegenparityspec]
-- 📤 [#subagent:genspec#2] do [#lzstalehandlegenspec]
-- 📤 [#subagent:genconformance#2] do [#lzstalehandlegenconformance]
-- 📤 [#subagent:genformal#2] do [#lzstalehandlegenformal]
-- 📤 [#subagent:parityrs#2] do [#lzstalehandleparityrs]
-- 📤 [#subagent:paritypy#2] do [#lzstalehandleparitypy]
-- 📤 [#subagent:paritydart#2] do [#lzstalehandleparitydart]
-- 📤 [#subagent:parityzig#3] do [#lzstalehandleparityzig]
-- 📤 [#subagent:paritygo#2] do [#lzstalehandleparitygo]
-- 📤 [#subagent:paritycpp#2] do [#lzstalehandleparitycpp]
-- 📤 [#subagent:paritycs#2] do [#lzstalehandleparitycs]
-- 📤 [#subagent:paritygd#2] do [#lzstalehandleparitygd]
+- do [#lzambienttokenresolve]
+- do [#lzcorecohort]
+- do [#fixrunturn]
+- do [#lzcorecireachaudit]
+- ~~do [#lzstalehandlegenkt]: release + publish: Coordinator releases~~
+- ~~do [#lzstalehandlegenjs]: release + publish: Coordinator releases~~
+- ~~do [#lzstalehandlegenparityspec]~~
+- ~~do [#lzstalehandlegenparityspec]~~
+- ~~do [#lzstalehandlegenspec]~~
+- ~~do [#lzstalehandlegenconformance]~~
+- ~~do [#lzstalehandlegenformal]~~
+- ~~do [#lzstalehandleparityrs]~~
+- ~~do [#lzstalehandleparitypy]~~
+- ~~do [#lzstalehandleparitydart]~~
+- ~~do [#lzstalehandleparityzig]~~
+- ~~do [#lzstalehandleparitygo]~~
+- ~~do [#lzstalehandleparitycpp]~~
+- ~~do [#lzstalehandleparitycs]~~
+- ~~do [#lzstalehandleparitygd]~~
+- 📫 [#subagent:actionable_review#1] #actionable-review
 <!-- /agent:queue -->
 
 ## Todo

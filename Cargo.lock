@@ -4378,11 +4378,10 @@ dependencies = [
 [[package]]
 name = "lazily"
 version = "0.57.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd1ec4901c6afceaa555b001e53b6f70662c4893136bb21a7659d8b96866e83"
+source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=7643192f34935d3173a26a3a53e31d16095703a1#7643192f34935d3173a26a3a53e31d16095703a1"
 dependencies = [
  "arc-swap",
- "lazily-macros 0.23.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazily-macros 0.23.0 (git+https://github.com/lazily-hub/lazily-rs.git?rev=7643192f34935d3173a26a3a53e31d16095703a1)",
  "parking_lot",
  "prost-build",
  "protoc-bin-vendored",
@@ -4408,8 +4407,7 @@ dependencies = [
 [[package]]
 name = "lazily-macros"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cde497d1471dd81ea14cd762e82f1b7bbe35e43858cc8b4066775fb387e42fa"
+source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=7643192f34935d3173a26a3a53e31d16095703a1#7643192f34935d3173a26a3a53e31d16095703a1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5299,7 +5297,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5785,7 +5783,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

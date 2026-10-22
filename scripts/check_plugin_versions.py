@@ -753,6 +753,14 @@ def self_test() -> int:
     assert len(pins) == 2 and pins[0] == pins[1], pins
     assert re.fullmatch(r"\d+\.\d+\.\d+", pins[0]), pins[0]
 
+    publish_helper = open(
+        os.path.join(repo_root, "scripts", "publish-pinned-lazily-kt.sh"),
+        encoding="utf-8",
+    ).read()
+    assert 'ln -s "$spec_dir" "$scratch/lazily-spec"' in publish_helper, (
+        "the exact-tag lazily-kt checkout must retain its required ../lazily-spec sibling"
+    )
+
     print("[self-test] check_plugin_versions: ok")
     return 0
 

@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.544
+
+- **Release packaging preserves Lazily Kotlin's pinned Spec sibling.** The exact-tag Maven-local publisher now
+  places `lazily-kt` beside the checked-out `lazily-spec` protobuf sources, matching the topology used by local and
+  editor builds and preventing the plugin job from failing before binary assets can be assembled.
+
 ## 0.35.543
 
 - **Remote Dev routing and sync now terminate consistently under flat or missing frontend geometry (GH #353–#357).**

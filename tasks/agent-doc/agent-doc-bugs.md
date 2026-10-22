@@ -204,6 +204,12 @@ The exchange is over the accretion warning threshold (179 lines), but the queue 
 ### Re: recovered response
 
 Yes. It’s redundant because the existing cumulative release item now explicitly includes #344–#348, plus the bold-choice and sdk-demo fixes. Removing the fallback item avoids a duplicate release/audit path.
+
+### Re: Response
+
+> **Chat prompt (#chatprompt):** I assume that removing struck queue items does not affect anything, correct?
+
+Correct—removing a genuinely struck queue item is presentation-only cleanup. A strike is terminal only when durable state confirms that completion was integrated and its claim/outbox was retired; deletion then must not cancel a worker or create a tombstone. Markdown strikethrough alone is not authority: if a manually struck row still has a live claim or outbox record, reconciliation must surface a degraded/mismatch state and preserve the underlying work until it is resolved.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -219,8 +225,8 @@ Yes. It’s redundant because the existing cumulative release item now explicitl
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/347
 - 📥 For subagent choices, make the title of each choice **bold**.
 - 📥 sdk-demo.md: `- Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?` queue item is not annotated with an emoji despite being worked on by a subagent. If the fix makes it into the `Include 344-347...` release, add it.
-- 🚧 The sdk-demo.md queue item annotations were not refreshed after the queue items were completed. If there is a choice, the choice should also be added into `agent:todo` with the same id as the choice expressed in the `agent:exchange`. Can we make an indicator for the queue items being blocked by a subagent choice? What do you recommend to add local visibility to the agent:queue? Can we have another emoji representing a user action with the same id as the choice + todo item?
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/348
+- 📥 The sdk-demo.md queue item annotations were not refreshed after the queue items were completed. If there is a choice, the choice should also be added into `agent:todo` with the same id as the choice expressed in the `agent:exchange`. Can we make an indicator for the queue items being blocked by a subagent choice? What do you recommend to add local visibility to the agent:queue? Can we have another emoji representing a user action with the same id as the choice + todo item?
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/348
 - 🚧 release + publish: Include 344-348 + For subagent choices, make the title of each choice **bold**.
 <!-- /agent:queue -->
 

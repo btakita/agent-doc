@@ -93,9 +93,15 @@ Current release: v0.35.523, published 2026-10-19 07:59:51 UTC.
 ```
 
 `sync` is evaluated at preflight and added to the active turn's prompt. On
-Claude Code and Codex, the owner-only `PostToolUse` hook also re-surfaces it no
-sooner than the configured `interval` after preflight and at most once per
-following interval. This is a throttled prompt checkpoint, not a timer,
+Claude Code and Codex, the owner-only `Stop` hook re-surfaces it once after the
+turn's queue and persistence obligations settle, so a fact that changed during
+the turn is checked against its current authoritative source before handoff.
+That final check is bounded by the harness recursion guard: an unchanged answer
+makes no write, while a changed answer uses `status set` plus `commit`; the next
+Stop passes through. The owner-only `PostToolUse` hook can also re-surface the
+instruction no sooner than the configured `interval` after preflight and at
+most once per following interval. This is a throttled prompt checkpoint, not a
+timer,
 background job, queue item, direct document write, or promise that external
 facts were verified.
 It cannot interrupt one continuously running tool call; once overdue, the next
@@ -107,10 +113,11 @@ atomically records the receipt that consumes that edge. SQLite is not a live
 timing or arbitration authority. The instruction should explicitly request
 verification when it depends on an external source.
 
-Periodic checkpoints default to off. With `sync` but no `interval`, the
-instruction is still included at preflight, but the `PostToolUse` hook publishes
-an explicit disarm fact and injects no repeated checkpoint. A valued `interval`
-opts in. It accepts a unitless number of seconds or a compound duration using
+Periodic mid-turn checkpoints default to off. With `sync` but no `interval`,
+the instruction is still checked at preflight and final Stop, but the
+`PostToolUse` hook publishes an explicit disarm fact and injects no repeated
+checkpoint. A valued `interval` opts in. It accepts a unitless number of seconds
+or a compound duration using
 `s`, `m`, `h`, and `d`, such as `5m`, `1h30m`, or `1d`. It is valid on
 `agent:status` only when `sync` is present. Bare, blank, duplicate, malformed,
 overflowing, and sub-minute values fail closed. The one-minute floor prevents a
@@ -123,6 +130,9 @@ During an open turn, the reminder names the safe focused command explicitly:
 `agent-doc status set <FILE> --text "<current result>"`. It updates only status,
 attributes that component delta to the agent baseline, and does not capture,
 seal, append a response, mutate the queue, or commit the active cycle.
+At the final Stop checkpoint the response transaction is already closed, so a
+changed result is followed by `agent-doc commit <FILE>`; an unchanged result is
+silent and leaves the document untouched.
 
 `sync` requires a non-empty instruction. Synchronization is additive by
 default (`sync-mode="additive"` is the explicit spelling). The agent upserts

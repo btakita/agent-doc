@@ -164,6 +164,7 @@ enum StopResponse {
 enum StopContinuationClass {
     Queue,
     SessionWriteback,
+    StatusSync,
     Recovery,
 }
 
@@ -172,6 +173,7 @@ impl StopContinuationClass {
         match self {
             Self::Queue => "Queue continuation, not an error: ",
             Self::SessionWriteback => "Session persistence continuation, not a refusal or error: ",
+            Self::StatusSync => "Final status synchronization, not an error: ",
             Self::Recovery => "Recovery continuation, not a refusal or error: ",
         }
     }
@@ -583,6 +585,56 @@ fn supervisor_handoff_overdue(file: &Path) -> bool {
     }
 }
 
+const FINAL_STATUS_SYNC_MARKER: &str = "[agent-doc] final status-sync checkpoint";
+
+/// Re-surface a persistent status synchronization contract at the owner turn's
+/// final lifecycle boundary.
+///
+/// Preflight is the first checkpoint and an optional `interval` provides
+/// mid-turn checkpoints. Neither proves that a fact which changed during the
+/// final tool call is current at handoff. The Stop hook is the only boundary
+/// that can make that guarantee without polling. It requests one bounded
+/// re-evaluation and relies on the harness' `stop_hook_active` recursion bit to
+/// pass the following Stop through.
+fn final_status_sync_continuation(file: &Path, stop_hook_active: bool) -> Result<Option<String>> {
+    if stop_hook_active {
+        return Ok(None);
+    }
+
+    // Read the editor-authoritative document cut, not a possibly stale disk
+    // mirror: the operator can add, edit, or remove `sync` during the turn.
+    let content = current_document_content(file, "stop_final_status_sync")?;
+    let Some(directive) = agent_doc_document::status_projection::status_sync_directive(&content)?
+    else {
+        return Ok(None);
+    };
+    let mode = match directive.mode {
+        agent_doc_document::status_projection::StatusSyncMode::Additive => "additive",
+        agent_doc_document::status_projection::StatusSyncMode::Replace => "replace",
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "status_sync_final_checkpoint_surfaced file={} mode={} source=stop_hook",
+            file.display(),
+            mode,
+        ),
+    );
+    Ok(Some(format!(
+        "{FINAL_STATUS_SYNC_MARKER}\n\
+         Before ending this owner turn, re-evaluate the persistent `agent:status` instruction \
+         against its current authoritative source: {}\n\
+         Mode: `{mode}`. If its answer changed, run `agent-doc status set '{}' --text \
+         \"<current result>\"`, then `agent-doc commit '{}'` so the focused status update is \
+         durable. Pass only the result: agent-doc owns the `<!-- status:sync -->` markers. \
+         If the answer did not change, make no write. This is a bounded final checkpoint; do \
+         not repeat completed work or start unrelated work, then send the final answer.",
+        directive.instruction,
+        file.display(),
+        file.display(),
+    )))
+}
+
 /// [`apply_claude_stop`] with the supervisor drain-readiness probe injected.
 fn apply_claude_stop_with_drain_readiness(
     input: &ClaudeStopInput,
@@ -649,7 +701,15 @@ fn apply_claude_stop_with_drain_readiness(
     {
         return Ok(Some(continuation));
     }
-    claude_steering_continuation(input, &file, run_id.as_deref(), &drain_readiness)
+    if let Some(continuation) =
+        claude_steering_continuation(input, &file, run_id.as_deref(), &drain_readiness)?
+    {
+        return Ok(Some(continuation));
+    }
+    Ok(
+        final_status_sync_continuation(&file, input.stop_hook_active)?
+            .map(|reason| ClaudeStopContinuation { reason }),
+    )
 }
 
 /// The queue half of [`apply_claude_stop_with_drain_readiness`]: a durably
@@ -1388,6 +1448,13 @@ fn apply_bound_stop(
                 input,
             )? {
                 return Ok(response);
+            }
+            stop_phase("final_status_sync");
+            if let Some(reason) = final_status_sync_continuation(file, input.stop_hook_active)? {
+                return Ok(StopResponse::ContinueTurn {
+                    class: StopContinuationClass::StatusSync,
+                    reason,
+                });
             }
             stop_phase("settle_session_binding");
             settle_session_binding(file, cleanup_roots, loaded_root, state)?;
@@ -4203,6 +4270,17 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(StopResponse::ContinueTurn {
+                class: StopContinuationClass::StatusSync,
+                reason: "s".to_string(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "decision": "block",
+                "reason": "Final status synchronization, not an error: s"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(StopResponse::ContinueTurn {
                 class: StopContinuationClass::Recovery,
                 reason: "x".to_string(),
             })
@@ -4690,6 +4768,29 @@ mod tests {
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "❯ Hello\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    fn write_status_sync_doc(dir: &tempfile::TempDir) -> PathBuf {
+        let doc = dir.path().join("status-sync.md");
+        let content = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status sync=\"Keep the published release current\" -->\n",
+            "<!-- status:sync -->\nPublished: v1\n<!-- /status:sync -->\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\nCompleted.\n",
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
@@ -7171,6 +7272,44 @@ Done.\n\
     }
 
     #[test]
+    fn codex_stop_rechecks_status_sync_once_at_the_final_boundary() {
+        let dir = setup_project();
+        let doc = write_status_sync_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "turn-status-sync");
+        complete_run(&doc);
+
+        let mut input = StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-status-sync".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        };
+        let response = apply_stop(&input).unwrap();
+        match response {
+            StopResponse::ContinueTurn { class, reason } => {
+                assert_eq!(class, StopContinuationClass::StatusSync);
+                assert!(reason.contains(FINAL_STATUS_SYNC_MARKER), "{reason}");
+                assert!(
+                    reason.contains("Keep the published release current"),
+                    "{reason}"
+                );
+                assert!(reason.contains("agent-doc status set"), "{reason}");
+                assert!(reason.contains("agent-doc commit"), "{reason}");
+                assert!(
+                    reason.contains("If the answer did not change, make no write"),
+                    "{reason}"
+                );
+            }
+            other => panic!("expected final status-sync continuation, got {other:?}"),
+        }
+
+        input.stop_hook_active = true;
+        assert_eq!(apply_stop(&input).unwrap(), StopResponse::AllowExit);
+    }
+
+    #[test]
     fn stop_passes_through_committed_cycle_with_stopped_queue_head() {
         // A held queue is `queue: pause` (`#queuestopremove`). A leftover `go`
         // marker beside it is an explicit control that wins on every activation
@@ -7529,6 +7668,43 @@ Reviewed the gated items.\n\
             response.to_hook_output()["hookSpecificOutput"]["additionalContext"]
                 .as_str()
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn claude_stop_rechecks_status_sync_once_at_the_final_boundary() {
+        let dir = setup_project();
+        let doc = write_status_sync_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+
+        let mut input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+        };
+        let response = apply_claude_stop(&input)
+            .unwrap()
+            .expect("first final boundary must re-evaluate status sync");
+        assert!(
+            response.reason.contains(FINAL_STATUS_SYNC_MARKER),
+            "{}",
+            response.reason
+        );
+        assert!(
+            response
+                .reason
+                .contains("Keep the published release current"),
+            "{}",
+            response.reason
+        );
+
+        input.stop_hook_active = true;
+        assert!(
+            apply_claude_stop(&input).unwrap().is_none(),
+            "recursive Stop must pass through even when the result stayed unchanged"
         );
     }
 

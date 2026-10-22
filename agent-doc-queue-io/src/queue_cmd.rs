@@ -1281,6 +1281,57 @@ mod tests {
     }
 
     #[test]
+    fn running_id_claim_projects_onto_exact_tracked_item_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk-demo.md");
+        let id_head = "do [#rebaseexistingproject]";
+        let question = "Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?";
+        let initial = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             <!-- agent:backlog -->\n- [ ] [#rebaseexistingproject] {question}\n<!-- /agent:backlog -->\n\n\
+             <!-- agent:queue subagents go -->\n- {id_head}\n- unrelated\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &initial).unwrap();
+        crate::queue_claim::claim(&doc, id_head, "subagent:project_rebase_review", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            id_head,
+            "subagent:project_rebase_review",
+            "/root/project_rebase_review",
+            600,
+            1,
+        )
+        .unwrap();
+
+        // Model the authoritative cut observed in sdk-demo.md: the tracked
+        // backlog row and id mirror are gone, but its exact prose remains live.
+        let current = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             <!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n\
+             <!-- agent:queue subagents go -->\n- {question}\n- unrelated\n<!-- /agent:queue -->\n"
+        );
+        let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 🚧 {question}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(projection.target_content.contains("- unrelated\n"));
+        assert!(!projection.target_content.contains("- 🚧 unrelated\n"));
+
+        let claims = crate::queue_claim::claim_states_for_content(&doc, &current).unwrap();
+        assert_eq!(claims.len(), 1, "{claims:#?}");
+        assert_eq!(claims[0].item_text, question);
+        assert_eq!(
+            claims[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+    }
+
+    #[test]
     fn worked_live_row_is_marked_but_struck_terminal_row_is_not() {
         let dir = tempfile::tempdir().unwrap();
         let item = "#gh-issue https://github.com/example/project/issues/299";

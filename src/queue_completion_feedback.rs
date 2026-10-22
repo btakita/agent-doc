@@ -313,6 +313,7 @@ mod tests {
                 started_at_secs: 10,
             }),
             dispatch_policy: None,
+            tracked_item_aliases: Vec::new(),
             claimed_at_secs: 10,
             expires_at_secs: 20,
             owner_session: None,

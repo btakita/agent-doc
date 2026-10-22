@@ -3523,13 +3523,22 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
     };
-    let comp = match agent_doc_queue::queue_set::selected_component(&content, &components) {
-        Ok(Some(component)) => component,
+    let selection_out_of_loop_items =
+        agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, &content);
+    let comp = match agent_doc_queue::queue_set::QueueSet::parse(&content, &components) {
+        Ok(queues) => match queues
+            .selected_excluding_claimed(&selection_out_of_loop_items)
+            // When every queue is held, keep exposing the ordinary selected
+            // queue's blocked facts instead of degrading to an empty probe.
+            .or_else(|| queues.selected())
+        {
+            Some(queue) => queue.component,
+            None => return Ok(QueueState::default()),
+        },
         Err(err) => {
             eprintln!("[preflight] queue probe topology warning: {err}");
             return Ok(QueueState::default());
         }
-        Ok(None) => return Ok(QueueState::default()),
     };
 
     let body = &content[comp.open_end..comp.close_start];
@@ -3660,7 +3669,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         Vec::new()
     };
     let out_of_loop_queue_items = if activation.active {
-        agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, &content)
+        selection_out_of_loop_items
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
@@ -4777,9 +4786,18 @@ pub fn run_queue_maintenance_with_coin_gate(
             return Ok(QueueState::default());
         }
     }
+    let selection_out_of_loop_items =
+        agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(
+            file,
+            &current_content,
+        );
     let selected_queue_id =
         match agent_doc_queue::queue_set::QueueSet::parse(&current_content, &components) {
-            Ok(queues) => match queues.selected().or_else(|| queues.blocks().first()) {
+            Ok(queues) => match queues
+                .selected_excluding_claimed(&selection_out_of_loop_items)
+                .or_else(|| queues.selected())
+                .or_else(|| queues.blocks().first())
+            {
                 Some(queue) => queue.id.clone(),
                 None => return Ok(QueueState::default()),
             },
@@ -18551,6 +18569,46 @@ mod tests {
 
     fn loop_scope_ops(dir: &Path) -> String {
         std::fs::read_to_string(dir.join(".agent-doc/logs/ops.log")).unwrap_or_default()
+    }
+
+    /// A delegated queue remains live while its workers run, but it must not
+    /// hide an independent scheduled queue after that queue's window opens.
+    /// This is the live `agent-doc-bugs.md` shape behind the unreliable loop:
+    /// each hourly tick advanced durable schedule state while preflight kept
+    /// selecting queue-1, then filtered every one of its heads as out-of-loop.
+    #[test]
+    fn inspect_queue_state_reaches_open_loop_behind_delegated_queue() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = loop_scope_doc(
+            "",
+            "- delegated main work\n",
+            &format!("- {LOOP_SCOPE_HEAD}\n"),
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        loop_scope_store_window(dir.path(), &doc, loop_scope_open(LOOP_SCOPE_T0));
+
+        let state = inspect_queue_state(&doc, None).unwrap();
+
+        assert_eq!(state.queue_prompts, vec![LOOP_SCOPE_HEAD.to_string()]);
+        assert_eq!(
+            state.queue_supervisor_continuation_head,
+            Some(LOOP_SCOPE_HEAD.to_string())
+        );
+        assert!(state.queue_supervisor_drainable);
+
+        let maintained = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(maintained.queue_prompts, vec![LOOP_SCOPE_HEAD.to_string()]);
+        assert_eq!(
+            maintained.queue_supervisor_continuation_head,
+            Some(LOOP_SCOPE_HEAD.to_string())
+        );
     }
 
     /// GH #327 pass 4 (measured): the echo was committed

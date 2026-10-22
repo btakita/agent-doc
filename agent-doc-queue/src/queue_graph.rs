@@ -153,6 +153,26 @@ impl QueueBlock<'_> {
             QueueNodeState::Ready
         }
     }
+
+    fn state_excluding_claimed(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+    ) -> QueueNodeState {
+        if self.is_drained() {
+            return QueueNodeState::Empty;
+        }
+        if self.entries.iter().any(|entry| match entry {
+            QueueEntry::Prompt(prompt) => !claimed.claims(&prompt.text),
+            QueueEntry::Freeform(line) => !document_queue::is_noise_freeform_line(line),
+            _ => false,
+        }) {
+            QueueNodeState::Ready
+        } else {
+            // Externally owned/held work remains live for dependency purposes,
+            // but must not monopolize selection ahead of an independent queue.
+            QueueNodeState::Paused
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -241,6 +261,35 @@ impl<'a> QueueGraph<'a> {
             | QueueScheduleDecision::Blocked { .. }
             | QueueScheduleDecision::InFlight { .. } => None,
         }
+    }
+
+    /// Select the first queue with work available to this drain owner.
+    ///
+    /// A queue whose every live head is claimed or otherwise held is paused,
+    /// not empty: independent later queues remain selectable, while an
+    /// `after=` dependent still waits for the externally owned work to finish.
+    pub fn selected_excluding_claimed(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+    ) -> Option<&QueueBlock<'a>> {
+        match self.schedule_excluding_claimed(claimed) {
+            QueueScheduleDecision::Ready { queue_id, .. } => self.block(&queue_id),
+            QueueScheduleDecision::Idle
+            | QueueScheduleDecision::Blocked { .. }
+            | QueueScheduleDecision::InFlight { .. } => None,
+        }
+    }
+
+    pub fn schedule_excluding_claimed(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+    ) -> QueueScheduleDecision {
+        let runtime_states = self
+            .blocks
+            .iter()
+            .map(|block| (block.id.clone(), block.state_excluding_claimed(claimed)))
+            .collect();
+        self.schedule_with_states(&runtime_states)
     }
 
     pub fn schedule(&self) -> QueueScheduleDecision {
@@ -1071,6 +1120,43 @@ mod tests {
             ]));
             assert!(matches!(decision, QueueScheduleDecision::Blocked { .. }));
         }
+    }
+
+    #[test]
+    fn claimed_queue_does_not_hide_an_independent_ready_queue() {
+        let doc = concat!(
+            "<!-- agent:queue id=delegated -->\n- delegated work\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=issues -->\n- poll issues\n<!-- /agent:queue -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let graph = QueueGraph::parse(doc, &components).unwrap();
+        let claimed = crate::queue_claim::ClaimedQueueItems::none()
+            .with_heads(&["delegated work".to_string()]);
+
+        assert_eq!(
+            graph.schedule_excluding_claimed(&claimed),
+            QueueScheduleDecision::Ready {
+                queue_id: "issues".into(),
+                occurrence: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn claimed_queue_still_blocks_its_dependent() {
+        let doc = concat!(
+            "<!-- agent:queue id=delegated -->\n- delegated work\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=publish after=delegated -->\n- publish\n<!-- /agent:queue -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let graph = QueueGraph::parse(doc, &components).unwrap();
+        let claimed = crate::queue_claim::ClaimedQueueItems::none()
+            .with_heads(&["delegated work".to_string()]);
+
+        assert!(matches!(
+            graph.schedule_excluding_claimed(&claimed),
+            QueueScheduleDecision::Blocked { .. }
+        ));
     }
 
     #[test]

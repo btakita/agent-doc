@@ -746,7 +746,7 @@ pub fn pending_head_prompt_text_excluding_claimed(
     if crate::queue_heads::queue_is_explicitly_stopped(content) {
         return None;
     }
-    let (queue_facts, entries) = queue_component_entries(content)?;
+    let (queue_facts, entries) = queue_component_entries_excluding_claimed(content, claimed)?;
     let entries: Vec<QueueEntry> = entries
         .into_iter()
         .filter(|entry| match entry {
@@ -851,8 +851,11 @@ pub fn live_drainable_head_prompt_text_excluding_claimed(
     scope: DrainScope,
     claimed: &ClaimedQueueItems,
 ) -> Option<String> {
-    let (queue_facts, activation) =
-        active_queue_for_supervisor_start(content, matches!(scope, DrainScope::Supervisor))?;
+    let (queue_facts, activation) = active_queue_for_supervisor_start_excluding_claimed(
+        content,
+        matches!(scope, DrainScope::Supervisor),
+        claimed,
+    )?;
     let entries: Vec<QueueEntry> = activation
         .entries_after
         .into_iter()
@@ -939,7 +942,9 @@ pub fn drainable_head_count(content: &str) -> usize {
 /// [`drainable_head_count`], not counting heads `claimed` by a worker outside
 /// the in-session loop (`#queueclaim`).
 pub fn drainable_head_count_excluding_claimed(content: &str, claimed: &ClaimedQueueItems) -> usize {
-    let Some((queue_facts, activation)) = active_queue(content) else {
+    let Some((queue_facts, activation)) =
+        active_queue_for_supervisor_start_excluding_claimed(content, false, claimed)
+    else {
         return 0;
     };
     let open_backlog = open_backlog_ids_from_content(content);
@@ -1042,10 +1047,21 @@ struct QueueFacts {
 }
 
 fn queue_component_entries(content: &str) -> Option<(QueueFacts, Vec<QueueEntry>)> {
+    queue_component_entries_excluding_claimed(content, &ClaimedQueueItems::none())
+}
+
+fn queue_component_entries_excluding_claimed(
+    content: &str,
+    claimed: &ClaimedQueueItems,
+) -> Option<(QueueFacts, Vec<QueueEntry>)> {
     let components = element::parse(content).ok()?;
-    let queue_component = crate::queue_set::selected_component(content, &components)
-        .ok()
-        .flatten()?;
+    let queue_set = crate::queue_set::QueueSet::parse(content, &components).ok()?;
+    let queue_component = queue_set
+        .selected_excluding_claimed(claimed)
+        // Preserve the selected queue's blocked/claimed facts when no sibling
+        // is available to this drain owner.
+        .or_else(|| queue_set.selected())?
+        .component;
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries = document_queue::parse(body).ok()?;
     Some((
@@ -1062,12 +1078,24 @@ fn queue_component_entries(content: &str) -> Option<(QueueFacts, Vec<QueueEntry>
 }
 
 fn active_queue(content: &str) -> Option<(QueueFacts, document_queue::QueueActivation)> {
-    active_queue_for_supervisor_start(content, false)
+    active_queue_for_supervisor_start_excluding_claimed(content, false, &ClaimedQueueItems::none())
 }
 
 fn active_queue_for_supervisor_start(
     content: &str,
     allow_supervisor_start: bool,
+) -> Option<(QueueFacts, document_queue::QueueActivation)> {
+    active_queue_for_supervisor_start_excluding_claimed(
+        content,
+        allow_supervisor_start,
+        &ClaimedQueueItems::none(),
+    )
+}
+
+fn active_queue_for_supervisor_start_excluding_claimed(
+    content: &str,
+    allow_supervisor_start: bool,
+    claimed: &ClaimedQueueItems,
 ) -> Option<(QueueFacts, document_queue::QueueActivation)> {
     let (fm, _) = frontmatter::parse(content).ok()?;
     // `#qstartinert`: `queue_active` is the LEGACY activation flag. `control_binding`
@@ -1095,7 +1123,7 @@ fn active_queue_for_supervisor_start(
     // every finished queue undispatched by the idle watch and the Codex Stop
     // hook once a new head was added; only an in-session invocation ran it. An
     // operator who wants a queue kept by hand writes `pause` or `stop`.
-    let (queue_facts, entries) = queue_component_entries(content)?;
+    let (queue_facts, entries) = queue_component_entries_excluding_claimed(content, claimed)?;
     let control = crate::control_binding::frontmatter_queue_control(&fm);
     let explicit_go = crate::control_binding::explicit_queue_go_mode(&queue_facts.attrs, control);
     let explicit_start = allow_supervisor_start

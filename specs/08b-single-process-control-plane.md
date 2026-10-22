@@ -112,7 +112,10 @@ The controller runs **one** queue scheduler per process for every scheduled
   `skipped_busy` or restore work into the wrong queue.
   Completed `loop` passes restore their items through the binary-owned queue
   write path (the live CRDT replica while an editor holds the document) via the
-  `ProjectControllerRuntimeEffects::restore_queue_loop_items` port.
+  `ProjectControllerRuntimeEffects::restore_queue_loop_items` port. The port
+  carries the exact authoritative queue cut that proved completion as the
+  compare-and-swap base; the writer re-reads current authority after transport
+  acceptance and refuses success until every roster identity is visibly live.
 - **Lazily state.** Scheduler state lives in a Lazily graph
   (`QueueScheduleGraph`): `Source` maps for each `(document, queue_id)` parsed
   spec, durable state, and in-flight mark; one `Computed` for the earliest wake;

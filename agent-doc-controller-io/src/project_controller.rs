@@ -3412,6 +3412,7 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         file: &Path,
         _queue_id: &str,
         _roster: &[String],
+        _source_content: &str,
     ) -> Result<usize> {
         anyhow::bail!(
             "queue loop restore is not wired in this binary ({})",

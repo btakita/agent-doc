@@ -602,12 +602,14 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         file: &Path,
         queue_id: &str,
         roster: &[String],
+        source_content: &str,
     ) -> anyhow::Result<usize> {
-        agent_doc_queue_io::queue_schedule::restore_loop_items_for_queue_with_effects(
+        agent_doc_queue_io::queue_schedule::restore_loop_items_for_queue_from_source_with_effects(
             &CliQueueCommandEffects,
             file,
             queue_id,
             roster,
+            source_content,
         )
     }
 }

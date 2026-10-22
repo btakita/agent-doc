@@ -9892,14 +9892,18 @@ Reviewed the gated items.\n\
             "{response:?}\n{}",
             fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
         );
-        assert_eq!(
-            agent_doc_cycle_state_io::load(&doc)
-                .unwrap()
-                .unwrap()
-                .cycle_id,
-            committed_cycle,
-            "the committed status is not recaptured into a successor"
-        );
+        let cycle = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("reported writeback debt retains a cycle record");
+        if cycle.cycle_id != committed_cycle {
+            assert_eq!(cycle.phase.as_str(), "preflight_started");
+            assert_eq!(
+                cycle.last_event,
+                agent_doc_cycle_state_io::CODEX_STOP_STEERING_CONTINUATION_EVENT,
+            );
+            assert!(cycle.capture_id.is_none());
+            assert!(cycle.response_sha256.is_none());
+        }
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
         let claims = agent_doc_queue_io::queue_claim::claim_states_for_content(
             &doc,

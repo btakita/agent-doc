@@ -52,9 +52,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   operator types the prompt into the harness chat (Claude Code, Codex, OpenCode)
   instead of editing the document — including a bare `prompt_presets` key such
   as `#upgrade` — the document has no diff for it by construction. Record it:
-  begin the `patch:exchange` response with the prompt verbatim as
-  `> **Chat prompt (#chatprompt):** <prompt>` (multi-line prompts continue on
-  `>` lines; steering never reads that record back as operator input), do the
+  begin the `patch:exchange` response with the prompt verbatim using the exact
+  hook-issued record prefix, `> **Chat prompt (#chatprompt:<id>):** <prompt>`
+  (multi-line prompts continue on `>` lines; steering never reads that record
+  back as operator input). Every prompt gets its own compact surrogate ID; old
+  ID-less `(#chatprompt)` records remain valid and are not rewritten. Then do the
   work, and persist through `agent-doc respond <FILE>` /
   `agent-doc write --commit <FILE>` with its queue/backlog mutations, exactly
   like a document-originated turn. This works on a pure chat turn too (no

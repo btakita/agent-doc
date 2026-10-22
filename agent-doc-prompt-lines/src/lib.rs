@@ -468,31 +468,105 @@ fn strip_prompt_prefix(line: &str) -> &str {
         .unwrap_or(line)
 }
 
-/// The canonical shape an agent records a chat-originated operator prompt in
+/// The legacy shape an agent recorded a chat-originated operator prompt in
 /// (`#chatprompt`, GH #125): `> **Chat prompt (#chatprompt):** <verbatim>`.
+/// New records use [`chat_prompt_record_prefix`] so every prompt has a compact
+/// surrogate ID. This constant remains public for reading and repairing old
+/// documents without rewriting their history.
 /// The record is agent-authored bookkeeping of a prompt that already reached
 /// the agent through the harness chat, so steering (`#midturn-steering`)
 /// never reads it as new operator input.
 pub const CHAT_PROMPT_RECORD_PREFIX: &str = "> **Chat prompt (#chatprompt):**";
 
+/// Human-readable template used when the original hook-issued ID is no longer
+/// available (for example, a post-commit repair warning).
+pub const CHAT_PROMPT_RECORD_TEMPLATE: &str = "> **Chat prompt (#chatprompt:<unique-id>):**";
+
+/// Canonical prefix for a new chat-prompt record.
+///
+/// `surrogate_id` is hook-issued and unique within the session document. The
+/// colon form keeps `#chatprompt` as the stable tag while making individual
+/// records addressable: `> **Chat prompt (#chatprompt:7f31ab08c4de):**`.
+pub fn chat_prompt_record_prefix(surrogate_id: &str) -> String {
+    format!("> **Chat prompt (#chatprompt:{surrogate_id}):**")
+}
+
+/// The surrogate ID carried by an agent-written chat-prompt record.
+///
+/// Legacy `(#chatprompt)` records return `None`; malformed lines are not
+/// records. IDs intentionally use a conservative token alphabet so the close
+/// parenthesis is an unambiguous delimiter in Markdown and shell tooling.
+pub fn chat_prompt_record_surrogate_id(line: &str) -> Option<&str> {
+    let rest = chat_prompt_record_tag_tail(line)?;
+    let id = rest.strip_prefix(':')?.strip_suffix(')')?;
+    (!id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+    .then_some(id)
+}
+
+fn chat_prompt_record_tag_tail(line: &str) -> Option<&str> {
+    let rest = line.trim_start().strip_prefix('>')?;
+    let rest = rest.trim_start().trim_start_matches(['*', '_']);
+    let rest = rest.strip_prefix("Chat prompt")?;
+    let rest = rest.trim_start().strip_prefix("(#chatprompt")?;
+    let close = rest.find(')')?;
+    let tag_tail = &rest[..=close];
+    if tag_tail == ")" || chat_prompt_record_surrogate_id_tail(tag_tail) {
+        Some(tag_tail)
+    } else {
+        None
+    }
+}
+
+fn chat_prompt_record_surrogate_id_tail(tag_tail: &str) -> bool {
+    let Some(id) = tag_tail
+        .strip_prefix(':')
+        .and_then(|id| id.strip_suffix(')'))
+    else {
+        return false;
+    };
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
 /// Whether `line` starts an agent-written chat-prompt record. Lenient about
 /// emphasis and spacing (`> Chat prompt (#chatprompt): …`, `>**Chat prompt
-/// (#chatprompt)**: …`), strict about the `#chatprompt` tag, so operator
-/// prose that merely mentions a chat prompt is never mistaken for one.
+/// (#chatprompt:id)**: …`), strict about the complete `#chatprompt` tag, so
+/// operator prose that merely mentions a chat prompt is never mistaken for
+/// one. Legacy ID-less records remain valid.
 pub fn is_chat_prompt_record_line(line: &str) -> bool {
-    let Some(rest) = line.trim_start().strip_prefix('>') else {
-        return false;
-    };
-    let rest = rest.trim_start().trim_start_matches(['*', '_']);
-    let Some(rest) = rest.strip_prefix("Chat prompt") else {
-        return false;
-    };
-    rest.trim_start().starts_with("(#chatprompt)")
+    chat_prompt_record_tag_tail(line).is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_prompt_records_accept_ids_and_legacy_shape() {
+        let identified = chat_prompt_record_prefix("7f31ab08c4de");
+        assert_eq!(identified, "> **Chat prompt (#chatprompt:7f31ab08c4de):**");
+        assert!(is_chat_prompt_record_line(&identified));
+        assert_eq!(
+            chat_prompt_record_surrogate_id(&identified),
+            Some("7f31ab08c4de")
+        );
+        assert!(is_chat_prompt_record_line(CHAT_PROMPT_RECORD_PREFIX));
+        assert_eq!(
+            chat_prompt_record_surrogate_id(CHAT_PROMPT_RECORD_PREFIX),
+            None
+        );
+        assert!(!is_chat_prompt_record_line(
+            "> **Chat prompt (#chatprompt:bad id):** nope"
+        ));
+        assert!(!is_chat_prompt_record_line(
+            "> **Chat prompt (#chatpromptish):** nope"
+        ));
+    }
 
     /// `#politeimperative`: a polite instruction is still an instruction. The
     /// live regression was a queue head that never became tracked backlog work

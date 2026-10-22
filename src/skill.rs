@@ -3722,7 +3722,9 @@ mod tests {
         assert!(cycle.contains("`#chatprompt`, GH #125"));
         assert!(cycle.contains("`#chatprompt`, GH #140"));
         assert!(cycle.contains("OpenCode has no `UserPromptSubmit` hook"));
-        assert!(cycle.contains("> **Chat prompt (#chatprompt):** <verbatim prompt>"));
+        assert!(cycle.contains(
+            "> **Chat prompt (#chatprompt:<id>):** <verbatim prompt>"
+        ));
         assert!(cycle.contains("A non-empty `chat_prompts` is never `no_changes`"));
         assert!(cycle.contains("`session-check` warns `chat prompt not recorded`"));
         for env in [

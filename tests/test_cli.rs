@@ -34447,7 +34447,9 @@ fn test_opencode_skill_install_preserves_operator_authority_instructions() {
     assert!(cycle.contains("`#chatprompt`, GH #140"));
     assert!(cycle.contains("OpenCode has no `UserPromptSubmit` hook"));
     assert!(cycle.contains("self-apply this rule"));
-    assert!(cycle.contains("> **Chat prompt (#chatprompt):** <verbatim prompt>"));
+    assert!(cycle.contains(
+        "> **Chat prompt (#chatprompt:<id>):** <verbatim prompt>"
+    ));
 }
 
 #[test]

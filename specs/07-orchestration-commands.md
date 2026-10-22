@@ -34,6 +34,9 @@ This file covers binary-owned planning/orchestration and the queue surface that 
   - `repo_actions`
   - `required_commands`
   - `pending_mutations`
+  - `operation_tree`, a compact binary-owned tree whose
+    `policy=selected_path_only` records the blocker gate and the ordered phases
+    on the chosen path without serializing speculative alternatives
   - `graph_evidence` when a materialized `.tsift/graph.db` exists and the prompt targets include queued `do #id` / `do [#id]` work
   - `handoff`
   - `blockers`
@@ -49,6 +52,11 @@ This file covers binary-owned planning/orchestration and the queue surface that 
   automatic dispatch. `task_class`, `risk`, model tier, token budgets,
   `write_scope`, and `required_proof` come from prompt targets, backlog text,
   requested presets, and visible repo-work directives.
+- `operation_tree` is the normative operation order for harness clients. Its
+  blocker gate selects exactly one child (`path.execute` or `path.stop`). An
+  executable path selects prompt scope before repo work, pending mutations,
+  and required commands; a non-`none` handoff prunes the manual repo-action
+  branch because the emitted handoff command owns that work.
 - `tsift_context` records the stable JSON handoff commands used by job packets:
   `tsift status --json`, `tsift context-pack <FILE> --json --budget normal`,
   `tsift source-read <handle>`, `tsift diff-digest --cached`, and

@@ -23,6 +23,7 @@ The command emits a structured planning record as JSON.
 - `repo_actions` — concrete repo work to complete before response persistence
 - `required_commands` — binary/harness commands that must run this cycle
 - `pending_mutations` — legacy-named planning field for backlog/review tracked-work mutations that must be resolved before persistence
+- `operation_tree` — binary-owned `selected_path_only` tree for the blocker gate and ordered executable phases; follow this path instead of proposing speculative alternatives
 - `handoff` — `none | orchestrate | compact | claim | other`
 - `blockers` — concrete blockers that mean the cycle should fail closed
 
@@ -30,6 +31,8 @@ The command emits a structured planning record as JSON.
 
 1. Run the planning phase after preflight and before repo work.
 2. Execute `required_commands` and respect `handoff` before free-form response generation.
+   Use `operation_tree` as the normative ordering: it contains only the selected
+   branch, so do not spend context enumerating or exploring paths absent from it.
 3. If `handoff=orchestrate`, use the emitted `agent-doc orchestrate ...` command instead of manually simulating the batch.
 4. If `handoff=compact`, follow the emitted compact/restart instruction and stop before normal repo work or response finalization. `handoff=compact` requires an explicit prompt or document compaction request; advisory session-accretion signals such as repeated no-op closeout churn must not force this handoff.
 5. If `execution_scope=plan_backlog_only`, do not start repo implementation, tests, builds, installs, commits, or pushes from this cycle even if the raw prompt contained imperative wording. Capture the plan and backlog items first, then wait for a later `do #id ...` turn to authorize implementation.

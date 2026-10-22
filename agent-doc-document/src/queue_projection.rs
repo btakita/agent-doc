@@ -449,11 +449,7 @@ pub fn strip_in_progress_marker(text: &str) -> String {
             rest = after_marker.trim_start();
             continue;
         }
-        if let Some((owner, after_marker)) = strip_owner_annotation_prefix(trimmed) {
-            kept_prefixes.push(format!(
-                "{OWNER_ANNOTATION_OPEN}{};generation={}{OWNER_ANNOTATION_CLOSE}",
-                owner.owner, owner.generation
-            ));
+        if let Some((_, after_marker)) = strip_owner_annotation_prefix(trimmed) {
             rest = after_marker.trim_start();
             continue;
         }
@@ -970,6 +966,11 @@ mod tests {
         );
         assert_eq!(owner_projection(&projected), Some(owner));
         assert_eq!(strip_priority_markers(&projected), "fix sdk demo");
+        assert_eq!(
+            strip_in_progress_marker(&projected),
+            "🙋 [#choice] 📌 fix sdk demo",
+            "terminalization strips attempt ownership with lifecycle state"
+        );
         assert_eq!(
             apply_owner_projection(&projected, None),
             "  🚧 🙋 [#choice] 📌 fix sdk demo  "

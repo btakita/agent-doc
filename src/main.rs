@@ -7941,7 +7941,7 @@ fn try_main() -> anyhow::Result<()> {
                     agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
                         &queue_effects,
                         &file,
-                        Some(&claim.item_text),
+                        requeue.then_some(claim.item_text.as_str()),
                     )?;
                 }
                 match released {

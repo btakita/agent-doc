@@ -7,7 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_doc_document::queue_projection::{
-    LIFECYCLE_MARKERS, strip_in_progress_marker, strip_priority_markers,
+    LIFECYCLE_MARKERS, OWNER_ANNOTATION_CLOSE, OWNER_ANNOTATION_OPEN,
+    strip_in_progress_marker, strip_priority_markers,
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
@@ -1763,6 +1764,42 @@ pub fn done_ids_have_atomic_queue_completion(
 }
 
 fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
+    fn strip_struck_owner_annotations(mut body: String) -> String {
+        let mut search_from = 0;
+        while let Some(offset) = body[search_from..].find(OWNER_ANNOTATION_OPEN) {
+            let start = search_from + offset;
+            let terminal_prefix = body[..start].ends_with("~~")
+                || body[..start].ends_with("~~~done\n");
+            let Some(close_offset) = body[start + OWNER_ANNOTATION_OPEN.len()..]
+                .find(OWNER_ANNOTATION_CLOSE)
+            else {
+                break;
+            };
+            let close = start
+                + OWNER_ANNOTATION_OPEN.len()
+                + close_offset
+                + OWNER_ANNOTATION_CLOSE.len();
+            let payload = &body[start + OWNER_ANNOTATION_OPEN.len()
+                ..close - OWNER_ANNOTATION_CLOSE.len()];
+            let valid = payload
+                .rsplit_once(";generation=")
+                .is_some_and(|(owner, generation)| {
+                    terminal_prefix
+                        && !owner.is_empty()
+                        && !owner.chars().any(|ch| ch == '\n' || ch == '\r')
+                        && generation.parse::<u64>().is_ok()
+                });
+            if !valid {
+                search_from = close;
+                continue;
+            }
+            let end = close + usize::from(body[close..].starts_with(' '));
+            body.replace_range(start..end, "");
+            search_from = start;
+        }
+        body
+    }
+
     let Ok(components) = element::parse(content) else {
         return content.to_string();
     };
@@ -1784,6 +1821,7 @@ fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
                 .replace(&needle_with_space, "~~")
                 .replace(&needle_bare, "~~");
         }
+        updated_body = strip_struck_owner_annotations(updated_body);
         if updated_body != body {
             edits.push((queue.open_end, queue.close_start, updated_body));
         }
@@ -3218,6 +3256,25 @@ Old.
             );
             assert!(updated.contains("- do [#tail]\n"), "{marker}: {updated}");
         }
+    }
+
+    #[test]
+    fn consume_queue_nodes_by_key_strips_terminal_attempt_owner_annotation() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- 📤 ⟦owner=subagent:sdk;generation=7⟧ finish sdk demo\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let key = queue_prompt_node_keys_for_count(content, 1)
+            .unwrap()
+            .keys
+            .remove(0);
+
+        let updated = consume_queue_nodes_by_key(content, &[key]).unwrap();
+
+        assert!(updated.contains("- ~~finish sdk demo~~\n"), "{updated}");
+        assert!(!updated.contains("⟦owner="), "{updated}");
     }
 
     #[test]

@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.543
+
+- **Remote Dev routing and sync now terminate consistently under flat or missing frontend geometry (GH #353–#357).**
+  Shared remedy text covers both frontend and backend plugin installation, repeated complete-width replacements
+  remain safe, exact flat-layout preservation succeeds without inventing columns, and structural focus deferrals no
+  longer trigger impossible repair loops.
+- **Queue delivery is durable and visually unambiguous.** Reported subagent results remain writeback debt until the
+  coordinator persists them, terminal-wrapped diagnostics stay one queue item, incoming defaults to `📥`, reported
+  defaults to `📫`, and every lifecycle prefix accepts an arbitrary configured string.
+- **Subagent operator answers preserve prompt locality.** Answers append beside their tracked request, remove the
+  blocking `🙋` state, and retain the primary task intent while the coordinator resumes work.
+- **Planning exposes the selected operation tree.** Agent runs can show the chosen branch and dependencies without
+  spending tokens narrating every rejected branch.
+- **Generation-safe Lazily handles are adopted from the published runtimes.** Rust uses `lazily` 0.61.0 and
+  `lazily-macros` 0.23.1, VS Code uses `@lazily-hub/lazily-js` 0.37.0, and JetBrains uses Lazily Kotlin 0.46.0;
+  consumer regressions prove stale Source/Effect disposal cannot affect a recycled replacement.
+
 ## 0.35.542
 
 - **Explicit Remote Dev routing can replace a complete same-width visible set without frontend geometry (GH #352).**

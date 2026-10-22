@@ -6802,7 +6802,7 @@ mod tests {
             "idle\n",
             "<!-- /agent:status -->\n\n",
             "<!-- agent:queue -->\n",
-            "- do [#work]\n",
+            "- 📥 do [#work]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] [#work] verify workflow\n",

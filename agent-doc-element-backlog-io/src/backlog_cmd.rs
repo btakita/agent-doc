@@ -29,6 +29,36 @@ use agent_doc_element_review::{
     resolve_review_items_in_document,
 };
 
+/// Project blocking operator requests onto their originating selected-queue
+/// rows. Existing annotations survive only while the same-id todo remains open.
+pub fn sync_queue_operator_actions(file: &Path, actions: &[(String, String)]) -> Result<bool> {
+    let full = read_command_document(file, "sync queue operator actions")?;
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(&full);
+    let components = element::parse(&full).context("failed to parse components")?;
+    let queues = agent_doc_queue::queue_set::QueueSet::parse(&full, &components)?;
+    let Some(queue) = queues.selected().or_else(|| queues.blocks().first()) else {
+        return Ok(false);
+    };
+    let Some(component) =
+        agent_doc_queue::queue_set::component_for_id(&full, &components, &queue.id)?
+    else {
+        return Ok(false);
+    };
+    let body = component.content(&full);
+    let Some((projected, _)) = agent_doc_queue::document_queue::project_prompt_operator_actions(
+        body,
+        actions,
+        &open_todo_ids,
+    )?
+    else {
+        return Ok(false);
+    };
+    let target = component.replace_content(&full, &projected);
+    persist_pending_write(file, &full, &target)?;
+    emit_pending_receipt("[queue] synchronized operator-action indicators".to_string());
+    Ok(true)
+}
+
 thread_local! {
     static FORCE_DISK_PENDING_WRITE: Cell<bool> = const { Cell::new(false) };
     static PENDING_WRITE_TRANSACTION: RefCell<Option<PendingWriteTransaction>> =

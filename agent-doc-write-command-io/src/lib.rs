@@ -2,6 +2,15 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// A blocking subagent request linked to the queue item it pauses. The pair is
+/// captured with closeout so retained/replayed writes reproduce the same local
+/// `🙋 [#request-id]` visibility.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueOperatorAction {
+    pub queue_item: String,
+    pub request_id: String,
+}
+
 /// Durable, replayable document-mutation portion of one closeout request.
 ///
 /// Runtime-only choices (force-disk authorization, lint overrides, origins, and
@@ -57,6 +66,8 @@ pub struct CapturedCloseoutMutationPlan {
     /// `#tododone`: `agent:todo` items deleted.
     #[serde(default)]
     pub todo_remove: Vec<String>,
+    #[serde(default)]
+    pub queue_operator_actions: Vec<QueueOperatorAction>,
     pub queue_completion_ids: Vec<String>,
     pub allow_replace_pending: bool,
     pub status: Option<String>,
@@ -133,6 +144,7 @@ pub struct CommandOptions {
     /// `#tododone`: `agent:todo` items to delete because they no longer apply
     /// (repeatable). A finished item uses `todo_done` instead.
     pub todo_remove: Vec<String>,
+    pub queue_operator_actions: Vec<QueueOperatorAction>,
     /// Queue-head completion ids proven by the response/route but not backed by
     /// a `pending` mutation such as `--done`.
     pub queue_completion_ids: Vec<String>,
@@ -189,6 +201,7 @@ impl CommandOptions {
             todo_edit: self.todo_edit.clone(),
             todo_reopen: self.todo_reopen.clone(),
             todo_remove: self.todo_remove.clone(),
+            queue_operator_actions: self.queue_operator_actions.clone(),
             queue_completion_ids: self.queue_completion_ids.clone(),
             allow_replace_pending: self.allow_replace_pending,
             status: self.status.clone(),
@@ -240,6 +253,7 @@ impl CommandOptions {
             todo_edit: plan.todo_edit,
             todo_reopen: plan.todo_reopen,
             todo_remove: plan.todo_remove,
+            queue_operator_actions: plan.queue_operator_actions,
             queue_completion_ids: plan.queue_completion_ids,
             allow_replace_pending: plan.allow_replace_pending,
             pending_only: false,
@@ -298,6 +312,7 @@ impl CommandOptions {
             todo_edit: Vec::new(),
             todo_reopen: Vec::new(),
             todo_remove: Vec::new(),
+            queue_operator_actions: Vec::new(),
             queue_completion_ids: queue_completion_ids.to_vec(),
             allow_replace_pending: false,
             pending_only: false,
@@ -347,6 +362,7 @@ impl CommandOptions {
             || !self.todo_edit.is_empty()
             || !self.todo_reopen.is_empty()
             || !self.todo_remove.is_empty()
+            || !self.queue_operator_actions.is_empty()
     }
 
     /// `#queuemirrororder`: the write carries a tracked-work mutation whose only

@@ -5698,6 +5698,32 @@ pub fn run_queue_maintenance_with_coin_gate(
         );
     }
 
+    // `#queueoperatoraction`: the annotation is a projection of the same-id
+    // operator todo, never durable authority by itself. An operator may check
+    // the Markdown todo directly, so preflight also removes stale annotations
+    // instead of relying only on the closeout command path.
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(&current_content);
+    if let Some(projected_entries) = agent_doc_queue::document_queue::set_prompt_operator_actions(
+        &activation.entries_after,
+        &[],
+        &open_todo_ids,
+    ) {
+        let new_body = agent_doc_queue::document_queue::render(&projected_entries);
+        current_content = {
+            let comps = agent_doc_element::element::parse(&current_content)?;
+            let q = agent_doc_queue::queue_set::component_for_id(
+                &current_content,
+                &comps,
+                &selected_queue_id,
+            )?
+            .context("queue maintenance: selected queue vanished during operator-action sync")?;
+            q.replace_content(&current_content, &new_body)
+        };
+        activation.entries_after = projected_entries;
+        mutated = true;
+        eprintln!("[preflight] queue: cleared resolved operator-action indicators");
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = agent_doc_queue::document_queue::render(&activation.entries_after);

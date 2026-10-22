@@ -1287,11 +1287,61 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             ),
         );
         return agent_doc_tmux_io::with_current_pane_id_override(&pane_id, || {
+            retire_bound_turn_status_on_stop(project_root.as_deref(), &pane_id, input, &file);
             apply_bound_stop(input, &loaded_root, &state, &file, &cleanup_roots)
         });
     }
 
     apply_bound_stop(input, &loaded_root, &state, &file, &cleanup_roots)
+}
+
+/// `#codexstopexactpane`: the generic Codex `turn-status idle` Stop hook runs
+/// in the hook executor's ambient tmux pane. In a shared window that can be a
+/// different pane from the exact Codex thread that stopped, leaving this
+/// document's turn-active lease and dispatch receipt live indefinitely. The
+/// consequential Stop hook already resolved the exact document actor above;
+/// project the same idle edge through that authoritative pane identity.
+///
+/// This is intentionally idempotent with the generic status hook and
+/// best-effort, preserving Stop closeout recovery if status storage is
+/// temporarily unavailable.
+fn retire_bound_turn_status_on_stop(
+    project_root: Option<&Path>,
+    pane_id: &str,
+    input: &StopInput,
+    file: &Path,
+) {
+    let Some(project_root) = project_root else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "hook_event_name": "Stop",
+        "session_id": input.session_id,
+        "turn_id": input.turn_id,
+        "cwd": input.cwd,
+    })
+    .to_string();
+    if let Err(err) = agent_doc_turn_status_io::apply_turn_status_hook_at(
+        project_root,
+        pane_id,
+        false,
+        Some(&payload),
+        now_secs(),
+    ) {
+        eprintln!(
+            "[agent-doc] warning: exact-pane Codex Stop idle projection failed for {} in {}: {err:#}",
+            file.display(),
+            pane_id,
+        );
+        return;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_stop_turn_status_idle pane={} source=exact_thread_document_actor (#codexstopexactpane)",
+            pane_id
+        ),
+    );
 }
 
 fn apply_bound_stop(
@@ -4006,6 +4056,40 @@ mod tests {
                 None,
             ),
             StopPaneIdentity::Ambient,
+        );
+    }
+
+    #[test]
+    fn exact_actor_stop_retires_only_the_bound_panes_turn_status() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, "# task\n").expect("write task");
+        agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%218")
+            .expect("write bound marker");
+        agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%219")
+            .expect("write ambient marker");
+        let input = StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "codex-turn".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: String::new(),
+            stop_hook_active: false,
+        };
+
+        retire_bound_turn_status_on_stop(Some(dir.path()), "%218", &input, &file);
+
+        assert!(!agent_doc_turn_status_io::turn_active_for_pane(
+            dir.path(),
+            "%218"
+        ));
+        assert!(agent_doc_turn_status_io::turn_active_for_pane(
+            dir.path(),
+            "%219"
+        ));
+        assert_eq!(
+            agent_doc_turn_status_io::pane_harness_session(dir.path(), "%218")
+                .map(|(session_id, _)| session_id),
+            Some("codex-session".to_string())
         );
     }
 

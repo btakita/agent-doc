@@ -612,6 +612,16 @@ its prompt, until the operator typed `/clear` by hand.
   settled cancelled turn therefore classifies as `IdlePrompt` and the clear
   proceeds. A clear that was already deferred is delivered by the supervisor
   at the next tick that sees the prompt and no live turn.
+- **Codex Stop uses the exact actor pane (`#codexstopexactpane`).** Codex runs
+  hook commands from a shared executor whose ambient tmux pane can differ from
+  the thread that stopped. The generic `turn-status idle` hook is retained, but
+  the consequential Codex Stop hook also projects the idle edge through the
+  authoritative document actor pane it already resolved for closeout. That
+  exact projection clears the stopped pane's turn lease and settles its
+  dispatch receipt idempotently; it never clears an ambient sibling pane. A
+  subsequent Clear Session Context therefore runs on its first press instead
+  of repeatedly deferring on the stopped turn and later being superseded by a
+  new prompt.
 - **Deferred clear already satisfied.** The supervisor retires a pending
   operator-deferred clear, and does not deliver it, when the target pane holds
   a `session_start_clear` or `session_start_startup` receipt strictly newer

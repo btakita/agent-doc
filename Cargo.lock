@@ -386,6 +386,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-tmux-io",
  "agent-doc-turn",
+ "agent-doc-turn-status-io",
  "agent-doc-write-command-io",
  "agent-doc-write-runtime-io",
  "anyhow",

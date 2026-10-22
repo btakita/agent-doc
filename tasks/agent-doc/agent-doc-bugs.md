@@ -26,7 +26,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published agent-doc release: v0.35.540, published on GitHub at 2026-10-22 05:52:14 UTC. JetBrains plugin packages published with that release at the same time: classic 0.2.776, 262 0.2.779, and 263 0.2.780 (latest numeric JetBrains package: 0.2.780).
+Latest published agent-doc release: v0.35.541, published on GitHub at 2026-10-22 10:14:33 UTC. JetBrains plugin packages published with that release at the same time: classic 0.2.787, 262 0.2.789, and 263 0.2.788 (latest numeric JetBrains package: 0.2.789). VS Code extension 0.2.83 was also published with the release. Release commit 34e41d9e22ba590124f2561630ec03111c5535c5 is on main, PyPI has agent_doc-0.35.541-py3-none-any.whl, and the Homebrew tap is updated by commit 28a351f.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -363,6 +363,54 @@ The editor changed the document again during commit, so agent-doc reported a con
 Implemented the compact form. Runtime queue state now renders as `⟦subagent:<label>#<generation>⟧`, so the suggested `⟦subagent:runtime_fix_switch#2⟧` shape is canonical. Legacy `⟦owner=…;generation=…⟧` markers remain readable and normalize on the next projection; lifecycle annotations are excluded from work identity so claim-following stays stable and projection is idempotent.
 
 Integrated and pushed agent-doc commit `61715cf113d50b9e6c29b1168868ead65262a36a` to `main`. The authoritative suite passed 11,398/11,398 tests (177 skipped), all focused lifecycle/compatibility/idempotence tests passed, and the coordinator-owned `make install` completed successfully for the CLI, native library, JetBrains plugins, and VS Code extension. GitHub CI for `main` run `39735904034` is in progress; local verification is green.
+
+### Re: v0.35.541 released; issues #349–#351 closed — gpt-5 · 2026-10-22T06:18:36-04:00
+
+agent-doc **v0.35.541** is public from release commit `34e41d9e22ba590124f2561630ec03111c5535c5`: [GitHub release](https://github.com/btakita/agent-doc/releases/tag/v0.35.541), PyPI wheel `agent_doc-0.35.541-py3-none-any.whl`, VS Code 0.2.83, and JetBrains classic 0.2.787 / 262 0.2.789 / 263 0.2.788. The Homebrew tap is current at commit `28a351f`. The exact versioned tree passed both `make check` and `make tmux-ci`, and the full local CLI/native/editor install completed.
+
+Issues [#349](https://github.com/btakita/agent-doc/issues/349), [#350](https://github.com/btakita/agent-doc/issues/350), and [#351](https://github.com/btakita/agent-doc/issues/351) are closed. #349 now rejects a copied session identity while preserving legitimate rename continuity. #350 keeps status-sync output and lint vocabulary aligned. #351 uses only an explicit live one-for-one, same-width Remote Dev replacement when pane order is unknown; automatic sync fails closed and emits a diagnostic when that proof is absent.
+
+The same release also makes single-bracket subagent markers such as `[#subagent:issue349#2]` canonical while retaining legacy-read compatibility, prevents operator-action queue rows from being struck by any completion path, and adds deterministic simulation coverage for the tmux auto-clear race.
+
+> **Queue prompt:** `⟦subagent:issue349#2⟧`: Can we switch to a normal id with single brackets? The double brackets don't play well with JetBrains expand text selection. `[#subagent:issue349#2]` works.
+
+Implemented and released; the single-bracket form is now canonical.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/350
+
+Fixed in v0.35.541 and closed.
+
+> **Queue prompt:** sdk-demo.md agent:queue has the Operator Action icon but is also struck. It should not be struck because the operator needs to take action before it can complete.
+
+Fixed across the completion paths and released.
+
+> **Queue prompt:** Fix the pre-existing queue_auto_clear_counts_an_item_committed_before_the_watch_first_observes tmux-CI failure reproduced locally and on main CI run 39735904034; add deterministic SimWorld coverage.
+
+Fixed with deterministic SimWorld regression coverage; the authoritative tmux gate passed.
+
+> **Queue prompt:** Is https://github.com/btakita/agent-doc/issues/349 + https://github.com/btakita/agent-doc/issues/350 fixed? They are still open in issues.
+
+Yes. Both fixes are released and both issues are now closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/349
+
+Fixed, released, and closed. Closure evidence: https://github.com/btakita/agent-doc/issues/349#issuecomment-6337580255
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/350
+
+The duplicate queue occurrence resolves to the same released #350 fix and closed issue.
+
+> **Queue prompt:** release + publish
+
+Complete: v0.35.541 is published across GitHub, PyPI, Homebrew, and the editor artifacts.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/351
+
+Fixed, released, and closed. Publication evidence: https://github.com/btakita/agent-doc/issues/351#issuecomment-6338343333
+
+> **Queue prompt:** release + publish: Include issue 351
+
+Complete: issue #351 is included in v0.35.541.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -371,6 +419,21 @@ Integrated and pushed agent-doc commit `61715cf113d50b9e6c29b1168868ead65262a36a
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 📤 [#subagent:issue349#2] do [#fixhttpsgithub-f6ne]
+- ~~`⟦subagent:issue349#2⟧`: Can we switch to a normal id with single brackets? The double brackets don't play well with JetBrains expand text selection. `[#subagent:issue349#2]` works.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/350~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~sdk-demo.md agent:queue has the Operator Action icon but is also struck. It should not be struck because the operator needs to take action before it can complete.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Fix the pre-existing queue_auto_clear_counts_an_item_committed_before_the_watch_first_observes tmux-CI failure reproduced locally and on main CI run 39735904034; add deterministic SimWorld coverage.~~ — auto-struck: answered this cycle (#ftstrike)
+```
+- ~~🙋 [#subagent-operator-request-adr-links-publish] 🚧 ⟦subagent:adr_links#1⟧ The links in the ADR in https://github.com/haiven-dev/haiven-docs/pull/68 are not well-formed: `[Public Chat][public-chat]`~~ — auto-struck: answered this cycle (#ftstrike)
+```
+---
+- ~~Is https://github.com/btakita/agent-doc/issues/349 + https://github.com/btakita/agent-doc/issues/350 fixed? They are still open in issues.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/349~~ — auto-struck: answered this cycle (#ftstrike)
+- 📤 [#subagent:issue349#1] #gh-fix https://github.com/btakita/agent-doc/issues/350
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/351~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: Include issue 351~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -386,6 +449,7 @@ Integrated and pushed agent-doc commit `61715cf113d50b9e6c29b1168868ead65262a36a
 
 ## Backlog
 <!-- agent:backlog priority queue -->
+- [x] [#fixhttpsgithub-f6ne] Should we fix https://github.com/btakita/agent-doc/issues/349 or should this be a Won't Fix?
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 

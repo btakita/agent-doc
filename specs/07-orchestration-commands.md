@@ -716,6 +716,29 @@ portable agent-doc fallback:
 
 ### Post-commit queue consumption
 
+- **Claimed-row removal is authoritative cancellation
+  (`#queue-removal-cancels`):** when an operator explicitly removes a claimed
+  `agent:queue` row, mid-turn steering emits `dispatch=cancel_claimed` with the
+  exact claim owner, bound harness worker, and generation. The binary first
+  tombstones that exact identity+generation, acknowledges/drops any pending
+  completion delivery, and publishes a retained retirement successor so outbox
+  replay cannot resurrect/reinsert/close the row or apply the result. A later
+  same-text row is a fresh generation and never consumes stale completion. The
+  harness interrupts the old attempt only if it remains alive, at the nearest
+  safe consistency boundary, and preserves
+  recoverable branch/worktree/commit artifacts, stop further implementation,
+  tests, integration, publication, release, and external issue closure, and
+  generation-fenced release the claim. Best judgment applies only to shutdown
+  mechanics, never to whether sunk-cost work continues. Already-crossed
+  irreversible effects are reported rather than undone. The binary expresses
+  this binary-to-harness contract; it does not claim to kill a harness worker
+  directly. Ambiguous edits and duplicate lineage fail closed without dispatching
+  worker cancellation. A durably terminal struck-row deletion is
+  presentation-only cleanup. If Markdown strikethrough conflicts with a live
+  claim, reported receipt, or completion outbox, steering emits
+  `degraded_claim_mismatch`, preserves/fences that work, and performs no
+  interrupt, release, integration, apply, publication, or terminal inference.
+
 **Claim closure is part of the strike (`#claimstrike`, GH #303).** Free-text answer strikes and id-backed done/gate/edit consumes release the live claim at the same successful document-mutation boundary. In particular, an id-backed `Reported` attempt must not wait for later disk-based closeout pruning: after its anchored line is struck, a later operator re-add of the same `#id` is new, unclaimed, dispatchable intent and never inherits the earlier attempt's `📤` marker.
 
 Queue subagent authorization accepts multiple whitespace-separated references in a quoted queue `preset=` value, for example `preset="#push #auth"`. The compatibility alias `presets=` resolves through the same path (`#presetattralias`); when both spellings carry nonempty values, canonical `preset=` wins. `queue brief` must therefore carry a resolved queue-level `#auth` declared with either spelling into `authorization.presets`, rather than degrade the dispatch to `item_text_only` and ask the operator to repeat permission. References resolve independently in source order, duplicate canonical names collapse at their first occurrence, and each structured preset keeps its runbook. Mixed resolved and unresolved references produce `status: unresolved_preset`; resolved details remain visible, but authorization still fails closed.

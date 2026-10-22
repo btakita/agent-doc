@@ -21,6 +21,9 @@
 //!   item is never interrupted or interleaved. An explicit `Run Agent Doc`
 //!   send upgrades this last case to `address_now`: pressing send is an
 //!   authoritative request for the owning turn to handle the item now.
+//! - deletion of a claimed queue item → `cancel_claimed`: removal is an
+//!   authoritative cancellation, so the harness interrupts that exact worker
+//!   attempt and retires its generation-fenced claim.
 //!
 //! The watermark is the exactly-once fence. Queue steering is tracked as an
 //! *acknowledged queue* (the queue as of the last surfacing), so a later edit
@@ -74,6 +77,14 @@ pub enum SteeringDispatch {
     /// forward the operator's change to that owner, never dispatch a new
     /// subagent (`#claimedsteerwake`). [`SteeringItem::owner`] names it.
     ForwardToOwner,
+    /// The operator removed an item owned by an active worker attempt. The
+    /// harness must interrupt that exact worker and retire its claim; it may
+    /// not continue based on sunk-cost judgment (`#queue-removal-cancels`).
+    CancelClaimed,
+    /// A deleted struck row still has durable live claim/report/outbox
+    /// evidence. Markdown presentation cannot override that conflict; the
+    /// harness preserves the attempt and reports degraded state.
+    DegradedClaimMismatch,
     /// The item's worker already reported and its claim was released with a
     /// receipt (`#reportedrelease`): the coordinator persists that result in
     /// the current turn, with the closeout that strikes the line. Never a new
@@ -88,6 +99,8 @@ impl SteeringDispatch {
             Self::DrainAfterCurrent => "drain_after_current",
             Self::Subagent => "subagent",
             Self::ForwardToOwner => "forward_to_owner",
+            Self::CancelClaimed => "cancel_claimed",
+            Self::DegradedClaimMismatch => "degraded_claim_mismatch",
             Self::PersistReported => "persist_reported",
         }
     }
@@ -153,6 +166,14 @@ pub struct SteeringItem {
     /// [`SteeringDispatch::ForwardToOwner`] item (`#claimedsteerwake`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    /// Generation fence for an active claimed attempt. Present for claim-owned
+    /// routing so cancellation cannot release a newer replacement worker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+    /// Concrete harness worker identity recorded by `queue start`, when that
+    /// acknowledgement has happened. Harnesses use it for direct interrupt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_id: Option<String>,
     /// The operator explicitly sent this item (`Run Agent Doc` / `agent-doc
     /// route`, `#claimedsteerwake`): it bypassed the typing gate and is final,
     /// never partial. Rendered as `sent=explicit`.
@@ -682,6 +703,8 @@ fn exchange_candidates(
                 presets: preset_intents,
                 possibly_partial: false,
                 owner: None,
+                generation: None,
+                worker_id: None,
                 explicit: false,
             },
         });
@@ -904,6 +927,8 @@ fn queue_alignment(
                 presets: intents,
                 possibly_partial: false,
                 owner: None,
+                generation: None,
+                worker_id: None,
                 explicit: false,
             },
         });
@@ -940,6 +965,8 @@ fn queue_alignment(
                 presets: intents,
                 possibly_partial: false,
                 owner: None,
+                generation: None,
+                worker_id: None,
                 explicit: false,
             },
         });
@@ -974,6 +1001,8 @@ fn queue_alignment(
                 presets: Vec::new(),
                 possibly_partial: false,
                 owner: None,
+                generation: None,
+                worker_id: None,
                 explicit: false,
             },
         });
@@ -1357,15 +1386,18 @@ const FORWARD_EDITED: &str = "the operator EDITED a queue item a worker already 
      up. Do NOT dispatch a new subagent and do NOT re-claim the item.";
 const FORWARD_ADDED: &str = "already claimed by the worker named in `owner` (in flight there). \
      Nothing to dispatch; do NOT start a second subagent for it.";
-const FORWARD_DELETED: &str = "the operator REMOVED a queue item a worker had claimed (`owner` \
-     above). Tell that owner to stop or wrap up per the operator's intent, then `agent-doc queue \
-     release` the claim.";
 
 /// ` owner=<label>` / ` sent=explicit` header fields (`#claimedsteerwake`).
 fn item_header_suffix(item: &SteeringItem) -> String {
     let mut out = String::new();
     if let Some(owner) = &item.owner {
         out.push_str(&format!(" owner={owner}"));
+    }
+    if let Some(generation) = item.generation {
+        out.push_str(&format!(" generation={generation}"));
+    }
+    if let Some(worker_id) = &item.worker_id {
+        out.push_str(&format!(" worker={worker_id}"));
     }
     if item.explicit {
         out.push_str(" sent=explicit");
@@ -1394,6 +1426,103 @@ pub fn apply_claim_owners(items: &mut [SteeringItem], owner_of: impl Fn(&str) ->
             item.presets.clear();
             item.owner = Some(owner);
         }
+    }
+}
+
+/// Route live claimed items with their generation-fenced worker attempt.
+///
+/// This is the typed form used by the harness-facing IO layer. The older
+/// [`apply_claim_owners`] remains for compatibility callers that only know an
+/// owner label.
+pub fn apply_claim_attempts(
+    items: &mut [SteeringItem],
+    claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
+) {
+    for item in items.iter_mut() {
+        if item.source != SteeringSource::Queue || item.current_item {
+            continue;
+        }
+        let claim =
+            claim_of(&item.verbatim).or_else(|| item.previous.as_deref().and_then(&claim_of));
+        if let Some(claim) = claim {
+            item.dispatch = SteeringDispatch::ForwardToOwner;
+            item.presets.clear();
+            item.owner = Some(claim.owner);
+            item.generation = Some(claim.generation);
+            item.worker_id = claim.worker.map(|worker| worker.worker_id);
+        }
+    }
+}
+
+/// Add authoritative cancellation steering for claimed queue rows the
+/// operator removed (`#queue-removal-cancels`).
+///
+/// Ordinary deletion of future queue work remains silent. A deletion becomes
+/// harness work only when the durable claim ledger still names an active
+/// attempt for the removed identity. Identity pairing is the same pairing used
+/// for edits, and cancellation is withheld while the same identity remains
+/// live (for example one of two identical rows was removed). This is the
+/// fail-closed boundary for ambiguous edits: uncertain lineage never kills a
+/// worker.
+pub fn append_claimed_queue_removals(
+    items: &mut Vec<SteeringItem>,
+    watermark: &SteeringWatermark,
+    current: &str,
+    claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
+) {
+    let current_identities: Vec<_> = queue_items(current)
+        .into_iter()
+        .map(|item| agent_doc_queue::queue_claim::claim_identity(&item.norm))
+        .collect();
+    let alignment = queue_alignment(
+        watermark,
+        current,
+        &BTreeSet::new(),
+        false,
+        &agent_doc_frontmatter::frontmatter::PromptPresets::default(),
+    );
+    for event in alignment.events {
+        let QueueEvent::Delete { old, .. } = event else {
+            continue;
+        };
+        let identity = agent_doc_queue::queue_claim::claim_identity(&old);
+        if current_identities
+            .iter()
+            .any(|current| current == &identity)
+        {
+            continue;
+        }
+        let Some(claim) = claim_of(&old) else {
+            continue;
+        };
+        if let Some(item) = items.iter_mut().find(|item| {
+            item.source == SteeringSource::Queue
+                && item.change == SteeringChange::Deleted
+                && agent_doc_queue::queue_claim::claim_identity(&item.verbatim) == identity
+        }) {
+            item.dispatch = SteeringDispatch::CancelClaimed;
+            item.presets.clear();
+            item.owner = Some(claim.owner);
+            item.generation = Some(claim.generation);
+            item.worker_id = claim.worker.map(|worker| worker.worker_id);
+            continue;
+        }
+        items.push(SteeringItem {
+            source: SteeringSource::Queue,
+            change: SteeringChange::Deleted,
+            dispatch: SteeringDispatch::CancelClaimed,
+            current_item: watermark.current_item.as_deref().is_some_and(|selected| {
+                agent_doc_queue::queue_claim::claim_identity(selected) == identity
+            }),
+            verbatim: old,
+            previous: None,
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: Some(claim.owner),
+            generation: Some(claim.generation),
+            worker_id: claim.worker.map(|worker| worker.worker_id),
+            explicit: false,
+        });
     }
 }
 
@@ -1430,6 +1559,10 @@ pub fn apply_release_receipts(
 /// reported line names its exact closeout (`#reportedrelease`).
 fn action_for(document: &str, item: &SteeringItem) -> String {
     match item.dispatch {
+        SteeringDispatch::CancelClaimed => cancel_claimed_instruction(document, item),
+        SteeringDispatch::DegradedClaimMismatch => {
+            "the deleted row looked struck/terminal in Markdown, but durable claim, report, or completion-outbox evidence still owns that exact work. Treat this as a degraded state mismatch: preserve and fence the claim/outbox and recoverable artifacts; do NOT interrupt or release the worker, integrate/apply its result, or infer terminality from strikethrough. Report the mismatch to the operator and wait for an explicit authoritative resolution.".to_string()
+        }
         SteeringDispatch::PersistReported => {
             agent_doc_queue::claim_release_receipt::persist_reported_instruction(
                 document,
@@ -1439,6 +1572,34 @@ fn action_for(document: &str, item: &SteeringItem) -> String {
         }
         _ => instruction_for(item).to_string(),
     }
+}
+
+fn cancel_claimed_instruction(document: &str, item: &SteeringItem) -> String {
+    let owner = item.owner.as_deref().unwrap_or("the claimed worker");
+    let worker = item.worker_id.as_deref().unwrap_or(owner);
+    let generation = item
+        .generation
+        .map(|generation| generation.to_string())
+        .unwrap_or_else(|| "<generation-above>".to_string());
+    let release = format!(
+        "agent-doc queue release {} --item {} --generation {}",
+        shell_single_quote(document),
+        shell_single_quote(&item.verbatim),
+        generation,
+    );
+    format!(
+        "the operator explicitly REMOVED work claimed by `{owner}` (worker `{worker}`). This is \
+         authoritative cancellation, never best-effort or sunk-cost continuation. If that exact \
+         harness worker is still alive, interrupt it now at the nearest safe consistency boundary; best judgment applies \
+         only to shutdown mechanics, never to whether work continues. Preserve recoverable \
+         branch/worktree/commit artifacts, but stop further implementation, tests, integration, \
+         publication, release, and external issue closure. The binary already tombstoned this exact \
+         claim generation and retired any pending completion delivery so replay cannot resurrect it; \
+         `{release}` is now only an idempotent generation-fenced cleanup if still needed. The binary \
+         cannot directly kill a harness subagent. Report any irreversible \
+         effect already crossed instead of trying to undo it. Do not close out or requeue the \
+         removed line."
+    )
 }
 
 /// Keep unsurfaced edits of CLAIMED queue items pending across a new cycle's
@@ -1546,7 +1707,16 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
                 agent_doc_queue::subagent_scratch_isolation_rule!()
             )
         }
-        (SteeringDispatch::ForwardToOwner, _, SteeringChange::Deleted, _) => FORWARD_DELETED,
+        (SteeringDispatch::CancelClaimed, _, _, _) => {
+            "the operator removed claimed work. Interrupt its exact worker attempt and retire the \
+             generation-fenced claim; do not continue based on sunk cost."
+        }
+        (SteeringDispatch::DegradedClaimMismatch, _, _, _) => {
+            "a struck-row deletion conflicts with durable work evidence. Preserve/fence it and report the mismatch; do not interrupt, release, or integrate automatically."
+        }
+        (SteeringDispatch::ForwardToOwner, _, SteeringChange::Deleted, _) => {
+            "the operator removed claimed work; treat it as cancellation and do not continue it."
+        }
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Added, _) => FORWARD_ADDED,
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Edited, _) => FORWARD_EDITED,
         (SteeringDispatch::PersistReported, _, _, _) => {
@@ -2910,6 +3080,8 @@ mod tests {
             presets: Vec::new(),
             possibly_partial: false,
             owner: None,
+            generation: None,
+            worker_id: None,
             explicit: false,
         };
 
@@ -2955,6 +3127,8 @@ mod tests {
             presets: Vec::new(),
             possibly_partial: false,
             owner: None,
+            generation: None,
+            worker_id: None,
             explicit: false,
         };
         let mut items = vec![
@@ -3003,6 +3177,8 @@ mod tests {
             presets: Vec::new(),
             possibly_partial: false,
             owner: None,
+            generation: None,
+            worker_id: None,
             explicit: false,
         };
 
@@ -3031,6 +3207,8 @@ mod tests {
             presets: Vec::new(),
             possibly_partial: false,
             owner: None,
+            generation: None,
+            worker_id: None,
             explicit: false,
         };
         let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();

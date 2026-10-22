@@ -25,6 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -256,21 +257,86 @@ fn load_explicit_send(
     .and_then(|raw| serde_json::from_str(&raw).ok())
 }
 
-/// Route queue items a worker claimed to their owner (`#claimedsteerwake`).
-fn route_claimed_items(file: &Path, content: &str, items: &mut [SteeringItem]) {
-    if !items
-        .iter()
-        .any(|item| item.source == core::SteeringSource::Queue)
-    {
-        return;
+/// Route queue items a worker claimed to their owner (`#claimedsteerwake`) and
+/// synthesize authoritative cancellation for claimed rows the operator removed
+/// (`#queue-removal-cancels`).
+fn route_claimed_items(
+    file: &Path,
+    content: &str,
+    watermark: &SteeringWatermark,
+    items: &mut Vec<SteeringItem>,
+) -> Result<()> {
+    let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, content)
+        .with_context(|| format!("read queue claims while routing {}", file.display()))?;
+    let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+    let mut attempts = ledger
+        .active(now, None)
+        .into_iter()
+        .map(|claim| (claim.identity.clone(), claim.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut cancellations = std::collections::HashMap::new();
+    for receipt in &ledger.cancellations {
+        cancellations
+            .entry(receipt.claim.identity.clone())
+            .and_modify(|claim: &mut agent_doc_queue::queue_claim::QueueClaim| {
+                if receipt.claim.generation > claim.generation {
+                    *claim = receipt.claim.clone();
+                }
+            })
+            .or_insert_with(|| receipt.claim.clone());
     }
-    let owners = agent_doc_queue_io::queue_claim::claim_owners_for_content(file, content);
-    if !owners.is_empty() {
-        core::apply_claim_owners(items, |text| {
-            owners
+    let released = agent_doc_queue_io::claim_release_receipt::load(file)
+        .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
+    for receipt in &released.receipts {
+        if ledger.cancellations.iter().any(|cancelled| {
+            cancelled.claim.identity == receipt.identity
+                && cancelled.claim.generation == receipt.generation
+        }) {
+            continue;
+        }
+        attempts.entry(receipt.identity.clone()).or_insert_with(|| {
+            agent_doc_queue::queue_claim::QueueClaim {
+                identity: receipt.identity.clone(),
+                item_text: receipt.item_text.clone(),
+                owner: receipt.owner.clone(),
+                generation: receipt.generation,
+                state: agent_doc_queue::queue_claim::QueueClaimState::Reported,
+                worker: receipt.worker_id.as_ref().map(|worker_id| {
+                    agent_doc_queue::queue_claim::QueueWorkerBinding {
+                        worker_id: worker_id.clone(),
+                        started_at_secs: receipt.claimed_at_secs,
+                    }
+                }),
+                dispatch_policy: None,
+                claimed_at_secs: receipt.claimed_at_secs,
+                expires_at_secs: receipt.expires_at_secs,
+                owner_session: None,
+                anchor: None,
+                followed_from: Vec::new(),
+            }
+        });
+    }
+    if !attempts.is_empty() {
+        let claim_for = |text: &str| {
+            attempts
                 .get(&agent_doc_queue::queue_claim::claim_identity(text))
                 .cloned()
-        });
+        };
+        core::apply_claim_attempts(items, claim_for);
+    }
+    core::append_claimed_queue_removals(items, watermark, content, |text| {
+        let identity = agent_doc_queue::queue_claim::claim_identity(text);
+        attempts
+            .get(&identity)
+            .or_else(|| cancellations.get(&identity))
+            .cloned()
+    });
+    append_struck_removal_mismatches(file, content, watermark, &attempts, items)?;
+    for item in items
+        .iter()
+        .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+    {
+        cancel_removed_claim_attempt(file, content, item)?;
     }
     // `#reportedrelease`: a line whose worker reported (released with a
     // receipt) is the coordinator's to persist now, never new dispatch work.
@@ -283,6 +349,201 @@ fn route_claimed_items(file: &Path, content: &str, items: &mut [SteeringItem]) {
                 .cloned()
         });
     }
+    Ok(())
+}
+
+fn completed_queue_items(content: &str) -> Vec<String> {
+    let body = agent_doc_queue::queue_prompt_drift::queue_component_text(content);
+    agent_doc_queue::document_queue::parse(&body)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|entry| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => Some(prompt.text),
+            _ => None,
+        })
+        .collect()
+}
+
+fn all_queue_item_identities(
+    content: &str,
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let body = agent_doc_queue::queue_prompt_drift::queue_component_text(content);
+    agent_doc_queue::document_queue::parse(&body)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|entry| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+            | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
+                Some(agent_doc_queue::queue_claim::claim_identity(&prompt.text))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A struck-row deletion is presentation cleanup only when durable state also
+/// proves terminality. Conflicting claim/receipt/outbox evidence is surfaced as
+/// degraded and is never converted into cancellation authority.
+fn append_struck_removal_mismatches(
+    file: &Path,
+    content: &str,
+    watermark: &SteeringWatermark,
+    attempts: &std::collections::HashMap<
+        agent_doc_element_queue::QueueItemIdentity,
+        agent_doc_queue::queue_claim::QueueClaim,
+    >,
+    items: &mut Vec<SteeringItem>,
+) -> Result<()> {
+    let current = all_queue_item_identities(content);
+    let deleted = completed_queue_items(&watermark.baseline)
+        .into_iter()
+        .filter(|text| !current.contains(&agent_doc_queue::queue_claim::claim_identity(text)))
+        .collect::<Vec<_>>();
+    if deleted.is_empty() {
+        return Ok(());
+    }
+    let receipts = agent_doc_queue_io::claim_release_receipt::load(file)
+        .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
+    let pending_content = agent_doc_document_realtime_io::pending_document_write(file)
+        .map(|pending| pending.target_content);
+    let completion_evidence = pending_content
+        .as_deref()
+        .into_iter()
+        .chain(std::iter::once(content))
+        .flat_map(agent_doc_document::subagent_completion::completion_evidence)
+        .collect::<Vec<_>>();
+
+    for text in deleted {
+        let identity = agent_doc_queue::queue_claim::claim_identity(&text);
+        let claim = attempts.get(&identity);
+        let receipt = receipts
+            .receipts
+            .iter()
+            .find(|receipt| receipt.identity == identity);
+        let completion = completion_evidence.iter().find(|evidence| {
+            agent_doc_queue::queue_claim::claim_identity(&evidence.item) == identity
+        });
+        if claim.is_none() && receipt.is_none() && completion.is_none() {
+            continue;
+        }
+        items.push(SteeringItem {
+            source: core::SteeringSource::Queue,
+            change: core::SteeringChange::Deleted,
+            dispatch: core::SteeringDispatch::DegradedClaimMismatch,
+            current_item: false,
+            verbatim: text,
+            previous: None,
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: claim
+                .map(|claim| claim.owner.clone())
+                .or_else(|| receipt.map(|receipt| receipt.owner.clone()))
+                .or_else(|| completion.map(|evidence| evidence.owner.clone())),
+            generation: claim
+                .map(|claim| claim.generation)
+                .or_else(|| receipt.map(|receipt| receipt.generation)),
+            worker_id: claim
+                .and_then(|claim| claim.worker.as_ref().map(|worker| worker.worker_id.clone()))
+                .or_else(|| receipt.and_then(|receipt| receipt.worker_id.clone())),
+            explicit: false,
+        });
+    }
+    Ok(())
+}
+
+/// Serialize removal against `queue report-complete`, tombstone the exact
+/// claim generation, and publish a completion-cell retirement successor. The
+/// shared lock closes the report-marked/cell-not-yet-retained race; the
+/// retained `queue_consume` composition closes the delayed-outbox replay race.
+fn cancel_removed_claim_attempt(file: &Path, content: &str, item: &SteeringItem) -> Result<()> {
+    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
+    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, Duration::from_secs(5), |_| {});
+    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
+        anyhow::bail!(
+            "timed out waiting to tombstone removed queue claim for {}; no cancellation state was changed",
+            file.display()
+        );
+    };
+    let receipt = match agent_doc_queue_io::queue_claim::cancel_removed_attempt(
+        file,
+        &item.verbatim,
+        item.generation,
+    ) {
+        Ok(receipt) => receipt,
+        Err(err)
+            if matches!(
+                err.downcast_ref::<agent_doc_queue::queue_claim::QueueClaimTransitionRefused>(),
+                Some(agent_doc_queue::queue_claim::QueueClaimTransitionRefused::Missing)
+            ) =>
+        {
+            let identity = agent_doc_queue::queue_claim::claim_identity(&item.verbatim);
+            let reported = agent_doc_queue_io::claim_release_receipt::load(file)?
+                .receipts
+                .into_iter()
+                .find(|receipt| {
+                    receipt.identity == identity
+                        && (receipt.generation == 0
+                            || item.generation == Some(receipt.generation))
+                })
+                .with_context(|| {
+                format!(
+                    "removed queue item {:?} no longer has its generation-fenced claim or reported receipt",
+                    item.verbatim
+                )
+            })?;
+            let cancellation =
+                agent_doc_queue_io::queue_claim::record_released_cancellation(file, &reported)?;
+            agent_doc_queue_io::claim_release_receipt::cancel_reported_attempt(
+                file,
+                &item.verbatim,
+                item.generation,
+            )?;
+            cancellation
+        }
+        Err(err) => return Err(err),
+    };
+    let Some(completion_key) = receipt.completion_key.as_deref() else {
+        return Ok(());
+    };
+    let retired = agent_doc_document::subagent_completion::strip_completion_cells_matching(
+        content,
+        |evidence| evidence.key == completion_key,
+    );
+    let pending = agent_doc_document_realtime_io::pending_document_write(file).is_some();
+    if !pending && retired == content {
+        return Ok(());
+    }
+    agent_doc_document_realtime_io::retain_deferred_document_write_target(
+        file,
+        content,
+        &retired,
+        "queue_consume",
+        agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
+    )?;
+    let editor_attached = agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached();
+    if !editor_attached {
+        agent_doc_document_realtime_io::materialize_last_editor_close_through_authority(
+            file,
+            "queue_cancel_completion_tombstone",
+        )?;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_cancel_completion_tombstone owner={} worker={} generation={} completion_key={} pending_outbox={} delivery=retired_successor (#queue-removal-cancels)",
+            receipt.claim.owner,
+            receipt
+                .claim
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str())
+                .unwrap_or("-"),
+            receipt.claim.generation,
+            completion_key,
+            pending,
+        ),
+    );
+    Ok(())
 }
 
 fn load_watermark(
@@ -758,7 +1019,7 @@ fn prepare_with_gate(
         explicit: explicit_send,
         decisions: std::mem::take(&mut observation.decisions),
     };
-    route_claimed_items(file, &content, &mut observation.ready);
+    route_claimed_items(file, &content, &watermark, &mut observation.ready)?;
     // `#steerbaselineabsorb`: a prompt a cycle already carried or answered is
     // never re-surfaced (the watermark still advances past it).
     crate::absorbed_steering::drop_consumed(file, &mut observation.ready);
@@ -1166,7 +1427,16 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
         );
         ready.clear();
     }
-    route_claimed_items(file, current, &mut ready);
+    if let Err(err) = route_claimed_items(file, current, &base, &mut ready) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "pending_steering_claim_cancellation_ambiguous file={} error={err:#} (#queue-removal-cancels)",
+                file.display(),
+            ),
+        );
+        ready.clear();
+    }
     crate::absorbed_steering::drop_consumed(file, &mut ready);
     ready
 }
@@ -1378,7 +1648,9 @@ fn status_sync_checkpoint_with(
         .strip_prefix("cycle-")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or_else(|| cycle.started_at.saturating_mul(1_000));
-    let interval_ms = directive.as_ref().and_then(|directive| directive.interval_ms);
+    let interval_ms = directive
+        .as_ref()
+        .and_then(|directive| directive.interval_ms);
     let due = observe_boundary(
         &root,
         file,
@@ -1392,7 +1664,8 @@ fn status_sync_checkpoint_with(
     if !due {
         return Ok(None);
     }
-    let directive = directive.context("controller returned a due edge for a disarmed status sync")?;
+    let directive =
+        directive.context("controller returned a due edge for a disarmed status sync")?;
     let interval_ms = directive
         .interval_ms
         .context("controller returned a due edge without a status-sync interval")?;
@@ -2717,12 +2990,8 @@ mod tests {
         // Preflight already supplied the contract; an immediate first tool call
         // must not duplicate it.
         assert_eq!(
-            post_tool_use_response_at_with_checkpoint(
-                &owner_payload,
-                first_due - 1,
-                checkpoint,
-            )
-            .unwrap(),
+            post_tool_use_response_at_with_checkpoint(&owner_payload, first_due - 1, checkpoint,)
+                .unwrap(),
             None
         );
 
@@ -2753,12 +3022,8 @@ mod tests {
 
         // Multiple tool calls within one full interval produce one reminder.
         assert_eq!(
-            post_tool_use_response_at_with_checkpoint(
-                &owner_payload,
-                first_due + 1,
-                checkpoint,
-            )
-            .unwrap(),
+            post_tool_use_response_at_with_checkpoint(&owner_payload, first_due + 1, checkpoint,)
+                .unwrap(),
             None
         );
 
@@ -3039,6 +3304,348 @@ mod tests {
                 .claims
                 .is_empty()
         );
+    }
+
+    /// `#queue-removal-cancels`: deleting a claimed non-current row is not
+    /// silent queue cleanup. It identifies the exact bound worker attempt and
+    /// gives the harness an authoritative, generation-fenced cancellation.
+    #[test]
+    fn removing_claimed_head_cancels_the_exact_worker_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let head = "release + publish: include issue 348";
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, head, "subagent:release-348", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            head,
+            "subagent:release-348",
+            "/root/release_348",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+
+        let deleted = baseline.replace(&format!("- {head}\n"), "");
+        std::fs::write(&file, deleted).unwrap();
+        backdate(&file);
+        let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        let item = &report.items[0];
+        assert_eq!(item.change, core::SteeringChange::Deleted);
+        assert_eq!(item.dispatch, core::SteeringDispatch::CancelClaimed);
+        assert_eq!(item.owner.as_deref(), Some("subagent:release-348"));
+        assert_eq!(item.worker_id.as_deref(), Some("/root/release_348"));
+        assert_eq!(item.generation, Some(claim.generation));
+
+        let rendered = report.render().expect("render");
+        assert!(rendered.contains("dispatch=cancel_claimed"), "{rendered}");
+        assert!(rendered.contains("worker=/root/release_348"), "{rendered}");
+        assert!(
+            rendered.contains("authoritative cancellation"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("never best-effort or sunk-cost"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("nearest safe consistency boundary"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("stop further implementation, tests, integration"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("cannot directly kill a harness subagent"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("--generation {}", claim.generation)),
+            "{rendered}"
+        );
+
+        // The binary owns the durable state transition but cannot kill the
+        // harness worker: the live claim is replaced by an audit tombstone.
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        assert!(ledger.claims.is_empty(), "{ledger:?}");
+        assert_eq!(ledger.cancellations.len(), 1, "{ledger:?}");
+        assert_eq!(ledger.cancellations[0].claim.generation, claim.generation);
+        let cli = observe(&file, CONSUMER_CLI, true).unwrap().expect("cli");
+        assert_eq!(cli.items.len(), 1, "{cli:?}");
+        assert_eq!(cli.items[0].dispatch, core::SteeringDispatch::CancelClaimed);
+        agent_doc_queue_io::queue_claim::release_attempt(&file, head, Some(claim.generation))
+            .unwrap();
+        assert!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
+    }
+
+    /// `#queue-removal-cancels`: one removed occurrence cannot authorize
+    /// cancellation while an indistinguishable claimed occurrence remains.
+    #[test]
+    fn removing_one_claimed_duplicate_fails_closed_without_cancelling_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let head = "release + publish: include issue 348";
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- {head}\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, head, "subagent:release-348", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            head,
+            "subagent:release-348",
+            "/root/release_348",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+
+        let one_left = baseline.replacen(&format!("- {head}\n"), "", 1);
+        std::fs::write(&file, &one_left).unwrap();
+        backdate(&file);
+        let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert!(
+            report
+                .items
+                .iter()
+                .all(|item| item.dispatch != core::SteeringDispatch::CancelClaimed),
+            "{report:?}"
+        );
+        let stored = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        assert_eq!(stored.claims.len(), 1, "{stored:?}");
+        assert_eq!(stored.claims[0].generation, claim.generation);
+        assert_eq!(
+            stored.claims[0]
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str()),
+            Some("/root/release_348")
+        );
+    }
+
+    #[test]
+    fn removal_tombstones_reported_generation_and_retires_hidden_completion_outbox() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let head = "finish sdk-demo.md queue fix";
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:exchange patch=append -->\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue go subagents -->\n- current task\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let editor = LiveEditorFixture::new(&file, "cancel-outbox-editor", &baseline);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, head, "subagent:sdk-demo", 3600).unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            head,
+            "subagent:sdk-demo",
+            "/root/sdk-demo",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        let reported = agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &file,
+            head,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+            Some(claim.generation),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
+        assert_eq!(
+            agent_doc_queue_io::claim_release_receipt::load(&file)
+                .unwrap()
+                .receipts
+                .len(),
+            1
+        );
+        let key = agent_doc_queue_io::queue_claim::completion_feedback_key(&reported).unwrap();
+        let cell = agent_doc_document::subagent_completion::cell(
+            &reported.owner,
+            &reported.item_text,
+            &key,
+        );
+        let completion_target =
+            agent_doc_element_exchange::insert_prompt_line_before_boundary(&baseline, &cell)
+                .unwrap();
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &file,
+            &baseline,
+            &completion_target,
+            "queue_subagent_completion_feedback",
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        assert!(
+            agent_doc_document_realtime_io::pending_document_write(&file)
+                .unwrap()
+                .target_content
+                .contains(&key)
+        );
+
+        let deleted = baseline.replace(&format!("- {head}\n"), "");
+        editor.publish(&deleted);
+        let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert_eq!(
+            report.items[0].dispatch,
+            core::SteeringDispatch::CancelClaimed
+        );
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        assert!(ledger.claims.is_empty(), "{ledger:?}");
+        assert_eq!(ledger.cancellations.len(), 1, "{ledger:?}");
+        let tombstone = &ledger.cancellations[0];
+        assert_eq!(tombstone.claim.generation, running.generation);
+        assert_eq!(tombstone.completion_key.as_deref(), Some(key.as_str()));
+        assert!(
+            agent_doc_queue_io::claim_release_receipt::load(&file)
+                .unwrap()
+                .receipts
+                .is_empty(),
+            "reported receipt must not authorize later integration"
+        );
+        let successor = agent_doc_document_realtime_io::pending_document_write(&file)
+            .expect("cancellation successor");
+        assert!(!successor.target_content.contains(&key), "{successor:?}");
+        assert!(!successor.target_content.contains(head), "{successor:?}");
+
+        editor.publish(&baseline);
+        let (_, replacement) =
+            agent_doc_queue_io::queue_claim::claim(&file, head, "subagent:sdk-demo-retry", 3600)
+                .unwrap();
+        assert_eq!(replacement.generation, running.generation + 1);
+        let stale =
+            agent_doc_queue_io::queue_claim::report_attempt(&file, head, Some(running.generation))
+                .unwrap_err();
+        assert!(stale.to_string().contains("stale queue claim generation"));
+    }
+
+    #[test]
+    fn deleting_terminal_struck_row_is_cleanup_but_live_claim_conflict_is_degraded() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let head = "finish worker result";
+        let live = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &live).unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, head, "subagent:worker", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            head,
+            "subagent:worker",
+            "/root/worker",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        let struck = live.replace(&format!("- {head}\n"), &format!("- ~{head}~\n"));
+        std::fs::write(&file, &struck).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&struck), Some(&struck)).unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &struck,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let deleted = struck.replace(&format!("- ~{head}~\n"), "");
+        std::fs::write(&file, &deleted).unwrap();
+        backdate(&file);
+        let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert_eq!(
+            report.items[0].dispatch,
+            core::SteeringDispatch::DegradedClaimMismatch
+        );
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file)
+                .unwrap()
+                .claims
+                .len(),
+            1,
+            "strikethrough cannot cancel durable live work"
+        );
+
+        let clean_file = dir.path().join("clean.md");
+        std::fs::write(&clean_file, &struck).unwrap();
+        let clean_cycle =
+            agent_doc_cycle_state_io::start_preflight(&clean_file, Some(&struck), Some(&struck))
+                .unwrap();
+        seed_for_cycle(
+            &clean_file,
+            &clean_cycle.cycle_id,
+            &struck,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        std::fs::write(&clean_file, &deleted).unwrap();
+        backdate(&clean_file);
+        let cleanup = observe(&clean_file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("observation");
+        assert!(cleanup.items.is_empty(), "{cleanup:?}");
     }
 
     /// `#steerworks` items 1 + 3 (agent-doc-bugs.md, 2026-10-04): the operator

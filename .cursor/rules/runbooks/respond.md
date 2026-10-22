@@ -125,6 +125,27 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     note or a corrected URL or wording (`#claimfollowedit`), and the worker
     can still `--refresh` / `release` by the text it was handed. An edit of a
     claimed head also wakes an idle coordinator.
+  - `cancel_claimed` (`#queue-removal-cancels`): the operator deleted a queue
+    row with a durable active claim. Deletion is authoritative cancellation,
+    never a best-effort hint and never permission to continue because substantial
+    work is already done. The binary has tombstoned the exact identity and
+    `generation=` and retired pending completion delivery; stale replay cannot
+    resurrect/integrate it, and a same-text re-add is a fresh generation. If the
+    exact `worker=` is still alive, use the harness interrupt primitive at the
+    nearest safe consistency boundary. Best judgment
+    governs only shutdown mechanics. Preserve the worker's branch, worktree, and
+    commits; stop further implementation, tests, integration, publication,
+    release, and external issue closure. Then run the rendered generation-fenced
+    `agent-doc queue release` command. Report effects that already crossed an
+    irreversible boundary; do not try to undo them, close out the removed row, or
+    requeue it. The binary reports the owner/worker contract but cannot itself
+    kill a harness subagent.
+  - `degraded_claim_mismatch` (`#queue-removal-cancels`): a deleted row looked
+    struck/terminal in Markdown but durable claim, reported-receipt, or completion
+    outbox evidence still owns it. Preserve and fence that work; do not interrupt,
+    release, integrate, apply, or publish it. Report the mismatch and wait for an
+    explicit authoritative resolution. A struck deletion with no such durable
+    evidence is presentation-only cleanup and needs no worker action.
   - `persist_reported` (`#reportedrelease`): a queue item whose worker already
     reported and whose claim you released; `owner=` names that worker. Its
     answer is only in your context. Persist it now with the closeout that
@@ -157,7 +178,8 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   it). The wake reads without consuming, so the woken turn still receives the
   items through preflight, the hook, or the boundary report. Items a worker
   claimed (`agent-doc queue claim`) never wake the session, but an edit of a
-  claimed item's text does (`forward_to_owner`). Steering goes only to the
+  claimed item's text does (`forward_to_owner`), and deleting a claimed row
+  wakes it with `cancel_claimed`. Steering goes only to the
   turn that owns the document: a subagent's tool calls neither receive nor
   consume it (`#steerowneronly`). Cursor has no
   route-owned pane, so it is never woken; it receives steering at its next

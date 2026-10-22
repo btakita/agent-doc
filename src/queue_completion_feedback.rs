@@ -6,7 +6,7 @@
 //! Reporting keeps the claim active while integration and verification run;
 //! ordinary claim release never implies that a worker completed successfully.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use agent_doc_element::component_scope::{changed_component_scope, with_component_write_scope};
@@ -50,7 +50,7 @@ fn report_complete_with_lock_wait(
     // `#subagentcompletionfeedback`: unlike SESSION_ACTOR_WRITE_QUEUE, this
     // lock serializes independent CLI processes. Re-resolve and rebuild inside
     // the owner so stale full-document successors cannot lose sibling notices.
-    let lock_path = completion_lock_path(file)?;
+    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
     let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, lock_wait, |_| {});
     let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
         bail!(
@@ -78,15 +78,9 @@ fn report_complete_with_lock_wait(
     // Derive the reported marker and completion cell from one cut and publish
     // one successor. Two separate retained editor writes can conflict while
     // the first is still awaiting projection.
-    let projection = agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(
-        file, &current, None,
-    )?;
-    let appended = append_completion_feedback(
-        file,
-        &current,
-        &projection.target_content,
-        &claim,
-    )?;
+    let projection =
+        agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, &current, None)?;
+    let appended = append_completion_feedback(file, &current, &projection.target_content, &claim)?;
     agent_doc_queue_io::queue_cmd::record_claim_runtime_projection(file, &projection, None)?;
     Ok(Some(CompletionFeedbackOutcome { claim, appended }))
 }
@@ -175,7 +169,7 @@ fn append_completion_feedback(
 pub(crate) fn repair_legacy_completion_feedback(
     file: &Path,
 ) -> Result<CompletionFeedbackRepairOutcome> {
-    let lock_path = completion_lock_path(file)?;
+    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
     let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
     let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
         bail!(
@@ -283,16 +277,6 @@ fn repair_legacy_completion_feedback_content(content: &str) -> (String, usize) {
 
 fn is_completion_marker_line(line: &str) -> bool {
     agent_doc_document::subagent_completion::is_marker_line(line)
-}
-
-fn completion_lock_path(file: &Path) -> Result<PathBuf> {
-    let root = agent_doc_project_root_io::project_root_containing(file)
-        .with_context(|| format!("no project root found for {}", file.display()))?;
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    Ok(root
-        .join(".agent-doc/locks")
-        .join(format!("subagent-completion-{document_hash}.lock")))
 }
 
 #[cfg(test)]
@@ -576,6 +560,67 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_generation_cannot_report_or_attach_to_same_text_readd() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        let item = "finish sdk";
+        fs::write(
+            &doc,
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:queue subagents -->\n",
+                "- finish sdk\n",
+                "<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        let (_, first) =
+            agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:first", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:first",
+            "worker:first",
+            600,
+            first.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::cancel_removed_attempt(&doc, item, Some(first.generation))
+            .unwrap();
+        assert!(
+            report_complete(&doc, item, Some(first.generation))
+                .unwrap()
+                .is_none(),
+            "a tombstoned attempt cannot manufacture completion feedback"
+        );
+
+        let (_, replacement) =
+            agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:replacement", 600)
+                .unwrap();
+        assert_eq!(replacement.generation, first.generation + 1);
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:replacement",
+            "worker:replacement",
+            600,
+            replacement.generation,
+        )
+        .unwrap();
+        let stale = report_complete(&doc, item, Some(first.generation)).unwrap_err();
+        assert!(stale.to_string().contains("stale queue claim generation"));
+        assert!(
+            !fs::read_to_string(&doc)
+                .unwrap()
+                .contains("agent-doc-subagent-completion"),
+            "stale completion must not enter the outbox"
+        );
+    }
+
+    #[test]
     fn attached_editor_reports_are_durable_bounded_and_concurrency_safe() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -605,13 +650,7 @@ mod tests {
         .unwrap();
         for item in items {
             let owner = format!("subagent:{}", item.replace(' ', "-"));
-            agent_doc_queue_io::queue_claim::claim(
-                &doc,
-                item,
-                &owner,
-                600,
-            )
-            .unwrap();
+            agent_doc_queue_io::queue_claim::claim(&doc, item, &owner, 600).unwrap();
             agent_doc_queue_io::queue_claim::start_attempt(
                 &doc,
                 item,
@@ -712,7 +751,8 @@ mod tests {
         .unwrap();
         agent_doc_queue_io::queue_claim::claim(&doc, "finish sdk", "subagent:sdk-feedback", 600)
             .unwrap();
-        let lock_path = completion_lock_path(&doc).unwrap();
+        let lock_path =
+            agent_doc_queue_io::queue_claim::completion_feedback_lock_path(&doc).unwrap();
         let agent_doc_sync_io::SyncLockAcquire::Acquired(_held) =
             agent_doc_sync_io::acquire_sync_lock(&lock_path, Duration::ZERO, |_| {})
         else {

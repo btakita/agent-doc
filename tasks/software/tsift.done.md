@@ -580,3 +580,4 @@
 - 2026-10-21 [#databasefiledecisions] Could we have a database and/or file of decisions to provide context to the agent? Would the decision database be a good feature for tsift or a separate tool/library?
 - 2026-10-21 [#needfeaturesdecisions] Do we need any features for the decisions markdown?
 - 2026-10-21 [#needfeaturesdecisions] : This seems similar to agent-doc's id system for backlog + todo + icebox items. Should we extract a common library?
+- 2026-10-22 [#decisionmanifest] [recommended] Prototype tsift decision-manifest import and lint with a tsift-local DecisionId and lifecycle schema; reassess a shared ID crate only after another domain needs the same grammar and collision semantics.

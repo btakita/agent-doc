@@ -184,14 +184,50 @@ Preset expansion `update spec + tests. build + install for local testing. commit
 - Verification: confirmed agent-doc's ID grammar/generation and work-item lifecycle are domain-specific, and confirmed tsift's current finding identity is content-derived and used only by finding add/harvest paths.
 - Confidence: high.
 - Escalation: none.
+
+### Re: do [#decisionmanifest] — gpt-5 · 2026-10-22T11:33-04:00
+
+Implemented and pushed the file-backed decision-manifest prototype as tsift commit `3f713cf` (`feat: add file-backed decision manifests`).
+
+The new surface is:
+
+- `tsift decision lint [MANIFEST] [--path ROOT] [--json]`
+- `tsift decision import [MANIFEST] [--path ROOT] [--scope NAME] [--json]`
+
+The Markdown manifest is authoritative; import projects explicit `decision:dec-*` nodes into `.tsift/findings.db`. The schema validates immutable tsift-local `DecisionId` values, `proposed|accepted|superseded|rejected` lifecycle states, calendar dates, repository-confined sources and file anchors, resolvable code-symbol anchors, relationship targets, replacement cardinality, and supersedes cycles. Accepted decisions map to trusted findings; all other lifecycle states remain draft-only. Import is idempotent and additive in this prototype; removal/rename reconciliation is deliberately deferred and documented.
+
+Changed paths:
+
+- `SPEC.md`
+- `specs/decisions.md`
+- `packages/tsift-cli/src/cli.rs`
+- `packages/tsift-cli/src/commands.rs`
+- `packages/tsift-cli/src/commands/decision.rs`
+- `packages/tsift-cli/src/commands/finding.rs`
+- `packages/tsift-cli/src/lib.rs`
+- `packages/tsift-cli/tests/decision.rs`
+
+Commands and verification:
+
+- Focused integration and unit tests passed, including idempotent import, trusted/draft projection, invalid IDs/links/paths, and unresolved symbol refusal.
+- Strict `cargo clippy -p tsift-cli --all-targets -- -D warnings` passed.
+- Authoritative `make check` passed with exit code 0 and zero parsed failures.
+- `cargo install --path .` completed successfully; the installed binary exposes both `decision` subcommands.
+- Latest pre-push main CI was green. The new CI run for `3f713cf` is queued at https://github.com/btakita/tsift/actions/runs/39805878940; it is not a closeout blocker because the full local suite passed.
+- `origin/main` resolves to `3f713cf0f56aa088ebdc9b49b7e83e3ac09cc8bf`, and the isolated source worktree is clean.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:a2b805d7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- ~~do [#needfeaturesdecisions]~~
-- do [#decisionmanifest]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#decisionmanifest]~~
+- 📥 #gh-fix https://github.com/btakita/tsift/issues/30
+- 📥 #gh-fix https://github.com/btakita/tsift/issues/31
+- 📥 #gh-fix https://github.com/btakita/tsift/issues/32
+- 📥 release + publish: include Issue 30-32
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -200,7 +236,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#decisionmanifest] [recommended] Prototype tsift decision-manifest import and lint with a tsift-local DecisionId and lifecycle schema; reassess a shared ID crate only after another domain needs the same grammar and collision semantics.
 <!-- /agent:backlog -->
 
 ## Review

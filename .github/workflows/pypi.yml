@@ -11,8 +11,8 @@ name: PyPI
 # raced against it. It used to run on its own `v*` tag push and poll at most 30
 # minutes for the Release's SHA256SUMS; v0.35.485's cross-platform builds took
 # about 33 minutes, so publish failed at 21:45:30Z and the Release went up at
-# 21:47:24Z (run 38086853278). Now `release.yml`'s `pypi` job, which `needs` the
-# job that uploads every asset including SHA256SUMS, dispatches this workflow on
+# 21:47:24Z (run 38086853278). Now `release.yml`'s `pypi` job needs the
+# finalizer that verifies all six public archives and uploads SHA256SUMS, then dispatches this workflow on
 # the tag (`gh workflow run pypi.yml --ref <tag>`). Its GITHUB_TOKEN-authored
 # `workflow_dispatch` is the one event GitHub still raises for token-authored
 # actions; `release: published` is NOT raised for the token-created release,
@@ -115,7 +115,7 @@ jobs:
           esac
           mkdir -p /tmp/agent-doc-release-ready
           if ! gh release download "$tag" --pattern SHA256SUMS --dir /tmp/agent-doc-release-ready; then
-            echo "::error::GitHub Release $tag has no SHA256SUMS. This workflow runs after release.yml uploads every asset, so the Release is missing or incomplete: rerun the Release workflow's release job, then dispatch PyPI again."
+            echo "::error::GitHub Release $tag has no SHA256SUMS. This workflow runs after release.yml verifies all six independently uploaded archives, so the Release is incomplete: rerun the Release workflow's failed jobs and finalize-release job, then dispatch PyPI again."
             exit 1
           fi
           gh api "repos/$GH_REPO/releases/tags/$tag" \

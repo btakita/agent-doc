@@ -11,6 +11,15 @@ This downloads the latest prebuilt binary from
 `~/.cargo/bin` (if it exists) or `~/.local/bin`. Set `AGENT_DOC_INSTALL_DIR` to
 choose another directory, or `AGENT_DOC_VERSION` to pin a release.
 
+Release archives appear independently: each platform archive is public as soon
+as that platform build succeeds, alongside an archive-specific `.sha256`
+sidecar. If one platform fails, successful platforms remain downloadable while
+the Actions run remains red for a precise “Re-run failed jobs” retry. Retries
+replace the same asset names instead of creating duplicates. The aggregate
+`SHA256SUMS` file appears only
+after all six platform archives verify, and continues to mark readiness for
+PyPI and Homebrew.
+
 ## PyPI
 
 ```sh

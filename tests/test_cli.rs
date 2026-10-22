@@ -14842,21 +14842,6 @@ fn test_every_release_publishes_the_editor_packages() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
 
-    assert!(
-        release.contains("needs: [build, plugins]"),
-        "the release job must depend on the editor-package build, or a tag can \
-         publish platform archives with no plugin assets and still report success"
-    );
-    for required in [
-        "gh release upload \"$tag\" artifacts/* editor-packages/* --clobber",
-        "artifacts/* editor-packages/*",
-    ] {
-        assert!(
-            release.contains(required),
-            "both release paths must attach the editor packages: {required}"
-        );
-    }
-
     let plugins = &release[release
         .find("  plugins:")
         .expect("editor-package build job")..];
@@ -14893,15 +14878,88 @@ fn test_every_release_publishes_the_editor_packages() {
             ),
         "same-ID updates must have distinct versions and tag-pinned download URLs"
     );
-
-    // `SHA256SUMS` is generated over `artifacts/` and consumed by the PyPI
-    // bootstrap launcher. The editor packages
-    // also match `agent-doc-*`, so downloading them into that directory would
-    // silently rewrite the platform-archive manifest.
-    let download = &release[release.find("  release:").expect("release job")..];
     assert!(
-        download.contains("pattern: agent-doc-*") && download.contains("path: editor-packages"),
-        "editor packages must download to their own directory so they stay out of SHA256SUMS"
+        plugins.contains(
+            "(cd editor-packages && sha256sum agent-doc-* | sort -k2) > editor-packages/EDITOR-PACKAGES.sha256"
+        ) && plugins.contains(
+            "gh release upload \"$GITHUB_REF_NAME\" editor-packages/* --clobber"
+        ),
+        "the verified editor packages and their dedicated checksum manifest must publish directly and idempotently"
+    );
+}
+
+/// A slow or failed target must not hold every successful platform archive in
+/// Actions' artifact store. The Release is seeded once; matrix legs upload
+/// distinct archive/checksum pairs directly, while the aggregate manifest
+/// remains a fail-closed all-platform completion marker.
+#[test]
+fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
+    let jobs = workflow_jobs(&release);
+    let job = |name: &str| -> String {
+        jobs.iter()
+            .find(|(job, _)| job == name)
+            .unwrap_or_else(|| panic!("release.yml has no `{name}` job"))
+            .1
+            .join("\n")
+    };
+
+    assert!(
+        release.contains("group: release-${{ github.repository }}-${{ github.ref_name }}")
+            && release.contains("cancel-in-progress: false"),
+        "same-tag runs must serialize so idempotent clobbers cannot race"
+    );
+    let prepare = job("prepare-release");
+    assert!(
+        prepare.contains("gh release view \"$tag\"")
+            && prepare.contains("gh release create \"$tag\"")
+            && prepare.contains("--verify-tag")
+            && prepare.contains("--generate-notes"),
+        "one prerequisite job must create or reuse the public Release before parallel uploads"
+    );
+
+    let build = job("build");
+    assert!(
+        build.contains("needs: [prepare-release]") && build.contains("fail-fast: false"),
+        "a failed platform must not cancel successful matrix siblings"
+    );
+    assert!(
+        !build.contains("continue-on-error"),
+        "the run must remain red on a missing platform so GitHub can re-run the failed leg; successful siblings still publish directly"
+    );
+    for required in [
+        "sha256sum \"$archive\" > \"$archive.sha256\"",
+        "shasum -a 256 \"$archive\" > \"$archive.sha256\"",
+        "gh release upload \"$GITHUB_REF_NAME\" \"$archive\" \"$archive.sha256\" --clobber",
+    ] {
+        assert!(
+            build.contains(required),
+            "each platform leg must publish an independently verifiable, retry-safe asset: {required}"
+        );
+    }
+    assert!(
+        !release.contains("actions/upload-artifact")
+            && !release.contains("actions/download-artifact"),
+        "release bytes must not wait in Actions artifacts for a global fan-in"
+    );
+
+    let finalize = job("finalize-release");
+    assert!(
+        finalize.contains("needs: [build, plugins]")
+            && finalize.contains("sha256sum --check \"$archive.sha256\"")
+            && finalize.contains("sha256sum \"${archives[@]}\" | sort -k2 > SHA256SUMS")
+            && finalize.contains(
+                "gh release upload \"$GITHUB_REF_NAME\" artifacts/SHA256SUMS --clobber"
+            ),
+        "the aggregate checksum must appear only after every public archive and sidecar verifies"
+    );
+    let pypi = job("pypi");
+    let homebrew = job("homebrew");
+    assert!(
+        pypi.contains("needs: [finalize-release]")
+            && homebrew.contains("needs: [finalize-release]"),
+        "PyPI and Homebrew must remain gated by the complete six-platform manifest"
     );
 }
 
@@ -15207,7 +15265,7 @@ fn test_pypi_publish_is_dispatched_after_release_assets_not_a_wall_clock_poll() 
     let release = fs::read_to_string(workflows_dir.join("release.yml")).unwrap();
     let pypi = fs::read_to_string(workflows_dir.join("pypi.yml")).unwrap();
 
-    // Release side: the job that uploads assets produces SHA256SUMS, and a job
+    // Release side: the completion job produces SHA256SUMS, and a job
     // that needs it dispatches PyPI on the tag.
     let release_jobs = workflow_jobs(&release);
     let job = |name: &str| -> &Vec<String> {
@@ -15217,17 +15275,20 @@ fn test_pypi_publish_is_dispatched_after_release_assets_not_a_wall_clock_poll() 
             .unwrap_or_else(|| panic!("release.yml has no `{name}` job"))
             .1
     };
-    let uploader = job("release").join("\n");
+    let uploader = job("finalize-release").join("\n");
     assert!(
-        uploader.contains("> artifacts/SHA256SUMS")
-            && uploader.contains("gh release create \"$tag\"")
-            && uploader.contains("artifacts/*"),
-        "release.yml's `release` job must generate and upload SHA256SUMS with the archives"
+        uploader.contains("> SHA256SUMS")
+            && uploader.contains(
+                "gh release upload \"$GITHUB_REF_NAME\" artifacts/SHA256SUMS --clobber"
+            ),
+        "release.yml's `finalize-release` job must generate and upload the completion manifest"
     );
     let dispatcher = job("pypi");
     assert!(
-        dispatcher.iter().any(|line| line == "    needs: [release]"),
-        "the PyPI dispatch must wait for the asset-uploading `release` job: {dispatcher:?}"
+        dispatcher
+            .iter()
+            .any(|line| line == "    needs: [finalize-release]"),
+        "the PyPI dispatch must wait for the completed aggregate manifest: {dispatcher:?}"
     );
     let dispatcher = dispatcher.join("\n");
     assert!(

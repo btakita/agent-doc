@@ -485,9 +485,31 @@ the installed library — in either case with no live holder), without deleting
 anything.
 
 Every tag publishes six hosted targets on demand: three Linux targets, Windows,
-and both Darwin architectures. The standard macOS runners are included for this
-public repository, so the release workflow builds each Darwin archive with its
-binary and `.dylib` and includes it in the initial checksum manifest.
+and both Darwin architectures. The workflow creates or reuses one public GitHub
+Release before those jobs start. Each successful target uploads its archive and
+an archive-specific `.sha256` sidecar immediately; matrix `fail-fast` is disabled,
+so one failed target neither cancels its siblings nor withholds their assets.
+Same-tag workflow runs are serialized, and every upload uses stable asset names
+with `--clobber`, making both “Re-run failed jobs” and a complete rerun
+idempotent. The standard macOS runners are included for this public repository,
+so each Darwin archive contains its binary and `.dylib`.
+
+A failed matrix leg intentionally keeps the Actions run red; it does not cancel
+or block successful legs' direct uploads. This preserves GitHub's precise
+“Re-run failed jobs” affordance instead of falsely declaring a partial release
+complete. That retry rebuilds and clobbers only the missing platform asset, then
+runs the previously skipped finalizer and downstream PyPI/Homebrew jobs. A full
+rerun is safe too because same-tag runs serialize and every durable asset name is
+stable.
+
+`SHA256SUMS` remains the six-platform completion marker rather than becoming a
+partial manifest. A final job downloads all six public archives and sidecars,
+verifies each pair, and only then uploads `SHA256SUMS`. Thus a partial release is
+useful for direct platform downloads without being mistaken for a complete
+release by the PyPI bootstrap or Homebrew automation. Editor packages follow the
+same early-publication rule with their separate `EDITOR-PACKAGES.sha256`
+manifest; failure to build them still blocks final completion, not already
+published platform archives.
 
 `make release-macos-assets TAG=v<version>` remains a manual repair path for a
 legacy or failed Darwin upload. `make release-macos-coverage-check` names any
@@ -517,11 +539,12 @@ on the next poll. The watcher records the effective binary and reconciled releas
 in memory so the old process that replaced its own executable does not reinstall
 the same release forever.
 
-PyPI publishes one small universal bootstrap wheel for every `v*` tag
+PyPI publishes one small universal bootstrap wheel for every completed `v*` tag
 (`#pypislim`; this superseded the earlier `#pypicadence` milestone gate). The
 PyPI workflow is started by the Release workflow, never raced against it
-(`#pypireleaseworkflow`): `release.yml`'s `pypi` job `needs` the job that uploads
-every asset including `SHA256SUMS`, then dispatches `pypi.yml` on the tag
+(`#pypireleaseworkflow`): `release.yml`'s `pypi` job needs the finalization job
+that verifies every independently uploaded platform asset and publishes
+`SHA256SUMS`, then dispatches `pypi.yml` on the tag
 (`gh workflow run pypi.yml --ref <tag>`). PyPI previously ran on its own tag
 push and polled a fixed 30 minutes for `SHA256SUMS`, so a Release whose builds
 ran longer (v0.35.485, ~33 minutes) left that version unpublished. The publish

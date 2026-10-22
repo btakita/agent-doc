@@ -7,8 +7,41 @@ on:
 permissions:
   contents: write
 
+# A retry of this tag may clobber the same asset names, but two runs must never
+# do that concurrently. Matrix legs within one run still upload distinct names
+# in parallel after `prepare-release` creates the shared Release exactly once.
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or reuse the public release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; retaining it for an idempotent retry"
+            exit 0
+          fi
+
+          # The second view makes the operation safe even if an operator creates
+          # the release between our first lookup and POST. Workflow concurrency
+          # prevents another release.yml run for this tag from racing this one.
+          if ! gh release create "$tag" \
+            --verify-tag \
+            --title "agent-doc $tag" \
+            --generate-notes; then
+            gh release view "$tag" >/dev/null
+          fi
+
   build:
+    needs: [prepare-release]
     strategy:
       fail-fast: false
       matrix:
@@ -134,21 +167,29 @@ jobs:
           }
           Compress-Archive -Path (Join-Path $releaseDir 'agent-doc.exe'), $lib -DestinationPath agent-doc-${{ matrix.target }}.zip
 
-      - name: Upload artifact (Unix)
-        if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-doc-${{ matrix.target }}
-          path: agent-doc-${{ matrix.target }}.tar.gz
-          retention-days: 1
-
-      - name: Upload artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-doc-${{ matrix.target }}
-          path: agent-doc-${{ matrix.target }}.zip
-          retention-days: 1
+      # Publish this platform as soon as it is ready. The sidecar makes the
+      # archive independently verifiable while `SHA256SUMS` remains the
+      # all-platform completion marker consumed by PyPI and Homebrew. A failed
+      # matrix leg cannot withhold archives uploaded by successful siblings;
+      # Actions' "Re-run failed jobs" retries only the missing leg and
+      # `--clobber` makes either a failed- or all-jobs retry idempotent.
+      - name: Publish platform archive and checksum
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            *-pc-windows-msvc) archive="agent-doc-${{ matrix.target }}.zip" ;;
+            *) archive="agent-doc-${{ matrix.target }}.tar.gz" ;;
+          esac
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$archive" "$archive.sha256" --clobber
 
   # `#pluginzipeveryrelease`: the editor packages ship with EVERY tag, not on a
   # cadence of their own. They used to be published separately, so the gap
@@ -159,10 +200,11 @@ jobs:
   # paper over. With the packages on the latest release, that page bound is slack
   # instead of load-bearing.
   #
-  # This job is a hard dependency of `release` on purpose: a tag that cannot
+  # This job is a hard dependency of `finalize-release` on purpose: a tag that cannot
   # produce editor packages must fail loudly rather than quietly publish the
   # asset gap this item exists to close.
   plugins:
+    needs: [prepare-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -295,70 +337,66 @@ jobs:
             exit 1
           fi
 
-      - name: Upload editor packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: editor-packages
-          path: editor-packages/*
-          retention-days: 1
-
-  release:
-    needs: [build, plugins]
-    runs-on: ubuntu-latest
-    steps:
-      # Platform archives only. `SHA256SUMS` below is generated over this
-      # directory and is consumed by the PyPI bootstrap launcher, so the editor
-      # packages must NOT land in it
-      # — they are release assets, not entries in the platform-archive manifest.
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: agent-doc-*
-          path: artifacts
-          merge-multiple: true
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: editor-packages
-          path: editor-packages
-
-      - name: Generate release checksums
+      - name: Generate and publish editor-package checksums
         shell: bash
-        run: |
-          set -euo pipefail
-          (cd artifacts && sha256sum agent-doc-* | sort -k2) > artifacts/SHA256SUMS
-          cat artifacts/SHA256SUMS
-
-      # `#editorpkgdigest`: the editor packages are code loaded into an IDE and
-      # were the only release assets with no published integrity value.
-      # `SHA256SUMS` above must stay platform-archives-only (its consumers parse
-      # exactly that manifest), so the editor packages get one of their own.
-      # `agent-doc plugin install/update` fetches this file and verifies the
-      # downloaded zip/vsix before extracting or handing it to the editor CLI.
-      - name: Generate editor-package checksums
-        shell: bash
-        run: |
-          set -euo pipefail
-          (cd editor-packages && sha256sum agent-doc-* | sort -k2) > editor-packages/EDITOR-PACKAGES.sha256
-          cat editor-packages/EDITOR-PACKAGES.sha256
-
-      - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists — uploading assets only"
-            gh release upload "$tag" artifacts/* editor-packages/* --clobber
-          else
-            gh release create "$tag" \
-              --title "agent-doc $tag" \
-              --generate-notes \
-              artifacts/* editor-packages/*
-          fi
+          set -euo pipefail
+          (cd editor-packages && sha256sum agent-doc-* | sort -k2) > editor-packages/EDITOR-PACKAGES.sha256
+          cat editor-packages/EDITOR-PACKAGES.sha256
+          gh release upload "$GITHUB_REF_NAME" editor-packages/* --clobber
+
+  # `SHA256SUMS` is deliberately a completion marker, not a partial manifest.
+  # Successful platform legs are already public above. This fan-in verifies all
+  # six public archives and their independently published sidecars before it
+  # exposes the aggregate manifest that unlocks PyPI and Homebrew.
+  finalize-release:
+    needs: [build, plugins]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify public platform assets and generate release checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          archives=(
+            agent-doc-x86_64-unknown-linux-gnu.tar.gz
+            agent-doc-x86_64-unknown-linux-musl.tar.gz
+            agent-doc-aarch64-unknown-linux-gnu.tar.gz
+            agent-doc-x86_64-apple-darwin.tar.gz
+            agent-doc-aarch64-apple-darwin.tar.gz
+            agent-doc-x86_64-pc-windows-msvc.zip
+          )
+          mkdir -p artifacts
+          for archive in "${archives[@]}"; do
+            gh release download "$GITHUB_REF_NAME" \
+              --pattern "$archive" \
+              --pattern "$archive.sha256" \
+              --dir artifacts
+          done
+          (
+            cd artifacts
+            for archive in "${archives[@]}"; do
+              sha256sum --check "$archive.sha256"
+            done
+            sha256sum "${archives[@]}" | sort -k2 > SHA256SUMS
+          )
+          cat artifacts/SHA256SUMS
+
+      - name: Publish the all-platform completion manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" artifacts/SHA256SUMS --clobber
 
   # `#pypireleaseworkflow`: start the PyPI publish only once this run's
-  # `release` job has uploaded every asset, SHA256SUMS included. PyPI used to
+  # `finalize-release` has uploaded the complete SHA256SUMS. PyPI used to
   # run on its own tag push and poll a fixed 30 minutes for SHA256SUMS, which
   # lost the race whenever these builds ran longer (v0.35.485: ~33 minutes, run
   # 38086853278). The dispatch has to be explicit: GitHub raises no
@@ -368,7 +406,7 @@ jobs:
   # trusted publisher is registered against. `--ref` is the tag, so the
   # dispatched run builds the tagged commit and its `verify` job runs.
   pypi:
-    needs: [release]
+    needs: [finalize-release]
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -396,7 +434,7 @@ jobs:
   # release exists because the formula is rendered from the published
   # `SHA256SUMS`, including both Darwin archives built above.
   homebrew:
-    needs: [release]
+    needs: [finalize-release]
     uses: ./.github/workflows/homebrew.yml
     with:
       tag: ${{ github.ref_name }}

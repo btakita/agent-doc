@@ -16,13 +16,16 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPO = "btakita/agent-doc"
-PLATFORM_ASSETS = {
+PLATFORM_ARCHIVES = {
     "agent-doc-x86_64-unknown-linux-gnu.tar.gz",
     "agent-doc-x86_64-unknown-linux-musl.tar.gz",
     "agent-doc-aarch64-unknown-linux-gnu.tar.gz",
     "agent-doc-x86_64-apple-darwin.tar.gz",
     "agent-doc-aarch64-apple-darwin.tar.gz",
     "agent-doc-x86_64-pc-windows-msvc.zip",
+}
+PLATFORM_ASSETS = PLATFORM_ARCHIVES | {
+    *(f"{archive}.sha256" for archive in PLATFORM_ARCHIVES),
     "SHA256SUMS",
     "EDITOR-PACKAGES.sha256",
     "agent-doc-jetbrains-classic.xml",
@@ -214,6 +217,10 @@ def self_test() -> None:
     assert missing_release_assets(complete_assets) == []
     complete_assets.remove("SHA256SUMS")
     assert missing_release_assets(complete_assets) == ["SHA256SUMS"]
+    complete_assets.add("SHA256SUMS")
+    sidecar = "agent-doc-x86_64-unknown-linux-musl.tar.gz.sha256"
+    complete_assets.remove(sidecar)
+    assert missing_release_assets(complete_assets) == [sidecar]
 
     index = {"files": [{"filename": "agent_doc-1.2.3-py3-none-any.whl"}]}
     assert pypi_has_wheel(index, "1.2.3")

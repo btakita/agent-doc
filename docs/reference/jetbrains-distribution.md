@@ -98,8 +98,10 @@ it is about to upload, re-reads all listings with `--verify-listings
 version and exact range, and a build sweep from 241 through 264 must select the
 classic update for 242–261, the modular update for 262, the modular update
 for 263, and nothing otherwise. Finally it asserts the exact three-ZIP/three-listing
-shape. The release job depends on that plugin job and uploads all six files together,
-so an incomplete release cannot report success.
+shape. The plugin job uploads the packages, listings, VSIX, and their separate
+checksum manifest as soon as they verify. The release finalizer depends on that
+job, so editor failure blocks the all-platform completion marker without
+withholding already successful platform archives.
 
 ## Live verification still required
 

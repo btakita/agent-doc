@@ -2388,10 +2388,14 @@ fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
     {
         return Ok(Some(prompt));
     }
-    // `#fixlazilycodex`: a head a worker claimed (or the queue-level
-    // `subagents` plan holds back) is not this session's prompt debt.
-    let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content);
-    Ok(first_active_queue_prompt_in_content(&content, &claimed))
+    // `#fixlazilycodex`: a head whose worker is still dispatching/running (or
+    // the queue-level `subagents` plan holds back) is not this session's prompt
+    // debt. A `Reported` claim is different: the worker has finished and its
+    // result is now coordinator writeback debt. Keeping it visible here stops
+    // a post-commit coordinator exit from stranding a 📤 row in the outbox.
+    let in_flight =
+        agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(file, &content);
+    Ok(first_active_queue_prompt_in_content(&content, &in_flight))
 }
 
 fn first_active_queue_prompt_in_content(
@@ -9741,6 +9745,15 @@ Reviewed the gated items.\n\
         let doc = write_claimed_subagent_queue_doc(&dir, status);
         init_git_repo(dir.path(), &doc);
         agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            1,
+        )
+        .unwrap();
         track_doc(&dir, &doc, "turn-1");
         let committed_cycle = complete_run(&doc);
         let before = fs::read_to_string(&doc).unwrap();
@@ -9773,6 +9786,69 @@ Reviewed the gated items.\n\
         assert!(
             !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
             "{ops}"
+        );
+    }
+
+    /// A worker can report after the coordinator's predecessor cycle commits
+    /// (and even after that coordinator session is replaced). Unlike a running
+    /// attempt, this 📤 row is coordinator writeback debt: Stop must hand it
+    /// back instead of accepting the already-committed status and stranding the
+    /// result in the outbox.
+    #[test]
+    fn committed_stop_with_reported_head_hands_back_writeback_debt() {
+        let dir = setup_project();
+        let status =
+            "Cycle `cycle-1` converged and committed successfully. No queue work is drainable.";
+        let doc = write_claimed_subagent_queue_doc(&dir, status);
+        init_git_repo(dir.path(), &doc);
+        agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            1,
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        let committed_cycle = complete_run(&doc);
+
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "do [#held]", Some(1)).unwrap();
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: status.to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert!(
+            matches!(&response, StopResponse::ContinueTurn { reason, .. }
+                if reason.contains("do [#held]")),
+            "{response:?}\n{}",
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            committed_cycle,
+            "the committed status is not recaptured into a successor"
+        );
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let claims = agent_doc_queue_io::queue_claim::claim_states_for_content(
+            &doc,
+            &fs::read_to_string(&doc).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(claims.len(), 1);
+        assert_eq!(
+            claims[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported,
+            "writeback debt remains fenced from redispatch"
         );
     }
 

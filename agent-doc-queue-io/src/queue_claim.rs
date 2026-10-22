@@ -1259,8 +1259,50 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
 /// failure direction is the pre-claim behaviour (the head stays drainable),
 /// never a stranded queue.
 pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
-    let claimed = ledger_claimed_items_for_content(file, content)
-        .with_heads(&completion_evidence_head_texts(content));
+    claimed_items_with_non_ledger_holds(
+        file,
+        content,
+        ledger_claimed_items_for_content(file, content),
+    )
+}
+
+/// The claimed heads an in-session writeback computation must skip.
+///
+/// A `Reported` claim still fences redispatch, but its worker result is now the
+/// coordinator's writeback debt. Therefore only `Claimed` and `Running`
+/// attempts are excluded here. Durable completion evidence and queue-level
+/// holds remain excluded exactly as they are in [`claimed_items_for_content`].
+/// An unreadable ledger contributes no attempt claims (the queue head remains
+/// visible instead of becoming stranded).
+pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    use agent_doc_queue::queue_claim::QueueClaimState;
+
+    let in_flight = match active_claims_for_content(file, content) {
+        Ok(claims) => ClaimedQueueItems::from_identities(
+            claims
+                .into_iter()
+                .filter(|claim| {
+                    matches!(claim.state, QueueClaimState::Claimed | QueueClaimState::Running)
+                })
+                .map(|claim| claim.identity),
+        ),
+        Err(err) => {
+            eprintln!(
+                "[queue-claim] WARNING: could not read queue claims for {}; treating every head as unclaimed: {err:#}",
+                file.display()
+            );
+            ClaimedQueueItems::none()
+        }
+    };
+    claimed_items_with_non_ledger_holds(file, content, in_flight)
+}
+
+fn claimed_items_with_non_ledger_holds(
+    file: &Path,
+    content: &str,
+    claimed: ClaimedQueueItems,
+) -> ClaimedQueueItems {
+    let claimed = claimed.with_heads(&completion_evidence_head_texts(content));
     // The queue-level subagents attribute holds heads back (cap full, or an
     // `after=` predecessor still queued). A held head is out of the in-session
     // loop exactly like a claimed one: never drained inline, never counted.

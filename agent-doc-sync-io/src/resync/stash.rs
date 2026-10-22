@@ -906,7 +906,11 @@ mod tests {
         respawn_pane_with_shell_command(
             &iso,
             &pane2,
-            &format!("exec {} 60", agent_bin.display()),
+            &format!(
+                "cd {} && exec {} 60",
+                cwd.display(),
+                agent_bin.display()
+            ),
         );
         assert!(wait_for_pane_current_command(
             &iso,

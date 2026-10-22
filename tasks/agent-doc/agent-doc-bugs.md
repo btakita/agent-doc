@@ -50,8 +50,7 @@ Compacted content:
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📤 [#subagent:issue349#2] do [#fixhttpsgithub-f6ne]
-- #gh-fix https://github.com/btakita/agent-doc/issues/352
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/352
 <!-- /agent:queue -->
 
 ## Queue: Issues

@@ -138,6 +138,18 @@ Last-call-wins: a subsequent `claim` for the same file overrides the previous pa
 
 Also available as a Claude Code skill: `/agent-doc claim <FILE>`.
 
+## queue lineage
+
+```
+agent-doc queue lineage <FILE> [--item ID_OR_TEXT] [--generation N] [--verbose | --json]
+```
+
+Inspect durable worktree, integration, and release provenance for queue attempts.
+The default prints one compact row per attempt. Use `--verbose` only when you
+need repository paths, commit evidence, or diagnostics; use `--json` for tools.
+Normal queue lifecycle commands record lineage silently and do not add lineage
+annotations to the session document.
+
 ## prompt
 
 ```

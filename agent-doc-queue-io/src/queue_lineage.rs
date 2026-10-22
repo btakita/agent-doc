@@ -1090,6 +1090,50 @@ pub fn render_text(report: &QueueLineageReport) -> String {
     if report.attempts.is_empty() {
         return format!("{}: no queue lineage receipts", report.document_path);
     }
+    report
+        .attempts
+        .iter()
+        .map(|attempt| {
+            let mut fields = vec![
+                format!("g{}", attempt.generation),
+                format!("{}/{}", attempt.state, attempt.verification),
+            ];
+            if let Some(tag) = attempt.release_tag.as_deref() {
+                let state = attempt
+                    .release_state
+                    .map(|state| format!("{state:?}").to_ascii_lowercase())
+                    .unwrap_or_else(|| "unknown".to_string());
+                fields.push(format!("release={tag}/{state}"));
+            } else if let Some(integration) = attempt.integration_sha.as_deref() {
+                fields.push(format!("integration={}", short_sha(integration)));
+            } else if let Some(source) = attempt.source_sha.as_deref() {
+                fields.push(format!("source={}", short_sha(source)));
+            } else if let Some(branch) = attempt.branch.as_deref() {
+                fields.push(format!("branch={branch}"));
+            } else if let Some(worker) = attempt.worker_id.as_deref() {
+                fields.push(format!("worker={worker}"));
+            }
+            if !attempt.diagnostics.is_empty() {
+                fields.push(format!(
+                    "diagnostics={} (use --verbose)",
+                    attempt.diagnostics.len()
+                ));
+            }
+            format!(
+                "{} | {}",
+                compact_item_text(&attempt.item_text),
+                fields.join(" | ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Full evidence and diagnostics for explicit operator inspection.
+pub fn render_verbose_text(report: &QueueLineageReport) -> String {
+    if report.attempts.is_empty() {
+        return format!("{}: no queue lineage receipts", report.document_path);
+    }
     let mut out = String::new();
     for attempt in &report.attempts {
         out.push_str(&format!(
@@ -1131,6 +1175,17 @@ pub fn render_text(report: &QueueLineageReport) -> String {
         }
     }
     out.trim_end().to_string()
+}
+
+fn compact_item_text(value: &str) -> String {
+    const MAX_CHARS: usize = 72;
+    let mut chars = value.chars();
+    let prefix = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}…")
+    } else {
+        prefix
+    }
 }
 
 /// Compact, non-authoritative Markdown hint suitable for queue projection.
@@ -1311,8 +1366,14 @@ mod tests {
         assert!(json.contains("subagent:first"));
         assert!(json.contains("subagent:second"));
         let text = render_text(&report);
-        assert!(text.contains("work generation 1 [cancelled"));
-        assert!(text.contains("work generation 2 [attached"));
+        assert_eq!(text.lines().count(), 2);
+        assert!(text.contains("work | g1 | cancelled/"));
+        assert!(text.contains("work | g2 | attached/"));
+        assert!(!text.contains("owner="));
+        let verbose = render_verbose_text(&report);
+        assert!(verbose.contains("work generation 1 [cancelled"));
+        assert!(verbose.contains("work generation 2 [attached"));
+        assert!(verbose.contains("owner=subagent:first"));
     }
 
     #[test]

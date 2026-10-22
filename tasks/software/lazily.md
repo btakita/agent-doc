@@ -25,7 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0.46.0, lazily-js v0.37.0, and lazily-rs v0.61.0. Rust v0.57.2 compatibility and remaining bindings are pending; operator-deleted queue claims remain cancelled.
 <!-- /agent:status -->
 
@@ -944,51 +944,58 @@ Kept genuinely gated:
 The 14 earlier removed stale-handle claims were also checked through their generation fences; all were already tombstoned, no matching worker remained live, and no work was restarted or published.
 
 Changed paths: none outside this binary-owned session update. Commands/evidence: `agent-doc review list`, session/archive and repository history inspection, worker-fenced queue claim/start/report-complete, and all 14 idempotent cancellation releases. Verification: current branches, commits, missing historical worktrees, resolved dependencies, and retained external gates were checked read-only. Confidence: high overall; medium only on whether current `agent-doc` main already subsumes `#fixrunturn`, which its re-queued regression task now proves. Escalation: none for this triage.
-<!-- agent:boundary:368b8d27 -->
+
+### Re: Subagent completed: `subagent:ambienttokenresolve2` returned work for queue item “do [#lzambienttokenresolve]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=200bdb9b6aaea565c46f4929b1931b3338b4ad155e005f6429b3091cf6fd63dd -->
+
+### Re: Subagent completed: `subagent:fixrunturn` returned work for queue item “do [#fixrunturn]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=3bbd4bd60125d7bbb58f54fe19488e042148a77b46c660fc20e4a2c23efaa649 -->
+> **Chat prompt (#chatprompt:9f0eeafbfd32):** are the subagents running?
+
+### Re: subagent status — gpt-5 · 2026-10-22T18:38-04:00
+
+Yes. Two are still running:
+
+- `#lzcorecohort` (`/root/corecohort_v2`): actively building and validating the immutable Phase 6 cohort manifest and published-artifact qualification. It has pushed qualifying Go, C++, and Zig commits and is waiting on the concurrent Python audit result before freezing the cohort pin.
+- `#lzcorecireachaudit` (`/root/corecireachaudit`): still auditing the settled Spec and nine binding commits for CI reachability and aggregate-gate drift.
+
+Two have completed:
+
+- `#lzambienttokenresolve`: proof refresh passed and was integrated as superproject commit `a40d94fde2`. The item is now correctly re-gated at `blocked_fresh` for the remaining operator-only quiet window, credential rotations, and interactive-shell verification. No credentials were read or publishers invoked.
+- `#fixrunturn`: current `agent-doc` main already contains the exact fix at `8cbd2f5672`; all three incident regressions and full `make check` passed, so no duplicate code commit or install was needed. The item is complete.
+
+The earlier `/root/ambienttokenresolve` and `/root/corecohort` entries shown as interrupted were superseded before claim binding; their active replacements are the workers listed above.
+<!-- agent:boundary:d62d2747 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- 🚧 [#subagent:ambienttokenresolve2#2] do [#lzambienttokenresolve]
+- 📫 [#subagent:ambienttokenresolve2#2] do [#lzambienttokenresolve]
 - 🚧 [#subagent:corecohort2#2] do [#lzcorecohort]
-- 🚧 [#subagent:fixrunturn#1] do [#fixrunturn]
+- 📫 [#subagent:fixrunturn#1] do [#fixrunturn]
 - 🚧 [#subagent:corecireachaudit#1] do [#lzcorecireachaudit]
-- ~~do [#lzstalehandlegenkt]: release + publish: Coordinator releases~~
-- ~~do [#lzstalehandlegenjs]: release + publish: Coordinator releases~~
-- ~~do [#lzstalehandlegenparityspec]~~
-- ~~do [#lzstalehandlegenparityspec]~~
-- ~~do [#lzstalehandlegenspec]~~
-- ~~do [#lzstalehandlegenconformance]~~
-- ~~do [#lzstalehandlegenformal]~~
-- ~~do [#lzstalehandleparityrs]~~
-- ~~do [#lzstalehandleparitypy]~~
-- ~~do [#lzstalehandleparitydart]~~
-- ~~do [#lzstalehandleparityzig]~~
-- ~~do [#lzstalehandleparitygo]~~
-- ~~do [#lzstalehandleparitycpp]~~
-- ~~do [#lzstalehandleparitycs]~~
-- ~~do [#lzstalehandleparitygd]~~
 - 📫 [#subagent:actionable_review#1] #actionable-review
 <!-- /agent:queue -->
 
 ## Todo
 
 <!-- agent:todo -->
+- [ ] [#lzambienttokenresolve] Complete #lzambienttokenresolve quiet-window application, Cargo/npm/PyPI credential rotations, and interactive-shell name-only verification (source: agent:review [#lzambienttokenresolve])
 <!-- /agent:todo -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzambienttokenresolve] Refresh the src/agent-doc/Makefile preimage SHA-256 and hunk offsets by hand, run make publish-credential-proof and make review-gate-status until blocked_fresh, then re-gate only the operator-owned quiet-window application, credential rotations, and fresh-shell name-only verification.
-- [ ] [#lzcorecohort] Complete Phase 6 on current lazily-spec. The schema/verifier landed in 4d86e62 and the Spec-side qualification caller landed in 42858f4; #lzreleasepins and #lzrustpublish are resolved. Generate a truthful immutable candidate manifest for the settled cohort, complete required cross-repository adoption, run clean-reproduction, negative, and publish gates, then commit and push.
-- [ ] [#fixrunturn] Revalidate the Run Agent Doc uncommitted-head/active-turn route race on current agent-doc origin/main. The recorded worktree is gone and its branch still equals base 06afd858, so do not attempt stale integration. If reproducible, recreate the six-file agent-doc-route-io fix and deterministic coverage on current main, run focused and full checks, commit/push, then coordinator install. If later route changes already subsume it, prove that with the incident regression and resolve.
 - [ ] [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzambienttokenresolve] Credential-plan evidence is refreshed and committed; make publish-credential-proof passes and review-gate-status reports blocked_fresh. Waiting only for the operator quiet-window application, Cargo/npm/PyPI credential rotations, and interactive-shell name-only verification.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 <!-- /agent:review -->

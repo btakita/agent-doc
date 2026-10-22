@@ -1037,7 +1037,7 @@ fn preflight_parks_committed_heading_replay_and_strikes_its_answered_head() {
     assert!(
         after.contains(&format!("{unrelated}\n"))
             && !after.contains(&format!("~~{unrelated}"))
-            && after.contains("- audit https://example.com/pull/48/\n"),
+            && after.contains("- 📥 audit https://example.com/pull/48/\n"),
         "unanswered heads and the operator's new edit must stay live:\n{after}"
     );
     assert_eq!(

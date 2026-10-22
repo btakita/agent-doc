@@ -368,8 +368,9 @@ pub fn record_claim_runtime_projection(
 /// invisible for the duration of its run. This command-path projection reads
 /// the editor/CRDT authority, changes only the selected queue component, and
 /// converges that exact authoritative cut. Existing non-claim `🚧` markers are
-/// preserved; `cleared_item` identifies the released claim whose marker must be
-/// removed.
+/// preserved; `cleared_item` identifies an abandoned/requeued claim whose
+/// marker must be removed. A reported release keeps its durable receipt visible
+/// as `📤`, so callers must not clear it.
 pub fn project_claim_runtime_state_with_effects(
     effects: &impl QueueCommandEffects,
     file: &Path,

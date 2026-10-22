@@ -18,6 +18,7 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish any lazily packages that have pending work'
+queue: go
 ---
 
 ## Status
@@ -675,32 +676,104 @@ Completed both authorized queue items.
 - `#lzcohortrelease`: verified `lazily-dart` tag `v0.34.0` at `e7b940bd2995c482a12fc87e9caeb0cbdb25158f`, published it with the verified Dart SDK, and confirmed the public pub.dev API now reports `0.34.0` as latest. Publication carried the known package-layout warning for the top-level `tests` directory. No source change was made. The immutable tag's current formatter gate would rewrite 134 Dart files under the available SDKs, but the publication command itself succeeded and public availability is proven.
 
 Preflight also audited the legacy TODO source locators for `#lzcohortrelease`, `#lzgithubbudget20`, and `#lzagentdocartifactpurge`. The exchange remains large (637 lines at admission), but the active queue policy requires completing the item boundary without pausing for compaction.
+
+### Re: stale-handle subagent release ownership — gpt-5 · 2026-10-22T14:40-04:00
+
+Six isolated workers are active for the spec, conformance, Rust, Python, Kotlin, and JavaScript heads. The remaining Dart, Zig, Go, C++, C#, and GDScript heads are queued for new isolated workers as concurrency becomes available. The exchange is large (over 646 lines), but the active queue remains in progress, so I have not compacted it.
+
+The operator's live `release + publish` edits conflict with the coordinator rule that forbids release work inside subagents. Agent-doc requires the following blocking handbacks to be preserved verbatim and answered by the operator:
+
+[#subagent-operator-request-paritykt-release] subagent operator request
+queue_item: do [#lzstalehandleparitykt]
+kind: question
+blocking: true
+request: How should the newly appended `release + publish` instruction be handled when the worker coordinator rules explicitly forbid this subagent from running a release, version bump, tag, or publish?
+context: I will continue the authorized lazily-kt implementation, tests, commit, and branch push in my isolated worktree. The exact edited head now requests release + publish, but the higher-priority coordinator rules reserve release activity outside this worker, so I cannot truthfully complete that added scope myself.
+choices:
+- **Coordinator releases (Recommended)**: I finish and push the implementation branch; the coordinator integrates it and performs any separately authorized release/publish steps.
+- **Defer release**: I finish and push the implementation branch, and the release/publish request remains open for a later queue item.
+
+[#subagent-operator-request-release-owner] subagent operator request
+queue_item: do [#lzstalehandleparityrs]
+kind: question
+blocking: true
+request: Who should execute the newly requested release + publish after this worker lands and pushes the code/spec/test commits?
+context: The operator steered this claimed item to add `release + publish`, but the coordinator rules explicitly prohibit this worker from running a release build, version bump, tag, or release. I will continue the non-conflicting implementation, full gates, commits, and pushes in my isolated lazily-rs worktree; release/publish must be performed by the coordinator or another actor after integration and green gates.
+choices:
+- **Coordinator release**: This worker stops at commit + push and the coordinator performs the authorized version/publish steps after integration.
+- **Separate release worker**: This worker stops at commit + push and the coordinator dispatches a release-capable actor for version/publish.
+
+[#subagent-operator-request-parityjs-release] subagent operator request
+queue_item: do [#lzstalehandleparityjs]
+kind: question
+blocking: true
+request: Should the coordinator perform the requested lazily-js release + publish after integrating this worker's tested commit?
+context: The operator edited the claimed head to `🚧 [#subagent:parityjs#1] do [#lzstalehandleparityjs]: release + publish`, but the coordinator rules explicitly prohibit this subagent from running a release, version bump, tag, or publish. I can and will complete the implementation, tests, commit, and branch push; release/publish must occur outside this worker after integration.
+choices:
+- **Coordinator release (Recommended)**: Integrate the worker commit, run final verification, and perform the single authorized release + publish from the coordinator.
+- **Defer release**: Integrate the worker commit but leave release + publish for a later operator-authorized cycle.
+
+[#subagent-operator-request-releasepublish354] subagent operator request
+queue_item: do [#lzstalehandleconformance]
+kind: question
+blocking: true
+request: Should I complete the authorized spec/tests commit+push and leave the requested release + publish to the coordinator after integration?
+context: The operator steered this claimed item to `release + publish`, but the coordinator rules explicitly prohibit subagents from running release builds, version bumps, tags, releases, or install. I can safely complete and push the scoped implementation branch; the coordinator must own any later release/publish operation.
+choices:
+- **Coordinator releases**: I finish spec/tests, commit, and push; the coordinator performs release + publish after integration.
+- **Stop before release**: I finish no further work until the coordinator resolves the release-scope conflict.
+
+[#subagent-operator-request-lzstale-release] subagent operator request
+queue_item: do [#lzstalehandlespec]
+kind: question
+blocking: true
+request: Should the coordinator perform the newly requested release + publish after integrating this worker's tested commits, or should this worker's authorized result remain commit + push only?
+context: The claimed queue item was edited to add `release + publish`, but the coordinator rules explicitly forbid subagents from running a release build, version bump, tag, or release. I can complete, test, commit, and push the isolated lazily-spec/lazily-formal branches; the release/publish step must be owned outside this worker unless the coordinator changes the execution arrangement.
+choices:
+- **Coordinator releases (Recommended)**: This worker finishes test + commit + push and reports exact SHAs; the coordinator integrates and performs the single authorized release/publish.
+- **Commit + push only**: Treat release/publish as deferred and close this worker at the pushed branch boundary.
+
+[#subagent-operator-request-release-owner-py] subagent operator request
+queue_item: do [#lzstalehandleparitypy]
+kind: question
+blocking: true
+request: Should the coordinator retain “release + publish” as coordinator-owned follow-up after integrating my committed and pushed lazily-py branch?
+context: The operator appended “release + publish” to my claimed item, but the coordinator rules explicitly prohibit this worker from running a release build, version bump, tag, or release. I can complete, test, commit, and push the parity implementation; release/publish needs an authorized owner outside this worker.
+choices:
+- **Coordinator releases (Recommended)**: I finish and push the implementation branch; the coordinator integrates it and performs the authorized release/publish workflow.
+- **Defer release**: I finish and push the implementation branch, and the release/publish request remains open for a later authorized cycle.
+
+Please answer each packet. A concise answer such as “Coordinator releases for all six” is sufficient if that is your choice.
 <!-- agent:boundary:aa7e9c64 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
+<!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
+- 🚧 [#subagent:spec#1] do [#lzstalehandlespec]: release + publish
+- 🚧 [#subagent:conformance#1] do [#lzstalehandleconformance]: release + publish
+- 🚧 [#subagent:parityrs#1] do [#lzstalehandleparityrs]: release + publish
+- 🚧 [#subagent:paritypy#1] do [#lzstalehandleparitypy]: release + publish
+- 🚧 [#subagent:paritykt#1] do [#lzstalehandleparitykt]: release + publish
+- 🚧 [#subagent:parityjs#1] do [#lzstalehandleparityjs]: release + publish
+- 📥 do [#lzstalehandleparitydart]: release + publish
+- 📥 do [#lzstalehandleparityzig]: release + publish
+- 📥 do [#lzstalehandleparitygo]: release + publish
+- 📥 do [#lzstalehandleparitycpp]: release + publish
+- 📥 do [#lzstalehandleparitycs]: release + publish
+- 📥 do [#lzstalehandleparitygd]: release + publish
 <!-- /agent:queue -->
 
 ## Todo
 
 <!-- agent:todo -->
-- [x] [#lzcohortrelease] Publish lazily-dart 0.34.0 to pub.dev under your login for [#lzcohortrelease] (source: agent:review [#lzcohortrelease])
-- [x] [#lzcoreciactivationfixes] Choose the spec-side or binding-side Phase 6 caller design for [#lzcoreciactivationfixes]
-- [x] [#lzcommitpresetresolve] Define or replace the queue-wide `#spec-test-commit-push` authorization for [#lzcommitpresetresolve]
-- [x] [#lzgenericreadmeincident] Inspect the generated README rollups and decide whether to restore them for [#lzgenericreadmeincident]
-- [x] [#lzrustpublish] Configure crates.io Trusted Publishing for future lazily-rs tag releases for [#lzrustpublish]
-- [ ] [#lzgithubbudget20] Add a valid payment method and set the GitHub Actions budget requested by [#lzgithubbudget20] (source: agent:review [#lzgithubbudget20])
-- [x] [#lzagentdocartifactpurge] Choose and explicitly authorize an artifact-purge plan after the refreshed handoff is integrated for [#lzagentdocartifactpurge] (source: agent:review [#lzagentdocartifactpurge])
-- [x] [#lzbetascope] Approve or decline Lazily Core Beta promotion after its gates are green for [#lzbetascope]
 <!-- /agent:todo -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzstalehandlespec] Add the normative stale-handle disposal contract to lazily-spec: disposal must validate handle generation/identity and node kind before mutating graph state; a stale or cross-kind-recycled handle is an idempotent no-op, cannot delete the new occupant or run its cleanup, and only a matching live effect may detach edges/run cleanup. Update reactive-graph prose, API vocabulary, coverage claims, and the formal model/invariants.
-- [ ] [#lzstalehandleconformance] Extend lazily-spec executable conformance for stale-handle disposal: add a discriminating Effect-handle → recycled Source reproduction for the GH #354 `set_cell on non-cell id` failure, cover the stale cell/computed/effect handle × successor-kind matrix where representable, assert successor readability/writability/edges and cleanup counts, update `dispose_stale_handle` schema/docs/generators, and make the aggregate/discriminability gates reject missing or vacuous replay.
+- [ ] [#lzstalehandleconformance] Extend lazily-spec executable conformance for stale-handle disposal: add a discriminating Effect-handle → recycled Source reproduction for the GH #354 (https://github.com/btakita/agent-doc/issues/354) `set_cell on non-cell id` failure, cover the stale cell/computed/effect handle × successor-kind matrix where representable, assert successor readability/writability/edges and cleanup counts, update `dispose_stale_handle` schema/docs/generators, and make the aggregate/discriminability gates reject missing or vacuous replay.
 - [ ] [#lzstalehandleparityrs] Bring lazily-rs into stale-handle disposal parity: land the kind-before-remove fix on current main and the compatible 0.57.x line, replay the new conformance vector in Context and ThreadSafeContext (plus async wrappers where applicable), prove a stale Effect handle cannot remove a recycled Source, and publish/version only after the spec pin and full gates are green.
 - [ ] [#lzstalehandleparitypy] Bring lazily-py into stale-handle disposal parity: adopt the new spec/conformance vector, audit source/computed/effect handle identity and id-reuse behavior, implement kind/generation-before-mutation semantics where needed, and wire non-vacuous replay plus mutation coverage into CI.
 - [ ] [#lzstalehandleparitykt] Bring lazily-kt into stale-handle disposal parity: adopt the new spec/conformance vector across normal and thread-safe/reactive contexts, enforce kind/generation validation before removal or cleanup, and add CI/mutation evidence that recycled successors survive stale disposal.

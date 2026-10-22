@@ -636,7 +636,13 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 val projectRoot = deriveSyncLayout(request, editorLayout = null).projectRoot
                 if (prepareTerminalFirst(request, projectRoot)) return@Thread
                 if (!awaitNativeGeneration(request)) return@Thread
-                when (val publication = listener.publishCommandSurface(commandSurface, projectRoot)) {
+                when (
+                    val publication = listener.publishCommandSurface(
+                        commandSurface,
+                        projectRoot,
+                        SurfaceCommandReference.Command.ExactSync,
+                    )
+                ) {
                     is EditorTabSyncListener.CommandSurfacePublication.Unavailable -> {
                         LOG.warn(
                             "[sync] surface reference unavailable reason=${publication.reason}; " +
@@ -690,6 +696,14 @@ class SyncLayoutAction : AnAction(), DumbAware {
                                     receipt.output.take(500),
                             )
                         }
+                    }
+                    is EditorTabSyncListener.CommandSurfacePublication.PreservedLayout -> {
+                        LOG.info(
+                            "[sync] flat surface retained without structural sync " +
+                                "surface=${publication.reference.surfaceId} " +
+                                "min_sequence=${publication.reference.minSequence} " +
+                                "reason=flat_evidence_preserves_retained_layout",
+                        )
                     }
                 }
             } catch (ex: Exception) {

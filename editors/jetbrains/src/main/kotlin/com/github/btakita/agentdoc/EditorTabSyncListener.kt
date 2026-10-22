@@ -604,6 +604,7 @@ private data class PendingSurface(
     val relativePath: String,
     val surfaceId: String,
     val surfaceJson: String,
+    val columnGeometry: SurfaceCommandReference.ColumnGeometry,
     val knownControllerRoots: List<String>,
     val liveSurfaceIds: Set<String>?,
 )
@@ -1414,6 +1415,12 @@ internal data class CapturedSurface(
                 relativePath = focusedRelativePath,
                 surfaceId = captured.surfaceId,
                 surfaceJson = GSON.toJson(surface),
+                columnGeometry =
+                    if (absoluteEditorLayout?.columns?.any { it.files.isNotEmpty() } == true) {
+                        SurfaceCommandReference.ColumnGeometry.Known
+                    } else {
+                        SurfaceCommandReference.ColumnGeometry.Unknown
+                    },
                 knownControllerRoots = knownControllerRoots,
                 liveSurfaceIds = captured.liveSurfaceIds,
             ),
@@ -1429,6 +1436,12 @@ internal data class CapturedSurface(
     /** What [publishCommandSurface] retained on the controller, or why the command keeps its snapshot. */
     internal sealed interface CommandSurfacePublication {
         data class Published(
+            val projectRoot: String,
+            val reference: SurfaceLayoutReference,
+        ) : CommandSurfacePublication
+
+        /** The flat surface was retained, but exact structure remains unchanged by policy. */
+        data class PreservedLayout(
             val projectRoot: String,
             val reference: SurfaceLayoutReference,
         ) : CommandSurfacePublication
@@ -1464,6 +1477,7 @@ internal data class CapturedSurface(
     internal fun publishCommandSurface(
         capture: CommandSurfaceCapture,
         commandRoot: String,
+        command: SurfaceCommandReference.Command,
     ): CommandSurfacePublication {
         if (!projectionLive()) return CommandSurfacePublication.Unavailable("listener_projection_retired")
         val captured = capture.captured
@@ -1528,10 +1542,14 @@ internal data class CapturedSurface(
                     publishExitCode = receipt.exitCode,
                     receiptJson = receipt.output,
                     publishedSequence = receipt.surfaceSequence,
+                    command = command,
+                    columnGeometry = pending.columnGeometry,
                 )
         ) {
             is SurfaceCommandReference.Decision.Reference ->
                 CommandSurfacePublication.Published(pending.projectRoot, decision.reference)
+            is SurfaceCommandReference.Decision.PreserveRetainedLayout ->
+                CommandSurfacePublication.PreservedLayout(pending.projectRoot, decision.reference)
             is SurfaceCommandReference.Decision.SnapshotFallback ->
                 CommandSurfacePublication.Unavailable(decision.reason)
         }

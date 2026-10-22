@@ -73,7 +73,7 @@ only the compact routing table that survives context compaction.
 - Subagent claims are attempt- and worker-fenced (`#queueclaimstate`,
   `#queueclaimworker`). Save the claim generation. `📥` is pending/unclaimed,
   `🟡` is reserved/dispatching, `🚧` is worker-bound/running,
-  `📤` is reported/outbox, `⚠️` is lost, and `❔`/`🔄` need
+  `📫` is reported/outbox, `⚠️` is lost, and `❔`/`🔄` need
   reconciliation. Worker-owned rows also name their exact owner and generation.
   Claim, spawn, start with the concrete worker id, report completion, integrate
   serially, and persist the result in the same turn. The complete coordinator

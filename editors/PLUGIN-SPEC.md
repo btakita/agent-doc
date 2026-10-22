@@ -49,7 +49,13 @@ Rust binary.
   Updating `pluginReleaseVersion` alone must not manufacture a package upgrade:
   the binary remains paired with the live generation and installed-plugin
   reconciliation is an `Unchanged` no-op (GH #295). A changed digest allocates
-  a fresh update number above every compatibility line before packaging.
+  a fresh update number above every compatibility line before packaging. The
+  generation gate rejects a bump whose Kotlin delta is only comments,
+  formatting, or consistent identifier renames: non-behavioral source churn is
+  not sufficient reason to make restart-only hosts reload the package (GH
+  #346). Native-boundary guards separately require measured Remote Dev column
+  grouping to pass through `client_measured_layout` before the schema-3 Kotlin
+  compatibility floor.
 - Restart-free dynamic upgrade is a per-line capability. The JetBrains classic
   line ships an attach launcher. The exact-262 modular line does not, so a live
   262 IDE gets a file replacement plus an explicit restart-required verdict that

@@ -121,10 +121,11 @@ internal object FrontendSurfaceCollector {
     }
 
     /**
-     * GH #320/#343: the window's measured on-screen rectangle. Schema 3 groups it into the exact
-     * client-authored `layoutColumns` vector before transport; only schema-2 compatibility lets the
-     * backend derive columns from bounds. Null unless the component is showing: an unrealized
-     * splitter has no screen geometry, and a parent-relative location is not one.
+     * GH #320/#343/#346: the window's measured on-screen rectangle. Schema 3 also carries the
+     * frozen client-authored `layoutColumns` floor, while the hot-reloaded native
+     * `client_measured_layout` derivation remains authoritative over these bounds. Null unless the
+     * component is showing: an unrealized splitter has no screen geometry, and a parent-relative
+     * location is not one.
      */
     private fun measuredBounds(component: Component): EditorWindowBounds? =
         if (!component.isShowing) {
@@ -154,8 +155,9 @@ internal object FrontendSurfaceCollector {
 }
 
 /**
- * Convert positive frontend geometry into the exact column vector carried on the wire. Unknown or
- * shared geometry yields no vector: absence defers structure instead of legitimizing a guess.
+ * Frozen schema-3 compatibility floor for a native library that cannot group the measured
+ * evidence. Unknown or shared geometry yields no vector: absence defers structure instead of
+ * legitimizing a guess. Do not extend this rule; change `client_measured_layout` instead.
  */
 internal fun frontendLayoutColumns(
     windows: List<EditorWindowSnapshot>,

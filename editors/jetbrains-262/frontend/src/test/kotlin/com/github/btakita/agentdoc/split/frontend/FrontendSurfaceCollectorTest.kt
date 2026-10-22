@@ -82,7 +82,7 @@ class FrontendSurfaceCollectorTest {
         assertEquals(first, retained)
     }
 
-    /** Schema 3 carries frontend-authored columns; older peers receive only what they understand. */
+    /** Schema 3 carries the frozen frontend column floor; older peers receive only known fields. */
     @Test
     fun snapshotSchemaNegotiationFallsBackToSchemaOneForAnOldBackend() {
         assertEquals(1, negotiatedSnapshotSchema(null))

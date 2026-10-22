@@ -8,6 +8,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use agent_doc_frontmatter::frontmatter::queue_icons;
+
 pub const PRIORITIZED_MARKERS: [&str; 7] = [
     "**prioritized**",
     "__prioritized__",
@@ -95,8 +97,21 @@ pub const SKIP_MARKER: &str = "⏭\u{fe0f}";
 /// consumed, claimed again, or no longer waits on the operator.
 pub const AWAITING_OPERATOR_MARKER: &str = "⏳";
 
-/// Every leading lifecycle marker the binary projects onto or accepts from a
-/// queue head. Legacy spellings remain here so they never enter work identity.
+pub fn operator_action_marker() -> &'static str {
+    &queue_icons().operator_action
+}
+
+pub fn prioritized_marker() -> &'static str {
+    &queue_icons().prioritized
+}
+
+pub fn agent_prioritized_marker() -> &'static str {
+    &queue_icons().agent_prioritized
+}
+
+/// Every built-in leading lifecycle marker the binary projects onto or accepts
+/// from a queue head. Legacy spellings remain here so they never enter work
+/// identity even when a custom palette is installed.
 pub const LIFECYCLE_MARKERS: [&str; 10] = [
     PENDING_MARKER,
     CLAIMED_MARKER,
@@ -109,6 +124,19 @@ pub const LIFECYCLE_MARKERS: [&str; 10] = [
     SKIP_MARKER,
     AWAITING_OPERATOR_MARKER,
 ];
+
+/// Effective and built-in lifecycle prefixes accepted by parsers that operate
+/// on already-rendered queue text.
+pub fn lifecycle_markers() -> Vec<&'static str> {
+    let mut markers = LIFECYCLE_MARKERS.to_vec();
+    for state in ALL_LIFECYCLE_STATES {
+        let marker = state.prefix();
+        if !markers.contains(&marker) {
+            markers.push(marker);
+        }
+    }
+    markers
+}
 
 /// Binary-owned visible lifecycle states. These prefixes are projection only:
 /// every parser strips them before queue-item identity is computed.
@@ -125,8 +153,34 @@ pub enum QueueLifecycleMarker {
     AwaitingOperator,
 }
 
+pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 9] = [
+    QueueLifecycleMarker::Pending,
+    QueueLifecycleMarker::Claimed,
+    QueueLifecycleMarker::Running,
+    QueueLifecycleMarker::Reported,
+    QueueLifecycleMarker::Lost,
+    QueueLifecycleMarker::Reconciling,
+    QueueLifecycleMarker::Unknown,
+    QueueLifecycleMarker::Skipped,
+    QueueLifecycleMarker::AwaitingOperator,
+];
+
 impl QueueLifecycleMarker {
-    pub const fn prefix(self) -> &'static str {
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Self::Pending => &queue_icons().pending,
+            Self::Claimed => &queue_icons().claimed,
+            Self::Running => &queue_icons().running,
+            Self::Reported => &queue_icons().reported,
+            Self::Lost => &queue_icons().lost,
+            Self::Reconciling => &queue_icons().reconciling,
+            Self::Unknown => &queue_icons().unknown,
+            Self::Skipped => &queue_icons().skipped,
+            Self::AwaitingOperator => &queue_icons().awaiting_operator,
+        }
+    }
+
+    pub const fn default_prefix(self) -> &'static str {
         match self {
             Self::Pending => PENDING_MARKER,
             Self::Claimed => CLAIMED_MARKER,
@@ -166,13 +220,37 @@ pub fn worker_evidence_marker(
 }
 
 fn strip_lifecycle_prefix(text: &str) -> Option<&str> {
-    LIFECYCLE_MARKERS
-        .iter()
-        .find_map(|marker| text.strip_prefix(marker))
+    lifecycle_prefix(text).map(|(_, _, rest)| rest)
+}
+
+fn lifecycle_prefix(text: &str) -> Option<(QueueLifecycleMarker, &str, &str)> {
+    ALL_LIFECYCLE_STATES
+        .into_iter()
+        .flat_map(|state| {
+            [
+                (state, state.prefix()),
+                (state, state.default_prefix()),
+                (
+                    state,
+                    if state == QueueLifecycleMarker::Reported {
+                        LEGACY_REPORTED_MARKER
+                    } else {
+                        state.default_prefix()
+                    },
+                ),
+            ]
+        })
+        .filter_map(|(state, prefix)| text.strip_prefix(prefix).map(|rest| (state, prefix, rest)))
+        .max_by_key(|(_, prefix, _)| prefix.len())
 }
 
 fn strip_operator_action_prefix(text: &str) -> Option<(&str, &str)> {
-    let after_marker = text.strip_prefix(OPERATOR_ACTION_MARKER)?.trim_start();
+    let after_marker = [operator_action_marker(), OPERATOR_ACTION_MARKER]
+        .into_iter()
+        .filter_map(|marker| text.strip_prefix(marker).map(|rest| (marker.len(), rest)))
+        .max_by_key(|(len, _)| *len)?
+        .1
+        .trim_start();
     let after_open = after_marker.strip_prefix("[#")?;
     let (id, rest) = after_open.split_once(']')?;
     let mut chars = id.chars();
@@ -181,6 +259,22 @@ fn strip_operator_action_prefix(text: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((id, rest))
+}
+
+fn priority_prefix(text: &str) -> Option<(&str, &str)> {
+    [prioritized_marker(), agent_prioritized_marker()]
+        .into_iter()
+        .chain(PRIORITIZED_MARKERS)
+        .chain(AGENT_PRIORITIZED_MARKERS)
+        .filter_map(|marker| text.strip_prefix(marker).map(|rest| (marker, rest)))
+        .max_by_key(|(marker, _)| marker.len())
+}
+
+fn is_lifecycle_prefix(prefix: &str) -> bool {
+    ALL_LIFECYCLE_STATES
+        .into_iter()
+        .any(|state| prefix == state.prefix() || prefix == state.default_prefix())
+        || prefix == LEGACY_REPORTED_MARKER
 }
 
 /// Human-readable identity of the exact durable worker attempt governing a
@@ -261,11 +355,7 @@ pub fn owner_projection(text: &str) -> Option<QueueOwnerProjection> {
             rest = after.trim_start();
             continue;
         }
-        if let Some(after) = PRIORITIZED_MARKERS
-            .iter()
-            .chain(AGENT_PRIORITIZED_MARKERS.iter())
-            .find_map(|marker| rest.strip_prefix(marker))
-        {
+        if let Some((_, after)) = priority_prefix(rest) {
             rest = after.trim_start();
             continue;
         }
@@ -276,10 +366,7 @@ pub fn owner_projection(text: &str) -> Option<QueueOwnerProjection> {
 /// Replace the exact-attempt owner annotation while preserving lifecycle,
 /// operator-action, priority, leading, and trailing whitespace. The annotation
 /// is placed immediately after a lifecycle marker when one exists.
-pub fn apply_owner_projection(
-    text: &str,
-    owner: Option<&QueueOwnerProjection>,
-) -> String {
+pub fn apply_owner_projection(text: &str, owner: Option<&QueueOwnerProjection>) -> String {
     let content_start = text.len() - text.trim_start().len();
     let leading = &text[..content_start];
     let (content, trailing) = split_trailing_whitespace(&text[content_start..]);
@@ -290,24 +377,17 @@ pub fn apply_owner_projection(
             rest = after.trim_start();
             continue;
         }
-        if let Some((marker, after)) = LIFECYCLE_MARKERS
-            .iter()
-            .find_map(|marker| rest.strip_prefix(marker).map(|after| (*marker, after)))
-        {
+        if let Some((_, marker, after)) = lifecycle_prefix(rest) {
             prefixes.push(marker.to_string());
             rest = after.trim_start();
             continue;
         }
         if let Some((id, after)) = strip_operator_action_prefix(rest) {
-            prefixes.push(format!("{OPERATOR_ACTION_MARKER} [#{id}]"));
+            prefixes.push(format!("{} [#{id}]", operator_action_marker()));
             rest = after.trim_start();
             continue;
         }
-        if let Some((marker, after)) = PRIORITIZED_MARKERS
-            .iter()
-            .chain(AGENT_PRIORITIZED_MARKERS.iter())
-            .find_map(|marker| rest.strip_prefix(marker).map(|after| (*marker, after)))
-        {
+        if let Some((marker, after)) = priority_prefix(rest) {
             prefixes.push(marker.to_string());
             rest = after.trim_start();
             continue;
@@ -316,7 +396,7 @@ pub fn apply_owner_projection(
     }
     if let Some(index) = prefixes
         .iter()
-        .position(|prefix| LIFECYCLE_MARKERS.contains(&prefix.as_str()))
+        .position(|prefix| is_lifecycle_prefix(prefix))
     {
         let lifecycle = prefixes.remove(index);
         prefixes.insert(0, lifecycle);
@@ -325,7 +405,7 @@ pub fn apply_owner_projection(
         let annotation = format_owner_annotation(owner);
         let insert_at = prefixes
             .first()
-            .is_some_and(|prefix| LIFECYCLE_MARKERS.contains(&prefix.as_str())) as usize;
+            .is_some_and(|prefix| is_lifecycle_prefix(prefix)) as usize;
         prefixes.insert(insert_at, annotation);
     }
     if !rest.is_empty() {
@@ -355,11 +435,7 @@ pub fn operator_action_ids(text: &str) -> Vec<String> {
             rest = after.trim_start();
             continue;
         }
-        if let Some(after) = PRIORITIZED_MARKERS
-            .iter()
-            .chain(AGENT_PRIORITIZED_MARKERS.iter())
-            .find_map(|marker| rest.strip_prefix(marker))
-        {
+        if let Some((_, after)) = priority_prefix(rest) {
             rest = after.trim_start();
             continue;
         }
@@ -377,10 +453,7 @@ fn strip_operator_action_annotations_preserving_markers(text: &str) -> String {
             rest = after.trim_start();
             continue;
         }
-        if let Some((marker, after)) = LIFECYCLE_MARKERS
-            .iter()
-            .find_map(|marker| trimmed.strip_prefix(marker).map(|after| (*marker, after)))
-        {
+        if let Some((_, marker, after)) = lifecycle_prefix(trimmed) {
             kept_prefixes.push(marker.to_string());
             rest = after.trim_start();
             continue;
@@ -390,11 +463,7 @@ fn strip_operator_action_annotations_preserving_markers(text: &str) -> String {
             rest = after.trim_start();
             continue;
         }
-        if let Some((marker, after)) = PRIORITIZED_MARKERS
-            .iter()
-            .chain(AGENT_PRIORITIZED_MARKERS.iter())
-            .find_map(|marker| trimmed.strip_prefix(marker).map(|after| (*marker, after)))
-        {
+        if let Some((marker, after)) = priority_prefix(trimmed) {
             kept_prefixes.push(marker.to_string());
             rest = after.trim_start();
             continue;
@@ -433,7 +502,7 @@ pub fn apply_operator_action_ids(text: &str, ids: &[String]) -> String {
     }
     let annotations = normalized
         .iter()
-        .map(|id| format!("{OPERATOR_ACTION_MARKER} [#{id}]"))
+        .map(|id| format!("{} [#{id}]", operator_action_marker()))
         .collect::<Vec<_>>()
         .join(" ");
     if bare.is_empty() {
@@ -482,7 +551,7 @@ pub fn strip_in_progress_marker(text: &str) -> String {
     loop {
         let trimmed = rest.trim_start();
         if let Some((id, after_marker)) = strip_operator_action_prefix(trimmed) {
-            kept_prefixes.push(format!("{OPERATOR_ACTION_MARKER} [#{id}]"));
+            kept_prefixes.push(format!("{} [#{id}]", operator_action_marker()));
             rest = after_marker.trim_start();
             continue;
         }
@@ -494,11 +563,7 @@ pub fn strip_in_progress_marker(text: &str) -> String {
             rest = after_marker.trim_start();
             continue;
         }
-        if let Some((marker, after_marker)) = PRIORITIZED_MARKERS
-            .iter()
-            .chain(AGENT_PRIORITIZED_MARKERS.iter())
-            .find_map(|marker| trimmed.strip_prefix(marker).map(|after| (*marker, after)))
-        {
+        if let Some((marker, after_marker)) = priority_prefix(trimmed) {
             kept_prefixes.push(marker.to_string());
             rest = after_marker.trim_start();
             continue;
@@ -552,51 +617,14 @@ fn split_trailing_whitespace(text: &str) -> (&str, &str) {
 }
 
 pub fn has_in_progress_marker(text: &str) -> bool {
-    has_leading_lifecycle_marker(text, IN_PROGRESS_MARKER)
+    lifecycle_marker(text) == Some(QueueLifecycleMarker::Running)
 }
 
 pub fn lifecycle_marker(text: &str) -> Option<QueueLifecycleMarker> {
-    [
-        QueueLifecycleMarker::Pending,
-        QueueLifecycleMarker::Claimed,
-        QueueLifecycleMarker::Running,
-        QueueLifecycleMarker::Reported,
-        QueueLifecycleMarker::Lost,
-        QueueLifecycleMarker::Reconciling,
-        QueueLifecycleMarker::Unknown,
-        QueueLifecycleMarker::Skipped,
-        QueueLifecycleMarker::AwaitingOperator,
-    ]
-    .into_iter()
-    .find(|marker| {
-        has_leading_lifecycle_marker(text, marker.prefix())
-            || (*marker == QueueLifecycleMarker::Reported
-                && has_leading_lifecycle_marker(text, LEGACY_REPORTED_MARKER))
-    })
-}
-
-/// True when the head carries a leading skip marker (`⏭️`), past any pins.
-pub fn has_skip_marker(text: &str) -> bool {
-    has_leading_lifecycle_marker(text, SKIP_MARKER)
-}
-
-/// True when the head carries a leading awaiting-operator marker (`⏳`).
-pub fn has_awaiting_operator_marker(text: &str) -> bool {
-    has_leading_lifecycle_marker(text, AWAITING_OPERATOR_MARKER)
-}
-
-/// True when the head carries any leading lifecycle marker (`🚧`/`⏭️`/`⏳`).
-pub fn has_lifecycle_marker(text: &str) -> bool {
-    LIFECYCLE_MARKERS
-        .iter()
-        .any(|marker| has_leading_lifecycle_marker(text, marker))
-}
-
-fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
     let mut rest = text.trim_start();
     loop {
-        if rest.starts_with(marker) {
-            return true;
+        if let Some((state, _, _)) = lifecycle_prefix(rest) {
+            return Some(state);
         }
         if let Some((_, after_marker)) = strip_operator_action_prefix(rest) {
             rest = after_marker.trim_start();
@@ -606,16 +634,27 @@ fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
             rest = after_marker.trim_start();
             continue;
         }
-        if let Some(after_marker) = PRIORITIZED_MARKERS
-            .iter()
-            .chain(AGENT_PRIORITIZED_MARKERS.iter())
-            .find_map(|m| rest.strip_prefix(m))
-        {
+        if let Some((_, after_marker)) = priority_prefix(rest) {
             rest = after_marker.trim_start();
             continue;
         }
-        return false;
+        return None;
     }
+}
+
+/// True when the head carries a leading skip marker (`⏭️`), past any pins.
+pub fn has_skip_marker(text: &str) -> bool {
+    lifecycle_marker(text) == Some(QueueLifecycleMarker::Skipped)
+}
+
+/// True when the head carries a leading awaiting-operator marker (`⏳`).
+pub fn has_awaiting_operator_marker(text: &str) -> bool {
+    lifecycle_marker(text) == Some(QueueLifecycleMarker::AwaitingOperator)
+}
+
+/// True when the head carries any leading lifecycle marker (`🚧`/`⏭️`/`⏳`).
+pub fn has_lifecycle_marker(text: &str) -> bool {
+    lifecycle_marker(text).is_some()
 }
 
 pub fn strip_in_progress_marker_for_display(text: &str) -> Option<String> {
@@ -695,12 +734,7 @@ pub fn strip_priority_markers(text: &str) -> String {
         let stripped = strip_lifecycle_prefix(trimmed)
             .or_else(|| strip_operator_action_prefix(trimmed).map(|(_, rest)| rest))
             .or_else(|| strip_owner_annotation_prefix(trimmed).map(|(_, rest)| rest))
-            .or_else(|| {
-                PRIORITIZED_MARKERS
-                    .iter()
-                    .chain(AGENT_PRIORITIZED_MARKERS.iter())
-                    .find_map(|m| trimmed.strip_prefix(m))
-            });
+            .or_else(|| priority_prefix(trimmed).map(|(_, rest)| rest));
         match stripped {
             Some(rest) => t = rest.trim_start(),
             None => break,
@@ -732,7 +766,8 @@ pub fn in_progress_marker_retarget_requested(
         (line.starts_with('+') || line.starts_with('-'))
             && !line.starts_with("+++")
             && !line.starts_with("---")
-            && line.contains(IN_PROGRESS_MARKER)
+            && (line.contains(QueueLifecycleMarker::Running.prefix())
+                || line.contains(IN_PROGRESS_MARKER))
     })
 }
 
@@ -1007,10 +1042,7 @@ mod tests {
             owner: "subagent:sdk-demo".to_string(),
             generation: 7,
         };
-        let projected = apply_owner_projection(
-            "  🙋 [#choice] 🚧 📌 fix sdk demo  ",
-            Some(&owner),
-        );
+        let projected = apply_owner_projection("  🙋 [#choice] 🚧 📌 fix sdk demo  ", Some(&owner));
         assert_eq!(
             projected,
             "  🚧 [#subagent:sdk-demo#7] 🙋 [#choice] 📌 fix sdk demo  "

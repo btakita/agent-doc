@@ -5377,6 +5377,7 @@ fn try_main() -> anyhow::Result<()> {
     }
 
     let config = agent_doc_config::load()?;
+    agent_doc_frontmatter::frontmatter::install_queue_icon_config(&config.queue_icons)?;
 
     // `#binaryownedcli`: standalone tracked-work and queue mutations are
     // binary-owned CLI writes. A write the editor authority retained while its

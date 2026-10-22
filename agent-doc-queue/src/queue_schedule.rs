@@ -507,30 +507,23 @@ fn identity(text: &str) -> QueueItemIdentity {
 /// in progress (`🚧`), fenced subagent attempt (`🟡`, `📫`, `⚠️`, `⏭️`), and
 /// awaiting operator (`⏳`). Pin markers (`📌`, `**pin**`, ...) are operator
 /// priority, not drain evidence, and are skipped over.
-const DRAIN_LIFECYCLE_MARKERS: &[&str] = &[
-    "🚧",
-    "🟡",
-    "📫",
-    // Former reported/outbox spelling; accepted for compatibility.
-    "📤",
-    "⚠️",
-    "❔",
-    "⏭\u{fe0f}",
-    "⏳",
-    agent_doc_document::queue_projection::OPERATOR_ACTION_MARKER,
-];
-
 /// GH #327: whether a live head carries a drain lifecycle marker, i.e. the
 /// pass's drain already picked it up. An operator keystroke state never does.
 fn head_carries_drain_lifecycle_marker(text: &str) -> bool {
-    let trimmed = text.trim();
-    let core = agent_doc_element_queue::strip_priority_markers(trimmed);
-    let Some(prefix) = trimmed.strip_suffix(core.as_str()) else {
-        return false;
-    };
-    DRAIN_LIFECYCLE_MARKERS
-        .iter()
-        .any(|marker| prefix.contains(marker))
+    use agent_doc_document::queue_projection::QueueLifecycleMarker;
+
+    matches!(
+        agent_doc_document::queue_projection::lifecycle_marker(text),
+        Some(
+            QueueLifecycleMarker::Claimed
+                | QueueLifecycleMarker::Running
+                | QueueLifecycleMarker::Reported
+                | QueueLifecycleMarker::Lost
+                | QueueLifecycleMarker::Unknown
+                | QueueLifecycleMarker::Skipped
+                | QueueLifecycleMarker::AwaitingOperator
+        )
+    ) || !agent_doc_document::queue_projection::operator_action_ids(text).is_empty()
 }
 
 /// The local zone's UTC offset at an instant. Injected so the schedule math is

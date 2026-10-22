@@ -1,4 +1,4 @@
-use agent_doc_document::queue_projection::{PRIORITIZED_MARKER, strip_priority_markers};
+use agent_doc_document::queue_projection::{prioritized_marker, strip_priority_markers};
 use anyhow::Result;
 
 use crate::document_queue::{
@@ -102,7 +102,7 @@ pub fn operator_prioritize_route_prompt(prompt_text: String) -> String {
     } else {
         format!(
             "{} {}",
-            PRIORITIZED_MARKER,
+            prioritized_marker(),
             strip_priority_markers(&prompt_text)
         )
     }

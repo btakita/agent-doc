@@ -29,6 +29,11 @@ host = "auto"
 auto_start_tmux = true
 # command = "wezterm start -- {tmux_command}"
 # attach_command = "tmux attach-session -t {session}"
+
+[queue_icons]
+# Strings may contain multiple characters; every field is optional.
+pending = "📥"
+reported = "📫"
 ```
 
 ## Fields
@@ -46,6 +51,7 @@ auto_start_tmux = true
 | `[terminal].command` | External-terminal command template; supports `{tmux_command}` |
 | `[terminal].auto_start_tmux` | Allow creation of a missing tmux session (default `true`) |
 | `[terminal].attach_command` | IDE attach template; supports `{session}` and `{tmux_command}` |
+| `[queue_icons]` | Optional visible queue prefix strings; fields are `pending`, `claimed`, `running`, `reported`, `lost`, `reconciling`, `unknown`, `skipped`, `awaiting_operator`, `operator_action`, `prioritized`, and `agent_prioritized` |
 
 ## Resolution order
 

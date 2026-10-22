@@ -305,7 +305,9 @@ pub fn operator_unskipped_queue_ids(diff: Option<&str>) -> std::collections::Has
         let Some(id) = crate::queue_response::queue_prompt_done_id(body) else {
             continue;
         };
-        let skipped = body.contains(agent_doc_document::queue_projection::SKIP_MARKER);
+        let skipped = body
+            .contains(agent_doc_document::queue_projection::QueueLifecycleMarker::Skipped.prefix())
+            || body.contains(agent_doc_document::queue_projection::SKIP_MARKER);
         match (added, skipped) {
             (false, true) => {
                 removed_skipped.insert(id);

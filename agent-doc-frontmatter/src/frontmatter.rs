@@ -287,6 +287,10 @@ pub struct StreamConfig {
     pub max_lines: Option<usize>,
 }
 
+pub use agent_doc_queue_icons::{
+    QueueIconConfig, QueueIconSet, install_queue_icon_config, queue_icons,
+};
+
 /// Live finalize-pipeline state tracker (`#fm-run-id-step`, Phase 5 of
 /// `tasks/agent-doc/plans/reentrant-finalize-pipeline.md`).
 ///

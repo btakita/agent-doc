@@ -2456,8 +2456,8 @@ fn write_nonblocking_or_quoted_operator_request_packet_records_no_todo() {
             "```text\n[#subagent-operator-request-pending-rows] subagent operator request\n",
         )
         .replace(
-            "- leave: change nothing.\n",
-            "- leave: change nothing.\n```\n",
+            "- **leave**: change nothing.\n",
+            "- **leave**: change nothing.\n```\n",
         );
     let quoted = BLOCKING_PACKET_RESPONSE
         .lines()

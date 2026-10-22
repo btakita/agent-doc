@@ -148,6 +148,12 @@ Reported queue work now uses canonical `☑️`; legacy `📫`/`📤` remain rea
 Custom prefixes are documented in `docs/getting-started/configuration.md`, `specs/06-config.md`, and `docs/reference/features.md`. Defaults are `pending="📥"`, `claimed="🟡"`, `running="🚧"`, `reported="☑️"`, `lost="⚠️"`, `reconciling="🔄"`, `unknown="❔"`, `skipped="⏭️"`, `awaiting_operator="⏳"`, `operator_action="🙋"`, `prioritized="📌"`, and `agent_prioritized="📍"` under `[queue_icons]`. Values may be arbitrary distinct, non-empty, single-line, multi-character strings without surrounding whitespace; omitted values keep defaults and legacy aliases remain readable.
 
 The queue loop recovery, failed enqueue receipt surfacing, stuck-outbox repair, Stop-hook continuation, remote-editor geometry formalization, operation-tree support, GitHub issues 352–357, operator-request locality, and duplicate/corrected queue items were integrated and verified. The local binary and editor packages were rebuilt and installed; `agent-doc --version` reports `0.35.544`.
+
+### Re: Continuation after release closeout
+
+> **Chat prompt (#chatprompt:03057a4af221):** cont
+
+Continuation complete. `v0.35.544` is public and its binary installer and PyPI bootstrap were verified. Post-tag fixes for unanswered `🙋☑️` retention and independent, idempotent per-platform asset publication are pushed to `main` at `c501ad975e`. The prior cycle passed `agent-doc session-check` with no drainable work; no additional implementation remains in this continuation.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 

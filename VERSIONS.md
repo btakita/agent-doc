@@ -2,6 +2,13 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.542
+
+- **Explicit Remote Dev routing can replace a complete same-width visible set without frontend geometry (GH #352).**
+  Run Agent Doc now accepts a full two-for-two live-tmux replacement while preserving unknown column order; partial
+  and widening replacements remain fail-closed, and missing-publisher diagnostics direct operators to install the
+  same modular plugin ZIP in both JetBrains Client/Gateway and the Remote Dev backend, restart both, and retry.
+
 ## 0.35.541
 
 - **Copied documents cannot take over an existing session identity (GH #349).** Replica registration rejects a

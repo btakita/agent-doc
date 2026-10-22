@@ -274,6 +274,17 @@ fn route_claimed_items(
         .into_iter()
         .map(|claim| (claim.identity.clone(), claim.clone()))
         .collect::<std::collections::HashMap<_, _>>();
+    // Only a live claim owns edit forwarding. Report receipts are added below
+    // as cancellation/mismatch evidence, but must continue through
+    // `apply_release_receipts` to become `persist_reported`.
+    if !attempts.is_empty() {
+        let claim_for = |text: &str| {
+            attempts
+                .get(&agent_doc_queue::queue_claim::claim_identity(text))
+                .cloned()
+        };
+        core::apply_claim_attempts(items, claim_for);
+    }
     let mut cancellations = std::collections::HashMap::new();
     for receipt in &ledger.cancellations {
         cancellations
@@ -315,14 +326,6 @@ fn route_claimed_items(
                 followed_from: Vec::new(),
             }
         });
-    }
-    if !attempts.is_empty() {
-        let claim_for = |text: &str| {
-            attempts
-                .get(&agent_doc_queue::queue_claim::claim_identity(text))
-                .cloned()
-        };
-        core::apply_claim_attempts(items, claim_for);
     }
     core::append_claimed_queue_removals(items, watermark, content, |text| {
         let identity = agent_doc_queue::queue_claim::claim_identity(text);

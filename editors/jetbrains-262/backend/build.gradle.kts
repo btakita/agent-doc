@@ -21,19 +21,19 @@ dependencies {
     }
 
     implementation(project(":shared"))
-    compileOnly("io.github.lazily:lazily:0.39.0") {
+    compileOnly("io.github.lazily:lazily:0.46.0") {
         exclude(group = "org.jetbrains.kotlinx")
         exclude(group = "org.jetbrains.kotlin")
         exclude(group = "org.jetbrains", module = "annotations")
         exclude(group = "net.java.dev.jna")
     }
-    testImplementation("io.github.lazily:lazily:0.39.0") {
+    testImplementation("io.github.lazily:lazily:0.46.0") {
         exclude(group = "org.jetbrains.kotlinx")
         exclude(group = "org.jetbrains.kotlin")
         exclude(group = "org.jetbrains", module = "annotations")
         exclude(group = "net.java.dev.jna")
     }
-    embeddedLazily("io.github.lazily:lazily:0.39.0") {
+    embeddedLazily("io.github.lazily:lazily:0.46.0") {
         exclude(group = "org.jetbrains.kotlinx")
         exclude(group = "org.jetbrains.kotlin")
         exclude(group = "org.jetbrains", module = "annotations")

@@ -21,7 +21,9 @@ rootProject.name = "agent-doc-jetbrains"
 // agent-loop superproject CI, whose submodule init listed every sibling except
 // `src/lazily-kt`. Keying on the settings file makes the fallback identical for
 // "absent" and "present but uninitialized".
-val lazilyKt = file("../../../lazily-kt")
+// An explicit source checkout lets dependency-update verification exercise the
+// released tag without changing the operator's sibling development checkout.
+val lazilyKt = System.getenv("AGENT_DOC_LAZILY_KT_DIR")?.let(::file) ?: file("../../../lazily-kt")
 val lazilyKtIsBuild = lazilyKt.resolve("settings.gradle.kts").isFile ||
     lazilyKt.resolve("settings.gradle").isFile
 if (lazilyKtIsBuild) {

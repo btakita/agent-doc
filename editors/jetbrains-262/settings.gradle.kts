@@ -37,3 +37,18 @@ dependencyResolutionManagement {
 include("shared")
 include("frontend")
 include("backend")
+
+// CI normally materializes the pinned release in mavenLocal. An explicit
+// source checkout provides the same exact-version verification seam without a
+// machine-local publication side effect.
+System.getenv("AGENT_DOC_LAZILY_KT_DIR")?.let { sourceDir ->
+    val lazilyKt = file(sourceDir)
+    check(lazilyKt.resolve("settings.gradle.kts").isFile) {
+        "AGENT_DOC_LAZILY_KT_DIR must name a lazily-kt Gradle build: ${lazilyKt.path}"
+    }
+    includeBuild(lazilyKt) {
+        dependencySubstitution {
+            substitute(module("io.github.lazily:lazily")).using(project(":"))
+        }
+    }
+}

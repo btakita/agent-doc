@@ -42,7 +42,7 @@ dependencies {
     // dispatcher); kotlin-stdlib, kotlinx-serialization, JetBrains annotations,
     // and jna are all platform-provided and were NOT bundled pre-change, so keep
     // them out of the zip to avoid classloader conflicts and regressions.
-    implementation("io.github.lazily:lazily:0.39.0") {
+    implementation("io.github.lazily:lazily:0.46.0") {
         exclude(group = "org.jetbrains.kotlinx")
         exclude(group = "org.jetbrains.kotlin")
         exclude(group = "org.jetbrains", module = "annotations")

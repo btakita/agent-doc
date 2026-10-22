@@ -81,7 +81,11 @@ same update installed on both sides; installing a modular ZIP locally on only th
 backend or only JetBrains Client does not copy it to the other process. For
 local ZIP testing, install the same ZIP explicitly in both backend and
 Client/Gateway, or use `runIdeSplitMode`. A one-sided install is unsupported and
-the pane-tagged surface bridge must be treated as unavailable. The backend still
+the pane-tagged surface bridge must be treated as unavailable. If a remote
+client remains connected without frontend authority after schema negotiation,
+the backend logs `frontend layout publisher unavailable` with
+`flat_evidence_has_no_column_geometry` and this two-sided install/restart remedy;
+route failures surface the same actionable reason. The backend still
 observes remote-client selection changes (Remote Dev `CONTROLLER` and Code With Me
 `GUEST` sessions; GH #262) while no frontend snapshot has been accepted, so
 main-layout tab switching continues for diagnostic/local installs. Detached-window

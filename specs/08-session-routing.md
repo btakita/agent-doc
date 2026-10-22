@@ -459,19 +459,22 @@ contain the document. Otherwise it defers with
 names the new membership. Tmux observation is a receipt and never supplies a
 replacement slot for passive focus escalation (GH #322; see
 `07-session-tmux-commands.md`). The narrow explicit-route exception is a
-foreground `Run Agent Doc` `ensure` request on a cold controller (GH #351): if
-positive live-tmux observation fixes the current window width, the requested
-document is the route's sole column, and the merge replaces exactly one live
-slot, the layout plane may publish that one-for-one replacement before
-dispatch. If the document is already live it remains focus-only. The published
-replacement keeps `column_order=unknown`; it is dispatch evidence, not a
-frontend snapshot, cannot seed editor-order memory, cannot widen the live
-window, and does not authorize automatic selection escalation or manual Sync.
-Manual `Sync Tmux Layout` still refuses unknown geometry with
-`surface_reference_unknown_layout`, names
-`flat_evidence_has_no_column_geometry` for Remote Dev flat evidence, and tells
-the operator to restart the Remote Dev IDE so its frontend layout publisher
-loads before retrying.
+foreground `Run Agent Doc` `ensure` request on a cold controller (GH #351,
+GH #352): if positive live-tmux observation fixes the current window width and
+the route carries the editor's complete named visible set at that same width,
+the layout plane may replace the complete observed set before dispatch. The
+one-column case is the smallest instance; a two-column visible set may replace
+two stashed live slots. Partial replacement and widening remain forbidden. If
+the document is already live it remains focus-only. The published replacement
+keeps `column_order=unknown`; it is dispatch evidence, not a frontend snapshot,
+cannot seed editor-order memory, cannot widen the live window, and does not
+authorize automatic selection escalation or manual Sync. Manual `Sync Tmux
+Layout` still refuses unknown geometry with `surface_reference_unknown_layout`
+and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence.
+If no frontend publisher connects, the backend and route failure identify it as
+unavailable and give the working local/custom-install remedy: install the same
+modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend,
+restart both, then retry.
 
 **Cross-document child-route boundary:** A route with no layout columns that is
 invoked from explicit live tmux process context inside a pane owned by another

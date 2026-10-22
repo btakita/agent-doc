@@ -1,9 +1,11 @@
 package com.github.btakita.agentdoc.split.backend
 
+import com.intellij.openapi.client.ClientType
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -54,5 +56,16 @@ class BackendGuestSelectionFallbackResumeTest {
             ),
             source,
         )
+    }
+
+    @Test
+    fun missingFrontendDiagnosticNamesTheWorkingTwoSidedInstallRemedy() {
+        assertEquals(5_000L, FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS)
+        val diagnostic = frontendAuthorityUnavailableDiagnostic("client-1", ClientType.CONTROLLER)
+        assertTrue(diagnostic.contains("frontend layout publisher unavailable"), diagnostic)
+        assertTrue(diagnostic.contains("reason=flat_evidence_has_no_column_geometry"), diagnostic)
+        assertTrue(diagnostic.contains("JetBrains Client/Gateway"), diagnostic)
+        assertTrue(diagnostic.contains("Remote Dev backend"), diagnostic)
+        assertTrue(diagnostic.contains("restart both"), diagnostic)
     }
 }

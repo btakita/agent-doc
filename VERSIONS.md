@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.541
+
+- **Copied documents cannot take over an existing session identity (GH #349).** Replica registration rejects a
+  carried `agent_doc_session` owned by another path before relay-authority lookup, while rename-compatible owners
+  remain valid; JetBrains treats the refusal as terminal and clears retry state and cached endpoints.
+- **Status synchronization preserves the authoritative projected body (GH #350).** Additive sync prose and
+  idempotent rewrites now round-trip through the lossless tree writer, lint shares the `sync`, `sync-mode`, and
+  `interval` vocabulary, and `respond --status` documents its single-value contract accurately.
+- **Subagent attempt IDs use ordinary Markdown brackets.** New queue projections render
+  `[#subagent:<label>#<generation>]`, while parsers and cleanup continue accepting both legacy double-bracket
+  forms and normalize them on the next projection write.
+- **Open operator actions veto every queue-consumption path.** A live `🙋 [#request-id]` annotation blocks explicit
+  completion and reactive free-text auto-strike until the linked todo clears, after which ordinary completion
+  resumes.
+- **Auto-clear timing coverage follows semantic queue state.** The live tmux regression reads the surviving head
+  through the production parser instead of comparing presentation decoration, and deterministic SimWorld coverage
+  proves that a generation-start baseline still observes a completion committed before the first watch tick.
+- **Explicit Remote Dev routing can recover a stashed document without guessing editor columns (GH #351).** When
+  editor geometry is unknown, Run Agent Doc accepts a typed single-document ensure only after a positive live-tmux
+  survey proves an exact one-for-one same-width replacement; automatic sync and escalation remain fail-closed,
+  `column_order=unknown` is preserved, and refusal text names the cause and remedy.
+
 ## 0.35.540
 
 - **Remote routing resumes only against a proven live document pane (GH #347).** After a controller restart,

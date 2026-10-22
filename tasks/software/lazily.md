@@ -25,8 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-📤 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
-completed
+Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0.46.0, lazily-js v0.37.0, and lazily-rs v0.61.0. Rust v0.57.2 compatibility and remaining bindings are pending; operator-deleted queue claims remain cancelled.
 <!-- /agent:status -->
 
 ## Exchange
@@ -850,45 +849,76 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=67a536a8cf74b7ed4352cdd8f71e79fa76ff5c3a6c464f7687734f8ffbd0f3f2 -->
 
-### Re: Subagent completed: `subagent:genformal` returned work for queue item “do [#lzstalehandlegenformal]: release + publish: Coordinator releases” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=b65ebd0d88efb5ef1c8df90098c93fe8971c7d733fee74f3b1b960bcf31c8aaf -->
-
-### Re: Subagent completed: `subagent:genspec` returned work for queue item “do [#lzstalehandlegenspec]: release + publish: Coordinator releases” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=b019b54cfc522d39a7e5b479fb29f2025b02675b92ad2478edc0e20e8caff040 -->
-
 ### Re: Subagent completed: `subagent:genconformance` returned work for queue item “do [#lzstalehandlegenconformance]: release + publish: Coordinator releases” — agent-doc
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=e04bd3c684a9fe4b4ea73ed611fbe46704d56306d65f16d071f2bc2077e776f5 -->
 
+### Re: Subagent completed: `subagent:genformal` returned work for queue item “do [#lzstalehandlegenformal]: release + publish: Coordinator releases” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=b65ebd0d88efb5ef1c8df90098c93fe8971c7d733fee74f3b1b960bcf31c8aaf -->
 ### Re: Subagent completed: `subagent:paritycs` returned work for queue item “do [#lzstalehandleparitycs]: release + publish: Coordinator releases” — agent-doc
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=356b7ad519c291fe5c5228a1d2c1eeba706f11bcf41610e89894a71b42bb7d1b -->
-<!-- agent:boundary:a10cf2c3 -->
+> **Chat prompt (#chatprompt:2bb930f7a9ea):** Have we released rs + kt + js?
+
+> **Chat prompt (#chatprompt:2c0e602e3fab):** can we release spec + conformance + formal?
+
+> **Chat prompt (#chatprompt:6f97bc4b5c48):** Why are some of my todo items not completed? I thought I answered the questions
+
+> **Chat prompt (#chatprompt:86730befeb39):** Have we release + published rs + kt + js to unblock agent-doc-bugs.md?
+
+> **Chat prompt (#chatprompt:cca2e4d1a074):** Can we publish those to unblock agent-doc-bugs.md?
+
+> **Chat prompt (#chatprompt:885255672298):** After, publish the rest of the implementations as they are ready.
+
+> **Chat prompt (#chatprompt:01d2100791e8):** is rs released yet?
+
+> **Chat prompt (#chatprompt:18e8d27ae5aa):** rs was the key blocker so of course it has extra delays
+
+> **Chat prompt (#chatprompt:bc2da60a7386):** Is rs released yet?
+
+> **Chat prompt (#chatprompt:6095ff080937):** Is it released?
+
+> **Operator note:** release + publish: Coordinator releases
+
+Coordinator release and publication are complete for both queued Kotlin and JavaScript follow-ups.
+
+### Re: stale-handle generation releases — gpt-5 · 2026-10-22
+
+Yes. The key Rust blocker is now released and published:
+
+- **lazily-rs v0.61.0**: generation-fenced stale-handle disposal is on `main` at tested release commit `81fb1e7cc01d8b9f7f83b313a2e7867ea75b68c7`, tagged and released on GitHub, and independently downloaded from crates.io as `lazily@0.61.0`. The release candidate passed the full local gate, including the canonical stale-handle replay and 21/21 Loom cases.
+- The tag-triggered GitHub job authenticated successfully but initially failed because the workflow did not pass the action's token output to Cargo. I published the exact tested package with the configured local Cargo credential, verified it from the registry, and fixed the workflow on `main` at `8a486f8` for future releases.
+- **lazily-kt v0.46.0** is published through GitHub Packages; its release and main CI workflows passed.
+- **lazily-js v0.37.0** is published as `@lazily-hub/lazily-js@0.37.0`; its release and main CI workflows passed.
+- **lazily-spec v0.43.0** and **lazily-formal v0.40.0** are released. The normative spec, executable conformance corpus, and formal generation/ABA preservation model now exist as released guidance.
+
+This removes the missing Rust registry release as the blocker for agent-doc adoption. The downstream agent-doc dependency still needs to be updated to consume v0.61.0.
+
+The unchecked release-owner TODOs were stale duplicates of decisions already answered in chat. I have checked those six TODOs off. I also completed the shipped spec/conformance and Kotlin/JavaScript parity backlog entries.
+
+The remaining Rust compatibility release `v0.57.2` and the other language implementations are not yet published. Their verified branches are preserved for the authorized follow-on release work. I added the discovered capability-aware conformance/spec follow-up as `#lzstalehandlegenparityspec`. Operator-deleted queue claims remain cancelled and were not restarted.
+
+The exchange is over the compaction threshold, but I did not interrupt the active queue to compact it.
+<!-- agent:boundary:368b8d27 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- 📤 [#subagent:genspec#1] do [#lzstalehandlegenspec]: release + publish: Coordinator releases
-- 📤 [#subagent:genconformance#1] do [#lzstalehandlegenconformance]: release + publish: Coordinator releases
-- 📤 [#subagent:genformal#1] do [#lzstalehandlegenformal]: release + publish: Coordinator releases
 - 📤 [#subagent:genkt#1] do [#lzstalehandlegenkt]: release + publish: Coordinator releases
 - 📤 [#subagent:genjs#1] do [#lzstalehandlegenjs]: release + publish: Coordinator releases
-- 📤 [#subagent:paritycs#1] do [#lzstalehandleparitycs]: release + publish: Coordinator releases
-- 🚧 [#subagent:paritygd#1] do [#lzstalehandleparitygd]: release + publish: Coordinator releases
 <!-- /agent:queue -->
 
 ## Todo
 
 <!-- agent:todo -->
-- [ ] [#lzstalehandleparitykt] Choose release owner for [#lzstalehandleparitykt] (source: agent:backlog [#lzstalehandleparitykt])
-- [ ] [#lzstalehandleparityrs] Choose release owner for [#lzstalehandleparityrs] (source: agent:backlog [#lzstalehandleparityrs])
-- [ ] [#lzstalehandleparityjs] Choose release owner for [#lzstalehandleparityjs] (source: agent:backlog [#lzstalehandleparityjs])
-- [ ] [#lzstalehandleconformance] Choose release owner for [#lzstalehandleconformance] (source: agent:backlog [#lzstalehandleconformance])
-- [ ] [#lzstalehandlespec] Choose release owner for [#lzstalehandlespec] (source: agent:backlog [#lzstalehandlespec])
-- [ ] [#lzstalehandleparitypy] Choose release owner for [#lzstalehandleparitypy] (source: agent:backlog [#lzstalehandleparitypy])
+- [x] [#lzstalehandleparitykt] Choose release owner for [#lzstalehandleparitykt] (source: agent:backlog [#lzstalehandleparitykt])
+- [x] [#lzstalehandleparityrs] Choose release owner for [#lzstalehandleparityrs] (source: agent:backlog [#lzstalehandleparityrs])
+- [x] [#lzstalehandleparityjs] Choose release owner for [#lzstalehandleparityjs] (source: agent:backlog [#lzstalehandleparityjs])
+- [x] [#lzstalehandleconformance] Choose release owner for [#lzstalehandleconformance] (source: agent:backlog [#lzstalehandleconformance])
+- [x] [#lzstalehandlespec] Choose release owner for [#lzstalehandlespec] (source: agent:backlog [#lzstalehandlespec])
+- [x] [#lzstalehandleparitypy] Choose release owner for [#lzstalehandleparitypy] (source: agent:backlog [#lzstalehandleparitypy])
 - [x] [#subagent-operator-request-paritykt-release] Answer the blocking subagent question for queue item ‘do [#lzstalehandleparitykt]’ in agent:exchange: How should the newly appended `release + publish` instruction be handled when the worker coordinator rules explicitly forbid this subagent from running a release, version bump, tag, or publish? (choices: Coordinator releases (Recommended), Defer release) (source: agent:backlog [#lzstalehandleparitykt])
 - [x] [#subagent-operator-request-release-owner] Answer the blocking subagent question for queue item ‘do [#lzstalehandleparityrs]’ in agent:exchange: Who should execute the newly requested release + publish after this worker lands and pushes the code/spec/test commits? (choices: Coordinator release, Separate release worker) (source: agent:backlog [#lzstalehandleparityrs])
 - [x] [#subagent-operator-request-parityjs-release] Answer the blocking subagent question for queue item ‘do [#lzstalehandleparityjs]’ in agent:exchange: Should the coordinator perform the requested lazily-js release + publish after integrating this worker's tested commit? (choices: Coordinator release (Recommended), Defer release) (source: agent:backlog [#lzstalehandleparityjs])
@@ -901,23 +931,18 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzstalehandlespec] Add the normative stale-handle disposal contract to lazily-spec: disposal must validate handle generation/identity and node kind before mutating graph state; a stale or cross-kind-recycled handle is an idempotent no-op, cannot delete the new occupant or run its cleanup, and only a matching live effect may detach edges/run cleanup. Update reactive-graph prose, API vocabulary, coverage claims, and the formal model/invariants.
-- [ ] 🚧 [#lzstalehandleconformance] Extend lazily-spec executable conformance for stale-handle disposal: add a discriminating Effect-handle → recycled Source reproduction for the GH #354 (https://github.com/btakita/agent-doc/issues/354) `set_cell on non-cell id` failure, cover the stale cell/computed/effect handle × successor-kind matrix where representable, assert successor readability/writability/edges and cleanup counts, update `dispose_stale_handle` schema/docs/generators, and make the aggregate/discriminability gates reject missing or vacuous replay.
-- [ ] [#lzstalehandlegenspec] [follow-up] Reconcile and release the generation-aware stale-handle normative spec for all implementations: define occupant identity, the canonical 3x3 parity obligations, explicit capability exclusions, and implementation pin/version requirements; validate docs and coverage before publish.
-- [ ] [#lzstalehandlegenconformance] [follow-up] Reconcile and release executable generation-aware stale-handle conformance across Rust, Kotlin, JavaScript, and all bindings: canonical 3x3 matrix, non-vacuous reuse proof, successor readability/writability/edge/cleanup assertions, mutation/discriminability gates, and CI pinning.
-- [ ] [#lzstalehandlegenformal] [follow-up] Reconcile and release the lazily-formal generation-aware teardown model and proofs: occupant generations, same-kind ABA and cross-kind stale handles as whole-state no-ops, successor edge and cleanup preservation, and refinement obligations aligned with the normative spec and executable conformance.
-- [ ] 🚧 [#lzstalehandleparityrs] Bring lazily-rs into stale-handle disposal parity: land the kind-before-remove fix on current main and the compatible 0.57.x line, replay the new conformance vector in Context and ThreadSafeContext (plus async wrappers where applicable), prove a stale Effect handle cannot remove a recycled Source, and publish/version only after the spec pin and full gates are green.
-- [ ] 🚧 [#lzstalehandleparitypy] Bring lazily-py into stale-handle disposal parity: adopt the new spec/conformance vector, audit source/computed/effect handle identity and id-reuse behavior, implement kind/generation-before-mutation semantics where needed, and wire non-vacuous replay plus mutation coverage into CI.
-- [ ] 🚧 [#lzstalehandleparitykt] Bring lazily-kt into stale-handle disposal parity: adopt the new spec/conformance vector across normal and thread-safe/reactive contexts, enforce kind/generation validation before removal or cleanup, and add CI/mutation evidence that recycled successors survive stale disposal.
-- [ ] 🚧 [#lzstalehandlegenkt] [follow-up] After integrating the current lazily-kt branch, pin the released stale-handle spec/conformance artifacts, rerun the full generation-aware 3x3 parity and mutation gates, close any drift, and release/publish the verified Kotlin artifact needed by agent-doc.
-- [ ] 🚧 [#lzstalehandleparityjs] Bring lazily-js into stale-handle disposal parity: replay the new vector for reactive and thread-safe/async APIs, close any stale/cross-kind disposal gap, and prove with CI/mutation tests that a recycled Source remains readable/writable and unrelated cleanup never runs.
-- [ ] 🚧 [#lzstalehandlegenjs] [follow-up] After integrating the current lazily-js branch, pin the released stale-handle spec/conformance artifacts, rerun the full generation-aware 3x3 parity and mutation gates, close any drift, and release/publish the verified JavaScript artifact needed by agent-doc.
-- [ ] 🚧 [#lzstalehandleparitydart] Bring lazily-dart into stale-handle disposal parity: adopt and replay the new vector, audit effect/source/computed disposal and allocator reuse, implement no-op stale/cross-kind disposal semantics, and add CI/mutation evidence with no vacuous fixture acceptance.
-- [ ] 🚧 [#lzstalehandleparityzig] Bring lazily-zig into stale-handle disposal parity: adopt and replay the new vector for every supported graph context, validate handle kind/generation before node removal, preserve recycled successors and cleanup ownership, and add CI/mutation evidence.
-- [ ] 🚧 [#lzstalehandleparitygo] Bring lazily-go into stale-handle disposal parity: adopt and replay the new vector, audit handle identity/reuse across source/computed/effect teardown, implement pre-mutation kind/generation checks where needed, and add non-vacuous CI/mutation coverage.
-- [ ] 🚧 [#lzstalehandleparitycpp] Bring lazily-cpp into stale-handle disposal parity: adopt and replay the new vector, audit handle identity/reuse and RAII effect cleanup, ensure stale/cross-kind handles cannot tear down recycled nodes or run the wrong cleanup, and add CI/mutation evidence.
-- [ ] [#lzstalehandleparitycs] Bring lazily-cs into stale-handle disposal parity: adopt and replay the new vector, audit disposable effect handles and recycled node ids, enforce kind/generation-before-mutation with idempotent stale disposal, and add non-vacuous CI/mutation coverage.
-- [ ] [#lzstalehandleparitygd] Bring lazily-gd into declared stale-handle disposal parity: classify the fixture against its staged reactive-graph surface, implement/replay the supported stale-handle cases (or record an exact capability exclusion for unavailable handle/id-reuse APIs), and update coverage so unsupported is explicit rather than silently skipped.
+- [ ] [#lzstalehandlegenparityspec] Model recycled-node-id stale-handle fencing as an explicit optional coverage capability: move the two requires=recycled_node_ids fixtures out of the base reactive-graph shipped-proof obligation into a dedicated coverage row (recommended: GDScript —, bindings with reusable logical ids ✅), update check-coverage-claims to enforce capability-aware fixture evidence, and add regression tests proving exact capability exclusions do not force the broad reactive-graph row to ~. Until that row split lands, the truthful conservative fallback is GDScript reactive-graph ~ with a required partial_reason.
+- [ ] 🚧 [#lzstalehandlegenspec] [follow-up] Reconcile and release the generation-aware stale-handle normative spec for all implementations: define occupant identity, the canonical 3x3 parity obligations, explicit capability exclusions, and implementation pin/version requirements; validate docs and coverage before publish.
+- [ ] 🚧 [#lzstalehandlegenconformance] [follow-up] Reconcile and release executable generation-aware stale-handle conformance across Rust, Kotlin, JavaScript, and all bindings: canonical 3x3 matrix, non-vacuous reuse proof, successor readability/writability/edge/cleanup assertions, mutation/discriminability gates, and CI pinning.
+- [ ] 🚧 [#lzstalehandlegenformal] [follow-up] Reconcile and release the lazily-formal generation-aware teardown model and proofs: occupant generations, same-kind ABA and cross-kind stale handles as whole-state no-ops, successor edge and cleanup preservation, and refinement obligations aligned with the normative spec and executable conformance.
+- [ ] [#lzstalehandleparityrs] Bring lazily-rs into stale-handle disposal parity: land the kind-before-remove fix on current main and the compatible 0.57.x line, replay the new conformance vector in Context and ThreadSafeContext (plus async wrappers where applicable), prove a stale Effect handle cannot remove a recycled Source, and publish/version only after the spec pin and full gates are green.
+- [ ] [#lzstalehandleparitypy] Bring lazily-py into stale-handle disposal parity: adopt the new spec/conformance vector, audit source/computed/effect handle identity and id-reuse behavior, implement kind/generation-before-mutation semantics where needed, and wire non-vacuous replay plus mutation coverage into CI.
+- [ ] [#lzstalehandleparitydart] Bring lazily-dart into stale-handle disposal parity: adopt and replay the new vector, audit effect/source/computed disposal and allocator reuse, implement no-op stale/cross-kind disposal semantics, and add CI/mutation evidence with no vacuous fixture acceptance.
+- [ ] [#lzstalehandleparityzig] Bring lazily-zig into stale-handle disposal parity: adopt and replay the new vector for every supported graph context, validate handle kind/generation before node removal, preserve recycled successors and cleanup ownership, and add CI/mutation evidence.
+- [ ] [#lzstalehandleparitygo] Bring lazily-go into stale-handle disposal parity: adopt and replay the new vector, audit handle identity/reuse across source/computed/effect teardown, implement pre-mutation kind/generation checks where needed, and add non-vacuous CI/mutation coverage.
+- [ ] [#lzstalehandleparitycpp] Bring lazily-cpp into stale-handle disposal parity: adopt and replay the new vector, audit handle identity/reuse and RAII effect cleanup, ensure stale/cross-kind handles cannot tear down recycled nodes or run the wrong cleanup, and add CI/mutation evidence.
+- [ ] 🚧 [#lzstalehandleparitycs] Bring lazily-cs into stale-handle disposal parity: adopt and replay the new vector, audit disposable effect handles and recycled node ids, enforce kind/generation-before-mutation with idempotent stale disposal, and add non-vacuous CI/mutation coverage.
+- [ ] 🚧 [#lzstalehandleparitygd] Bring lazily-gd into declared stale-handle disposal parity: classify the fixture against its staged reactive-graph surface, implement/replay the supported stale-handle cases (or record an exact capability exclusion for unavailable handle/id-reuse APIs), and update coverage so unsupported is explicit rather than silently skipped.
 <!-- /agent:backlog -->
 
 ## Review

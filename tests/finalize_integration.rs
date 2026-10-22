@@ -5511,7 +5511,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         released_projection.contains(&format!(
             "- 🚧 [#subagent:setup#1] {setup}\n"
         )) && released_projection.contains(&format!(
-            "- 📤 [#subagent:page-status-enum#1] {question}\n"
+            "- 📫 [#subagent:page-status-enum#1] {question}\n"
         ))
             && !released_projection.contains(&format!("- 🟡 {question}\n")),
         "reported release must retain a distinct awaiting-integration marker:\n{released_projection}"
@@ -5527,7 +5527,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
 
     // Force the ordering that failed under the full release suite: closeout
     // observes the pre-question turn baseline after the worker claim has been
-    // released. The exact-attempt receipt, not projection timing or the 📤
+    // released. The exact-attempt receipt, not projection timing or the 📫
     // marker, must authorize the exact echoed answer.
     checkpoint_baseline(tmp.path(), &original);
     let receipt = agent_doc_queue_io::claim_release_receipt::load(&doc)

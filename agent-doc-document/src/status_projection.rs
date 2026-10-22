@@ -10,7 +10,7 @@ use agent_doc_element::element::{is_backlog_component, is_tracked_work_component
 pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your supervisor)";
 
 /// Prefix for the binary-owned queue handoff summary projected into
-/// `agent:status`. Reported queue rows (`📤`) are not stale or finished: their
+/// `agent:status`. Reported queue rows (`📫`) are not stale or finished: their
 /// worker result still needs coordinator integration, verification, and closeout.
 pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📤 Queue handoff:";
 const LEGACY_REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";

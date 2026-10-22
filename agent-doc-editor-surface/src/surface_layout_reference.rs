@@ -115,7 +115,7 @@ impl SurfaceReferenceRefusal {
             }
             Self::Inert => "No agent-doc session document focused",
             Self::UnknownLayout => {
-                "Editor split could not be read; the retained tmux layout was not changed."
+                "Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Restart the Remote Dev IDE so its frontend layout publisher loads, then retry Sync Tmux Layout."
             }
             Self::StaleFocus => {
                 "Editor focus changed while the split layout was being read; retry after the selection settles."
@@ -429,7 +429,7 @@ mod tests {
     fn refusal_diagnostics_carry_a_stable_token() {
         assert_eq!(
             SurfaceReferenceRefusal::UnknownLayout.diagnostic(),
-            "surface_reference_unknown_layout: Editor split could not be read; the retained tmux layout was not changed."
+            "surface_reference_unknown_layout: Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Restart the Remote Dev IDE so its frontend layout publisher loads, then retry Sync Tmux Layout."
         );
         assert!(
             SurfaceReferenceRefusal::StaleFocus

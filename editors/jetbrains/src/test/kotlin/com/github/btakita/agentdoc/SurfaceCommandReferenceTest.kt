@@ -110,9 +110,9 @@ class SurfaceCommandReferenceTest {
     }
 
     @Test
-    fun `controller layout refusals keep the plugin's former sentences`() {
+    fun `controller layout refusals keep actionable plugin messages`() {
         assertEquals(
-            "Editor split could not be read; the retained tmux layout was not changed.",
+            "Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Restart the Remote Dev IDE so its frontend layout publisher loads, then retry Sync Tmux Layout.",
             SurfaceCommandReference.refusalMessage(
                 "sync_tmux_layout rejected: surface_reference_unknown_layout: Editor split could not be read; ...",
             ),

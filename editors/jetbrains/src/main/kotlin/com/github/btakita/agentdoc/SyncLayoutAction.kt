@@ -573,9 +573,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         is ExactVisibleSyncDecision.Publish -> decision.columns
                         ExactVisibleSyncDecision.RefuseUnknownLayout -> {
                             LOG.warn("[sync] refusing exact-visible layout because editor columns are unknown")
-                            request.notifyFailure(
-                                "Editor split could not be read; the retained tmux layout was not changed.",
-                            )
+                            request.notifyFailure(SurfaceCommandReference.UNKNOWN_LAYOUT_MESSAGE)
                             return@Thread
                         }
                         ExactVisibleSyncDecision.RefuseStaleFocusProjection -> {

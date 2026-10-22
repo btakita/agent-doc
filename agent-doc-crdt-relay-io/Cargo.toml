@@ -32,7 +32,7 @@ agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.542" 
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.542" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.542" }
 anyhow = "1"
-lazily = { version = "0.57.1", features = ["ipc", "durable-sqlite"] }
+lazily = { version = "0.61.0", features = ["ipc", "durable-sqlite"] }
 # `#relaylockpoison`: the relay registries use parking_lot, not std::sync::Mutex.
 # The workspace deliberately keeps `panic = "unwind"` so the cdylib's
 # catch_unwind guards survive a replica panic inside the host IDE; a poisoning

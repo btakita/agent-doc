@@ -91,7 +91,9 @@ pub fn wire_op_to_lazily(op: &WireDeltaOp) -> Result<DeltaOp, base64::DecodeErro
 }
 
 /// Convert one lazily [`DeltaOp`] back to an agent-doc wire op. Returns `None` when
-/// a payload is a `SharedBlob` (no string-payload wire representation).
+/// a payload is a `SharedBlob` (no string-payload wire representation) or when the
+/// op uses Lazily's queue-cell protocol, which the agent-doc editor wire has not
+/// negotiated.
 pub fn lazily_op_to_wire(op: &DeltaOp) -> Option<WireDeltaOp> {
     Some(match op {
         DeltaOp::CellSet { node, payload } => WireDeltaOp::CellSet {
@@ -132,6 +134,9 @@ pub fn lazily_op_to_wire(op: &DeltaOp) -> Option<WireDeltaOp> {
             dependent: dependent.0,
             dependency: dependency.0,
         },
+        DeltaOp::QueuePush { .. } | DeltaOp::QueuePop { .. } | DeltaOp::QueueClose { .. } => {
+            return None;
+        }
     })
 }
 
@@ -355,5 +360,24 @@ mod tests {
             key: None,
         };
         assert!(lazily_op_to_wire(&op).is_none());
+    }
+
+    #[test]
+    fn queue_cell_ops_are_not_representable_on_the_editor_wire() {
+        let ops = [
+            DeltaOp::QueuePush {
+                node: nid(1),
+                payload: lazily::IpcValue::Inline(vec![1]),
+            },
+            DeltaOp::QueuePop { node: nid(1) },
+            DeltaOp::QueueClose { node: nid(1) },
+        ];
+
+        for op in ops {
+            assert!(
+                lazily_op_to_wire(&op).is_none(),
+                "unexpected wire op: {op:?}"
+            );
+        }
     }
 }

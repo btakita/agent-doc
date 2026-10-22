@@ -61,7 +61,7 @@ agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.542" }
 anyhow = "1"
 base64 = "0.22"
 interprocess = { version = "2", default-features = false, features = ["tokio"] }
-lazily = { version = "0.57.1", features = ["thread-safe", "ipc", "durable-sqlite"] }
+lazily = { version = "0.61.0", features = ["thread-safe", "ipc", "durable-sqlite"] }
 libc = "0.2"
 fs2 = "0.4"
 serde = { version = "1", features = ["derive"] }

@@ -802,6 +802,10 @@ pub struct BlockingOperatorRequestPacket {
     pub kind: String,
     /// The packet's `request:` line, trimmed.
     pub request: String,
+    /// The dispatch-time queue item this request blocks. New worker prompts
+    /// provide this exact value so queue-local visibility can link back to the
+    /// packet and todo without guessing from prose.
+    pub queue_item: Option<String>,
     /// The plain-text label of every `- **<label>**: <effect>` choice line, in order.
     /// Legacy unbolded choice labels remain readable.
     pub choice_labels: Vec<String>,
@@ -848,6 +852,7 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
         let mut kind = None;
         let mut blocking = None;
         let mut request = None;
+        let mut queue_item = None;
         let mut choice_labels = Vec::new();
         let mut in_choices = false;
         while index < lines.len() {
@@ -882,6 +887,7 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
                 "kind" => kind = Some(value.to_ascii_lowercase()),
                 "blocking" => blocking = Some(value.eq_ignore_ascii_case("true")),
                 "request" => request = Some(value.to_string()),
+                "queue_item" => queue_item = (!value.is_empty()).then(|| value.to_string()),
                 "choices" => in_choices = value.is_empty(),
                 _ => {}
             }
@@ -899,6 +905,7 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
             id: packet_id.to_string(),
             kind,
             request,
+            queue_item,
             choice_labels,
         });
     }
@@ -933,9 +940,11 @@ fn is_closing_fence(trimmed_start: &str, (ch, run): (char, usize)) -> bool {
 /// The deterministic `agent:todo` action for a blocking operator request packet
 /// (`#packettodo`). It names the packet's place (`agent:exchange`), the first
 /// sentence of its `request:` line, and the offered choice labels, so the todo
-/// is understandable by itself and points at the full packet. `tracked_id`
-/// (the one tracked item this closeout gated or cited) is cited mid-sentence
-/// so `--todo-add` id layering (`#todoidlayer`) reuses it.
+/// is understandable by itself and points at the full packet. Its explicit id
+/// is the packet id, so `agent:exchange`, `agent:todo`, and the queue's
+/// `🙋 [#id]` annotation share one stable identity. `tracked_id` is descriptive
+/// context only; it deliberately is not rendered as a `#id` citation because
+/// todo id layering would otherwise replace the request identity.
 pub fn blocking_operator_request_todo_text(
     packet: &BlockingOperatorRequestPacket,
     tracked_id: Option<&str>,
@@ -946,14 +955,26 @@ pub fn blocking_operator_request_todo_text(
         "question"
     };
     let target = tracked_id
-        .map(|id| format!(" for #{id}"))
+        .map(|id| format!(" for tracked work {id}"))
         .unwrap_or_default();
     let summary = truncate_on_word(
         first_sentence(&packet.request),
         OPERATOR_REQUEST_TODO_SUMMARY_MAX_CHARS,
     );
-    let mut text =
-        format!("Answer the blocking subagent {subject}{target} in agent:exchange: {summary}");
+    let queue_target = packet
+        .queue_item
+        .as_deref()
+        .map(|item| {
+            format!(
+                " for queue item ‘{}’",
+                truncate_on_word(item, OPERATOR_REQUEST_TODO_SUMMARY_MAX_CHARS)
+            )
+        })
+        .unwrap_or_default();
+    let mut text = format!(
+        "id={} Answer the blocking subagent {subject}{target}{queue_target} in agent:exchange: {summary}",
+        packet.id
+    );
     if !packet.choice_labels.is_empty() {
         let labels = packet
             .choice_labels
@@ -1770,6 +1791,7 @@ mod tests {
 `#apipendingorphans` is gated on review of #733 and on your decision below.
 
 [#subagent-operator-request-pending-rows] subagent operator request
+queue_item: sdk-demo.md queue annotation fix
 kind: question
 blocking: true
 request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
@@ -1789,6 +1811,10 @@ choices:
         assert_eq!(packets.len(), 1, "{packets:?}");
         assert_eq!(packets[0].id, "subagent-operator-request-pending-rows");
         assert_eq!(packets[0].kind, "question");
+        assert_eq!(
+            packets[0].queue_item.as_deref(),
+            Some("sdk-demo.md queue annotation fix")
+        );
         assert!(packets[0].request.starts_with("What should happen"));
         assert_eq!(
             packets[0].choice_labels,
@@ -1808,12 +1834,12 @@ choices:
     }
 
     #[test]
-    fn packettodo_text_is_deterministic_and_cites_the_tracked_id() {
+    fn packettodo_text_is_deterministic_and_reuses_the_packet_id() {
         let packet = &blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE)[0];
         let text = blocking_operator_request_todo_text(packet, Some("apipendingorphans"));
         assert_eq!(
             text,
-            "Answer the blocking subagent question for #apipendingorphans in agent:exchange: \
+            "id=subagent-operator-request-pending-rows Answer the blocking subagent question for tracked work apipendingorphans for queue item ‘sdk-demo.md queue annotation fix’ in agent:exchange: \
              What should happen to the chat messages already stuck in `pending` on STG \
              (including the rows from the 2026-10-20 incident)? \
              (choices: withdraw, resubmit, release, leave)"
@@ -1826,11 +1852,12 @@ choices:
             id: "subagent-operator-request-deploy-stg".to_string(),
             kind: "permission".to_string(),
             request: "Run `make deploy` against STG".to_string(),
+            queue_item: None,
             choice_labels: Vec::new(),
         };
         assert_eq!(
             blocking_operator_request_todo_text(&permission, None),
-            "Answer the blocking subagent permission request in agent:exchange: Run `make deploy` against STG"
+            "id=subagent-operator-request-deploy-stg Answer the blocking subagent permission request in agent:exchange: Run `make deploy` against STG"
         );
     }
 
@@ -1871,8 +1898,8 @@ choices:
         assert!(blocking_operator_request_packets(prose).is_empty());
 
         let gap = BLOCKING_PACKET_RESPONSE.replace(
-            "subagent operator request\nkind",
-            "subagent operator request\n\nkind",
+            "subagent operator request\nqueue_item",
+            "subagent operator request\n\nqueue_item",
         );
         assert!(blocking_operator_request_packets(&gap).is_empty());
     }
@@ -1883,6 +1910,7 @@ choices:
             id: "subagent-operator-request-long".to_string(),
             kind: "question".to_string(),
             request: "word ".repeat(80),
+            queue_item: None,
             choice_labels: vec![
                 "(separate question) reaper for future 504-accepted messages that are never decided"
                     .to_string(),
@@ -1945,8 +1973,7 @@ choices:
             "subagent-operator-request",
             "old retained/history packets remain readable"
         );
-        let duplicate_legacy =
-            blocking_operator_request_packets(&format!("{legacy}\n{legacy}"));
+        let duplicate_legacy = blocking_operator_request_packets(&format!("{legacy}\n{legacy}"));
         assert_eq!(
             duplicate_blocking_operator_request_id(&duplicate_legacy),
             Some("subagent-operator-request"),

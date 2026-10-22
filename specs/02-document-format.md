@@ -464,6 +464,14 @@ packets record nothing. Todo mutations run after the envelope's adds, ungates,
 and gates, so a todo layered on an item this closeout gated names
 `(source: agent:review [#<id>])`.
 
+The current packet protocol also carries `queue_item: <origin-queue-item>`
+verbatim. Its derived todo owns `[#<packet-id>]`; an explicit todo suppresses
+derivation only when it owns that same id. While the todo is open, the matching
+live queue row carries identity-neutral `🙋 [#<packet-id>]` alongside any worker
+lifecycle marker and is not drainable. Completing the same-id todo clears the
+annotation. This request-linked rule supersedes the older tracked-id/surrogate
+layering described above for newly emitted packets.
+
 **Todo-done advisory.** When a closeout resolves tracked work (`--done`,
 `--review-resolve`) and an OPEN `agent:todo` item still cites it (an item that
 owns the id was already checked off by the `#todoids` closeout check), the

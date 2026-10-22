@@ -284,7 +284,11 @@ pub fn subagent_authorization_with_presets(
         presets
             .iter()
             .filter(|preset| preset.source == PresetSource::Item)
-            .chain(presets.iter().filter(|preset| preset.source != PresetSource::Item))
+            .chain(
+                presets
+                    .iter()
+                    .filter(|preset| preset.source != PresetSource::Item),
+            )
             .find_map(field)
             .map(String::as_str)
     };
@@ -398,6 +402,7 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "stopping; use the harness's native parent-message mechanism when available, otherwise ",
     "return the packet as your result:\n\n",
     "[#subagent-operator-request-<unique-id>] subagent operator request\n",
+    "queue_item: <origin-queue-item>\n",
     "kind: question | permission\n",
     "blocking: true\n",
     "request: <exact question or exact tool/action requiring permission>\n",
@@ -407,6 +412,7 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "Replace `<unique-id>` with a short request-specific lowercase suffix using letters, digits, ",
     "and hyphens. Use a different marker id for every request packet in the session document; ",
     "never reuse the legacy fixed `[#subagent-operator-request]` id. ",
+    "Keep the rendered `queue_item:` value unchanged; it links this packet to the exact queue row. ",
     "Include every offered choice; write `choices: []` only when the harness supplied none. ",
     "Claude Code may surface a background worker's tool-permission prompt natively, and Codex ",
     "provides inter-agent messaging; Grok Build and OpenCode may require returning the packet ",
@@ -552,7 +558,11 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
          - Report back: branch, commit SHA, files changed, and exact test results.\n",
     );
     out.push('\n');
-    out.push_str(SUBAGENT_OPERATOR_REQUEST_PROTOCOL);
+    let queue_item = agent_doc_document::queue_projection::strip_priority_markers(&auth.item)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    out.push_str(&SUBAGENT_OPERATOR_REQUEST_PROTOCOL.replace("<origin-queue-item>", &queue_item));
     out
 }
 
@@ -633,9 +643,15 @@ mod tests {
         let auth = subagent_authorization("doc.md", &queue, "fix it");
         assert_eq!(auth.model.as_deref(), Some("queue-model"));
         assert_eq!(auth.effort.as_deref(), Some("xhigh"));
-        assert!(auth.subagent_prompt_preamble.contains("> model: queue-model"));
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains("> model: queue-model")
+        );
         assert!(auth.subagent_prompt_preamble.contains("> effort: xhigh"));
-        assert!(auth.subagent_prompt_preamble.contains("Codex `spawn_agent`"));
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains("Codex `spawn_agent`")
+        );
 
         let preset = queue
             .replace(" model=queue-model effort=xhigh", "")
@@ -940,6 +956,10 @@ mod tests {
             );
             assert!(!preamble.contains("[agent-doc] subagent operator request"));
             assert!(!preamble.contains("(#waypostrequest)"));
+            assert!(
+                preamble.contains(&format!("queue_item: {item}")),
+                "{preamble}"
+            );
             assert!(preamble.contains("request: <exact question or exact tool/action"));
             assert!(preamble.contains(
                 "Use a different marker id for every request packet in the session document"

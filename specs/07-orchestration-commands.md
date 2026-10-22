@@ -659,6 +659,7 @@ stopping, it sends or returns this packet without paraphrase:
 
 ```text
 [#subagent-operator-request-<unique-id>] subagent operator request
+queue_item: <origin-queue-item>
 kind: question | permission
 blocking: true
 request: <exact question or exact tool/action requiring permission>
@@ -692,6 +693,12 @@ a closeout whose response presents a blocking packet without its own
 `--todo-add` gets a derived, id-layered `agent:todo` item from the packet's
 `request:` and choice labels in the same transaction (`#packettodo`,
 [§2](02-document-format.md)).
+
+For current packets, `queue_item` is copied unchanged from the dispatch brief.
+The derived todo owns the packet id, and the same live queue row carries
+`🙋 [#request-id]` while that todo remains open. This operator-action annotation
+is orthogonal to `🟡`/`🚧`/`📥` worker lifecycle, is stripped from queue identity,
+and makes the row non-drainable. `--todo-done <request-id>` clears it.
 
 Permission safety is stricter than question routing: a conversational answer is
 context, not a tool permission grant. The worker may retry a protected action

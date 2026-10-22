@@ -1147,6 +1147,12 @@ fn head_is_drainable(
     preset_supplies_directive: bool,
     scope: DrainScope,
 ) -> bool {
+    // `🙋 [#id]` is an orthogonal local projection of an open operator todo.
+    // The row remains visible in place, but no agent drain scope may dispatch
+    // it until completing that same-id todo clears the annotation.
+    if !agent_doc_document::queue_projection::operator_action_ids(text).is_empty() {
+        return false;
+    }
     let drainable = if preset_supplies_directive {
         is_drainable_queue_head_with_context(text, true)
     } else {

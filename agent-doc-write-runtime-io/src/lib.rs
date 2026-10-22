@@ -2359,6 +2359,18 @@ fn apply_pending_and_status_mutations_with_mode(
                         for selector in &options.todo_remove {
                             backlog_cmd::todo_remove(file, selector)?;
                         }
+                        if !options.queue_operator_actions.is_empty()
+                            || options.has_todo_item_mutation()
+                        {
+                            let actions: Vec<(String, String)> = options
+                                .queue_operator_actions
+                                .iter()
+                                .map(|action| {
+                                    (action.queue_item.clone(), action.request_id.clone())
+                                })
+                                .collect();
+                            backlog_cmd::sync_queue_operator_actions(file, &actions)?;
+                        }
                         for pair in &options.pending_set_gate_type {
                             let (id, gt) = pair.split_once('=').with_context(|| {
                                 format!("--backlog-set-gate-type expects 'id=type', got: {}", pair)
@@ -3359,8 +3371,11 @@ fn run_command_inner_within_pass(
     // ordinary `--todo-add` dedupe and id layering. Only the caller's own
     // flags count as "tracked-work mutations" for the committed-replay gate.
     let operator_todo_add_supplied = !options.todo_add.is_empty();
-    let derived_packet_todos = derive_blocking_operator_request_todos(file, &options)?;
-    options.todo_add.extend(derived_packet_todos);
+    let derived_packet_requests = derive_blocking_operator_requests(file, &options)?;
+    options.todo_add.extend(derived_packet_requests.todo_inputs);
+    options
+        .queue_operator_actions
+        .extend(derived_packet_requests.queue_actions);
     let has_pending_ops = options.has_pending_mutation();
 
     // Validate the response half first. The tracked-work pass below is virtual,
@@ -4521,13 +4536,49 @@ fn packet_todo_tracked_id(
 
 /// `#packettodo`: the pure decision — which `--todo-add` texts a closeout
 /// response's blocking operator request packets owe `agent:todo`.
+fn explicit_todo_input_id(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("id=") {
+        return rest.split_whitespace().next().map(|id| {
+            id.trim_matches(|ch| ch == '[' || ch == ']' || ch == '#')
+                .to_ascii_lowercase()
+        });
+    }
+    trimmed
+        .strip_prefix("[#")
+        .and_then(|rest| rest.split_once(']'))
+        .map(|(id, _)| id.to_ascii_lowercase())
+}
+
+fn response_patch_todo_owns_id(response: &str, wanted: &str) -> bool {
+    let mut in_patch = false;
+    for line in response.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("<!-- patch:todo") {
+            in_patch = true;
+            continue;
+        }
+        if trimmed == "<!-- /patch:todo -->" {
+            in_patch = false;
+            continue;
+        }
+        if in_patch
+            && agent_doc_element::todo::parse_todo_line(line)
+                .and_then(|item| item.own_id)
+                .is_some_and(|id| id.eq_ignore_ascii_case(wanted))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn blocking_operator_request_todo_texts(
     options: &CommandOptions,
     response: &str,
     document_ids: &std::collections::HashSet<String>,
 ) -> Vec<String> {
-    if options.pending_only || !options.todo_add.is_empty() || response.contains("<!-- patch:todo")
-    {
+    if options.pending_only {
         return Vec::new();
     }
     let packets = agent_doc_turn::response_text::blocking_operator_request_packets(response);
@@ -4537,6 +4588,15 @@ fn blocking_operator_request_todo_texts(
     let tracked_id = packet_todo_tracked_id(options, response, document_ids);
     let mut texts: Vec<String> = Vec::new();
     for packet in &packets {
+        if options
+            .todo_add
+            .iter()
+            .filter_map(|text| explicit_todo_input_id(text))
+            .any(|id| id == packet.id.to_ascii_lowercase())
+            || response_patch_todo_owns_id(response, &packet.id)
+        {
+            continue;
+        }
         let text = agent_doc_turn::response_text::blocking_operator_request_todo_text(
             packet,
             tracked_id.as_deref(),
@@ -4548,17 +4608,23 @@ fn blocking_operator_request_todo_texts(
     texts
 }
 
-fn derive_blocking_operator_request_todos(
+#[derive(Default)]
+struct DerivedBlockingOperatorRequests {
+    todo_inputs: Vec<String>,
+    queue_actions: Vec<agent_doc_write_command_io::QueueOperatorAction>,
+}
+
+fn derive_blocking_operator_requests(
     file: &Path,
     options: &CommandOptions,
-) -> Result<Vec<String>> {
+) -> Result<DerivedBlockingOperatorRequests> {
     if options.pending_only {
-        return Ok(Vec::new());
+        return Ok(DerivedBlockingOperatorRequests::default());
     }
     let response = peek_response_input()?;
     let packets = agent_doc_turn::response_text::blocking_operator_request_packets(&response);
     if packets.is_empty() {
-        return Ok(Vec::new());
+        return Ok(DerivedBlockingOperatorRequests::default());
     }
     if let Some(duplicate) =
         agent_doc_turn::response_text::duplicate_blocking_operator_request_id(&packets)
@@ -4566,21 +4632,6 @@ fn derive_blocking_operator_request_todos(
         anyhow::bail!(
             "blocking subagent operator-request packets reuse [#{duplicate}]; give every packet a unique [#subagent-operator-request-<unique-id>] marker"
         );
-    }
-    if !options.todo_add.is_empty() || response.contains("<!-- patch:todo") {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "blocking_operator_request_todo_skipped file={} reason={}",
-                file.display(),
-                if options.todo_add.is_empty() {
-                    "response_patch_todo"
-                } else {
-                    "todo_add_supplied"
-                }
-            ),
-        );
-        return Ok(Vec::new());
     }
     // An unreadable document only loses the response-citation fallback; the
     // gate ids and the packet itself still derive the todo.
@@ -4614,7 +4665,21 @@ fn derive_blocking_operator_request_todos(
             ),
         );
     }
-    Ok(texts)
+    let queue_actions = packets
+        .iter()
+        .filter_map(|packet| {
+            packet.queue_item.as_ref().map(|queue_item| {
+                agent_doc_write_command_io::QueueOperatorAction {
+                    queue_item: queue_item.clone(),
+                    request_id: packet.id.clone(),
+                }
+            })
+        })
+        .collect();
+    Ok(DerivedBlockingOperatorRequests {
+        todo_inputs: texts,
+        queue_actions,
+    })
 }
 
 fn active_capture_response_body_for_write(file: &Path) -> Result<String> {
@@ -6157,9 +6222,8 @@ mod tests {
         }
     }
 
-    /// `#packettodo`: the derived todo layers on the ONE id this closeout
-    /// gated, falls back to the one document id the response cites, and cites
-    /// nothing (so `--todo-add` mints a surrogate) when that is ambiguous.
+    /// `#packettodo`: the derived todo always owns the packet id; a uniquely
+    /// associated tracked id remains descriptive context only.
     #[test]
     fn packettodo_texts_pick_one_tracked_id_and_respect_existing_todo_records() {
         let packet = "[#subagent-operator-request-keep-or-drop] subagent operator request\nkind: question\nblocking: true\nrequest: Keep or drop the rows?\nchoices:\n- keep: nothing\n- drop: delete\n";
@@ -6179,7 +6243,7 @@ mod tests {
         assert_eq!(
             blocking_operator_request_todo_texts(&gated, &response, &ids),
             vec![
-                "Answer the blocking subagent question for #alpha in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
+                "id=subagent-operator-request-keep-or-drop Answer the blocking subagent question for tracked work alpha in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
             ]
         );
 
@@ -6188,7 +6252,7 @@ mod tests {
         assert_eq!(
             blocking_operator_request_todo_texts(&two_gates, &response, &ids),
             vec![
-                "Answer the blocking subagent question in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
+                "id=subagent-operator-request-keep-or-drop Answer the blocking subagent question in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
             ]
         );
 
@@ -6196,22 +6260,30 @@ mod tests {
         assert_eq!(
             blocking_operator_request_todo_texts(&base(), &one_cited, &ids),
             vec![
-                "Answer the blocking subagent question for #alpha in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
+                "id=subagent-operator-request-keep-or-drop Answer the blocking subagent question for tracked work alpha in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
             ]
         );
         assert_eq!(
             blocking_operator_request_todo_texts(&base(), &response, &ids),
             vec![
-                "Answer the blocking subagent question in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
+                "id=subagent-operator-request-keep-or-drop Answer the blocking subagent question in agent:exchange: Keep or drop the rows? (choices: keep, drop)"
             ]
         );
 
         let mut supplied = base();
-        supplied.todo_add = vec!["Decide the rows [#alpha]".to_string()];
+        supplied.todo_add =
+            vec!["id=subagent-operator-request-keep-or-drop Decide the rows".to_string()];
         assert!(blocking_operator_request_todo_texts(&supplied, &response, &ids).is_empty());
         let patched =
             format!("{response}\n<!-- patch:todo -->\n- [ ] Decide\n<!-- /patch:todo -->\n");
-        assert!(blocking_operator_request_todo_texts(&base(), &patched, &ids).is_empty());
+        assert_eq!(
+            blocking_operator_request_todo_texts(&base(), &patched, &ids).len(),
+            1
+        );
+        let same_id_patch = format!(
+            "{response}\n<!-- patch:todo -->\n- [ ] [#subagent-operator-request-keep-or-drop] Decide\n<!-- /patch:todo -->\n"
+        );
+        assert!(blocking_operator_request_todo_texts(&base(), &same_id_patch, &ids).is_empty());
         let mut pending_only = base();
         pending_only.pending_only = true;
         assert!(blocking_operator_request_todo_texts(&pending_only, &response, &ids).is_empty());

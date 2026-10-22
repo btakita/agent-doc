@@ -703,6 +703,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         todo_edit: string_vec_arg(args, "todo_edit")?,
         todo_reopen: string_vec_arg(args, "todo_reopen")?,
         todo_remove: string_vec_arg(args, "todo_remove")?,
+        queue_operator_actions: Vec::new(),
         queue_completion_ids: Vec::new(),
         allow_replace_pending: bool_arg(args, "allow_replace_pending", false)?,
         pending_only: false,

@@ -606,6 +606,14 @@ pub fn add_todo_item_to_document(
     links: &TodoLinkIndex,
 ) -> Result<TodoAddOutcome> {
     let (explicit_id, action) = parse_todo_input(text, "--todo-add")?;
+    // `#queueoperatoraction`: request packets deliberately own an identity
+    // distinct from the tracked work whose queue row they pause. Preserve that
+    // reserved explicit id even when the action cites exactly one tracked id;
+    // ordinary todos retain `#todoidlayer` behavior below.
+    let explicit_request_id = explicit_id.as_deref().filter(|id| {
+        id.to_ascii_lowercase()
+            .starts_with("subagent-operator-request-")
+    });
     let (ensured, todo, created_component) = ensure_todo_component_in_document(content)?;
     let body = todo.content(&ensured);
     let explicit_linked = explicit_id
@@ -699,63 +707,68 @@ pub fn add_todo_item_to_document(
     let explicit_tracked = explicit_id
         .as_deref()
         .and_then(|id| links.linkable_component(id).map(|_| id.to_string()));
-    let (id, linked) = match explicit_tracked {
-        Some(id) => {
-            let linked = links.linkable_component(&id).map(str::to_string);
-            (id, linked)
-        }
-        None => {
-            let link_candidates: Vec<String> = cited_ids(&action)
-                .into_iter()
-                .filter(|id| links.linkable_component(id).is_some())
-                .collect();
-            let reuse = match link_candidates.as_slice() {
-                [only] => match owner(only) {
-                    // `#todoids`: one open todo per tracked id — a second add
-                    // for the same item folds into the existing todo.
-                    Some(existing) if existing.state.is_open() => {
-                        return Ok(TodoAddOutcome {
-                            content: ensured.clone(),
-                            inserted: false,
-                            source_reference_added: false,
-                            created_component,
-                            id: Some(only.clone()),
-                            linked: links.linkable_component(only).map(str::to_string),
-                            requested_id_unused: explicit_id,
-                        });
-                    }
-                    // A checked todo already owns the id: this is a follow-up
-                    // action, given a surrogate below and still citing the item.
-                    Some(_) => None,
-                    None => Some(only.clone()),
-                },
-                _ => None,
-            };
-            match (reuse, explicit_id.clone()) {
-                (Some(id), _) => {
-                    let linked = links.linkable_component(&id).map(str::to_string);
-                    (id, linked)
-                }
-                // A caller-chosen id naming no tracked work is the surrogate.
-                (None, Some(custom)) => (custom, None),
-                (None, None) => {
-                    let taken = body_id_tokens(&ensured);
-                    let mut chosen = None;
-                    for counter in 0..256u64 {
-                        let candidate = id_for(&action, counter).to_ascii_lowercase();
-                        if is_valid_todo_id(&candidate)
-                            && !taken.contains(&candidate)
-                            && !reserved.contains(&candidate)
-                            && !links.knows(&candidate)
-                        {
-                            chosen = Some(candidate);
-                            break;
+    let (id, linked) = if let Some(id) = explicit_request_id {
+        (id.to_ascii_lowercase(), None)
+    } else {
+        match explicit_tracked {
+            Some(id) => {
+                let linked = links.linkable_component(&id).map(str::to_string);
+                (id, linked)
+            }
+            None => {
+                let link_candidates: Vec<String> = cited_ids(&action)
+                    .into_iter()
+                    .filter(|id| links.linkable_component(id).is_some())
+                    .collect();
+                let reuse = match link_candidates.as_slice() {
+                    [only] => match owner(only) {
+                        // `#todoids`: one open todo per tracked id — a second add
+                        // for the same item folds into the existing todo.
+                        Some(existing) if existing.state.is_open() => {
+                            return Ok(TodoAddOutcome {
+                                content: ensured.clone(),
+                                inserted: false,
+                                source_reference_added: false,
+                                created_component,
+                                id: Some(only.clone()),
+                                linked: links.linkable_component(only).map(str::to_string),
+                                requested_id_unused: explicit_id,
+                            });
                         }
+                        // A checked todo already owns the id: this is a follow-up
+                        // action, given a surrogate below and still citing the item.
+                        Some(_) => None,
+                        None => Some(only.clone()),
+                    },
+                    _ => None,
+                };
+                match (reuse, explicit_id.clone()) {
+                    (Some(id), _) => {
+                        let linked = links.linkable_component(&id).map(str::to_string);
+                        (id, linked)
                     }
-                    (
-                        chosen.context("--todo-add could not derive a collision-free todo id")?,
-                        None,
-                    )
+                    // A caller-chosen id naming no tracked work is the surrogate.
+                    (None, Some(custom)) => (custom, None),
+                    (None, None) => {
+                        let taken = body_id_tokens(&ensured);
+                        let mut chosen = None;
+                        for counter in 0..256u64 {
+                            let candidate = id_for(&action, counter).to_ascii_lowercase();
+                            if is_valid_todo_id(&candidate)
+                                && !taken.contains(&candidate)
+                                && !reserved.contains(&candidate)
+                                && !links.knows(&candidate)
+                            {
+                                chosen = Some(candidate);
+                                break;
+                            }
+                        }
+                        (
+                            chosen
+                                .context("--todo-add could not derive a collision-free todo id")?,
+                            None,
+                        )
+                    }
                 }
             }
         }
@@ -1585,6 +1598,23 @@ pub fn open_todo_actions(content: &str) -> Vec<String> {
         .into_iter()
         .filter(|item| item.state.is_open())
         .map(|item| item.action)
+        .collect()
+}
+
+/// Stable own ids of every open (`[ ]`/`[/]`) operator todo.
+///
+/// Queue operator-action annotations use this projection to remain visible
+/// exactly while their same-id todo is actionable.
+pub fn open_todo_ids(content: &str) -> std::collections::HashSet<String> {
+    let Ok(Some(todo)) = find_todo_component(content) else {
+        return std::collections::HashSet::new();
+    };
+    TodoBody::parse(todo.content(content))
+        .items
+        .into_iter()
+        .filter(|item| item.state.is_open())
+        .filter_map(|item| item.own_id)
+        .map(|id| id.to_ascii_lowercase())
         .collect()
 }
 

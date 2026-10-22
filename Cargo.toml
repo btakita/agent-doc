@@ -383,3 +383,9 @@ lto = "off"
 codegen-units = 256
 incremental = true
 strip = false
+
+# GH #354: lazily 0.57.1's thread-safe effect disposal removed a recycled
+# non-effect node before checking its kind, poisoning the controller graph.
+# Pin the compatible upstream backport until the next crates.io release.
+[patch.crates-io]
+lazily = { git = "https://github.com/lazily-hub/lazily-rs.git", rev = "7643192f34935d3173a26a3a53e31d16095703a1" }

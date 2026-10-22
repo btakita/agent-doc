@@ -3946,6 +3946,11 @@ pub(crate) struct ControllerRuntime {
     /// state projection itself is always caught up there with the rows the load
     /// missed (`#runfrontenddispatch`, `#refreshmemlockstall`).
     state_apply_generation: AtomicU64,
+    /// A panic inside any controller-owned request/effect worker poisons the
+    /// shared reactive generation. The serve loop then retires this process so
+    /// the next client launches a clean graph instead of observing partial
+    /// mutation left behind by an unwind (GH #354).
+    controller_generation_poisoned: AtomicBool,
     actor_graph: ControllerActorGraph,
     document_authority_graph: ControllerDocumentAuthorityGraph,
     coordination_graph: ControllerCoordinationGraph,
@@ -9038,6 +9043,15 @@ fn retained_intent_facts_from_projection(
 }
 
 impl ControllerRuntime {
+    pub(crate) fn poison_controller_generation(&self) {
+        self.controller_generation_poisoned
+            .store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn controller_generation_poisoned(&self) -> bool {
+        self.controller_generation_poisoned.load(Ordering::SeqCst)
+    }
+
     fn new(bootstrap: ControllerBootstrap) -> Result<Self> {
         if controller_restart_recovery_needed(
             bootstrap.controller_generation,
@@ -9116,6 +9130,7 @@ impl ControllerRuntime {
             state_event_ingress: Mutex::new(()),
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
+            controller_generation_poisoned: AtomicBool::new(false),
             actor_graph,
             document_authority_graph,
             coordination_graph,
@@ -19849,6 +19864,7 @@ agent:queue\n\
             state_event_ingress: Mutex::new(()),
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
+            controller_generation_poisoned: AtomicBool::new(false),
             actor_graph,
             document_authority_graph,
             supervisor_recycle_graph,
@@ -19874,6 +19890,18 @@ agent:queue\n\
             recycle_declined_target: Mutex::new(None),
             _scope: scope,
         }
+    }
+
+    #[test]
+    fn controller_generation_panic_poison_is_monotone() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime_for_bootstrap(test_bootstrap(&dir));
+
+        assert!(!runtime.controller_generation_poisoned());
+        runtime.poison_controller_generation();
+        assert!(runtime.controller_generation_poisoned());
+        runtime.poison_controller_generation();
+        assert!(runtime.controller_generation_poisoned());
     }
 
     #[test]

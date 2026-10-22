@@ -18367,7 +18367,7 @@ pub(crate) fn serve_with_options(
     // socket pathname no longer belongs to it. The pathname may then name another
     // controller's live socket, so retirement must not unlink it.
     let mut socket_pathname_relinquished = false;
-    while !should_stop.load(Ordering::SeqCst) {
+    while !should_stop.load(Ordering::SeqCst) && !runtime.controller_generation_poisoned() {
         match listener.accept() {
             Ok(stream) => {
                 last_client_activity = Instant::now();
@@ -21034,10 +21034,15 @@ pub(crate) fn handle_request_for_client(
     runtime: &Arc<ControllerRuntime>,
 ) -> Result<(String, bool)> {
     let mut request_should_stop = false;
-    let handled = handle_request_capturing_panic(line, || {
+    let (handled, request_panicked) = handle_request_capturing_panic(line, || {
         handle_request_locked(line, runtime, &mut request_should_stop)
     });
+    if request_panicked {
+        runtime.poison_controller_generation();
+        request_should_stop = true;
+    }
     if agent_doc_state_wire::take_local_state_db_dirty()
+        && !request_panicked
         && let Err(err) = runtime.refresh_memory()
     {
         eprintln!("[controller] refresh after local Lazily append failed: {err:#}");
@@ -21066,10 +21071,13 @@ pub(crate) fn handle_request_for_client(
 fn handle_request_capturing_panic(
     line: &str,
     handle: impl FnOnce() -> Result<String>,
-) -> Result<String> {
+) -> (Result<String>, bool) {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(handle)) {
-        Ok(handled) => handled,
-        Err(payload) => Err(controller_request_panic_error(line, payload.as_ref())),
+        Ok(handled) => (handled, false),
+        Err(payload) => (
+            Err(controller_request_panic_error(line, payload.as_ref())),
+            true,
+        ),
     }
 }
 
@@ -31233,7 +31241,8 @@ impl TmuxLayoutEffectSink for ControllerTmuxLayoutEffectSink {
 /// `LatestTmuxEffectWorkerState::active` latched. Every later editor selection
 /// then updated `pending_revision` but declined to spawn, permanently disabling
 /// tmux auto-sync until the controller restarted. Retire the failed revision
-/// atomically and hand a revision that raced with the panic to a replacement.
+/// atomically, then poison this controller generation so a clean graph owns any
+/// revision that raced with the panic (GH #354).
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn spawn_pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
@@ -31263,15 +31272,14 @@ fn spawn_pane_layout_effect_worker(
             }
 
             let failed_revision = executing_revision.load(Ordering::SeqCst);
-            let should_restart = worker_state
-                .lock()
-                .recover_after_failure(failed_revision);
-            eprintln!(
-                "[controller] pane-layout effect worker panicked at revision {failed_revision}; restart_pending={should_restart}"
-            );
-            if should_restart {
-                spawn_pane_layout_effect_worker(runtime, lane, worker_state, wake);
+            let pending_revision_waiting =
+                worker_state.lock().recover_after_failure(failed_revision);
+            if let Some(runtime) = runtime.upgrade() {
+                runtime.poison_controller_generation();
             }
+            eprintln!(
+                "[controller] pane-layout effect worker panicked at revision {failed_revision}; controller_generation_poisoned=true pending_revision_waiting={pending_revision_waiting}"
+            );
         });
     if let Err(error) = spawn {
         state.lock().deactivate();
@@ -54446,9 +54454,14 @@ mod tests {
         .to_string()
             + "\n";
 
-        let handled = handle_request_capturing_panic(&request, || -> Result<String> {
-            panic!("byte range starts at 10536 but ends at 10019")
-        });
+        let (handled, request_panicked) =
+            handle_request_capturing_panic(&request, || -> Result<String> {
+                panic!("byte range starts at 10536 but ends at 10019")
+            });
+        assert!(
+            request_panicked,
+            "the controller generation must be poisoned"
+        );
         let err = handled.expect_err("a panicking handler must answer with an error");
         let rendered = format!("{err:#}");
         assert!(
@@ -54472,10 +54485,12 @@ mod tests {
                 .is_some_and(|error| error.contains("/project/doc-a.md"))
         );
 
-        let formatted = handle_request_capturing_panic("{\"command\":\"status\"}\n", || {
-            std::panic::panic_any(format!("owned {}", "payload"))
-        })
-        .expect_err("owned panic payloads are captured too");
+        let (formatted, formatted_panicked) =
+            handle_request_capturing_panic("{\"command\":\"status\"}\n", || {
+                std::panic::panic_any(format!("owned {}", "payload"))
+            });
+        assert!(formatted_panicked);
+        let formatted = formatted.expect_err("owned panic payloads are captured too");
         let formatted = format!("{formatted:#}");
         assert!(
             formatted.contains("`status`")
@@ -54484,7 +54499,9 @@ mod tests {
             "unexpected panic error: {formatted}"
         );
 
-        let passthrough = handle_request_capturing_panic(&request, || Ok("answer".to_string()));
+        let (passthrough, passthrough_panicked) =
+            handle_request_capturing_panic(&request, || Ok("answer".to_string()));
+        assert!(!passthrough_panicked);
         assert_eq!(passthrough.unwrap(), "answer");
     }
 
@@ -61255,8 +61272,13 @@ mod tests {
             .find("let _ = ready.send(sock.clone());")
             .expect("in-process serve-ready announcement");
         let accept_loop = serve
-            .find("while !should_stop.load(Ordering::SeqCst) {")
+            .find("while !should_stop.load(Ordering::SeqCst)")
             .expect("controller accept loop");
+        assert!(
+            serve[accept_loop..]
+                .starts_with("while !should_stop.load(Ordering::SeqCst) && !runtime.controller_generation_poisoned()"),
+            "controller accept loop must retire a panic-poisoned generation"
+        );
         assert!(
             listener_nonblocking < ready_announced
                 && serve_ready_logged < ready_announced

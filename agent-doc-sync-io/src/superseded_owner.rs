@@ -118,7 +118,10 @@ pub fn retire_superseded_owner_pane(
     } = &action
     {
         let reason = protection.reason();
-        let retirement_scheduled = event == "route_duplicate_owner"
+        let retirement_scheduled = matches!(
+            event,
+            "route_duplicate_owner" | "start_force_superseded_owner_accepted"
+        )
             && supervisor_pid.parse::<u32>().ok().is_some_and(|pid| {
                 match agent_doc_supervisor_io::duplicate_retirement::request_duplicate_retirement(
                     file,

@@ -39,11 +39,14 @@ projections, and tmux transcript inference.
   request handler runs under a panic boundary that converts the unwind into an
   ordinary `ok: false` error envelope naming the command and the request's
   document (``project controller request `<command>` for document <file>
-  panicked: <message>``). A dropped connection (`closed connection without a
-  response`) is reserved for a controller that actually went away, which
-  clients classify as a retryable transport drop; a request panic is a
-  deterministic failure of that request and must not be retried as one
-  (GH #264).
+  panicked: <message>``), then poisons and stops that controller generation.
+  A panic in a detached controller-owned effect worker likewise poisons the
+  generation instead of restarting the effect against a possibly corrupted
+  reactive graph; the next client launches a clean controller. A dropped
+  connection (`closed connection without a response`) is reserved for a
+  controller that actually went away, which clients classify as a retryable
+  transport drop; a request panic is a deterministic failure of that request
+  and must not be retried as one (GH #264, GH #354).
 
 ### Bootstrap publication is adoptable before status hydration (GH #146)
 

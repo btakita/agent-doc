@@ -1699,6 +1699,7 @@ fn prepare_start_runtime_with_admission(
         .ok()
         .flatten();
 
+    let mut force_superseded_pane = None;
     if !force {
         if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
             match action {
@@ -1742,18 +1743,17 @@ fn prepare_start_runtime_with_admission(
                 file.display()
             ),
         );
-        // GH #243: the bypassed owner must not keep running beside this one.
+        // GH #243/#354: prove a bypassed owner is safe to retire before
+        // changing authority, but do not retire it until the controller has
+        // accepted the replacement generation below.
         if let Some(ExistingSessionPaneAction::Refuse(superseded_pane)) =
             existing_session_pane_action(&tmux, &session_id, file, &pane_id)?
         {
-            let action = agent_doc_sync_io::superseded_owner::retire_superseded_owner_pane(
+            let action = agent_doc_sync_io::superseded_owner::superseded_owner_decision(
                 &tmux,
                 file,
                 &superseded_pane,
-                &pane_id,
-                agent_doc_sync_io::superseded_owner::SUPERSEDED_OWNER_EXIT_GRACE,
-                "start_force_superseded_owner",
-            )?;
+            );
             if let agent_doc_supervisor::session_owner::SupersededOwnerAction::Defer {
                 protection,
                 ..
@@ -1771,6 +1771,7 @@ fn prepare_start_runtime_with_admission(
                     pane_id,
                 );
             }
+            force_superseded_pane = Some(superseded_pane);
         }
     }
 
@@ -1951,6 +1952,7 @@ fn prepare_start_runtime_with_admission(
                 start_generation
             ),
         );
+        // #gh354-force-start-accept: controller admission is the authority edge.
         let record = start_controller_session(StartControllerSessionInput {
             file,
             canonical: &canonical,
@@ -1982,17 +1984,46 @@ fn prepare_start_runtime_with_admission(
         );
         record
     };
-    let registry_publication_retry = publish_start_supervisor_registry(StartSupervisorRegistryPublication {
-        file,
-        canonical: &canonical,
-        project_root: &project_root,
-        session_id: &session_id,
-        pane_id: &pane_id,
-        pane_window: &pane_window,
-        supervisor_instance_id: &supervisor_instance_id,
-        session_log: &mut session_log,
-        route_owned,
-    });
+    if let Some(superseded_pane) = force_superseded_pane {
+        // #gh354-force-start-retire: never destroy the prior owner until the
+        // controller has accepted the replacement generation. A protection
+        // change after the preflight becomes a durable idle-retirement request.
+        if let Err(error) = agent_doc_sync_io::superseded_owner::retire_superseded_owner_pane(
+            &tmux,
+            file,
+            &superseded_pane,
+            &pane_id,
+            agent_doc_sync_io::superseded_owner::SUPERSEDED_OWNER_EXIT_GRACE,
+            "start_force_superseded_owner_accepted",
+        ) {
+            let message = format!(
+                "start_force_superseded_owner_retire_after_accept_failed file={} pane={} owner={} error={}",
+                file.display(),
+                superseded_pane,
+                pane_id,
+                format!("{error:#}").replace('\n', "\\n"),
+            );
+            log_event(&mut session_log, &message);
+            agent_doc_ops_log_io::log_op(file, &message);
+            eprintln!(
+                "[start] replacement controller accepted for {}, but superseded pane {} could not be retired: {error:#}",
+                file.display(),
+                superseded_pane,
+            );
+        }
+    }
+    let registry_publication_retry =
+        publish_start_supervisor_registry(StartSupervisorRegistryPublication {
+            file,
+            canonical: &canonical,
+            project_root: &project_root,
+            session_id: &session_id,
+            pane_id: &pane_id,
+            pane_window: &pane_window,
+            supervisor_instance_id: &supervisor_instance_id,
+            session_log: &mut session_log,
+            route_owned,
+        });
 
     if !admission.preserves_session_lifecycle() {
         fire_session_start_hooks(file, &session_id, &fm, &global_config, &harness);
@@ -3627,5 +3658,21 @@ auto_start_tmux = false
         assert!(command.contains("--resume conversation-id"));
         assert!(command.contains("--route-owned-reap-policy keep-alive"));
         assert!(command.contains("--route-owned-start-purpose layout-provision"));
+    }
+
+    #[test]
+    fn force_start_accepts_replacement_before_retiring_prior_owner() {
+        let source = include_str!("lib.rs");
+        let accepted = source
+            .find("#gh354-force-start-accept:")
+            .expect("force-start controller acceptance marker");
+        let retired = source
+            .find("#gh354-force-start-retire:")
+            .expect("force-start prior-owner retirement marker");
+
+        assert!(
+            accepted < retired,
+            "force start must preserve the old owner until controller admission succeeds"
+        );
     }
 }

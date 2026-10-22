@@ -14,8 +14,8 @@
  */
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-// esbuild inlines this at build time; the 4-up path reaches `src/lazily-js` in
-// the monorepo (same resolution the state-graph-mirror import uses).
+// esbuild inlines this at build time from the pinned lazily-js package (same
+// resolution the state-graph-mirror import uses).
 import { OrSet } from '@lazily-hub/lazily-js';
 import {
     documentIdForPath,

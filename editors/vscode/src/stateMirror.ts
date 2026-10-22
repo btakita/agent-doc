@@ -11,16 +11,15 @@
  * product surface over lazily's view, sibling to signal-space's patchboard
  * surface, reading only its own `agent_doc.*` node vocabulary.
  *
- * lazily-js is ESM + unpublished. The production `out/extension.js` is bundled by
- * **esbuild** (`esbuild.js`), which statically resolves the relative imports below
- * from the monorepo tree and INLINES lazily-js's source into the single CJS
- * bundle — so the packaged `.vsix` is self-contained. For the tsc test build
- * (`out/*.test.js`) the same static imports compile to `require()`s that Node's
- * `require(ESM)` support resolves against the sibling source.
+ * lazily-js is ESM. The production `out/extension.js` is bundled by **esbuild**
+ * (`esbuild.js`), which resolves the package imports below and INLINES lazily-js's
+ * source into the single CJS bundle — so the packaged `.vsix` is self-contained.
+ * For the tsc test build (`out/*.test.js`) the same imports compile to `require()`s
+ * that Node's `require(ESM)` support resolves from the installed package.
  */
 
 // esbuild inlines these at build time; tsc emits `require()`s resolved by Node's
-// require(ESM). The 4-up path reaches `src/lazily-js` in the monorepo.
+// require(ESM) support from the pinned package.
 import { GraphView } from '@lazily-hub/lazily-js/graph-view';
 import { IpcMessage } from '@lazily-hub/lazily-js';
 

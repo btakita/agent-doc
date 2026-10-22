@@ -42,6 +42,22 @@ Latest published agent-doc release: v0.35.541, published on GitHub at 2026-10-22
 Compacted content:
 - Archived 15 response topic(s): recovered response; Subagent completed: `subagent:unique_request_ids` returned work for queue item “api.md has 2 subagent questions with ...; no-guess layout authority, hook recovery, and v0.35.537; 12 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): #gh-fix issue 331; #gh-fix issue 332; releases, realtime fixes...
+
+### Re: Subagent completed: `subagent:gh352` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/352” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=1083830e51e7cc54c9c31f8caeadf254bd76ae84e447ebec54371887c18d871c -->
+
+### Re: Subagent completed: `subagent:release_publish` returned work for queue item “release + publish” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=03901def1f034bb4d759efe9753be5be61d240b96e28eddb447b45c818347734 -->
+
+### Re: Subagent completed: `subagent:queue_loop2` returned work for queue item “The `agent:queue loop` does not seem to be reliably firing.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=b414cf439892a9bbff920926f06114b12068b3f57956f618af686d22c0826b66 -->
+
+### Re: Subagent completed: `subagent:sched_recovery` returned work for queue item “Make the process-wide queue scheduler replace a disconnected worker and surface failed refresh enqueue receipts instead of discarding `mpsc::Sender::send` errors; its `OnceLock` handle currently cannot recover if the scheduler thread exits.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=7aff199ca08e468d96d55e25d7aa669fc37911d1d8a22f67f0b797e3c0325e2e -->
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -50,7 +66,10 @@ Compacted content:
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/352
+- 📤 [#subagent:gh352#1] #gh-fix https://github.com/btakita/agent-doc/issues/352
+- 📤 [#subagent:release_publish#2] release + publish
+- 📤 [#subagent:queue_loop2#2] The `agent:queue loop` does not seem to be reliably firing.
+- 📤 [#subagent:sched_recovery#1] Make the process-wide queue scheduler replace a disconnected worker and surface failed refresh enqueue receipts instead of discarding `mpsc::Sender::send` errors; its `OnceLock` handle currently cannot recover if the scheduler thread exits.
 <!-- /agent:queue -->
 
 ## Queue: Issues

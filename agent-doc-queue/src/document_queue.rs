@@ -4652,7 +4652,7 @@ mod tests {
         let marked = set_prompt_lifecycle_markers(&entries, &targets).unwrap();
         assert_eq!(
             render(&marked),
-            "- 📫 do [#a]\n- ⚠️ do [#b]\n- 🟡 do [#c]\n"
+            "- ☑️ do [#a]\n- ⚠️ do [#b]\n- 🟡 do [#c]\n"
         );
     }
 

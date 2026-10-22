@@ -33,7 +33,7 @@ auto_start_tmux = true
 [queue_icons]
 # Strings may contain multiple characters; every field is optional.
 pending = "📥"
-reported = "📫"
+reported = "☑️"
 ```
 
 ## Fields

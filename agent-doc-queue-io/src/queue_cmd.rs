@@ -370,7 +370,7 @@ pub fn record_claim_runtime_projection(
 /// converges that exact authoritative cut. Existing non-claim `🚧` markers are
 /// preserved; `cleared_item` identifies an abandoned/requeued claim whose
 /// marker must be removed. A reported release keeps its durable receipt visible
-/// as `📫`, so callers must not clear it.
+/// as `☑️`, so callers must not clear it.
 pub fn project_claim_runtime_state_with_effects(
     effects: &impl QueueCommandEffects,
     file: &Path,
@@ -1224,7 +1224,7 @@ mod tests {
         let reported = std::fs::read_to_string(&doc).unwrap();
         assert!(
             reported.contains(
-                "- 📫 [#subagent:worker#1] dispatched worker work"
+                "- ☑️ [#subagent:worker#1] dispatched worker work"
             ),
             "{reported}"
         );
@@ -1245,7 +1245,7 @@ mod tests {
         );
         assert!(
             released_projection.contains(
-                "- 📫 [#subagent:worker#1] dispatched worker work"
+                "- ☑️ [#subagent:worker#1] dispatched worker work"
             )
                 && !released_projection.contains("- 🟡 dispatched worker work"),
             "{released_projection}"
@@ -1256,7 +1256,7 @@ mod tests {
         assert!(
             released_snapshot.contains("- 📥 inline coordinator work")
                 && released_snapshot.contains(
-                    "- 📫 [#subagent:worker#1] dispatched worker work"
+                    "- ☑️ [#subagent:worker#1] dispatched worker work"
                 )
                 && !released_snapshot.contains("- 🟡 dispatched worker work"),
             "{released_snapshot}"
@@ -1308,6 +1308,7 @@ mod tests {
         );
         let cancelled = derive_claim_runtime_projection(&doc, &current, None).unwrap();
         assert!(cancelled.target_content.contains(&format!("- 📥 {item}\n")));
+        assert!(!cancelled.target_content.contains("☑️"));
         assert!(!cancelled.target_content.contains("📫"));
         assert!(!cancelled.target_content.contains("📤"));
         assert!(!cancelled.target_content.contains("🔄"));
@@ -1322,6 +1323,7 @@ mod tests {
             "- 🟡 [#subagent:sdk-retry#{}] {item}\n",
             replacement.generation
         )));
+        assert!(!replacement_projection.target_content.contains("☑️"));
         assert!(!replacement_projection.target_content.contains("📫"));
         assert!(!replacement_projection.target_content.contains("📤"));
         assert!(!replacement_projection.target_content.contains("🔄"));

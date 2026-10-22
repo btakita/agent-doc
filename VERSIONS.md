@@ -16,7 +16,8 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   longer trigger impossible repair loops.
 - **Queue delivery is durable and visually unambiguous.** Reported subagent results remain writeback debt until the
   coordinator persists them, terminal-wrapped diagnostics stay one queue item, incoming defaults to `📥`, reported
-  defaults to `📫`, and every lifecycle prefix accepts an arbitrary configured string.
+  defaults to `☑️` (worker-complete handoff awaiting coordinator integration), and both former `📫` /
+  `📤` spellings remain readable while every lifecycle prefix accepts an arbitrary configured string.
 - **Subagent operator answers preserve prompt locality.** Answers append beside their tracked request, remove the
   blocking `🙋` state, and retain the primary task intent while the coordinator resumes work.
 - **Planning exposes the selected operation tree.** Agent runs can show the chosen branch and dependencies without

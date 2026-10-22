@@ -61,7 +61,7 @@ impl Default for QueueIconSet {
             pending: "📥".into(),
             claimed: "🟡".into(),
             running: "🚧".into(),
-            reported: "📫".into(),
+            reported: "☑️".into(),
             lost: "⚠️".into(),
             reconciling: "🔄".into(),
             unknown: "❔".into(),
@@ -133,6 +133,7 @@ impl QueueIconSet {
                 ("pending", "📥"),
                 ("claimed", "🟡"),
                 ("running", "🚧"),
+                ("reported", "☑️"),
                 ("reported", "📫"),
                 ("reported", "📤"),
                 ("lost", "⚠️"),
@@ -180,6 +181,11 @@ pub fn queue_icons() -> &'static QueueIconSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reported_default_is_worker_complete_handoff() {
+        assert_eq!(QueueIconSet::default().reported, "☑️");
+    }
 
     #[test]
     fn resolves_arbitrary_multi_character_prefixes_over_defaults() {

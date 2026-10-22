@@ -7,8 +7,8 @@
 // product surface over lazily's view, sibling to signal-space's patchboard surface —
 // it reads its own `agent_doc.*` node vocabulary, nothing generic.
 //
-// esbuild inlines the lazily-js import at build time (same 4-up path the state-graph-mirror
-// and reliable-sync-liveness imports use).
+// esbuild inlines the pinned lazily-js package at build time (the same package
+// resolution the state-graph-mirror and reliable-sync-liveness imports use).
 import { GraphView } from "@lazily-hub/lazily-js/graph-view";
 
 export interface AgentDocProjection {

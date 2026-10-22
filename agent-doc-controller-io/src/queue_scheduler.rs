@@ -28,9 +28,10 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, OnceLock};
+use std::thread::JoinHandle;
 
 use agent_doc_queue::queue_schedule::{
     self, FireDecision, FireFacts, LocalOffset, ObserveOutcome, QUEUE_SCHEDULE_STATE_KIND,
@@ -379,6 +380,7 @@ fn stored_queue_ids(file: &Path) -> Result<Vec<String>> {
 
 // ----- the worker -----
 
+#[derive(Debug)]
 enum Job {
     Refresh(PathBuf),
     Due(DueSchedule),
@@ -719,54 +721,240 @@ impl QueueScheduleWorker {
 // ----- process-wide scheduler -----
 
 struct RunningScheduler {
-    sender: Mutex<Sender<Job>>,
+    sender: Sender<Job>,
+    graph: Arc<QueueScheduleGraph>,
+    stop: Arc<AtomicBool>,
+    worker_thread: JoinHandle<()>,
+    scheduler_thread: JoinHandle<()>,
 }
 
-fn running() -> &'static OnceLock<RunningScheduler> {
-    static RUNNING: OnceLock<RunningScheduler> = OnceLock::new();
-    &RUNNING
+impl RunningScheduler {
+    fn disconnected_reason(&self) -> Option<&'static str> {
+        if self.worker_thread.is_finished() {
+            Some("queue-schedule worker thread exited")
+        } else if self.scheduler_thread.is_finished() {
+            Some("queue-schedule loop thread exited")
+        } else {
+            None
+        }
+    }
+
+    fn stop(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        self.graph.waker().notify();
+        self.worker_thread.thread().unpark();
+        self.scheduler_thread.thread().unpark();
+    }
+}
+
+#[derive(Default)]
+struct ProcessScheduler {
+    running: Option<RunningScheduler>,
+    documents: HashSet<PathBuf>,
+}
+
+enum EnsureScheduler {
+    Existing,
+    Started,
+    Replaced(String),
+}
+
+/// Receipt for one realtime refresh enqueue.
+///
+/// A recovered enqueue names the failed observation that forced replacement;
+/// callers no longer have to infer that a closed channel was silently ignored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use = "queue refresh enqueue receipts expose scheduler disconnection and recovery"]
+pub enum QueueRefreshEnqueueReceipt {
+    SchedulerNotRunning,
+    Enqueued,
+    Recovered {
+        reason: String,
+        refreshed_documents: usize,
+    },
+}
+
+impl ProcessScheduler {
+    fn replace_with(&mut self, spawn: &mut impl FnMut() -> Result<RunningScheduler>) -> Result<()> {
+        if let Some(stale) = self.running.take() {
+            stale.stop();
+        }
+        self.running = Some(spawn().context("failed to spawn replacement queue scheduler")?);
+        Ok(())
+    }
+
+    fn ensure_with(
+        &mut self,
+        spawn: &mut impl FnMut() -> Result<RunningScheduler>,
+    ) -> Result<EnsureScheduler> {
+        match self
+            .running
+            .as_ref()
+            .and_then(RunningScheduler::disconnected_reason)
+        {
+            Some(reason) => {
+                let reason = reason.to_string();
+                self.replace_with(spawn)?;
+                Ok(EnsureScheduler::Replaced(reason))
+            }
+            None if self.running.is_some() => Ok(EnsureScheduler::Existing),
+            None => {
+                self.replace_with(spawn)?;
+                Ok(EnsureScheduler::Started)
+            }
+        }
+    }
+
+    fn sorted_documents(&self) -> Vec<PathBuf> {
+        let mut documents = self.documents.iter().cloned().collect::<Vec<_>>();
+        documents.sort();
+        documents
+    }
+
+    fn send_refreshes(&self, documents: &[PathBuf]) -> std::result::Result<usize, String> {
+        let running = self
+            .running
+            .as_ref()
+            .expect("send_refreshes requires a running scheduler");
+        for file in documents {
+            running
+                .sender
+                .send(Job::Refresh(file.clone()))
+                .map_err(|err| err.to_string())?;
+        }
+        Ok(documents.len())
+    }
+
+    fn recover_and_refresh_all(
+        &mut self,
+        reason: String,
+        spawn: &mut impl FnMut() -> Result<RunningScheduler>,
+    ) -> Result<QueueRefreshEnqueueReceipt> {
+        self.replace_with(spawn).with_context(|| {
+            format!("queue refresh enqueue failed ({reason}); scheduler replacement failed")
+        })?;
+        let documents = self.sorted_documents();
+        let refreshed_documents = self.send_refreshes(&documents).map_err(|replacement_error| {
+            anyhow::anyhow!(
+                "queue refresh enqueue failed ({reason}); replacement enqueue failed: {replacement_error}"
+            )
+        })?;
+        Ok(QueueRefreshEnqueueReceipt::Recovered {
+            reason,
+            refreshed_documents,
+        })
+    }
+
+    fn enqueue_refresh_with(
+        &mut self,
+        file: &Path,
+        spawn: &mut impl FnMut() -> Result<RunningScheduler>,
+    ) -> Result<QueueRefreshEnqueueReceipt> {
+        if self.running.is_none() {
+            return Ok(QueueRefreshEnqueueReceipt::SchedulerNotRunning);
+        }
+        self.documents.insert(file.to_path_buf());
+        match self.ensure_with(spawn)? {
+            EnsureScheduler::Replaced(reason) => {
+                let documents = self.sorted_documents();
+                match self.send_refreshes(&documents) {
+                    Ok(refreshed_documents) => Ok(QueueRefreshEnqueueReceipt::Recovered {
+                        reason,
+                        refreshed_documents,
+                    }),
+                    Err(replacement_error) => self.recover_and_refresh_all(
+                        format!("{reason}; first replacement enqueue failed: {replacement_error}"),
+                        spawn,
+                    ),
+                }
+            }
+            EnsureScheduler::Existing | EnsureScheduler::Started => {
+                match self.send_refreshes(&[file.to_path_buf()]) {
+                    Ok(_) => Ok(QueueRefreshEnqueueReceipt::Enqueued),
+                    Err(reason) => self.recover_and_refresh_all(reason, spawn),
+                }
+            }
+        }
+    }
+
+    fn start_with(
+        &mut self,
+        documents: Vec<PathBuf>,
+        spawn: &mut impl FnMut() -> Result<RunningScheduler>,
+    ) -> Result<()> {
+        for file in &documents {
+            self.documents.insert(file.clone());
+        }
+        let ensured = self.ensure_with(spawn)?;
+        let refreshes = if matches!(ensured, EnsureScheduler::Existing) {
+            documents
+        } else {
+            self.sorted_documents()
+        };
+        if let Err(reason) = self.send_refreshes(&refreshes) {
+            let receipt = self.recover_and_refresh_all(reason, spawn)?;
+            surface_recovery_receipt(&receipt);
+        } else if let EnsureScheduler::Replaced(reason) = ensured {
+            let receipt = QueueRefreshEnqueueReceipt::Recovered {
+                reason,
+                refreshed_documents: refreshes.len(),
+            };
+            surface_recovery_receipt(&receipt);
+        }
+        Ok(())
+    }
+}
+
+fn process_scheduler() -> &'static Mutex<ProcessScheduler> {
+    static RUNNING: OnceLock<Mutex<ProcessScheduler>> = OnceLock::new();
+    RUNNING.get_or_init(|| Mutex::new(ProcessScheduler::default()))
+}
+
+fn region_effect_installed() -> &'static OnceLock<()> {
+    static INSTALLED: OnceLock<()> = OnceLock::new();
+    &INSTALLED
+}
+
+fn surface_recovery_receipt(receipt: &QueueRefreshEnqueueReceipt) {
+    if let QueueRefreshEnqueueReceipt::Recovered {
+        reason,
+        refreshed_documents,
+    } = receipt
+    {
+        eprintln!(
+            "[queue-schedule] WARNING: replaced disconnected scheduler after `{reason}`; refreshed_documents={refreshed_documents}"
+        );
+    }
 }
 
 /// Note that `file`'s queue may have changed (commit frontier, watch-daemon
-/// disk signal). A no-op when no scheduler runs in this process.
-pub fn note_document_changed(file: &Path) {
-    if let Some(running) = running().get() {
-        let _ = running.sender.lock().send(Job::Refresh(file.to_path_buf()));
-    }
+/// disk signal). A no-op when no scheduler runs in this process. A disconnected
+/// scheduler is replaced and every known scheduled document is refreshed.
+pub fn note_document_changed(file: &Path) -> Result<QueueRefreshEnqueueReceipt> {
+    let receipt = process_scheduler()
+        .lock()
+        .enqueue_refresh_with(file, &mut || spawn_scheduler(Arc::new(ProductionIo)))?;
+    surface_recovery_receipt(&receipt);
+    Ok(receipt)
 }
 
 /// Start this process's single queue scheduler (idempotent) and enqueue a
 /// refresh of every document with a durable schedule under `project_root`.
-pub fn start_queue_scheduler(project_root: &Path) {
-    let mut started_now = false;
-    let running = running().get_or_init(|| {
-        started_now = true;
-        spawn_scheduler(Arc::new(ProductionIo))
-    });
-    if !started_now {
-        // Another root in the same process: hydrate it too.
-        hydrate(&running.sender.lock(), project_root);
-        return;
-    }
-    hydrate(&running.sender.lock(), project_root);
-    install_region_effect();
-}
-
-fn hydrate(sender: &Sender<Job>, project_root: &Path) {
-    match scheduled_documents(project_root) {
-        Ok(files) => {
-            for file in files {
-                let _ = sender.send(Job::Refresh(file));
-            }
-        }
-        Err(err) => eprintln!(
-            "[queue-schedule] WARNING: could not list scheduled documents under {}: {err:#}",
+pub fn start_queue_scheduler(project_root: &Path) -> Result<()> {
+    let documents = scheduled_documents(project_root).with_context(|| {
+        format!(
+            "could not list scheduled documents under {}",
             project_root.display()
-        ),
-    }
+        )
+    })?;
+    process_scheduler()
+        .lock()
+        .start_with(documents, &mut || spawn_scheduler(Arc::new(ProductionIo)))?;
+    region_effect_installed().get_or_init(install_region_effect);
+    Ok(())
 }
 
-fn spawn_scheduler(io: Arc<dyn QueueScheduleIo>) -> RunningScheduler {
+fn spawn_scheduler(io: Arc<dyn QueueScheduleIo>) -> Result<RunningScheduler> {
     // `#stategraphjoin`: the scheduler joins the controller process's shared
     // scope (the relay's queue-region Source lives there too).
     let graph = Arc::new(QueueScheduleGraph::new_in(
@@ -775,31 +963,32 @@ fn spawn_scheduler(io: Arc<dyn QueueScheduleIo>) -> RunningScheduler {
     ));
     let (sender, receiver) = std::sync::mpsc::channel::<Job>();
     let worker = QueueScheduleWorker::new(Arc::clone(&graph), io);
-    if let Err(err) = std::thread::Builder::new()
+    let worker_thread = std::thread::Builder::new()
         .name("agent-doc-queue-schedule-worker".to_string())
         .spawn(move || run_worker(&worker, &receiver))
-    {
-        eprintln!("[queue-schedule] failed to start worker: {err}");
-    }
+        .context("failed to start queue-schedule worker")?;
     let loop_sender = sender.clone();
     let loop_graph = Arc::clone(&graph);
-    if let Err(err) = std::thread::Builder::new()
+    let stop = Arc::new(AtomicBool::new(false));
+    let loop_stop = Arc::clone(&stop);
+    let scheduler_thread = std::thread::Builder::new()
         .name("agent-doc-queue-scheduler".to_string())
         .spawn(move || {
             // The loop lives as long as the controller process.
-            let never_stop = AtomicBool::new(false);
-            run_scheduler_loop(&loop_graph, &SystemScheduleClock, &never_stop, |due| {
+            run_scheduler_loop(&loop_graph, &SystemScheduleClock, &loop_stop, |due| {
                 if loop_sender.send(Job::Due(due.clone())).is_err() {
                     loop_graph.release(&due.key);
                 }
             });
         })
-    {
-        eprintln!("[queue-schedule] failed to start scheduler loop: {err}");
-    }
-    RunningScheduler {
-        sender: Mutex::new(sender),
-    }
+        .context("failed to start queue-schedule loop")?;
+    Ok(RunningScheduler {
+        sender,
+        graph,
+        stop,
+        worker_thread,
+        scheduler_thread,
+    })
 }
 
 /// The worker loop: due ticks first, refreshes coalesced per document. A
@@ -870,8 +1059,13 @@ fn install_region_effect() {
                 .is_some_and(|(_, prev_hint, _)| *prev_hint);
             seen.insert(key, (hash, hint, file.clone()));
             drop(seen);
-            if hint || was_hinted {
-                note_document_changed(&file);
+            if (hint || was_hinted)
+                && let Err(err) = note_document_changed(&file)
+            {
+                eprintln!(
+                    "[queue-schedule] WARNING: could not enqueue realtime refresh for {}: {err:#}",
+                    file.display()
+                );
             }
         }
     });
@@ -964,6 +1158,149 @@ mod tests {
             file: file.to_path_buf(),
             queue_id: queue_id.to_string(),
         }
+    }
+
+    fn parked_scheduler(sender: Sender<Job>) -> RunningScheduler {
+        let graph = Arc::new(QueueScheduleGraph::new(Arc::new(FixedOffset(0))));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let worker_thread = std::thread::spawn(move || {
+            while !worker_stop.load(Ordering::SeqCst) {
+                std::thread::park_timeout(std::time::Duration::from_millis(10));
+            }
+        });
+        let scheduler_stop = Arc::clone(&stop);
+        let scheduler_thread = std::thread::spawn(move || {
+            while !scheduler_stop.load(Ordering::SeqCst) {
+                std::thread::park_timeout(std::time::Duration::from_millis(10));
+            }
+        });
+        RunningScheduler {
+            sender,
+            graph,
+            stop,
+            worker_thread,
+            scheduler_thread,
+        }
+    }
+
+    fn scheduler_with_finished_loop(sender: Sender<Job>) -> RunningScheduler {
+        let graph = Arc::new(QueueScheduleGraph::new(Arc::new(FixedOffset(0))));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let worker_thread = std::thread::spawn(move || {
+            while !worker_stop.load(Ordering::SeqCst) {
+                std::thread::park_timeout(std::time::Duration::from_millis(10));
+            }
+        });
+        let scheduler_thread = std::thread::spawn(|| {});
+        while !scheduler_thread.is_finished() {
+            std::thread::yield_now();
+        }
+        RunningScheduler {
+            sender,
+            graph,
+            stop,
+            worker_thread,
+            scheduler_thread,
+        }
+    }
+
+    #[test]
+    fn a_disconnected_worker_is_replaced_and_the_refresh_is_retried() {
+        let (dead_sender, dead_receiver) = std::sync::mpsc::channel();
+        drop(dead_receiver);
+        let (replacement_sender, replacement_receiver) = std::sync::mpsc::channel();
+        let mut replacement = Some(parked_scheduler(replacement_sender));
+        let mut state = ProcessScheduler {
+            running: Some(parked_scheduler(dead_sender)),
+            ..ProcessScheduler::default()
+        };
+        let file = PathBuf::from("/sample/project/plan.md");
+
+        let receipt = state
+            .enqueue_refresh_with(&file, &mut || {
+                Ok(replacement.take().expect("one replacement scheduler"))
+            })
+            .unwrap();
+
+        match receipt {
+            QueueRefreshEnqueueReceipt::Recovered {
+                reason,
+                refreshed_documents,
+            } => {
+                assert!(reason.contains("sending on a closed channel"), "{reason}");
+                assert_eq!(refreshed_documents, 1);
+            }
+            other => panic!("expected recovered enqueue receipt, got {other:?}"),
+        }
+        match replacement_receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("replacement received the retried refresh")
+        {
+            Job::Refresh(received) => assert_eq!(received, file),
+            Job::Due(_) => panic!("replacement received a due job instead of the refresh"),
+        }
+        state.running.take().unwrap().stop();
+    }
+
+    #[test]
+    fn a_finished_scheduler_loop_is_replaced_before_the_refresh() {
+        let (stale_sender, stale_receiver) = std::sync::mpsc::channel();
+        let (replacement_sender, replacement_receiver) = std::sync::mpsc::channel();
+        let mut replacement = Some(parked_scheduler(replacement_sender));
+        let mut state = ProcessScheduler {
+            running: Some(scheduler_with_finished_loop(stale_sender)),
+            ..ProcessScheduler::default()
+        };
+        let file = PathBuf::from("/sample/project/plan.md");
+
+        let receipt = state
+            .enqueue_refresh_with(&file, &mut || {
+                Ok(replacement.take().expect("one replacement scheduler"))
+            })
+            .unwrap();
+
+        assert_eq!(
+            receipt,
+            QueueRefreshEnqueueReceipt::Recovered {
+                reason: "queue-schedule loop thread exited".to_string(),
+                refreshed_documents: 1,
+            }
+        );
+        assert!(stale_receiver.try_recv().is_err());
+        match replacement_receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("replacement received the refresh")
+        {
+            Job::Refresh(received) => assert_eq!(received, file),
+            Job::Due(_) => panic!("replacement received a due job instead of the refresh"),
+        }
+        state.running.take().unwrap().stop();
+    }
+
+    #[test]
+    fn a_failed_replacement_surfaces_the_refresh_enqueue_error() {
+        let (dead_sender, dead_receiver) = std::sync::mpsc::channel();
+        drop(dead_receiver);
+        let mut state = ProcessScheduler {
+            running: Some(parked_scheduler(dead_sender)),
+            ..ProcessScheduler::default()
+        };
+
+        let error = state
+            .enqueue_refresh_with(Path::new("/sample/project/plan.md"), &mut || {
+                anyhow::bail!("replacement refused")
+            })
+            .unwrap_err();
+        let rendered = format!("{error:#}");
+
+        assert!(
+            rendered.contains("sending on a closed channel"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("replacement refused"), "{rendered}");
+        assert!(state.running.is_none());
     }
 
     #[test]

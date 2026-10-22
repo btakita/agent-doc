@@ -7362,7 +7362,7 @@ impl ControllerDocumentGraphs {
             .set(&self.ctx, document_hash.to_string(), Some(observation));
         // `#queueschedule`: a commit frontier may have drained (or edited) a
         // scheduled queue; detached documents have no relay region Source.
-        crate::queue_scheduler::note_document_changed(file);
+        let _refresh_receipt = crate::queue_scheduler::note_document_changed(file)?;
         let strike = self.current_answered_free_text_strike(document_hash);
         if let Some(error) = strike.error {
             anyhow::bail!("{error}");

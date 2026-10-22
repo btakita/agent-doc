@@ -4610,8 +4610,11 @@ enum QueueAction {
         #[arg(long)]
         generation: Option<u64>,
         /// Emit the machine-readable lineage report
-        #[arg(long)]
+        #[arg(long, conflicts_with = "verbose")]
         json: bool,
+        /// Show full repository, worktree, commit, release, and diagnostic evidence
+        #[arg(long)]
+        verbose: bool,
     },
     /// Append one generation-fenced queue lineage receipt. Integrations are
     /// always explicit source-to-integration mappings; they are never inferred
@@ -8139,6 +8142,7 @@ fn try_main() -> anyhow::Result<()> {
                 item,
                 generation,
                 json,
+                verbose,
             } => {
                 let report = agent_doc_queue_io::queue_lineage::query(
                     &file,
@@ -8147,6 +8151,11 @@ fn try_main() -> anyhow::Result<()> {
                 )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&report)?);
+                } else if verbose {
+                    println!(
+                        "{}",
+                        agent_doc_queue_io::queue_lineage::render_verbose_text(&report)
+                    );
                 } else {
                     println!(
                         "{}",

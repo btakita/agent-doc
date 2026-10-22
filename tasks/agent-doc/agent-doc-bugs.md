@@ -23,7 +23,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
+📥 Queue handoff: 9 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -216,6 +216,16 @@ Correct—removing a genuinely struck queue item is presentation-only cleanup. A
 > **Chat prompt (#chatprompt):** My agent-doc sessions have [unwedge-watchdog]. What is this? [Image #1]
 
 It is not part of agent-doc. It is the enabled user service `unwedge-watchdog.service`, and it broadcasts warnings with `wall`, so the text appears in every logged-in terminal—including agent-doc/Codex panes. It probes Xorg every 10 seconds with a 5-second timeout. In this incident X stopped answering at 00:44:31, diagnostics were captured after 30 seconds at `~/.local/state/unwedge-freezes/20261022-004501/`, a non-destructive recovery was attempted, and X answered again at 00:45:22; Xorg was not killed. The banner can cosmetically overwrite or wrap a terminal prompt but is not shell or agent-doc input. The capture shows heavy concurrent Java, Unity, rustc, and tsift CPU load, but no proven cause; X itself was not answering property requests. With the current `UNWEDGE_AUTOKILL=1`, a freeze lasting 120 seconds would terminate Xorg to recover the desktop.
+
+### Re: recovered response
+
+Press `Ctrl+L` first. That should clear and redraw the Codex terminal.
+
+If the display remains garbled:
+
+1. In tmux, press `Ctrl+B`, then `:`.
+2. Enter `refresh-client` and press Enter.
+3. As a last resort, run `reset` in the shell.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 

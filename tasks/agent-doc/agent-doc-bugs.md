@@ -236,6 +236,16 @@ Press `Ctrl+L` first. If the tmux display remains garbled, press `Ctrl+B`, then 
 > **Chat prompt (#chatprompt):** How is the release going?
 
 All v0.35.540 source work is integrated at `ba96f57522`: #347, #348, bold subagent-choice titles, and the sdk-demo claim-alias fix. The combined build and clippy stages passed. The first combined `check-fast` returned non-zero during nextest, but its console output was truncated before the failure summary, so the same gate is running through a bounded test-log capture to identify the exact failure. The release auditor is checking this exact integrated head in parallel. No version bump, tag, install, or publication has happened yet. After a clean combined gate, the remaining path is v0.35.540 projection, one authoritative full `make check`, the release commit and push, local install, and GitHub/PyPI publication.
+
+### Re: Response
+
+> **Chat prompt (#chatprompt):** Is there any way for agent-doc to help keep track on worktree lineage?
+
+Partially today: queue claims persist exact identity, generation, owner, and worker; agent-doc-created parallel worktrees know path, branch, and base commit while orchestration runs; retained authored worktrees are reported; graph-backed orchestration records dispatch traces and worker results. What is missing is the durable join `queue item/generation -> worker -> worktree -> base SHA -> source SHA -> integration SHA -> release tag`. The recommended solution is a durable lineage receipt keyed by exact queue identity and generation, with verified Git facts and explicit source-to-integration mappings rather than branch-name inference. A `queue lineage` query should expose it while Markdown carries only a compact non-authoritative projection.
+
+> **Chat prompt (#chatprompt):** Create solution in a subagent.
+
+**Deferred:** dispatched to worker `/root/worktree_lineage` in an isolated external worktree. It is implementing the durable exact-generation lineage ledger, Git verification, operator-facing query/recording CLI, built-in orchestration hooks where feasible, cancellation/re-add fencing, persistence after worktree cleanup, specs, and focused regression coverage. It will coordinate against cancellation commit `3037f47ea3` and the queue-state projection without sharing their worktrees; the coordinator will integrate and release the verified result.
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -268,13 +278,11 @@ All v0.35.540 source work is integrated at `ba96f57522`: #347, #348, bold subage
 <!-- /agent:todo -->
 
 ## Backlog
-
 <!-- agent:backlog priority queue -->
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:backlog -->
 
 ## Review
-
 <!-- agent:review -->
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
@@ -285,7 +293,6 @@ All v0.35.540 source work is integrated at `ba96f57522`: #347, #348, bold subage
 <!-- /agent:icebox -->
 
 ## Completed / Reaped
-
 <!-- agent:done archive=tasks/agent-doc/agent-doc-bugs.done.md -->
 
 <!-- completed work archived in tasks/agent-doc/agent-doc-bugs.done.md -->

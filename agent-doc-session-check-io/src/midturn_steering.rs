@@ -319,6 +319,7 @@ fn route_claimed_items(
                     }
                 }),
                 dispatch_policy: None,
+                tracked_item_aliases: Vec::new(),
                 claimed_at_secs: receipt.claimed_at_secs,
                 expires_at_secs: receipt.expires_at_secs,
                 owner_session: None,

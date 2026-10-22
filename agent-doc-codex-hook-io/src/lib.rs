@@ -456,6 +456,10 @@ pub struct ChatPromptEntry {
     /// Harness turn the prompt opened.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub turn_id: String,
+    /// Compact hook-issued identity used by the corresponding
+    /// `#chatprompt:<id>` record in `agent:exchange`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub surrogate_id: String,
 }
 
 impl<'de> Deserialize<'de> for ChatPromptEntry {
@@ -473,6 +477,8 @@ impl<'de> Deserialize<'de> for ChatPromptEntry {
                 noted_at: u64,
                 #[serde(default)]
                 turn_id: String,
+                #[serde(default)]
+                surrogate_id: String,
             },
         }
         Ok(match Wire::deserialize(deserializer)? {
@@ -480,18 +486,82 @@ impl<'de> Deserialize<'de> for ChatPromptEntry {
                 text,
                 noted_at: now_secs(),
                 turn_id: String::new(),
+                surrogate_id: String::new(),
             },
             Wire::Entry {
                 text,
                 noted_at,
                 turn_id,
+                surrogate_id,
             } => ChatPromptEntry {
                 text,
                 noted_at,
                 turn_id,
+                surrogate_id,
             },
         })
     }
+}
+
+fn chat_prompt_surrogate_id(
+    session_id: &str,
+    turn_id: &str,
+    text: &str,
+    noted_at: u64,
+    salt: usize,
+) -> String {
+    let digest = agent_doc_hash::content_hash(&format!(
+        "chat-prompt\0{session_id}\0{turn_id}\0{text}\0{noted_at}\0{salt}"
+    ));
+    digest[..12].to_string()
+}
+
+fn chat_prompt_ids_in_document(document: &str) -> std::collections::HashSet<String> {
+    document
+        .lines()
+        .filter_map(agent_doc_prompt_lines::chat_prompt_record_surrogate_id)
+        .map(str::to_string)
+        .collect()
+}
+
+fn ensure_chat_prompt_ids(
+    ledger: &mut ChatPromptLedger,
+    session_id: &str,
+    document: Option<&str>,
+) -> bool {
+    let mut changed = false;
+    let mut occupied = document
+        .map(chat_prompt_ids_in_document)
+        .unwrap_or_default();
+    for entry in &mut ledger.prompts {
+        if !entry.surrogate_id.is_empty() && occupied.insert(entry.surrogate_id.clone()) {
+            continue;
+        }
+        let mut salt = 0;
+        loop {
+            let candidate = chat_prompt_surrogate_id(
+                session_id,
+                &entry.turn_id,
+                &entry.text,
+                entry.noted_at,
+                salt,
+            );
+            if occupied.insert(candidate.clone()) {
+                entry.surrogate_id = candidate;
+                changed = true;
+                break;
+            }
+            salt += 1;
+        }
+    }
+    changed
+}
+
+/// A newly noted chat prompt and the identity its document record must carry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotedChatPrompt {
+    pub document: PathBuf,
+    pub surrogate_id: String,
 }
 
 /// Chat prompts a document-bound harness session received since its last
@@ -620,7 +690,7 @@ fn same_document(lhs: &Path, rhs: &Path) -> bool {
 /// The prompt is appended to the session's ledger so the next trigger cycle
 /// can report it when it never reached the document. Entries already resolved
 /// are pruned on the way ([`prune_chat_prompt_ledger`]).
-pub fn note_chat_prompt(input: &UserPromptSubmitInput) -> Result<Option<PathBuf>> {
+pub fn note_chat_prompt_with_id(input: &UserPromptSubmitInput) -> Result<Option<NotedChatPrompt>> {
     let Some(chat) = agent_doc_prompt_contract::chat_prompt::chat_prompt_text(&input.prompt) else {
         return Ok(None);
     };
@@ -654,21 +724,52 @@ pub fn note_chat_prompt(input: &UserPromptSubmitInput) -> Result<Option<PathBuf>
             committed_response_cycle_started_at: committed_response_cycle_started_at(&doc_path),
         },
     );
+    ensure_chat_prompt_ids(&mut ledger, &input.session_id, document.as_deref());
+    let occupied = ledger
+        .prompts
+        .iter()
+        .map(|entry| entry.surrogate_id.clone())
+        .chain(
+            document
+                .as_deref()
+                .into_iter()
+                .flat_map(chat_prompt_ids_in_document),
+        )
+        .collect::<std::collections::HashSet<_>>();
+    let mut salt = 0;
+    let surrogate_id = loop {
+        let candidate =
+            chat_prompt_surrogate_id(&input.session_id, &input.turn_id, &chat, now, salt);
+        if !occupied.contains(&candidate) {
+            break candidate;
+        }
+        salt += 1;
+    };
     match ledger.prompts.iter_mut().find(|entry| entry.text == chat) {
         // A repeat refreshes the entry: it is the newest unanswered turn.
         Some(existing) => {
             existing.noted_at = now;
             existing.turn_id = input.turn_id.clone();
+            existing.surrogate_id = surrogate_id.clone();
         }
         None => ledger.prompts.push(ChatPromptEntry {
             text: chat,
             noted_at: now,
             turn_id: input.turn_id.clone(),
+            surrogate_id: surrogate_id.clone(),
         }),
     }
     prune_chat_prompt_ledger(&mut ledger, now, ChatPromptPruneFacts::default());
     store_chat_prompt_ledger(&roots, &input.session_id, &ledger)?;
-    Ok(Some(doc_path))
+    Ok(Some(NotedChatPrompt {
+        document: doc_path,
+        surrogate_id,
+    }))
+}
+
+/// Compatibility wrapper for callers that only need the bound document.
+pub fn note_chat_prompt(input: &UserPromptSubmitInput) -> Result<Option<PathBuf>> {
+    Ok(note_chat_prompt_with_id(input)?.map(|noted| noted.document))
 }
 
 /// Chat prompts this session received since its last trigger that `document`
@@ -681,6 +782,18 @@ pub fn unrecorded_chat_prompts(
     doc_path: &Path,
     document: &str,
 ) -> Result<Vec<String>> {
+    Ok(unrecorded_chat_prompt_entries(input, doc_path, document)?
+        .into_iter()
+        .map(|entry| entry.text)
+        .collect())
+}
+
+/// Unrecorded entries with the stable surrogate IDs the hook assigned them.
+pub fn unrecorded_chat_prompt_entries(
+    input: &UserPromptSubmitInput,
+    doc_path: &Path,
+    document: &str,
+) -> Result<Vec<ChatPromptEntry>> {
     let roots = tracking_roots(Path::new(&input.cwd), Some(doc_path));
     let Some(mut ledger) = load_chat_prompt_ledger(&roots, &input.session_id)? else {
         return Ok(Vec::new());
@@ -688,17 +801,19 @@ pub fn unrecorded_chat_prompts(
     if !same_document(Path::new(&ledger.doc_path), doc_path) {
         return Ok(Vec::new());
     }
-    if prune_chat_prompt_ledger(
+    let mut changed = prune_chat_prompt_ledger(
         &mut ledger,
         now_secs(),
         ChatPromptPruneFacts {
             document: Some(document),
             committed_response_cycle_started_at: committed_response_cycle_started_at(doc_path),
         },
-    ) {
+    );
+    changed |= ensure_chat_prompt_ids(&mut ledger, &input.session_id, Some(document));
+    if changed {
         store_chat_prompt_ledger(&roots, &input.session_id, &ledger)?;
     }
-    Ok(ledger.prompts.into_iter().map(|entry| entry.text).collect())
+    Ok(ledger.prompts)
 }
 
 /// Drop the session's chat prompt ledger: each chat prompt is carried by
@@ -1496,7 +1611,15 @@ mod tests {
 
         let chat = chat_input(&dir, "turn-2", "#upgrade");
         apply_user_prompt_submit(&chat).unwrap();
-        assert_eq!(note_chat_prompt(&chat).unwrap(), Some(doc.clone()));
+        let noted = note_chat_prompt_with_id(&chat).unwrap().unwrap();
+        assert_eq!(noted.document, doc);
+        assert_eq!(noted.surrogate_id.len(), 12);
+        assert!(
+            noted
+                .surrogate_id
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        );
 
         let trigger = chat_input(&dir, "turn-3", &format!("agent-doc {}", doc.display()));
         apply_user_prompt_submit(&trigger).unwrap();
@@ -1510,6 +1633,8 @@ mod tests {
             unrecorded_chat_prompts(&trigger, &doc, &content).unwrap(),
             vec!["#upgrade".to_string()]
         );
+        let entries = unrecorded_chat_prompt_entries(&trigger, &doc, &content).unwrap();
+        assert_eq!(entries[0].surrogate_id, noted.surrogate_id);
 
         // Reported on exactly one admitted cycle.
         clear_chat_prompt_ledger(&trigger, &doc).unwrap();
@@ -1518,6 +1643,32 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn repeated_chat_prompt_turns_receive_distinct_surrogate_ids() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-1");
+
+        let first = chat_input(&dir, "turn-2", "same words");
+        apply_user_prompt_submit(&first).unwrap();
+        let first_id = note_chat_prompt_with_id(&first)
+            .unwrap()
+            .unwrap()
+            .surrogate_id;
+
+        let second = chat_input(&dir, "turn-3", "same words");
+        apply_user_prompt_submit(&second).unwrap();
+        let second_id = note_chat_prompt_with_id(&second)
+            .unwrap()
+            .unwrap()
+            .surrogate_id;
+
+        assert_ne!(first_id, second_id);
+        let entries = ledger_entries(&dir, &doc);
+        assert_eq!(entries.len(), 1, "duplicate text remains ledger-deduplicated");
+        assert_eq!(entries[0].surrogate_id, second_id);
     }
 
     fn ledger_entries(dir: &tempfile::TempDir, doc: &Path) -> Vec<ChatPromptEntry> {
@@ -1625,6 +1776,7 @@ mod tests {
             text: text.to_string(),
             noted_at,
             turn_id: String::new(),
+            surrogate_id: String::new(),
         };
         let mut ledger = ChatPromptLedger {
             doc_path: "doc.md".to_string(),

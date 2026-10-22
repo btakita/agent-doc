@@ -14,9 +14,11 @@ only the compact routing table that survives context compaction.
   repair path `agent-doc write --commit <FILE>`.
 - **Document is the UI.** User edits are the prompt. A chat-only prompt is also
   a session turn (`#chatprompt`, GH #125; `#chatprompt`, GH #140): begin the response with
-  `> **Chat prompt (#chatprompt):** <verbatim prompt>` so it is recorded in the
-  document. OpenCode has no `UserPromptSubmit` hook, so its agent MUST
-  self-apply this rule. A non-empty `chat_prompts` is never `no_changes`, and
+  the exact hook-issued `> **Chat prompt (#chatprompt:<id>):** <verbatim prompt>`
+  prefix so it is recorded in the document. OpenCode has no `UserPromptSubmit` hook,
+  so its agent MUST self-apply this rule with a unique compact ID. Legacy
+  ID-less records remain readable and must not be rewritten just to normalize their marker.
+  A non-empty `chat_prompts` is never `no_changes`, and
   `session-check` warns `chat prompt not recorded` if closeout skipped it.
 - **Imperative edits are executable directives.** `do #id`, `fix this`, `go`,
   `push`, tests, build/install, and commit/push authorize the named work. A

@@ -388,13 +388,21 @@ fn run_preflight_for_prompt(
     // last trigger that the document still does not record. Computed before
     // admission against the pre-cycle document; reported only on an admitted
     // contract, so a refused admission keeps them for the next attempt.
-    let chat_prompts = tracked_input
+    let chat_prompt_entries = tracked_input
         .map(|input| unrecorded_chat_prompts_for(input, &file))
         .unwrap_or_default();
+    let chat_prompts = chat_prompt_entries
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect::<Vec<_>>();
     let chat_notice = tracked_input.and_then(|input| {
+        let records = chat_prompt_entries
+            .iter()
+            .map(|entry| (entry.surrogate_id.clone(), entry.text.clone()))
+            .collect::<Vec<_>>();
         agent_doc_prompt_contract::chat_prompt::unrecorded_chat_prompts_context(
             &display_document(Path::new(&input.cwd), &file),
-            &chat_prompts,
+            &records,
         )
     });
 
@@ -449,11 +457,11 @@ fn display_document(cwd: &Path, file: &Path) -> String {
 fn unrecorded_chat_prompts_for(
     input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
     file: &Path,
-) -> Vec<String> {
+) -> Vec<agent_doc_codex_hook_io::ChatPromptEntry> {
     let Ok(document) = std::fs::read_to_string(file) else {
         return Vec::new();
     };
-    match agent_doc_codex_hook_io::unrecorded_chat_prompts(input, file, &document) {
+    match agent_doc_codex_hook_io::unrecorded_chat_prompt_entries(input, file, &document) {
         Ok(prompts) => prompts,
         Err(err) => {
             eprintln!("[agent-doc] chat prompt ledger read failed: {err:#}");
@@ -468,9 +476,13 @@ fn unrecorded_chat_prompt_notice(
     input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
     file: &Path,
 ) -> Option<String> {
+    let records = unrecorded_chat_prompts_for(input, file)
+        .into_iter()
+        .map(|entry| (entry.surrogate_id, entry.text))
+        .collect::<Vec<_>>();
     agent_doc_prompt_contract::chat_prompt::unrecorded_chat_prompts_context(
         &display_document(Path::new(&input.cwd), file),
-        &unrecorded_chat_prompts_for(input, file),
+        &records,
     )
 }
 
@@ -481,18 +493,19 @@ fn unrecorded_chat_prompt_notice(
 fn chat_prompt_hook_context(
     input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
 ) -> Option<String> {
-    let doc = match agent_doc_codex_hook_io::note_chat_prompt(input) {
-        Ok(doc) => doc?,
+    let noted = match agent_doc_codex_hook_io::note_chat_prompt_with_id(input) {
+        Ok(noted) => noted?,
         Err(err) => {
             eprintln!("[agent-doc] chat prompt tracking failed: {err:#}");
             return None;
         }
     };
     let chat = agent_doc_prompt_contract::chat_prompt::chat_prompt_text(&input.prompt)?;
-    let document = std::fs::read_to_string(&doc).unwrap_or_default();
+    let document = std::fs::read_to_string(&noted.document).unwrap_or_default();
     let presets = agent_doc_prompt_contract::chat_prompt::chat_prompt_presets(&document, &chat);
     Some(agent_doc_prompt_contract::chat_prompt::chat_prompt_context(
-        &display_document(Path::new(&input.cwd), &doc),
+        &display_document(Path::new(&input.cwd), &noted.document),
+        &noted.surrogate_id,
         &chat,
         &presets,
     ))
@@ -1303,12 +1316,20 @@ mod tests {
         assert!(context.contains("agent:exchange"));
         assert!(context.contains("Upgrade agent-doc."));
         assert!(!context.contains(super::CONTRACT_MARKER));
+        let surrogate_id = context
+            .split("#chatprompt:")
+            .nth(1)
+            .and_then(|tail| tail.split(')').next())
+            .expect("hook context carries a chat-prompt surrogate ID");
+        assert_eq!(surrogate_id.len(), 12);
+        assert!(surrogate_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
 
         let next = input("/agent-doc task.md");
         agent_doc_codex_hook_io::apply_user_prompt_submit(&next).unwrap();
         let notice = super::unrecorded_chat_prompt_notice(&next, &doc).expect("unrecorded");
         assert!(notice.contains("not idle") && notice.contains("chat_prompts"));
         assert!(notice.contains("chat_prompt: \"#upgrade\""));
+        assert!(notice.contains(&format!("#chatprompt:{surrogate_id}")));
     }
 
     /// `#hooktriggerunresolved`: a trigger whose document path does not resolve

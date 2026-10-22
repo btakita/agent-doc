@@ -23,7 +23,8 @@
 //! - [`chat_prompt_record_present`] / [`chat_prompts_missing_record`] /
 //!   [`unrecorded_chat_prompt_closeout_warning`] back the closeout warning: a
 //!   committed cycle that carried chat prompts needs a
-//!   `> **Chat prompt (#chatprompt):**` record block for each.
+//!   `> **Chat prompt (#chatprompt:<id>):**` record block for each. Legacy
+//!   ID-less records remain readable and are never rewritten implicitly.
 //!
 //! ## Agentic Contracts
 //! - Pure: no I/O. The hook adapter owns state and stdout.
@@ -109,9 +110,7 @@ pub fn is_harness_generated_prompt(prompt: &str) -> bool {
     matches!(
         envelope_tag_at(trimmed),
         Some("agent-message" | "task-notification")
-    )
-        || (envelope_tag_at(trimmed).is_some()
-            && strip_harness_envelopes(trimmed).trim().is_empty())
+    ) || (envelope_tag_at(trimmed).is_some() && strip_harness_envelopes(trimmed).trim().is_empty())
 }
 
 /// The operator text of a harness prompt that is not an `agent-doc` trigger.
@@ -164,7 +163,7 @@ pub const CHAT_PROMPT_DIFF_TYPE: &str = "chat_prompt";
 /// over and re-raising it on every later trigger is noise, not a record.
 pub const CHAT_PROMPT_LEDGER_TTL_SECS: u64 = 6 * 60 * 60;
 
-/// Bodies of every `> **Chat prompt (#chatprompt):** …` record in `document`
+/// Bodies of every `> **Chat prompt (#chatprompt[:<id>]):** …` record in `document`
 /// (frontmatter excluded): the text after the tag plus its `>` continuation
 /// lines, joined by newlines.
 fn chat_prompt_record_blocks(document: &str) -> Vec<String> {
@@ -178,8 +177,8 @@ fn chat_prompt_record_blocks(document: &str) -> Vec<String> {
                 blocks.push(block);
             }
             let rest = trimmed
-                .split_once("(#chatprompt)")
-                .map(|(_, rest)| rest)
+                .find(')')
+                .map(|close| &trimmed[close + 1..])
                 .unwrap_or_default()
                 .trim_start_matches([':', '*', '_', ' ']);
             current = Some(rest.to_string());
@@ -202,7 +201,7 @@ fn chat_prompt_record_blocks(document: &str) -> Vec<String> {
     blocks
 }
 
-/// Does `document` carry a `> **Chat prompt (#chatprompt):** …` record of
+/// Does `document` carry a `> **Chat prompt (#chatprompt[:<id>]):** …` record of
 /// `chat`: one record block containing every non-blank line of the prompt?
 ///
 /// Stricter than [`chat_prompt_recorded`]: a short prompt (`yes`, `#upgrade`)
@@ -237,7 +236,7 @@ pub const UNRECORDED_CHAT_PROMPT_CLOSEOUT_MARKER: &str =
     "[session-check] warning: chat prompt not recorded (#chatprompt)";
 
 /// Closeout warning for chat prompts a committed cycle carried without a
-/// `> **Chat prompt (#chatprompt):**` record, with the repair. A warning, never
+/// `> **Chat prompt (#chatprompt:<id>):**` record, with the repair. A warning, never
 /// a failure: the work may be done and committed, only its record is missing.
 pub fn unrecorded_chat_prompt_closeout_warning(
     document: &str,
@@ -249,7 +248,7 @@ pub fn unrecorded_chat_prompt_closeout_warning(
     let mut warning = format!(
         "{UNRECORDED_CHAT_PROMPT_CLOSEOUT_MARKER}: `{document}` committed a cycle that carried {}          chat prompt(s) without a `{record} <prompt>` record. The turn is in the chat transcript          only. Repair: pipe a response whose `patch:exchange` begins with `{record} <verbatim          prompt>` (plus a note of the work done) through `agent-doc respond {document}`; on a          committed cycle it reopens a fresh one from HEAD.",
         missing.len(),
-        record = agent_doc_prompt_lines::CHAT_PROMPT_RECORD_PREFIX,
+        record = agent_doc_prompt_lines::CHAT_PROMPT_RECORD_TEMPLATE,
     );
     for prompt in missing {
         warning.push_str(&format!("\nchat_prompt: {prompt:?}"));
@@ -270,7 +269,13 @@ pub fn chat_prompt_presets(document: &str, chat: &str) -> Vec<(String, String)> 
 }
 
 /// Hook context for a chat-originated prompt in a document-bound session.
-pub fn chat_prompt_context(document: &str, chat: &str, presets: &[(String, String)]) -> String {
+pub fn chat_prompt_context(
+    document: &str,
+    surrogate_id: &str,
+    chat: &str,
+    presets: &[(String, String)],
+) -> String {
+    let record = agent_doc_prompt_lines::chat_prompt_record_prefix(surrogate_id);
     let mut context = format!(
         "{CHAT_PROMPT_MARKER} `{document}` (#chatprompt): this operator prompt arrived in the \
          harness chat, not as a document edit, and it is still a session turn. Record it: insert \
@@ -279,7 +284,7 @@ pub fn chat_prompt_context(document: &str, chat: &str, presets: &[(String, Strin
          `agent-doc respond {document}` / `agent-doc write --commit {document}` with its \
          queue/backlog mutations. Do not leave the turn only in the chat transcript.\n\
          chat_prompt: {chat:?}",
-        record = agent_doc_prompt_lines::CHAT_PROMPT_RECORD_PREFIX,
+        record = record,
     );
     for (key, body) in presets {
         context.push_str(&format!("\nprompt_preset {key:?}: {body:?}"));
@@ -288,8 +293,12 @@ pub fn chat_prompt_context(document: &str, chat: &str, presets: &[(String, Strin
 }
 
 /// Notice prepended to an admitted cycle contract when chat prompts since the
-/// previous trigger never reached the document.
-pub fn unrecorded_chat_prompts_context(document: &str, prompts: &[String]) -> Option<String> {
+/// previous trigger never reached the document. Each pair is
+/// `(surrogate_id, prompt_text)`.
+pub fn unrecorded_chat_prompts_context(
+    document: &str,
+    prompts: &[(String, String)],
+) -> Option<String> {
     if prompts.is_empty() {
         return None;
     }
@@ -297,13 +306,16 @@ pub fn unrecorded_chat_prompts_context(document: &str, prompts: &[String]) -> Op
         "{UNRECORDED_CHAT_PROMPTS_MARKER} `{document}` (#chatprompt): the operator prompted in \
          the harness chat since the last cycle and the document does not record it. The contract \
          below carries them as `chat_prompts` (and in `user_intent_prompt_changes`), so this cycle \
-         is a real turn, not idle: begin the `patch:exchange` response with `{record} <prompt>` \
-         for each prompt below, answer it (or note the work already done), and persist through \
+         is a real turn, not idle: begin the `patch:exchange` response with the exact \
+         `chat_prompt_record` shown for each prompt below, answer it (or note the work already \
+         done), and persist through \
          `agent-doc respond {document}` / `agent-doc write --commit {document}`.",
-        record = agent_doc_prompt_lines::CHAT_PROMPT_RECORD_PREFIX,
     );
-    for prompt in prompts {
-        context.push_str(&format!("\nchat_prompt: {prompt:?}"));
+    for (surrogate_id, prompt) in prompts {
+        let record = agent_doc_prompt_lines::chat_prompt_record_prefix(surrogate_id);
+        context.push_str(&format!(
+            "\nchat_prompt_record: {record} <prompt>\nchat_prompt: {prompt:?}"
+        ));
     }
     Some(context)
 }
@@ -372,24 +384,29 @@ mod tests {
     #[test]
     fn chat_context_names_the_recording_path_and_preset_body() {
         let presets = chat_prompt_presets(DOC, "#upgrade");
-        let context = chat_prompt_context("tasks/a.md", "#upgrade", &presets);
+        let context = chat_prompt_context("tasks/a.md", "7f31ab08c4de", "#upgrade", &presets);
         assert!(context.starts_with(CHAT_PROMPT_MARKER));
         assert!(context.contains("agent:exchange"));
         assert!(context.contains("agent-doc respond tasks/a.md"));
         assert!(context.contains("agent-doc write --commit tasks/a.md"));
         assert!(context.contains("chat_prompt: \"#upgrade\""));
+        assert!(context.contains("> **Chat prompt (#chatprompt:7f31ab08c4de):**"));
         assert!(context.contains("Upgrade agent-doc. File a gh issue."));
     }
 
     #[test]
     fn unrecorded_notice_says_no_changes_is_not_idle() {
         assert_eq!(unrecorded_chat_prompts_context("tasks/a.md", &[]), None);
-        let notice =
-            unrecorded_chat_prompts_context("tasks/a.md", &["#upgrade".to_string()]).unwrap();
+        let notice = unrecorded_chat_prompts_context(
+            "tasks/a.md",
+            &[("7f31ab08c4de".to_string(), "#upgrade".to_string())],
+        )
+        .unwrap();
         assert!(notice.starts_with(UNRECORDED_CHAT_PROMPTS_MARKER));
         assert!(notice.contains("not idle"));
         assert!(notice.contains("chat_prompts"));
         assert!(notice.contains("chat_prompt: \"#upgrade\""));
+        assert!(notice.contains("> **Chat prompt (#chatprompt:7f31ab08c4de):**"));
     }
 
     /// GH #125 gap 4: closeout asks for the canonical record shape. A short
@@ -404,6 +421,11 @@ mod tests {
             "hello\n> **Chat prompt (#chatprompt):** #upgrade\n\n### Re: upgrade\n",
         );
         assert!(chat_prompt_record_present(&recorded, "#upgrade"));
+        let identified = DOC.replace(
+            "hello\n",
+            "hello\n> **Chat prompt (#chatprompt:7f31ab08c4de):** #upgrade\n",
+        );
+        assert!(chat_prompt_record_present(&identified, "#upgrade"));
         assert!(chat_prompts_missing_record(&recorded, &["#upgrade".to_string()]).is_empty());
         // A multi-line prompt is recorded through `>` continuation lines.
         let multi = DOC.replace(
@@ -445,7 +467,7 @@ mod tests {
                 .unwrap();
         assert!(warning.starts_with(UNRECORDED_CHAT_PROMPT_CLOSEOUT_MARKER));
         assert!(warning.contains("agent-doc respond tasks/a.md"));
-        assert!(warning.contains(agent_doc_prompt_lines::CHAT_PROMPT_RECORD_PREFIX));
+        assert!(warning.contains(agent_doc_prompt_lines::CHAT_PROMPT_RECORD_TEMPLATE));
         assert!(warning.contains("chat_prompt: \"#upgrade\""));
     }
 

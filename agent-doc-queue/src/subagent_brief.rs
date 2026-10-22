@@ -403,7 +403,7 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "request: <exact question or exact tool/action requiring permission>\n",
     "context: <why it is needed, current state, target/scope, and risk or effect>\n",
     "choices:\n",
-    "- <label>: <effect>\n\n",
+    "- **<label>**: <effect>\n\n",
     "Replace `<unique-id>` with a short request-specific lowercase suffix using letters, digits, ",
     "and hyphens. Use a different marker id for every request packet in the session document; ",
     "never reuse the legacy fixed `[#subagent-operator-request]` id. ",
@@ -947,7 +947,8 @@ mod tests {
             assert!(
                 preamble.contains("never reuse the legacy fixed `[#subagent-operator-request]` id")
             );
-            assert!(preamble.contains("choices:\n- <label>: <effect>"));
+            assert!(preamble.contains("choices:\n- **<label>**: <effect>"));
+            assert!(!preamble.contains("choices:\n- <label>: <effect>"));
             for harness in ["Claude Code", "Codex", "Grok Build", "OpenCode"] {
                 assert!(preamble.contains(harness), "missing {harness}: {preamble}");
             }

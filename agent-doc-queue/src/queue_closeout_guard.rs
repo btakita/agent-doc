@@ -485,6 +485,12 @@ pub fn free_text_queue_head_provenance_decision_with_claims(
     let mut completed_residue = Vec::new();
 
     for head in active_free_text_queue_heads {
+        // Preserve the operator-action projection until its linked todo is
+        // answered. Stripping cosmetic markers below intentionally produces
+        // work identity, so this gate must inspect the visible row first.
+        if !agent_doc_document::queue_projection::operator_action_ids(head).is_empty() {
+            continue;
+        }
         let head = strip_priority_markers(head);
         let normalized = head.trim().to_ascii_lowercase();
         if normalized.is_empty() {

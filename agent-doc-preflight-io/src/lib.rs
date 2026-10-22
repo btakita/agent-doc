@@ -6002,6 +6002,11 @@ pub fn run_queue_maintenance_with_coin_gate(
                     // INTERRUPT set disagree and a fresh `deploy` request gets struck
                     // with no action taken.
                             if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
+                                // `#operatoractionresidue`: a reported worker can
+                                // leave an exact queue echo while its linked
+                                // operator request is still unanswered. That
+                                // `🙋` gate outranks historical answer evidence.
+                                && agent_doc_document::queue_projection::operator_action_ids(&p.text).is_empty()
                                 && queue_prompt_text_is_free_text(&current_content, &p.text)
                                 && committed_free_text.contains(&gate_norm(&p.text))
                                 && answered_residue_in(&exchange_text, &p.text)
@@ -18247,6 +18252,55 @@ mod tests {
         assert!(
             active.iter().any(|t| t.contains("do [#beta]")),
             "unanswered id-backed head must remain an active Prompt:\nactive={active:?}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_keeps_reported_head_with_unanswered_operator_action() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prepare sdk demo\n\n",
+            "> **Queue prompt:** prepare sdk demo\n\n",
+            "The worker finished, but the operator decision is still pending.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- 🙋☑️ prepare sdk demo [#subagent-operator-request-sdk-demo-approval]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#subagent-operator-request-sdk-demo-approval] Approve the sdk demo release\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let (active, completed) = residue_scope_queue_rows(&doc);
+        assert_eq!(active.len(), 1, "blocked reported head must remain live");
+        assert!(
+            active[0].contains("prepare sdk demo"),
+            "the original blocked work must remain queued: {active:?}"
+        );
+        assert!(
+            !agent_doc_document::queue_projection::operator_action_ids(&active[0]).is_empty(),
+            "the unanswered operator-action link must remain projected: {active:?}"
+        );
+        assert!(
+            completed.is_empty(),
+            "historical answer evidence must not strike an unanswered operator request: {completed:?}"
         );
     }
 

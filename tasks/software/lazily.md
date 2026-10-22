@@ -950,10 +950,10 @@ Changed paths: none outside this binary-owned session update. Commands/evidence:
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- do [#lzambienttokenresolve]
-- do [#lzcorecohort]
-- do [#fixrunturn]
-- do [#lzcorecireachaudit]
+- 🚧 [#subagent:ambienttokenresolve2#2] do [#lzambienttokenresolve]
+- 🚧 [#subagent:corecohort2#2] do [#lzcorecohort]
+- 🚧 [#subagent:fixrunturn#1] do [#fixrunturn]
+- 🚧 [#subagent:corecireachaudit#1] do [#lzcorecireachaudit]
 - ~~do [#lzstalehandlegenkt]: release + publish: Coordinator releases~~
 - ~~do [#lzstalehandlegenjs]: release + publish: Coordinator releases~~
 - ~~do [#lzstalehandlegenparityspec]~~

@@ -13866,7 +13866,7 @@ mod tests {
         let baseline = concat!(
             "# Session\n\n",
             "<!-- agent:backlog -->\n- [ ] existing #existing\n<!-- /agent:backlog -->\n\n",
-            "<!-- agent:queue -->\n- existing queue\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue -->\n- 📥 existing queue\n<!-- /agent:queue -->\n\n",
             "<!-- agent:exchange -->\nReady.\n<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n",
         );
         let target = baseline
@@ -13893,8 +13893,8 @@ mod tests {
         agent_doc_crdt_relay_io::with_hub(&file, |hub| {
             let current = hub.canonical_text();
             let operator = current.replace(
-                "- existing queue\n",
-                "- existing queue\n- operator typed after delivery proof\n",
+                "- 📥 existing queue\n",
+                "- 📥 existing queue\n- 📥 operator typed after delivery proof\n",
             );
             hub.apply_local(client_id, 0, current.chars().count() as u32, &operator)
                 .unwrap();
@@ -15064,7 +15064,7 @@ mod tests {
             "❯ Original prompt.\n",
             "<!-- agent:boundary:base -->\n",
             "<!-- /agent:exchange -->\n",
-            "<!-- agent:queue -->\n- do [#keep]\n- do [#deleted]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- 📥 do [#keep]\n- 📥 do [#deleted]\n<!-- /agent:queue -->\n",
         );
         let response_target = editor_base.replace(
             "<!-- agent:boundary:base -->",
@@ -15075,7 +15075,7 @@ mod tests {
                 "❯ Original prompt.\n",
                 "❯ Original prompt.\n❯ Prompt typed during repair.\n",
             )
-            .replace("- do [#deleted]\n", "");
+            .replace("- 📥 do [#deleted]\n", "");
         let (_dir, file, _canonical) = temp_doc(editor_base);
         let identity = "test-repair-zero-replica-semantic-rebase";
         seed_reliable_sync_open(&file, identity);
@@ -16374,14 +16374,17 @@ mod tests {
     fn retained_capture_supersedes_prior_cycle_reconnect_target() {
         let prior_cut = concat!(
             "# Session\n\n",
-            "<!-- agent:queue -->\n- prior head\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue -->\n- 📥 prior head\n<!-- /agent:queue -->\n\n",
             "<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n",
         );
         let stale_prior_target = format!(
             "{}\n-->\n",
-            prior_cut.replace("- prior head\n", "- stale prior head\n")
+            prior_cut.replace("- 📥 prior head\n", "- 📥 stale prior head\n")
         );
-        let current_cut = prior_cut.replace("- prior head\n", "- operator-owned current head\n");
+        let current_cut = prior_cut.replace(
+            "- 📥 prior head\n",
+            "- 📥 operator-owned current head\n",
+        );
         let captured_response = "### Re: investigate\n\nRecovered the current response.\n";
         let replayed_target =
             agent_doc_turn::response_replay::materialize_response_in_current_exchange(
@@ -16523,7 +16526,7 @@ mod tests {
             concat!(
                 "# Session\n\n",
                 "<!-- agent:queue -->\n",
-                "- do [#fresh-project-supervisor-log]: agent-doc start should create a configurable path to the supervisor log file. Directories should be created as needed.\n",
+                "- 📥 do [#fresh-project-supervisor-log]: agent-doc start should create a configurable path to the supervisor log file. Directories should be created as needed.\n",
                 "<!-- /agent:queue -->\n\n",
                 "<!-- agent:exchange -->\n",
                 "{}",
@@ -16595,21 +16598,21 @@ mod tests {
     fn retained_capture_rebases_over_operator_save_without_preflight_or_recapture() {
         let editor_base = concat!(
             "# Session\n\n",
-            "<!-- agent:queue -->\n- original item\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:queue -->\n- 📥 original item\n<!-- /agent:queue -->\n\n",
             "<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n",
         );
         let captured_response = "### Re: investigate\n\nFixed the retained closeout.\n";
         let captured_target = format!(
             concat!(
                 "# Session\n\n",
-                "<!-- agent:queue -->\n- original item\n<!-- /agent:queue -->\n\n",
+                "<!-- agent:queue -->\n- 📥 original item\n<!-- /agent:queue -->\n\n",
                 "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
             ),
             captured_response.trim_end()
         );
         let operator_saved_cut = editor_base.replace(
-            "- original item\n",
-            "- original item\n- operator item saved before recovery\n",
+            "- 📥 original item\n",
+            "- 📥 original item\n- 📥 operator item saved before recovery\n",
         );
         let (_dir, file, _canonical) = temp_doc(editor_base);
         let identity = "test-retained-capture-operator-save";
@@ -17134,17 +17137,17 @@ mod tests {
     fn newer_compact_projection_retires_stale_composed_journal_without_replay() {
         let stale_reposition = compact_projection_test_document(
             "20260717-225006",
-            "- [ ] stale queue item",
+            "- 📥 [ ] stale queue item",
             "old prompt\n",
         );
         let stale_composite = compact_projection_test_document(
             "20260717-225007",
-            "- [ ] stale queue item\n- [ ] another stale item",
+            "- 📥 [ ] stale queue item\n- 📥 [ ] another stale item",
             "old prompt\n",
         );
         let current = compact_projection_test_document(
             "20260717-225039",
-            "- [x] retained current item",
+            "- 📥 [x] retained current item",
             "❯ 🚧 current prompt\n",
         );
         let (_dir, file, _canonical) = temp_doc(&current);
@@ -17333,9 +17336,12 @@ mod tests {
     /// so it is accepted and canonical (with the operator's queue) is adopted.
     #[test]
     fn editor_receipt_accepts_operator_drift_in_an_unowned_cell() {
-        let pre = cell_doc("prompt\n", "- do #a\n");
-        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- do #a typ\n");
-        let canonical = cell_doc("prompt\n### Re: answer\n\nbody\n", "- do #a typed more\n");
+        let pre = cell_doc("prompt\n", "- 📥 do #a\n");
+        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- 📥 do #a typ\n");
+        let canonical = cell_doc(
+            "prompt\n### Re: answer\n\nbody\n",
+            "- 📥 do #a typed more\n",
+        );
         let (_dir, file, _canonical) = temp_doc(&pre);
         let identity = "test-editor-receipt-unowned-cell-drift";
         seed_reliable_sync_open(&file, identity);
@@ -17413,8 +17419,8 @@ mod tests {
     /// budget and is accepted when the delta lands.
     #[test]
     fn editor_receipt_pending_owned_cell_waits_past_the_ordinary_budget() {
-        let pre = cell_doc("prompt\n", "- do #a\n");
-        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- do #a\n");
+        let pre = cell_doc("prompt\n", "- 📥 do #a\n");
+        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- 📥 do #a\n");
         let (_dir, file, _canonical) = temp_doc(&pre);
         let identity = "test-editor-receipt-pending-owned-cell";
         seed_reliable_sync_open(&file, identity);
@@ -17438,7 +17444,7 @@ mod tests {
             let waiter_started = start_rx.recv().unwrap();
             // Unrelated operator revision first, then the late exchange delta
             // strictly after the waiter's ordinary budget has expired.
-            let operator = writer_pre.replace("- do #a\n", "- do #a!\n");
+            let operator = writer_pre.replace("- 📥 do #a\n", "- 📥 do #a!\n");
             apply_cp_write_through_relay_authority(
                 &writer_file,
                 &writer_pre,
@@ -17448,7 +17454,7 @@ mod tests {
             .unwrap();
             let late = waiter_started + ORDINARY_BUDGET + std::time::Duration::from_millis(300);
             std::thread::sleep(late.saturating_duration_since(std::time::Instant::now()));
-            let landed = writer_receipt.replace("- do #a\n", "- do #a!\n");
+            let landed = writer_receipt.replace("- 📥 do #a\n", "- 📥 do #a!\n");
             apply_cp_write_through_relay_authority(
                 &writer_file,
                 &operator,
@@ -17481,15 +17487,15 @@ mod tests {
     /// exactly once and keeps the operator's newer queue text.
     #[test]
     fn pending_owned_response_is_folded_into_canonical_after_the_budget() {
-        let pre = cell_doc("prompt\n", "- do #a\n");
-        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- do #a\n");
+        let pre = cell_doc("prompt\n", "- 📥 do #a\n");
+        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- 📥 do #a\n");
         let (_dir, file, _canonical) = temp_doc(&pre);
         let identity = "test-editor-receipt-pending-owned-fold";
         seed_reliable_sync_open(&file, identity);
         test_support_register_replica_for_file(&file, identity)
             .unwrap()
             .expect("editor replica should attach");
-        let operator = pre.replace("- do #a\n", "- do #a\n- #b typed later\n");
+        let operator = pre.replace("- 📥 do #a\n", "- 📥 do #a\n- 📥 #b typed later\n");
         apply_cp_write_through_relay_authority(&file, &pre, &operator, "operator_queue_typing")
             .unwrap();
         let scope = exchange_scope(&pre);
@@ -17518,7 +17524,10 @@ mod tests {
         )
         .unwrap()
         .expect("a pending owned response must fold into canonical");
-        let expected = receipt.replace("- do #a\n", "- do #a\n- #b typed later\n");
+        let expected = receipt.replace(
+            "- 📥 do #a\n",
+            "- 📥 do #a\n- 📥 #b typed later\n",
+        );
         assert_eq!(folded, expected);
         assert_eq!(
             try_resolve_current_document_content(&file, "appliedresponsefold_check").unwrap(),
@@ -17740,7 +17749,7 @@ mod tests {
             "❯ Original prompt.\n",
             "<!-- agent:boundary:base -->\n",
             "<!-- /agent:exchange -->\n",
-            "<!-- agent:queue -->\n- do [#keep]\n- do [#deleted]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- 📥 do [#keep]\n- 📥 do [#deleted]\n<!-- /agent:queue -->\n",
         );
         let response_target = editor_base.replace(
             "<!-- agent:boundary:base -->",
@@ -17751,7 +17760,7 @@ mod tests {
                 "❯ Original prompt.\n",
                 "❯ Original prompt.\n❯ Prompt typed during delivery.\n",
             )
-            .replace("- do [#deleted]\n", "");
+            .replace("- 📥 do [#deleted]\n", "");
         let (_dir, file, _canonical) = temp_doc(editor_base);
         let identity = "test-semantic-response-no-lineage";
         seed_reliable_sync_open(&file, identity);

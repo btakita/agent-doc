@@ -1406,7 +1406,25 @@ fn reconcile_durable_queue_attempts_on_hub(
     hub: &mut RelayHub,
 ) -> Result<(bool, usize)> {
     let current = hub.canonical_text();
-    let target = durable_queue_attempt_projection(file, &current)?;
+    let target = match durable_queue_attempt_projection(file, &current) {
+        Ok(target) => target,
+        Err(error) => {
+            // Queue lifecycle projection is a derived repair, never authority
+            // to make an already malformed document unavailable. There is no
+            // safe row boundary on which to write `❔`; keep the exact cut so
+            // structural recovery can run, and expose the uncertainty in the
+            // durable operator diagnostic instead of claiming synchronized
+            // state.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_handoff_queue_attempt_projection_degraded file={} reason={error:#} action=preserve_exact_cut (#claimmarker #controllerhandoff)",
+                    file.display(),
+                ),
+            );
+            return Ok((false, 0));
+        }
+    };
     if target == current {
         return Ok((false, 0));
     }

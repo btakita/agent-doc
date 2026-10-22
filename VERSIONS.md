@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.539
+
+- **Invalid visible roll-forwards terminate with an actionable recovery (GH #344).** A structurally invalid
+  JetBrains buffer returns a definitive refusal with its exact validation diagnostic; the controller stops retrying
+  unchanged content, and session-check directs `agent-doc admin recycle` without risking operator text.
+- **Deferred automatic CRDT compaction remains armed until delivery settles (GH #345).** Oversized session history
+  records its blocking gate, compacts at the next visible projection, and requests a fresh replica epoch instead of
+  waiting for a chance editor update.
+- **Remote Dev column grouping stays behind the hot-reloaded native boundary (GH #346).** Schema-3 window evidence
+  now runs through `client_measured_layout` before the frozen frontend fallback, and the release gate rejects both
+  native-boundary regressions and comment/rename-only plugin bumps.
+
 ## 0.35.538
 
 - **Interrupted Codex turns retire state on the authoritative document pane.** Stop now clears the exact actor

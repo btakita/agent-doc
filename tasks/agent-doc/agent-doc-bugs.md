@@ -23,11 +23,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="Track the latest published agent-doc release + publication time and latest JetBrains plugin release version + publication time." -->
 
-📥 Queue handoff: 9 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published release: [v0.35.537](https://github.com/btakita/agent-doc/releases/tag/v0.35.537), published on GitHub at 2026-10-22 00:13:39 UTC with 17 assets; PyPI 0.35.537 followed and passed clean-install verification. Release commit ac8ad5c3cd. Published editor packages: JetBrains classic 0.2.770, JetBrains 262 0.2.771, JetBrains 263 0.2.772, and VS Code 0.2.83. Main is now b3f985e863 with the post-release exact-pane Clear Session Context fix; that mainline build is tested and installed locally.
+Latest published agent-doc release: v0.35.540, published on GitHub at 2026-10-22 05:52:14 UTC. JetBrains plugin packages published with that release at the same time: classic 0.2.776, 262 0.2.779, and 263 0.2.780 (latest numeric JetBrains package: 0.2.780).
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -353,26 +353,6 @@ The exact post-release integration passed `make check`: 11,396/11,396 Rust tests
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/344~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/345~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/346~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/347~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~For subagent choices, make the title of each choice **bold**.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~sdk-demo.md: `- Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?` queue item is not annotated with an emoji despite being worked on by a subagent. If the fix makes it into the `Include 344-347...` release, add it.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The sdk-demo.md queue item annotations were not refreshed after the queue items were completed. If there is a choice, the choice should also be added into `agent:todo` with the same id as the choice expressed in the `agent:exchange`. Can we make an indicator for the queue items being blocked by a subagent choice? What do you recommend to add local visibility to the agent:queue? Can we have another emoji representing a user action with the same id as the choice + todo item?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/348~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish: Include 344-348 + For subagent choices, make the title of each choice **bold**.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~re worktree lineage: make the DX lightweight and non-verbose.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The current agent:status shows the latest version being `v0.35.537`, but this is an older version. The sync:status needs to use the correct hook to be current.~~ — auto-struck: answered this cycle (#ftstrike)
-~~~done
-Each Chat prompt in the `agent:exchange` should have a unique surrogate id. From sdk-demo.md:
-```
-> **Chat prompt (#chatprompt):** did you see my latest steering?
-
-> **Chat prompt (#chatprompt):** Did you see it before I asked?
-```
-~~~
 <!-- /agent:queue -->
 
 ## Queue: Issues

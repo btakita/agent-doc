@@ -12,7 +12,6 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#repo': 'https://github.com/btakita/agent-doc'
-queue: go
 ---
 
 ## Status
@@ -36,13 +35,35 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 13 response topic(s): recovered response; v0.1.106 release and Issue #29; do [#databasefiledecisions]; 10 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): GitHub issues 26–28; v0.1.104 release; upgrade-friendly tsift ...
-<!-- agent:boundary:7012ffbc -->
+> **Queue prompt:** Support grok build: Add backlog + queue items
+
+### Re: Support grok build: Add backlog + queue items — gpt-5 · 2026-10-22T19:00-04:00
+
+Implemented and integrated Grok Build session support plus agent-doc backlog/queue traversal support.
+
+- Added Grok Build `chat_history.jsonl` auto-detection, digest/review discovery, percent-encoded working-directory resolution, CLI rendering/rewrite support, and explicit-target handling. Grok rows intentionally omit cost totals because the transcript carries no usage data.
+- Updated agent-doc parsing so claimed, status-marked, and free-text queue items are retained without being misclassified as backlog rows, and traversal emits them as job packets.
+- Updated `VERSIONS.md` and `specs/digests-sessions.md` alongside the Rust implementation and regression coverage.
+- Integrated commit `3a3a16d6321b193400a611472a1052c31570c4c9` from branch `agent/grok-build-backlog-20261022`; pushed it fast-forward to `origin/main` and verified the remote main SHA matches.
+- Preserved unrelated local edits in the coordinator's `src/tsift` checkout by integrating and installing from the clean external worker worktree.
+
+Verification:
+
+- `cargo check -p tsift-agent-doc -p tsift-cli` — passed.
+- `cargo test -p tsift-agent-doc` — 90 passed, 0 failed.
+- Queue traversal regression — 1 passed, 0 failed.
+- Grok rewrite integration regression — 1 passed, 0 failed.
+- Repository-wide `make check` via `tsift --envelope digest-runner` — exit 0, zero failure groups (`tart-650d103db1`).
+- The repository has no `make install` target; the documented equivalent `cargo install --path . --force` completed successfully with zero error signals (`tart-aff50c63ee`).
+- Latest observed GitHub Actions release run was successful.
+
+No follow-up queue heads were produced.
+<!-- agent:boundary:ef8cc4b0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- 🚧 [#subagent:grok_backlog#1] Support grok build: Add backlog + queue items
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

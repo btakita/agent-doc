@@ -962,6 +962,12 @@ pub fn cancel_removed_attempt(
             .cancel_attempt(item, generation, cancelled_at_secs)
             .map_err(anyhow::Error::from)
     })?;
+    crate::queue_lineage::record_cancelled_claim(
+        file,
+        &receipt.claim,
+        receipt.cancelled_at_secs,
+        Some("operator removed active row".to_string()),
+    )?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1001,6 +1007,7 @@ pub fn record_released_cancellation(
         state: agent_doc_queue::queue_claim::QueueClaimState::Reported,
         worker,
         dispatch_policy: None,
+        tracked_item_aliases: Vec::new(),
         claimed_at_secs: reported.claimed_at_secs,
         expires_at_secs: reported.released_at_secs,
         owner_session: None,
@@ -1011,6 +1018,12 @@ pub fn record_released_cancellation(
     let receipt = mutate_ledger(file, |ledger| {
         Ok(ledger.record_cancellation(claim, cancelled_at_secs, reported.completion_key.clone()))
     })?;
+    crate::queue_lineage::record_cancelled_claim(
+        file,
+        &receipt.claim,
+        receipt.cancelled_at_secs,
+        Some("operator removed row after reported release".to_string()),
+    )?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

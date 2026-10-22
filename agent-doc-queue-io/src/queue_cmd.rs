@@ -1502,11 +1502,13 @@ mod tests {
         assert!(
             projection
                 .target_content
-                .contains(&format!("- 🚧 {question}\n")),
+                .contains(&format!(
+                    "- 🚧 ⟦owner=subagent:project_rebase_review;generation=1⟧ {question}\n"
+                )),
             "{}",
             projection.target_content
         );
-        assert!(projection.target_content.contains("- unrelated\n"));
+        assert!(projection.target_content.contains("- 📥 unrelated\n"));
         assert!(!projection.target_content.contains("- 🚧 unrelated\n"));
 
         let claims = crate::queue_claim::claim_states_for_content(&doc, &current).unwrap();

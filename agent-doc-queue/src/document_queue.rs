@@ -447,9 +447,9 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 // `\n` so `render` stays byte-preserving.
                 let mut end_i = i + 1;
                 if agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(rest) {
-                    while end_i < lines.len()
-                        && agent_doc_markdown_ast::overlay::queue_continuation_line(lines[end_i])
-                    {
+                    let mut continuation =
+                        agent_doc_markdown_ast::overlay::QueueContinuationState::default();
+                    while end_i < lines.len() && continuation.accepts_line(lines[end_i]) {
                         end_i += 1;
                     }
                 }
@@ -8687,6 +8687,32 @@ mod tests {
         );
         assert_eq!(
             entries[2],
+            QueueEntry::Prompt(QueuePrompt::new("next item"))
+        );
+    }
+
+    #[test]
+    fn terminal_tree_hard_wrap_is_not_a_separate_queue_head() {
+        let body = concat!(
+            "- In tsift.md session: • Blocked by hook\n",
+            "  └ Session persistence continuation found fresh unresolved exchange work\n",
+            "for /workspace/tasks/software/tsift.md after the previous cycle was committed.\n",
+            "Continue THIS turn in-pane and persist it with agent-doc finalize.\n",
+            "- next item\n",
+        );
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 2, "{entries:?}");
+        assert_eq!(
+            entries[0],
+            QueueEntry::Prompt(QueuePrompt::new(concat!(
+                "In tsift.md session: • Blocked by hook\n",
+                "  └ Session persistence continuation found fresh unresolved exchange work\n",
+                "for /workspace/tasks/software/tsift.md after the previous cycle was committed.\n",
+                "Continue THIS turn in-pane and persist it with agent-doc finalize."
+            )))
+        );
+        assert_eq!(
+            entries[1],
             QueueEntry::Prompt(QueuePrompt::new("next item"))
         );
     }

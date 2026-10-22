@@ -246,6 +246,105 @@ Partially today: queue claims persist exact identity, generation, owner, and wor
 > **Chat prompt (#chatprompt):** Create solution in a subagent.
 
 **Deferred:** dispatched to worker `/root/worktree_lineage` in an isolated external worktree. It is implementing the durable exact-generation lineage ledger, Git verification, operator-facing query/recording CLI, built-in orchestration hooks where feasible, cancellation/re-add fencing, persistence after worktree cleanup, specs, and focused regression coverage. It will coordinate against cancellation commit `3037f47ea3` and the queue-state projection without sharing their worktrees; the coordinator will integrate and release the verified result.
+
+### Re: release complete; queue state, lineage, and prompt identity landed
+
+v0.35.540 is public on GitHub and PyPI. It includes Issues #344–#348, bold subagent-choice labels, the sdk-demo tracked-item alias fix, and local visibility for queue items blocked on an operator choice. The authoritative release gate passed and public verification fetched the pinned native release successfully.
+
+The follow-on queue-state work is now on `main` at `99bcba5791` and installed locally. It is intentionally post-release—there is no extra tag or version bump yet.
+
+What now happens when queue Markdown changes:
+
+- Removing an active claimed/running/reported row cancels that exact identity and generation. The cancellation is durable, fences stale completions, and prevents the same text from reusing the old generation.
+- A worker may retain source artifacts for recovery, but it can no longer complete the deleted generation as live work. Re-adding the same item creates a new generation.
+- Removing a genuinely terminal struck row remains presentation-only cleanup.
+- A manually struck row that still has live durable state is reopened as an explicit degraded/mismatch projection rather than silently treated as done.
+- Queue rows are projected from durable state: `📥` pending, `🟡` dispatching, `🚧` running, `📤` reported/outbox, `🙋 [#id]` operator choice, and `❔` degraded/mismatched.
+
+Worktree lineage is now durable per exact queue identity and generation. `queue claim` and `queue start` record the attempt automatically; explicit receipts cover attached, dirty, committed, pushed, integrated, released, cancelled, retained, and removed states. Source→integration edges are explicit and Git-verified rather than guessed from branch names or patch similarity. History survives worktree deletion and struck-row cleanup.
+
+The DX is deliberately quiet: automatic recording emits no Markdown noise, and `agent-doc queue lineage FILE` shows one compact row per attempt. Use `--verbose` for paths, SHAs, release evidence, and diagnostics, or `--json` for machine-readable output.
+
+Status sync now runs once at the final Stop/handoff boundary even when the contract has no interval. Unchanged values stay silent; a changed value is persisted through the normal status/commit path. That prevents this document from remaining stuck on an old “latest version” after a long release turn.
+
+New chat prompt records use unique `#chatprompt:<12hex>` surrogate IDs, collision-checked against both document and ledger. Delayed notices retain the same ID, and legacy ID-less `#chatprompt` records remain readable without rewriting history.
+
+#### Recovered chat prompts
+
+> **Chat prompt (#chatprompt:9f3a0c7e2b41):** Why not 347?
+
+#347 was not excluded. Its final source commit was integrated into the v0.35.540 release candidate and shipped in v0.35.540.
+
+> **Chat prompt (#chatprompt:1c8d4b90e6af):** How close are we to the sdk-demo.md queue item fix?
+
+It was integrated into the same release as the issue batch. The fix preserves the tracked-item alias when an id-backed queue head becomes its exact prose, so the running marker follows the worked item instead of disappearing.
+
+> **Chat prompt (#chatprompt:74e1a9c3d058):** Is 348 going to be ready around the same time as 347?
+
+Yes. #347 and #348 shipped together in v0.35.540.
+
+> **Chat prompt (#chatprompt:3b8f1d6a20ce):** Should I remove "release + publish: Include Issue 348 if not in the previous release. Otherwise pick up anything leftover."?
+
+Yes. The cumulative release item already covered #348, so removing that fallback correctly avoided a duplicate release worker.
+
+> **Chat prompt (#chatprompt:ac47e092d1b5):** If I remove a queue item, do you cancel the worker + subagent?
+
+For an active exact generation, yes: agent-doc now records a durable cancellation and fences that generation. The harness worker may finish or be interrupted depending on timing and recoverability, but its result cannot silently complete the deleted queue attempt.
+
+> **Chat prompt (#chatprompt:6d20bfa183e9):** or is this a "best effort"...as in if a substantial amount of work is done with the subagent, continue despite the queue item being removed?
+
+The durable queue decision is not best-effort: deletion cancels the exact attempt. Retaining useful branch/worktree artifacts is best judgment, but integrating them requires a new live queue generation or separate operator authorization.
+
+> **Chat prompt (#chatprompt:e4185b09ca72):** or a "best judgement"?
+
+Best judgment applies only to recoverable artifacts and whether to interrupt the process immediately. Queue authority is deterministic: a removed active generation is cancelled.
+
+> **Chat prompt (#chatprompt:52af79d1c6e3):** If not implemented, add implementation to a subagent.
+
+Implemented through isolated subagents and integrated into `main`.
+
+> **Chat prompt (#chatprompt:b7c294e01a5f):** What should happen if a queue item is in outbox phase and is deleted?
+
+Its reported receipt remains audit evidence, but deletion creates an exact-generation cancellation tombstone. The stale outbox/completion cannot strike or complete a later re-added item, and the lineage records the cancellation after reported release.
+
+> **Chat prompt (#chatprompt:d3198a47ef60):** I think we need to up our game with the syncing agent-doc state with document queue items. I have in the past deleted queue items because I was not sure if the state was synced.
+
+That is now addressed by durable lifecycle projection. The Markdown row visibly reflects pending, dispatching, running, reported, choice-blocked, or degraded state, while the state database remains authoritative.
+
+#### Verification
+
+The exact post-release integration passed `make check`: 11,396/11,396 Rust tests, VS Code 202/202, cross-editor simulation 1/1, all JetBrains variants, bootstrap 8/8, documentation audit, and TLA receipt. The same head was pushed to `origin/main` and installed locally; CLI and native/editor packages converged without requiring an IDE restart.
+
+> **Queue prompt:** release + publish
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/344
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/345
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/346
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/347
+
+> **Queue prompt:** For subagent choices, make the title of each choice **bold**.
+
+> **Queue prompt:** sdk-demo.md: `- Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?` queue item is not annotated with an emoji despite being worked on by a subagent. If the fix makes it into the `Include 344-347...` release, add it.
+
+> **Queue prompt:** The sdk-demo.md queue item annotations were not refreshed after the queue items were completed. If there is a choice, the choice should also be added into `agent:todo` with the same id as the choice expressed in the `agent:exchange`. Can we make an indicator for the queue items being blocked by a subagent choice? What do you recommend to add local visibility to the agent:queue? Can we have another emoji representing a user action with the same id as the choice + todo item?
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/348
+
+> **Queue prompt:** release + publish: Include 344-348 + For subagent choices, make the title of each choice **bold**.
+
+> **Queue prompt:** re worktree lineage: make the DX lightweight and non-verbose.
+
+> **Queue prompt:** The current agent:status shows the latest version being `v0.35.537`, but this is an older version. The sync:status needs to use the correct hook to be current.
+
+> **Queue prompt:** Each Chat prompt in the `agent:exchange` should have a unique surrogate id. From sdk-demo.md:
+```
+> **Chat prompt (#chatprompt):** did you see my latest steering?
+
+> **Chat prompt (#chatprompt):** Did you see it before I asked?
+```
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -254,16 +353,26 @@ Partially today: queue claims persist exact identity, generation, owner, and wor
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📥 release + publish
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/344
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/345
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/346
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/347
-- 📥 For subagent choices, make the title of each choice **bold**.
-- 📥 sdk-demo.md: `- Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?` queue item is not annotated with an emoji despite being worked on by a subagent. If the fix makes it into the `Include 344-347...` release, add it.
-- 📥 The sdk-demo.md queue item annotations were not refreshed after the queue items were completed. If there is a choice, the choice should also be added into `agent:todo` with the same id as the choice expressed in the `agent:exchange`. Can we make an indicator for the queue items being blocked by a subagent choice? What do you recommend to add local visibility to the agent:queue? Can we have another emoji representing a user action with the same id as the choice + todo item?
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/348
-- 🚧 release + publish: Include 344-348 + For subagent choices, make the title of each choice **bold**.
+- ~~release + publish~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/344~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/345~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/346~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/347~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~For subagent choices, make the title of each choice **bold**.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~sdk-demo.md: `- Why can't we just rebase the existing Project source code into the aggregate PR branch with the fixes?` queue item is not annotated with an emoji despite being worked on by a subagent. If the fix makes it into the `Include 344-347...` release, add it.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~The sdk-demo.md queue item annotations were not refreshed after the queue items were completed. If there is a choice, the choice should also be added into `agent:todo` with the same id as the choice expressed in the `agent:exchange`. Can we make an indicator for the queue items being blocked by a subagent choice? What do you recommend to add local visibility to the agent:queue? Can we have another emoji representing a user action with the same id as the choice + todo item?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/348~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: Include 344-348 + For subagent choices, make the title of each choice **bold**.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~re worktree lineage: make the DX lightweight and non-verbose.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~The current agent:status shows the latest version being `v0.35.537`, but this is an older version. The sync:status needs to use the correct hook to be current.~~ — auto-struck: answered this cycle (#ftstrike)
+~~~done
+Each Chat prompt in the `agent:exchange` should have a unique surrogate id. From sdk-demo.md:
+```
+> **Chat prompt (#chatprompt):** did you see my latest steering?
+
+> **Chat prompt (#chatprompt):** Did you see it before I asked?
+```
+~~~
 <!-- /agent:queue -->
 
 ## Queue: Issues

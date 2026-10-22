@@ -486,9 +486,20 @@ pub fn claim_with_session(
         .iter()
         .filter(|head| claim_identity(head) == identity)
         .count();
+    // Live claims are pruned when their rows close, but lineage is retained.
+    // Its generation floor prevents a later identical row from inheriting a
+    // stale completion/integration receipt.
+    let lineage_generation_floor = crate::queue_lineage::max_generation(file, &target)?;
     let now = now_secs();
     let result = mutate_ledger(file, |ledger| {
-        let outcome = ledger.claim_in_session(&target, owner, now, ttl_secs, owner_session);
+        let outcome = ledger.claim_in_session_with_generation_floor(
+            &target,
+            owner,
+            now,
+            ttl_secs,
+            owner_session,
+            lineage_generation_floor,
+        );
         // Anchor the claim to its line(s) in the view it resolved in.
         log_followed(file, &ledger.follow_edits(now, &heads));
         let stored = ledger
@@ -508,6 +519,8 @@ pub fn claim_with_session(
             result.1.generation
         );
     }
+    crate::queue_lineage::record_claim(file, &result.1)
+        .context("persist durable queue worktree lineage claim receipt")?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -574,6 +587,10 @@ pub fn start_attempt(
         }
         Ok(claim)
     });
+    if let Ok(claim) = &outcome {
+        crate::queue_lineage::record_started(file, claim)
+            .context("persist durable queue worktree lineage start receipt")?;
+    }
     match &outcome {
         Ok(claim) => agent_doc_ops_log_io::log_op(
             file,

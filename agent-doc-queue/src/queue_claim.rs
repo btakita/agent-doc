@@ -778,6 +778,28 @@ impl QueueClaimLedger {
         ttl_secs: u64,
         owner_session: Option<ClaimOwnerSession>,
     ) -> ClaimOutcome {
+        self.claim_in_session_with_generation_floor(
+            item,
+            owner,
+            now_secs,
+            ttl_secs,
+            owner_session,
+            0,
+        )
+    }
+
+    /// [`Self::claim_in_session`] with a durable generation floor supplied by
+    /// an external attempt ledger. This keeps a struck/removed/re-added row
+    /// from reusing an old generation after its live claim has been pruned.
+    pub fn claim_in_session_with_generation_floor(
+        &mut self,
+        item: &str,
+        owner: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+        owner_session: Option<ClaimOwnerSession>,
+        generation_floor: u64,
+    ) -> ClaimOutcome {
         let identity = claim_identity(item);
         let expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         let mut fresh = QueueClaim {
@@ -818,7 +840,11 @@ impl QueueClaimLedger {
             }
             Some(existing) => {
                 let outcome = ClaimOutcome::Reassigned;
-                fresh.generation = existing.generation.saturating_add(1).max(1);
+                fresh.generation = existing
+                    .generation
+                    .max(generation_floor)
+                    .saturating_add(1)
+                    .max(1);
                 // Re-claim after lost/expired handling keeps line anchoring but
                 // starts a new fenced attempt.
                 fresh.anchor = existing.anchor.take();
@@ -827,6 +853,7 @@ impl QueueClaimLedger {
                 outcome
             }
             None => {
+                fresh.generation = generation_floor.saturating_add(1).max(1);
                 self.claims.push(fresh);
                 ClaimOutcome::Created
             }

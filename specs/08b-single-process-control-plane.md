@@ -130,6 +130,15 @@ The controller runs **one** queue scheduler per process for every scheduled
   schedule syntax removes only that queue from the runnable graph and holds it
   fail-closed. Therefore transitions for `(D, Q1)` neither gate nor replay
   `(D, Q2)` when `Q1 != Q2`.
+- **Process-lifetime recovery.** The process-global handle is a replaceable
+  scheduler slot, not a write-once worker handle. It retains the known scheduled
+  document set and the worker/loop thread liveness handles. A finished thread or
+  a failed refresh-channel send stops the stale loop, starts one replacement,
+  and re-enqueues the complete known set before returning a typed recovery
+  receipt. If replacement or its enqueue fails, the caller receives the error;
+  realtime ingress logs it and controller RPC/frontier callers propagate it.
+  Thus a disconnected worker cannot leave a permanently initialized but dead
+  scheduler, and no `mpsc::Sender::send` failure is discarded.
 - **Exactly-once across controllers.** The durable row is the authority: a
   deadline at or before `last_fired_due_secs` is never fired again, and a pass
   completion sets `passes_completed = max(passes_completed, pass)`. A handoff

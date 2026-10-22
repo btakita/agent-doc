@@ -10398,7 +10398,7 @@ fn handle_crdt_route_disk_change_signal_rpc(
     let delivery = signal.into_delivery();
     let action = agent_doc_crdt_relay_io::route_disk_change_signal(&canonical, &delivery)?;
     // `#queueschedule`: a detached document's disk edit may reschedule its queue.
-    crate::queue_scheduler::note_document_changed(&canonical);
+    let _refresh_receipt = crate::queue_scheduler::note_document_changed(&canonical)?;
     Ok(ControllerWatchSignalResult {
         action: watch_action_payload(action).to_string(),
     })
@@ -18326,7 +18326,7 @@ pub(crate) fn serve_with_options(
     // Ticks are exactly-once through the durable `queue_schedule` row, so a
     // handoff predecessor and successor running it side by side cannot double
     // fire; the loop only opens pass windows and never drains on its thread.
-    crate::queue_scheduler::start_queue_scheduler(&durable_project_root);
+    crate::queue_scheduler::start_queue_scheduler(&durable_project_root)?;
 
     let should_stop = Arc::new(AtomicBool::new(false));
     let active_clients = Arc::new(AtomicUsize::new(0));

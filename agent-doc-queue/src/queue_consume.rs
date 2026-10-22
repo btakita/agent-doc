@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_doc_document::queue_projection::{
-    LIFECYCLE_MARKERS, OWNER_ANNOTATION_OPEN, strip_in_progress_marker,
+    LIFECYCLE_MARKERS, OWNER_ANNOTATION_OPEN, operator_action_ids, strip_in_progress_marker,
     strip_owner_annotation_prefix, strip_priority_markers,
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
@@ -626,6 +626,18 @@ pub fn queue_consumption_allowed_for_response(
     } else {
         None
     };
+    // `#operatoractionstrike`: `🙋 [#id]` is the document projection of a
+    // still-open operator todo. It is an orthogonal lifecycle gate, so no answer
+    // echo, tracked completion id, or other closeout signal may consume the row
+    // while the annotation remains. Completing the todo clears this projection
+    // through `set_prompt_operator_actions`, after which ordinary completion
+    // evidence is authoritative again.
+    if active_head
+        .as_ref()
+        .is_some_and(|head| !operator_action_ids(head).is_empty())
+    {
+        return Ok(false);
+    }
     let head_is_free_text = active_head.is_some()
         && crate::queue_response::queue_head_is_free_text_prompt(current_content)?;
     let active_free_text_head = active_head.clone().filter(|_| head_is_free_text);
@@ -930,6 +942,16 @@ pub fn answered_free_text_head_node_keys_with_authority(
         let text = node.item.text.trim();
         if text.is_empty() || !crate::queue_response::queue_prompt_text_is_free_text(content, text)
         {
+            continue;
+        }
+        // `#operatoractionstrike`: the captured response can present a blocking
+        // operator request and quote the queue head in the same cycle. The quote
+        // is answer evidence for ordinary free text, but an open `🙋 [#id]`
+        // annotation is stronger evidence that the row is not terminal yet.
+        // This check belongs in the reactive projection itself so every adapter
+        // observes the same invariant; todo completion removes the annotation
+        // and invalidates/recomputes this derived target normally.
+        if !operator_action_ids(text).is_empty() {
             continue;
         }
         if struck_texts.contains(&normalize_queue_prompt_text(text)) {
@@ -2220,6 +2242,58 @@ mod tests {
         let approved = approved_queue_head_for_consume(paused).unwrap();
         assert_eq!(approved, ApprovedQueueHead::NoHead);
         assert!(!approved_queue_head_matches(&approved, "later", None));
+    }
+
+    #[test]
+    fn operator_action_gate_blocks_closeout_consumption_until_annotation_clears() {
+        let free_text = "publish the release after operator confirmation";
+        let blocked_free_text =
+            format!("🙋 [#publish-confirmation] 🚧 ⟦subagent:publisher#1⟧ {free_text}");
+        let blocked_document = active_queue_doc(&format!("- {blocked_free_text}\n"));
+        let response = format!(
+            "### Re: publication\n\n> **Queue prompt:** {free_text}\n\nThe release is ready.\n"
+        );
+        assert!(
+            !queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(&blocked_document),
+                &blocked_document,
+                &response,
+                &[],
+            )
+            .unwrap(),
+            "an exact answer echo cannot consume work that still needs operator action"
+        );
+
+        let blocked_tracked = active_queue_doc("- 🙋 [#deploy-approval] do [#deploy]\n");
+        assert!(
+            !queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(&blocked_tracked),
+                &blocked_tracked,
+                "### Re: deploy\n\nDeployment prepared.\n",
+                &["deploy".to_string()],
+            )
+            .unwrap(),
+            "even an explicit tracked completion signal waits for the open operator action"
+        );
+
+        let cleared_free_text = agent_doc_document::queue_projection::apply_operator_action_ids(
+            &blocked_free_text,
+            &[],
+        );
+        let cleared_document = active_queue_doc(&format!("- {cleared_free_text}\n"));
+        assert!(
+            queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(&cleared_document),
+                &cleared_document,
+                &response,
+                &[],
+            )
+            .unwrap(),
+            "clearing the completed operator action restores ordinary answer-based consumption"
+        );
     }
 
     #[test]
@@ -3616,6 +3690,35 @@ Old.
                 .is_none(),
             "the projection must disappear once its target is authoritative"
         );
+    }
+
+    #[test]
+    fn operator_action_gate_blocks_reactive_free_text_strike_until_annotation_clears() {
+        let head = "publish the release after operator confirmation";
+        let blocked_head = format!("🙋 [#publish-confirmation] 🚧 ⟦subagent:publisher#1⟧ {head}");
+        let document = active_queue_doc(&format!("- {blocked_head}\n- do [#later]\n"));
+        let response =
+            format!("### Re: publication\n\n> **Queue prompt:** {head}\n\nThe release is ready.\n");
+
+        assert!(
+            project_answered_free_text_strike(&document, &response, Some(&document))
+                .unwrap()
+                .is_none(),
+            "the reactive projection must keep a row live while operator action is open"
+        );
+
+        let cleared_head =
+            agent_doc_document::queue_projection::apply_operator_action_ids(&blocked_head, &[]);
+        let cleared_document = active_queue_doc(&format!("- {cleared_head}\n- do [#later]\n"));
+        let projected = project_answered_free_text_strike(
+            &cleared_document,
+            &response,
+            Some(&cleared_document),
+        )
+        .unwrap()
+        .expect("todo completion clears the gate and re-enables the normal strike projection");
+        assert_eq!(projected.node_keys.len(), 1);
+        assert!(projected.target_content.contains(STRUCK_FREE_TEXT_NOTE));
     }
 
     #[test]

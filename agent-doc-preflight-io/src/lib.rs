@@ -9635,7 +9635,7 @@ mod tests {
             let updated = std::fs::read_to_string(&doc).unwrap();
             assert_eq!(
                 queue_line(&updated, "claimed"),
-                "- 🟡 ⟦subagent:worker#1⟧ do [#claimed]",
+                "- 🟡 [#subagent:worker#1] do [#claimed]",
                 "pass {pass}: a live claim keeps its in-flight marker:\n{updated}"
             );
             assert_eq!(
@@ -9692,7 +9692,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             queue_line(&updated, "verify"),
-            "- 🟡 ⟦subagent:worker#1⟧ do [#verify]",
+            "- 🟡 [#subagent:worker#1] do [#verify]",
             "{updated}"
         );
         let warning = state
@@ -14881,7 +14881,7 @@ mod tests {
         assert_eq!(state.queue_drainable_head_count, 2);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#a]\n- 🟡 ⟦subagent:b#1⟧ do [#b]\n- 🟡 ⟦subagent:c#1⟧ do [#c]\n- 📥 do [#d]"),
+            updated.contains("- 🚧 do [#a]\n- 🟡 [#subagent:b#1] do [#b]\n- 🟡 [#subagent:c#1] do [#c]\n- 📥 do [#d]"),
             "selected and all claimed queue heads must be marked:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#a] inline work"));
@@ -14893,7 +14893,7 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- 🟡 ⟦subagent:c#1⟧ do [#c]\n- 📥 do [#d]"));
+        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- 🟡 [#subagent:c#1] do [#c]\n- 📥 do [#d]"));
         assert!(updated.contains("- [ ] [#b] worker one"));
         assert!(updated.contains("- [ ] 🚧 [#c] worker two"));
 
@@ -14901,7 +14901,7 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ⚠️ ⟦subagent:c#1⟧ do [#c]\n- 📥 do [#d]"));
+        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ⚠️ [#subagent:c#1] do [#c]\n- 📥 do [#d]"));
         assert!(updated.contains("- [ ] [#c] worker two"));
     }
 
@@ -18781,7 +18781,7 @@ mod tests {
         assert!(updated.contains(&format!("- ~~{done}~~")), "{updated}");
         assert!(
             updated.contains(&format!(
-                "- 🟡 ⟦subagent:palette#1⟧ {pending}\n"
+                "- 🟡 [#subagent:palette#1] {pending}\n"
             )),
             "{updated}"
         );

@@ -440,6 +440,14 @@ pub fn free_text_queue_head_is_completed_residue_with_claim(
     head: &str,
     claimed: bool,
 ) -> bool {
+    // `#operatoractionresidue`: an earlier exact queue echo does not make a
+    // blocked handoff terminal. The operator-action annotation is stronger,
+    // current evidence that the row still needs the linked answer. Keep this
+    // predicate aligned with closeout consumption and preflight catch-up so
+    // session-check never asks maintenance to strike an unanswered `🙋☑️` row.
+    if !agent_doc_document::queue_projection::operator_action_ids(head).is_empty() {
+        return false;
+    }
     if crate::queue_continuation::is_recurring_imperative_head(head) {
         return false;
     }
@@ -953,6 +961,25 @@ mod tests {
             doc,
             exchange,
             "explain the queue churn"
+        ));
+    }
+
+    #[test]
+    fn unanswered_operator_action_is_not_completed_residue_after_worker_report() {
+        let head = "🙋☑️ prepare sdk demo [#subagent-operator-request-sdk-demo-approval]";
+        let doc = format!("<!-- agent:queue -->\n- {head}\n<!-- /agent:queue -->\n");
+        let exchange = concat!(
+            "### Re: prepare sdk demo\n\n",
+            "> **Queue prompt:** prepare sdk demo\n\n",
+            "The worker finished, but the operator decision is still pending.\n",
+        );
+
+        assert!(
+            crate::queue_response::free_text_head_answered_by_response(exchange, head),
+            "the regression requires an old echo that would otherwise look terminal"
+        );
+        assert!(!free_text_queue_head_is_completed_residue(
+            &doc, exchange, head
         ));
     }
 

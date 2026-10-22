@@ -69,8 +69,10 @@ only the compact routing table that survives context compaction.
   directed. Never re-answer prompts already committed. Harnesses without the
   hook poll `agent-doc steering <FILE>` between long steps.
 - Subagent claims are attempt- and worker-fenced (`#queueclaimstate`,
-  `#queueclaimworker`). Save the claim generation; `🟡` is reserved, `🚧` is
-  worker-bound, `📥` is reported, `⚠️` is lost, and `🔄` needs reconciliation.
+  `#queueclaimworker`). Save the claim generation. `📥` is pending/unclaimed,
+  `🟡` is reserved/dispatching, `🚧` is worker-bound/running,
+  `📤` is reported/outbox, `⚠️` is lost, and `❔`/`🔄` need
+  reconciliation. Worker-owned rows also name their exact owner and generation.
   Claim, spawn, start with the concrete worker id, report completion, integrate
   serially, and persist the result in the same turn. The complete coordinator
   protocol lives in [respond.md](respond.md) (`#queuesubagents`).

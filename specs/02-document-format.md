@@ -537,7 +537,11 @@ publishes a successor that retires the exact keyed completion cell even when it
 exists only in an older retained target. Pending delivery is thereby
 acknowledged/dropped and cannot replay the row, close it, or authorize automatic
 integration. A later identical row starts above the tombstoned generation and
-cannot consume the stale cell. Deleting a durably terminal struck row is only
+cannot consume the stale cell. Every document projection reader treats the
+cancellation receipt as a terminal, non-visible fence: an old release receipt
+with the same identity+generation and an old completion cell with its exact key
+are non-governing even across a crash or controller restart. Neither may add
+`📤`, `🔄`, owner metadata, or terminality to the later row. Deleting a durably terminal struck row is only
 presentation cleanup; strikethrough that conflicts with a live claim, reported
 receipt, or completion outbox is a degraded mismatch and preserves/fences the
 work instead of cancelling or integrating it.

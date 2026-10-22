@@ -299,7 +299,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   7. As soon as a subagent reports back, run
      `agent-doc queue report-complete <FILE> --item <...> --generation <N>`.
      The exact generation fence prevents a late result from mutating a reclaimed
-     item and changes its marker to `📥` (reported/awaiting integration). The binary appends
+     item and changes its marker to `📤` (reported/outbox, awaiting integration). The binary appends
      immediate, deduplicated completion feedback to `agent:exchange` through
      its cross-process document owner and editor/CRDT authority while leaving
      the claim active; the worker never edits the session document. The

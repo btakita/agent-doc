@@ -1269,9 +1269,13 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .receipts;
 
     let components = agent_doc_element::element::parse(current)?;
-    let Some(queue_component) =
-        agent_doc_queue::queue_set::selected_component(current, &components)?
-    else {
+    let selected = agent_doc_queue::queue_set::selected_component(current, &components)?;
+    let only_queue = || {
+        let mut queues = components.iter().filter(|component| component.name == "queue");
+        let first = queues.next()?;
+        queues.next().is_none().then_some(first)
+    };
+    let Some(queue_component) = selected.or_else(only_queue) else {
         return Ok(current.to_string());
     };
     let body = queue_component.content(current);
@@ -1290,6 +1294,7 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .unwrap_or_default()
         .as_secs();
     ledger.follow_edits(now_secs, &live_heads);
+    let cancellations = ledger.cancellations;
     let claim_states = ledger
         .claims
         .into_iter()
@@ -1304,9 +1309,24 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .collect::<HashMap<_, _>>();
     let receipts = receipts
         .into_iter()
+        .filter(|receipt| {
+            !cancellations
+                .iter()
+                .any(|cancelled| cancelled.cancels_attempt(&receipt.identity, receipt.generation))
+        })
         .filter(|receipt| !claim_states.contains_key(&receipt.identity))
         .map(|receipt| (receipt.identity.clone(), receipt))
         .collect::<HashMap<_, _>>();
+    let completion_evidence =
+        agent_doc_document::subagent_completion::completion_evidence(current)
+            .into_iter()
+            .filter(|evidence| {
+                !cancellations
+                    .iter()
+                    .any(|cancelled| cancelled.cancels_completion_key(&evidence.key))
+            })
+            .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
+            .collect::<std::collections::HashSet<_>>();
     let targets = entries
         .iter()
         .filter_map(|entry| match entry {
@@ -1318,7 +1338,9 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                 let durable_on_struck = matches!(
                     entry,
                     agent_doc_queue::document_queue::QueueEntry::Completed(_)
-                ) && (claim.is_some() || receipt.is_some());
+                ) && (claim.is_some()
+                    || receipt.is_some()
+                    || completion_evidence.contains(&identity));
                 if matches!(
                     entry,
                     agent_doc_queue::document_queue::QueueEntry::Completed(_)
@@ -1332,6 +1354,8 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     claim.state.projection_marker()
                 } else if receipt.is_some() {
                     agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                } else if completion_evidence.contains(&identity) {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
                 } else if matches!(
                     agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
                     Some(
@@ -8395,6 +8419,27 @@ mod tests {
         .unwrap();
     }
 
+    fn persist_queue_receipt_ledger(
+        project_root: &std::path::Path,
+        doc: &std::path::Path,
+        ledger: &agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,
+    ) {
+        let conn = agent_doc_sqlite::state_store::open_state_db(project_root).unwrap();
+        let document_hash = agent_doc_hash::path_hash(doc).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash,
+                state_kind: agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND
+                    .to_string(),
+                canonical_path: doc.canonicalize().unwrap().display().to_string(),
+                payload_json: serde_json::to_string(ledger).unwrap(),
+                updated_at_secs: 1,
+            },
+        )
+        .unwrap();
+    }
+
     #[test]
     fn controller_hydration_derives_exact_queue_attempt_markers_idempotently() {
         let (dir, doc) = temp_doc("queue-attempt-hydration.md");
@@ -8454,6 +8499,74 @@ mod tests {
             projected,
             "hydrating the same durable attempts twice must be idempotent"
         );
+    }
+
+    #[test]
+    fn controller_restart_never_replays_a_cancelled_generation_onto_readded_text() {
+        let (dir, doc) = temp_doc("cancelled-queue-attempt-hydration.md");
+        let item = "finish sdk demo";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        claims.claim(item, "subagent:sdk", now, 3600);
+        claims
+            .start(
+                item,
+                "subagent:sdk",
+                "worker:sdk",
+                now,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        let reported = claims.report(item, Some(1)).unwrap();
+        let key = agent_doc_queue::queue_claim::completion_attestation_key(
+            &reported.identity,
+            &reported.owner,
+            reported.generation,
+            reported.claimed_at_secs,
+            &reported.worker.as_ref().unwrap().worker_id,
+        )
+        .unwrap();
+        let mut receipts =
+            agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger::default();
+        receipts
+            .record(&reported, key.clone(), now + 1, 3600)
+            .unwrap();
+        claims
+            .cancel_attempt(item, Some(reported.generation), now + 2)
+            .unwrap();
+        persist_queue_claim_ledger(dir.path(), &doc, &claims);
+        persist_queue_receipt_ledger(dir.path(), &doc, &receipts);
+
+        let completion = agent_doc_document::subagent_completion::cell(
+            &reported.owner,
+            item,
+            &key,
+        );
+        let stale = format!(
+            "<!-- agent:exchange -->\n{completion}\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n- 📤 ⟦owner=subagent:sdk;generation=1⟧ {item}\n<!-- /agent:queue -->\n"
+        );
+        let projected = durable_queue_attempt_projection(&doc, &stale).unwrap();
+        assert!(projected.contains(&format!("- 📥 {item}\n")), "{projected}");
+        assert!(!projected.contains("⟦owner="), "{projected}");
+        assert!(!projected.contains("🔄"), "{projected}");
+
+        claims.claim(item, "subagent:sdk-retry", now + 3, 3600);
+        assert_eq!(claims.claims[0].generation, 2);
+        persist_queue_claim_ledger(dir.path(), &doc, &claims);
+        let replacement = durable_queue_attempt_projection(&doc, &projected).unwrap();
+        assert!(
+            replacement.contains(
+                "- 🟡 ⟦owner=subagent:sdk-retry;generation=2⟧ finish sdk demo\n"
+            ),
+            "{replacement}"
+        );
+        assert!(!replacement.contains("📤"), "{replacement}");
+        assert!(!replacement.contains("🔄"), "{replacement}");
     }
 
     #[test]

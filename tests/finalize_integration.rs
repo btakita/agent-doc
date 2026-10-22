@@ -296,7 +296,7 @@ fn status_repair_folds_nested_status_sync_and_leaves_the_cycle_open() {
     let doc = tmp.path().join("session.md");
     let status = concat!(
         "<!-- agent:status sync=\"Keep the published release current\" -->\n",
-        "\n📥 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
+        "\n📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.\n",
         "Review pass done.\n\n",
         "<!-- status:sync -->\n",
         "Review pass done.\n\n",

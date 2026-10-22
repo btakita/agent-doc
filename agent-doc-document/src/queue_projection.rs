@@ -33,6 +33,10 @@ pub const AGENT_PRIORITIZED_MARKERS: [&str; 6] = [
 pub const PRIORITIZED_MARKER: &str = "📌";
 pub const AGENT_PRIORITIZED_MARKER: &str = "📍";
 pub const IN_PROGRESS_MARKER: &str = "🚧";
+/// Live queue work that has no current coordinator selection, worker attempt,
+/// report receipt, or operator gate. Pending is explicit so removing a stale
+/// active marker never leaves the operator wondering whether projection ran.
+pub const PENDING_MARKER: &str = "📥";
 /// Claimed for dispatch, but no positive worker-liveness evidence exists yet.
 /// `⏳` already means "awaiting operator" in existing documents, so claims use
 /// a yellow state marker instead (`#queueclaimstate`).
@@ -40,19 +44,27 @@ pub const CLAIMED_MARKER: &str = "🟡";
 /// The claimed worker has positive dispatch/liveness evidence.
 pub const RUNNING_MARKER: &str = IN_PROGRESS_MARKER;
 /// The worker reported and the result is awaiting coordinator integration.
-pub const REPORTED_MARKER: &str = "📥";
+pub const REPORTED_MARKER: &str = "📤";
 /// The attempt was lost or expired and is eligible for recovery/re-dispatch.
 pub const LOST_MARKER: &str = "⚠️";
 /// Durable work evidence exists, but it cannot be bound to a current claim
 /// generation. The coordinator must reconcile/close the row; it is not fresh
 /// pending work (`#queueworkevidence`).
 pub const RECONCILING_MARKER: &str = "🔄";
+/// Agent-doc could not read enough durable lifecycle state to name an owner.
+/// This is deliberately different from `Lost`: it authorizes diagnosis, not
+/// redispatch, and prevents a stale visible marker from claiming certainty.
+pub const UNKNOWN_MARKER: &str = "❔";
 /// A concrete operator action blocks this queue head. Unlike the mutually
 /// exclusive lifecycle markers, this annotation is orthogonal: a worker may
 /// still be running (`🚧`) while it waits for the operator's answer. The
 /// following `[#id]` links the queue row to the request packet in
 /// `agent:exchange` and the operator-owned row in `agent:todo`.
 pub const OPERATOR_ACTION_MARKER: &str = "🙋";
+/// Delimiters for the compact owner/generation annotation carried by worker
+/// attempt projections. Ordinary pending/coordinator rows omit it.
+pub const OWNER_ANNOTATION_OPEN: &str = "⟦owner=";
+pub const OWNER_ANNOTATION_CLOSE: &str = "⟧";
 /// Visible projection marker for a queue head the binary has SKIPPED: it was
 /// dispatched, came back unconsumed, and the queue advanced past it to a
 /// non-dependent drainable head (`#orphanqhead` / `#queueskip`). Like `🚧`, it is
@@ -72,12 +84,14 @@ pub const SKIP_MARKER: &str = "⏭\u{fe0f}";
 pub const AWAITING_OPERATOR_MARKER: &str = "⏳";
 
 /// Every leading lifecycle marker the binary projects onto a queue head.
-pub const LIFECYCLE_MARKERS: [&str; 7] = [
+pub const LIFECYCLE_MARKERS: [&str; 9] = [
+    PENDING_MARKER,
     CLAIMED_MARKER,
     RUNNING_MARKER,
     REPORTED_MARKER,
     LOST_MARKER,
     RECONCILING_MARKER,
+    UNKNOWN_MARKER,
     SKIP_MARKER,
     AWAITING_OPERATOR_MARKER,
 ];
@@ -86,11 +100,13 @@ pub const LIFECYCLE_MARKERS: [&str; 7] = [
 /// every parser strips them before queue-item identity is computed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum QueueLifecycleMarker {
+    Pending,
     Claimed,
     Running,
     Reported,
     Lost,
     Reconciling,
+    Unknown,
     Skipped,
     AwaitingOperator,
 }
@@ -98,11 +114,13 @@ pub enum QueueLifecycleMarker {
 impl QueueLifecycleMarker {
     pub const fn prefix(self) -> &'static str {
         match self {
+            Self::Pending => PENDING_MARKER,
             Self::Claimed => CLAIMED_MARKER,
             Self::Running => RUNNING_MARKER,
             Self::Reported => REPORTED_MARKER,
             Self::Lost => LOST_MARKER,
             Self::Reconciling => RECONCILING_MARKER,
+            Self::Unknown => UNKNOWN_MARKER,
             Self::Skipped => SKIP_MARKER,
             Self::AwaitingOperator => AWAITING_OPERATOR_MARKER,
         }
@@ -151,6 +169,131 @@ fn strip_operator_action_prefix(text: &str) -> Option<(&str, &str)> {
     Some((id, rest))
 }
 
+/// Human-readable identity of the exact durable worker attempt governing a
+/// queue row. It is projection metadata, never part of queue work identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueOwnerProjection {
+    pub owner: String,
+    pub generation: u64,
+}
+
+fn strip_owner_annotation_prefix(text: &str) -> Option<(QueueOwnerProjection, &str)> {
+    let after_open = text.strip_prefix(OWNER_ANNOTATION_OPEN)?;
+    let (payload, rest) = after_open.split_once(OWNER_ANNOTATION_CLOSE)?;
+    let (owner, generation) = payload.rsplit_once(";generation=")?;
+    if owner.is_empty() || owner.chars().any(|ch| ch == '\n' || ch == '\r') {
+        return None;
+    }
+    let generation = generation.parse().ok()?;
+    Some((
+        QueueOwnerProjection {
+            owner: owner.to_string(),
+            generation,
+        },
+        rest,
+    ))
+}
+
+/// Read the first exact-attempt owner annotation from a leading projection
+/// prefix sequence.
+pub fn owner_projection(text: &str) -> Option<QueueOwnerProjection> {
+    let mut rest = text.trim_start();
+    loop {
+        if let Some((owner, _)) = strip_owner_annotation_prefix(rest) {
+            return Some(owner);
+        }
+        if let Some(after) = strip_lifecycle_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((_, after)) = strip_owner_annotation_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((_, after)) = strip_operator_action_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = PRIORITIZED_MARKERS
+            .iter()
+            .chain(AGENT_PRIORITIZED_MARKERS.iter())
+            .find_map(|marker| rest.strip_prefix(marker))
+        {
+            rest = after.trim_start();
+            continue;
+        }
+        return None;
+    }
+}
+
+/// Replace the exact-attempt owner annotation while preserving lifecycle,
+/// operator-action, priority, leading, and trailing whitespace. The annotation
+/// is placed immediately after a lifecycle marker when one exists.
+pub fn apply_owner_projection(
+    text: &str,
+    owner: Option<&QueueOwnerProjection>,
+) -> String {
+    let content_start = text.len() - text.trim_start().len();
+    let leading = &text[..content_start];
+    let (content, trailing) = split_trailing_whitespace(&text[content_start..]);
+    let mut rest = content.trim_start();
+    let mut prefixes = Vec::<String>::new();
+    loop {
+        if let Some((_, after)) = strip_owner_annotation_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((marker, after)) = LIFECYCLE_MARKERS
+            .iter()
+            .find_map(|marker| rest.strip_prefix(marker).map(|after| (*marker, after)))
+        {
+            prefixes.push(marker.to_string());
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((id, after)) = strip_operator_action_prefix(rest) {
+            prefixes.push(format!("{OPERATOR_ACTION_MARKER} [#{id}]"));
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((marker, after)) = PRIORITIZED_MARKERS
+            .iter()
+            .chain(AGENT_PRIORITIZED_MARKERS.iter())
+            .find_map(|marker| rest.strip_prefix(marker).map(|after| (*marker, after)))
+        {
+            prefixes.push(marker.to_string());
+            rest = after.trim_start();
+            continue;
+        }
+        break;
+    }
+    if let Some(index) = prefixes
+        .iter()
+        .position(|prefix| LIFECYCLE_MARKERS.contains(&prefix.as_str()))
+    {
+        let lifecycle = prefixes.remove(index);
+        prefixes.insert(0, lifecycle);
+    }
+    if let Some(owner) = owner {
+        let safe_owner = owner
+            .owner
+            .replace(['\n', '\r'], " ")
+            .replace(OWNER_ANNOTATION_CLOSE, "?");
+        let annotation = format!(
+            "{OWNER_ANNOTATION_OPEN}{safe_owner};generation={}{OWNER_ANNOTATION_CLOSE}",
+            owner.generation
+        );
+        let insert_at = prefixes
+            .first()
+            .is_some_and(|prefix| LIFECYCLE_MARKERS.contains(&prefix.as_str())) as usize;
+        prefixes.insert(insert_at, annotation);
+    }
+    if !rest.is_empty() {
+        prefixes.push(rest.to_string());
+    }
+    format!("{leading}{}{trailing}", prefixes.join(" "))
+}
+
 /// Request ids carried by leading `🙋 [#id]` queue annotations.
 pub fn operator_action_ids(text: &str) -> Vec<String> {
     let mut rest = text.trim_start();
@@ -165,6 +308,10 @@ pub fn operator_action_ids(text: &str) -> Vec<String> {
             continue;
         }
         if let Some(after) = strip_lifecycle_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((_, after)) = strip_owner_annotation_prefix(rest) {
             rest = after.trim_start();
             continue;
         }
@@ -195,6 +342,14 @@ fn strip_operator_action_annotations_preserving_markers(text: &str) -> String {
             .find_map(|marker| trimmed.strip_prefix(marker).map(|after| (*marker, after)))
         {
             kept_prefixes.push(marker.to_string());
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((owner, after)) = strip_owner_annotation_prefix(trimmed) {
+            kept_prefixes.push(format!(
+                "{OWNER_ANNOTATION_OPEN}{};generation={}{OWNER_ANNOTATION_CLOSE}",
+                owner.owner, owner.generation
+            ));
             rest = after.trim_start();
             continue;
         }
@@ -294,6 +449,14 @@ pub fn strip_in_progress_marker(text: &str) -> String {
             rest = after_marker.trim_start();
             continue;
         }
+        if let Some((owner, after_marker)) = strip_owner_annotation_prefix(trimmed) {
+            kept_prefixes.push(format!(
+                "{OWNER_ANNOTATION_OPEN}{};generation={}{OWNER_ANNOTATION_CLOSE}",
+                owner.owner, owner.generation
+            ));
+            rest = after_marker.trim_start();
+            continue;
+        }
         if let Some(after_marker) = strip_lifecycle_prefix(trimmed) {
             rest = after_marker.trim_start();
             continue;
@@ -361,11 +524,13 @@ pub fn has_in_progress_marker(text: &str) -> bool {
 
 pub fn lifecycle_marker(text: &str) -> Option<QueueLifecycleMarker> {
     [
+        QueueLifecycleMarker::Pending,
         QueueLifecycleMarker::Claimed,
         QueueLifecycleMarker::Running,
         QueueLifecycleMarker::Reported,
         QueueLifecycleMarker::Lost,
         QueueLifecycleMarker::Reconciling,
+        QueueLifecycleMarker::Unknown,
         QueueLifecycleMarker::Skipped,
         QueueLifecycleMarker::AwaitingOperator,
     ]
@@ -397,6 +562,10 @@ fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
             return true;
         }
         if let Some((_, after_marker)) = strip_operator_action_prefix(rest) {
+            rest = after_marker.trim_start();
+            continue;
+        }
+        if let Some((_, after_marker)) = strip_owner_annotation_prefix(rest) {
             rest = after_marker.trim_start();
             continue;
         }
@@ -488,6 +657,7 @@ pub fn strip_priority_markers(text: &str) -> String {
         let trimmed = t.trim_start();
         let stripped = strip_lifecycle_prefix(trimmed)
             .or_else(|| strip_operator_action_prefix(trimmed).map(|(_, rest)| rest))
+            .or_else(|| strip_owner_annotation_prefix(trimmed).map(|(_, rest)| rest))
             .or_else(|| {
                 PRIORITIZED_MARKERS
                     .iter()
@@ -771,7 +941,7 @@ mod tests {
         assert_eq!(strip_priority_markers(&annotated), "fix sdk demo");
         assert_eq!(
             apply_lifecycle_marker(&annotated, QueueLifecycleMarker::Reported),
-            "📥 🙋 [#subagent-operator-request-sdk-route] 📌 fix sdk demo"
+            "📤 🙋 [#subagent-operator-request-sdk-route] 📌 fix sdk demo"
         );
         assert_eq!(
             apply_operator_action_ids(&annotated, &[]),
@@ -781,6 +951,28 @@ mod tests {
             apply_operator_action_ids("  /clear  ", &[]),
             "  /clear  ",
             "a no-op projection preserves literal prompt whitespace"
+        );
+    }
+
+    #[test]
+    fn owner_generation_annotation_is_orthogonal_and_whitespace_preserving() {
+        let owner = QueueOwnerProjection {
+            owner: "subagent:sdk-demo".to_string(),
+            generation: 7,
+        };
+        let projected = apply_owner_projection(
+            "  🙋 [#choice] 🚧 📌 fix sdk demo  ",
+            Some(&owner),
+        );
+        assert_eq!(
+            projected,
+            "  🚧 ⟦owner=subagent:sdk-demo;generation=7⟧ 🙋 [#choice] 📌 fix sdk demo  "
+        );
+        assert_eq!(owner_projection(&projected), Some(owner));
+        assert_eq!(strip_priority_markers(&projected), "fix sdk demo");
+        assert_eq!(
+            apply_owner_projection(&projected, None),
+            "  🚧 🙋 [#choice] 📌 fix sdk demo  "
         );
     }
 

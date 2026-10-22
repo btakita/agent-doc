@@ -385,7 +385,7 @@ fn late_reported_queue_status_projection(
 }
 
 /// The durable claim ledger's reported-handoff count for `content`, the input
-/// of the binary-owned `📥 Queue handoff` status projection.
+/// of the binary-owned `📤 Queue handoff` status projection.
 fn reported_queue_count(file: &Path, content: &str) -> Result<usize> {
     let mut reported_identities =
         agent_doc_queue_io::queue_claim::claim_states_for_content(file, content)?

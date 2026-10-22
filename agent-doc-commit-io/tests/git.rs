@@ -3296,7 +3296,7 @@ Duplicate replay should stay live.
             .unwrap()
             .expect("reported ledger must add the handoff status line");
         assert!(projected.contains(
-            "📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."
+            "📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."
         ));
 
         let operator_extended = projected.replace(
@@ -3315,7 +3315,7 @@ Duplicate replay should stay live.
             .expect("committed document");
         assert!(
             landed.contains(
-                "📥 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."
+                "📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout."
             ) && !landed.contains("Operator-authored status update."),
             "normal commit cleanup may insert an exchange boundary, but must land only the exact status projection:\n{landed}"
         );

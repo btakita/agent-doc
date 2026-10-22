@@ -11817,8 +11817,10 @@ fn publish_editor_route_layout_locally<'a>(
     // `#ideriderindependentnav` P6: the route merges over, publishes into, and
     // awaits its own lane's graph (the shared lane for every pre-lane route).
     let lane_graph = runtime.pane_layout_graph_for_lane(lane);
-    let (retained_columns, retained_focus, retained_owner) = lane_graph
-        .desired()
+    let retained = lane_graph.desired();
+    let retained_allows_live_tmux_replacement =
+        retained_layout_allows_live_tmux_replacement(retained.as_ref());
+    let (retained_columns, retained_focus, retained_owner) = retained
         .map(|desired| {
             (
                 desired.invocation.columns,
@@ -11851,6 +11853,7 @@ fn publish_editor_route_layout_locally<'a>(
         layout_mode,
         retained_columns,
         retained_focus,
+        retained_allows_live_tmux_replacement,
         || {
             if !lane.is_shared() {
                 // The live survey observes the shared session; an installation
@@ -11901,12 +11904,13 @@ fn publish_editor_route_layout_locally<'a>(
     // full-width replacement. A partial or widening replacement is still
     // refused because it would guess the missing frontend structure.
     // This does not promote tmux to editor-order authority: the publication
-    // retains its `unknown` order label and the typed claim is consumed only
-    // by the cold-publication guard below.
+    // retains its `unknown` order label. That label plus route-owned structure
+    // means it is still dispatch evidence, not a frontend snapshot, so a later
+    // explicit route may survey live tmux and replace the complete width again.
     let live_basis_width = live_basis_columns.unwrap_or_default();
     let live_tmux_replacement = layout_invocation.column_order
         == agent_doc_tmux::LayoutColumnOrder::Unknown
-        && lane_graph.desired().is_none()
+        && retained_allows_live_tmux_replacement
         && live_basis_columns.is_some()
         && layout_merge.kind == EditorRouteLayoutMergeKind::Replaced
         && layout_merge.route_columns == live_basis_width
@@ -14638,10 +14642,13 @@ fn ensure_route_merge_basis(
     mode: EditorRouteLayoutMode,
     retained_columns: Vec<String>,
     retained_focus: Option<String>,
+    retained_allows_live_tmux_replacement: bool,
     observe_live: impl FnOnce() -> LiveLayoutDocumentsObservation,
     log_target: &Path,
 ) -> (Vec<String>, Option<String>, Option<usize>) {
-    if mode != EditorRouteLayoutMode::Ensure || !retained_columns.is_empty() {
+    if mode != EditorRouteLayoutMode::Ensure
+        || (!retained_columns.is_empty() && !retained_allows_live_tmux_replacement)
+    {
         return (retained_columns, retained_focus, None);
     }
     let observation = observe_live();
@@ -14666,6 +14673,17 @@ fn ensure_route_merge_basis(
     );
     let width = live.len();
     (live, None, Some(width))
+}
+
+/// An unknown-order layout whose structure is route-owned is dispatch-time
+/// placement evidence, not an editor-authored structural snapshot. It must not
+/// become authoritative merely because the controller retained it after the
+/// first live-tmux replacement (GH #355).
+fn retained_layout_allows_live_tmux_replacement(retained: Option<&PaneLayoutDesired>) -> bool {
+    retained.is_none_or(|retained| {
+        retained.invocation.column_order == agent_doc_tmux::LayoutColumnOrder::Unknown
+            && retained.provenance.structure_owner == PaneLayoutPublisher::Route
+    })
 }
 
 #[derive(Debug)]
@@ -35604,12 +35622,14 @@ fn publish_pane_layout_desired_invocation_in_lane(
     // the retained vector. GH #351 / GH #352's typed exception is an explicit route whose complete
     // named visible set replaces the complete positive live-tmux vector without changing its
     // width; it remains labelled `unknown`, so it cannot seed editor-order authority.
-    let cold_live_tmux_replacement = claim.live_tmux_replacement
+    let live_tmux_replacement = claim.live_tmux_replacement
         && publisher == PaneLayoutPublisher::Route
         && claim.route == Some(PaneLayoutRouteClaim::Ensure)
-        && retained.is_none()
+        && retained_layout_allows_live_tmux_replacement(retained.as_ref())
         && incoming_order == agent_doc_tmux::LayoutColumnOrder::Unknown;
-    if incoming_order != agent_doc_tmux::LayoutColumnOrder::Editor && !cold_live_tmux_replacement {
+    let incomplete_frontend_fallback =
+        incoming_order != agent_doc_tmux::LayoutColumnOrder::Editor && !live_tmux_replacement;
+    if incomplete_frontend_fallback {
         let retained = retained.as_ref().context(
             "sync_tmux_layout deferred: incomplete frontend layout has no authoritative snapshot; \
              reason=flat_evidence_has_no_column_geometry; frontend_publisher=unavailable; \
@@ -35624,13 +35644,22 @@ fn publish_pane_layout_desired_invocation_in_lane(
         !desired_columns.is_empty(),
         "sync_tmux_layout refused: desired pane layout is empty"
     );
-    if let Some(focus) = invocation.focus.as_deref() {
-        anyhow::ensure!(
-            pane_layout_foreground_focus_matches_columns(
-                &bootstrap.project_root,
-                &invocation,
-                &desired_columns,
-            ),
+    if let Some(focus) = invocation.focus.as_deref()
+        && !pane_layout_foreground_focus_matches_columns(
+            &bootstrap.project_root,
+            &invocation,
+            &desired_columns,
+        )
+    {
+        if incomplete_frontend_fallback {
+            anyhow::bail!(
+                "sync_tmux_layout refused before layout publication: focused document `{focus}` is absent from the retained desired columns; \
+                 reason=flat_evidence_has_no_column_geometry; frontend_publisher=unavailable; \
+                 remedy=install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and \
+                 the Remote Dev backend, restart both, then retry Run Agent Doc"
+            );
+        }
+        anyhow::bail!(
             "sync_tmux_layout refused before layout publication: focused document `{focus}` is absent from the desired columns"
         );
     }
@@ -48407,6 +48436,128 @@ mod tests {
         let refusal =
             handle_editor_route_rpc(&fixture.bootstrap, partial_runtime.as_ref(), partial)
                 .expect_err("a partial replacement must not guess the missing third column");
+        let refusal = format!("{refusal:#}");
+        assert!(
+            refusal.contains("reason=flat_evidence_has_no_column_geometry"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains(
+                "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway"
+            ) && refusal.contains("restart both"),
+            "{refusal}"
+        );
+    }
+
+    /// GH #355: retaining the first route-owned unknown-order replacement must
+    /// not turn it into editor structure. A later Run Agent Doc surveys the
+    /// current live width and may perform the same safe full-width replacement.
+    #[test]
+    fn gh355_retained_unknown_route_does_not_block_the_next_full_width_replacement() {
+        struct LiveLayoutGuard;
+        impl Drop for LiveLayoutGuard {
+            fn drop(&mut self) {
+                TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| *documents.borrow_mut() = None);
+            }
+        }
+        let _guard = LiveLayoutGuard;
+
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma", "delta", "epsilon"]);
+        let runtime = test_controller_runtime(&fixture.bootstrap);
+        let unknown_request = |focus: &str, columns: &[&str]| {
+            let mut request = fixture.route_request(focus, columns, Some("ensure"));
+            let mut payload: serde_json::Value = serde_json::from_str(
+                request
+                    .diagnostic_payload
+                    .as_deref()
+                    .expect("route diagnostic payload"),
+            )
+            .unwrap();
+            payload["column_order"] = serde_json::json!("unknown");
+            request.diagnostic_payload = Some(payload.to_string());
+            request
+        };
+
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| {
+            *documents.borrow_mut() = Some(vec![fixture.id("alpha"), fixture.id("beta")]);
+        });
+        handle_editor_route_rpc(
+            &fixture.bootstrap,
+            runtime.as_ref(),
+            unknown_request("gamma", &["gamma", "delta"]),
+        )
+        .expect("the first full-width replacement is accepted");
+        let first_columns = runtime.pane_layout_desired().unwrap().invocation.columns;
+        assert_eq!(first_columns.len(), 2);
+        assert!(first_columns.contains(&fixture.id("gamma")));
+        assert!(first_columns.contains(&fixture.id("delta")));
+
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| {
+            *documents.borrow_mut() = Some(first_columns);
+        });
+        handle_editor_route_rpc(
+            &fixture.bootstrap,
+            runtime.as_ref(),
+            unknown_request("epsilon", &["epsilon", "alpha"]),
+        )
+        .expect("the retained unknown route must not block the next replacement");
+        let desired = runtime.pane_layout_desired().unwrap();
+        assert_eq!(desired.invocation.columns.len(), 2);
+        assert!(desired.invocation.columns.contains(&fixture.id("epsilon")));
+        assert!(desired.invocation.columns.contains(&fixture.id("alpha")));
+        assert_eq!(
+            desired.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Unknown
+        );
+        assert_eq!(
+            desired.provenance.structure_owner,
+            PaneLayoutPublisher::Route
+        );
+
+        let ops = fixture.ops_log();
+        assert_eq!(
+            ops.matches(
+                "reason=flat_evidence_has_no_column_geometry action=publish_live_tmux_replacement columns=2"
+            )
+            .count(),
+            2,
+            "each explicit route must publish from a fresh positive live observation: {ops}"
+        );
+    }
+
+    /// When a retained authoritative layout really does block flat evidence,
+    /// the refusal names the missing geometry and the effective Remote Dev fix
+    /// instead of presenting the derived focus mismatch as the root cause.
+    #[test]
+    fn gh355_retained_layout_focus_refusal_names_missing_geometry_and_remedy() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        fixture
+            .route("alpha", &["alpha", "beta"], Some("exact"))
+            .unwrap();
+        assert_eq!(
+            fixture
+                .runtime
+                .pane_layout_desired()
+                .unwrap()
+                .invocation
+                .column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+
+        let mut request = fixture.route_request("gamma", &["gamma", "beta"], Some("ensure"));
+        let mut payload: serde_json::Value = serde_json::from_str(
+            request
+                .diagnostic_payload
+                .as_deref()
+                .expect("route diagnostic payload"),
+        )
+        .unwrap();
+        payload["column_order"] = serde_json::json!("unknown");
+        request.diagnostic_payload = Some(payload.to_string());
+
+        let refusal =
+            handle_editor_route_rpc(&fixture.bootstrap, fixture.runtime.as_ref(), request)
+                .expect_err("flat focus outside retained authoritative columns must be refused");
         let refusal = format!("{refusal:#}");
         assert!(
             refusal.contains("reason=flat_evidence_has_no_column_geometry"),

@@ -4395,6 +4395,10 @@ enum PendingAction {
 }
 
 #[derive(Subcommand)]
+// Command payloads are instantiated once per process; keeping the lineage
+// receipt fields named is clearer and safer than packing them into positional
+// strings solely to equalize enum variant sizes.
+#[allow(clippy::large_enum_variant)]
 enum QueueAction {
     /// Append an attributed free-text head `[from:<source>] <text>` to the
     /// document's `agent:queue` (`#queueinbound`, GH #237): the supported way for
@@ -4591,6 +4595,67 @@ enum QueueAction {
     Claims {
         /// Path to the session document
         file: PathBuf,
+    },
+    /// Query durable queue-attempt lineage. Historical closed attempts are
+    /// included by default; filter by exact queue item and/or generation.
+    Lineage {
+        /// Path to the session document
+        file: PathBuf,
+        /// Exact queue identity text (`#id` or the queue line's text)
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: Option<String>,
+        /// Exact queue-attempt generation
+        #[arg(long)]
+        generation: Option<u64>,
+        /// Emit the machine-readable lineage report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Append one generation-fenced queue lineage receipt. Integrations are
+    /// always explicit source-to-integration mappings; they are never inferred
+    /// from a branch name or patch similarity.
+    #[command(name = "lineage-record")]
+    LineageRecord {
+        /// Path to the session document
+        file: PathBuf,
+        /// Exact queue identity text (`#id` or the queue line's text)
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+        /// Exact queue-attempt generation
+        #[arg(long)]
+        generation: u64,
+        /// created|attached|dirty|committed|pushed|integrated|released|cancelled|retained|removed
+        #[arg(long)]
+        event: String,
+        #[arg(long)]
+        worker_id: Option<String>,
+        #[arg(long, value_name = "PATH")]
+        repo: Option<PathBuf>,
+        #[arg(long, value_name = "PATH")]
+        worktree: Option<PathBuf>,
+        #[arg(long)]
+        branch: Option<String>,
+        #[arg(long)]
+        base_sha: Option<String>,
+        #[arg(long)]
+        source_sha: Option<String>,
+        #[arg(long)]
+        pushed_ref: Option<String>,
+        #[arg(long)]
+        integration_sha: Option<String>,
+        /// cherry-pick|rebase|merge|fast-forward|other
+        #[arg(long)]
+        method: Option<String>,
+        #[arg(long)]
+        release_tag: Option<String>,
+        /// planned|tagged|published|failed
+        #[arg(long)]
+        release_state: Option<String>,
+        #[arg(long)]
+        detail: Option<String>,
+        /// Emit the updated attempt as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Reconstruct historical queue heads from snapshots, sidecars, and git history
     #[command(name = "recover-lost")]
@@ -8065,6 +8130,90 @@ fn try_main() -> anyhow::Result<()> {
                     &file,
                 )?;
                 println!("{}", serde_json::to_string_pretty(&claims)?);
+                Ok(())
+            }
+            QueueAction::Lineage {
+                file,
+                item,
+                generation,
+                json,
+            } => {
+                let report = agent_doc_queue_io::queue_lineage::query(
+                    &file,
+                    item.as_deref(),
+                    generation,
+                )?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    println!(
+                        "{}",
+                        agent_doc_queue_io::queue_lineage::render_text(&report)
+                    );
+                }
+                Ok(())
+            }
+            QueueAction::LineageRecord {
+                file,
+                item,
+                generation,
+                event,
+                worker_id,
+                repo,
+                worktree,
+                branch,
+                base_sha,
+                source_sha,
+                pushed_ref,
+                integration_sha,
+                method,
+                release_tag,
+                release_state,
+                detail,
+                json,
+            } => {
+                let attempt = agent_doc_queue_io::queue_lineage::record(
+                    &file,
+                    &item,
+                    generation,
+                    agent_doc_queue_io::queue_lineage::RecordRequest {
+                        kind: agent_doc_queue_io::queue_lineage::QueueLineageEventKind::parse(
+                            &event,
+                        )?,
+                        at_secs: None,
+                        worker_id,
+                        repo_path: repo,
+                        worktree_path: worktree,
+                        branch,
+                        base_sha,
+                        source_sha,
+                        pushed_ref,
+                        integration_sha,
+                        integration_method: method
+                            .as_deref()
+                            .map(agent_doc_queue_io::queue_lineage::IntegrationMethod::parse)
+                            .transpose()?,
+                        release_tag,
+                        release_state: release_state
+                            .as_deref()
+                            .map(agent_doc_queue_io::queue_lineage::ReleaseState::parse)
+                            .transpose()?,
+                        detail,
+                    },
+                )?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&attempt)?);
+                } else {
+                    let report = agent_doc_queue_io::queue_lineage::query(
+                        &file,
+                        Some(&item),
+                        Some(generation),
+                    )?;
+                    println!(
+                        "{}",
+                        agent_doc_queue_io::queue_lineage::render_text(&report)
+                    );
+                }
                 Ok(())
             }
             QueueAction::RecoverLost {

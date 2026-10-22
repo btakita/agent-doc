@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a14afe-0212-7da3-8343-b1f29934e5e0
+  codex: 01a14df7-ee2d-7ae0-a71a-258c82094a4b
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -699,6 +699,18 @@ Preflight also audited the legacy TODO source locators for `#lzcohortrelease`, `
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzstalehandlespec] Add the normative stale-handle disposal contract to lazily-spec: disposal must validate handle generation/identity and node kind before mutating graph state; a stale or cross-kind-recycled handle is an idempotent no-op, cannot delete the new occupant or run its cleanup, and only a matching live effect may detach edges/run cleanup. Update reactive-graph prose, API vocabulary, coverage claims, and the formal model/invariants.
+- [ ] [#lzstalehandleconformance] Extend lazily-spec executable conformance for stale-handle disposal: add a discriminating Effect-handle → recycled Source reproduction for the GH #354 `set_cell on non-cell id` failure, cover the stale cell/computed/effect handle × successor-kind matrix where representable, assert successor readability/writability/edges and cleanup counts, update `dispose_stale_handle` schema/docs/generators, and make the aggregate/discriminability gates reject missing or vacuous replay.
+- [ ] [#lzstalehandleparityrs] Bring lazily-rs into stale-handle disposal parity: land the kind-before-remove fix on current main and the compatible 0.57.x line, replay the new conformance vector in Context and ThreadSafeContext (plus async wrappers where applicable), prove a stale Effect handle cannot remove a recycled Source, and publish/version only after the spec pin and full gates are green.
+- [ ] [#lzstalehandleparitypy] Bring lazily-py into stale-handle disposal parity: adopt the new spec/conformance vector, audit source/computed/effect handle identity and id-reuse behavior, implement kind/generation-before-mutation semantics where needed, and wire non-vacuous replay plus mutation coverage into CI.
+- [ ] [#lzstalehandleparitykt] Bring lazily-kt into stale-handle disposal parity: adopt the new spec/conformance vector across normal and thread-safe/reactive contexts, enforce kind/generation validation before removal or cleanup, and add CI/mutation evidence that recycled successors survive stale disposal.
+- [ ] [#lzstalehandleparityjs] Bring lazily-js into stale-handle disposal parity: replay the new vector for reactive and thread-safe/async APIs, close any stale/cross-kind disposal gap, and prove with CI/mutation tests that a recycled Source remains readable/writable and unrelated cleanup never runs.
+- [ ] [#lzstalehandleparitydart] Bring lazily-dart into stale-handle disposal parity: adopt and replay the new vector, audit effect/source/computed disposal and allocator reuse, implement no-op stale/cross-kind disposal semantics, and add CI/mutation evidence with no vacuous fixture acceptance.
+- [ ] [#lzstalehandleparityzig] Bring lazily-zig into stale-handle disposal parity: adopt and replay the new vector for every supported graph context, validate handle kind/generation before node removal, preserve recycled successors and cleanup ownership, and add CI/mutation evidence.
+- [ ] [#lzstalehandleparitygo] Bring lazily-go into stale-handle disposal parity: adopt and replay the new vector, audit handle identity/reuse across source/computed/effect teardown, implement pre-mutation kind/generation checks where needed, and add non-vacuous CI/mutation coverage.
+- [ ] [#lzstalehandleparitycpp] Bring lazily-cpp into stale-handle disposal parity: adopt and replay the new vector, audit handle identity/reuse and RAII effect cleanup, ensure stale/cross-kind handles cannot tear down recycled nodes or run the wrong cleanup, and add CI/mutation evidence.
+- [ ] [#lzstalehandleparitycs] Bring lazily-cs into stale-handle disposal parity: adopt and replay the new vector, audit disposable effect handles and recycled node ids, enforce kind/generation-before-mutation with idempotent stale disposal, and add non-vacuous CI/mutation coverage.
+- [ ] [#lzstalehandleparitygd] Bring lazily-gd into declared stale-handle disposal parity: classify the fixture against its staged reactive-graph surface, implement/replay the supported stale-handle cases (or record an exact capability exclusion for unavailable handle/id-reuse APIs), and update coverage so unsupported is explicit rather than silently skipped.
 <!-- /agent:backlog -->
 
 ## Review

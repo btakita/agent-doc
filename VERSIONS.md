@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.540
+
+- **Remote routing resumes only against a proven live document pane (GH #347).** After a controller restart,
+  focus-only dispatch waits for live tmux evidence and never publishes inferred editor structure; missing targets
+  remain fail-closed.
+- **Loop restoration records success only after the restored schedule is visibly live (GH #348).** Failed restores
+  retain the real next deadline and recovery intent instead of reporting a false success or losing the retry.
+- **Subagent choice titles render in bold without breaking retained packets.** New operator-request packets use bold
+  choice labels, while legacy unbolded packets remain readable and derived todo summaries keep plain labels.
+- **Tracked queue claims follow equivalent prose aliases.** A running claim can transfer to one unique, unheld exact
+  prose alias without losing ownership; ambiguous or duplicate matches remain fail-closed.
+
 ## 0.35.539
 
 - **Invalid visible roll-forwards terminate with an actionable recovery (GH #344).** A structurally invalid

@@ -25,7 +25,9 @@ shared skill and registers the project `agent-doc` MCP server
 project loads neither the project skill nor its MCP server (`grok inspect`
 shows `Project trusted: no`). Existing server configuration is preserved,
 except that an entry from an older installer with `args = ["mcp"]`, which
-never starts a server, is migrated to `["mcp", "serve"]`.
+older binaries did not serve, is migrated to `["mcp", "serve"]`. Current
+binaries also accept bare `agent-doc mcp` as a compatibility alias so an
+existing project can complete its MCP handshake before that migration runs.
 
 Set `agent: grok` in document frontmatter (`grok-build` is also accepted).
 `agent-doc route notes.md` opens the managed interactive session;

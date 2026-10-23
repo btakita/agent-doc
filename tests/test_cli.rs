@@ -572,7 +572,7 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
 }
 
 #[test]
-fn mcp_serve_handles_initialize_list_and_read() {
+fn bare_mcp_compatibility_alias_handles_initialize_list_and_read() {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     write!(
         file,
@@ -610,7 +610,7 @@ fn mcp_serve_handles_initialize_list_and_read() {
     let input = format!("{initialize}\n{tools_list}\n{read}\n");
 
     let assert = agent_doc_cmd()
-        .args(["mcp", "serve"])
+        .arg("mcp")
         .write_stdin(input)
         .assert()
         .success();

@@ -29,9 +29,12 @@ writes `[mcp_servers.agent-doc]` as `command = "agent-doc"`,
 `args = ["mcp", "serve"]`, and preserves any other existing project MCP server
 configuration, including an intentional disable. The one migration is the
 legacy installer entry `args = ["mcp"]` (`#grokmcpserveargs`): bare
-`agent-doc mcp` prints help and exits 2, so Grok's MCP handshake fails and
-`agent_doc_admit` is never connected. Install rewrites only those args, and
-the skill audit (`skill check --harness grok`) rejects the legacy shape.
+`agent-doc mcp` printed help and exited 2 in older binaries, so Grok's MCP
+handshake failed and `agent_doc_admit` was never connected. Current binaries
+serve stdio for the bare form as a compatibility alias, preventing an existing
+project config from failing closed before the skill can migrate it. Install
+rewrites only those args to the explicit canonical form, and the skill audit
+(`skill check --harness grok`) rejects the legacy shape.
 
 ## Trait
 

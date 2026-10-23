@@ -355,9 +355,6 @@ impl IdentifiedQueueSchedule {
 /// canonical queue IDs used by dependency scheduling. Multiple queues must
 /// therefore already have explicit or binary-backfilled IDs.
 pub fn identified_queue_schedules(content: &str) -> anyhow::Result<Vec<IdentifiedQueueSchedule>> {
-    if !content.contains("agent:queue") {
-        return Ok(Vec::new());
-    }
     let components = element::parse(content)?;
     let graph = QueueGraph::parse(content, &components).map_err(anyhow::Error::new)?;
     Ok(graph
@@ -1861,6 +1858,19 @@ mod tests {
             .unwrap();
         assert!(restored.contains("id=main go -->\n- ship now\n"));
         assert!(restored.contains("id=issues interval=1h loop -->\n- poll issues\n"));
+    }
+
+    #[test]
+    fn canonical_run_marker_is_scheduled() {
+        let content =
+            "<!-- agent:run id=issues interval=1h loop -->\n- poll issues\n<!-- /agent:run -->\n";
+        let schedules = identified_queue_schedules(content).unwrap();
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(schedules[0].queue_id, "issues");
+        assert_eq!(
+            schedules[0].spec.as_ref().unwrap().interval_secs,
+            Some(3_600)
+        );
     }
 
     #[test]

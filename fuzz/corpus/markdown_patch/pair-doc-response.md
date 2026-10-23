@@ -138,7 +138,7 @@ Nisi 102 quis magna (quis + amet + labore + minim + ipsum). `eiusmod commodo` ul
 
 ## Queue
 
-<!-- agent:queue preset=sample auto -->
+<!-- agent:run preset=sample auto -->
 - ~Aliqua `ad enim = sed.sed(dolor);` dolore `dolor`?~
 - ~[#aliquip]~
 - Ad enim amet mermaid elit ad sed adipiscing.
@@ -147,7 +147,7 @@ Nisi 102 quis magna (quis + amet + labore + minim + ipsum). `eiusmod commodo` ul
 - [#aliqua]
 - Enim nisi amet dolor sit eiusmod "Nisi quis Dolor(amet) ea" sit Dolor(laboris) labore Dolor(1) incididunt?
 - Sed Consectetur.lorem. Magna minim ad #lorem-aliqua sit ullamco ad amet do?
-<!-- /agent:queue -->
+<!-- /agent:run -->
 
 ## Ipsum
 

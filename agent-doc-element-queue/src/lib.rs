@@ -8,8 +8,8 @@ use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
-    name: "queue",
-    aliases: &[],
+    name: "run",
+    aliases: &["queue"],
     source: ElementSource::BuiltIn,
     shape: ElementShape::Component,
     authority: ElementAuthority::DerivedProjection,

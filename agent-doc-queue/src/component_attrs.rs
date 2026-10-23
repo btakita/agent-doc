@@ -88,7 +88,7 @@ pub fn is_queue_bare_flag_attr(key: &str) -> bool {
 pub fn is_priority_component(name: &str) -> bool {
     matches!(
         name,
-        "backlog" | "icebox" | "pending" | "review" | "todo" | "queue"
+        "backlog" | "icebox" | "pending" | "review" | "todo" | "run" | "queue"
     )
 }
 
@@ -105,12 +105,12 @@ pub fn is_recognized_bare_flag_attr(component: &str, key: &str) -> bool {
             .is_some_and(is_priority_component);
     }
     if is_queue_only_component_attr(key) {
-        return component != "agent:queue" || is_queue_bare_flag_attr(key);
+        return !matches!(component, "agent:run" | "agent:queue") || is_queue_bare_flag_attr(key);
     }
     if !is_prompt_component_attr(key) {
         return false;
     }
-    if !matches!(component, "agent:queue" | "agent:exchange") {
+    if !matches!(component, "agent:run" | "agent:queue" | "agent:exchange") {
         return true;
     }
     matches!(key, "subagents" | "fan-out")

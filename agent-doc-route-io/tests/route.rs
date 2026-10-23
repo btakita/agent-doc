@@ -577,8 +577,8 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("queue: go"));
-        assert!(updated.contains("<!-- agent:queue go -->"));
-        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("<!-- agent:run go -->"));
+        assert!(!updated.contains("agent:run auto"));
         // `#qbulletlesshead`: the head stays LITERAL (undecorated) so the
         // idle-queue classifier still sees it, but it renders as a list item so
         // the bullet-only `item_nodes` enumerator can strike it. The literalness
@@ -651,8 +651,8 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("queue: go"));
-        assert!(updated.contains("<!-- agent:queue go -->"));
-        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("<!-- agent:run go -->"));
+        assert!(!updated.contains("agent:run auto"));
         // `#qbulletlesshead`: the head stays LITERAL (undecorated) so the
         // idle-queue classifier still sees it, but it renders as a list item so
         // the bullet-only `item_nodes` enumerator can strike it. The literalness
@@ -1064,10 +1064,10 @@ mod tests {
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("queue: go"));
-        assert!(updated.contains("<!-- agent:queue go -->"));
-        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("<!-- agent:run go -->"));
+        assert!(!updated.contains("agent:run auto"));
         assert!(updated.contains("- do [#qipc]. #spec-test-build-install-commit-push"));
-        let queue_pos = updated.find("<!-- agent:queue go -->").unwrap();
+        let queue_pos = updated.find("<!-- agent:run go -->").unwrap();
         let backlog_pos = updated.find("<!-- agent:backlog -->").unwrap();
         assert!(
             queue_pos < backlog_pos,

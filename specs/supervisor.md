@@ -855,7 +855,7 @@ Long-lived log storage is bounded independently from open-cycle behavior:
 ### Idle-queue watch (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`)
 
 When a busy-pane `Run Agent Doc` route cannot inject into an active turn, it
-inserts the prompt **ahead of queued active-loop items** in plain `agent:queue` (a
+inserts the prompt **ahead of queued active-loop items** in plain `agent:run` (a
 manual operator dispatch preempts the loop rather than landing at the tail —
 `#jb-run-preempt-autoloop-priority`; the priority insert lands after any leading
 queue directive such as a preset/start fence and never supersedes a lone active
@@ -933,7 +933,7 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   help, and clean-exit blockers still produce `SkipNotIdle`.
   - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
     text fires again.
-- **Queue auto-clear (`#bgclearpolicy`).** An active `agent:queue` resets the
+- **Queue auto-clear (`#bgclearpolicy`).** An active `agent:run` resets the
   agent context between items by default. In the drain-dispatch path — after
   every dispatch gate has proven the item boundary (dispatch-ready prompt, no
   live turn, no route submit in flight, no `/loop` drain owner, the prior cycle

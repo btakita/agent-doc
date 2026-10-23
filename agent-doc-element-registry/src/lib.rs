@@ -107,6 +107,8 @@ mod tests {
 
     #[test]
     fn registry_finds_canonical_and_legacy_names() {
+        assert_eq!(find_built_in("run").unwrap().name, "run");
+        assert_eq!(find_built_in("queue").unwrap().name, "run");
         assert_eq!(find_built_in("backlog").unwrap().name, "backlog");
         assert_eq!(find_built_in("pending").unwrap().name, "backlog");
         assert_eq!(find_built_in("signals").unwrap().name, "signals");
@@ -145,7 +147,7 @@ mod tests {
     #[test]
     fn queue_and_backlog_composition_roles_are_explicit() {
         let backlog = find_built_in("backlog").unwrap();
-        let queue = find_built_in("queue").unwrap();
+        let queue = find_built_in("run").unwrap();
         assert_eq!(backlog.composition_role, ElementCompositionRole::Producer);
         assert_eq!(backlog.realtime_model, ElementRealtimeModel::TrackedItems);
         assert_eq!(queue.composition_role, ElementCompositionRole::Consumer);

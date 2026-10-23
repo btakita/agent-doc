@@ -1,5 +1,5 @@
 <!-- agent:exchange -->
-<!-- agent:queue -->
+<!-- agent:run -->
 - a
-<!-- /agent:queue -->
+<!-- /agent:run -->
 <!-- /agent:exchange -->

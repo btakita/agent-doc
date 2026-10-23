@@ -452,6 +452,7 @@ fn cached_document_facts(path: &Path) -> Option<DocumentFacts> {
 pub(crate) fn has_session_structure(content: &str) -> bool {
     content.contains("<!-- agent:exchange")
         || content.contains("<!-- agent:backlog")
+        || content.contains("<!-- agent:run")
         || content.contains("<!-- agent:queue")
 }
 

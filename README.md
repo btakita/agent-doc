@@ -19,7 +19,7 @@ Terminal chats are ephemeral. A document is a workspace you curate:
 - **Edits are the prompt.** agent-doc diffs the document against the last turn,
   so the agent sees exactly what you added, changed, or deleted, including
   inline notes on its own earlier answers.
-- **Work queues up.** Drop several requests into an `agent:queue` section and
+- **Work queues up.** Drop several requests into an `agent:run` section and
   the agent drains them one by one; track follow-ups in `agent:backlog`.
 - **You can keep typing.** Edits made while the agent works merge safely with
   its writes in real time, inside your editor, without clobbering your cursor

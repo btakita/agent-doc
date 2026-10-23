@@ -719,7 +719,7 @@ Rules:
 
 ## Realtime Queue + Exchange Rules
 
-The `agent:queue` and `agent:exchange` components are realtime document state,
+The `agent:run` and `agent:exchange` components are realtime document state,
 not turn-local state. The operator may edit queue items and exchange text while
 the queue is running. Every realtime observation must recompute the in-memory
 queue projection and exchange update classification from the latest
@@ -1098,7 +1098,7 @@ supported `agent:*` element gets a small pure crate under the
 |---|---|---|---|
 | `agent-doc-element-exchange` | `agent:exchange` | prompt/response exchange state | local shared surface |
 | `agent-doc-element-boundary` | `agent:boundary:*` | inline response boundary marker | projection consumed by exchange/turn closeout |
-| `agent-doc-element-queue` | `agent:queue` | active heads, pins, priorities, auto-DAG ordering, `🚧` projection | consumer/projection of runnable work |
+| `agent-doc-element-queue` | `agent:run` | active heads, pins, priorities, auto-DAG ordering, `🚧` projection | consumer/projection of runnable work |
 | `agent-doc-element-backlog` | `agent:backlog` (`agent:pending` alias) | tracked runnable work items | producer for queue projection |
 | `agent-doc-element-review` | `agent:review` | tracked gated work items | local gate state |
 | `agent-doc-element-icebox` | `agent:icebox` | tracked parked work items | local parked state, not queue producer |
@@ -1118,7 +1118,7 @@ backlog-to-queue sync, active-head projection, auto-DAG recomputation,
 tracked-work archive routing, and signal observations that depend on queue or
 turn state. Element crates own local rules only. For example, backlog and
 icebox can share a tracked-item model, but only backlog is a runnable work
-producer; icebox is parked and must not mirror into `agent:queue`.
+producer; icebox is parked and must not mirror into `agent:run`.
 
 `agent-doc-element-unknown` is not a reserved `agent:unknown` document marker.
 It is an internal fallback classification for an `agent:*` component whose name

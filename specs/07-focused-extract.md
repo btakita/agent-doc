@@ -232,7 +232,7 @@ unrelated plan with a matching basename from being mistaken for the extracted
 session. Use `agent-doc init TARGET` first, or use focused selectors when the
 command should initialize a new target.
 
-Tracked IDs are resolved across `agent:queue`, `agent:todo`, `agent:backlog`
+Tracked IDs are resolved across `agent:run`, `agent:todo`, `agent:backlog`
 (including legacy `agent:pending`), `agent:review`, `agent:icebox`, and inline
 `agent:done`. Dated done entries retain their archive date, text, and indented
 continuations. Exchange nodes that mention a selected ID move with it. Selecting

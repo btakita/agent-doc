@@ -556,7 +556,8 @@ pub(crate) fn is_safe_duplicate_template_scaffold(segment: &str) -> bool {
         return false;
     }
 
-    let has_scaffold_component = trimmed.contains("<!-- agent:queue -->")
+    let has_scaffold_component = trimmed.contains("<!-- agent:run -->")
+        || trimmed.contains("<!-- agent:queue -->")
         || trimmed.contains("<!-- agent:backlog")
         || trimmed.contains("<!-- agent:pending")
         || trimmed.contains("<!-- agent:done");

@@ -20,7 +20,7 @@ keystroke and an agent `exchange` write competed inside the *same* merge even th
 touch unrelated regions — and text could land in the wrong region.
 
 **Live repro:** agent console output (`● Supervisor is now fresh …`) got merged **into** the
-`agent:queue` component as a fenced block while the operator was typing a prompt. The
+`agent:run` component as a fenced block while the operator was typing a prompt. The
 stale-base-detection and `dedup_adjacent_blocks` hacks were band-aids over duplicates that
 blob-merging itself produced.
 

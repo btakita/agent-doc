@@ -132,7 +132,7 @@ agent_doc_per_component_convergence: true
 
 The same experiment can be enabled project-wide in `.agent-doc/config.toml`
 with `agent_doc_per_component_convergence = true`. It is off by default.
-When enabled, an operator edit in an unowned component such as `agent:queue`
+When enabled, an operator edit in an unowned component such as `agent:run`
 does not block an agent response that owns only `agent:exchange`. Invalid or
 legacy ownership evidence falls back to whole-document equality.
 
@@ -232,7 +232,7 @@ Quote names that begin with `#`; otherwise YAML treats the rest of the key as
 a comment. `prompt_presets:` is accepted as an alias for `presets:`.
 
 Invoke a preset by adding its name to a session prompt or queue, for example
-`#review` in `agent:exchange` or `- #review` in `agent:queue`. Every ancestor
+`#review` in `agent:exchange` or `- #review` in `agent:run`. Every ancestor
 `.agent-doc/project.md` supplies live defaults within the configured root
 ceiling. A nested project's values overlay its parent's values, and a session
 document can override either by defining the same exact name in its own

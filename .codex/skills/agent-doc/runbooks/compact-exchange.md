@@ -30,7 +30,7 @@ Steps to compact an agent-doc exchange component when it grows too large.
 
 2. **Read the canonical state surfaces** that must survive compaction:
    - `agent:backlog` / `agent:pending`
-   - `agent:queue`
+   - `agent:run`
    - `agent:icebox`
    - Treat those components as the source of truth for unresolved work. Do not rely on old exchange prose alone when deciding what context must survive.
 

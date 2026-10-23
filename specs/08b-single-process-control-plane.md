@@ -88,7 +88,7 @@ fail-closed; socket-only adoption applies only while status is not yet ready.
 ### Queue scheduler (`#queueschedule`)
 
 The controller runs **one** queue scheduler per process for every scheduled
-`agent:queue` (document format: `02-document-format.md` §2.5 Queue schedule).
+`agent:run` (document format: `02-document-format.md` §2.5 Queue schedule).
 
 - **One loop, deadline-sleeping.** A single thread
   (`agent-doc-queue-scheduler`) parks on a condvar until the earliest wake
@@ -124,7 +124,7 @@ The controller runs **one** queue scheduler per process for every scheduled
   spec, durable state, and in-flight mark; one `Computed` for the earliest wake;
   one `Effect` on that `Computed` that notifies the parked loop. No observers.
 - **Realtime ingress.** Every relay-hub operation publishes a per-document
-  queue-region change key (a hash of the `agent:queue` region, plus a schedule
+  queue-region change key (a hash of the `agent:run` region, plus a schedule
   hint) into a Lazily `Source`; an `Effect` enqueues a worker refresh when a
   region changes, so typing outside the queue never reaches the scheduler. The
   commit frontier and watch-daemon disk signals enqueue refreshes for detached

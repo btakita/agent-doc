@@ -78,6 +78,25 @@ use std::fmt;
 /// Canonical component name for the backlog/pending component.
 pub const BACKLOG_COMPONENT: &str = "backlog";
 
+/// Canonical document marker name for the runnable work component.
+pub const RUN_COMPONENT: &str = "run";
+
+/// Backward-compatible document marker alias for [`RUN_COMPONENT`].
+pub const QUEUE_COMPONENT_ALIAS: &str = "queue";
+
+/// Normalize public document marker names to the stable internal queue model.
+///
+/// Queue is retained as the internal semantic name so persisted node keys, IPC
+/// operations, and existing integrations do not churn when the public marker
+/// becomes `agent:run`. Both public spellings therefore produce a component
+/// whose `name` is `queue`; writers use `agent:run` for new documents.
+fn canonical_component_name(name: &str) -> &str {
+    match name {
+        RUN_COMPONENT | QUEUE_COMPONENT_ALIAS => QUEUE_COMPONENT_ALIAS,
+        _ => name,
+    }
+}
+
 /// Legacy alias for the backlog component.
 pub const BACKLOG_ALIAS: &str = "pending";
 
@@ -1345,13 +1364,16 @@ fn line_number_at(bytes: &[u8], offset: usize) -> usize {
 /// Errors on unmatched open/close markers or invalid names.
 /// Skips markers inside fenced code blocks and inline code spans.
 pub fn parse(doc: &str) -> Result<Vec<Component>> {
+    type OpenComponent = (String, String, HashMap<String, String>, usize, usize);
+
     let bytes = doc.as_bytes();
     let len = bytes.len();
     let code_ranges = find_code_ranges(doc);
     let quoted_ranges = find_quoted_ranges(doc);
     let mut templates: Vec<Component> = Vec::new();
-    // Stack of (name, attrs, open_start, open_end)
-    let mut stack: Vec<(String, HashMap<String, String>, usize, usize)> = Vec::new();
+    // Stack of (raw_name, canonical_name, attrs, open_start, open_end).
+    // Keep the raw spelling so mixed alias pairs remain a structural error.
+    let mut stack: Vec<OpenComponent> = Vec::new();
     let mut pos = 0;
 
     while pos + 4 <= len {
@@ -1419,7 +1441,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                 .into());
             }
             match stack.pop() {
-                Some((open_name, open_attrs, open_start, open_end)) => {
+                Some((open_name, canonical_name, open_attrs, open_start, open_end)) => {
                     if open_name != name {
                         return Err(ComponentParseError::Mismatched {
                             open_name,
@@ -1430,7 +1452,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                         .into());
                     }
                     templates.push(Component {
-                        name: name.to_string(),
+                        name: canonical_name,
                         attrs: open_attrs,
                         open_start,
                         open_end,
@@ -1462,13 +1484,19 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                 .into());
             }
             let attrs = parse_attrs(attr_text);
-            stack.push((name.to_string(), attrs, marker_start, marker_end));
+            stack.push((
+                name.to_string(),
+                canonical_component_name(name).to_string(),
+                attrs,
+                marker_start,
+                marker_end,
+            ));
         }
 
         pos = close;
     }
 
-    if let Some((name, _, open_start, _)) = stack.last() {
+    if let Some((name, _, _, open_start, _)) = stack.last() {
         return Err(ComponentParseError::Unclosed {
             name: name.clone(),
             line: line_number_at(bytes, *open_start),
@@ -2102,7 +2130,7 @@ pub fn repair_welded_queue_close_marker(doc: &str) -> Option<String> {
 /// exactly one split of exactly one queue close marker, preserves the complete
 /// insertion on the preceding line, and refuses every ambiguous shape.
 pub fn repair_spliced_queue_close_marker(doc: &str, inserted_text: &str) -> Option<String> {
-    const CLOSE: &str = "<!-- /agent:queue -->";
+    const CLOSES: &[&str] = &["<!-- /agent:run -->", "<!-- /agent:queue -->"];
 
     let inserted_text = inserted_text
         .strip_suffix("\r\n")
@@ -2123,22 +2151,24 @@ pub fn repair_spliced_queue_close_marker(doc: &str, inserted_text: &str) -> Opti
         let line = line.strip_suffix('\r').unwrap_or(line);
         let indent_len = line.len() - line.trim_start().len();
         let content = &line[indent_len..];
-        for split in 1..CLOSE.len() {
-            let (prefix, suffix) = CLOSE.split_at(split);
-            let Some(remainder) = content.strip_prefix(prefix) else {
-                continue;
-            };
-            let Some(fragment) = remainder.strip_suffix(suffix) else {
-                continue;
-            };
-            if fragment.is_empty() || !inserted_text.ends_with(fragment) {
-                continue;
+        for close in CLOSES {
+            for split in 1..close.len() {
+                let (prefix, suffix) = close.split_at(split);
+                let Some(remainder) = content.strip_prefix(prefix) else {
+                    continue;
+                };
+                let Some(fragment) = remainder.strip_suffix(suffix) else {
+                    continue;
+                };
+                if fragment.is_empty() || !inserted_text.ends_with(fragment) {
+                    continue;
+                }
+                matches.push((offset, offset + line.len(), indent_len, *close));
             }
-            matches.push((offset, offset + line.len(), indent_len));
         }
         offset += raw_line.len();
     }
-    let [(line_start, line_end, indent_len)] = matches.as_slice() else {
+    let [(line_start, line_end, indent_len, close)] = matches.as_slice() else {
         return None;
     };
     if doc[..*line_start].contains(inserted_text) || doc[*line_end..].contains(inserted_text) {
@@ -2146,7 +2176,7 @@ pub fn repair_spliced_queue_close_marker(doc: &str, inserted_text: &str) -> Opti
     }
 
     let indent = &doc[*line_start..*line_start + *indent_len];
-    let replacement = format!("{indent}{inserted_text}\n{indent}{CLOSE}");
+    let replacement = format!("{indent}{inserted_text}\n{indent}{close}");
     let mut repaired = doc.to_string();
     repaired.replace_range(*line_start..*line_end, &replacement);
     (structural_corruption_reason(&repaired).is_none()).then_some(repaired)
@@ -2478,6 +2508,27 @@ mod tests {
         assert_eq!(ranges.len(), 1);
         assert_eq!(ranges[0].name, "status");
         assert_eq!(ranges[0].content(doc), "Hello\n");
+    }
+
+    #[test]
+    fn run_component_accepts_legacy_queue_alias_without_changing_semantic_name() {
+        let canonical = "<!-- agent:run -->\ncanonical\n<!-- /agent:run -->\n";
+        let legacy = "<!-- agent:queue -->\nlegacy\n<!-- /agent:queue -->\n";
+
+        let canonical_component = parse(canonical).unwrap().remove(0);
+        let legacy_component = parse(legacy).unwrap().remove(0);
+
+        assert_eq!(canonical_component.name, "queue");
+        assert_eq!(legacy_component.name, "queue");
+        assert_eq!(canonical_component.content(canonical), "canonical\n");
+        assert_eq!(legacy_component.content(legacy), "legacy\n");
+    }
+
+    #[test]
+    fn run_component_alias_pair_must_use_one_spelling() {
+        let mixed = "<!-- agent:run -->\nwork\n<!-- /agent:queue -->\n";
+        let error = parse(mixed).unwrap_err().to_string();
+        assert!(error.contains("mismatched component"), "{error}");
     }
 
     #[test]

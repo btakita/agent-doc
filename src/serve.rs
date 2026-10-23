@@ -754,6 +754,7 @@ fn is_agent_doc_file(path: &Path) -> Result<bool> {
         || frontmatter.format.is_some()
         || content.contains("<!-- agent:exchange")
         || content.contains("<!-- agent:backlog")
+        || content.contains("<!-- agent:run")
         || content.contains("<!-- agent:queue"))
 }
 

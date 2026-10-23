@@ -35,8 +35,8 @@ The body contains named components delimited by HTML comment markers:
 <!-- agent:exchange -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue priority subagents clear -->
-<!-- /agent:queue -->
+<!-- agent:run priority subagents clear -->
+<!-- /agent:run -->
 
 <!-- agent:backlog -->
 <!-- /agent:backlog -->
@@ -53,6 +53,7 @@ The body contains named components delimited by HTML comment markers:
 - `<!-- agent:input -->` — user writes prompts here (read-only for the agent).
 - `<!-- agent:output -->` — agent responds here when no other target is given.
 - `<!-- agent:exchange -->` — shared conversation surface; user and agent both write inline. Default target for unmatched patches and the canonical location for the response boundary marker.
+- `<!-- agent:run -->` — runnable prompts consumed in queue order. Legacy alias: `<!-- agent:queue -->`; existing alias markers are preserved, while new scaffolds use `agent:run`.
 - `<!-- agent:backlog -->` — task tracker managed through granular backlog ops (see `pending-ops.md`). Legacy alias: `<!-- agent:pending -->`.
 - `<!-- agent:review -->` — code-complete tracked work awaiting human review. `--backlog-gate` moves backlog items here as `[/]`; `--backlog-ungate` moves them back.
 - `<!-- agent:icebox -->` — project icebox for items parked outside the active backlog. Sits after `agent:backlog` in the default template.

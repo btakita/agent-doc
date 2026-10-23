@@ -11,7 +11,7 @@
 | [07-core-commands.md](07-core-commands.md) | Bootstrap, maintenance, inspection, transfer, backlog, and utility commands |
 | [07-session-tmux-commands.md](07-session-tmux-commands.md) | `start` / `route` / `claim` / `sync` / `resync` / `session` and tmux-layout invariants |
 | [07-closeout-commands.md](07-closeout-commands.md) | `commit` / `write` / `finalize` / `repair` / `preflight` / `session-check` closeout rules |
-| [07-orchestration-commands.md](07-orchestration-commands.md) | `plan` / `orchestrate` / `agent:queue` lifecycle and queue consumption |
+| [07-orchestration-commands.md](07-orchestration-commands.md) | `plan` / `orchestrate` / `agent:run` lifecycle and queue consumption |
 
 ## Cross-file invariants
 

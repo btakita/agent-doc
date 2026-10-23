@@ -361,7 +361,7 @@ fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
         ordered_marker: None,
         text: prompt_text.to_string(),
     })]);
-    let block = format!("<!-- agent:queue go -->\n{}<!-- /agent:queue -->\n\n", body);
+    let block = format!("<!-- agent:run go -->\n{}<!-- /agent:run -->\n\n", body);
     let components = agent_doc_element::element::parse(content)?;
     let insert_at = components
         .iter()
@@ -563,10 +563,10 @@ mod tests {
         assert!(
             update
                 .content
-                .contains("<!-- agent:queue go -->\n- do [#x]\n<!-- /agent:queue -->")
+                .contains("<!-- agent:run go -->\n- do [#x]\n<!-- /agent:run -->")
         );
         assert!(
-            update.content.find("<!-- agent:queue go -->").unwrap()
+            update.content.find("<!-- agent:run go -->").unwrap()
                 < update.content.find("<!-- agent:backlog -->").unwrap()
         );
     }

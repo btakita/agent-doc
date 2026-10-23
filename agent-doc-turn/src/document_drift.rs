@@ -102,7 +102,7 @@ pub fn detect_bypassed_response_write_between(
 
     // `#subagentcompletionfeedback`: a `### Re:` heading that opens a
     // binary-attested completion cell (completion heading grammar + fixed
-    // binary body + keyed marker) was written by `queue report-complete`, not
+    // attested response/legacy body + keyed marker) was written by `queue report-complete`, not
     // by an agent bypassing the write path. Recognize it structurally, by line
     // position in the current document, never by its prose.
     let completion_headings =
@@ -303,7 +303,7 @@ mod tests {
     }
 
     /// `#subagentcompletionfeedback`: a binary-attested completion cell is not
-    /// a direct patchback, but the same heading words without the binary body
+    /// a direct patchback, but the same heading words without an attested response
     /// and keyed marker still are.
     #[test]
     fn bypassed_response_write_exempts_only_binary_attested_completion_cells() {

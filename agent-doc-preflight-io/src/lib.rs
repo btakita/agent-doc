@@ -938,7 +938,8 @@ also record its concrete operator action in `agent:todo` with `--todo-add`; when
 worker result complete that action, check it off with `--todo-done`. Never treat a chat answer as \
 a tool permission grant; the harness must grant the exact protected action. Keep the generation \
 printed by the claim. When the subagent reports back, run `agent-doc queue report-complete <FILE> \
---item <item> --generation <generation>`; integrate and close the item normally. Use `queue release \
+--item <item> --generation <generation> --response '<complete worker response>'`; integrate and close \
+the item normally. Empty responses and placeholder-only reports are refused. Use `queue release \
 --requeue --generation <generation>` only for explicitly abandoned work.";
 
 /// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.
@@ -10408,6 +10409,8 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Never treat a chat answer"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("run its `start_command`"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("🟡 dispatching to 🚧 running"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--response '<complete worker response>'"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("placeholder-only reports are refused"));
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json["authorization"]["subagent_prompt_preamble"].is_string());
         assert!(json.get("model").is_none(), "unset launch policy must be omitted");

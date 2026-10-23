@@ -33,7 +33,7 @@
 //! AND its text appears nowhere else: not as a drained live head, and not as
 //! any other line outside the queue components (an operator may type the same
 //! text as a live exchange prompt). A completion-shaped heading without the
-//! fixed body and keyed marker is ordinary text and stays in scope. Anything
+//! attested response (or recognized legacy body) and keyed marker is ordinary text and stays in scope. Anything
 //! ambiguous stays in scope and keeps the gate armed.
 //!
 //! The requirement is fixed at preflight, but the set of heads a cycle drains
@@ -496,7 +496,7 @@ mod tests {
         assert!(without_undrained_queue_lines(&[cell], &undrained).is_empty());
     }
 
-    /// Fail-closed: a completion-shaped heading without the binary body and
+    /// Fail-closed: a completion-shaped heading without an attested response and
     /// keyed marker is ordinary exchange text, and the same heading typed as
     /// its own line elsewhere keeps a real cell's heading in scope too.
     #[test]

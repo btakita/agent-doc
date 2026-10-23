@@ -103,6 +103,8 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
                     item,
                     "--generation",
                     "1",
+                    "--response",
+                    &format!("Completed {item}.\n\n- focused tests passed\n- branch pushed"),
                 ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -138,9 +140,10 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
     for item in items {
         assert_eq!(
             content.matches(item).count(),
-            2,
-            "queue + notice for {item}"
+            3,
+            "queue + heading + worker response for {item}"
         );
+        assert!(content.contains(&format!("> Completed {item}.")));
     }
     agent_doc_lint_io::validate_structure_on_content(&doc, &content)
         .expect("multi-process notices must pass the session-check integrity classifier");
@@ -437,6 +440,8 @@ fn several_reports_then_preflight_admits_the_next_turn() {
                 item,
                 "--generation",
                 "1",
+                "--response",
+                "Implemented the requested fix; focused tests passed.",
             ],
         );
         assert!(

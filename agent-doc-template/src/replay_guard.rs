@@ -296,7 +296,7 @@ pub fn classify_replay_payload_against_document<'a>(
 /// different headings compare equal.
 ///
 /// `#subagentcompletionfeedback`: a heading that opens a binary-attested
-/// subagent completion cell (heading grammar + fixed binary body + keyed
+/// subagent completion cell (heading grammar + attested response/legacy body + keyed
 /// marker) is binary feedback, not an assistant response, so it is never a
 /// replayed heading. Legacy cells all normalized to the topic `subagent
 /// completed`; counting them made two or more uncommitted reports refuse every
@@ -562,7 +562,7 @@ mod tests {
     }
 
     /// The exemption is structural: the same heading words twice WITHOUT the
-    /// binary body and keyed marker are an ordinary repeated heading.
+    /// attested response (or recognized legacy body) and keyed marker are an ordinary repeated heading.
     #[test]
     fn classify_still_blocks_a_repeated_completion_shaped_heading_without_the_binary_cell() {
         assert_blocked(

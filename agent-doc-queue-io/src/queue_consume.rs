@@ -1174,9 +1174,14 @@ fn strike_free_text_queue_heads_with_proof(
     // `#claimstrike`: an answered head is struck even when a worker claim holds
     // it (the coordinator echoing a head its subagent finished is the normal
     // `#queuesubagents` flow); a deferral next to the echo is what keeps a
-    // quoted head queued. Read the claims now so the struck heads' claims are
-    // released in this same closeout.
-    let mut claimed_heads = crate::queue_claim::claimed_live_head_texts_for_content(file, &content);
+    // quoted head queued. `#longrunstrike`: use the durable attempt identity,
+    // not only live ownership. A coordinator may close out after the two-hour
+    // claim TTL, and the exact materialized echo below remains completion
+    // authority for the same row even though the expired attempt no longer
+    // blocks redispatch. Read that authority now so the struck rows' attempts
+    // are released in this same closeout.
+    let mut claimed_heads =
+        crate::queue_claim::claim_attempt_head_texts_for_content(file, &content);
     // A reported release removes the live claim by design. Preserve its exact
     // attempt authority for this closeout from the durable receipt, otherwise
     // a row added after the turn baseline races projection timing: 🚧 may
@@ -5962,6 +5967,87 @@ mod core_tests {
         assert!(
             claimstrike_completed_residue(&after, &response).is_empty(),
             "session-check sees no completed residue after the strike"
+        );
+    }
+
+    #[test]
+    fn long_running_closeout_strikes_post_baseline_head_after_claim_ttl() {
+        const STARTED_AT: u64 = 1_000;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("longrun-strike.md");
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#laterwork]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let response = format!(
+            "### Re: completed subagent — codex\n\n> **Queue prompt:** {CLAIMSTRIKE_HEAD}\n\n\
+             Integrated and verified the completed worker change.\n"
+        );
+        let current = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {}\n",
+                "- do [#laterwork]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response, CLAIMSTRIKE_HEAD,
+        );
+        std::fs::write(&doc, &current).unwrap();
+        {
+            let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(STARTED_AT);
+            crate::queue_claim::claim(
+                &doc,
+                CLAIMSTRIKE_HEAD,
+                "subagent:longrun-strike",
+                agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS,
+            )
+            .unwrap();
+        }
+
+        let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(
+            STARTED_AT + 3 * 60 * 60 + 1,
+        );
+        assert_eq!(crate::queue_claim::prune_closed_claims(&doc, &current).unwrap(), 1);
+        assert!(
+            crate::queue_claim::claimed_live_head_texts_for_content(&doc, &current).is_empty(),
+            "the expired attempt must not retain dispatch ownership"
+        );
+        assert_eq!(
+            crate::queue_claim::claim_attempt_head_texts_for_content(&doc, &current),
+            vec![CLAIMSTRIKE_HEAD.to_string()],
+            "the retained Lost attempt still identifies its exact open row"
+        );
+
+        let struck = strike_answered_free_text_queue_heads(&doc, &response, true).unwrap();
+        assert_eq!(struck, 1, "the exact completion echo should still strike");
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains(&format!(
+                "- ~~{CLAIMSTRIKE_HEAD}~~ — auto-struck: answered this cycle (#ftstrike)"
+            )),
+            "{after}"
+        );
+        assert!(after.contains("- do [#laterwork]\n"), "{after}");
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty(),
+            "closing the row should retire the retained Lost attempt"
         );
     }
 

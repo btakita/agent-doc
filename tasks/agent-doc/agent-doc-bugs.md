@@ -24,15 +24,14 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 20 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-✅ Release v0.35.547 was published from `9c2375a33c` and verified end to end. The stable, non-draft GitHub release has 21 assets; all 11 release jobs passed, the PyPI build/publish/clean-install verification passed, and issue #367 is closed. The local CLI reports 0.35.547; expected plugins are JetBrains 0.2.801, VS Code 0.2.83, and Zed 0.1.1. JetBrains Marketplace publication remains deferred because its token is not configured; the verified ZIPs and feeds are present in the GitHub release.
+✅ Release v0.35.548 was published from `56046b3880` and verified end to end. The stable, non-draft GitHub release has 21 assets; all 11 release jobs passed, including six platform builds, plugins, Homebrew, PyPI, and finalization. Issues #368–#371 are closed.
 
-The pushed post-release integration branch `integrate/post-547-config-repair-20261023` is at `220aaa6b14`. Its combined authoritative `make check` passed and the coordinator-owned `make install` completed. It adds proof-gated automatic repair for torn queue owner/lifecycle projections (`0c2503e2ff`) and project-level agent selection (`220aaa6b14`). Set `.agent-doc/config.toml` to `default_agent = "claude"`; precedence is CLI `--agent`, document frontmatter `agent:`, project default, global default, then Claude fallback.
+Remote `main` is at `9e366edd73`. Its post-release per-target stable upgrade-channel implementation is pushed, and CI, Book, and Pages workflows all passed. The feature is not part of v0.35.548; it will activate after a future release containing the resolver.
 
-The live queue cleanup is committed through this closeout. The attached controller deferred its native-library reload while this cycle was active; it will adopt the installed generation at the idle boundary and ordinary projection will canonicalize the malformed queue row.
+This host reports agent-doc CLI 0.35.548. Installed editor packages are IntelliJ classic 0.2.806, Rider/262 0.2.807, and VSCodium 0.2.83. The v0.35.548 release also publishes JetBrains 263 package 0.2.808; it is not installed on this host.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -211,7 +210,18 @@ It adds:
 Validation passed: full `make check`, `make check-fast`, Actionlint/ShellCheck, publisher self-test, 27 upgrade tests, and integration tests.
 
 v0.35.548 is fully released, but this feature landed afterward. Your Coder can upgrade to 0.35.548 now; per-target upgrading will activate after the next release containing this resolver. Main CI is still running at handoff.
-<!-- agent:boundary:1d86f43f -->
+> **Queue prompt:** Update sync:status
+
+### Re: Update sync:status — gpt-5 · 2026-10-23T18:12-04:00
+
+The synchronized status now reflects the current verified state:
+
+- v0.35.548 is the stable public release from `56046b3880`; all 11 release jobs and 21 assets passed, and issues #368–#371 are closed.
+- Remote `main` is `9e366edd73`; its post-release per-target upgrade-channel work passed CI, Book, and Pages, but is not included in v0.35.548.
+- This host runs CLI 0.35.548 with IntelliJ classic 0.2.806, Rider/262 0.2.807, and VSCodium 0.2.83. JetBrains 263 package 0.2.808 is published but not installed here.
+
+This was a status-only audit: no repository files changed, so no code tests, build, install, commit, or push were required. Release and main CI were green. The exchange remains above its accretion warning threshold; it was not compacted because the queue was active and auto-compaction was not enabled.
+<!-- agent:boundary:6192acdd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -219,51 +229,12 @@ v0.35.548 is fully released, but this feature landed afterward. Your Coder can u
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:coder-instance-defaulting#1] do [#coderinstancedefaulting]
-- ☑️ [#subagent:gh363-fix#1] do [#gh363]
-- ☑️ [#subagent:gh355-cleanup-rerun#3] #gh-issue https://github.com/btakita/agent-doc/issues/355
-- ☑️ [#subagent:sdk-demo-compact-attach#3] Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
-- 📥 agent-doc process is thrashing in the background along with Idea.
-- 📥 Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.
-- 📥 Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/364
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/365
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/366
-- 📥 Coder instance still has backend/frontend communication issues
-- ☑️ [#subagent:gh367-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/367 ⟦effect:1⟧
-- ☑️ [#subagent:gh367-followup#1] #gh-fix https://github.com/btakita/agent-doc/issues/367 ⟦effect:2⟧
-- ☑️ [#subagent:queue-state-live-repair#4] Several of this queue's items were in a ❔ state. Now the incorrect 📥 state. They should be in the ☑️ state. Fix agent-doc causes.
-- ☑️ [#subagent:release-367-queue-state#1] release + publish: include issue 367 + queue state fixes
-- ☑️ [#subagent:queue-auto-repair#1] agent-doc should have an auto-recover + repair to clean up the queue. Clean up this queue.
-- ☑️ [#subagent:effect-annotation-explain#1] What is `⟦effect:1⟧`? Why is `⟦` and `⟧` used?
-- ☑️ [#subagent:project-md-frontmatter#1] Allow project.md to configure all frontmatter including `agent: ...`. This would have override precedence over config.toml. Allow changes while the project is open to both config.toml and project.md.
-- ☑️ [#subagent:gh368-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/368
-- ☑️ [#subagent:gh369-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/369
-- ☑️ [#subagent:gh370-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/370
-- ☑️ [#subagent:gh371-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/371
-- ☑️ [#subagent:agent-doc-bugs-attach-repair#1] fix: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
-- ☑️ [#subagent:sdk-demo-reroute-recovery#1] In sdk-demo.md, I manually interrupted the Grok turn, ran `/clear`, then attempted to Run Agent Doc from the editor: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md could not be drained before reroute; nothing was dispatched and existing queue head "Unbind the \"s\" key to toggle \"Network Stats\". We are typing into chat and everytime \"s\" is pressed, the Network Stats is toggled." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md
----
-☑️ [#subagent:in-turn-upgrade-answer#1] - From sdk-demo.md: Can we make agent-doc allow in-turn upgrades with the new contract? Would that require the agent to restart? Answer only: ```
-❯ agent-doc tasks/sdk/sdk-demo.md                                                                      2:09 PM
-
-
-I'll open the agent-doc session for tasks/sdk/sdk-demo.md and follow the skill before answering.       2:09 PM
-
-◈ Explored 4 files, 1 search, called 3 tools, ran 1 command
-
-Admission is in. The binary is newer than the local skill, and the plan says this sealed turn still    2:09 PM
-has a contract to run. I'll update the skill and pull the queue and backlog. 
-- ```
----
-- ☑️ [#subagent:release-368-370#1] release + publish: include issues 368-371
-- ☑️ [#subagent:grok-queue-subagents#1] grok does not seem to run subagents in the queue. Make grok use subagents when `subagents` attribute is set. See the sdk-demo.md session. I had to manually prompt Grok to run subagents for each queue item.
 <!-- /agent:queue -->
 
 ## Queue: Issues
 
 <!-- agent:queue id=issues loop interval=1h -->
-- ☑️ [#subagent:gh363-fix#1] do [#gh363]
+- 🚧 do [#gh363]
 <!-- /agent:queue -->
 
 ## Todo

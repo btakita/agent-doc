@@ -667,13 +667,13 @@ stopping, it sends or returns this packet without paraphrase:
 
 ```text
 [#subagent-operator-request-<unique-id>] subagent operator request
-queue_item: <origin-queue-item>
-kind: question | permission
-blocking: true
-request: <exact question or exact tool/action requiring permission>
-context: <why it is needed, current state, target/scope, and risk or effect>
-choices:
-- **<label>**: <effect>
+- *queue_item:* <origin-queue-item>
+- *kind:* question | permission
+- *blocking:* true
+- *request:* <exact question or exact tool/action requiring permission>
+- *context:* <why it is needed, current state, target/scope, and risk or effect>
+- *choices:*
+  - **<label>**: <effect>
 ```
 
 The worker MUST replace `<unique-id>` with a short request-specific lowercase
@@ -684,9 +684,14 @@ historical packets, but workers MUST NOT emit or reuse it. A closeout that
 presents two blocking packets with the same marker id fails before response
 capture and names the duplicate id.
 
+The packet MUST render its fields as list items and emphasize each key with its
+colon (`- *key:* value`) so the ask is easy to scan while retaining one stable
+key/value field per line. Choices are nested below `- *choices:*`. Historical
+plain `key: value` fields and the common colon-outside-emphasis or bold-key
+spellings remain read-compatible, but workers emit the canonical list form.
 The packet MUST include every offered choice with its effect, and MUST render
 each choice title in Markdown bold while leaving the effect as ordinary prose.
-`choices: []` is valid only when the harness supplied no choices. The
+`- *choices:* []` is valid only when the harness supplied no choices. The
 coordinator MUST copy the
 complete packet verbatim into `agent:exchange`, present the same request from
 the main harness session, and send the operator's answer verbatim to the same

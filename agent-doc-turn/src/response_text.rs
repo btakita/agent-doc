@@ -819,10 +819,11 @@ const OPERATOR_REQUEST_TODO_CHOICE_MAX_CHARS: usize = 40;
 ///
 /// A packet is a request-specific marker line (at most three leading spaces,
 /// so an indented code block never counts) followed, without a blank line, by
-/// `key: value` field lines. It counts only when it carries `kind: question`
-/// or `kind: permission`, `blocking: true`, and a concrete `request:` (not the
-/// `<...>` protocol placeholder). Lines inside fenced code blocks and
-/// blockquoted (`>`) lines are quoted prose, never a packet.
+/// canonical `- *key:* value` field lines (legacy `key: value` remains readable).
+/// It counts only when it carries `kind: question` or `kind: permission`,
+/// `blocking: true`, and a concrete `request:` (not the `<...>` protocol
+/// placeholder). Lines inside fenced code blocks and blockquoted (`>`) lines
+/// are quoted prose, never a packet.
 pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperatorRequestPacket> {
     let lines: Vec<&str> = response.lines().collect();
     let mut packets = Vec::new();
@@ -879,11 +880,10 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
                 continue;
             }
             in_choices = false;
-            let Some((key, value)) = field.split_once(':') else {
+            let Some((key, value)) = operator_request_field(field) else {
                 continue;
             };
-            let value = value.trim();
-            match key.trim().to_ascii_lowercase().as_str() {
+            match key.to_ascii_lowercase().as_str() {
                 "kind" => kind = Some(value.to_ascii_lowercase()),
                 "blocking" => blocking = Some(value.eq_ignore_ascii_case("true")),
                 "request" => request = Some(value.to_string()),
@@ -910,6 +910,22 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
         });
     }
     packets
+}
+
+/// Parse a request field after removing the canonical list marker and emphasis.
+/// Plain historical fields remain readable, as do the common colon-outside-
+/// emphasis and bold-key variants produced by hand-edited packets.
+fn operator_request_field(field: &str) -> Option<(&str, &str)> {
+    let field = field.trim().strip_prefix("- ").unwrap_or(field.trim());
+    for (prefix, delimiter) in [("**", ":**"), ("**", "**:"), ("*", ":*"), ("*", "*:")] {
+        if let Some(emphasized) = field.strip_prefix(prefix)
+            && let Some((key, value)) = emphasized.split_once(delimiter)
+        {
+            return Some((key.trim(), value.trim()));
+        }
+    }
+    let (key, value) = field.split_once(':')?;
+    Some((key.trim(), value.trim()))
 }
 
 /// The first request id reused by more than one blocking packet, if any.
@@ -1791,16 +1807,16 @@ mod tests {
 `#apipendingorphans` is gated on review of #733 and on your decision below.
 
 [#subagent-operator-request-pending-rows] subagent operator request
-queue_item: sdk-demo.md queue annotation fix
-kind: question
-blocking: true
-request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
-context: PR #733 stops new stuck rows.
-choices:
-- **withdraw**: soft-delete the stuck sends.
-- **resubmit**: send each stuck row to FPE again.
-- **release**: set the stuck rows to `allowed`.
-- **leave**: change nothing.
+- *queue_item:* sdk-demo.md queue annotation fix
+- *kind:* question
+- *blocking:* true
+- *request:* What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
+- *context:* PR #733 stops new stuck rows.
+- *choices:*
+  - **withdraw**: soft-delete the stuck sends.
+  - **resubmit**: send each stuck row to FPE again.
+  - **release**: set the stuck rows to `allowed`.
+  - **leave**: change nothing.
 
 **Recommendation:** withdraw.
 ";
@@ -1821,15 +1837,41 @@ choices:
             vec!["withdraw", "resubmit", "release", "leave"]
         );
 
-        let legacy = BLOCKING_PACKET_RESPONSE
+        let legacy_choices = BLOCKING_PACKET_RESPONSE
             .replace("**withdraw**", "withdraw")
             .replace("**resubmit**", "resubmit")
             .replace("**release**", "release")
             .replace("**leave**", "leave");
         assert_eq!(
-            blocking_operator_request_packets(&legacy)[0].choice_labels,
+            blocking_operator_request_packets(&legacy_choices)[0].choice_labels,
             packets[0].choice_labels,
             "historical unbolded packets remain readable"
+        );
+
+        let legacy_fields = BLOCKING_PACKET_RESPONSE
+            .replace("- *queue_item:*", "queue_item:")
+            .replace("- *kind:*", "kind:")
+            .replace("- *blocking:*", "blocking:")
+            .replace("- *request:*", "request:")
+            .replace("- *context:*", "context:")
+            .replace("- *choices:*", "choices:");
+        assert_eq!(
+            blocking_operator_request_packets(&legacy_fields),
+            packets,
+            "historical unlisted, unemphasized fields remain readable"
+        );
+
+        let colon_outside_emphasis = BLOCKING_PACKET_RESPONSE
+            .replace("*queue_item:*", "*queue_item*:")
+            .replace("*kind:*", "*kind*:")
+            .replace("*blocking:*", "*blocking*:")
+            .replace("*request:*", "*request*:")
+            .replace("*context:*", "*context*:")
+            .replace("*choices:*", "*choices*:");
+        assert_eq!(
+            blocking_operator_request_packets(&colon_outside_emphasis),
+            packets,
+            "the alternate emphasized-key spelling remains readable"
         );
     }
 
@@ -1863,7 +1905,7 @@ choices:
 
     #[test]
     fn packettodo_ignores_nonblocking_fenced_quoted_and_placeholder_packets() {
-        let nonblocking = BLOCKING_PACKET_RESPONSE.replace("blocking: true", "blocking: false");
+        let nonblocking = BLOCKING_PACKET_RESPONSE.replace("*blocking:* true", "*blocking:* false");
         assert!(blocking_operator_request_packets(&nonblocking).is_empty());
 
         let fenced = format!("Example:\n\n```text\n{BLOCKING_PACKET_RESPONSE}```\n");
@@ -1891,15 +1933,15 @@ choices:
                 agent_doc_queue::subagent_brief::SUBAGENT_OPERATOR_REQUEST_PROTOCOL
             )
             .is_empty(),
-            "the protocol template's `kind: question | permission` placeholder is not a packet"
+            "the protocol template's `- *kind:* question | permission` placeholder is not a packet"
         );
 
         let prose = "The worker would send `[#subagent-operator-request] subagent operator request` with blocking: true.";
         assert!(blocking_operator_request_packets(prose).is_empty());
 
         let gap = BLOCKING_PACKET_RESPONSE.replace(
-            "subagent operator request\nqueue_item",
-            "subagent operator request\n\nqueue_item",
+            "subagent operator request\n- *queue_item:*",
+            "subagent operator request\n\n- *queue_item:*",
         );
         assert!(blocking_operator_request_packets(&gap).is_empty());
     }

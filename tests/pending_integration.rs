@@ -2344,16 +2344,16 @@ const BLOCKING_PACKET_RESPONSE: &str = "<!-- patch:exchange -->\n\
 `#apipendingorphans` is gated on review of #733 and on your decision below.\n\
 \n\
 [#subagent-operator-request-pending-rows] subagent operator request\n\
-queue_item: do [#apipendingorphans]\n\
-kind: question\n\
-blocking: true\n\
-request: What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?\n\
-context: PR #733 stops new stuck rows for refused sends and edits.\n\
-choices:\n\
-- **withdraw**: soft-delete the stuck sends.\n\
-- **resubmit**: send each stuck row to FPE again.\n\
-- **release**: set the stuck rows to `allowed` without screening.\n\
-- **leave**: change nothing.\n\
+- *queue_item:* do [#apipendingorphans]\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:* What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?\n\
+- *context:* PR #733 stops new stuck rows for refused sends and edits.\n\
+- *choices:*\n\
+\x20\x20- **withdraw**: soft-delete the stuck sends.\n\
+\x20\x20- **resubmit**: send each stuck row to FPE again.\n\
+\x20\x20- **release**: set the stuck rows to `allowed` without screening.\n\
+\x20\x20- **leave**: change nothing.\n\
 \n\
 **Recommendation:** withdraw, after STG gets migration `0022`.\n\
 <!-- /patch:exchange -->\n";
@@ -2502,15 +2502,15 @@ fn write_blocking_operator_request_projects_and_clears_queue_indicator() {
 /// blockquoted packet is not a pending operator decision.
 #[test]
 fn write_nonblocking_or_quoted_operator_request_packet_records_no_todo() {
-    let nonblocking = BLOCKING_PACKET_RESPONSE.replace("blocking: true", "blocking: false");
+    let nonblocking = BLOCKING_PACKET_RESPONSE.replace("*blocking:* true", "*blocking:* false");
     let fenced = BLOCKING_PACKET_RESPONSE
         .replace(
             "[#subagent-operator-request-pending-rows] subagent operator request\n",
             "```text\n[#subagent-operator-request-pending-rows] subagent operator request\n",
         )
         .replace(
-            "- **leave**: change nothing.\n",
-            "- **leave**: change nothing.\n```\n",
+            "  - **leave**: change nothing.\n",
+            "  - **leave**: change nothing.\n```\n",
         );
     let quoted = BLOCKING_PACKET_RESPONSE
         .lines()

@@ -394,7 +394,8 @@ pub fn subagent_operator_request_id(line: &str) -> Option<&str> {
 
 /// Cross-harness fallback for questions and permission requests that a background
 /// worker cannot present to the operator itself. The field names are deliberately
-/// stable so the coordinator can preserve the complete request in `agent:exchange`.
+/// stable and emphasized in a Markdown list so people can scan the packet while
+/// the coordinator can preserve the complete request in `agent:exchange`.
 pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "If required scope or a choice is still missing, or a protected tool action still requires ",
     "harness approval, do not guess or silently deny it. Send the coordinator this exact packet ",
@@ -402,18 +403,18 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
     "stopping; use the harness's native parent-message mechanism when available, otherwise ",
     "return the packet as your result:\n\n",
     "[#subagent-operator-request-<unique-id>] subagent operator request\n",
-    "queue_item: <origin-queue-item>\n",
-    "kind: question | permission\n",
-    "blocking: true\n",
-    "request: <exact question or exact tool/action requiring permission>\n",
-    "context: <why it is needed, current state, target/scope, and risk or effect>\n",
-    "choices:\n",
-    "- **<label>**: <effect>\n\n",
+    "- *queue_item:* <origin-queue-item>\n",
+    "- *kind:* question | permission\n",
+    "- *blocking:* true\n",
+    "- *request:* <exact question or exact tool/action requiring permission>\n",
+    "- *context:* <why it is needed, current state, target/scope, and risk or effect>\n",
+    "- *choices:*\n",
+    "  - **<label>**: <effect>\n\n",
     "Replace `<unique-id>` with a short request-specific lowercase suffix using letters, digits, ",
     "and hyphens. Use a different marker id for every request packet in the session document; ",
     "never reuse the legacy fixed `[#subagent-operator-request]` id. ",
-    "Keep the rendered `queue_item:` value unchanged; it links this packet to the exact queue row. ",
-    "Include every offered choice; write `choices: []` only when the harness supplied none. ",
+    "Keep the rendered `- *queue_item:*` value unchanged; it links this packet to the exact queue row. ",
+    "Include every offered choice; write `- *choices:* []` only when the harness supplied none. ",
     "Claude Code may surface a background worker's tool-permission prompt natively, and Codex ",
     "provides inter-agent messaging; Grok Build and OpenCode may require returning the packet ",
     "through the child result. In every harness, the coordinator records the packet verbatim in ",
@@ -614,8 +615,8 @@ mod tests {
         );
         assert!(p.contains("covers only the queue item above"));
         assert!(p.contains(SUBAGENT_OPERATOR_REQUEST_MARKER));
-        assert!(p.contains("kind: question | permission"));
-        assert!(p.contains("context: <why it is needed, current state, target/scope"));
+        assert!(p.contains("- *kind:* question | permission"));
+        assert!(p.contains("- *context:* <why it is needed, current state, target/scope"));
         assert!(p.contains("A chat reply is context, not a tool permission grant"));
         assert!(p.contains("current operator authorization for the work and actions they name"));
         assert!(p.contains("without asking the operator to repeat those words"));
@@ -957,18 +958,18 @@ mod tests {
             assert!(!preamble.contains("[agent-doc] subagent operator request"));
             assert!(!preamble.contains("(#waypostrequest)"));
             assert!(
-                preamble.contains(&format!("queue_item: {item}")),
+                preamble.contains(&format!("- *queue_item:* {item}")),
                 "{preamble}"
             );
-            assert!(preamble.contains("request: <exact question or exact tool/action"));
+            assert!(preamble.contains("- *request:* <exact question or exact tool/action"));
             assert!(preamble.contains(
                 "Use a different marker id for every request packet in the session document"
             ));
             assert!(
                 preamble.contains("never reuse the legacy fixed `[#subagent-operator-request]` id")
             );
-            assert!(preamble.contains("choices:\n- **<label>**: <effect>"));
-            assert!(!preamble.contains("choices:\n- <label>: <effect>"));
+            assert!(preamble.contains("- *choices:*\n  - **<label>**: <effect>"));
+            assert!(!preamble.contains("- *choices:*\n  - <label>: <effect>"));
             for harness in ["Claude Code", "Codex", "Grok Build", "OpenCode"] {
                 assert!(preamble.contains(harness), "missing {harness}: {preamble}");
             }

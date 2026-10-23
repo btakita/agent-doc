@@ -64,14 +64,14 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
         ))
         .stdout(predicate::str::contains("[agent-doc] subagent operator request").not())
         .stdout(predicate::str::contains("(#waypostrequest)").not())
-        .stdout(predicate::str::contains("kind: question | permission"))
+        .stdout(predicate::str::contains("- *kind:* question | permission"))
         .stdout(predicate::str::contains(
-            "context: <why it is needed, current state, target/scope, and risk or effect>",
+            "- *context:* <why it is needed, current state, target/scope, and risk or effect>",
         ))
         .stdout(predicate::str::contains(
-            "choices:\n- **<label>**: <effect>",
+            "- *choices:*\n  - **<label>**: <effect>",
         ))
-        .stdout(predicate::str::contains("choices:\n- <label>: <effect>").not())
+        .stdout(predicate::str::contains("- *choices:*\n  - <label>: <effect>").not())
         .stdout(predicate::str::contains(
             "A chat reply is context, not a tool permission grant",
         ))

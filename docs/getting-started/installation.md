@@ -20,6 +20,12 @@ replace the same asset names instead of creating duplicates. The aggregate
 after all six platform archives verify, and continues to mark readiness for
 PyPI and Homebrew.
 
+`agent-doc upgrade` verifies its selected archive against that archive-specific
+sidecar, so it can use a completed platform pair before the aggregate manifest
+appears. If a newer release is visible but its archive or sidecar is not yet
+available for this platform, the one-shot command exits non-zero and leaves the
+installed binary and plugins unchanged.
+
 ## PyPI
 
 ```sh

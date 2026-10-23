@@ -518,8 +518,14 @@ pair as a drop.
 
 `agent-doc upgrade` checks GitHub Releases for a newer stable version and upgrades
 through the prebuilt GitHub binary / `pip` cascade. A prebuilt archive is installed
-only after its bytes match the release's `SHA256SUMS` entry. The agent-doc Rust
-workspace is private and is not a crates.io upgrade source. The one-shot path
+only after its bytes match its archive-specific `.sha256` sidecar. It does not
+wait for the aggregate `SHA256SUMS` completion marker, because a platform archive
+and its sidecar are intentionally usable while other platform jobs are still
+publishing (GH #363). The aggregate manifest remains the completion gate for
+PyPI and Homebrew. If a newer release is found but neither the verified GitHub
+archive nor an eligible PyPI fallback can be installed, the one-shot command
+exits non-zero and leaves the current binary and plugins unchanged. The agent-doc
+Rust workspace is private and is not a crates.io upgrade source. The one-shot path
 also reconciles every already-installed JetBrains and VS Code-family plugin to
 the latest release (GH #107) — after a successful binary upgrade, and also when
 the binary is already current, so a workspace skewed by an earlier binary-only

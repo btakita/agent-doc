@@ -805,6 +805,8 @@ fn print_jetbrains_remote_dev_install_scope(package_range: JetbrainsPackageRange
     }
 }
 
+const JETBRAINS_REMOTE_DEV_LOCAL_RECONCILE_NOTICE: &str = "Remote Dev peer scope: only plugin directories visible to this process were reconciled; a Client/Gateway on another machine was not verified or updated. Install the matching modular ZIP in that peer (or use JetBrains Marketplace synchronization), then restart both peers.";
+
 /// GH #108: the headline for a finished release install. A staged package left
 /// the plugin tree untouched by design, so it must not read "Plugin installed"
 /// stamped with the on-disk (old) version; it names the staged version instead.
@@ -3395,17 +3397,28 @@ impl PluginReconcileReport {
     /// instruction; the conditional "if it does not pick it up on its own" is
     /// kept for VS Code, whose running window may genuinely reload by itself.
     pub fn summary(&self, release: &str) -> String {
-        let summary = self.reconciled_summary(release);
-        let unsupported = self.unsupported_platform_warnings();
-        if unsupported.is_empty() {
-            return summary;
+        let mut lines = vec![self.reconciled_summary(release)];
+        lines.extend(self.unsupported_platform_warnings());
+        if self.has_modular_jetbrains_target() {
+            lines.push(JETBRAINS_REMOTE_DEV_LOCAL_RECONCILE_NOTICE.to_string());
         }
-        let mut lines = vec![summary];
-        lines.extend(unsupported);
         lines.join("\n")
     }
 
+    fn has_modular_jetbrains_target(&self) -> bool {
+        self.targets.iter().any(|target| {
+            target.family == PluginEditorFamily::JetBrains
+                && agent_doc_fs::jetbrains_install::jetbrains_platform_build(Path::new(
+                    &target.label,
+                ))
+                .is_some_and(|build| build >= 262)
+        })
+    }
+
     fn reconciled_summary(&self, release: &str) -> String {
+        if self.targets.is_empty() {
+            return "No installed editor plugins were discovered on this machine.".to_string();
+        }
         if self.changed() == 0 {
             if self.targets.iter().any(|target| {
                 matches!(
@@ -3414,10 +3427,12 @@ impl PluginReconcileReport {
                 )
             }) {
                 return format!(
-                    "Installed editor plugins on supported IDE builds already match v{release}."
+                    "Installed editor plugins on supported IDE builds discovered on this machine already match v{release}."
                 );
             }
-            return format!("Installed editor plugins already match v{release}.");
+            return format!(
+                "Installed editor plugins discovered on this machine already match v{release}."
+            );
         }
         let counts = self
             .counts()
@@ -4880,7 +4895,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let summary = report.summary("0.35.482");
         assert!(
             summary.starts_with(
-                "Installed editor plugins on supported IDE builds already match v0.35.482."
+                "Installed editor plugins on supported IDE builds discovered on this machine already match v0.35.482."
             ),
             "{summary}"
         );
@@ -4915,7 +4930,8 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert!(logged.contains("unchanged=1"), "{logged}");
         assert!(logged.contains("restart_targets=\"\""), "{logged}");
 
-        // A report with no unsupported target keeps its original wording.
+        // A report with no unsupported target still scopes the proof to local
+        // discovery and refuses to imply that another Remote Dev peer matched.
         let plain = super::PluginReconcileReport {
             targets: vec![reconcile_target(
                 JetBrains,
@@ -4924,9 +4940,17 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 O::Unchanged,
             )],
         };
-        assert_eq!(
-            plain.summary("0.35.482"),
-            "Installed editor plugins already match v0.35.482."
+        let plain_summary = plain.summary("0.35.482");
+        assert!(
+            plain_summary.starts_with(
+                "Installed editor plugins discovered on this machine already match v0.35.482."
+            ),
+            "{plain_summary}"
+        );
+        assert!(
+            plain_summary
+                .contains("a Client/Gateway on another machine was not verified or updated"),
+            "{plain_summary}"
         );
     }
 
@@ -6963,7 +6987,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     }
 
     #[test]
-    fn reconcile_summary_all_unchanged_has_no_restart_text() {
+    fn reconcile_summary_all_unchanged_scopes_remote_dev_proof_to_this_machine() {
         use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
         let report = super::PluginReconcileReport {
             targets: vec![
@@ -6972,12 +6996,22 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             ],
         };
         let summary = report.summary("0.35.442");
-        assert_eq!(summary, "Installed editor plugins already match v0.35.442.");
+        assert!(
+            summary.starts_with(
+                "Installed editor plugins discovered on this machine already match v0.35.442."
+            ),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("a Client/Gateway on another machine was not verified or updated"),
+            "{summary}"
+        );
+        assert!(!summary.contains("Restart IntelliJIdea"), "{summary}");
         assert_eq!(report.changed(), 0);
         assert_eq!(report.hot_upgraded(), 0);
         assert_eq!(
             super::PluginReconcileReport::default().summary("0.35.442"),
-            summary
+            "No installed editor plugins were discovered on this machine."
         );
     }
 
@@ -7040,7 +7074,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     }
 
     #[test]
-    fn hot_upgrade_only_summary_has_no_restart_or_native_library_line() {
+    fn hot_upgrade_only_summary_keeps_remote_dev_peer_scope_explicit() {
         use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
         let report = super::PluginReconcileReport {
             targets: vec![reconcile_target(
@@ -7051,10 +7085,17 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             )],
         };
         let summary = report.summary("0.35.442");
-        assert_eq!(
-            summary,
-            "Editor plugins reconciled with the v0.35.442 release: 1 hot-upgraded."
+        assert!(
+            summary.starts_with(
+                "Editor plugins reconciled with the v0.35.442 release: 1 hot-upgraded."
+            ),
+            "{summary}"
         );
+        assert!(
+            summary.contains("a Client/Gateway on another machine was not verified or updated"),
+            "{summary}"
+        );
+        assert!(!summary.contains("native library"), "{summary}");
     }
 
     /// GH #114: the per-target outcome is derived from the install's real

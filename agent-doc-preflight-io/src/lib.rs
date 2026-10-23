@@ -7746,7 +7746,10 @@ fn resolve_free_text_execution(
 ) -> Result<(ResolvedFreeTextExecution, Vec<PreflightWarning>)> {
     let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap_or_default();
     let project_config = agent_doc_project_config_io::load_project_for_doc(file);
-    let global_config = agent_doc_config::load().unwrap_or_default();
+    let global_config = agent_doc_project_config_io::apply_project_defaults(
+        agent_doc_config::load().unwrap_or_default(),
+        &project_config,
+    );
     let requested = fm
         .free_text_execution
         .or(project_config.agent_doc_free_text_execution)

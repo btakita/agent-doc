@@ -1567,7 +1567,7 @@ fn prepare_start_runtime_with_admission(
         file,
         &rc.ssh_context(),
     )?;
-    let global_config = agent_doc_config::load().unwrap_or_default();
+    let global_config = (*rc.global_config()).clone();
     let mut session_log = open_session_log(&canonical, &session_id);
     if let Some(open_file_descriptors) = agent_doc_fs::open_file_descriptor_count() {
         log_event(

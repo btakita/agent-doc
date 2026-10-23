@@ -446,6 +446,40 @@ fn run_template_mode_writes_inside_exchange_and_commits() {
 }
 
 #[test]
+fn project_default_agent_overrides_global_default_for_run() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let script = write_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: project default\nproject-selected backend\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &script);
+    let global_path = config_root.join("agent-doc/config.toml");
+    let global = fs::read_to_string(&global_path)
+        .unwrap()
+        .replace("default_agent = \"mock\"", "default_agent = \"grok\"");
+    fs::write(global_path, global).unwrap();
+    fs::write(
+        tmp.path().join(".agent-doc/config.toml"),
+        "default_agent = \"mock\"\n",
+    )
+    .unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", "--force-disk", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("project-selected backend"), "{content}");
+}
+
+#[test]
 fn grok_native_json_run_commits_response_and_its_own_resume_slot() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");

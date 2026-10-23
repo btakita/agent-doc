@@ -53,8 +53,9 @@ applies it through the shared write/commit/session-check path.
 
 1. CLI `--agent` flag
 2. Frontmatter `agent` field
-3. Config `default_agent`
-4. Fallback: `"claude"`
+3. Project config `default_agent`
+4. Global config `default_agent`
+5. Fallback: `"claude"`
 
 ## Claude Backend
 

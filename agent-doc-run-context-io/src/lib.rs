@@ -353,12 +353,16 @@ fn global_config_slot<C>(ctx: &C) -> GlobalConfigSlot<C::Schema>
 where
     C: TypedFactoryContext + ?Sized,
 {
-    ctx.memoized_slot::<GlobalConfigKey, _, _>(|_| {
+    ctx.memoized_slot::<GlobalConfigKey, _, _>(|ctx| {
+        let project: Arc<ProjectConfig> = ctx.get(project_config_slot(ctx));
         Arc::new(match agent_doc_config::load() {
-            Ok(config) => config,
+            Ok(config) => project_config_io::apply_project_defaults(config, &project),
             Err(e) => {
                 eprintln!("[graph] global config load failed: {e}");
-                agent_doc_config::Config::default()
+                project_config_io::apply_project_defaults(
+                    agent_doc_config::Config::default(),
+                    &project,
+                )
             }
         })
     })
@@ -1443,6 +1447,33 @@ mod tests {
         let second = rc.global_config();
         assert_eq!(second.default_agent.as_deref(), Some("codex"));
         assert_eq!(second.agent_args.as_deref(), Some("--second"));
+    }
+
+    #[test]
+    fn effective_config_uses_project_default_agent_and_tracks_invalidation() {
+        let _env_guard = env_lock();
+        let config_root = TempDir::new().unwrap();
+        let config_dir = config_root.path().join("agent-doc");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(config_dir.join("config.toml"), "default_agent = \"grok\"\n").unwrap();
+        let _xdg = EnvVarRestore::set("XDG_CONFIG_HOME", config_root.path());
+
+        let project = TempDir::new().unwrap();
+        let project_config = setup_project(project.path());
+        std::fs::write(&project_config, "default_agent = \"codex\"\n").unwrap();
+        let doc = project.path().join("doc.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = cycle_context(doc);
+        assert_eq!(rc.global_config().default_agent.as_deref(), Some("codex"));
+
+        std::fs::write(&project_config, "default_agent = \"claude\"\n").unwrap();
+        rc.invalidate_project_config();
+        assert_eq!(
+            rc.global_config().default_agent.as_deref(),
+            Some("claude"),
+            "invalidating project config also refreshes the effective config"
+        );
     }
 
     #[test]

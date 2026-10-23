@@ -6,7 +6,7 @@
 //! - `AgentDocMode` enum (`Append`, `Template`, `Stream`) is a `ValueEnum` used by `Convert`
 //!   and `Mode` subcommands; `Append` maps to inline format, `Template`/`Stream` to CRDT.
 //! - Startup upgrade notices are suppressed for `Upgrade` and the machine-only `LibPath` and `Version` queries.
-//! - Loads global config via `agent_doc_config::load()` before dispatching; config is threaded into
+//! - Loads effective global + project config before dispatching; config is threaded into
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
 //! - Each subcommand delegates immediately to its owning module or focused crate (`agent_doc_run_io::run`, `agent_doc_diff_io::run`, etc.);
 //!   `main` contains no business logic beyond argument destructuring and dispatch.
@@ -5353,10 +5353,11 @@ fn try_main() -> anyhow::Result<()> {
     // A document-scoped command is also a cheap freshness observation. The
     // supervisor's `pid` response refreshes its process-scoped Lazily projection;
     // a proven-stale owner is marked for the existing safe-boundary recycle.
-    if let Some(file) = dogfood_document_argument()
+    let document_argument = dogfood_document_argument();
+    if let Some(file) = document_argument.as_deref()
         && let Some(message) =
             agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_command(
-                &file,
+                file,
                 "cli_command_entry",
             )
     {
@@ -5380,7 +5381,13 @@ fn try_main() -> anyhow::Result<()> {
         );
     }
 
-    let config = agent_doc_config::load()?;
+    let global_config = agent_doc_config::load()?;
+    let project_config = match document_argument {
+        Some(file) => agent_doc_project_config_io::load_project_for_doc(&file),
+        None => agent_doc_project_config_io::load_project(),
+    };
+    let config =
+        agent_doc_project_config_io::apply_project_defaults(global_config, &project_config);
     agent_doc_frontmatter::frontmatter::install_queue_icon_config(&config.queue_icons)?;
 
     // `#binaryownedcli`: standalone tracked-work and queue mutations are

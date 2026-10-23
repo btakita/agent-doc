@@ -46,6 +46,20 @@ fn nonempty(value: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Apply project-scoped defaults to the machine-wide configuration.
+///
+/// Only non-empty project values override the global setting, so an omitted or
+/// whitespace-only project value preserves the user's machine default.
+pub fn apply_project_defaults(
+    mut global: agent_doc_config::Config,
+    project: &ProjectConfig,
+) -> agent_doc_config::Config {
+    if let Some(agent) = nonempty(project.default_agent.as_deref()) {
+        global.default_agent = Some(agent);
+    }
+    global
+}
+
 /// Resolve project override, then global machine override, then PATH.
 pub fn resolve_tmux_bin(
     project_binary: Option<&str>,
@@ -390,14 +404,53 @@ mod tests {
         let config_path = setup_project(dir.path());
         std::fs::write(
             &config_path,
-            "tmux_session = \"test\"\ntmux_bin = \"/opt/tmux/bin/tmux\"\nagent_doc_auto_compact = 240\n\n[components.exchange]\npatch = \"append\"\n",
+            "default_agent = \"codex\"\ntmux_session = \"test\"\ntmux_bin = \"/opt/tmux/bin/tmux\"\nagent_doc_auto_compact = 240\n\n[components.exchange]\npatch = \"append\"\n",
         )
         .unwrap();
         let cfg = load_project_from(&config_path);
+        assert_eq!(cfg.default_agent.as_deref(), Some("codex"));
         assert_eq!(cfg.tmux_session.as_deref(), Some("test"));
         assert_eq!(cfg.tmux_bin.as_deref(), Some("/opt/tmux/bin/tmux"));
         assert_eq!(cfg.agent_doc_auto_compact, Some(240));
         assert_eq!(cfg.components["exchange"].patch, "append");
+    }
+
+    #[test]
+    fn project_default_agent_overrides_global_when_nonempty() {
+        let global = agent_doc_config::Config {
+            default_agent: Some("grok".to_string()),
+            ..Default::default()
+        };
+        let project = ProjectConfig {
+            default_agent: Some(" codex ".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            apply_project_defaults(global, &project)
+                .default_agent
+                .as_deref(),
+            Some("codex")
+        );
+    }
+
+    #[test]
+    fn absent_or_blank_project_default_agent_preserves_global() {
+        for project_agent in [None, Some("   ".to_string())] {
+            let global = agent_doc_config::Config {
+                default_agent: Some("grok".to_string()),
+                ..Default::default()
+            };
+            let project = ProjectConfig {
+                default_agent: project_agent,
+                ..Default::default()
+            };
+            assert_eq!(
+                apply_project_defaults(global, &project)
+                    .default_agent
+                    .as_deref(),
+                Some("grok")
+            );
+        }
     }
 
     #[test]

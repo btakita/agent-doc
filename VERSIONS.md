@@ -13,6 +13,8 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **JetBrains Remote Dev routing is generation-safe across frontend and backend peers.** Frontend authority readiness
   is diagnosed explicitly, all three compatibility-ranged plugin artifacts are verified as one set, and release CI
   can publish that exact set to Marketplace once repository onboarding and its permanent token are configured.
+  Marketplace onboarding no longer blocks core GitHub/PyPI releases: the CLI selects the correct ranged ZIP from
+  the target IDE build for manual two-peer installation while Marketplace approval proceeds independently.
 
 ## 0.35.545
 

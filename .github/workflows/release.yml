@@ -337,10 +337,12 @@ jobs:
             exit 1
           fi
 
-      # Marketplace is the authoritative Remote Dev distribution channel: it
+      # Marketplace is the preferred Remote Dev distribution channel: it
       # applies the same compatibility selection independently to the backend
       # and JetBrains Client, then synchronizes the selected modular ZIP to both
-      # peers. Validate the complete three-update set before the first upload.
+      # peers. Marketplace onboarding is external and must not block the core
+      # GitHub/PyPI release; when configured, validate the complete three-update
+      # set before the first upload.
       # Per-artifact release markers make a failed-job retry resume after the
       # last accepted update instead of attempting to upload that version twice.
       - name: Publish all compatibility-ranged JetBrains updates to Marketplace
@@ -352,8 +354,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$PUBLISH_TOKEN" ]; then
-            echo "::error::JETBRAINS_MARKETPLACE_TOKEN is missing. Complete docs/reference/jetbrains-distribution.md#marketplace-onboarding before tagging a release."
-            exit 1
+            echo "::notice::JETBRAINS_MARKETPLACE_TOKEN is missing; Marketplace publication is deferred. The verified JetBrains ZIPs and custom-repository feeds will still publish with the core GitHub/PyPI release. Complete docs/reference/jetbrains-distribution.md#marketplace-onboarding and rerun this tag's Release workflow to publish them to Marketplace."
+            exit 0
           fi
 
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')

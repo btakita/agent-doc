@@ -14888,11 +14888,12 @@ fn test_every_release_publishes_the_editor_packages() {
     );
 }
 
-/// Marketplace must receive the same three ZIPs that passed the custom-feed
-/// range proof, and a failed job must resume without re-uploading versions that
-/// the service already accepted.
+/// When configured, Marketplace must receive the same three ZIPs that passed
+/// the custom-feed range proof, and a failed job must resume without
+/// re-uploading versions that the service already accepted. External onboarding
+/// must not hold the core release.
 #[test]
-fn test_every_release_publishes_all_ranged_jetbrains_updates_to_marketplace() {
+fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_configured() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     let plugins = &release[release
@@ -14904,6 +14905,8 @@ fn test_every_release_publishes_all_ranged_jetbrains_updates_to_marketplace() {
 
     for required in [
         "PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}",
+        "::notice::JETBRAINS_MARKETPLACE_TOKEN is missing; Marketplace publication is deferred.",
+        "rerun this tag's Release workflow to publish them to Marketplace",
         "--classic \"${artifacts[0]}\"",
         "--modular \"${artifacts[1]}\"",
         "--modern \"${artifacts[2]}\"",
@@ -14919,6 +14922,13 @@ fn test_every_release_publishes_all_ranged_jetbrains_updates_to_marketplace() {
             "Marketplace publication must retain the exact three-artifact gate and retry marker: {required}",
         );
     }
+
+    assert!(
+        publish.contains("if [ -z \"$PUBLISH_TOKEN\" ]; then")
+            && publish.contains("exit 0")
+            && !publish.contains("::error::JETBRAINS_MARKETPLACE_TOKEN is missing"),
+        "missing external onboarding must defer Marketplace without failing the core release"
+    );
 
     let verify = publish
         .find("--verify-artifacts")
@@ -14949,6 +14959,9 @@ fn test_every_release_publishes_all_ranged_jetbrains_updates_to_marketplace() {
         "My Tokens",
         "JETBRAINS_MARKETPLACE_TOKEN",
         "JetBrains requires the first update",
+        "A missing token emits",
+        "do not hold the CLI, GitHub, PyPI, ZIP, or custom",
+        "agent-doc plugin install jetbrains",
     ] {
         assert!(
             distribution.contains(required),

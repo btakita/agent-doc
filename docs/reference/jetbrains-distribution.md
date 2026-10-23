@@ -43,13 +43,14 @@ Builds below 242 or above `263.*` are offered nothing.
 
 ### Marketplace
 
-Every tagged release uploads all three ZIPs as updates of the same plugin ID,
+When `JETBRAINS_MARKETPLACE_TOKEN` is configured, every tagged release uploads
+all three ZIPs as updates of the same plugin ID,
 `com.github.btakita.agent-doc`. Immediately before the first upload, the release
 job re-reads each packaged `plugin.xml` and refuses the whole set unless the
 artifact names, shared ID, distinct versions, and exact ranges are `242` through
-`261.*`, `262` through `262.*`, and `263` through `263.*`. The existing GitHub
-custom-repository listings remain published as an independently verifiable
-fallback.
+`261.*`, `262` through `262.*`, and `263` through `263.*`. A missing token emits
+a notice and defers only Marketplace publication: the core GitHub/PyPI release,
+three verified ZIPs, and custom-repository listings continue normally.
 
 Marketplace applies compatibility selection independently to the Remote Dev
 backend and JetBrains Client/Gateway and synchronizes the selected modular ZIP
@@ -60,8 +61,8 @@ at the first update that Marketplace did not accept.
 
 #### Marketplace onboarding
 
-The repository owner must complete these one-time external steps before tagging
-a release that contains this automation:
+The repository owner may complete these one-time external steps independently
+of the core release schedule:
 
 1. Create or join the Marketplace vendor account, accept the Marketplace
    agreement, and create the `com.github.btakita.agent-doc` plugin listing.
@@ -74,21 +75,28 @@ a release that contains this automation:
 3. Add the token to this GitHub repository as the Actions secret
    `JETBRAINS_MARKETPLACE_TOKEN`. Never put the token in Gradle properties,
    workflow input, an artifact, or a release asset.
-4. On the first automated release, verify in Marketplace that the three pending
+4. Rerun the existing tag's Release workflow after adding the secret. On that
+   first automated Marketplace publication, verify that the three pending
    updates have the exact ranges and distinct versions above before approving or
    unhiding them. Marketplace review remains external to the workflow.
 
-The release fails with an onboarding link when the secret is absent. JetBrains
-Marketplace upload and approval are external operations; local builds can prove
-the artifacts and workflow wiring but cannot manufacture the vendor account,
-listing, permanent token, or approval.
+The Marketplace upload still fails closed when a configured token is rejected
+or an artifact upload fails. JetBrains Marketplace onboarding and approval are
+external operations; local builds can prove the artifacts and workflow wiring
+but cannot manufacture the vendor account, listing, permanent token, or
+approval. Those external steps do not hold the CLI, GitHub, PyPI, ZIP, or custom
+repository release channels.
 
 ## Remote Development and fail-closed behavior
 
 Marketplace installs synchronize the compatible modular update to both Remote
 Dev peers. When testing a local ZIP or using the custom-repository fallback,
-configure the matching repository URL and install the same update on both the
-Remote Dev backend and JetBrains Client/Gateway. Both packages use the
+run `agent-doc plugin install jetbrains` in each peer's filesystem context (or
+pass its versioned directory with `--plugins-dir <PATH>`). The CLI derives the
+IDE platform build from that path and selects classic 242-261, modular 262, or
+modular 263 without guessing. Alternatively, configure the matching repository
+URL and install the same update on both the Remote Dev backend and JetBrains
+Client/Gateway. Both packages use the
 frontend-owned surface snapshot bridge, so
 documents detached with Open in New Window retain their frame identity instead
 of being flattened into the main window's split columns. A custom repository

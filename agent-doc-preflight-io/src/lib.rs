@@ -18910,6 +18910,91 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_keeps_reported_head_when_only_worker_echoes_it() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let head = "Fix queue rows regressing from reported to pending";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue: start\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {head}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            head = head,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let (_, claimed) =
+            agent_doc_queue_io::queue_claim::claim(&doc, head, "subagent:queue-state", 3600)
+                .unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            head,
+            "subagent:queue-state",
+            "worker:queue-state",
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        let worker_response = format!(
+            "> **Queue prompt:** {head}\n\nImplemented the worker-side fix and tests pass."
+        );
+        let completion = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &agent_doc_queue_io::queue_claim::completion_feedback_key(&running).unwrap(),
+            &worker_response,
+        )
+        .unwrap();
+        let with_completion = content.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{completion}\n<!-- /agent:exchange -->"),
+        );
+        std::fs::write(&doc, &with_completion).unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, head, Some(running.generation))
+            .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(&format!(
+                "- ☑️ [#subagent:queue-state#{}] {head}",
+                running.generation
+            )),
+            "worker completion feedback must remain a reported handoff:\n{updated}"
+        );
+        assert!(
+            !updated.contains(&format!("~~{head}")),
+            "the worker's nested queue echo must not strike the row:\n{updated}"
+        );
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        assert_eq!(
+            ledger.claims.len(),
+            1,
+            "reported claim must not be released"
+        );
+        assert_eq!(
+            ledger.claims[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_strikes_prior_distinctive_identifier_heading() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

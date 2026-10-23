@@ -593,12 +593,6 @@ pub(crate) struct PaneLayoutClaim {
     /// `ensure` route's own `--col` count). `None` derives it from the
     /// publisher (see [`PaneLayoutClaim::width_authority`]).
     pub asserted_columns: Option<usize>,
-    /// An explicit single-document `ensure` route replaced one column in a
-    /// positive live-tmux observation while no frontend-authored snapshot was
-    /// retained. This is dispatch-time placement evidence only: the resulting
-    /// desired layout keeps its `unknown` order label and therefore cannot
-    /// become editor-order authority (GH #351).
-    pub live_tmux_replacement: bool,
     /// Desired generation from which a derived publication computed its
     /// columns. The layout graph rebases an escalation when another publisher
     /// advances the retained generation before the escalation is committed.
@@ -612,7 +606,6 @@ impl From<PaneLayoutPublisher> for PaneLayoutClaim {
             route: None,
             plane_basis: None,
             asserted_columns: None,
-            live_tmux_replacement: false,
             derived_from_generation: None,
         }
     }
@@ -625,7 +618,6 @@ impl PaneLayoutClaim {
             route: Some(route),
             plane_basis,
             asserted_columns: None,
-            live_tmux_replacement: false,
             derived_from_generation: None,
         }
     }
@@ -634,16 +626,6 @@ impl PaneLayoutClaim {
     /// asserts.
     pub(crate) fn asserting(mut self, columns: usize) -> Self {
         self.asserted_columns = Some(columns);
-        self
-    }
-
-    /// Admit the narrow GH #351 fallback proved by the route merge: one
-    /// explicit target replaces one observed live pane without changing the
-    /// live window's width.
-    pub(crate) fn with_live_tmux_replacement(mut self) -> Self {
-        debug_assert_eq!(self.publisher, PaneLayoutPublisher::Route);
-        debug_assert_eq!(self.route, Some(PaneLayoutRouteClaim::Ensure));
-        self.live_tmux_replacement = true;
         self
     }
 

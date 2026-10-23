@@ -26,6 +26,11 @@ appears. If a newer release is visible but its archive or sidecar is not yet
 available for this platform, the one-shot command exits non-zero and leaves the
 installed binary and plugins unchanged.
 
+The shell installer uses the same archive-specific sidecar before extracting or
+replacing anything. On Linux x86_64 it chooses the GNU or musl archive from the
+active C library; merely having an optional musl compatibility loader installed
+does not redirect a glibc host to the musl asset.
+
 ## PyPI
 
 ```sh

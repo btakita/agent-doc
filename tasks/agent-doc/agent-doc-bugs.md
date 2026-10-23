@@ -57,15 +57,18 @@ Compacted content:
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ☑️ [#subagent:gh363-fix#1] do [#gh363]
 - ☑️ [#subagent:gh355-cleanup-rerun#3] #gh-issue https://github.com/btakita/agent-doc/issues/355
-- ❔ Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
-- ❔ agent-doc process is thrashing in the background along with Idea.
-- ❔ Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.
-- ❔ Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.
-- ❔ #gh-fix https://github.com/btakita/agent-doc/issues/364
-- ❔ #gh-fix https://github.com/btakita/agent-doc/issues/365
-- ❔ #gh-fix https://github.com/btakita/agent-doc/issues/366
-- ❔ Coder instance still has backend/frontend communication issues
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/367
+- 📥 Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- 📥 agent-doc process is thrashing in the background along with Idea.
+- 📥 Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.
+- 📥 Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/364
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/365
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/366
+- 📥 Coder instance still has backend/frontend communication issues
+- ☑️ [#subagent:gh367-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/367
+- ☑️ [#subagent:gh367-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/367
+- 🟡 [#subagent:queue-state-fix#3] [#subagent:queue-state-fix#3📥 Several of this queue's items were in a ❔ state. Now the incorrect 📥 state. They should be in the ☑️ state. Fix agent-doc causes.
+- ☑️ [#subagent:release-367-queue-state#1] release + publish: incude issue 367 + queue state fixes
 <!-- /agent:queue -->
 
 ## Queue: Issues

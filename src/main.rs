@@ -2997,7 +2997,7 @@ enum Commands {
     /// Run agent-doc's stdio MCP server
     Mcp {
         #[command(subcommand)]
-        action: McpAction,
+        action: Option<McpAction>,
     },
     /// Run the supplemental Markdown language server used by the Zed extension
     ZedLsp,
@@ -6465,7 +6465,8 @@ fn try_main() -> anyhow::Result<()> {
             codex_final_gate,
         } => agent_doc_repair_command_io::run_session_check(&file, codex_final_gate),
         Commands::Mcp { action } => match action {
-            McpAction::Serve { project_root } => mcp::serve(project_root.as_deref()),
+            None => mcp::serve(None),
+            Some(McpAction::Serve { project_root }) => mcp::serve(project_root.as_deref()),
         },
         Commands::ZedLsp => agent_doc_zed_lsp_io::run(),
         Commands::Serve {

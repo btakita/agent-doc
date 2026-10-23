@@ -47,8 +47,8 @@ fn serve_args() -> toml::Value {
     toml::Value::Array(vec!["mcp".into(), "serve".into()])
 }
 
-/// The pre-`#grokmcpserveargs` installer entry: `agent-doc mcp` with no
-/// subcommand, which never starts a server.
+/// The pre-`#grokmcpserveargs` installer entry. Current binaries accept bare
+/// `agent-doc mcp` as a compatibility alias, but installs remain explicit.
 fn is_legacy_mcp_entry(entry: &toml::Value) -> bool {
     entry.get("command").and_then(toml::Value::as_str) == Some("agent-doc")
         && entry
@@ -86,9 +86,11 @@ pub fn install(root: Option<&Path>) -> Result<bool> {
         .context("Grok mcp_servers must be a table")?;
     // Preserve an explicitly configured server, including an intentional disable.
     // The one exception is the legacy installer shape `agent-doc mcp`: that
-    // command prints help and exits 2, so Grok's MCP handshake never completes
-    // and `agent_doc_admit` is never connected (`#grokmcpserveargs`). Only the
-    // args are migrated; `enabled` and every other key stay as configured.
+    // command used to print help and exit 2, so Grok's MCP handshake never
+    // completed and `agent_doc_admit` was never connected
+    // (`#grokmcpserveargs`). Current binaries accept it as a compatibility
+    // alias, but the installer still migrates to the explicit command. Only
+    // the args are migrated; `enabled` and every other key stay as configured.
     let changed = match servers.get_mut("agent-doc") {
         None => {
             servers.insert(
@@ -147,7 +149,7 @@ pub(super) fn audit(base: &Path) -> Result<()> {
             .is_some_and(is_legacy_mcp_entry)
         {
             anyhow::bail!(
-                "broken Grok MCP server args in {} (`agent-doc mcp` exits without serving); run agent-doc skill install --harness grok",
+                "legacy Grok MCP server args in {}; run agent-doc skill install --harness grok to write the canonical `agent-doc mcp serve` command",
                 config_path.display()
             );
         }
@@ -235,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_rejects_legacy_mcp_args_that_never_serve() {
+    fn audit_rejects_legacy_mcp_args_in_favor_of_the_canonical_command() {
         let dir = tempfile::tempdir().unwrap();
         install(Some(dir.path())).unwrap();
         let path = dir.path().join(".grok/config.toml");
@@ -245,7 +247,7 @@ mod tests {
         )
         .unwrap();
         let err = audit(dir.path()).unwrap_err().to_string();
-        assert!(err.contains("broken Grok MCP server args"), "{err}");
+        assert!(err.contains("legacy Grok MCP server args"), "{err}");
         assert!(check(Some(dir.path())).is_err());
     }
 
@@ -275,9 +277,6 @@ mod tests {
             .join()
             .unwrap();
         assert!(installed, "installed Grok MCP args must parse");
-        assert!(
-            !bare,
-            "bare `agent-doc mcp` must not be the installed command"
-        );
+        assert!(bare, "bare `agent-doc mcp` must remain a serving alias");
     }
 }

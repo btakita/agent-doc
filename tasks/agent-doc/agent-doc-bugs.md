@@ -24,11 +24,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 9 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published agent-doc release: v0.35.544, published on GitHub at 2026-10-22 23:47:03 UTC. JetBrains plugin packages published with that release: classic 0.2.795, 262 0.2.796, and 263 0.2.797 (latest numeric JetBrains package: 0.2.797). VS Code extension 0.2.83 was also published. Release tag v0.35.544 points to 3e975e91f9e94c1865da06d2c8d805bae284013a; all six platform archives and checksums are public, and PyPI agent-doc 0.35.544 passed clean-install verification. Post-release main c501ad975e26ed6f6a7b04666f7af3bb7af16dc7 includes unanswered 🙋☑️ retention and independent idempotent per-platform release uploads; the current mainline binary and editor packages are installed locally. The Homebrew tap still visibly points at v0.35.541 despite the successful release handoff, so its asynchronous bump remains pending.
+Latest published agent-doc release: v0.35.545, published on GitHub at 2026-10-23 02:16:55 UTC from b3839fdd6d90cb50e00551f1ec7e9fc30d28edaa. GitHub Release publication is complete with 21 assets; PyPI build, publish, and clean-install verification passed; the public wheel is agent_doc-0.35.545-py3-none-any.whl. Remote main and tag v0.35.545 both resolve to b3839fdd6d, and agent-doc 0.35.545 is installed locally. The post-release integration branch is at 09aa2b50b6 with response-bearing subagent completion feedback, positive Remote Dev frontend-authority readiness diagnostics, three-range JetBrains Marketplace automation, JetBrains generations 0.2.798/0.2.799/0.2.800, operator-answer lifecycle/inline-code parsing fixes, and nested emphasized operator-request formatting. Canonical agent:loop is fully verified and awaiting integration; canonical agent:run is in its corrected final composite check. Marketplace publication for the next release is blocked on one-time vendor/listing onboarding and the missing JETBRAINS_MARKETPLACE_TOKEN repository secret. The Homebrew tap still visibly points at v0.35.541, so its asynchronous bump remains pending.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -154,6 +154,19 @@ The queue loop recovery, failed enqueue receipt surfacing, stuck-outbox repair, 
 > **Chat prompt (#chatprompt:03057a4af221):** cont
 
 Continuation complete. `v0.35.544` is public and its binary installer and PyPI bootstrap were verified. Post-tag fixes for unanswered `🙋☑️` retention and independent, idempotent per-platform asset publication are pushed to `main` at `c501ad975e`. The prior cycle passed `agent-doc session-check` with no drainable work; no additional implementation remains in this continuation.
+
+### Re: recovered response
+
+Yes—primarily for a proper Remote Dev frontend installation.
+
+Marketplace distribution lets JetBrains install the correct compatibility-ranged plugin on both sides:
+
+- The remote IDE backend.
+- The local JetBrains Client/Gateway frontend.
+
+Without Marketplace, Agent Doc still works through manual ZIP installation, but the matching plugin must be installed manually on both peers. A backend-only install causes the one-sided state behind the recent routing failures.
+
+The release automation publishes separate builds for classic IDEs, 262, and 263 so Marketplace can select the correct one. Marketplace is therefore not required for local development, but it is the reliable installation/update channel for Remote Dev. The plugin is not listed there yet because vendor onboarding and `JETBRAINS_MARKETPLACE_TOKEN` remain outstanding. [JetBrains Marketplace API documentation](https://plugins.jetbrains.com/docs/marketplace/plugin-details.html)
 <!-- agent:boundary:0f221edb -->
 <!-- /agent:exchange -->
 
@@ -162,34 +175,36 @@ Continuation complete. `v0.35.544` is public and its binary installer and PyPI b
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/352~~
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The `agent:queue loop` does not seem to be reliably firing.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Make the process-wide queue scheduler replace a disconnected worker and surface failed refresh enqueue receipts instead of discarding `mpsc::Sender::send` errors; its `OnceLock` handle currently cannot recover if the scheduler thread exits.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~There are various queue items stuck with the outbox. Not sure why. In agent-doc-bugs.md + tsift.md~~ — auto-struck: answered this cycle (#ftstrike)
-- ☑️ [#subagent:tsift_hook#1] In tsift.md session: • Blocked by hook
-  └ Session persistence continuation, not a refusal or error: agent-doc Stop hook found fresh unresolved exchange work
-~~~done
-for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md after the previous cycle was already committed. Continue THIS turn in-pane: answer "release + publish latest updates" in /home/brian/work/btakita/agent-loop/tasks/software/ tsift.md and persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` (or `agent- doc write --commit /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`). It is a queue line: open the response with the verbatim echo `> **Queue prompt:** release + publish latest updates` and persist it with `agent-doc finalize / home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; a `### Re:` heading alone leaves the line queued; that closeout strikes it. Do NOT send the final answer yet.
-~~~
-- ~~Heads up: my coder instance is getting many "Remote Dev provided flat editor evidence without column geometry" errors on Run Agent Doc + Sync Tmux Panes. Issues incoming. But get a head start to make this process formal logic backed and fix this class of bug.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Can agent-doc provide a tree of operations when evaluating paths to go down? I'm having issues with my client using Coder, where Claude Code will propose many strangs to go down. This increases token spend on spe~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/353~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/354~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/355~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/356~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~: lazily.md is working on the lazily-rs + spec + conformance implementations.~~ — auto-struck: answered this cycle (#ftstrike)
 - ☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355
 - ☑️ [#subagent:gh356#1] #gh-issue https://github.com/btakita/agent-doc/issues/356
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/357~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The queue items with issues 353-357 started with `📥` then went to `🟡`. I thought `📥` meant the outgoing inbox, but is this the incoming inbox? Can we have distinct icons for incoming & outgoing? Actually I do see the distinct `📤` outgoing icon. It's a bit tough to distinguish because the down arrow and up arrow look very similar...but I can train myself to spot the difference. Perhaps there may be alternate emoji pairs that are easier to distinguish? I think  📥 / 📫 is the best pair overall as it is a single utf-8 character & is distinctive with small font sizes...which is a better tradeoff than 📥 / 📤, which is symmetric but isn't distinctive enough at smaller font sizes.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Make the emoji icons configurable with defaults. Also allow the "emoji" icons to be any set of characters in case someone wants to use multiple characters for the prefix.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~In lazily.md, a 🙋 was raised: `- 🙋 [#subagent-operator-request-lzstale-release] 🚧 [#subagent:spec#1] do [#lzstalehandlespec]: release + publish`: I answered the question: `- 🙋 [#subagent-operator-request-lzstale-release] 🚧 [#subagent:spec#1] do [#lzstalehandlespec]: release + publish: Coordinator releases`: After answering the question prompt, the 🙋 should be removed. The `[#subagent-operator-request-lzstale-release]` should be appended rather than prepended, since it is not the primary intent of the turn. It may block the turn but it's secondary. Also, I can append an answer as `[#subagent-operator-request-lzstale-release]: release + publish: Coordinator releases` with locality. The states should be blocking prompt: `🙋🚧`, unblocked: `🚧`.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~I prefer `☑️` over `📫`? Is the current `📫` effectively "done"? If yes, use `☑️instead.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~In sdk-demo.md, there was a `🙋☑️`. I did not answer the prompt. On the next turn, agent-doc removed the item from the queue. The item should have remained since it was blocked with a user prompt.~~ — auto-struck: answered this cycle (#ftstrike)
+- ☑️ [#subagent:gh355status#1] Is `☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355` done? It is leftover in the queue. Issues 353, 354, 355, 357 remain open on github.
+- ☑️ [#subagent:gh353fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/353
+- ☑️ [#subagent:gh354fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/354
+- ☑️ [#subagent:gh355#1] #gh-fix https://github.com/btakita/agent-doc/issues/355
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/357
+- 📥 Did you reimplement "guessing"? The tmux panes are reversed on my coder instance. The "guessing" seems to be wrong more often than not.
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/358
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/359
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/360
+- 📥 "Re: Subagent completed:" should immediately add the response into agent:exchange.
+- 📥 How do we improve the reliability of the routing? Why did the guess occur in https://github.com/btakita/agent-doc/issues/360? On top of fail no-close routing, we need to figure out how to not get into the fail state.
+- 📥 Automate publication of all three compatibility-ranged JetBrains updates to Marketplace, with token/onboarding and exact-range verification, so Remote Dev synchronizes the modular ZIP to both peers and prevents one-sided installs.
+- 📥 In sdk-demo.md, no queue item status despite agent running: `- [#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`
+- 📥 release + publish: no `agent:run` + `agent:loop`
+- ☑️ [#subagent:operator-request-format#1] The formatting of a subagent operator request is difficult to read the key + values. What are some formatting options to make it easier to see the keys + values? How about making a nested24list and emphasizing the keys `- *kind:*`?
+- ☑️ [#subagent:rename-queue-run#1] Rename `agent:queue` to `agent:run`. Keep the alias compatability.
+- ☑️ [#subagent:rename-loop#1] . What are some formatting options to make it easie Rename `agent:run loop`/`agent:queue loop` to `agent:loop`. Keep backward compatability.
+- ☑️ [#subagent:release-runloop#1] release + publish: include `agent:run` + `agent:loop`
+- ☑️ [#subagent:longrun-strike#1] Even though this run has been going for > 3 hours, agent-doc should still strike items that can be deleted.
+- ☑️ [#subagent:gh361#1] #gh-fix https://github.com/btakita/agent-doc/issues/361
+- ☑️ [#subagent:sdk-request-format#1] sdk-demo.md subagent operator request does not have the italics and list items. Is this implemented and installed locally?
+- 🚧 [#subagent:queue-state-regression#1] The previous state of various items in this queue were ☑️, but now the state is 📥.
+- 🚧 [#subagent:completion-feedback-async#1] There is a long list of "Subagent completed" but no response. agent-doc should immediately respond with the subagent completion feedback for tracked queue items. Can this be done without slowing down the agent? Like a fire & forget with agent-doc correctly formatting the exchange response?
+- 🚧 [#subagent:gh362#1] #gh-fix https://github.com/btakita/agent-doc/issues/362
 <!-- /agent:queue -->
 
 ## Queue: Issues
+
 <!-- agent:queue id=issues loop interval=1h -->
 - 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:queue -->

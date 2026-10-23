@@ -4111,6 +4111,37 @@ Old.
         );
     }
 
+    /// GH #364: preset-expansion evidence in ordinary response prose must not
+    /// bypass loop ownership and terminalize the repeating queue.
+    #[test]
+    fn preset_prose_cannot_auto_strike_or_stop_a_loop_queue_gh364() {
+        let document = concat!(
+            "---\n",
+            "queue_active: true\n",
+            "prompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc. Are the current issues fixed? Check for new issues. File a gh issue for any new issues in btakita/agent-doc.\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: upgrade pass — gpt-5\n\n",
+            "Upgrade agent-doc. Are the current issues fixed? Check for new issues. File a gh issue for any new issues in btakita/agent-doc.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue loop interval=1h id=queue-2 priority -->\n",
+            "- #upgrade\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: upgrade pass — gpt-5\n\n",
+            "Upgrade agent-doc. Are the current issues fixed? Check for new issues. File a gh issue for any new issues in btakita/agent-doc.\n",
+        );
+
+        assert!(
+            project_answered_free_text_strike(document, response, Some(document))
+                .unwrap()
+                .is_none(),
+            "plain preset-expansion prose must not #ftstrike or terminalize a loop queue"
+        );
+    }
+
     /// `presetquotestrike` (live, agent-doc-bugs.md 2026-10-02, agent-doc
     /// 0.35.434): one response quoted all five live heads, each in its own
     /// singular `> **Queue prompt:**` block, then answered them together. Only

@@ -24,7 +24,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 10 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -628,7 +628,42 @@ GitHub issue [#365](https://github.com/btakita/agent-doc/issues/365) is closed a
 The integration branch `integrate/thrash-compact-20261023` is clean and pushed through `3e449f71c2`. The authoritative combined `make check` passed with no failures. The coordinator-owned `make install` completed successfully for the CLI, native library, JetBrains packages, and VSCodium extension.
 
 No IDEA restart is required: the installed JetBrains plugin bytes were already current. The attached document's native generation will reload automatically at its next idle boundary. The exchange remains above the advisory size threshold; the active queue prevented compaction during this cycle.
-<!-- agent:boundary:9c10241d -->
+
+### Re: Subagent completed: `subagent:gh366-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/366” — agent-doc
+<!-- agent-doc-subagent-response sha256=448a63bd752e07f613979b8233f0f78bd997399a486c50c021d7b84b91bf3c76 -->
+> **Subagent response:**
+>
+> Issue #366 fixed and closed COMPLETED. Branch fix/gh366-stock-remote-install-20261023, commit 293d182b4a, pushed and clean. The modular installer now prints explicit single-peer Remote Dev scope; specs and docs explain that Marketplace metadata is the only stock automatic peer-sync path and that CLI, local ZIP, or custom-repository installs require the same version installed explicitly on both peers. Focused scope and distribution tests passed; final make check passed with 11,447 passed and 177 skipped; classic, 262, and 263 builds succeeded. No follow-ups.
+<!-- agent-doc-subagent-completion key=25ee94744f1f5200b1194a0153cda390474799a299eecf67dd1f86a65acf4c35 -->
+
+### Re: Subagent completed: `subagent:coder-backend-frontend` returned work for queue item “Coder instance still has backend/frontend communication issues” — agent-doc
+<!-- agent-doc-subagent-response sha256=921aaaaf0834b1fa7067a8983f2c3c40e462a931a173d80a30c782f26f366ee0 -->
+> **Subagent response:**
+>
+> Independent handshake-liveness defect fixed and pushed. Branch fix/coder-backend-frontend-20261023, commits 7efbe50fb9 and 049f3b1ece. Root cause: backend openIngress returned a normally completed empty Flow while frontend ProjectId was unresolved, but frontend only retried transport errors, allowing both loaded modules to remain disconnected forever. Frontend now retries normal empty completion with bounded 1 second to 30 second backoff, resets after a lease, and emits paired connected/completed diagnostics; backend emits deferred/accepted diagnostics. Behavioral regression proves empty flow then lease recovery. JetBrains 262 and 263 checks passed, audit-docs and diff check passed. Full check reached only the expected modular package-generation fence. No follow-ups; no install.
+<!-- agent-doc-subagent-completion key=87b9fdeb6aa278293f067c2725d197b9bf892e988de8a63b4d4aca0c258484cb -->
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/366
+
+### Re: Remote Dev installation scope — gpt-5 · 2026-10-23T11:16:-04:00
+
+GitHub issue [#366](https://github.com/btakita/agent-doc/issues/366) is fixed and closed as completed. JetBrains Marketplace metadata is the only stock automatic split-plugin peer synchronization path. CLI, local ZIP, and custom-repository installs affect only the selected peer, so modular installs now print that scope explicitly and the specification documents the same-version, two-sided fallback for virgin Coder and Toolbox environments. Integrated commit: `fa065be5f5`.
+
+> **Queue prompt:** Coder instance still has backend/frontend communication issues
+
+### Re: Coder backend and frontend handshake — gpt-5 · 2026-10-23T11:16:-04:00
+
+A separate handshake-liveness defect was reproduced and fixed. When the backend could not yet resolve the frontend `ProjectId`, `openIngress()` returned a normally completed empty flow. Transport retry handled errors but not normal empty completion, so two loaded modules could remain disconnected indefinitely.
+
+The frontend now retries normal ingress completion with bounded 1 second to 30 second backoff, resets after receiving a lease, and emits `ingress completed` and `ingress connected` diagnostics. The backend emits paired `ingress deferred` and `ingress accepted` diagnostics. A behavioral regression proves that an empty flow followed by a lease reconnects successfully. Integrated commits: `2afbe02225` and `b9dad9de29`.
+
+### Re: Verification and deployment — gpt-5 · 2026-10-23T11:16:-04:00
+
+The modular generations are now 0.2.804 for 262 and 0.2.805 for 263. The authoritative combined `make check` passed, the coordinator-owned `make install` completed, and `integrate/thrash-compact-20261023` is clean and pushed through `910ea714aa`.
+
+Local IDEA does not need a restart. To deploy the Coder fix, install the same 0.2.805 modular ZIP on both the Client or Gateway and backend, then restart both peers. That concrete deployment step is recorded in the operator todo list. After restart, `deferred` followed by `accepted` proves backend recovery; missing frontend `completed` or `connected` means the frontend activity did not start.
+
+The exchange remains above the advisory size threshold; the active queue prevented compaction during this cycle.
+<!-- agent:boundary:1d86f43f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -644,7 +679,8 @@ No IDEA restart is required: the installed JetBrains plugin bytes were already c
 - ☑️ [#subagent:sdk-compact-cycle#1] Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.
 - ☑️ [#subagent:gh364-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/364
 - ☑️ [#subagent:gh365-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/365
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/366
+- ☑️ [#subagent:gh366-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/366
+- ☑️ [#subagent:coder-backend-frontend#1] Coder instance still has backend/frontend communication issues 
 <!-- /agent:queue -->
 
 ## Queue: Issues
@@ -658,6 +694,7 @@ No IDEA restart is required: the installed JetBrains plugin bytes were already c
 <!-- agent:todo -->
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
+- [ ] [#coder-remote-install-02805] Install agent-doc-jetbrains-263 0.2.805 on both the Coder Client or Gateway and backend, then restart both peers and verify paired ingress deferred or accepted and completed or connected diagnostics.
 <!-- /agent:todo -->
 
 ## Backlog

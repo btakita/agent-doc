@@ -14,6 +14,14 @@ full-state request, editor adoption, or canonical reconstruction.
 
 ## External Disk Pending Lifecycle
 
+An `ambiguous-retained-projection`, `ambiguous-reregister-projection`, or
+`retained-reseed-missing-settled-shadow` attach hold is operator-gated, not a
+timer retry. JetBrains surfaces the remedy once and disarms automatic
+registration retries. Closing the held tab releases its refused (never attached)
+replica authority without publishing the ambiguous buffer, so the documented
+detached `agent-doc repair <file>` step can proceed; reopening supplies the next
+registration evidence.
+
 Any filesystem change observed while at least one editor buffer is open is a pending disk candidate. The watcher records it in Lazily but does not replace controller canonical state. The authority order is controller canonical, then disk after detach and proof, with Git only as historical evidence.
 
 - A controller revision is delivered downstream and acknowledged by exact content.

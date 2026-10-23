@@ -14,6 +14,7 @@ import com.github.btakita.agentdoc.SyncLayoutAction
 import com.github.btakita.agentdoc.TerminalUtil
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceRole
@@ -39,7 +40,11 @@ import javax.swing.SwingUtilities
  */
 internal sealed interface MeasuredMainLayout {
     /** Columns (absolute paths) in measured left-to-right order, plus the selected document. */
-    data class Measured(val columns: List<List<String>>, val focused: String) : MeasuredMainLayout {
+    data class Measured(
+        val columns: List<List<String>>,
+        val focused: String,
+        val focusedEditor: String? = null,
+    ) : MeasuredMainLayout {
         val visible: List<String>
             get() = columns.flatten().distinct()
     }
@@ -84,13 +89,20 @@ internal object RemoteClientMeasuredLayout {
                 )
             },
         )
-        return derivation.derive("client_measured_layout", GSON.toJson(evidence))
+        val measured = derivation.derive("client_measured_layout", GSON.toJson(evidence))
             ?.let(::parseMeasuredLayout)
             ?: if (snapshot.schemaVersion >= FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
                 frozenFrontendDerive(main, isSessionDocument)
             } else {
                 frozenDerive(evidence)
             }
+        if (measured !is MeasuredMainLayout.Measured) return measured
+        val focusedEditor =
+            main.focusedEditorPath
+                ?.takeIf { snapshot.schemaVersion >= FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION }
+                ?.takeIf(isSessionDocument)
+                ?.takeIf(measured.visible::contains)
+        return measured.copy(focusedEditor = focusedEditor)
     }
 
     /**
@@ -184,10 +196,11 @@ internal data class ForwardedRemoteSurface(val projectRoot: String, val surfaceJ
  * project root (a filesystem read it makes on its worker); native owns the root that spans the
  * layout (the `sync_layout` root rule), the paths normalized against it, and the `editor_surface`
  * payload. The order provenance is `editor` because the columns came from measured geometry. The
- * forward owns pane membership and order only (`preserve_focus`): the snapshot names each split's
- * selected document but not which split has keyboard focus, so it must not move tmux focus. The
- * payload stays JSON, so a field a newer library adds reaches the controller without a plugin
- * generation. [frozen] answers only when no native generation does and is never extended.
+ * Schema 4 additionally proves the editor window that owns frontend AWT focus. Such a snapshot
+ * publishes that document as focus authority; snapshots without the proof still own pane
+ * membership and order only (`preserve_focus`). The payload stays JSON, so a field a newer library
+ * adds reaches the controller without a plugin generation. [frozen] answers only when no native
+ * generation does and is never extended.
  */
 internal object RemoteClientSurfacePayload {
     private val LOG = Logger.getInstance(RemoteClientSurfacePayload::class.java)
@@ -198,6 +211,8 @@ internal object RemoteClientSurfacePayload {
         @SerializedName("base_path") val basePath: String?,
         @SerializedName("fallback_root") val fallbackRoot: String?,
         val focused: String,
+        val focus: String? = null,
+        @SerializedName("focus_root") val focusRoot: String? = null,
         val columns: List<List<String>>,
     )
 
@@ -207,13 +222,16 @@ internal object RemoteClientSurfacePayload {
         focusedRoot: (String?, String) -> String = { base, focused ->
             TerminalUtil.resolveProjectPath(base, focused).first
         },
-    ): Evidence =
-        Evidence(
+    ): Evidence {
+        return Evidence(
             basePath = basePath,
             fallbackRoot = focusedRoot(basePath, layout.focused),
             focused = layout.focused,
+            focus = layout.focusedEditor,
+            focusRoot = layout.focusedEditor?.let { focusedRoot(basePath, it) },
             columns = layout.columns,
         )
+    }
 
     /** Derive the forwarded surface. Never on the EDT: the forwarder's worker calls this. */
     fun build(

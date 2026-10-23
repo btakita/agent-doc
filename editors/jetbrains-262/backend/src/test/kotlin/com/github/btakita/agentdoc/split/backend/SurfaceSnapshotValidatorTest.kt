@@ -50,9 +50,26 @@ class SurfaceSnapshotValidatorTest {
         assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 1)))
         assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 2)))
         assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 3)))
+        assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 4)))
         assertEquals(
             SurfaceIngressStatus.INVALID_SCHEMA,
-            SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 4))?.status,
+            SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 5))?.status,
+        )
+    }
+
+    @Test
+    fun focusedEditorMustBeSelectedInTheActiveSurface() {
+        val active =
+            surface("root", SurfaceRole.MAIN, window("/repo/a.md"), focused = true)
+                .copy(focusedEditorPath = "/repo/b.md")
+        assertEquals(
+            SurfaceIngressStatus.INVALID_SURFACE,
+            SurfaceSnapshotValidator.validate(snapshot(active))?.status,
+        )
+        assertNull(
+            SurfaceSnapshotValidator.validate(
+                snapshot(active.copy(focusedEditorPath = "/repo/a.md")),
+            ),
         )
     }
 

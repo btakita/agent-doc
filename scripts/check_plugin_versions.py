@@ -449,8 +449,8 @@ def self_test() -> int:
     boundary_source = open(MEASURED_LAYOUT_FORWARDER, encoding="utf-8").read()
     assert client_measured_layout_boundary_failure(boundary_source) is None
     bypass = boundary_source.replace(
-        'return derivation.derive("client_measured_layout", GSON.toJson(evidence))',
-        "return frozenFrontendDerive(main, isSessionDocument)",
+        'derivation.derive("client_measured_layout", GSON.toJson(evidence))',
+        "frozenFrontendDerive(main, isSessionDocument)",
         1,
     )
     assert "schema-3 grouping bypasses" in client_measured_layout_boundary_failure(bypass)

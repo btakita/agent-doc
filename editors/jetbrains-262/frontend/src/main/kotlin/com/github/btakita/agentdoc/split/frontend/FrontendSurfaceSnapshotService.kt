@@ -8,6 +8,7 @@ import com.github.btakita.agentdoc.split.FrontendPresentationCapability
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
 import com.github.btakita.agentdoc.split.FrontendPresentationProjection
+import com.github.btakita.agentdoc.split.GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
 import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
@@ -179,7 +180,7 @@ class FrontendSurfaceSnapshotService(
         val schema = negotiatedSnapshotSchema(offered)
         LOG.info(
             "[split-surface] snapshot schema negotiated version=$schema backend_offered=${offered ?: "none"} " +
-                "geometry=${if (schema >= SURFACE_SNAPSHOT_SCHEMA_VERSION) "measured" else "unavailable"}",
+                "geometry=${if (schema >= GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION) "measured" else "unavailable"}",
         )
         return schema
     }

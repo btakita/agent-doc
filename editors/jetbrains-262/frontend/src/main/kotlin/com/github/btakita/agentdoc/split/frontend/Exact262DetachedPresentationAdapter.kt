@@ -51,13 +51,21 @@ internal object FrontendSurfaceCollector {
         surfaceIdentities: FrontendSurfaceIdentityTracker,
     ): CapturedFrontendSurfaces {
         check(SwingUtilities.isEventDispatchThread()) { "frontend surface capture must run on EDT" }
-        val activeFrame = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
+        val keyboardFocusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+        val activeFrame = keyboardFocusManager.activeWindow
+        val permanentFocusOwner = keyboardFocusManager.permanentFocusOwner
         val mainFrame = WindowManager.getInstance().getFrame(project)
         val editorWindows = FileEditorManagerEx.getInstanceEx(project).windows.toList()
         val tagged = editorWindows.mapNotNull { editorWindow ->
             val component = editorWindow.tabbedPane.component
             val frame = SwingUtilities.getWindowAncestor(component) ?: return@mapNotNull null
-            TaggedEditorWindow(frame, componentPosition(component), measuredBounds(component), editorWindow)
+            TaggedEditorWindow(
+                frame,
+                componentPosition(component),
+                measuredBounds(component),
+                component,
+                editorWindow,
+            )
         }
         val complete = mainFrame != null && tagged.size == editorWindows.size
         val grouped = tagged.groupBy(TaggedEditorWindow::frame).toMutableMap()
@@ -68,21 +76,30 @@ internal object FrontendSurfaceCollector {
         }
         val surfaces = ordered.map { (identity, frameAndWindows) ->
             val (frame, windows) = frameAndWindows
+            val snapshots = windows.mapIndexed { ordinal, taggedWindow ->
+                editorWindowSnapshot(taggedWindow.editorWindow)
+                    .copy(ordinal = ordinal, bounds = taggedWindow.bounds)
+            }
             FrontendSurface(
                 identity.paneId,
                 identity.surfaceGeneration,
                 identity.role,
                 frame === activeFrame,
-                windows.mapIndexed { ordinal, taggedWindow ->
-                    editorWindowSnapshot(taggedWindow.editorWindow)
-                        .copy(ordinal = ordinal, bounds = taggedWindow.bounds)
-                },
-                layoutColumns = frontendLayoutColumns(
-                    windows.mapIndexed { ordinal, taggedWindow ->
-                        editorWindowSnapshot(taggedWindow.editorWindow)
-                            .copy(ordinal = ordinal, bounds = taggedWindow.bounds)
+                snapshots,
+                layoutColumns = frontendLayoutColumns(snapshots),
+                focusedEditorPath =
+                    if (frame === activeFrame) {
+                        focusedEditorPath(
+                            permanentFocusOwner,
+                            windows.map { taggedWindow ->
+                                taggedWindow.component to
+                                    taggedWindow.editorWindow.selectedFile
+                                        ?.let(SurfacePresentationFiles::logicalPath)
+                            },
+                        )
+                    } else {
+                        null
                     },
-                ),
             )
         }.sortedWith(compareBy({ it.role != SurfaceRole.MAIN }, FrontendSurface::paneId))
         val targets = ordered.associate { (identity, frameAndWindows) ->
@@ -150,8 +167,20 @@ internal object FrontendSurfaceCollector {
         val frame: Window,
         val position: Point,
         val bounds: EditorWindowBounds?,
+        val component: Component,
         val editorWindow: EditorWindow,
     )
+}
+
+/** The selected document only when one exact editor window contains the permanent focus owner. */
+internal fun focusedEditorPath(
+    focusOwner: Component?,
+    windows: List<Pair<Component, String?>>,
+): String? {
+    if (focusOwner == null) return null
+    return windows.singleOrNull { (component, _) ->
+        focusOwner === component || SwingUtilities.isDescendingFrom(focusOwner, component)
+    }?.second
 }
 
 /**

@@ -171,6 +171,14 @@ fn route_cancel_empty_preflight(file: &Path) -> Result<bool> {
     .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
 }
 
+fn route_cancel_empty_preflight_after_stable_dispatch_ready_pane(file: &Path) -> Result<bool> {
+    agent_doc_repair_io::cancel_preflight_cycle_after_stable_dispatch_ready_pane(
+        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+        file,
+    )
+    .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
+}
+
 fn route_cancel_empty_preflight_after_owner_release(file: &Path) -> Result<bool> {
     agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
         &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
@@ -204,6 +212,8 @@ pub fn route_closeout_drain_effects(
         force_disk_route_writes: crate::invocation::force_disk_route_writes,
         run_pending_maintenance: route_run_pending_maintenance,
         cancel_empty_preflight: route_cancel_empty_preflight,
+        cancel_empty_preflight_after_stable_dispatch_ready_pane:
+            route_cancel_empty_preflight_after_stable_dispatch_ready_pane,
         cancel_empty_preflight_after_owner_release:
             route_cancel_empty_preflight_after_owner_release,
         repair_closeout,

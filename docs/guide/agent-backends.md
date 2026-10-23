@@ -45,8 +45,12 @@ is not advertised. No Heavy-plan model is selected automatically.
 Grok's passive Stop hooks cannot steer another turn. The installed skill uses
 MCP admission/finalize and follows committed queue continuation in the same
 turn. Pane dispatch uses the observed boxed composer and active cancel/stop
-indicators; drafts and unrecognized UI remain protected. Tested with Grok Build
-1.0.24. See the [CLI reference](https://docs.x.ai/build/cli/reference) and
+indicators; drafts and unrecognized UI remain protected. After a manual
+interrupt plus `/clear`, Grok may have no hook/transcript turn-end receipt. A
+reroute can recover the resulting empty preflight when the exact bound pane
+shows an empty boxed composer across two captures and no live turn lease;
+actor/cycle changes still fail closed. Tested with Grok Build 1.0.24. See the
+[CLI reference](https://docs.x.ai/build/cli/reference) and
 [hook contract](https://docs.x.ai/build/features/hooks).
 
 ## Custom backends

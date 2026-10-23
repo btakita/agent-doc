@@ -1,0 +1,94 @@
+name: Promote or roll back target stable channel
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Published target to repoint
+        required: true
+        type: choice
+        options:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-gnu
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+          - x86_64-pc-windows-msvc
+      version:
+        description: Verified release version, without the v prefix
+        required: true
+        type: string
+      allow_rollback:
+        description: Explicitly allow the pointer to move to an older version
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: target-stable-channel-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify release evidence and repoint the target channel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          CHANNEL_TAG: agent-doc-target-stable-v1
+          TARGET: ${{ inputs.target }}
+          VERSION: ${{ inputs.version }}
+          ALLOW_ROLLBACK: ${{ inputs.allow_rollback }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            *-pc-windows-msvc) archive="agent-doc-$TARGET.zip" ;;
+            *) archive="agent-doc-$TARGET.tar.gz" ;;
+          esac
+          mkdir -p rollback/release rollback/current rollback/out
+          if ! gh release view "$CHANNEL_TAG" >/dev/null 2>&1; then
+            gh release create "$CHANNEL_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "agent-doc per-target stable channels" \
+              --notes "Machine-readable rolling pointers. Use ordinary versioned releases for downloads." \
+              --prerelease \
+              --latest=false
+          fi
+          if ! gh release download "v$VERSION" \
+            --pattern "$archive" \
+            --pattern "$archive.sha256" \
+            --pattern EDITOR-PACKAGES.sha256 \
+            --dir rollback/release; then
+            echo "::notice::$TARGET or its coupled editor packages are not ready in v$VERSION; another readiness transition will retry"
+            exit 0
+          fi
+          gh release download "$CHANNEL_TAG" \
+            --pattern "stable-$TARGET.json" \
+            --dir rollback/current >/dev/null 2>&1 || true
+          args=(
+            --target "$TARGET" \
+            --version "$VERSION" \
+            --archive "rollback/release/$archive" \
+            --archive-sidecar "rollback/release/$archive.sha256" \
+            --editor-manifest rollback/release/EDITOR-PACKAGES.sha256 \
+            --current "rollback/current/stable-$TARGET.json" \
+            --output-dir rollback/out
+          )
+          if [ "$ALLOW_ROLLBACK" = true ]; then
+            args+=(--allow-rollback)
+          fi
+          result=$(python3 scripts/target-stable-channel.py "${args[@]}")
+          echo "$result"
+          if grep -Fxq action=stale <<<"$result"; then
+            echo "::notice::$TARGET already points to a newer stable release; refusing implicit rollback"
+            exit 0
+          fi
+          gh release upload "$CHANNEL_TAG" "rollback/out/stable-$TARGET.json" --clobber
+          gh release upload "$CHANNEL_TAG" "rollback/out/stable-$TARGET.json.sha256" --clobber

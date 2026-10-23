@@ -2,10 +2,10 @@
 //!
 //! Manual mode checks once and reconciles installed editor plugins on every
 //! run (GH #107), failing loudly when they cannot be updated. Auto mode is a foreground watcher that checks
-//! immediately, polls stable GitHub releases, retries transient failures, and
+//! immediately, polls the current platform's checksummed stable channel, retries transient failures, and
 //! uses a per-user PID lock so only one watcher runs. Release archives are
 //! installed only after verification against its archive-specific `.sha256`
-//! sidecar. The aggregate `SHA256SUMS` remains the all-platform completion
+//! sidecar and its target-channel digest. The aggregate `SHA256SUMS` remains the all-platform completion
 //! marker and release-promotion gate for compatibility with older clients, not
 //! the digest source used by this client for its selected archive (GH #363,
 //! GH #369).
@@ -29,6 +29,22 @@ const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 pub const DEFAULT_AUTO_INTERVAL_SECS: u64 = 15 * 60;
 pub const MIN_AUTO_INTERVAL_SECS: u64 = 60;
 const GITHUB_REPO: &str = "btakita/agent-doc";
+const TARGET_STABLE_CHANNEL_TAG: &str = "agent-doc-target-stable-v1";
+const TARGET_STABLE_CHANNEL_SCHEMA: u64 = 1;
+const EDITOR_PACKAGES_MANIFEST: &str = "EDITOR-PACKAGES.sha256";
+
+#[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct TargetStableManifest {
+    schema: u64,
+    target: String,
+    version: String,
+    release_tag: String,
+    archive: String,
+    archive_sha256: String,
+    editor_manifest: String,
+    editor_manifest_sha256: String,
+}
 
 /// GH #113: hidden `upgrade` flag that runs only the installed-plugin reconcile,
 /// pinned to the given release. This is a cross-release contract: the binary an
@@ -128,9 +144,11 @@ impl AutoUpgradeState {
     }
 
     fn plan(&self, latest: &str) -> AutoUpgradePlan {
+        let channel_is_older = version_is_newer(&self.effective_version, latest);
         AutoUpgradePlan {
             upgrade_binary: version_is_newer(latest, &self.effective_version),
-            reconcile_plugins: self.reconciled_release.as_deref() != Some(latest),
+            reconcile_plugins: !channel_is_older
+                && self.reconciled_release.as_deref() != Some(latest),
         }
     }
 
@@ -198,6 +216,12 @@ fn run_once() -> Result<()> {
             return Ok(());
         }
     };
+    if version_is_newer(CURRENT_VERSION, &latest) {
+        eprintln!(
+            "The stable channel is rolled back to v{latest}; keeping newer installed v{CURRENT_VERSION} binary and plugins unchanged."
+        );
+        return Ok(());
+    }
     let upgraded_exe = if version_is_newer(&latest, CURRENT_VERSION) {
         eprintln!("New version available: v{latest} (current: v{CURRENT_VERSION})");
         let target = UpgradeTarget::capture()?;
@@ -396,6 +420,7 @@ fn validate_auto_interval(interval_seconds: u64) -> Result<()> {
 /// (GH #113: the plugin reconcile is spawned from that path, never a PATH
 /// lookup that could resolve to a different install).
 fn upgrade_binary(version: &str, target: &UpgradeTarget) -> Option<PathBuf> {
+    let channel_managed = detect_target().is_some();
     match try_github_release_upgrade(version, &target.executable) {
         Ok(installed_exe) => {
             eprintln!("Successfully upgraded to v{version} via GitHub Releases.");
@@ -403,6 +428,12 @@ fn upgrade_binary(version: &str, target: &UpgradeTarget) -> Option<PathBuf> {
             return Some(installed_exe);
         }
         Err(error) => eprintln!("GitHub binary upgrade failed: {error:#}"),
+    }
+    if channel_managed {
+        eprintln!(
+            "Refusing an unpinned pip fallback for a target-channel upgrade; the channel may have changed or may lead PyPI. Retry after the verified release archive is available."
+        );
+        return None;
     }
     let Some(verification_executable) = target.pip_verification_executable() else {
         eprintln!(
@@ -454,26 +485,50 @@ fn print_manual_upgrade_instructions() {
     );
 }
 
+fn published_target_for(os: &str, arch: &str, env: &str) -> Option<String> {
+    match (os, arch, env) {
+        ("linux", "x86_64", "musl") => Some("x86_64-unknown-linux-musl".to_owned()),
+        ("linux", "x86_64", "gnu") => Some("x86_64-unknown-linux-gnu".to_owned()),
+        ("linux", "aarch64", "gnu") => Some("aarch64-unknown-linux-gnu".to_owned()),
+        ("macos", "x86_64", _) => Some("x86_64-apple-darwin".to_owned()),
+        ("macos", "aarch64", _) => Some("aarch64-apple-darwin".to_owned()),
+        ("windows", "x86_64", _) => Some("x86_64-pc-windows-msvc".to_owned()),
+        _ => None,
+    }
+}
+
+fn archive_name_for_target(target: &str) -> String {
+    let extension = if target.ends_with("windows-msvc") {
+        "zip"
+    } else {
+        "tar.gz"
+    };
+    format!("{CRATE_NAME}-{target}.{extension}")
+}
+
 fn detect_target() -> Option<String> {
-    let os = if cfg!(target_os = "linux") {
-        "unknown-linux-gnu"
-    } else if cfg!(target_os = "macos") {
-        "apple-darwin"
-    } else {
+    // A running Windows executable cannot safely replace itself. Windows keeps
+    // the legacy global-stable/pip/manual path until a detached helper owns the
+    // replacement and rollback protocol.
+    if cfg!(windows) {
         return None;
-    };
-    let arch = if cfg!(target_arch = "x86_64") {
-        "x86_64"
-    } else if cfg!(target_arch = "aarch64") {
-        "aarch64"
+    }
+    let env = if cfg!(target_env = "musl") {
+        "musl"
     } else {
-        return None;
+        "gnu"
     };
-    Some(format!("{arch}-{os}"))
+    published_target_for(std::env::consts::OS, std::env::consts::ARCH, env)
 }
 
 fn release_asset_url(version: &str, asset_name: &str) -> String {
     format!("https://github.com/{GITHUB_REPO}/releases/download/v{version}/{asset_name}")
+}
+
+fn channel_asset_url(asset_name: &str) -> String {
+    format!(
+        "https://github.com/{GITHUB_REPO}/releases/download/{TARGET_STABLE_CHANNEL_TAG}/{asset_name}"
+    )
 }
 
 fn download_bytes(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>> {
@@ -512,12 +567,118 @@ fn verify_release_archive(asset_name: &str, bytes: &[u8], manifest: &str) -> Res
     Ok(())
 }
 
+fn parse_target_stable_manifest(
+    target: &str,
+    bytes: &[u8],
+    sidecar: &str,
+) -> Result<TargetStableManifest> {
+    let asset_name = format!("stable-{target}.json");
+    verify_release_archive(&asset_name, bytes, sidecar)
+        .context("target stable-channel manifest integrity check failed")?;
+    let manifest: TargetStableManifest = serde_json::from_slice(bytes)
+        .context("target stable-channel manifest is not valid JSON")?;
+    let expected_archive = archive_name_for_target(target);
+    if manifest.schema != TARGET_STABLE_CHANNEL_SCHEMA
+        || manifest.target != target
+        || manifest.release_tag != format!("v{}", manifest.version)
+        || manifest.archive != expected_archive
+        || manifest.editor_manifest != EDITOR_PACKAGES_MANIFEST
+        || !valid_sha256(&manifest.archive_sha256)
+        || !valid_sha256(&manifest.editor_manifest_sha256)
+        || !valid_release_version(&manifest.version)
+    {
+        bail!("target stable-channel manifest is incompatible with {target}");
+    }
+    Ok(manifest)
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_release_version(version: &str) -> bool {
+    let mut parts = version.split('.');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(a), Some(b), Some(c), None)
+            if [a, b, c].into_iter().all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    )
+}
+
+fn verify_target_release_evidence(
+    agent: &ureq::Agent,
+    manifest: &TargetStableManifest,
+) -> Result<()> {
+    let editor_url = release_asset_url(&manifest.version, &manifest.editor_manifest);
+    let editor_bytes = download_bytes(agent, &editor_url)
+        .context("promoted target is missing its coupled editor-package manifest")?;
+    verify_editor_manifest_evidence(manifest, Some(&editor_bytes))
+}
+
+fn verify_editor_manifest_evidence(
+    manifest: &TargetStableManifest,
+    editor_bytes: Option<&[u8]>,
+) -> Result<()> {
+    let editor_bytes =
+        editor_bytes.context("promoted target is missing its coupled editor-package manifest")?;
+    let actual = agent_doc_hash::bytes_hash(editor_bytes);
+    if !actual.eq_ignore_ascii_case(&manifest.editor_manifest_sha256) {
+        bail!(
+            "editor-package manifest integrity check failed for v{}; refusing the target promotion",
+            manifest.version
+        );
+    }
+    Ok(())
+}
+
+fn verify_promoted_archive(
+    manifest: &TargetStableManifest,
+    requested_version: &str,
+    target: &str,
+    archive_bytes: &[u8],
+) -> Result<()> {
+    if manifest.version != requested_version {
+        bail!(
+            "the {target} stable channel changed from v{requested_version} to v{} during upgrade; retrying is safe",
+            manifest.version
+        );
+    }
+    let actual = agent_doc_hash::bytes_hash(archive_bytes);
+    if !actual.eq_ignore_ascii_case(&manifest.archive_sha256) {
+        bail!("archive does not match the checksummed {target} stable-channel promotion");
+    }
+    Ok(())
+}
+
+fn fetch_target_stable_manifest(target: &str) -> Result<TargetStableManifest> {
+    let asset_name = format!("stable-{target}.json");
+    let sidecar_name = format!("{asset_name}.sha256");
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(10)))
+        .build()
+        .into();
+    // Fetch the checksum first. During a channel replacement, any old/new pair
+    // mismatch fails closed and the next manual/auto poll retries it.
+    let sidecar_bytes = download_bytes(&agent, &channel_asset_url(&sidecar_name))?;
+    let manifest_bytes = download_bytes(&agent, &channel_asset_url(&asset_name))?;
+    let sidecar = std::str::from_utf8(&sidecar_bytes)
+        .with_context(|| format!("{sidecar_name} is not UTF-8"))?;
+    let manifest = parse_target_stable_manifest(target, &manifest_bytes, sidecar)?;
+    verify_target_release_evidence(&agent, &manifest)?;
+    Ok(manifest)
+}
+
+fn fetch_target_stable_release_version(target: &str) -> Result<String> {
+    Ok(fetch_target_stable_manifest(target)?.version)
+}
+
 /// Replace the captured install path with `version` and return that same path.
 /// The caller resolves it once before any auto-upgrade poll can unlink the
 /// running image; this function never consults `/proc/self/exe` (GH #152).
 fn try_github_release_upgrade(version: &str, exe_path: &Path) -> Result<PathBuf> {
     let target = detect_target().context("no prebuilt archive for this platform")?;
-    let archive_name = format!("{CRATE_NAME}-{target}.tar.gz");
+    let archive_name = archive_name_for_target(&target);
+    let promotion = fetch_target_stable_manifest(&target)?;
     let archive_url = release_asset_url(version, &archive_name);
     // GH #363: platform jobs publish each archive and its sidecar before the
     // aggregate SHA256SUMS completion marker exists. Requiring that aggregate
@@ -536,6 +697,7 @@ fn try_github_release_upgrade(version: &str, exe_path: &Path) -> Result<PathBuf>
     let sidecar = std::str::from_utf8(&sidecar_bytes)
         .with_context(|| format!("{sidecar_name} is not UTF-8"))?;
     verify_release_archive(&archive_name, &archive_bytes, sidecar)?;
+    verify_promoted_archive(&promotion, version, &target, &archive_bytes)?;
 
     install_release_archive(&archive_bytes, exe_path, version)?;
     Ok(exe_path.to_path_buf())
@@ -707,28 +869,37 @@ fn process_is_alive(_pid: u32) -> bool {
 }
 
 fn check_for_update() -> Option<String> {
-    if let Some(cached) = read_cache() {
+    let channel = upgrade_channel_key();
+    if let Some(cached) = read_cache(&channel) {
         return version_is_newer(&cached, CURRENT_VERSION).then_some(cached);
     }
     let latest = fetch_latest_release_version().ok()?;
-    let _ = write_cache(&latest);
+    let _ = write_cache(&channel, &latest);
     version_is_newer(&latest, CURRENT_VERSION).then_some(latest)
 }
 
-fn read_cache() -> Option<String> {
+fn upgrade_channel_key() -> String {
+    detect_target()
+        .map(|target| format!("target-stable-v1:{target}"))
+        .unwrap_or_else(|| "legacy-global-stable".to_owned())
+}
+
+fn read_cache(channel: &str) -> Option<String> {
     let content = fs::read_to_string(cache_path()?).ok()?;
     let cache: Value = serde_json::from_str(&content).ok()?;
     let timestamp = cache.get("timestamp")?.as_u64()?;
     let version = cache.get("version")?.as_str()?;
+    let cached_channel = cache.get("channel")?.as_str()?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    (now.saturating_sub(timestamp) < CACHE_TTL_SECS).then(|| version.to_owned())
+    (cached_channel == channel && now.saturating_sub(timestamp) < CACHE_TTL_SECS)
+        .then(|| version.to_owned())
 }
 
-fn write_cache(version: &str) -> Option<()> {
+fn write_cache(channel: &str, version: &str) -> Option<()> {
     let path = cache_path()?;
     fs::create_dir_all(path.parent()?).ok()?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    let cache = serde_json::json!({ "version": version, "timestamp": now });
+    let cache = serde_json::json!({ "channel": channel, "version": version, "timestamp": now });
     fs::write(path, serde_json::to_string_pretty(&cache).ok()?).ok()?;
     Some(())
 }
@@ -739,6 +910,14 @@ fn release_version_from_response(body: &Value) -> Option<String> {
 }
 
 fn fetch_latest_release_version() -> Result<String> {
+    if let Some(target) = detect_target() {
+        return fetch_target_stable_release_version(&target)
+            .with_context(|| format!("failed to resolve the stable channel for {target}"));
+    }
+    fetch_legacy_global_release_version()
+}
+
+fn fetch_legacy_global_release_version() -> Result<String> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(10)))
@@ -783,6 +962,119 @@ fn version_is_newer(latest: &str, current: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn published_target_mapping_distinguishes_gnu_musl_macos_and_windows() {
+        assert_eq!(
+            published_target_for("linux", "x86_64", "gnu").as_deref(),
+            Some("x86_64-unknown-linux-gnu")
+        );
+        assert_eq!(
+            published_target_for("linux", "x86_64", "musl").as_deref(),
+            Some("x86_64-unknown-linux-musl")
+        );
+        assert_eq!(
+            published_target_for("linux", "aarch64", "gnu").as_deref(),
+            Some("aarch64-unknown-linux-gnu")
+        );
+        assert_eq!(
+            published_target_for("macos", "x86_64", "").as_deref(),
+            Some("x86_64-apple-darwin")
+        );
+        assert_eq!(
+            published_target_for("macos", "aarch64", "").as_deref(),
+            Some("aarch64-apple-darwin")
+        );
+        assert_eq!(
+            published_target_for("windows", "x86_64", "msvc").as_deref(),
+            Some("x86_64-pc-windows-msvc")
+        );
+        assert_eq!(published_target_for("linux", "riscv64", "gnu"), None);
+        assert_eq!(published_target_for("linux", "aarch64", "musl"), None);
+        assert_eq!(
+            archive_name_for_target("x86_64-pc-windows-msvc"),
+            "agent-doc-x86_64-pc-windows-msvc.zip"
+        );
+    }
+
+    fn target_manifest_bytes(target: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 1,
+            "target": target,
+            "version": "1.2.3",
+            "release_tag": "v1.2.3",
+            "archive": archive_name_for_target(target),
+            "archive_sha256": "a".repeat(64),
+            "editor_manifest": EDITOR_PACKAGES_MANIFEST,
+            "editor_manifest_sha256": "b".repeat(64),
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn target_stable_manifest_is_checksummed_and_target_bound() {
+        let target = "x86_64-unknown-linux-musl";
+        let bytes = target_manifest_bytes(target);
+        let asset = format!("stable-{target}.json");
+        let sidecar = format!("{}  {asset}\n", agent_doc_hash::bytes_hash(&bytes));
+        let manifest = parse_target_stable_manifest(target, &bytes, &sidecar).unwrap();
+        assert_eq!(manifest.version, "1.2.3");
+
+        let error = parse_target_stable_manifest(
+            "x86_64-unknown-linux-gnu",
+            &bytes,
+            &format!(
+                "{}  stable-x86_64-unknown-linux-gnu.json\n",
+                agent_doc_hash::bytes_hash(&bytes)
+            ),
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("incompatible"));
+
+        let error =
+            parse_target_stable_manifest(target, &bytes, &format!("{}  {asset}\n", "0".repeat(64)))
+                .unwrap_err();
+        assert!(format!("{error:#}").contains("integrity check failed"));
+    }
+
+    #[test]
+    fn promoted_target_selects_bound_version_archive_and_editor_evidence() {
+        let target = "x86_64-unknown-linux-gnu";
+        let bytes = target_manifest_bytes(target);
+        let asset = format!("stable-{target}.json");
+        let sidecar = format!("{}  {asset}\n", agent_doc_hash::bytes_hash(&bytes));
+        let mut manifest = parse_target_stable_manifest(target, &bytes, &sidecar).unwrap();
+        let archive = b"promoted archive";
+        let editors = b"bound editor package manifest";
+        manifest.archive_sha256 = agent_doc_hash::bytes_hash(archive);
+        manifest.editor_manifest_sha256 = agent_doc_hash::bytes_hash(editors);
+
+        verify_promoted_archive(&manifest, "1.2.3", target, archive).unwrap();
+        verify_editor_manifest_evidence(&manifest, Some(editors)).unwrap();
+        assert_eq!(manifest.version, "1.2.3");
+
+        let missing = verify_editor_manifest_evidence(&manifest, None).unwrap_err();
+        assert!(format!("{missing:#}").contains("missing its coupled"));
+        let mismatched = verify_editor_manifest_evidence(&manifest, Some(b"other")).unwrap_err();
+        assert!(format!("{mismatched:#}").contains("integrity check failed"));
+    }
+
+    #[test]
+    fn channel_swap_or_rollback_mismatch_cannot_install() {
+        let target = "x86_64-unknown-linux-musl";
+        let bytes = target_manifest_bytes(target);
+        let asset = format!("stable-{target}.json");
+        let sidecar = format!("{}  {asset}\n", agent_doc_hash::bytes_hash(&bytes));
+        let mut manifest = parse_target_stable_manifest(target, &bytes, &sidecar).unwrap();
+        let archive = b"archive selected before pointer swap";
+        manifest.archive_sha256 = agent_doc_hash::bytes_hash(archive);
+
+        let swapped = verify_promoted_archive(&manifest, "1.2.4", target, archive).unwrap_err();
+        assert!(format!("{swapped:#}").contains("changed from v1.2.4 to v1.2.3"));
+        let replaced =
+            verify_promoted_archive(&manifest, "1.2.3", target, b"replacement").unwrap_err();
+        assert!(format!("{replaced:#}").contains("does not match"));
+    }
 
     /// A gzip tarball shaped like a release asset: `agent-doc` + the cdylib.
     #[cfg(unix)]
@@ -1180,6 +1472,14 @@ mod tests {
         );
         assert!(state.plan("1.2.0").upgrade_binary);
         assert!(state.plan("1.2.0").reconcile_plugins);
+        assert_eq!(
+            state.plan("1.0.9"),
+            AutoUpgradePlan {
+                upgrade_binary: false,
+                reconcile_plugins: false,
+            },
+            "a rolled-back channel must not downgrade plugins in a newer installation"
+        );
     }
 
     #[test]

@@ -15001,7 +15001,8 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
 
     assert!(
         release.contains("group: release-${{ github.repository }}-${{ github.ref_name }}")
-            && release.contains("cancel-in-progress: false"),
+            && release.contains("cancel-in-progress: false")
+            && release.contains("actions: write"),
         "same-tag runs must serialize so idempotent clobbers cannot race"
     );
     let prepare = job("prepare-release");
@@ -15032,6 +15033,8 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
         "sha256sum \"$archive\" > \"$archive.sha256\"",
         "shasum -a 256 \"$archive\" > \"$archive.sha256\"",
         "gh release upload \"$GITHUB_REF_NAME\" \"$archive\" \"$archive.sha256\" --clobber",
+        "gh workflow run target-channel.yml",
+        "-f target=\"${{ matrix.target }}\"",
     ] {
         assert!(
             build.contains(required),
@@ -15042,6 +15045,41 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
         !release.contains("actions/upload-artifact")
             && !release.contains("actions/download-artifact"),
         "release bytes must not wait in Actions artifacts for a global fan-in"
+    );
+
+    let target_channels = job("promote-target-channels");
+    for required in [
+        "if: ${{ always() && needs.plugins.result == 'success' }}",
+        "group: target-stable-channel-${{ github.repository }}",
+        "python3 scripts/target-stable-channel.py",
+        "--editor-manifest promotion/editor/EDITOR-PACKAGES.sha256",
+        "gh release upload \"$CHANNEL_TAG\" \"promotion/out/stable-$target.json\" --clobber",
+        "gh release upload \"$CHANNEL_TAG\" \"promotion/out/stable-$target.json.sha256\" --clobber",
+    ] {
+        assert!(
+            target_channels.contains(required),
+            "per-target promotion must serialize, bind editor compatibility, and publish a checksummed pointer: {required}"
+        );
+    }
+    let plugins = job("plugins");
+    assert!(
+        plugins.contains("Request promotion for every archive already ready")
+            && plugins.contains("gh workflow run target-channel.yml")
+            && !plugins.contains("gh workflow run target-channel.yml || true"),
+        "editor readiness must trigger promotion without waiting for unrelated matrix legs"
+    );
+    let rollback = fs::read_to_string(
+        manifest_dir.join(".github/workflows/target-channel.yml"),
+    )
+    .unwrap();
+    assert!(
+        rollback.contains("args+=(--allow-rollback)")
+            && rollback.contains("group: target-stable-channel-${{ github.repository }}")
+            && rollback.contains("--pattern EDITOR-PACKAGES.sha256")
+            && rollback.contains("type: boolean")
+            && rollback.contains("default: false")
+            && rollback.contains("if [ \"$ALLOW_ROLLBACK\" = true ]"),
+        "operator rollback must share the promotion lock and re-verify archive/editor evidence"
     );
 
     let finalize = job("finalize-release");

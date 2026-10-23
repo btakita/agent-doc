@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 2f70e722-90c5-4918-b28b-0cf7bc1660eb
-  codex: 01a1642c-d307-71c2-b7b1-fb1136e4d122
+  codex: 01a165ef-8365-7a43-b793-30cdc75a5b1d
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -17,8 +17,7 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-
-complete — Issues #30–#32 are fixed and closed; v0.1.108 is published on GitHub, crates.io, and npm; release workflow succeeded and local tsift is v0.1.108
+complete — v0.1.109 is published on GitHub, crates.io, and npm; the release workflow succeeded and the local tsift wrapper reports v0.1.109
 <!-- /agent:status -->
 
 ## Spec
@@ -58,12 +57,34 @@ Verification:
 - Latest observed GitHub Actions release run was successful.
 
 No follow-up queue heads were produced.
-<!-- agent:boundary:ef8cc4b0 -->
+> **Queue prompt:** release + publish: Update my local tsift wrapper
+
+### Re: release + publish: Update my local tsift wrapper — gpt-5 · 2026-10-22T20:17-04:00
+
+Released and published tsift v0.1.109.
+
+- Prepared release commit `d78eddf3092cc59c9fbd53d9b6f78f74b0679bdf` from the clean external worktree and pushed it fast-forward to `origin/main`.
+- Created and pushed annotated tag `v0.1.109`; it resolves to the same release commit.
+- Updated the local wrapper with `cargo install --path . --locked --force`; `/home/brian/.cargo/bin/tsift` now reports `tsift 0.1.109`.
+- Published the GitHub release with Linux, macOS ARM, and Windows archives plus a SHA-256 checksum for each artifact.
+- Published `tsift@0.1.109` and its dependency chain to crates.io.
+- Published `opencode-tsift@0.1.109` to npm.
+
+Verification:
+
+- Background release audit: full `make check` passed at the unreleased feature tip with exit 0 and zero failures.
+- Authoritative post-version-projection `make check`: exit 0, zero failure groups (`tart-cdbf7781e0`).
+- `npm run publish:check --prefix packages/opencode-tsift`: passed for 0.1.109.
+- GitHub Actions Release run `39873600580`: all jobs passed, including release-input verification, three platform builds, crates.io publishing, npm publishing, and GitHub Release publishing.
+- Independent public checks found the six expected GitHub assets/checksums, downloaded `tsift v0.1.109` metadata from crates.io, and resolved npm's 0.1.109 tarball.
+
+No follow-up queue heads were produced.
+<!-- agent:boundary:542df059 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

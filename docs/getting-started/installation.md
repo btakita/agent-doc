@@ -47,6 +47,18 @@ On Linux, an explicit libc result from Python selects the matching GNU or musl
 asset; an installed musl compatibility loader cannot override a detected glibc
 host.
 
+`agent-doc upgrade` on published Linux and macOS targets follows a checksummed
+per-target stable pointer. A ready Coder/Linux target can therefore advance
+before unrelated Darwin or Windows builds finish. The pointer also binds the
+release's complete JetBrains package manifest, so Remote Dev backend and Client
+compatibility are promoted together. Invalid or mid-update pointer evidence
+fails closed and never falls through to an unpinned PyPI version. Windows keeps
+the aggregate global-stable/manual path because a running `.exe` needs a future
+detached replacement helper for safe self-upgrade.
+Existing installations begin using this channel only after they have installed
+a release that contains the target-aware resolver; older clients deliberately
+continue to follow GitHub's aggregate global `latest` release.
+
 ## Homebrew
 
 ```sh

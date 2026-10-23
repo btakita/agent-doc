@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 # A retry of this tag may clobber the same asset names, but two runs must never
 # do that concurrently. Matrix legs within one run still upload distinct names
@@ -204,6 +205,19 @@ jobs:
             shasum -a 256 "$archive" > "$archive.sha256"
           fi
           gh release upload "$GITHUB_REF_NAME" "$archive" "$archive.sha256" --clobber
+
+      - name: Request target-channel promotion
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run target-channel.yml \
+            --ref "$GITHUB_REF_NAME" \
+            -f target="${{ matrix.target }}" \
+            -f version="${GITHUB_REF_NAME#v}" \
+            -f allow_rollback=false
 
   # `#pluginzipeveryrelease`: the editor packages ship with EVERY tag, not on a
   # cadence of their own. They used to be published separately, so the gap
@@ -414,6 +428,110 @@ jobs:
           (cd editor-packages && sha256sum agent-doc-* | sort -k2) > editor-packages/EDITOR-PACKAGES.sha256
           cat editor-packages/EDITOR-PACKAGES.sha256
           gh release upload "$GITHUB_REF_NAME" editor-packages/* --clobber
+
+      - name: Request promotion for every archive already ready
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for target in \
+            x86_64-unknown-linux-gnu \
+            x86_64-unknown-linux-musl \
+            aarch64-unknown-linux-gnu \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin \
+            x86_64-pc-windows-msvc; do
+            gh workflow run target-channel.yml \
+              --ref "$GITHUB_REF_NAME" \
+              -f target="$target" \
+              -f version="${GITHUB_REF_NAME#v}" \
+              -f allow_rollback=false
+          done
+
+  # Per-target stability is independent of the six-platform aggregate, but not
+  # independent of the editor packages. A Remote Dev backend upgraded to a tag
+  # whose JetBrains Client package is absent is not a stable target. This fan-in
+  # runs even when one matrix leg failed, promotes every archive that DID arrive,
+  # and binds it to the verified editor-package manifest from the same tag.
+  promote-target-channels:
+    if: ${{ always() && needs.plugins.result == 'success' }}
+    needs: [build, plugins]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: target-stable-channel-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Promote independently ready targets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          CHANNEL_TAG: agent-doc-target-stable-v1
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if ! gh release view "$CHANNEL_TAG" >/dev/null 2>&1; then
+            gh release create "$CHANNEL_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "agent-doc per-target stable channels" \
+              --notes "Machine-readable rolling pointers. Use ordinary versioned releases for downloads." \
+              --prerelease \
+              --latest=false
+          fi
+
+          mkdir -p promotion/editor promotion/current promotion/out
+          gh release download "$GITHUB_REF_NAME" \
+            --pattern EDITOR-PACKAGES.sha256 \
+            --dir promotion/editor
+          targets=(
+            x86_64-unknown-linux-gnu
+            x86_64-unknown-linux-musl
+            aarch64-unknown-linux-gnu
+            x86_64-apple-darwin
+            aarch64-apple-darwin
+            x86_64-pc-windows-msvc
+          )
+          for target in "${targets[@]}"; do
+            case "$target" in
+              *-pc-windows-msvc) archive="agent-doc-$target.zip" ;;
+              *) archive="agent-doc-$target.tar.gz" ;;
+            esac
+            target_dir="promotion/$target"
+            mkdir -p "$target_dir"
+            if ! gh release download "$GITHUB_REF_NAME" \
+              --pattern "$archive" \
+              --pattern "$archive.sha256" \
+              --dir "$target_dir"; then
+              echo "::notice::$target is not ready in $GITHUB_REF_NAME; leaving its stable channel unchanged"
+              continue
+            fi
+
+            current="promotion/current/stable-$target.json"
+            gh release download "$CHANNEL_TAG" \
+              --pattern "stable-$target.json" \
+              --dir promotion/current >/dev/null 2>&1 || true
+            result=$(python3 scripts/target-stable-channel.py \
+              --target "$target" \
+              --version "$version" \
+              --archive "$target_dir/$archive" \
+              --archive-sidecar "$target_dir/$archive.sha256" \
+              --editor-manifest promotion/editor/EDITOR-PACKAGES.sha256 \
+              --current "$current" \
+              --output-dir promotion/out)
+            echo "$result"
+            if grep -Fxq action=stale <<<"$result"; then
+              echo "::notice::$target already points to a newer stable release; refusing implicit rollback"
+              continue
+            fi
+            # Two rolling assets cannot be atomically replaced. Uploading the
+            # JSON first makes every intermediate state checksum-mismatched, so
+            # clients fail closed until the sidecar completes the transaction.
+            gh release upload "$CHANNEL_TAG" "promotion/out/stable-$target.json" --clobber
+            gh release upload "$CHANNEL_TAG" "promotion/out/stable-$target.json.sha256" --clobber
+          done
 
   # `SHA256SUMS` is deliberately a completion marker, not a partial manifest.
   # Successful platform legs are already public above. This fan-in verifies all

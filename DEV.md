@@ -43,6 +43,22 @@ After publishing, always run `cargo install --path .` — the `~/.cargo/bin/agen
 binary is used by tmux-spawned sessions. The `.bin/agent-doc` symlink (from `make release`)
 serves the local workspace but tmux panes resolve via `$PATH` which hits `~/.cargo/bin/`.
 
+## Per-target stable channels
+
+The release workflow publishes each archive immediately. Both archive upload and
+editor-package upload dispatch the globally serialized channel workflow, so the
+checksummed target pointer updates as soon as that archive and all three
+JetBrains compatibility packages plus `EDITOR-PACKAGES.sha256` verify. The final
+release fan-in is an idempotent backstop. The rolling channel workflow is globally
+serialized across release tags and refuses implicit rollback. Use the `Promote
+or roll back target stable channel` workflow for an explicit rollback; it re-downloads and
+verifies the selected version's archive, sidecar, and editor manifest before
+repointing the channel. Do not edit rolling assets by hand: clients deliberately
+fail closed while the JSON and its sidecar disagree.
+The archive-side and editor-side dispatch calls remain strict. Duplicate queued
+requests are safe, but permission, workflow lookup, or dispatch API failures must
+red the release job; the fan-in is a readiness-race fallback, not an error mask.
+
 ## Homebrew formula (GH #31)
 
 Every tag's Release workflow calls `.github/workflows/homebrew.yml`, which renders

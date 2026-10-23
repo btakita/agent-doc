@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test release-publication-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
 
 # `#tmuxscopesteward`: tmux built with systemd support (e.g. Arch/CachyOS tmux
 # 3.8) asks the systemd user manager for one transient `tmux-spawn-<uuid>.scope`
@@ -438,6 +438,9 @@ release-driver-self-test:
 release-publication-self-test:
 	@python3 scripts/verify-release-publication.py --self-test
 
+target-stable-channel-self-test:
+	@python3 scripts/target-stable-channel.py --self-test
+
 installer-self-test:
 	@python3 scripts/test-install-script.py
 
@@ -463,10 +466,10 @@ build-priority-probe:
 
 # Fast edit-loop validation: helper checks plus Rust packages affected by the
 # diff and their reverse-dependency closure. This is not a release proof.
-check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test release-publication-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test
+check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test
 	@python3 scripts/dev-check.py run
 
-check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test release-publication-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check python-bootstrap-test lean tla-runner-self-test tla
+check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check python-bootstrap-test lean tla-runner-self-test tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Target-specific, so it reaches the `audit-docs` prerequisite of `check` only.

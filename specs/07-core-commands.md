@@ -522,17 +522,48 @@ follow the same early-publication rule with their separate
 `EDITOR-PACKAGES.sha256` manifest; failure to build them still blocks final
 completion, not already published platform archives.
 
+New clients do not make every target wait for that aggregate promotion. After
+the editor-package job has verified the classic, 262, and 263 JetBrains ZIPs,
+both readiness transitions request a serialized promotion: the platform upload
+requests its target, and the editor upload requests every platform already
+present. Thus a target advances as soon as its archive and the editor set are
+both ready, without waiting for unrelated matrix legs. A final fan-in repeats
+the same operation idempotently as a retry backstop. The promotion updates that
+target's rolling `agent-doc-target-stable-v1` pointer. Each pointer
+is a strict JSON manifest plus a `.sha256` sidecar and binds the versioned archive
+digest and the digest of the same release's complete editor-package manifest.
+Promotion is serialized across tags; an older rerun cannot roll a pointer back.
+The two rolling assets are uploaded JSON-first, so the unavoidable intermediate
+state is checksum-mismatched and clients fail closed until the sidecar lands.
+The manual `Promote or roll back target stable channel` workflow re-verifies both artifact
+sets and takes the same lock before explicitly permitting a lower pointer.
+This is a forward-compatible rollout: clients predating the target-channel
+resolver keep consuming the unchanged global `latest` plus `SHA256SUMS` path;
+per-target readiness begins helping an installation after it receives a release
+containing the resolver.
+Readiness dispatch is intentionally strict: duplicate requests are harmless and
+serialize idempotently, but an Actions permission, workflow lookup, or dispatch
+API failure reds the source release job. The final fan-in covers readiness races;
+it must not hide a broken promotion control plane.
+
 `make release-macos-assets TAG=v<version>` remains a manual repair path for a
 legacy or failed Darwin upload. `make release-macos-coverage-check` names any
 published release that dropped either Darwin archive, counting a half-shipped
 pair as a drop.
 
-`agent-doc upgrade` checks GitHub Releases for a newer stable version and upgrades
-through the prebuilt GitHub binary / `pip` cascade. The stable feed exposes a tag
+`agent-doc upgrade` resolves the stable pointer for its exact published Unix
+target (including GNU versus musl) and upgrades through that verified prebuilt
+archive. A valid equal or lower pointer is a no-op, which makes target rollback
+authoritative without downgrading an already installed binary. Missing,
+malformed, mismatched, or changing channel evidence fails closed; a channel-led
+upgrade never falls through to unpinned PyPI. Windows retains the legacy global
+stable/PyPI/manual behavior until a detached helper can replace an in-use `.exe`
+with tested rollback semantics. The global stable feed exposes a tag
 only after the aggregate `SHA256SUMS` completion marker exists, preserving the
-upgrade path for older clients (GH #369). A current client then verifies only its
-selected prebuilt archive against the archive-specific `.sha256` sidecar; it does
-not parse or trust the aggregate manifest for that verification (GH #363). The
+upgrade path for older clients (GH #369). A current client verifies the channel
+manifest sidecar, its bound editor-manifest digest, the selected archive's
+release sidecar, and the channel-bound archive digest; it does not parse or trust
+the aggregate manifest for those checks (GH #363). The
 aggregate manifest remains the completion gate for PyPI and Homebrew. If a newer
 release is found but neither the verified GitHub
 archive nor an eligible PyPI fallback can be installed, the one-shot command

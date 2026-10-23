@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.545
+
+- **Remote Dev routing no longer guesses pane membership or left/right order from flat evidence (GH #359–#360).**
+  Unknown geometry may focus a target only when that document already has a live tmux pane; otherwise routing fails
+  closed with the frontend-publisher remedy instead of replacing one or two panes from live width alone.
+- **Legacy Grok MCP launch commands self-heal through bootstrap (GH #358).** Bare `agent-doc mcp` starts the stdio
+  server so an old client can complete its first handshake and migrate to canonical `agent-doc mcp serve`; newly
+  installed and audited configurations continue using only the canonical form.
+- **Queue and release handoffs retain useful partial state.** Unanswered `🙋☑️` rows survive subsequent turns, and
+  release CI creates one public release before independently uploading each successful platform asset with
+  idempotent retry while aggregate publication remains fail-closed.
+
 ## 0.35.544
 
 - **Release packaging preserves Lazily Kotlin's pinned Spec sibling.** The exact-tag Maven-local publisher now

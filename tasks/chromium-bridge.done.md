@@ -2,3 +2,4 @@
 
 - 2026-09-02 [#fixcontractsrun] Fix contracts.md Run Agent Doc stall
 - 2026-09-18 [#fixhttpsgithub] Fix https://github.com/btakita/chromium-bridge/issues/1 + #release-publish
+- 2026-10-22 [#supportgrokbuild] Add support for grok build. release + publish

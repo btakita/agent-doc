@@ -6,8 +6,9 @@
 //! uses a per-user PID lock so only one watcher runs. Release archives are
 //! installed only after verification against its archive-specific `.sha256`
 //! sidecar. The aggregate `SHA256SUMS` remains the all-platform completion
-//! marker for PyPI and Homebrew, not a prerequisite for an already-published
-//! platform archive (GH #363).
+//! marker and release-promotion gate for compatibility with older clients, not
+//! the digest source used by this client for its selected archive (GH #363,
+//! GH #369).
 //!
 //! GH #113: replacing the executable on disk does not replace the running
 //! process image, so after a binary upgrade the plugin reconcile runs as a child

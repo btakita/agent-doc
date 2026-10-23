@@ -492,9 +492,11 @@ anything.
 
 Every tag publishes six hosted targets on demand: three Linux targets, Windows,
 and both Darwin architectures. The workflow creates or reuses one public GitHub
-Release before those jobs start. Each successful target uploads its archive and
-an archive-specific `.sha256` sidecar immediately; matrix `fail-fast` is disabled,
-so one failed target neither cancels its siblings nor withholds their assets.
+prerelease before those jobs start. Each successful target uploads its archive
+and an archive-specific `.sha256` sidecar immediately; matrix `fail-fast` is
+disabled, so one failed target neither cancels its siblings nor withholds their
+assets. Those partial assets remain reachable by their tag URLs, while the
+prerelease stays out of GitHub's stable `latest` release feed.
 Same-tag workflow runs are serialized, and every upload uses stable asset names
 with `--clobber`, making both “Re-run failed jobs” and a complete rerun
 idempotent. The standard macOS runners are included for this public repository,
@@ -510,12 +512,15 @@ stable.
 
 `SHA256SUMS` remains the six-platform completion marker rather than becoming a
 partial manifest. A final job downloads all six public archives and sidecars,
-verifies each pair, and only then uploads `SHA256SUMS`. Thus a partial release is
-useful for direct platform downloads without being mistaken for a complete
-release by the PyPI bootstrap or Homebrew automation. Editor packages follow the
-same early-publication rule with their separate `EDITOR-PACKAGES.sha256`
-manifest; failure to build them still blocks final completion, not already
-published platform archives.
+verifies each pair, uploads `SHA256SUMS`, and only then promotes the prerelease
+to the stable latest release. Thus a partial release is useful for direct
+platform downloads without being mistaken for a complete release by the PyPI
+bootstrap, Homebrew automation, or stable upgrade clients. In particular, this
+keeps clients through v0.35.546, which require the aggregate `SHA256SUMS`, from
+discovering a sidecar-only release they cannot install (GH #369). Editor packages
+follow the same early-publication rule with their separate
+`EDITOR-PACKAGES.sha256` manifest; failure to build them still blocks final
+completion, not already published platform archives.
 
 `make release-macos-assets TAG=v<version>` remains a manual repair path for a
 legacy or failed Darwin upload. `make release-macos-coverage-check` names any
@@ -523,12 +528,13 @@ published release that dropped either Darwin archive, counting a half-shipped
 pair as a drop.
 
 `agent-doc upgrade` checks GitHub Releases for a newer stable version and upgrades
-through the prebuilt GitHub binary / `pip` cascade. A prebuilt archive is installed
-only after its bytes match its archive-specific `.sha256` sidecar. It does not
-wait for the aggregate `SHA256SUMS` completion marker, because a platform archive
-and its sidecar are intentionally usable while other platform jobs are still
-publishing (GH #363). The aggregate manifest remains the completion gate for
-PyPI and Homebrew. If a newer release is found but neither the verified GitHub
+through the prebuilt GitHub binary / `pip` cascade. The stable feed exposes a tag
+only after the aggregate `SHA256SUMS` completion marker exists, preserving the
+upgrade path for older clients (GH #369). A current client then verifies only its
+selected prebuilt archive against the archive-specific `.sha256` sidecar; it does
+not parse or trust the aggregate manifest for that verification (GH #363). The
+aggregate manifest remains the completion gate for PyPI and Homebrew. If a newer
+release is found but neither the verified GitHub
 archive nor an eligible PyPI fallback can be installed, the one-shot command
 exits non-zero and leaves the current binary and plugins unchanged. The agent-doc
 Rust workspace is private and is not a crates.io upgrade source. The one-shot path

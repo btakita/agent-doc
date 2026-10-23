@@ -84,13 +84,19 @@ Client/Gateway, or use `runIdeSplitMode`. A one-sided install is unsupported and
 the pane-tagged surface bridge must be treated as unavailable. If a remote
 client remains connected without frontend authority after schema negotiation,
 the backend logs `frontend layout publisher unavailable` with
-`flat_evidence_has_no_column_geometry` and this two-sided install/restart remedy;
-route failures surface the same actionable reason. The backend still
+`readiness=blocked`,
+`readiness_reason=frontend_authority_absent_or_generation_mismatched`,
+`geometry_reason=flat_evidence_has_no_column_geometry`, and the two-sided
+same-version install/restart remedy; route failures surface the same actionable
+reason. This is a distribution/readiness fault, not geometry the backend may
+reconstruct and not a transient that retrying can repair. The backend still
 observes remote-client selection changes (Remote Dev `CONTROLLER` and Code With Me
 `GUEST` sessions; GH #262) while no frontend snapshot has been accepted, so
-main-layout tab switching continues for diagnostic/local installs. Detached-window
-identity and frontend presentation remain unavailable until the matching frontend
-module connects; accepted frontend authority automatically suppresses the fallback.
+focus for an already-live main-layout document continues for diagnostic/local
+installs. Structural routing remains blocked and retains the existing tmux layout.
+Detached-window identity and frontend presentation remain unavailable until the
+matching frontend module connects; accepted frontend authority automatically
+suppresses the fallback.
 
 Every Agent Doc tag packages both modular ZIPs as
 `agent-doc-jetbrains-{262,263}-<pluginVersion>.zip` alongside the compatibility-ranged

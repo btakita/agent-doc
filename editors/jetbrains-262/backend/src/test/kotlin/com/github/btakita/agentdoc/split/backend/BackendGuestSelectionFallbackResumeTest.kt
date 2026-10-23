@@ -63,9 +63,16 @@ class BackendGuestSelectionFallbackResumeTest {
         assertEquals(5_000L, FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS)
         val diagnostic = frontendAuthorityUnavailableDiagnostic("client-1", ClientType.CONTROLLER)
         assertTrue(diagnostic.contains("frontend layout publisher unavailable"), diagnostic)
-        assertTrue(diagnostic.contains("reason=flat_evidence_has_no_column_geometry"), diagnostic)
+        assertTrue(diagnostic.contains("readiness=blocked"), diagnostic)
+        assertTrue(
+            diagnostic.contains("readiness_reason=frontend_authority_absent_or_generation_mismatched"),
+            diagnostic,
+        )
+        assertTrue(diagnostic.contains("geometry_reason=flat_evidence_has_no_column_geometry"), diagnostic)
+        assertTrue(diagnostic.contains("structural_routing=blocked fallback=focus_only"), diagnostic)
         assertTrue(diagnostic.contains("JetBrains Client/Gateway"), diagnostic)
         assertTrue(diagnostic.contains("Remote Dev backend"), diagnostic)
+        assertTrue(diagnostic.contains("verify both sides report that exact plugin version"), diagnostic)
         assertTrue(diagnostic.contains("restart both"), diagnostic)
     }
 }

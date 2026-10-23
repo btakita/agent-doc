@@ -30,13 +30,17 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 internal const val FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS = 5_000L
+internal const val FRONTEND_AUTHORITY_UNAVAILABLE_READINESS =
+    "frontend_authority_absent_or_generation_mismatched"
 internal const val FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY =
     "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, " +
-        "restart both, then retry Run Agent Doc"
+        "verify both sides report that exact plugin version, restart both, then retry Run Agent Doc"
 
 internal fun frontendAuthorityUnavailableDiagnostic(clientId: String, type: ClientType): String =
     "[layout-sync] frontend layout publisher unavailable client=$clientId type=$type " +
-        "reason=flat_evidence_has_no_column_geometry remedy=$FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY"
+        "readiness=blocked readiness_reason=$FRONTEND_AUTHORITY_UNAVAILABLE_READINESS " +
+        "geometry_reason=flat_evidence_has_no_column_geometry " +
+        "structural_routing=blocked fallback=focus_only remedy=$FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY"
 
 /**
  * Restores the classic editor-selection edge when a Remote Dev frontend module is unavailable.

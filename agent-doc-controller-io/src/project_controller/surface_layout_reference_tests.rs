@@ -223,11 +223,15 @@ fn sync_by_reference_fails_closed_without_a_usable_source() {
         .unwrap_err();
     let refused = format!("{refused:#}");
     assert!(
-        refused.contains("surface_reference_unknown_layout: Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry)"),
+        refused.contains("surface_reference_unknown_layout: Remote Dev frontend structural routing is not ready (frontend_authority_absent_or_generation_mismatched; flat_evidence_has_no_column_geometry)"),
         "{refused}"
     );
     assert!(
         refused.contains(FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY),
+        "{refused}"
+    );
+    assert!(
+        refused.contains(agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_READINESS),
         "{refused}"
     );
     assert!(refused.contains("then retry Sync Tmux Layout"), "{refused}");

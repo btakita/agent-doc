@@ -71,6 +71,19 @@ focus evidence: the backend must not require a Swing active window that exists
 only in the thin client. Focus-projection gates and task failures are logged at
 INFO/WARN before controller transport so a missing publication is diagnosable.
 
+After the bounded frontend startup grace, flat selection evidence without an
+authenticated same-generation surface publication is classified
+`readiness=blocked` with
+`readiness_reason=frontend_authority_absent_or_generation_mismatched` and
+`geometry_reason=flat_evidence_has_no_column_geometry`. Structural routing stays
+blocked and preserves the existing tmux layout; the fallback is focus-only for
+an already-live document. A retry cannot load an absent or incompatible client
+module, and flat evidence cannot safely reconstruct editor columns. Verify that
+both peers report the exact same plugin version, restart both, and retry only
+after the two-sided install is ready. Marketplace hosting is the automatic way
+to synchronize a compatible plugin to the Remote Dev peer; custom-repository and
+local-ZIP installs require this explicit two-sided update.
+
 ## Release proof
 
 `scripts/jetbrains-custom-repository.py` reads all three distribution ZIPs, validates

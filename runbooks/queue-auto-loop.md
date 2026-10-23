@@ -51,6 +51,12 @@ document; only compaction reduces exchange accretion.
 - **OpenCode:** it has no `/loop` and no Stop hook. After a proven closeout with
   continuation true, immediately start the next binary-owned cycle and drain in
   the same turn until the binary emits a real stop condition or iteration cap.
+- **Grok Build:** a `subagents` / `fan-out` queue does not drain inline. Dispatch
+  every `queue_subagent_dispatch` entry immediately with native
+  `spawn_subagent(background=true)`, one worker per item, then acknowledge each
+  returned `subagent_id` with the entry's generation-fenced `start_command`.
+  This dispatch is automatic on the first admitted cycle; it never waits for a
+  follow-up operator prompt asking Grok to run the workers.
 
 Both `agent_doc_queue_max_iterations` and
 `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) bound the loop.

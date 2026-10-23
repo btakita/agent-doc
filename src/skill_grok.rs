@@ -8,7 +8,7 @@ fn content() -> String {
     let rendered = render_skill(
         agent_kit::detect::Environment::Generic,
         "Interactive markdown session. TRIGGER: agent-doc <file>. Requires binary admission and committed closeout.",
-        "## Invocation\n\nSubmit `agent-doc <FILE>` in Grok Build. Read this skill, call connected `agent_doc_admit` for FILE, then read the document and run `agent-doc plan <FILE>`. Never recursively launch `agent-doc <FILE>` from a shell.\n\nGrok lifecycle hooks are notifications: stdout cannot inject admission context or continue the turn. Successful MCP admission is the required checkpoint. Use connected `agent_doc_finalize` for closeout. If MCP tools are absent, install with `agent-doc skill install --harness grok`, then enable/trust the project MCP server in Grok. Never bypass refused admission.\n\nAfter a committed finalize, follow its queue-continuation fields in the same turn, admitting and completing each next actionable head. Do not end while a drainable head remains. Do not run another session-check after a successful connected finalize.",
+        "## Invocation\n\nSubmit `agent-doc <FILE>` in Grok Build. Read this skill, call connected `agent_doc_admit` for FILE, then read the document and run `agent-doc plan <FILE>`. Never recursively launch `agent-doc <FILE>` from a shell.\n\nGrok lifecycle hooks are notifications: stdout cannot inject admission context or continue the turn. Successful MCP admission is the required checkpoint. Use connected `agent_doc_finalize` for closeout. If MCP tools are absent, install with `agent-doc skill install --harness grok`, then enable/trust the project MCP server in Grok. Never bypass refused admission.\n\nWhen `queue_subagent_dispatch` is non-empty, dispatch it immediately without waiting for another operator prompt. For each entry, run its `claim_command`, call Grok's native `spawn_subagent` with `background=true` and the authorization preamble verbatim at the start of the worker prompt, then run its `start_command` with the returned `subagent_id`. Give repository-writing workers separate external worktrees. Use `get_command_or_subagent_output` for completion. Do not substitute `agent-doc orchestrate` while native `spawn_subagent` is available.\n\nAfter a committed finalize, follow its queue-continuation fields in the same turn, admitting and completing each next actionable head. Do not end while a drainable head remains. Do not run another session-check after a successful connected finalize.",
     );
     let mut result = String::new();
     for line in rendered.lines() {
@@ -209,6 +209,9 @@ mod tests {
         let text = content();
         assert!(text.contains("agent_doc_admit"));
         assert!(text.contains("agent_doc_finalize"));
+        assert!(text.contains("`queue_subagent_dispatch`"));
+        assert!(text.contains("`spawn_subagent`"));
+        assert!(text.contains("`background=true`"));
         assert!(!text.contains("the turn context must contain the"));
         assert!(!text.contains("When all of these hold, invoke the `Skill` tool"));
         std::fs::write(dir.path().join(REL_PATH).join("SKILL.md"), "stale").unwrap();
@@ -278,5 +281,28 @@ mod tests {
             .unwrap();
         assert!(installed, "installed Grok MCP args must parse");
         assert!(bare, "bare `agent-doc mcp` must remain a serving alias");
+    }
+
+    #[test]
+    fn installed_bundle_routes_subagent_queues_to_grok_native_workers() {
+        let dir = tempfile::tempdir().unwrap();
+        install(Some(dir.path())).unwrap();
+        let bundle = dir.path().join(REL_PATH);
+        let planning =
+            std::fs::read_to_string(bundle.join("runbooks/planning-dispatch.md")).unwrap();
+        let respond = std::fs::read_to_string(bundle.join("runbooks/respond.md")).unwrap();
+        let harness =
+            std::fs::read_to_string(bundle.join("runbooks/harness-invocation.md")).unwrap();
+        let auto_loop =
+            std::fs::read_to_string(bundle.join("runbooks/queue-auto-loop.md")).unwrap();
+
+        for text in [&planning, &respond, &harness] {
+            assert!(text.contains("`spawn_subagent`"), "{text}");
+        }
+        assert!(respond.contains("native background worker per dispatch item"));
+        assert!(!respond.contains("Codex, OpenCode, Grok Build,"));
+        assert!(auto_loop.contains("`spawn_subagent(background=true)`"));
+        assert!(auto_loop.contains("automatic on the first admitted cycle"));
+        audit(dir.path()).unwrap();
     }
 }

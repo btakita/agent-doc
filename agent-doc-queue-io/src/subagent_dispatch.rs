@@ -784,6 +784,23 @@ mod tests {
     }
 
     #[test]
+    fn queue_brief_preserves_quoted_operator_answer_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let item = concat!(
+            "In sdk-demo.md, no queue item status despite agent running: `- ",
+            "[#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`",
+        );
+        let content = attr_doc("subagents", &[item]);
+        std::fs::write(&file, &content).unwrap();
+
+        let brief = subagent_authorization_for_item(&file, item).unwrap();
+        assert_eq!(brief.item, item);
+        assert!(brief.subagent_prompt_preamble.contains(item));
+    }
+
+    #[test]
     fn out_of_loop_projection_holds_dispatchable_and_capacity_waiting_heads() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("session.md");

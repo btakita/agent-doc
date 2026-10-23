@@ -291,6 +291,38 @@ fn id_prefix(text: &str) -> &str {
         .unwrap_or("")
 }
 
+fn trailing_operator_action_annotation(text: &str) -> Option<(&str, &str, usize)> {
+    let code_ranges = agent_doc_element::element::find_code_ranges(text);
+    for (start, _) in text.rmatch_indices("[#") {
+        if code_ranges
+            .iter()
+            .any(|(range_start, range_end)| start >= *range_start && start < *range_end)
+        {
+            continue;
+        }
+        if start > 0
+            && !text[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace)
+        {
+            continue;
+        }
+        let after_open = &text[start + 2..];
+        let Some((id, after)) = after_open.split_once(']') else {
+            continue;
+        };
+        if id.is_empty()
+            || !id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+            || !(after.is_empty() || after.trim_start().starts_with(':'))
+        {
+            continue;
+        }
+        return Some((id, after, start));
+    }
+    None
+}
+
 /// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🟡`/`🚧`/`📥`/`☑️`/`⚠️`/`⏭️`/`⏳`
 /// and the `**pin**`/`**prioritized**` word forms) from a queue head so a
 /// marker-decorated line keys to the same durable identity as the bare line.
@@ -407,22 +439,18 @@ pub fn strip_priority_markers(text: &str) -> String {
         }
     }
     let mut bare = t.trim();
-    if let Some(start) = bare.rfind("[#")
-        && (start == 0
-            || bare[..start]
-                .chars()
-                .next_back()
-                .is_some_and(char::is_whitespace))
-        && let Some((id, after)) = bare[start + 2..].split_once(']')
-        && !id.is_empty()
-        && id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
-        && (after.is_empty() || after.trim_start().starts_with(':'))
+    if let Some((id, after, start)) = trailing_operator_action_annotation(bare)
         && (canonical_operator_action
             || id
                 .to_ascii_lowercase()
                 .starts_with("subagent-operator-request-"))
     {
-        bare = bare[..start].trim_end();
+        let identity_end = bare.len().saturating_sub(after.len());
+        bare = if start == 0 {
+            bare[..identity_end].trim_end()
+        } else {
+            bare[..start].trim_end()
+        };
     }
     bare.to_string()
 }
@@ -638,6 +666,19 @@ mod tests {
             bare,
             QueueItemIdentity::FreeText("fix the flaky test".to_string())
         );
+    }
+
+    #[test]
+    fn local_operator_answer_is_keyed_by_reserved_request_id() {
+        let id = "subagent-operator-request-publish-ci-pr166";
+        assert_eq!(
+            queue_head_identity(&format!("[#{id}]: **Commit and push to PR #166**")),
+            QueueItemIdentity::Id(id.to_string())
+        );
+        let quoted = format!(
+            "In sdk-demo.md, no queue item status despite agent running: `- [#{id}]: **Commit and push to PR #166**`"
+        );
+        assert_eq!(strip_priority_markers(&quoted), quoted);
     }
 
     #[test]

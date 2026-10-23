@@ -221,6 +221,16 @@ The synchronized status now reflects the current verified state:
 - This host runs CLI 0.35.548 with IntelliJ classic 0.2.806, Rider/262 0.2.807, and VSCodium 0.2.83. JetBrains 263 package 0.2.808 is published but not installed here.
 
 This was a status-only audit: no repository files changed, so no code tests, build, install, commit, or push were required. Release and main CI were green. The exchange remains above its accretion warning threshold; it was not compacted because the queue was active and auto-compaction was not enabled.
+
+### Re: do [#upgradeideatest] — gpt-5 · 2026-10-23T18:14-04:00
+
+> **Operator question:** Should we upgrade IDEA to test the frontend + backend install?
+
+Yes. Upgrade the test environment to IDEA 263 and install the matching agent-doc JetBrains 263 package, v0.2.808, on both the frontend Client/Gateway and the backend. Restart both peers before testing so the result proves the paired install path rather than a mixed or stale plugin generation.
+
+Then run Agent Doc and verify that paired ingress is deferred or accepted as expected and reaches a completed or connected diagnostic state. This is a manual environment verification, so no repository code, build, or test changes were appropriate in this answer-only cycle. The existing operator TODO now names v0.2.808.
+
+The exchange remains above its accretion warning threshold; it was not compacted because the queue is active and auto-compaction is not enabled.
 <!-- agent:boundary:6192acdd -->
 <!-- /agent:exchange -->
 
@@ -233,15 +243,17 @@ This was a status-only audit: no repository files changed, so no code tests, bui
 
 ## Queue: Issues
 
-<!-- agent:queue id=issues loop interval=1h -->
-- 🚧 do [#gh363]
+<!-- agent:queue id=issues loop interval=1h priority -->
+- ~~do [#upgradeideatest]~~
+- Help me register the Jetbrains plugin?
+- ~~do [#gh363]~~
 <!-- /agent:queue -->
 
 ## Todo
 <!-- agent:todo -->
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
-- [ ] [#coder-remote-install-02805] Install agent-doc-jetbrains-263 0.2.805 on both the Coder Client or Gateway and backend, then restart both peers and verify paired ingress deferred or accepted and completed or connected diagnostics.
+- [ ] [#coder-remote-install-02805] Install agent-doc-jetbrains-263 0.2.808 on both the Coder Client or Gateway and backend, then restart both peers and verify paired ingress deferred or accepted and completed or connected diagnostics.
 <!-- /agent:todo -->
 
 ## Backlog

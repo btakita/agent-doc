@@ -24,7 +24,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -445,7 +445,146 @@ The GH-356 row was previously completed and its durable result is preserved in t
 ### Re: Intentional queue cleanup boundary — gpt-5 · 2026-10-23T03:47-04:00
 
 The operator explicitly requested queue cleanup. The removed historical rows all had durable reported/completion evidence and were intentionally cleared after their results were summarized in the preceding response. They were not silently dropped. The fenced GH-355 claim/outbox mismatch and the newly dispatched sdk-demo.md compact-exchange defect remain in the queue.
-<!-- agent:boundary:67a15c86 -->
+
+### Re: Subagent completed: `subagent:idea-thrashing` returned work for queue item “agent-doc process is thrashing in the background along with Idea.” — agent-doc
+<!-- agent-doc-subagent-response sha256=24a00267fadd771ad40406e59a7e9ed335635dba8b9c5d5b041baccc61d2bf22 -->
+> **Subagent response:**
+>
+> Completed and pushed fix.
+>
+> Branch: `fix/idea-controller-thrash-20261023`
+> Commit: `1f67142207ed87a5e09820487204e2ca8d2fffc0`
+> Remote: `origin/fix/idea-controller-thrash-20261023`
+> Files: `CrdtReplicaManager.kt`, `CrdtReplicaProjectionFrontierTest.kt`, `specs/14-realtime-workflow.md`.
+>
+> Cause/fix: a retained CRDT update fetched after `baseline-diverged-lazy-canonical-projection` was counted as useful work before any visible projection, so `queueRemoteDrain` immediately rescheduled and bypassed its 100ms→30s no-op backoff. The drain now counts progress only after accepted baseline plus queued/recovered visible projection; rejected/fail-closed redelivery returns 0 and enters bounded backoff.
+>
+> Tests/build:
+> - Focused projection-frontier class: 31 tests, 0 failures/errors/skips; BUILD SUCCESSFUL.
+> - `./gradlew buildPlugin`: BUILD SUCCESSFUL (17 tasks: 3 executed, 14 up-to-date).
+> - Full JetBrains test: 935 tests, 1 failure, `LazilyGenerationFenceTest` line 23. Confirmed identical failure on untouched main (`3a1d3cb8dc`) in separate baseline worktree, so unrelated/pre-existing.
+> - `make check`: blocked exactly at `plugin-version-check` because JetBrains source digest changed. Coordinator rules prohibit this subagent from doing the required package version/source-digest bump.
+> - diff check + private denylist scan: clean.
+> - post-push `gh run list --branch ...`: no workflow run surfaced.
+>
+> Follow-up queue item (immediately after origin): `Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.`
+>
+> Live state after operator restart: IDEA instantaneous CPU 5%→3%→2%; sdk-demo agent-doc controller 0%. Restart mitigated the incident; the patch prevents recurrence.
+<!-- agent-doc-subagent-completion key=3028358e7a48249ac07cd999e7a3c1cb2e8dee058ee3c3a2e174308ee32a0388 -->
+
+### Re: Subagent completed: `subagent:sdk-compact-replica` returned work for queue item “Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.” — agent-doc
+<!-- agent-doc-subagent-response sha256=4dc6c304061592610245949b6f6cffd3a25413580ada941ce46611af650e3f92 -->
+> **Subagent response:**
+>
+> Implemented, committed, and pushed.
+>
+> - Branch: `fix/sdk-compact-ambiguous-thrash-20261023`
+> - Commit: `49626167e0`
+> - Remote branch pushed successfully.
+> - Session document was not touched.
+>
+> The fix makes attach-failure diagnosis the policy owner for retry behavior:
+>
+> - Ambiguous retained/re-register/reseed holds now return `await_operator_evidence`.
+> - Those holds no longer schedule background registration timers.
+> - Ordinary refreshes cannot bypass the hold.
+> - Closing a refused, unattached editor releases liveness without publishing the ambiguous buffer, allowing detached repair.
+> - Transient failures retain automatic backoff; stale endpoints still republish liveness and retry promptly.
+>
+> Verification:
+>
+> - Rust suites: 184 passed.
+> - Focused JetBrains suites: 41 passed.
+> - Targeted Clippy with warnings denied: passed.
+> - `make build`: passed.
+> - JetBrains `buildPlugin`: passed.
+> - Full JetBrains suite: 935/936 passed; the unrelated `LazilyGenerationFenceTest` failure reproduces independently.
+> - `make check` reached the expected plugin-generation fence. Integration must perform the standard three-package generation bump and single install; I did not bump or install per subagent restrictions.
+>
+> I used the tsift navigation workflow and architecture-first runbook to centralize retry policy instead of adding another local string-based exception.
+<!-- agent-doc-subagent-completion key=684d9a9501b8d594bea50e5f5bfa0c4ff0b26673804eb5981b25714bb23349fd -->
+
+### Re: Subagent completed: `subagent:lazily-generation-fence` returned work for queue item “Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.” — agent-doc
+<!-- agent-doc-subagent-response sha256=2e5aa640d56abd03e807561434ee3a98816aa500401f45fcfc2e623f80bcdc1c -->
+> **Subagent response:**
+>
+> Queue investigation result: current untouched origin/main (3a1d3cb8dcac7f9e5633b2bc58940e7701e57dde) is already fixed. The 0.46.0 update exposed a test-only source-compatibility mistake: the tests accessed lazily-kt internal `nodeGeneration`; implementation stale-disposal behavior was correct. Main already contains e93a732b827d76e5f771e88ad48d0ed45af95cec (`test(jetbrains): use published lazily handle API`), which replaces that assertion with public `nodeId` collision proof and retains the behavioral stale-disposal assertions in both classic and 262 tests. Fresh local results: classic LazilyGenerationFenceTest 1/1 passed; 262 backend LazilyGenerationFenceTest 1/1 passed. Latest main CI run 39905477930 at this exact HEAD is green. Worktree is clean; no new files/commit/push were warranted (branch fix/lazily-generation-fence-stale remains at origin/main).
+<!-- agent-doc-subagent-completion key=76807555334598365a5811ef9681a75e174d8f6b99047f8dbea5b6f07879aab0 -->
+
+### Re: Subagent completed: `subagent:sdk-compact-cycle` returned work for queue item “Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.” — agent-doc
+<!-- agent-doc-subagent-response sha256=d113c9a730b5ae46cd5e98b065f3dee19726d916e55bdfd718c14bc3f6607dd1 -->
+> **Subagent response:**
+>
+> Completed queue item on dedicated worktree `/home/brian/worktrees/agent-doc-sdk-compact-cycle-closeout-20261023`.
+>
+> Branch: `fix/sdk-compact-cycle-closeout-20261023`
+> Commit: `59a5bfb6d9802695eb84596b5911bdd81eb57be9`
+> Pushed: `origin/fix/sdk-compact-cycle-closeout-20261023`
+> Worktree clean.
+>
+> Root cause/fix: retained captured-response settlement recognized only inline response text. A valid compact target therefore looked like a dropped/superseded response even though its referenced compact archive contained the exact capture, so the pending response write held Compact Exchange closeout. Added one archive-aware semantic proof helper and used it before lineage classification/rebase/replay in both retained settlement and projected-save settlement. Preserved the existing compact pending-write ordering guard; archived text is not replayed into the live exchange. Updated compact spec accordingly.
+>
+> Files changed:
+> - `Cargo.lock`
+> - `agent-doc-document-realtime-io/Cargo.toml`
+> - `agent-doc-document-realtime-io/src/lib.rs`
+> - `specs/07-core-commands.md`
+>
+> Tests:
+> - focused regression: 1 passed, 0 failed, 194 filtered
+> - affected crate: 195 passed, 0 failed
+> - `make check` Rust Nextest stage: 11,445 passed, 0 failed, 177 skipped
+> - docs audit: no blocking issues (29 mtime advisories)
+> - overall `make check`: FAILED only at unchanged JetBrains `LazilyGenerationFenceTest` (933 passed, 1 failed); targeted rerun reproduces the same failure. It asserts a stale lazily-kt handle cannot dispose a recycled-slot replacement; no changed file touches JetBrains/lazily-kt.
+> - latest `gh run list --workflow CI --limit 1`: completed success, run 39905477930 on main.
+>
+> Per coordinator rule, I did not install or restart IDEA and did not touch the agent-doc session document.
+>
+> Proposed follow-up queue head (after `main`), if not already tracked:
+> `Investigate the reproducible JetBrains LazilyGenerationFenceTest failure against lazily-kt 0.46.0; make check reports 933 plugin tests passed and this unchanged dependency-contract test failed.`
+<!-- agent-doc-subagent-completion key=129e51c9396e0f9342f375d4aa8e194556030cc10eac5a0de04f3c3cd76ddd43 -->
+> **Chat prompt (#chatprompt:6fd345ebfc42):** Should I restart Idea?
+
+### Re: IDEA restart and background thrash — gpt-5 · 2026-10-23T10:09:-04:00
+
+You already restarted IDEA, and that mitigated the live incident. No further restart is needed while IDEA remains responsive and cool: the replacement IDEA process settled from roughly 5% to 3% to 2% CPU, and the sdk-demo controller settled at 0%. For any future restart, save or copy unsaved buffers first; do not manually recycle controllers while retained delivery is in flight.
+
+> **Queue prompt:** agent-doc process is thrashing in the background along with Idea.
+
+The recurring cause was fixed. A rejected retained CRDT pull was being counted as useful progress before any visible projection, so the controller immediately rescheduled work and bypassed its 100 ms to 30 s no-op backoff. Progress is now recorded only after an accepted baseline and queued or recovered visible projection; rejected or fail-closed redelivery returns zero progress and backs off. The fix is integrated as `197a450b0c`.
+
+> **Queue prompt:** Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+
+### Re: Ambiguous attach retry control — gpt-5 · 2026-10-23T10:09:-04:00
+
+Ambiguous retained or re-register/reseed attachment now enters an operator-evidence pause instead of an automatic retry loop. Refresh cannot bypass the pause, closing the refused unattached editor releases liveness so detached repair remains reachable, and genuinely transient failures still back off and retry. The fix is integrated as `d1424feed1`.
+
+> **Queue prompt:** Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.
+
+### Re: Compact-cycle completion — gpt-5 · 2026-10-23T10:09:-04:00
+
+Compact closeout now accepts an exact retained response from the compact archive before lineage classification, rebase, or replay. Ordering protection remains intact, and archived response text is never reinserted inline. The fix is integrated as `0e2b08a324`.
+
+> **Queue prompt:** Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.
+
+### Re: Lazily generation fence — gpt-5 · 2026-10-23T10:09:-04:00
+
+The failure was integration-location-specific, not a test-ordering defect. The classic JetBrains build silently substituted an adjacent dirty lazily-kt v0.44.0 checkout for the pinned v0.46.0 dependency. Local source substitution now requires the explicit `AGENT_DOC_LAZILY_KT_DIR` override, matching the modular build. Default builds honor v0.46.0; explicit development overrides still work. The systemic fix is integrated as `572350dcdc`.
+
+> **Queue prompt:** Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+
+### Re: GitHub issue watch — gpt-5 · 2026-10-23T10:09:-04:00
+
+Found one newly untracked issue and added it to both the backlog and priority queue: [#363, “0.35.546: agent-doc upgrade fails because SHA256SUMS is 404”](https://github.com/btakita/agent-doc/issues/363).
+
+### Re: Integration and verification — gpt-5 · 2026-10-23T10:09:-04:00
+
+All fixes were integrated on `integrate/thrash-compact-20261023` and pushed to origin. The branch contains six clean commits, including the required JetBrains package-generation bumps and synchronized runbook bundles. The final authoritative `make check` passed with 11,445 Rust tests passing and 177 skipped, the classic JetBrains suite passed 937 of 937, artifact verification passed, and `make install` completed successfully.
+
+The CLI, native library, IntelliJ IDEA plugin, Rider plugin, and VSCodium extension were installed. IDEA accepted the plugin through dynamic upgrade, so no additional restart is required. One native generation reload was deferred because this document is mid-cycle and will publish at the next idle boundary. GitHub had not created a workflow run for the branch at the time of closeout.
+
+The tsift workflow kept integration isolated in a clean worktree and bounded the diff and test evidence. The exchange remains above the advisory size threshold; the active queue prevented compaction during this cycle.
+<!-- agent:boundary:63dc6c4a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -453,14 +592,18 @@ The operator explicitly requested queue cleanup. The removed historical rows all
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#gh363]
 - ☑️ [#subagent:gh355-cleanup-rerun#3] #gh-issue https://github.com/btakita/agent-doc/issues/355
-- 🚧 [#subagent:sdk-compact-replica#1] Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- ☑️ [#subagent:sdk-compact-replica#2] Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- ☑️ [#subagent:idea-thrashing#1] agent-doc process is thrashing in the background along with Idea.
+- ☑️ [#subagent:lazily-generation-fence#1] Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.
+- ☑️ [#subagent:sdk-compact-cycle#1] Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.
 <!-- /agent:queue -->
 
 ## Queue: Issues
 
 <!-- agent:queue id=issues loop interval=1h -->
-- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:queue -->
 
 ## Todo
@@ -471,6 +614,7 @@ The operator explicitly requested queue cleanup. The removed historical rows all
 
 ## Backlog
 <!-- agent:backlog priority queue -->
+- [ ] [#gh363] #gh-fix https://github.com/btakita/agent-doc/issues/363
 <!-- /agent:backlog -->
 
 ## Review

@@ -417,6 +417,20 @@ fn format_owner_annotation(owner: &QueueOwnerProjection) -> String {
     )
 }
 
+/// Recover the narrow torn projection produced when editor convergence drops
+/// the closing `]` between a duplicated owner annotation and lifecycle marker.
+/// The exact owner/generation is required as positive durable evidence, so an
+/// operator-authored lookalike is never stripped speculatively.
+fn strip_torn_duplicate_owner_lifecycle_prefix<'a>(
+    text: &'a str,
+    owner: &QueueOwnerProjection,
+) -> Option<&'a str> {
+    let annotation = format_owner_annotation(owner);
+    let torn = annotation.strip_suffix(OWNER_ANNOTATION_CLOSE)?;
+    let after_owner = text.strip_prefix(torn)?.trim_start();
+    strip_lifecycle_prefix(after_owner)
+}
+
 /// Read the first exact-attempt owner annotation from a leading projection
 /// prefix sequence.
 pub fn owner_projection(text: &str) -> Option<QueueOwnerProjection> {
@@ -459,8 +473,24 @@ pub fn apply_owner_projection(text: &str, owner: Option<&QueueOwnerProjection>) 
     let mut rest = content.trim_start();
     let mut prefixes = Vec::<String>::new();
     let mut legacy_operator_ids = Vec::<String>::new();
+    let mut observed_owner = None::<QueueOwnerProjection>;
     loop {
-        if let Some((_, after)) = strip_owner_annotation_prefix(rest) {
+        if let Some((projected_owner, after)) = strip_owner_annotation_prefix(rest) {
+            observed_owner.get_or_insert(projected_owner);
+            rest = after.trim_start();
+            continue;
+        }
+        let repaired = observed_owner
+            .as_ref()
+            .and_then(|projected_owner| {
+                strip_torn_duplicate_owner_lifecycle_prefix(rest, projected_owner)
+            })
+            .or_else(|| {
+                owner.and_then(|projected_owner| {
+                    strip_torn_duplicate_owner_lifecycle_prefix(rest, projected_owner)
+                })
+            });
+        if let Some(after) = repaired {
             rest = after.trim_start();
             continue;
         }
@@ -725,6 +755,7 @@ pub fn strip_in_progress_marker(text: &str) -> String {
     let mut rest = text.trim();
     let mut kept_prefixes: Vec<String> = Vec::new();
     let mut legacy_operator_ids: Vec<String> = Vec::new();
+    let mut observed_owner = None::<QueueOwnerProjection>;
     loop {
         let trimmed = rest.trim_start();
         if let Some((id, after_marker)) = strip_operator_action_prefix(trimmed) {
@@ -738,7 +769,15 @@ pub fn strip_in_progress_marker(text: &str) -> String {
             rest = after_marker.trim_start();
             continue;
         }
-        if let Some((_, after_marker)) = strip_owner_annotation_prefix(trimmed) {
+        if let Some((owner, after_marker)) = strip_owner_annotation_prefix(trimmed) {
+            observed_owner.get_or_insert(owner);
+            rest = after_marker.trim_start();
+            continue;
+        }
+        if let Some(after_marker) = observed_owner
+            .as_ref()
+            .and_then(|owner| strip_torn_duplicate_owner_lifecycle_prefix(trimmed, owner))
+        {
             rest = after_marker.trim_start();
             continue;
         }
@@ -1345,6 +1384,30 @@ mod tests {
             );
             assert_eq!(strip_priority_markers(legacy), "fix sdk demo");
         }
+    }
+
+    #[test]
+    fn torn_duplicate_owner_lifecycle_projection_repairs_only_with_owner_evidence() {
+        let owner = QueueOwnerProjection {
+            owner: "subagent:queue-state-fix".to_string(),
+            generation: 3,
+        };
+        let prompt = "Several queue items have the wrong state";
+        let torn =
+            format!("🟡 [#subagent:queue-state-fix#3] [#subagent:queue-state-fix#3📥 {prompt}");
+
+        assert_eq!(strip_in_progress_marker(&torn), prompt);
+        assert_eq!(
+            apply_owner_projection(&torn, Some(&owner)),
+            format!("🟡 [#subagent:queue-state-fix#3] {prompt}")
+        );
+
+        let unproven = format!("[#subagent:queue-state-fix#3📥 {prompt}");
+        assert_eq!(
+            apply_owner_projection(&unproven, None),
+            unproven,
+            "a lookalike without durable or preceding owner evidence is operator text"
+        );
     }
 
     #[test]

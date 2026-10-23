@@ -9031,6 +9031,32 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn runtime_projection_repairs_torn_duplicate_owner_before_identity_matching() {
+        let prompt = "Several queue items have the wrong state";
+        let body =
+            format!("- 🟡 [#subagent:queue-state-fix#3] [#subagent:queue-state-fix#3📥 {prompt}\n");
+        let entries = parse(&body).unwrap();
+        let projected = set_prompt_runtime_projections(
+            &entries,
+            &[QueueRowProjection {
+                text: prompt.to_string(),
+                marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Claimed,
+                owner: Some(agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: "subagent:queue-state-fix".to_string(),
+                    generation: 3,
+                }),
+                reopen_completed: false,
+            }],
+        )
+        .expect("the repaired row should match its durable claim identity");
+
+        assert_eq!(
+            render(&projected),
+            format!("- 🟡 [#subagent:queue-state-fix#3] {prompt}\n")
+        );
+    }
 }
 
 /// Redacted fixture for `#multilinequeuehead`: the queue shape of the live

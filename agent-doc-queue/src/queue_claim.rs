@@ -30,16 +30,17 @@
 //! carries it. Each claim stores a [`ClaimAnchor`] (the queue's heads and the
 //! claimed line indexes), and [`QueueClaimLedger::follow_edits`] aligns it
 //! with the live heads by the edit rule mid-turn steering reports
-//! ([`crate::queue_head_alignment`]). An in-place edit of a claimed free-text
-//! line, such as a corrected URL, carries the claim to the edited line, and
-//! steering forwards that edit to the claim's owner. Observed 2026-10-15 on
+//! ([`crate::queue_head_alignment`]). Any structurally aligned replacement of
+//! a claimed row, from a corrected URL through a complete prose or tracked-id rewrite,
+//! carries the claim to the edited line, and steering forwards that edit to
+//! the claim's owner. Observed 2026-10-15 on
 //! agent-doc-bugs.md: the operator corrected `…/agent-foc/issues/272` to
 //! `…/agent-doc/issues/272`; the text-keyed claim matched nothing, was pruned
-//! at closeout, and the edited line was offered to a second worker. A line
-//! with a different `#id`, or a claimed line deleted while a similar one is
-//! added elsewhere, is a different task and does not inherit the claim. The
-//! narrow exception is an id-backed mirror replaced by the exact tracked item
-//! prose captured with the claim (`#claimtrackedalias`).
+//! at closeout, and the edited line was offered to a second worker. A claimed
+//! line deleted while a similar one is added elsewhere is still distinct and
+//! does not inherit the claim. The narrow cross-hunk exception is an id-backed
+//! mirror replaced by the exact tracked item prose captured with the claim
+//! (`#claimtrackedalias`).
 //!
 //! # Lifetime
 //!
@@ -1310,9 +1311,10 @@ impl QueueClaimLedger {
     /// [`ClaimAnchor`] is aligned with `live_heads` by the rule mid-turn
     /// steering uses to report `previous` -> `verbatim` edits
     /// ([`crate::queue_head_alignment::pair_queue_heads`]): an unchanged or
-    /// moved line pairs by identity, an in-place edit of free text pairs by
-    /// similarity, and a line with a different `#id`, or a line deleted in one
-    /// place and added in another, does not pair. A live (unexpired) claim
+    /// moved line pairs by identity, and an equal-cardinality replace hunk pairs
+    /// still-unmatched rows at the same structural offset even when their text
+    /// or `#id` changes completely. A line deleted in one place and added in
+    /// another does not pair. A live (unexpired) claim
     /// whose identity is no longer a live head follows the line its anchored
     /// line(s) became, so `#gh-fix …/agent-foc/issues/272` edited into
     /// `#gh-fix …/agent-doc/issues/272` stays claimed by the same owner and is
@@ -2952,10 +2954,10 @@ mod tests {
         assert_eq!(ledger.claims[0].identity, claim_identity(fixed));
     }
 
-    /// A deleted claimed line closes its claim, and a line with a different
-    /// `#id`, or a similar line added in another place, never inherits it.
+    /// A deleted claimed line closes its claim, while an in-place rewrite keeps
+    /// the attempt. A similar line added in another place never inherits it.
     #[test]
-    fn a_claim_does_not_follow_a_deleted_line_or_a_different_id() {
+    fn a_claim_follows_any_in_place_rewrite_but_not_a_distant_add() {
         let line = "#gh-fix https://x.test/issues/7";
         let mut ledger = QueueClaimLedger::default();
         ledger.claim(line, "subagent:gh7", 100, 3600);
@@ -2974,11 +2976,21 @@ mod tests {
         let mut ids = QueueClaimLedger::default();
         ids.claim("do [#a]", "subagent:a", 100, 3600);
         ids.follow_edits(100, &strings(&["inline", "do [#a]"]));
-        assert!(
-            ids.follow_edits(110, &strings(&["inline", "do [#b]"]))
-                .is_empty(),
-            "a different id is a different item"
+        assert_eq!(
+            ids.follow_edits(110, &strings(&["inline", "do [#b]"])),
+            vec![("do [#a]".to_string(), "do [#b]".to_string())],
+            "an in-place id change steers the existing worker"
         );
+        assert_eq!(ids.claims[0].owner, "subagent:a");
+        assert_eq!(ids.claims[0].item_text, "do [#b]");
+
+        let rewritten = "replace this with a wholly different request";
+        assert_eq!(
+            ids.follow_edits(120, &strings(&["inline", rewritten])),
+            vec![("do [#b]".to_string(), rewritten.to_string())]
+        );
+        assert_eq!(ids.claims[0].owner, "subagent:a");
+        assert_eq!(ids.claims[0].item_text, rewritten);
     }
 
     /// `#claimtrackedalias` (sdk-demo.md, 2026-10-21): a running worker held

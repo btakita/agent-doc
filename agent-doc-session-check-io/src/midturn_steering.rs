@@ -3801,8 +3801,8 @@ mod tests {
     /// annotates a CLAIMED `#gh-fix` head while the coordinator is idle. The
     /// claim follows the edit, the idle wake fires for it, the woken cycle's
     /// seed keeps it pending, and its first hook says "forward to owner", not
-    /// "dispatch a new subagent". A further trailing-period edit routes the
-    /// same way with no re-claim.
+    /// "dispatch a new subagent". Further edits, including a complete rewrite,
+    /// route the same way with no re-claim.
     #[test]
     fn claimed_head_edit_wakes_the_idle_coordinator_and_forwards_to_owner() {
         let dir = tempfile::tempdir().unwrap();
@@ -3893,6 +3893,27 @@ mod tests {
         let stored = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
         assert_eq!(stored.claims.len(), 1, "{stored:?}");
         assert_eq!(stored.claims[0].item_text, format!("{annotated_head}."));
+
+        // A complete same-row rewrite is still steering for the existing
+        // attempt, not unregister + fresh dispatch.
+        let replacement = "replace this claimed work with a wholly different request";
+        let rewritten = period.replace(&format!("{annotated_head}."), replacement);
+        std::fs::write(&file, &rewritten).unwrap();
+        backdate(&file);
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(hook.items.len(), 1, "{hook:?}");
+        assert_eq!(
+            hook.items[0].dispatch,
+            core::SteeringDispatch::ForwardToOwner,
+            "{hook:?}"
+        );
+        assert_eq!(hook.items[0].owner.as_deref(), Some("subagent:ghfix126"));
+        assert_eq!(hook.items[0].verbatim, replacement);
+        let stored =
+            agent_doc_queue_io::queue_claim::load_ledger_following(&file, &rewritten).unwrap();
+        assert_eq!(stored.claims.len(), 1, "{stored:?}");
+        assert_eq!(stored.claims[0].owner, "subagent:ghfix126");
+        assert_eq!(stored.claims[0].item_text, replacement);
     }
 
     /// `#steerbaselineabsorb` (agent-doc-bugs.md, 2026-10-04): the operator

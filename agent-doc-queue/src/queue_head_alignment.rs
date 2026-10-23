@@ -13,10 +13,11 @@
 //!    ([`queue_head_identity`]) aligns the untouched run; a head whose identity
 //!    survives outside that run (a moved line) still pairs with itself.
 //! 2. **Edit.** Inside each Myers replace hunk, the lines left without an
-//!    identity partner are paired greedily by text similarity (containment, or
-//!    a character ratio of at least 0.5). Id-backed heads never pair this way:
-//!    a tracked id IS the item, so `do [#a]` -> `do [#b]` is a different item
-//!    however alike the text.
+//!    identity partner are paired first by text similarity. When a replace
+//!    hunk keeps its row count, remaining rows at the same structural offset
+//!    pair too. Such a row replacement is operator steering even when its prose
+//!    or tracked id changes completely; it is not a deletion plus a new
+//!    registration. Only an old row with no same-slot successor is a deletion.
 //!
 //! A line deleted in one hunk and a line added in another never pair, so a
 //! consumed head followed by an operator addition elsewhere is a delete plus an
@@ -44,7 +45,7 @@ fn identity_key(norm: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct QueueHeadPairing {
     /// Per new head: the old head it continues, and whether the pair is an
-    /// edit (similarity-paired) rather than an identity match.
+    /// edit (replace-hunk paired) rather than an identity match.
     pub pair_of_new: Vec<Option<(usize, bool)>>,
     /// Per old head: whether some new head continues it.
     pub old_paired: Vec<bool>,
@@ -122,19 +123,27 @@ pub fn pair_queue_heads(old: &[String], new: &[String]) -> QueueHeadPairing {
     }
 }
 
-/// Greedy best-match pairing of a replaced block: `(old_offset, new_offset)`
-/// for every pair whose texts are similar enough to be one edited item
-/// (containment, or a character similarity ratio of at least 0.5).
+/// Pair a replaced block as row mutations: `(old_offset, new_offset)`.
+///
+/// Similar free-text rows pair first so adjacent edits keep the most useful
+/// provenance. When the replace hunk keeps the same row count, every remaining
+/// old/new row at the same structural offset then pairs regardless of text or
+/// tracked id. Already-paired rows are never skipped over to manufacture a
+/// match: that would turn a deletion plus an adjacent addition into an edit.
+/// This fallback is the fail-safe distinction between mutation and removal: an
+/// edited claimed row keeps its owner/generation and is forwarded as steering;
+/// only an old row with no same-slot successor is deleted and eligible for
+/// cancellation.
 pub fn pair_replaced_lines(old: &[String], new: &[String]) -> Vec<(usize, usize)> {
     let mut scored: Vec<(f32, usize, usize)> = Vec::new();
     for (o, old_text) in old.iter().enumerate() {
         let old_identity = queue_head_identity(old_text);
         for (n, new_text) in new.iter().enumerate() {
-            // A tracked id IS the item's identity: two different ids are two
-            // different items however alike their text (`do [#ridernavp4]`
-            // vs `do [#ridernavp6route]`), and neither is the same item as a
-            // free-text line. Only free text, whose identity is its text, can
-            // be edited into a different key.
+            // Tracked ids do not participate in fuzzy matching: identity
+            // matches were already paired above, and text similarity must not
+            // move one id-backed row onto another. If both rows remain in the
+            // same replace hunk, the structural fallback below still treats
+            // their same-slot replacement as steering.
             if old_identity.is_id_backed() || queue_head_identity(new_text).is_id_backed() {
                 continue;
             }
@@ -159,6 +168,16 @@ pub fn pair_replaced_lines(old: &[String], new: &[String]) -> Vec<(usize, usize)
     for (_, o, n) in scored {
         if !pairs.iter().any(|(po, pn)| *po == o || *pn == n) {
             pairs.push((o, n));
+        }
+    }
+    if old.len() == new.len() {
+        for slot in 0..old.len() {
+            if !pairs
+                .iter()
+                .any(|(old_slot, new_slot)| *old_slot == slot || *new_slot == slot)
+            {
+                pairs.push((slot, slot));
+            }
         }
     }
     pairs
@@ -206,14 +225,23 @@ mod tests {
     }
 
     #[test]
-    fn a_different_id_or_a_distant_add_is_not_an_edit() {
+    fn every_same_hunk_replacement_is_an_edit() {
         let pairing = pair_queue_heads(&heads(&["do [#a]"]), &heads(&["do [#b]"]));
         assert_eq!(
             pairing.new_index_of(0),
-            None,
-            "a different id is a different item"
+            Some(0),
+            "changing a tracked id in place steers the existing owner"
         );
 
+        let pairing = pair_queue_heads(
+            &heads(&["rewrite the deployment guide"]),
+            &heads(&["replace this with a wholly different request"]),
+        );
+        assert_eq!(pairing.pair_of_new, vec![Some((0, true))]);
+    }
+
+    #[test]
+    fn a_distant_add_is_not_an_edit() {
         // The claimed line is deleted and a similar line is added elsewhere:
         // two hunks, never one edit.
         let old = heads(&["inline task", "#gh-fix https://x.test/issues/7"]);
@@ -221,6 +249,16 @@ mod tests {
         let pairing = pair_queue_heads(&old, &new);
         assert_eq!(pairing.new_index_of(1), None);
         assert_eq!(pairing.new_index_of(0), Some(1));
+    }
+
+    #[test]
+    fn structural_fallback_never_skips_over_a_semantic_pair() {
+        let old = heads(&["current task", "later work"]);
+        let new = heads(&["later work, plus docs", "new subagent work"]);
+        let pairing = pair_queue_heads(&old, &new);
+        assert_eq!(pairing.pair_of_new[0], Some((1, true)));
+        assert_eq!(pairing.pair_of_new[1], None);
+        assert_eq!(pairing.new_index_of(0), None);
     }
 
     #[test]

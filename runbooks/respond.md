@@ -180,8 +180,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   it). The wake reads without consuming, so the woken turn still receives the
   items through preflight, the hook, or the boundary report. Items a worker
   claimed (`agent-doc queue claim`) never wake the session, but an edit of a
-  claimed item's text does (`forward_to_owner`), and deleting a claimed row
-  wakes it with `cancel_claimed`. Steering goes only to the
+  claimed item's text does (`forward_to_owner`) even for a complete prose or
+  tracked-id rewrite; the exact owner/generation remains registered. Deleting
+  a claimed row with no structural successor wakes it with `cancel_claimed`.
+  Steering goes only to the
   turn that owns the document: a subagent's tool calls neither receive nor
   consume it (`#steerowneronly`). Cursor has no
   route-owned pane, so it is never woken; it receives steering at its next

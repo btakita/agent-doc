@@ -1035,7 +1035,7 @@ fn queue_alignment(
         Some((o, _)) if old[o] == new[n].norm => {
             alignment.events.push(QueueEvent::Keep(old[o].clone()));
         }
-        // Same identity with different text, or a similarity-paired edit.
+        // Same identity with different text, or a replace-hunk row mutation.
         Some((o, _)) => edit(alignment, o, n),
         None => insert(alignment, n),
     };
@@ -1412,8 +1412,8 @@ fn item_header_suffix(item: &SteeringItem) -> String {
 /// A claimed item that is not this turn's own current item becomes
 /// [`SteeringDispatch::ForwardToOwner`] with its owner: an edit is forwarded
 /// to the running worker instead of offered as a NEW subagent dispatch. The
-/// edit's previous text is consulted too, so a claim that could not follow
-/// (an ambiguous edit) still routes to its owner.
+/// edit's previous text is consulted too, so a legacy claim without an anchor
+/// still routes conservatively to its owner.
 pub fn apply_claim_owners(items: &mut [SteeringItem], owner_of: impl Fn(&str) -> Option<String>) {
     for item in items.iter_mut() {
         if item.source != SteeringSource::Queue || item.current_item {
@@ -1462,8 +1462,8 @@ pub fn apply_claim_attempts(
 /// attempt for the removed identity. Identity pairing is the same pairing used
 /// for edits, and cancellation is withheld while the same identity remains
 /// live (for example one of two identical rows was removed). This is the
-/// fail-closed boundary for ambiguous edits: uncertain lineage never kills a
-/// worker.
+/// fail-closed boundary for removals: same-hunk row replacements are edits,
+/// while uncertain cross-hunk lineage never kills a worker.
 pub fn append_claimed_queue_removals(
     items: &mut Vec<SteeringItem>,
     watermark: &SteeringWatermark,

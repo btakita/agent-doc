@@ -231,6 +231,12 @@ fn sync_by_reference_fails_closed_without_a_usable_source() {
         "{refused}"
     );
     assert!(
+        refused.contains(
+            "restarting only the Remote Dev backend cannot replace its already-loaded frontend module"
+        ),
+        "{refused}"
+    );
+    assert!(
         refused.contains(agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_READINESS),
         "{refused}"
     );

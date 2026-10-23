@@ -74,5 +74,12 @@ class BackendGuestSelectionFallbackResumeTest {
         assertTrue(diagnostic.contains("Remote Dev backend"), diagnostic)
         assertTrue(diagnostic.contains("verify both sides report that exact plugin version"), diagnostic)
         assertTrue(diagnostic.contains("restart both"), diagnostic)
+        assertTrue(diagnostic.contains("including the JetBrains Client/Gateway process"), diagnostic)
+        assertTrue(
+            diagnostic.contains(
+                "restarting only the Remote Dev backend cannot replace its already-loaded frontend module",
+            ),
+            diagnostic,
+        )
     }
 }

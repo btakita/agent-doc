@@ -34,7 +34,9 @@ internal const val FRONTEND_AUTHORITY_UNAVAILABLE_READINESS =
     "frontend_authority_absent_or_generation_mismatched"
 internal const val FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY =
     "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, " +
-        "verify both sides report that exact plugin version, restart both, then retry Run Agent Doc"
+        "verify both sides report that exact plugin version, restart both (including the JetBrains Client/Gateway " +
+        "process; restarting only the Remote Dev backend cannot replace its already-loaded frontend module), " +
+        "then retry Run Agent Doc"
 
 internal fun frontendAuthorityUnavailableDiagnostic(clientId: String, type: ClientType): String =
     "[layout-sync] frontend layout publisher unavailable client=$clientId type=$type " +

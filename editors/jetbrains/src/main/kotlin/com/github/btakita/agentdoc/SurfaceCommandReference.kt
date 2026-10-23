@@ -23,10 +23,17 @@ import com.google.gson.JsonParser
  */
 internal object SurfaceCommandReference {
     const val FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY =
-        "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, restart both"
+        "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, " +
+            "verify both sides report that exact plugin version, restart both"
+
+    const val FRONTEND_AUTHORITY_UNAVAILABLE_READINESS =
+        "frontend_authority_absent_or_generation_mismatched"
 
     const val UNKNOWN_LAYOUT_MESSAGE =
-        "Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: $FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY, then retry Sync Tmux Layout."
+        "Remote Dev frontend structural routing is not ready " +
+            "($FRONTEND_AUTHORITY_UNAVAILABLE_READINESS; flat_evidence_has_no_column_geometry); " +
+            "the retained tmux layout was not changed. Remedy: $FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY, " +
+            "then retry Sync Tmux Layout."
 
     const val SURFACE_LAYOUT_REFERENCE_CAPABILITY = "surface_layout_reference_v1"
 

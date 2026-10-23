@@ -148,7 +148,7 @@ class SurfaceCommandReferenceTest {
     @Test
     fun `controller layout refusals keep actionable plugin messages`() {
         assertEquals(
-            "Remote Dev provided flat editor evidence without column geometry (flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, restart both, then retry Sync Tmux Layout.",
+            "Remote Dev frontend structural routing is not ready (frontend_authority_absent_or_generation_mismatched; flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both, then retry Sync Tmux Layout.",
             SurfaceCommandReference.refusalMessage(
                 "sync_tmux_layout rejected: surface_reference_unknown_layout: Editor split could not be read; ...",
             ),
@@ -156,6 +156,11 @@ class SurfaceCommandReferenceTest {
         assertTrue(
             SurfaceCommandReference.UNKNOWN_LAYOUT_MESSAGE.contains(
                 SurfaceCommandReference.FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY,
+            ),
+        )
+        assertTrue(
+            SurfaceCommandReference.UNKNOWN_LAYOUT_MESSAGE.contains(
+                SurfaceCommandReference.FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
             ),
         )
         assertEquals(

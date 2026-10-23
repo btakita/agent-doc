@@ -35648,7 +35648,9 @@ fn publish_pane_layout_desired_invocation_in_lane(
         let retained = retained.as_ref().context(format!(
             "sync_tmux_layout deferred: incomplete frontend layout has no authoritative snapshot; \
              reason=flat_evidence_has_no_column_geometry; frontend_publisher=unavailable; \
+             frontend_readiness=blocked; frontend_readiness_reason={}; \
              remedy={}, then retry Run Agent Doc",
+            agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
             agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY,
         ))?;
         invocation.columns = retained.invocation.columns.clone();
@@ -35670,8 +35672,10 @@ fn publish_pane_layout_desired_invocation_in_lane(
             anyhow::bail!(
                 "sync_tmux_layout refused before layout publication: focused document `{focus}` is absent from the retained desired columns; \
                  reason=flat_evidence_has_no_column_geometry; frontend_publisher=unavailable; \
-                 remedy=install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and \
-                 the Remote Dev backend, restart both, then retry Run Agent Doc"
+                 frontend_readiness=blocked; frontend_readiness_reason={}; \
+                 remedy={}, then retry Run Agent Doc",
+                agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
+                agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY,
             );
         }
         anyhow::bail!(
@@ -48386,6 +48390,12 @@ mod tests {
             refusal.contains("reason=flat_evidence_has_no_column_geometry"),
             "{refusal}"
         );
+        assert!(
+            refusal.contains(
+                "frontend_readiness=blocked; frontend_readiness_reason=frontend_authority_absent_or_generation_mismatched"
+            ),
+            "{refusal}"
+        );
         assert!(successor_without_beta.pane_layout_desired().is_none());
 
         let ops = fixture.ops_log();
@@ -48432,6 +48442,12 @@ mod tests {
             refusal.contains("reason=flat_evidence_has_no_column_geometry"),
             "{refusal}"
         );
+        assert!(
+            refusal.contains(
+                "frontend_readiness=blocked; frontend_readiness_reason=frontend_authority_absent_or_generation_mismatched"
+            ),
+            "{refusal}"
+        );
         assert!(successor.pane_layout_desired().is_none());
 
         let ops = fixture.ops_log();
@@ -48465,6 +48481,12 @@ mod tests {
         let refusal = format!("{refusal:#}");
         assert!(
             refusal.contains("reason=flat_evidence_has_no_column_geometry"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains(
+                "frontend_readiness=blocked; frontend_readiness_reason=frontend_authority_absent_or_generation_mismatched"
+            ),
             "{refusal}"
         );
         assert!(
@@ -48511,6 +48533,12 @@ mod tests {
         let refusal = format!("{refusal:#}");
         assert!(
             refusal.contains("reason=flat_evidence_has_no_column_geometry"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains(
+                "frontend_readiness=blocked; frontend_readiness_reason=frontend_authority_absent_or_generation_mismatched"
+            ),
             "{refusal}"
         );
         assert!(

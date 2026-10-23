@@ -466,6 +466,18 @@ or left-to-right assignment, so a one-for-one or complete-width replacement is
 still refused rather than filling tmux slots from an unordered visible set.
 Manual `Sync Tmux Layout` likewise refuses unknown geometry with `surface_reference_unknown_layout`
 and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence.
+That flat evidence is the causal boundary from GH #360: the backend knew only an
+unordered selected-file set while the missing frontend module was the sole
+source of editor column membership and order. Combining the set with live tmux
+width would guess both membership and left-to-right assignment, which is why the
+route must not enter a structural fallback. After the bounded frontend startup
+grace, the condition is reported as `readiness=blocked` with
+`readiness_reason=frontend_authority_absent_or_generation_mismatched`; structure
+stays unchanged and the backend fallback remains focus-only for an already-live
+document. Recovery requires the same modular ZIP generation on both peers,
+verification that both report that exact plugin version, and both processes
+restarted. Retrying before that readiness invariant holds cannot create the
+missing authority.
 When passive focus escalation cannot use a positive frontend snapshot, its
 receipt is `focus_deferred:<cause>` and is terminal for that observation: it is
 not retained as a failed effect, and the plugin must not translate it into a
@@ -476,7 +488,7 @@ the original actionable refusal (GH #357).
 If no frontend publisher connects, the backend and route failure identify it as
 unavailable and give the working local/custom-install remedy: install the same
 modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend,
-restart both, then retry.
+verify both sides report that exact plugin version, restart both, then retry.
 
 **Cross-document child-route boundary:** A route with no layout columns that is
 invoked from explicit live tmux process context inside a pane owned by another

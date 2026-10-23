@@ -1062,6 +1062,16 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   controller-stream `input_required` state. JetBrains shows an important notification and editor
   banner with a `Focus Agent Terminal` action on the false-to-true transition; it does not poll or
   become a second answer authority.
+- The important input-required notification is a current-state projection, not one notice per
+  plugin generation. Its owning refresher retracts it when the document leaves `input_required`,
+  while a project-notification-bus observer expires the preceding equivalent notice whenever a
+  replacement is published. The observer also reconciles the platform's existing project notices
+  once at startup. Thus incompletely retired dynamic-plugin generations may still receive the same
+  controller frame, but they cannot stack equivalent input-required balloons; disposing an
+  observer only forgets foreign handles and does not retract another generation's live notice.
+  The refresher and both of its project-bus connections belong to the current project
+  initialization's disposable scope, so an explicit project/generation retirement disconnects
+  the observer as well as closing its controller subscriptions (`#jbinputrequireddedupe`).
 - A queued Clear Session Context the supervisor later drops (a newer prompt started before the
   turn ended) arrives as controller-stream `deferred_clear_superseded`. `TurnStateBannerRefresher`
   shows one information notification per dropped `clear_epoch` ("Queued clear not sent") with a

@@ -116,4 +116,88 @@ class InputRequiredNotificationsTest {
         assertFalse(subject.isLive("/docs/contracts.md"))
         assertFalse(subject.isLive("/docs/backend.md"))
     }
+
+    @Test
+    fun `project bus keeps only the newest equivalent notification across plugin generations`() {
+        val expired = mutableListOf<Handle>()
+        val subject =
+            NotificationBusDeduplicator<Handle, String>(
+                keyOf = { "Agent input required for session.md" },
+                expire = {
+                    it.expired = true
+                    expired.add(it)
+                },
+            )
+        val firstGeneration = Handle(1)
+        val secondGeneration = Handle(2)
+        val thirdGeneration = Handle(3)
+
+        assertFalse(subject.observe(firstGeneration))
+        assertTrue(subject.observe(secondGeneration))
+        assertTrue(subject.observe(thirdGeneration))
+
+        assertEquals(listOf(firstGeneration, secondGeneration), expired)
+        assertTrue(firstGeneration.expired)
+        assertTrue(secondGeneration.expired)
+        assertFalse("the newest notification must remain visible", thirdGeneration.expired)
+    }
+
+    @Test
+    fun `project bus ignores unrelated notices and keeps documents independent`() {
+        val expired = mutableListOf<Handle>()
+        val keys = mutableMapOf<Int, String?>()
+        val subject =
+            NotificationBusDeduplicator<Handle, String>(
+                keyOf = { keys[it.id] },
+                expire = {
+                    it.expired = true
+                    expired.add(it)
+                },
+            )
+        val contracts = Handle(1).also { keys[it.id] = "contracts.md" }
+        val backend = Handle(2).also { keys[it.id] = "backend.md" }
+        val unrelated = Handle(3).also { keys[it.id] = null }
+
+        assertFalse(subject.observe(contracts))
+        assertFalse(subject.observe(backend))
+        assertFalse(subject.observe(unrelated))
+
+        assertTrue(expired.isEmpty())
+    }
+
+    @Test
+    fun `startup inventory can reobserve the bus winner without expiring it`() {
+        val expired = mutableListOf<Handle>()
+        val subject =
+            NotificationBusDeduplicator<Handle, String>(
+                keyOf = { "session.md" },
+                expire = expired::add,
+            )
+        val notification = Handle(1)
+
+        assertFalse(subject.observe(notification))
+        assertFalse(subject.observe(notification))
+
+        assertTrue(expired.isEmpty())
+    }
+
+    @Test
+    fun `disposing a bus observer forgets foreign notices without retracting them`() {
+        val expired = mutableListOf<Handle>()
+        val subject =
+            NotificationBusDeduplicator<Handle, String>(
+                keyOf = { "session.md" },
+                expire = expired::add,
+            )
+        val notification = Handle(1)
+        val laterNotification = Handle(2)
+
+        subject.observe(notification)
+        subject.forgetAll()
+        assertFalse(subject.observe(laterNotification))
+
+        assertTrue(expired.isEmpty())
+        assertFalse(notification.expired)
+        assertFalse(laterNotification.expired)
+    }
 }

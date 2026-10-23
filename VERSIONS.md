@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.547
+
+- **Remote Dev frontend authority remains live across an empty ingress completion (GH #367).** A normally completed
+  ingress that produced no lease is treated as absence of evidence, retried with bounded backoff, and covered by
+  frontend/backend tests plus the state-backbone invariant; cancellation still terminates the lease loop.
+- **Reported subagent handoffs cannot be consumed by their own quoted worker response.** Queue answer, deferral,
+  preset, and latest-echo matching now exclude structurally attested completion cells, so nested
+  `> **Queue prompt:**` text cannot strike the live row or release its `Reported` claim before coordinator closeout.
+- **Retained editor work backs off and pauses on ambiguous authority instead of thrashing.** Retained pulls use
+  bounded retry, ambiguous attachment surfaces a detached-repair path, and archive-aware Compact Exchange closes
+  through the same durable projection contract.
+- **Remote Dev installation and Lazily source selection are explicit.** Modular JetBrains deployments require the
+  matching plugin on both Client/Gateway and backend peers, while source substitution keeps local and packaged
+  Lazily inputs deterministic.
+- **Release artifacts are verified independently and recurring queue loops preserve answered history.** Per-archive
+  checksums and installer selection cover GNU and musl packages, and recurring-loop maintenance no longer
+  auto-strikes a re-emitted head from stale response evidence.
+
 ## 0.35.546
 
 - **Canonical session components are now `agent:run` for queued work and `agent:loop` for recurring schedules.**

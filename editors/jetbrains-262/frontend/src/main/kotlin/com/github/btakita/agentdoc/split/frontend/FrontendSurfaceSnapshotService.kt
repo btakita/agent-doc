@@ -83,12 +83,42 @@ class FrontendSurfaceSnapshotService(
 
         coroutineScope.launch {
             durable {
-                SurfaceSnapshotRpcApi.getInstance()
-                    .openIngress(project.projectId(), frontendInstanceId)
-                    .collectLatest(::publishForLease)
+                maintainIngress()
             }
         }
         requestCapture()
+    }
+
+    /**
+     * A backend can accept the RPC and still complete the lease flow without emitting when the
+     * frontend project id has not become resolvable there yet. `durable` reconnects transport
+     * failures, but a normal empty completion is not a failure. Keep that startup race live with
+     * bounded retries instead of permanently leaving two loaded plugin modules disconnected.
+     */
+    private suspend fun maintainIngress() {
+        var consecutiveEmptyCompletions = 0
+        while (true) {
+            var observedLease = false
+            SurfaceSnapshotRpcApi.getInstance()
+                .openIngress(project.projectId(), frontendInstanceId)
+                .collectLatest { lease ->
+                    observedLease = true
+                    consecutiveEmptyCompletions = 0
+                    LOG.info(
+                        "[split-surface] frontend/backend ingress connected " +
+                            "generation=${lease.connectionGeneration}",
+                    )
+                    publishForLease(lease)
+                }
+
+            val retryDelayMs = frontendIngressRetryDelayMillis(consecutiveEmptyCompletions)
+            if (!observedLease) consecutiveEmptyCompletions++
+            LOG.warn(
+                "[split-surface] frontend/backend ingress completed " +
+                    "lease_observed=$observedLease retry_in_ms=$retryDelayMs",
+            )
+            delay(retryDelayMs)
+        }
     }
 
     private suspend fun publishForLease(lease: SurfaceIngressLease) {
@@ -255,6 +285,12 @@ internal const val FRONTEND_CAPTURE_DEBOUNCE_MS = 75L
 
 /** Hang guard for first-lease schema negotiation; authority is already pending during this wait. */
 internal const val FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
+
+/** Retry a normally completed, lease-less RPC flow without spinning either IDE process. */
+internal fun frontendIngressRetryDelayMillis(consecutiveEmptyCompletions: Int): Long {
+    val exponent = consecutiveEmptyCompletions.coerceIn(0, 5)
+    return (1_000L * (1L shl exponent)).coerceAtMost(30_000L)
+}
 
 /**
  * The snapshot schema to publish, from the backend's advertised newest schema (null when the

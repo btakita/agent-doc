@@ -278,7 +278,50 @@ Official references:
 - JetBrains Remote Development overview: https://www.jetbrains.com/help/idea/remote-development-overview.html
 
 The exchange remains above its accretion warning threshold; it was not compacted because the queue is active and auto-compaction is not enabled.
-<!-- agent:boundary:f9beebe9:agent-doc-bugs -->
+
+### Re: do [#helpregisterjetbrains] — gpt-5 · 2026-10-23T18:47-04:00
+
+I traced the registration path and prepared the exact handoff. The repository side is already wired: the plugin ID is `com.github.btakita.agent-doc`, releases produce three signed, non-overlapping JetBrains packages, and the Release workflow uploads all three once `JETBRAINS_MARKETPLACE_TOKEN` exists. The v0.35.548 run log confirms Marketplace publication was skipped only because that secret is missing.
+
+The remaining one-time step must be completed while signed in as the Marketplace/GitHub account owner:
+
+1. Open [your JetBrains Marketplace profile](https://plugins.jetbrains.com/author/me), choose **Upload plugin**, accept the Developer Agreement, and create or select the vendor profile. Choose the Vendor ID carefully because JetBrains says it cannot be changed later, and declare the required trader/non-trader status. JetBrains requires the first publication to be uploaded manually.
+2. Upload this older signed classic package as the bootstrap update and enable **Hidden**:
+   [agent-doc-jetbrains-0.2.801.zip](https://github.com/btakita/agent-doc/releases/download/v0.35.547/agent-doc-jetbrains-0.2.801.zip)
+   
+   Using 0.2.801 avoids colliding with the current automated versions 0.2.806, 0.2.807, and 0.2.808; Marketplace refuses duplicate plugin versions.
+3. Use these listing values:
+   - Name: **Agent Doc**
+   - Plugin XML ID: `com.github.btakita.agent-doc`
+   - Vendor/public name: **btakita** (or the durable public vendor identity you want)
+   - License: **Apache License 2.0**
+   - Source and website: https://github.com/btakita/agent-doc
+   - License URL: https://github.com/btakita/agent-doc/blob/main/LICENSE
+   - Issue tracker: https://github.com/btakita/agent-doc/issues
+   - Ads: **No**
+   - Visibility: **Hidden** for this bootstrap upload
+4. After JetBrains accepts the initial listing, open [Marketplace My Tokens](https://plugins.jetbrains.com/author/me/tokens), create a permanent token, and copy it once. Do not paste it into this document or chat.
+5. From a trusted terminal, store it directly as the repository secret:
+   
+   ```bash
+   gh secret set JETBRAINS_MARKETPLACE_TOKEN --repo btakita/agent-doc
+   ```
+   
+   Paste the token only into that command's hidden prompt.
+6. Rerun the successful v0.35.548 Release workflow:
+   
+   ```bash
+   gh run rerun 40012427385 --repo btakita/agent-doc
+   ```
+7. Verify Marketplace shows these three pending/current updates under the same plugin ID:
+   - 0.2.806: builds 242 through 261.*
+   - 0.2.807: builds 262 through 262.*
+   - 0.2.808: builds 263 through 263.*
+
+JetBrains' current documentation confirms the manual-first-upload requirement, vendor/agreement flow, hidden-update option, and permanent-token flow: [publishing guide](https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html), [new-plugin upload guide](https://plugins.jetbrains.com/docs/marketplace/uploading-a-new-plugin.html), and [vendor profile guide](https://plugins.jetbrains.com/docs/marketplace/organizations.html). JetBrains says to contact marketplace@jetbrains.com if a new plugin has no review update after roughly 3–4 working days.
+
+No repository code changed in this cycle. Verification was read-only: I inspected the current plugin metadata and Marketplace onboarding runbook, confirmed all v0.35.548 JetBrains release artifacts, checked the successful Release workflow log, and confirmed its explicit missing-token notice. No additional backlog follow-up is needed because the only remaining prerequisite is the account-owner upload/token step and JetBrains' external approval. The exchange remains above its accretion warning threshold; it was not compacted because the queue is active and auto-compaction is not enabled.
+<!-- agent:boundary:ab7aaf57:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -291,9 +334,10 @@ The exchange remains above its accretion warning threshold; it was not compacted
 ## Queue: Issues
 
 <!-- agent:queue id=issues loop interval=1h priority -->
-- ~~do [#upgradedidealatest]~~
-- 📥 do [#helpregisterjetbrains]
+- ~~do [#helpregisterjetbrains]~~
 - 📥 After the idea plugin, the agent-doc Plugin formatting stopped working and the commands don't show up. The plugin manager says the Agent Doc plugin is incompatible.
+- Register agent-doc at https://plugins.jetbrains.com/plugin/add#intellij. Create a nice profile.
+- In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.
 <!-- /agent:queue -->
 
 ## Todo
@@ -301,15 +345,16 @@ The exchange remains above its accretion warning threshold; it was not compacted
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#coder-remote-install-02805] Install agent-doc-jetbrains-263 0.2.808 on both the Coder Client or Gateway and backend, then restart both peers and verify paired ingress deferred or accepted and completed or connected diagnostics.
+- [ ] [#helpregisterjetbrains] Complete [#helpregisterjetbrains]: create the JetBrains Marketplace vendor/listing with a hidden bootstrap upload, create a permanent token, and add it to btakita/agent-doc as JETBRAINS_MARKETPLACE_TOKEN. (source: agent:review [#helpregisterjetbrains])
 <!-- /agent:todo -->
 
 ## Backlog
 <!-- agent:backlog priority queue -->
-- [ ] [#helpregisterjetbrains] Help me register the Jetbrains plugin?
 <!-- /agent:backlog -->
 
 ## Review
 <!-- agent:review -->
+- [/] 🚧 [#helpregisterjetbrains] [operator-verify] Complete the first manual JetBrains Marketplace upload and add JETBRAINS_MARKETPLACE_TOKEN; then rerun v0.35.548 Release and verify the three compatibility-ranged updates.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.

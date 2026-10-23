@@ -546,9 +546,11 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
          - Never run `make install`, a release build, a version bump, a tag, or a release. Where the \
          authorization says build + install, build and test in your worktree; the coordinator runs \
          the single `make install` after integrating.\n\
-         - Never edit, write, or commit the agent-doc session document or its queue, and never run \
-         `agent-doc` write/respond/queue commands against it; the coordinator owns the claim and \
-         closes the item.\n",
+         - Never manually edit, write, or commit the agent-doc session document or its queue, and \
+         never run `agent-doc` write/respond/queue commands against it. After `queue start` \
+         succeeds, the coordinator may send one exact generation-fenced `agent-doc queue \
+         report-complete` command; run that sole exception immediately before returning the same \
+         complete handback. The coordinator still owns integration and closeout.\n",
     );
     out.push_str(concat!("- ", subagent_scratch_isolation_rule!(), "\n"));
     out.push_str(
@@ -608,6 +610,8 @@ mod tests {
         assert!(p.contains("> do [#abc]"));
         assert!(p.contains("> Add a way to post authorization"));
         assert!(p.contains("Never run `make install`"));
+        assert!(p.contains("sole exception immediately before returning"));
+        assert!(p.contains("agent-doc queue report-complete"));
         // Sibling subagents share the coordinator's scratchpad: one `make check`
         // read another worktree's nextest output from a shared `check.log`.
         assert!(

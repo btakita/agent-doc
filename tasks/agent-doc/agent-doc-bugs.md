@@ -24,7 +24,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 30 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 29 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -434,6 +434,13 @@ The leading GH-355 row was already resolved and its completion evidence is prese
 The preceding committed response already contains the full answers. This re-admitted cycle confirms the resulting state: no subagents remain running; all prior main-queue work has durable completion evidence; the latest post-v0.35.546 commits are not released; and the completion-receipt root-cause fix is prepared but not yet released. The completed rows are being struck while the newly arrived sdk-demo.md compact-exchange error remains queued as distinct work.
 
 The GH-356 row was previously completed and its durable result is preserved in the exchange before removal.
+
+### Re: Subagent completed: `subagent:gh355-cleanup-rerun` returned work for queue item “#gh-issue https://github.com/btakita/agent-doc/issues/355” — agent-doc
+<!-- agent-doc-subagent-response sha256=c8257663b8133ee872ab873bbfbec24752aafd1f0ed6526e3aa89e027d206a9d -->
+> **Subagent response:**
+>
+> Duplicate cleanup audit: GH #355 is already resolved by 4bb0b43868, released in v0.35.544, and present in current v0.35.546 main. Existing GH-355 and unknown-route regressions passed in the prior isolated verification. No duplicate change, commit, issue action, or release is required.
+<!-- agent-doc-subagent-completion key=cfde8eab28a1bbb4adbb41d63161a5b97758a93f97eafb34100c0fe15f867113 -->
 <!-- agent:boundary:e5fbc736 -->
 <!-- /agent:exchange -->
 
@@ -442,40 +449,8 @@ The GH-356 row was previously completed and its durable result is preserved in t
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/355~~
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/356~~
-- ☑️ [#subagent:gh355status#1] Is `☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355` done? It is leftover in the queue. Issues 353, 354, 355, 357 remain open on github.
-- ☑️ [#subagent:gh353fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/353
-- ☑️ [#subagent:gh354fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/354
-- ☑️ [#subagent:gh355-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/355
-- ☑️ [#subagent:gh357-release-audit#4] #gh-fix https://github.com/btakita/agent-doc/issues/357
-- ☑️ [#subagent:coder-pane-routing#2] Did you reimplement "guessing"? The tmux panes are reversed on my coder instance. The "guessing" seems to be wrong more often than not.
-- ☑️ [#subagent:gh358-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/358
-- ☑️ [#subagent:gh359-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/359
-- ☑️ [#subagent:gh360-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/360
-- ☑️ [#subagent:completion-exchange#2] "Re: Subagent completed:" should immediately add the response into agent:exchange.
-- ☑️ [#subagent:gh360-fix#2] How do we improve the reliability of the routing? Why did the guess occur in https://github.com/btakita/agent-doc/issues/360? On top of fail no-close routing, we need to figure out how to not get into the fail state.
-- ☑️ [#subagent:release-publish#3] Automate publication of all three compatibility-ranged JetBrains updates to Marketplace, with token/onboarding and exact-range verification, so Remote Dev synchronizes the modular ZIP to both peers and prevents one-sided installs.
-- ☑️ [#subagent:sdk-demo-pr166#2] In sdk-demo.md, no queue item status despite agent running: `- [#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`
-- ☑️ [#subagent:release-runloop#2] release + publish: no `agent:run` + `agent:loop`
-- ☑️ [#subagent:operator-request-format#1] The formatting of a subagent operator request is difficult to read the key + values. What are some formatting options to make it easier to see the keys + values? How about making a nested24list and emphasizing the keys `- *kind:*`?
-- ☑️ [#subagent:rename-queue-run#1] Rename `agent:queue` to `agent:run`. Keep the alias compatability.
-- ☑️ [#subagent:rename-loop#1] . What are some formatting options to make it easie Rename `agent:run loop`/`agent:queue loop` to `agent:loop`. Keep backward compatability.
-- ☑️ [#subagent:release-runloop#1] release + publish: include `agent:run` + `agent:loop`
-- ☑️ [#subagent:longrun-strike#1] Even though this run has been going for > 3 hours, agent-doc should still strike items that can be deleted.
-- ☑️ [#subagent:gh361#1] #gh-fix https://github.com/btakita/agent-doc/issues/361
-- ☑️ [#subagent:sdk-request-format#1] sdk-demo.md subagent operator request does not have the italics and list items. Is this implemented and installed locally?
-- ☑️ [#subagent:queue-state-regression#1] The previous state of various items in this queue were ☑️, but now the state is 📥.
-- ☑️ [#subagent:gh362#1] #gh-fix https://github.com/btakita/agent-doc/issues/362
-- ☑️ [#subagent:release-publish#1] release + publish
-- ☑️ [#subagent:completion-feedback-async#1] There is a long list of "Subagent completed" but no response. agent-doc should immediately respond with the subagent completion feedback for tracked queue items. Can this be done without slowing down the agent? Like a fire & forget with agent-doc correctly formatting the exchange response?
-- ☑️ [#subagent:coder-readiness#1] I have to manually run `agent-doc` from the terminal on my Coder instance. Did you fix the bugs so I can properly use agent-doc on Coder?
-- ☑️ [#subagent:request-format-release#1] I still don't see proper "subagent operator request" formatting in the exchange on this machine. Has this feature been released? See the last subagent operator request in api.md.
-- ☑️ [#subagent:idea-notification-dedupe#1] There is 1 prompt in this session, but there were 3 Idea notifications stacked on top of each other.
-- ☑️ [#subagent:followup-release-batch#2] release + publish: include completed follow-up fixes from the completion-feedback, Coder readiness, subagent-request formatting, and IDEA notification-deduplication investigations after v0.35.546
-- ☑️ [#subagent:gh363#1] #gh-issue https://github.com/btakita/agent-doc/issues/363
-- ☑️ [#subagent:release-publish#1] release + publish
-- Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- ☑️ [#subagent:gh355-cleanup-rerun#3] #gh-issue https://github.com/btakita/agent-doc/issues/355
+- 📥 Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
 <!-- /agent:queue -->
 
 ## Queue: Issues

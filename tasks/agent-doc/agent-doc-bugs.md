@@ -321,7 +321,22 @@ The remaining one-time step must be completed while signed in as the Marketplace
 JetBrains' current documentation confirms the manual-first-upload requirement, vendor/agreement flow, hidden-update option, and permanent-token flow: [publishing guide](https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html), [new-plugin upload guide](https://plugins.jetbrains.com/docs/marketplace/uploading-a-new-plugin.html), and [vendor profile guide](https://plugins.jetbrains.com/docs/marketplace/organizations.html). JetBrains says to contact marketplace@jetbrains.com if a new plugin has no review update after roughly 3–4 working days.
 
 No repository code changed in this cycle. Verification was read-only: I inspected the current plugin metadata and Marketplace onboarding runbook, confirmed all v0.35.548 JetBrains release artifacts, checked the successful Release workflow log, and confirmed its explicit missing-token notice. No additional backlog follow-up is needed because the only remaining prerequisite is the account-owner upload/token step and JetBrains' external approval. The exchange remains above its accretion warning threshold; it was not compacted because the queue is active and auto-compaction is not enabled.
-<!-- agent:boundary:ab7aaf57:agent-doc-bugs -->
+> **Chat prompt (#chatprompt:5da52f1b9753):** Is the first publication the first release for a plugin or a user's first publication?
+
+### Re: first JetBrains Marketplace publication — gpt-5 · 2026-10-23T19:09-04:00
+
+It means the **first Marketplace publication of that particular plugin/listing**, not the user's first-ever publication.
+
+So:
+
+- If an author has already published other plugins, a new plugin ID such as `com.github.btakita.agent-doc` still needs its first update uploaded manually.
+- Once Agent Doc has one manually created Marketplace listing/update, later Agent Doc versions can be uploaded through the API, Gradle, or the existing GitHub Actions workflow.
+- A first-time author also has extra account-level steps—accepting the Developer Agreement and creating a vendor profile—but completing those does not remove the manual-first-upload rule for each new plugin.
+
+“First publication” also does not mean Agent Doc's first historical GitHub release. It means its first version **on JetBrains Marketplace**. Therefore using the older signed 0.2.801 ZIP as a hidden bootstrap update remains appropriate; the current 0.2.806/0.2.807/0.2.808 versions remain available for the automated production upload afterward.
+
+JetBrains states both sides of this distinction: the [publishing guide](https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html) says the first plugin publication must be manual, while the [new-plugin guide](https://plugins.jetbrains.com/docs/marketplace/uploading-a-new-plugin.html) separately says authors who have never uploaded any plugin must also accept the agreement and create a vendor profile.
+<!-- agent:boundary:1e40f569:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--

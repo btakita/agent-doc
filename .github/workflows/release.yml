@@ -337,6 +337,57 @@ jobs:
             exit 1
           fi
 
+      # Marketplace is the authoritative Remote Dev distribution channel: it
+      # applies the same compatibility selection independently to the backend
+      # and JetBrains Client, then synchronizes the selected modular ZIP to both
+      # peers. Validate the complete three-update set before the first upload.
+      # Per-artifact release markers make a failed-job retry resume after the
+      # last accepted update instead of attempting to upload that version twice.
+      - name: Publish all compatibility-ranged JetBrains updates to Marketplace
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PUBLISH_TOKEN" ]; then
+            echo "::error::JETBRAINS_MARKETPLACE_TOKEN is missing. Complete docs/reference/jetbrains-distribution.md#marketplace-onboarding before tagging a release."
+            exit 1
+          fi
+
+          classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
+          modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
+          modern_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-263/gradle.properties | tr -d '[:space:]')
+          artifacts=(
+            "editor-packages/agent-doc-jetbrains-$classic_version.zip"
+            "editor-packages/agent-doc-jetbrains-262-$modular_version.zip"
+            "editor-packages/agent-doc-jetbrains-263-$modern_version.zip"
+          )
+          python3 scripts/jetbrains-custom-repository.py \
+            --classic "${artifacts[0]}" \
+            --modular "${artifacts[1]}" \
+            --modern "${artifacts[2]}" \
+            --verify-artifacts
+
+          mkdir -p marketplace-state
+          published_assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+          for artifact in "${artifacts[@]}"; do
+            marker="marketplace-uploaded-${artifact##*/}.txt"
+            if grep -Fxq "$marker" <<<"$published_assets"; then
+              echo "Marketplace already accepted ${artifact##*/}; retaining $marker"
+              continue
+            fi
+            curl --fail-with-body --silent --show-error \
+              --header "Authorization: Bearer $PUBLISH_TOKEN" \
+              --form "xmlId=com.github.btakita.agent-doc" \
+              --form "file=@$artifact" \
+              --form "containsAds=false" \
+              https://plugins.jetbrains.com/api/updates/upload
+            printf '%s  %s\n' "$GITHUB_SHA" "${artifact##*/}" > "marketplace-state/$marker"
+            gh release upload "$GITHUB_REF_NAME" "marketplace-state/$marker" --clobber
+          done
+
       - name: Generate and publish editor-package checksums
         shell: bash
         env:

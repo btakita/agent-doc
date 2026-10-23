@@ -16,9 +16,10 @@ the workflow before publication.
 
 ## Production repository URLs
 
-The repository's release automation does not upload these updates to JetBrains
-Marketplace. Instead, every stable GitHub release publishes three JetBrains
-[simple custom-repository listings](https://plugins.jetbrains.com/docs/intellij/custom-plugin-repository.html):
+In addition to Marketplace, every stable GitHub release publishes three
+JetBrains
+[simple custom-repository listings](https://plugins.jetbrains.com/docs/intellij/custom-plugin-repository.html)
+as a fallback channel:
 
 - Classic IDEs: `https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-classic.xml`
 - IDEs on branch 262: `https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-262.xml`
@@ -42,18 +43,53 @@ Builds below 242 or above `263.*` are offered nothing.
 
 ### Marketplace
 
-The equivalent Marketplace path is to upload all three ZIPs as updates of the same
-plugin ID, where Marketplace performs the same per-build selection and also
-synchronizes the plugin to the Remote Dev peer. Release automation does not
-upload to Marketplace today; the custom-repository listings are the supported
-production channel until a Marketplace upload step (with its own three-range
-assertion) is added.
+Every tagged release uploads all three ZIPs as updates of the same plugin ID,
+`com.github.btakita.agent-doc`. Immediately before the first upload, the release
+job re-reads each packaged `plugin.xml` and refuses the whole set unless the
+artifact names, shared ID, distinct versions, and exact ranges are `242` through
+`261.*`, `262` through `262.*`, and `263` through `263.*`. The existing GitHub
+custom-repository listings remain published as an independently verifiable
+fallback.
+
+Marketplace applies compatibility selection independently to the Remote Dev
+backend and JetBrains Client/Gateway and synchronizes the selected modular ZIP
+to both peers. This removes the custom-repository requirement to install the
+same ZIP manually on both sides. A release marker is written to the GitHub
+release after each accepted upload, so retrying a failed tag workflow resumes
+at the first update that Marketplace did not accept.
+
+#### Marketplace onboarding
+
+The repository owner must complete these one-time external steps before tagging
+a release that contains this automation:
+
+1. Create or join the Marketplace vendor account, accept the Marketplace
+   agreement, and create the `com.github.btakita.agent-doc` plugin listing.
+   JetBrains requires the first update to be uploaded through the Marketplace UI
+   so listing metadata, licensing, source, and support URLs can be reviewed. Keep
+   that bootstrap update hidden; automated releases supply the three production
+   ranges.
+2. In the Marketplace profile's **My Tokens** page, create a permanent token for
+   the account that owns the plugin.
+3. Add the token to this GitHub repository as the Actions secret
+   `JETBRAINS_MARKETPLACE_TOKEN`. Never put the token in Gradle properties,
+   workflow input, an artifact, or a release asset.
+4. On the first automated release, verify in Marketplace that the three pending
+   updates have the exact ranges and distinct versions above before approving or
+   unhiding them. Marketplace review remains external to the workflow.
+
+The release fails with an onboarding link when the secret is absent. JetBrains
+Marketplace upload and approval are external operations; local builds can prove
+the artifacts and workflow wiring but cannot manufacture the vendor account,
+listing, permanent token, or approval.
 
 ## Remote Development and fail-closed behavior
 
-For branch 262 or 263 Remote Development, configure the matching repository URL
-and install the same modular update on both the Remote Dev backend and JetBrains
-Client/Gateway. Both packages use the frontend-owned surface snapshot bridge, so
+Marketplace installs synchronize the compatible modular update to both Remote
+Dev peers. When testing a local ZIP or using the custom-repository fallback,
+configure the matching repository URL and install the same update on both the
+Remote Dev backend and JetBrains Client/Gateway. Both packages use the
+frontend-owned surface snapshot bridge, so
 documents detached with Open in New Window retain their frame identity instead
 of being flattened into the main window's split columns. A custom repository
 does not provide Marketplace's automatic cross-side synchronization.
@@ -77,7 +113,10 @@ INFO/WARN before controller transport so a missing publication is diagnosable.
 the shared identity, distinct update versions, exact non-overlapping ranges
 (`242`..`261.*`, `262`..`262.*`, and `263`..`263.*`), and canonical artifact names,
 then emits the three listings. Validation runs before any listing is written, so
-a refused set publishes none. `make jetbrains-repository-self-test` (part of
+a refused set publishes none. The tag workflow repeats that validation with
+`--verify-artifacts` immediately before Marketplace upload and writes one
+GitHub-release marker after each accepted update so retries can resume safely.
+`make jetbrains-repository-self-test` (part of
 `make check-fast` and `make check`) proves:
 
 - IntelliJ range semantics (prefix `since-build`, wildcard `until-build`);

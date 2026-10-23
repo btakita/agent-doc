@@ -4,33 +4,21 @@ plugins {
 
 rootProject.name = "agent-doc-jetbrains"
 
-// #lzpkgwire / S5: consume the sibling lazily-kt reactive core as a composite
-// build when it is present (agent-loop monorepo checkout) so local edits to the
-// canonical StateGraphMirror are exercised without a republish. The plugin is a
-// public standalone repo, so this is strictly conditional: when the sibling is
-// absent (standalone checkout) the `io.github.lazily:lazily` dependency resolves
-// from mavenLocal / GitHub Packages instead.
-//
-// `#lzktemptydir`: the guard must prove the sibling is a REAL Gradle build, not
-// merely that the directory exists. An uninitialized git submodule is an
-// existing EMPTY directory, so `exists()` alone returns true, `includeBuild`
-// substitutes `io.github.lazily:lazily` with a build that has no projects, and
-// Gradle fails with the opaque "No matching variant of project :lazily-kt was
-// found ... No variants exist." A standalone checkout has no directory at all,
-// which is why only a PARTIAL monorepo checkout hit this — observed in the
-// agent-loop superproject CI, whose submodule init listed every sibling except
-// `src/lazily-kt`. Keying on the settings file makes the fallback identical for
-// "absent" and "present but uninitialized".
-// An explicit source checkout lets dependency-update verification exercise the
-// released tag without changing the operator's sibling development checkout.
-val lazilyKt = System.getenv("AGENT_DOC_LAZILY_KT_DIR")?.let(::file) ?: file("../../../lazily-kt")
-val lazilyKtIsBuild = lazilyKt.resolve("settings.gradle.kts").isFile ||
-    lazilyKt.resolve("settings.gradle").isFile
-if (lazilyKtIsBuild) {
-    val lazilySpecProto = file("../../../lazily-spec/proto")
+// #lzpkgwire / S5: ordinary builds resolve the version pinned in build.gradle.kts.
+// A checkout that merely happens to sit beside lazily-kt must not silently replace
+// that release: an old or dirty sibling made the 0.46.0 consumer suite exercise
+// unrelated source and fail its generation-fence proof. Development against local
+// Lazily source is therefore an explicit opt-in, matching the modular plugin build.
+// The override also lets dependency-update verification exercise an exact source tag
+// without changing the operator's ordinary sibling checkout.
+System.getenv("AGENT_DOC_LAZILY_KT_DIR")?.let { sourceDir ->
+    val lazilyKt = file(sourceDir)
+    check(lazilyKt.resolve("settings.gradle.kts").isFile || lazilyKt.resolve("settings.gradle").isFile) {
+        "AGENT_DOC_LAZILY_KT_DIR must name a lazily-kt Gradle build: ${lazilyKt.path}"
+    }
+    val lazilySpecProto = lazilyKt.parentFile.resolve("lazily-spec/proto")
     check(lazilySpecProto.isDirectory) {
-        "lazily-kt development build requires sibling lazily-spec/proto at ${lazilySpecProto.path}; " +
-            "initialize the lazily-spec sibling or remove the partial lazily-kt checkout"
+        "AGENT_DOC_LAZILY_KT_DIR requires sibling lazily-spec/proto at ${lazilySpecProto.path}"
     }
     includeBuild(lazilyKt) {
         dependencySubstitution {

@@ -24,7 +24,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -584,7 +584,51 @@ All fixes were integrated on `integrate/thrash-compact-20261023` and pushed to o
 The CLI, native library, IntelliJ IDEA plugin, Rider plugin, and VSCodium extension were installed. IDEA accepted the plugin through dynamic upgrade, so no additional restart is required. One native generation reload was deferred because this document is mid-cycle and will publish at the next idle boundary. GitHub had not created a workflow run for the branch at the time of closeout.
 
 The tsift workflow kept integration isolated in a clean worktree and bounded the diff and test evidence. The exchange remains above the advisory size threshold; the active queue prevented compaction during this cycle.
-<!-- agent:boundary:63dc6c4a -->
+
+### Re: Subagent completed: `subagent:gh365-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/365” — agent-doc
+<!-- agent-doc-subagent-response sha256=bf62d3bfc36db69c74058ea650941cb4f3ad677f1a00172cf0bdadde2e3b94d1 -->
+> **Subagent response:**
+>
+> Issue #365 is closed NOT_PLANNED after verification showed an unsupported one-sided Remote Dev installation: the backend loaded Agent Doc 0.2.800, while the JetBrains Client had no Agent Doc frontend package. Restart alone cannot load an absent plugin. The correct remedy is to install the same 263 modular ZIP on both Client or Gateway and backend, then restart both. No source change was appropriate because the current windows=0 plus focus_only fail-closed behavior prevents a regression of #360. Verification: controller layout tests 8 passed; modular backend test, buildPlugin, and verifySplitArtifact succeeded; worktree clean at 572350dcdc; latest CI successful; no follow-ups.
+<!-- agent-doc-subagent-completion key=bd6194c7fe8688dd45ee420a2b9663dc0dc151d75ca0ee26a38584d129fc7b4f -->
+
+### Re: Subagent completed: `subagent:gh363-fix` returned work for queue item “do [#gh363]” — agent-doc
+<!-- agent-doc-subagent-response sha256=1e270e9f69bd9e8b475239b8fc79462413399a2471a1ed742cf1cb54dc84abf8 -->
+> **Subagent response:**
+>
+> Issue #363 fixed and pushed on fix/gh363-release-checksum-sidecar-subagent. Commits 0e2f332a6d and f056a947a4 replace unavailable aggregate SHA256SUMS use with per-archive sidecar verification for upgrade and install.sh, add active GNU versus musl asset selection, fail closed before moving binaries or plugins, and add spec, docs, and offline installer coverage. Focused Rust upgrade tests passed 23 of 23; installer self-test, shell syntax, Python compile, and rustfmt passed; full make check passed with zero failures, artifact tart-5372da5867. Branch clean; no install; no follow-ups.
+<!-- agent-doc-subagent-completion key=f5c4f920848223c003037d3c175eddbde9be9a5a0020c17c0519ca6ecd6c8459 -->
+
+### Re: Subagent completed: `subagent:gh364-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/364” — agent-doc
+<!-- agent-doc-subagent-response sha256=6f13c5fa7f9abeb40051ff06944685d7b534ffe77c366a2d9e39750d6c0c7f90 -->
+> **Subagent response:**
+>
+> Issue #364 fixed and closed COMPLETED. Branch fix/gh364-loop-ftstrike-stop, commit 60e65f0e8d, pushed. The exact regression proves plain preset prose cannot auto-strike, terminalize, pause, or add stop to a recurring loop queue. Focused regression and the full agent-doc-queue crate passed; authoritative make check passed with zero failures; git diff check passed. Broad unrelated baseline rustfmt drift remains, with the added hunk absent from reported diffs. Worktree clean; no follow-ups.
+<!-- agent-doc-subagent-completion key=f6f2202fd037098d7e06a242a2d3f61fbdf8a948a38775e8dfb4bcc2aea24f80 -->
+> **Queue prompt:** do [#gh363]
+
+### Re: Release checksum upgrade failure — gpt-5 · 2026-10-23T10:45:-04:00
+
+GitHub issue [#363](https://github.com/btakita/agent-doc/issues/363) is fixed and closed as completed. Upgrade and the printed installer fallback now download and verify each platform archive's own `.sha256` sidecar instead of the unavailable aggregate `SHA256SUMS`. The installer also selects GNU versus musl from the active libc and fails closed before extraction or moving binaries and plugins. Integrated commits: `9b09fe3899` and `cb953c53f4`.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/364
+
+### Re: Recurring queue auto-strike regression — gpt-5 · 2026-10-23T10:45:-04:00
+
+GitHub issue [#364](https://github.com/btakita/agent-doc/issues/364) is fixed and closed as completed. The regression test proves plain preset prose cannot auto-strike, terminalize, pause, or add `stop` to a recurring loop queue. The invariant is now explicit in the document-format specification. Integrated commit: `3e449f71c2`.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/365
+
+### Re: Remote Dev layout report — gpt-5 · 2026-10-23T10:45:-04:00
+
+GitHub issue [#365](https://github.com/btakita/agent-doc/issues/365) is closed as not planned after verification showed a one-sided Remote Dev installation: the backend loaded Agent Doc, while the JetBrains Client had no Agent Doc frontend package. Restarting alone cannot load an absent client plugin. The correct remedy is installing the same 263 modular ZIP on both Client or Gateway and backend, then restarting both. No source change was appropriate because the existing fail-closed behavior protects the #360 invariant.
+
+### Re: Combined integration — gpt-5 · 2026-10-23T10:45:-04:00
+
+The integration branch `integrate/thrash-compact-20261023` is clean and pushed through `3e449f71c2`. The authoritative combined `make check` passed with no failures. The coordinator-owned `make install` completed successfully for the CLI, native library, JetBrains packages, and VSCodium extension.
+
+No IDEA restart is required: the installed JetBrains plugin bytes were already current. The attached document's native generation will reload automatically at its next idle boundary. The exchange remains above the advisory size threshold; the active queue prevented compaction during this cycle.
+<!-- agent:boundary:9c10241d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -592,18 +636,22 @@ The tsift workflow kept integration isolated in a clean worktree and bounded the
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#gh363]
+- ☑️ [#subagent:gh363-fix#1] do [#gh363]
 - ☑️ [#subagent:gh355-cleanup-rerun#3] #gh-issue https://github.com/btakita/agent-doc/issues/355
 - ☑️ [#subagent:sdk-compact-replica#2] Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
 - ☑️ [#subagent:idea-thrashing#1] agent-doc process is thrashing in the background along with Idea.
 - ☑️ [#subagent:lazily-generation-fence#1] Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.
 - ☑️ [#subagent:sdk-compact-cycle#1] Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.
+- ☑️ [#subagent:gh364-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/364
+- ☑️ [#subagent:gh365-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/365
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/366
 <!-- /agent:queue -->
 
 ## Queue: Issues
 
 <!-- agent:queue id=issues loop interval=1h -->
-- Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- ☑️ [#subagent:gh363-fix#1] do [#gh363]
+- ~~Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.~~
 <!-- /agent:queue -->
 
 ## Todo
@@ -614,7 +662,6 @@ The tsift workflow kept integration isolated in a clean worktree and bounded the
 
 ## Backlog
 <!-- agent:backlog priority queue -->
-- [ ] [#gh363] #gh-fix https://github.com/btakita/agent-doc/issues/363
 <!-- /agent:backlog -->
 
 ## Review

@@ -2606,6 +2606,35 @@ mod tests {
         (tmp, doc)
     }
 
+    #[test]
+    fn canonical_local_operator_answer_resolves_its_open_request() {
+        let id = "subagent-operator-request-publish-ci-pr166";
+        let content = format!(
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "[#{id}] subagent operator request\n",
+                "queue_item: do\n",
+                "kind: permission\n",
+                "blocking: true\n",
+                "request: Publish the validated patch.\n",
+                "choices:\n",
+                "- **Commit and push to PR #166**: Publish it.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- [#{id}]: **Commit and push to PR #166**\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#{id}] Answer the blocking subagent permission request for queue item ‘do’ in agent:exchange: Authorize publishing.\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            id = id,
+        );
+        assert_eq!(
+            answered_queue_operator_action_ids(&content).unwrap(),
+            vec![id.to_string()]
+        );
+    }
+
     struct TestBacklogCommandEffects;
 
     static TEST_BACKLOG_COMMAND_EFFECTS: TestBacklogCommandEffects = TestBacklogCommandEffects;

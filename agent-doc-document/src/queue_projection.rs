@@ -272,30 +272,61 @@ fn strip_operator_action_prefix(text: &str) -> Option<(&str, &str)> {
     if !first.is_ascii_alphanumeric() || !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-') {
         return None;
     }
+    // `🙋 [#subagent-operator-request-x]: answer` is the canonical marker
+    // followed by a local answer row, not the legacy `🙋 [#id] <work>`
+    // prefix. Keep the request token and answer together as the work body.
+    if is_reserved_operator_action_id(id) && rest.trim_start().starts_with(':') {
+        return None;
+    }
     Some((id, rest))
 }
 
 fn trailing_operator_action_annotation(text: &str) -> Option<(&str, &str, usize)> {
-    let start = text.rfind("[#")?;
-    if start > 0
-        && !text[..start]
-            .chars()
-            .next_back()
-            .is_some_and(char::is_whitespace)
-    {
-        return None;
+    // A queue prompt may quote an operator-answer row as inline Markdown, for
+    // example ``why did `- [#subagent-operator-request-x]: yes` truncate?``.
+    // Such evidence is prose, not the prompt's own annotation. Looking only at
+    // the final `[#` made `strip_priority_markers` truncate that prompt at the
+    // opening backtick, which in turn truncated `queue brief` and its worker
+    // authorization. Use the shared Markdown literal ranges and keep looking
+    // backwards until an unquoted candidate is found.
+    let code_ranges = agent_doc_element::element::find_code_ranges(text);
+    for (start, _) in text.rmatch_indices("[#") {
+        if code_ranges
+            .iter()
+            .any(|(range_start, range_end)| start >= *range_start && start < *range_end)
+        {
+            continue;
+        }
+        if start > 0
+            && !text[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace)
+        {
+            continue;
+        }
+        let after_open = &text[start + 2..];
+        let Some((id, after)) = after_open.split_once(']') else {
+            continue;
+        };
+        let mut chars = id.chars();
+        let Some(first) = chars.next() else {
+            continue;
+        };
+        if !first.is_ascii_alphanumeric()
+            || !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+            || !(after.is_empty() || after.trim_start().starts_with(':'))
+        {
+            continue;
+        }
+        return Some((id, after, start));
     }
-    let after_open = &text[start + 2..];
-    let (id, after) = after_open.split_once(']')?;
-    let mut chars = id.chars();
-    let first = chars.next()?;
-    if !first.is_ascii_alphanumeric()
-        || !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
-        || !(after.is_empty() || after.trim_start().starts_with(':'))
-    {
-        return None;
-    }
-    Some((id, after, start))
+    None
+}
+
+fn is_reserved_operator_action_id(id: &str) -> bool {
+    id.to_ascii_lowercase()
+        .starts_with("subagent-operator-request-")
 }
 
 fn render_projection_parts(parts: &[String]) -> String {
@@ -523,7 +554,14 @@ pub fn operator_action_ids(text: &str) -> Vec<String> {
         }
         break;
     }
-    if marked && let Some((id, _, _)) = trailing_operator_action_annotation(text.trim()) {
+    if let Some((id, after, _)) = trailing_operator_action_annotation(text.trim())
+        && (marked
+            || (is_reserved_operator_action_id(id)
+                && after
+                    .trim_start()
+                    .strip_prefix(':')
+                    .is_some_and(|answer| !answer.trim().is_empty())))
+    {
         let id = id.to_ascii_lowercase();
         if !ids.contains(&id) {
             ids.push(id);
@@ -909,13 +947,20 @@ pub fn strip_priority_markers(text: &str) -> String {
         }
     }
     let mut bare = t.trim();
-    if let Some((id, _, start)) = trailing_operator_action_annotation(bare)
-        && (canonical_operator_action
-            || id
-                .to_ascii_lowercase()
-                .starts_with("subagent-operator-request-"))
+    if let Some((id, after, start)) = trailing_operator_action_annotation(bare)
+        && (canonical_operator_action || is_reserved_operator_action_id(id))
     {
-        bare = bare[..start].trim_end();
+        // A local answer row has no originating work text before the request
+        // annotation: `[#subagent-operator-request-x]: answer`. Preserve the
+        // reserved request token as its stable identity so the row can receive
+        // 📥/🟡/🚧/☑️ lifecycle projection. Ordinary trailing annotations keep
+        // keying to the originating work text.
+        let identity_end = bare.len().saturating_sub(after.len());
+        bare = if start == 0 {
+            bare[..identity_end].trim_end()
+        } else {
+            bare[..start].trim_end()
+        };
     }
     bare.to_string()
 }
@@ -1231,6 +1276,32 @@ mod tests {
             "  /clear  ",
             "a no-op projection preserves literal prompt whitespace"
         );
+    }
+
+    #[test]
+    fn local_operator_answer_keeps_request_identity_and_inline_examples_are_inert() {
+        let id = "subagent-operator-request-publish-ci-pr166";
+        let answer = format!("[#{id}]: **Commit and push to PR #166**");
+        assert_eq!(operator_action_ids(&answer), vec![id.to_string()]);
+        assert_eq!(strip_priority_markers(&answer), format!("[#{id}]"));
+        assert!(operator_action_is_answered(&answer, id, "do"));
+        assert_eq!(
+            apply_operator_action_ids(&answer, &[id.to_string()]),
+            format!("🙋 [#{id}]: **Commit and push to PR #166**")
+        );
+        assert_eq!(
+            apply_lifecycle_marker(
+                &apply_operator_action_ids(&answer, &[id.to_string()]),
+                QueueLifecycleMarker::Running,
+            ),
+            format!("🙋🚧 [#{id}]: **Commit and push to PR #166**")
+        );
+
+        let quoted = format!(
+            "In sdk-demo.md, no queue item status despite agent running: `- [#{id}]: **Commit and push to PR #166**`"
+        );
+        assert!(operator_action_ids(&quoted).is_empty());
+        assert_eq!(strip_priority_markers(&quoted), quoted);
     }
 
     #[test]

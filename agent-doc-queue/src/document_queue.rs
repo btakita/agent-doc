@@ -9001,6 +9001,36 @@ mod tests {
             "- 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
         );
     }
+
+    #[test]
+    fn local_operator_answer_projects_running_worker_status() {
+        let id = "subagent-operator-request-publish-ci-pr166";
+        let answer = format!("[#{id}]: **Commit and push to PR #166**");
+        let body = format!("- {answer}\n");
+        let entries = parse(&body).unwrap();
+        let open = std::collections::HashSet::from([id.to_string()]);
+        let annotated = set_prompt_operator_actions(&entries, &[], &open)
+            .expect("the local answer should project its operator-action state");
+        let projected = set_prompt_runtime_projections(
+            &annotated,
+            &[QueueRowProjection {
+                text: answer,
+                marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
+                owner: Some(agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: "subagent:publish-ci-pr166".to_string(),
+                    generation: 1,
+                }),
+                reopen_completed: false,
+            }],
+        )
+        .expect("a reserved request answer has a nonempty stable projection key");
+        assert_eq!(
+            render(&projected),
+            format!(
+                "- 🙋🚧 [#subagent:publish-ci-pr166#1] [#{id}]: **Commit and push to PR #166**\n"
+            )
+        );
+    }
 }
 
 /// Redacted fixture for `#multilinequeuehead`: the queue shape of the live

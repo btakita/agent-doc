@@ -15062,6 +15062,7 @@ fn controller_crdt_replica_data(
                         "canonical_projection_retained": canonical_projection_retained,
                         "retained_replica_reseed_pending": registration.retained_replica_reseed_pending,
                         "canonical_covers_retained_frontier": registration.canonical_covers_retained_frontier,
+                        "canonical_supersedes_retained_frontier": registration.canonical_supersedes_retained_frontier,
                         "canonical_content_hash": registration.canonical_content_hash,
                         "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
                             .context("registered replica is missing its canonical lineage")?,
@@ -62618,6 +62619,10 @@ body
         assert_eq!(
             editor_registration["canonical_covers_retained_frontier"], true,
             "durable recovery must force a full bootstrap without discarding causal coverage proof"
+        );
+        assert_eq!(
+            editor_registration["canonical_supersedes_retained_frontier"], false,
+            "ordinary retained delivery must not claim authoritative replacement provenance"
         );
         let wake = runtime
             .captured_finalize_wakes

@@ -2459,6 +2459,12 @@ pub struct ReplicaRegistration {
     /// retained frontier supplied by this registering editor. `None` means the
     /// editor supplied no usable frontier, so consumers must remain fail-closed.
     pub canonical_covers_retained_frontier: Option<bool>,
+    /// The controller explicitly queued a replace-capable rebootstrap for the
+    /// retained predecessor replica. This is typed provenance that canonical
+    /// intentionally supersedes that replica's CRDT frontier (for example,
+    /// after Compact Exchange rotated the authoritative epoch); an unrelated
+    /// frontier mismatch must leave this false.
+    pub canonical_supersedes_retained_frontier: bool,
     pub canonical_content_hash: String,
 }
 
@@ -2956,6 +2962,7 @@ fn register_replica_for_file_incremental_locked(
         incremental,
         canonical_projection_retained,
         canonical_covers_retained_frontier,
+        canonical_supersedes_retained_frontier,
         canonical_content_hash,
     ) = with_hub_seeded_from_file(file, |hub| {
         // Check the command's captured base in the same live-hub transition as
@@ -2990,6 +2997,16 @@ fn register_replica_for_file_incremental_locked(
                 }
             },
         );
+        // An authoritative whole-document rebuild cannot causally cover the
+        // predecessor's frontier: rotating the CRDT epoch is the point. Carry
+        // the hub's replace-capable rebootstrap obligation across replica
+        // replacement as the narrow proof that this mismatch is intentional.
+        // Capture it before deregistration, which consumes the predecessor's
+        // pending-rebootstrap membership.
+        let canonical_supersedes_retained_frontier = retained_state_vector.is_some()
+            && superseded_client_ids
+                .iter()
+                .any(|client_id| hub.pending_rebootstrap_members().contains(client_id));
         // Registration/reconnect removes the retiring member and its queue.
         // Preserve that unsettled visible-write obligation under the new
         // identity, and force a full canonical bootstrap so a stale retained
@@ -3087,6 +3104,7 @@ fn register_replica_for_file_incremental_locked(
             incremental,
             canonical_projection_retained,
             canonical_covers_retained_frontier,
+            canonical_supersedes_retained_frontier,
             canonical_content_hash,
         ))
     })??;
@@ -3101,7 +3119,7 @@ fn register_replica_for_file_incremental_locked(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} bootstrap_kind={} canonical_state_vector_bytes={} dead_members_pruned={} superseded_generations_pruned={} generation_fenced={} provisional_replacement={}",
+            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} bootstrap_kind={} canonical_state_vector_bytes={} dead_members_pruned={} superseded_generations_pruned={} generation_fenced={} provisional_replacement={} canonical_supersedes_retained_frontier={}",
             file.display(),
             client_id,
             bootstrap.len(),
@@ -3115,6 +3133,7 @@ fn register_replica_for_file_incremental_locked(
             },
             !provisional_replacement && !superseded_client_ids.is_empty(),
             provisional_replacement,
+            canonical_supersedes_retained_frontier,
         ),
     );
     Ok(Some(ReplicaRegistration {
@@ -3125,6 +3144,7 @@ fn register_replica_for_file_incremental_locked(
         canonical_projection_retained,
         retained_replica_reseed_pending: restore_fresh_controller_from_retained_replica,
         canonical_covers_retained_frontier,
+        canonical_supersedes_retained_frontier,
         canonical_content_hash,
     }))
 }
@@ -9482,6 +9502,7 @@ mod tests {
         assert!(!registration.incremental);
         assert!(registration.canonical_projection_retained);
         assert_eq!(registration.canonical_covers_retained_frontier, Some(true));
+        assert!(!registration.canonical_supersedes_retained_frontier);
         let replacement = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
             registration.client_id,
             &registration.bootstrap,
@@ -10583,6 +10604,62 @@ mod tests {
             assert!(!hub.is_registered(original.client_id));
             assert!(hub.is_registered(replacement.client_id));
             assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn authoritative_rebootstrap_provenance_crosses_provisional_registration() {
+        let (_dir, doc) = temp_doc("authoritative-rebootstrap-registration.md");
+        let file_str = doc.display().to_string();
+        let editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&file_str, editor.pid());
+        let pid = editor.pid();
+        let base_identity =
+            format!("jetbrains-{pid}-authoritative:/tmp/authoritative-rebootstrap.md");
+        let original =
+            register_editor_replica_for_file_incremental(&doc, &base_identity, None, pid)
+                .unwrap()
+                .expect("initial replica should attach");
+        let retained_frontier = original.canonical_state_vector.clone();
+        let compacted = "# compacted\n".to_string();
+
+        assert_eq!(
+            adopt_authoritative_text_for_file(&doc, &compacted).unwrap(),
+            Some(true)
+        );
+        with_hub(&doc, |hub| {
+            assert!(hub
+                .pending_rebootstrap_members()
+                .contains(&original.client_id));
+        })
+        .unwrap();
+
+        let replacement_identity = format!("{base_identity}:refresh-1");
+        let replacement = register_replica_for_file_with_precondition_and_replacement_mode(
+            &doc,
+            &replacement_identity,
+            Some(&retained_frontier),
+            Some(pid),
+            true,
+            None,
+            true,
+        )
+        .unwrap()
+        .expect("provisional replacement should attach");
+
+        assert!(replacement.canonical_projection_retained);
+        assert_eq!(replacement.canonical_covers_retained_frontier, Some(false));
+        assert!(replacement.canonical_supersedes_retained_frontier);
+        let replacement_replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            replacement.client_id,
+            &replacement.bootstrap,
+        )
+        .unwrap();
+        assert_eq!(replacement_replica.text(), compacted);
+        with_hub(&doc, |hub| {
+            assert!(hub.is_registered(original.client_id));
+            assert!(hub.is_registered(replacement.client_id));
         })
         .unwrap();
     }

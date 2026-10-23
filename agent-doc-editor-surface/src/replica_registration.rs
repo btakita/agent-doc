@@ -73,6 +73,11 @@ pub struct RegistrationProjectionEvidence {
     /// (`None`: unknown).
     #[serde(default)]
     pub canonical_covers_retained_frontier: Option<bool>,
+    /// The controller explicitly queued a replace-capable rebootstrap for the
+    /// retained predecessor, proving that canonical intentionally supersedes
+    /// its CRDT epoch rather than merely failing the causal-coverage check.
+    #[serde(default)]
+    pub canonical_supersedes_retained_frontier: bool,
     /// The editor holds a settled shadow: the last text it proved the
     /// controller accepted.
     #[serde(default)]
@@ -191,9 +196,13 @@ fn causal_action(
         // A restarted IDE has no shadow, and an unreadable buffer is not
         // divergence: the historical fail-closed adoption stands.
         ApplyCanonical
-    } else if e.buffer_equals_shadow && canonical_covers_retained_frontier == Some(true) {
-        // The buffer has not advanced past the last accepted projection and
-        // canonical covers the cached native frontier: a safe recovery.
+    } else if e.buffer_equals_shadow
+        && (canonical_covers_retained_frontier == Some(true)
+            || e.canonical_supersedes_retained_frontier)
+    {
+        // The buffer has not advanced past the last accepted projection. It is
+        // safe to recover when canonical either causally covers that frontier
+        // or explicitly supersedes it through an authoritative rebootstrap.
         ApplyCanonical
     } else if e.canonical_equals_shadow {
         PublishOperatorBuffer
@@ -279,6 +288,37 @@ mod tests {
         assert_eq!(
             hold.hold_reason.as_deref(),
             Some(HOLD_AMBIGUOUS_REREGISTER_PROJECTION)
+        );
+    }
+
+    #[test]
+    fn authoritative_rebootstrap_accepts_only_an_unchanged_settled_buffer() {
+        let unchanged = RegistrationProjectionEvidence {
+            canonical_projection_retained: true,
+            canonical_covers_retained_frontier: Some(false),
+            canonical_supersedes_retained_frontier: true,
+            ..facts(Some("settled"), Some("settled"), Some("compacted"))
+        };
+        assert_eq!(
+            derive_registration_projection(&unchanged).action,
+            ApplyCanonical
+        );
+
+        let advanced = RegistrationProjectionEvidence {
+            canonical_projection_retained: true,
+            canonical_covers_retained_frontier: Some(false),
+            canonical_supersedes_retained_frontier: true,
+            ..facts(
+                Some("settled"),
+                Some("settled plus operator text"),
+                Some("compacted"),
+            )
+        };
+        let answer = derive_registration_projection(&advanced);
+        assert_eq!(answer.action, HoldOperatorBuffer);
+        assert_eq!(
+            answer.hold_reason.as_deref(),
+            Some(HOLD_AMBIGUOUS_RETAINED_PROJECTION)
         );
     }
 

@@ -130,6 +130,10 @@ class CrdtReplicaForwarder(
     var canonicalCoversRetainedFrontier: Boolean? = null
         private set
 
+    /** Whether an authoritative epoch replacement explicitly supersedes the retained frontier. */
+    var canonicalSupersedesRetainedFrontier: Boolean = false
+        private set
+
     var canonicalContentHash: String? = null
         private set
 
@@ -185,6 +189,7 @@ class CrdtReplicaForwarder(
             canonicalProjectionRetained = ack.canonicalProjectionRetained
             retainedReplicaReseedPending = ack.retainedReplicaReseedPending
             canonicalCoversRetainedFrontier = ack.canonicalCoversRetainedFrontier
+            canonicalSupersedesRetainedFrontier = ack.canonicalSupersedesRetainedFrontier
             canonicalContentHash = ack.canonicalContentHash
             val incremental = ack.bootstrapKind == ReplicaBootstrapKind.Delta
             if (incremental && (resumeState == null || ack.canonicalStateVector == null)) {
@@ -606,6 +611,7 @@ data class ReplicaRegisterAck(
     val canonicalProjectionRetained: Boolean = false,
     val retainedReplicaReseedPending: Boolean = false,
     val canonicalCoversRetainedFrontier: Boolean? = null,
+    val canonicalSupersedesRetainedFrontier: Boolean = false,
     val canonicalContentHash: String? = null,
 )
 
@@ -864,6 +870,8 @@ class CpSocketReplicaTransport(
             data.get("canonical_covers_retained_frontier")
                 ?.takeUnless { it.isJsonNull }
                 ?.asBoolean
+        val canonicalSupersedesRetainedFrontier =
+            data.get("canonical_supersedes_retained_frontier")?.asBoolean ?: false
         val canonicalContentHash = data.get("canonical_content_hash")?.asString
         val lineage = data.get("lineage")?.asString
         lastRegisterError = null
@@ -876,6 +884,7 @@ class CpSocketReplicaTransport(
             canonicalProjectionRetained = canonicalProjectionRetained,
             retainedReplicaReseedPending = retainedReplicaReseedPending,
             canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
+            canonicalSupersedesRetainedFrontier = canonicalSupersedesRetainedFrontier,
             canonicalContentHash = canonicalContentHash,
         )
     }

@@ -265,6 +265,17 @@ matching intent clears it. Unrelated convergence facts must not erase pending
 work, and a zero-member relay acknowledgement must not manufacture delivery or
 disk authority.
 
+An authoritative whole-document rebuild (including Compact Exchange epoch
+rotation) also retains a replace-capable rebootstrap obligation for every live
+replica. When a replica generation is replaced, that obligation is the only
+provenance that may classify an uncovered retained CRDT frontier as
+intentionally superseded. The registration projection may adopt the rebuilt
+canonical across that frontier only if the live editor buffer exactly equals
+its settled shadow. A buffer advanced beyond the shadow remains operator-owned
+and must hold unless an independent containment or clean-merge proof applies.
+An ordinary lineage mismatch, content resemblance, or missing predecessor
+obligation is never sufficient authority.
+
 Implementation: `StateBackboneProjection` reduces the event ledger into
 document, queue, closeout, transport, supervisor, route, and proof projections.
 The closeout projection delegates phase advancement to the existing

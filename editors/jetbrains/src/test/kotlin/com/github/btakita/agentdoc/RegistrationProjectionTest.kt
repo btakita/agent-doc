@@ -37,6 +37,8 @@ class RegistrationProjectionTest {
         canonicalProjectionRetained = flags.get("canonical_projection_retained").asBoolean,
         retainedReplicaReseedPending = flags.get("retained_replica_reseed_pending").asBoolean,
         canonicalCoversRetainedFrontier = flags.get("canonical_covers_retained_frontier").flagOrNull(),
+        canonicalSupersedesRetainedFrontier =
+            flags.get("canonical_supersedes_retained_frontier")?.asBoolean ?: false,
         publishedShadow = shadow,
         bufferText = buffer,
         canonicalText = canonical,
@@ -65,7 +67,7 @@ class RegistrationProjectionTest {
         JsonObject().also { out -> input.entrySet().filter { !it.value.isJsonNull }.forEach { out.add(it.key, it.value) } }
 
     @Test
-    fun `GH 326 frozen registration floor answers every named parity case and captures its facts exactly`() {
+    fun `GH 326 registration facts match every named case and the frozen floor answers compatible cases`() {
         // The same file pins the native derivation in Rust
         // (gh326_registration_projection_answers_the_shared_parity_cases).
         val cases = fixture().getAsJsonArray("cases").map { it.asJsonObject }
@@ -87,7 +89,9 @@ class RegistrationProjectionTest {
                 withoutNulls(input),
                 JsonParser.parseString(gson.toJson(RegistrationProjection.evidence(observation))).asJsonObject,
             )
-            assertEquals(name, case.getAsJsonObject("expected"), wire(RegistrationProjection.frozen(observation)))
+            if (case.get("native_only")?.asBoolean != true) {
+                assertEquals(name, case.getAsJsonObject("expected"), wire(RegistrationProjection.frozen(observation)))
+            }
         }
     }
 

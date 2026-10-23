@@ -189,6 +189,7 @@ class CrdtReplicaForwarderTest {
         private val canonicalProjectionRetained: Boolean = false,
         private val retainedReplicaReseedPending: Boolean = false,
         private val canonicalCoversRetainedFrontier: Boolean? = null,
+        private val canonicalSupersedesRetainedFrontier: Boolean = false,
         private val canonicalContentHash: String? = null,
         var durablePushSucceeds: Boolean = true,
         private val broadcastFails: Boolean = false,
@@ -223,6 +224,7 @@ class CrdtReplicaForwarderTest {
                 canonicalProjectionRetained = canonicalProjectionRetained,
                 retainedReplicaReseedPending = retainedReplicaReseedPending,
                 canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
+                canonicalSupersedesRetainedFrontier = canonicalSupersedesRetainedFrontier,
                 canonicalContentHash = canonicalContentHash,
             )
         }
@@ -279,6 +281,7 @@ class CrdtReplicaForwarderTest {
                 bootstrap = "CANONICAL".toByteArray(),
                 canonicalProjectionRetained = true,
                 canonicalCoversRetainedFrontier = true,
+                canonicalSupersedesRetainedFrontier = true,
                 canonicalContentHash = "canonical-hash",
             )
         val fwd = CrdtReplicaForwarder("plan.md", "intellij:restart", node, transport)
@@ -286,6 +289,7 @@ class CrdtReplicaForwarderTest {
         assertTrue(fwd.register())
         assertTrue(fwd.canonicalProjectionRetained)
         assertEquals(true, fwd.canonicalCoversRetainedFrontier)
+        assertTrue(fwd.canonicalSupersedesRetainedFrontier)
         assertEquals("canonical-hash", fwd.canonicalContentHash)
         assertEquals("CANONICAL", fwd.replicaText())
     }

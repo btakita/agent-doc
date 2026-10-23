@@ -40,6 +40,7 @@ internal object RegistrationProjection {
         val canonicalProjectionRetained: Boolean,
         val retainedReplicaReseedPending: Boolean,
         val canonicalCoversRetainedFrontier: Boolean?,
+        val canonicalSupersedesRetainedFrontier: Boolean = false,
         val publishedShadow: String?,
         val bufferText: String?,
         val canonicalText: String?,
@@ -57,6 +58,7 @@ internal object RegistrationProjection {
         @SerializedName("canonical_projection_retained") val canonicalProjectionRetained: Boolean,
         @SerializedName("retained_replica_reseed_pending") val retainedReplicaReseedPending: Boolean,
         @SerializedName("canonical_covers_retained_frontier") val canonicalCoversRetainedFrontier: Boolean?,
+        @SerializedName("canonical_supersedes_retained_frontier") val canonicalSupersedesRetainedFrontier: Boolean?,
         @SerializedName("has_published_shadow") val hasPublishedShadow: Boolean,
         @SerializedName("has_buffer") val hasBuffer: Boolean,
         @SerializedName("has_canonical") val hasCanonical: Boolean,
@@ -83,6 +85,10 @@ internal object RegistrationProjection {
             canonicalProjectionRetained = observation.canonicalProjectionRetained,
             retainedReplicaReseedPending = observation.retainedReplicaReseedPending,
             canonicalCoversRetainedFrontier = observation.canonicalCoversRetainedFrontier,
+            // Omit false for compatibility with older native generations and
+            // the frozen exhaustive fixture; absence remains fail-closed.
+            canonicalSupersedesRetainedFrontier =
+                observation.canonicalSupersedesRetainedFrontier.takeIf { it },
             hasPublishedShadow = shadow != null,
             hasBuffer = buffer != null,
             hasCanonical = canonical != null,

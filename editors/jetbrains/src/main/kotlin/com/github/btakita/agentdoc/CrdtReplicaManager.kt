@@ -4074,6 +4074,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
                     retainedReplicaReseedPending = forwarder.retainedReplicaReseedPending,
                     canonicalCoversRetainedFrontier = forwarder.canonicalCoversRetainedFrontier,
+                    canonicalSupersedesRetainedFrontier = forwarder.canonicalSupersedesRetainedFrontier,
                     publishedShadow = publishedShadowAtRegistration,
                     bufferText = bufferTextAtRegistration,
                     canonicalText = forwarder.replicaText(),

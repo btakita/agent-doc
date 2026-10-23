@@ -457,19 +457,14 @@ escalation republishes cached frontend columns unchanged only when they already
 contain the document. Otherwise it defers with
 `cause=focus_requires_frontend_layout` until a positive frontend snapshot
 names the new membership. Tmux observation is a receipt and never supplies a
-replacement slot for passive focus escalation (GH #322; see
-`07-session-tmux-commands.md`). The narrow explicit-route exception is a
-foreground `Run Agent Doc` `ensure` request on a cold controller (GH #351,
-GH #352): if positive live-tmux observation fixes the current window width and
-the route carries the editor's complete named visible set at that same width,
-the layout plane may replace the complete observed set before dispatch. The
-one-column case is the smallest instance; a two-column visible set may replace
-two stashed live slots. Partial replacement and widening remain forbidden. If
-the document is already live it remains focus-only. The published replacement
-keeps `column_order=unknown`; it is dispatch evidence, not a frontend snapshot,
-cannot seed editor-order memory, cannot widen the live window, and does not
-authorize automatic selection escalation or manual Sync. Manual `Sync Tmux
-Layout` still refuses unknown geometry with `surface_reference_unknown_layout`
+replacement slot for focus escalation or explicit routing (GH #322; see
+`07-session-tmux-commands.md`). A foreground `Run Agent Doc` `ensure` request
+with unknown Remote Dev geometry may use a positive live-tmux observation only
+to prove that its target document already has a pane, in which case dispatch is
+focus-only. Equal observed and requested widths do not prove editor membership
+or left-to-right assignment, so a one-for-one or complete-width replacement is
+still refused rather than filling tmux slots from an unordered visible set.
+Manual `Sync Tmux Layout` likewise refuses unknown geometry with `surface_reference_unknown_layout`
 and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence.
 When passive focus escalation cannot use a positive frontend snapshot, its
 receipt is `focus_deferred:<cause>` and is terminal for that observation: it is

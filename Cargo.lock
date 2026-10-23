@@ -740,6 +740,7 @@ dependencies = [
 name = "agent-doc-document-realtime-io"
 version = "0.35.546"
 dependencies = [
+ "agent-doc-archive-io",
  "agent-doc-capture-io",
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",

@@ -22,6 +22,7 @@ test-support = []
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.546" }
+agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.35.546" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.546" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.546" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.546" }

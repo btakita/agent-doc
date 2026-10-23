@@ -2427,7 +2427,26 @@ pub fn settle_retained_committed_projection_through_authority(
 /// so it can be delivery-converged with an empty ACK queue. In that state the
 /// durable deferred-write slot is historical evidence, not an outstanding
 /// delivery. Clear it only when the exact retained target is authoritative,
-/// projected to disk, and contains the already-durable captured response.
+/// projected to disk, and materializes the already-durable captured response
+/// either inline or in a compact archive referenced by that target.
+fn captured_response_materialized_in_document_or_archive(
+    path: &Path,
+    captured_response: &str,
+    content: &str,
+) -> bool {
+    agent_doc_turn::response_replay::response_materialized_in_content(
+        captured_response,
+        content,
+    ) || agent_doc_archive_io::read_head_compact_archives(path, content)
+        .into_iter()
+        .any(|archive| {
+            agent_doc_turn::response_replay::response_materialized_in_content(
+                captured_response,
+                &archive,
+            )
+        })
+}
+
 pub fn settle_retained_captured_projection_through_authority(
     path: &Path,
     captured_response: &str,
@@ -2501,14 +2520,15 @@ pub fn settle_retained_captured_projection_through_authority(
     // A newer authority cut that already contains the durable response is the
     // desired semantic result. Replaying an older incomplete intent over it can
     // only regress the closeout and may discard newer operator-owned edits.
-    let response_already_materialized =
-        agent_doc_turn::response_replay::response_materialized_in_content(
-            captured_response,
-            &canonical,
-        );
+    let response_already_materialized = captured_response_materialized_in_document_or_archive(
+        path,
+        captured_response,
+        &canonical,
+    );
     let pending_journal = pending_document_write_journal(path);
     let has_superseded_capture_lineage = pending_journal.iter().any(|intent| {
-        !agent_doc_turn::response_replay::response_materialized_in_content(
+        !captured_response_materialized_in_document_or_archive(
+            path,
             captured_response,
             &intent.target_content,
         )
@@ -2546,7 +2566,8 @@ pub fn settle_retained_captured_projection_through_authority(
         && !response_already_materialized
         && !has_superseded_capture_lineage
         && let Some(rebased_target) = deferred_document_write_reconnect_content(path, &canonical)?
-        && agent_doc_turn::response_replay::response_materialized_in_content(
+        && captured_response_materialized_in_document_or_archive(
+            path,
             captured_response,
             &rebased_target,
         )
@@ -2567,7 +2588,8 @@ pub fn settle_retained_captured_projection_through_authority(
         }
         canonical = try_resolve_current_document_content(path, source)?;
     }
-    if !agent_doc_turn::response_replay::response_materialized_in_content(
+    if !captured_response_materialized_in_document_or_archive(
+        path,
         captured_response,
         &canonical,
     ) {
@@ -2604,7 +2626,8 @@ pub fn settle_retained_captured_projection_through_authority(
         }
         canonical = try_resolve_current_document_content(path, source)?;
         if canonical != replayed_target
-            || !agent_doc_turn::response_replay::response_materialized_in_content(
+            || !captured_response_materialized_in_document_or_archive(
+                path,
                 captured_response,
                 &canonical,
             )
@@ -3008,8 +3031,7 @@ pub fn settle_projected_captured_response_through_authority(
     if live_editors == 0 {
         return Ok(None);
     }
-    if !agent_doc_turn::response_replay::response_materialized_in_content(captured_response, &text)
-    {
+    if !captured_response_materialized_in_document_or_archive(path, captured_response, &text) {
         let Some(replayed_target) =
             agent_doc_turn::response_replay::materialize_response_in_current_exchange(
                 &text,
@@ -3036,8 +3058,7 @@ pub fn settle_projected_captured_response_through_authority(
         }
         text = try_resolve_current_document_content(path, source)?;
     }
-    if !agent_doc_turn::response_replay::response_materialized_in_content(captured_response, &text)
-    {
+    if !captured_response_materialized_in_document_or_archive(path, captured_response, &text) {
         return Ok(None);
     }
 
@@ -16162,6 +16183,54 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), captured_current);
+    }
+
+    #[test]
+    fn retained_capture_settles_from_compact_archive_without_replaying_inline_response() {
+        let captured_response = "### Re: investigate\n\nFixed the retained closeout.\n";
+        let captured_target = format!(
+            "# Session\n\n<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            captured_response.trim_end()
+        );
+        let compacted_target = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/capture.md`*\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (dir, file, _canonical) = temp_doc(compacted_target);
+        let archive_dir = dir.path().join(".agent-doc/archives");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        std::fs::write(archive_dir.join("capture.md"), captured_response).unwrap();
+
+        ensure_deferred_document_write_intent(
+            &file,
+            &captured_target,
+            compacted_target,
+            "serialized_atomic_write_compact_archive_test",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .expect("the overlapping compact target should remain retained");
+        assert!(pending_document_write(&file).is_some());
+
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_compact_archive_test",
+            )
+            .unwrap(),
+            "the referenced archive should satisfy retained response materialization",
+        );
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), compacted_target);
+        assert!(
+            !std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("Fixed the retained closeout."),
+            "settlement must not restore the archived response into the live exchange",
+        );
     }
 
     #[test]

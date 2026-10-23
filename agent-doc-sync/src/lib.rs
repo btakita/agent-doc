@@ -118,6 +118,19 @@ impl AutoStartMode {
     }
 }
 
+/// Whether tmux-router may bind an unresolved document to an otherwise spare
+/// visible pane.
+///
+/// A spare pane proves only that a terminal slot exists. It does not prove
+/// which document owns that slot, so assigning it from pane-list order would
+/// reconstruct editor membership/order from ambient tmux state. Exact actor
+/// bindings and pane-provision receipts enter tmux-router through
+/// `pre_resolved_panes`; anything that still reaches the unresolved callback
+/// must fail closed.
+pub const fn unresolved_visible_spare_assignment_allowed() -> bool {
+    false
+}
+
 /// Whether a sync pass may realise the columns left after the stale-supervisor
 /// gate has excluded one or more requested documents.
 ///
@@ -1157,6 +1170,14 @@ fn resolve_absolute_file_path(file: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unresolved_visible_spare_is_never_document_assignment_evidence() {
+        assert!(
+            !unresolved_visible_spare_assignment_allowed(),
+            "pane inventory order cannot prove editor membership or left-to-right assignment"
+        );
+    }
 
     #[test]
     fn sync_lock_acquire_decision_self_heals_wedged_holder() {

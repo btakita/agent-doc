@@ -464,6 +464,14 @@ to prove that its target document already has a pane, in which case dispatch is
 focus-only. Equal observed and requested widths do not prove editor membership
 or left-to-right assignment, so a one-for-one or complete-width replacement is
 still refused rather than filling tmux slots from an unordered visible set.
+That evidence boundary also applies after a complete frontend vector reaches
+sync: the vector authorizes document order, not a document-to-terminal guess.
+The reconciler receives file-to-pane assignments only from a proven live actor
+or registry binding, or from the exact pane ID returned by the current
+provision effect. That provision receipt is pre-resolved before tmux-router
+runs. A document still unresolved at that point cannot borrow a visible spare
+pane in either passive or full/manual mode; pane-list order, pane index,
+creation order, and a last-element `pop()` are not ownership evidence.
 Manual `Sync Tmux Layout` likewise refuses unknown geometry with `surface_reference_unknown_layout`
 and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence.
 That flat evidence is the causal boundary from GH #360: the backend knew only an

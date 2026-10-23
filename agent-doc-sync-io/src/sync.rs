@@ -219,6 +219,7 @@ use agent_doc_sync::{
     epoch_millis_now, gated_layout_decision, last_visible_excerpt, latency_budget_status,
     plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
     rename_debounce_expired, sanitize_excerpt, sync_latency_message,
+    unresolved_visible_spare_assignment_allowed,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -1607,6 +1608,29 @@ fn block_unresolved_safe_passive_managed_files(
     }
     newly_blocked.sort();
     newly_blocked
+}
+
+fn managed_files_missing_exact_pane_assignment(
+    col_args: &[String],
+    session_files: &[(String, PathBuf)],
+    exact_assignments: &HashMap<PathBuf, String>,
+) -> Vec<PathBuf> {
+    let managed_files: HashSet<&Path> = session_files
+        .iter()
+        .map(|(_, file_path)| file_path.as_path())
+        .collect();
+    col_args
+        .iter()
+        .flat_map(|column| column.split(','))
+        .map(str::trim)
+        .filter(|file| !file.is_empty())
+        .map(PathBuf::from)
+        .filter(|file| {
+            managed_files.contains(file.as_path()) && !exact_assignments.contains_key(file)
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn open_session_log_owner_fail_closed_diagnostic(
@@ -4956,6 +4980,11 @@ fn run_with_options_internal_at_root(
                             pane_id,
                             file_path.display()
                         ));
+                        // The provision effect returned the exact file→pane
+                        // assignment. Carry that receipt directly into the
+                        // router instead of making the later unresolved path
+                        // borrow an arbitrary visible spare pane.
+                        pre_resolved_panes.insert(file_path.to_path_buf(), pane_id.clone());
                         reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
                         safe_passive_resolved_files
                             .borrow_mut()
@@ -5308,6 +5337,11 @@ fn run_with_options_internal_at_root(
                         pane_id,
                         file_path.display()
                     ));
+                    // A successful provision is exact ownership evidence for
+                    // this pass. Without this handoff tmux-router can see the
+                    // file as unresolved and assign it from unordered spare
+                    // pane inventory, reversing editor columns.
+                    pre_resolved_panes.insert(file_path.to_path_buf(), pane_id.clone());
                     reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
                     if matches!(auto_start_mode, AutoStartMode::SafePassive) {
                         safe_passive_resolved_files
@@ -5441,8 +5475,12 @@ fn run_with_options_internal_at_root(
     }
 
     let tmux_router_registry_path = registry_path.as_path();
-    let allow_unresolved_pane_assignment =
-        |path: &Path| !blocked_unresolved_files.borrow().contains(path);
+    let allow_unresolved_pane_assignment = |_path: &Path| {
+        // Exact actor bindings and provision receipts are already present in
+        // `pre_resolved_panes`. Reaching this callback means no document→pane
+        // evidence exists; a visible spare is not structural authority.
+        unresolved_visible_spare_assignment_allowed()
+    };
     let logged_open_cycle_panes: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     let log_open_cycle_detach = |pane_id: &str| {
         let Some(protected) = open_cycle_protected_pane_state(tmux, pane_id) else {
@@ -5621,6 +5659,37 @@ fn run_with_options_internal_at_root(
         return Ok(());
     }
     let col_args: &[String] = &router_col_args;
+
+    // `#tmuxpanesreversed`: tmux-router can otherwise pair unresolved files
+    // with ambient visible panes by iteration order. Refuse before reconcile,
+    // while the current layout is still untouched, unless every managed
+    // document retained an exact actor binding or a fresh provision receipt.
+    let missing_exact_assignments = managed_files_missing_exact_pane_assignment(
+        col_args,
+        &session_files.borrow(),
+        &pre_resolved_panes,
+    );
+    if !missing_exact_assignments.is_empty() {
+        let missing_summary = missing_exact_assignments
+            .iter()
+            .map(|file| file.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let message = format!(
+            "[sync] refused tmux reconcile because managed documents lack exact pane assignments: {missing_summary}"
+        );
+        eprintln!("{message}");
+        sync_log(&format!(
+            "unresolved_pane_assignment_refused files={} mode={} reason=no_exact_binding_or_provision_receipt",
+            missing_summary,
+            auto_start_mode.log_label(),
+        ));
+        if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+            mark_sync_layout_preserved(&message);
+            return Ok(());
+        }
+        anyhow::bail!(message);
+    }
 
     // Open-cycle panes are logged during DETACH, but they are not kept visible.
     // Stashing preserves the process and avoids recurring 3-pane projections.
@@ -8996,6 +9065,43 @@ mod tests {
                 .borrow()
                 .contains(Path::new("tasks/software/tsift.md")),
             "files with a proven or freshly provisioned owner remain eligible for reconcile"
+        );
+    }
+
+    #[test]
+    fn requested_managed_files_require_exact_pane_assignments() {
+        let left = PathBuf::from("tasks/agent-doc/agent-doc-bugs.md");
+        let right = PathBuf::from("tasks/software/tsift.md");
+        let unmanaged = PathBuf::from("README.md");
+        let col_args = vec![
+            format!("{},{}", left.display(), unmanaged.display()),
+            right.display().to_string(),
+        ];
+        let session_files = vec![
+            ("left-session".to_string(), left.clone()),
+            ("right-session".to_string(), right.clone()),
+        ];
+        let mut exact_assignments = HashMap::from([(left.clone(), "%31".to_string())]);
+
+        assert_eq!(
+            managed_files_missing_exact_pane_assignment(
+                &col_args,
+                &session_files,
+                &exact_assignments,
+            ),
+            vec![right.clone()],
+            "an unmanaged editor split is irrelevant, but every managed document needs evidence"
+        );
+
+        exact_assignments.insert(right, "%32".to_string());
+        assert!(
+            managed_files_missing_exact_pane_assignment(
+                &col_args,
+                &session_files,
+                &exact_assignments,
+            )
+            .is_empty(),
+            "an exact provision receipt closes the pre-reconcile boundary"
         );
     }
 

@@ -761,6 +761,32 @@ def self_test() -> int:
         "the exact-tag lazily-kt checkout must retain its required ../lazily-spec sibling"
     )
 
+    # #lzexplicitcomposite: the version pinned in each JetBrains build is the
+    # default dependency authority. A checkout path must never implicitly opt
+    # classic builds into an adjacent, possibly dirty lazily-kt source tree.
+    # Both plugin generations expose the same explicit source-verification seam.
+    classic_settings = open(
+        os.path.join(repo_root, "editors", "jetbrains", "settings.gradle.kts"),
+        encoding="utf-8",
+    ).read()
+    modular_settings = open(
+        os.path.join(repo_root, "editors", "jetbrains-262", "settings.gradle.kts"),
+        encoding="utf-8",
+    ).read()
+    explicit_override = 'System.getenv("AGENT_DOC_LAZILY_KT_DIR")?.let { sourceDir ->'
+    assert explicit_override in classic_settings, (
+        "classic JetBrains source substitution must require AGENT_DOC_LAZILY_KT_DIR"
+    )
+    assert explicit_override in modular_settings, (
+        "modular JetBrains source substitution must require AGENT_DOC_LAZILY_KT_DIR"
+    )
+    assert '?: file("../../../lazily-kt")' not in classic_settings, (
+        "classic JetBrains builds must not silently substitute an adjacent lazily-kt checkout"
+    )
+    assert 'lazilyKt.parentFile.resolve("lazily-spec/proto")' in classic_settings, (
+        "the explicit Lazily checkout must resolve its own adjacent spec checkout"
+    )
+
     print("[self-test] check_plugin_versions: ok")
     return 0
 

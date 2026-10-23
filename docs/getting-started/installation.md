@@ -56,9 +56,10 @@ cargo install --path . --force
 
 `make install` also rebuilds already-installed editor packages. The JetBrains
 build runs its Gradle daemon on JDK 21; Gradle provisions a Temurin 21 when
-none is installed. In a monorepo checkout, an initialized sibling `lazily-kt`
-development build also requires sibling `lazily-spec/proto`; standalone checkouts
-use the published Lazily dependency instead.
+none is installed. JetBrains builds use the Lazily version pinned in their Gradle
+build files even when a `lazily-kt` checkout happens to be adjacent. Set
+`AGENT_DOC_LAZILY_KT_DIR=/path/to/lazily-kt` to opt into a local composite build;
+that checkout requires an adjacent `lazily-spec/proto` sibling.
 
 The Rust workspace is an implementation detail: every agent-doc Cargo package is
 marked `publish = false`. New releases ship through GitHub Releases and PyPI;

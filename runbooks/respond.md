@@ -247,6 +247,13 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      generation binds to at most one worker and one worker binds to at most one
      live claim in the document; a stale generation or conflicting binding is
      refused without mutation.
+
+     On Grok Build, use native `spawn_subagent` with `background=true` for one
+     native background worker per dispatch item. Start each claim immediately
+     with the returned `subagent_id`; do not wait for another operator prompt
+     and do not substitute `agent-doc orchestrate` while that tool is available.
+     Collect completions with `get_command_or_subagent_output` and preserve the
+     same generation fence through report-complete and closeout.
   4. Treat `[#subagent-operator-request-<unique-id>] subagent operator request` as a
      blocking handback, not worker completion. Copy the entire packet verbatim
      into `agent:exchange` so the exact request, why it is needed, target/scope,
@@ -340,8 +347,8 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      turn ends. For abandoned, failed, or requeued work run
      `agent-doc queue release <FILE> --item <...> --generation <N> --requeue`: no report is
      recorded and the line is dispatchable to a new worker again.
-  Harnesses without an in-session Agent tool (Codex, OpenCode, Grok Build,
-  Cursor) claim the same items and fall back to
+  Harnesses without an in-session Agent tool (Codex, OpenCode, Cursor) claim
+  the same items and fall back to
   `agent-doc orchestrate <FILE> --mode parallel --task "<item>" ...` over the
   dispatch items. If neither path exists, say so in the response and drain the
   items inline. When every remaining head is claimed or held, end the turn

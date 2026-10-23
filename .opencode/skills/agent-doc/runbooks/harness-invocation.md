@@ -48,6 +48,15 @@ indicator; unknown screens and drafts remain protected. Fullscreen UI was
 verified with Grok Build 1.0.24. `/clear` starts a fresh conversation; Ctrl+Q
 twice exits. Goal dispatch and native token streaming are not advertised.
 
+Grok Build has a native `spawn_subagent` tool. When `agent-doc plan` returns a
+non-empty `queue_subagent_dispatch` list for a `subagents` / `fan-out` queue,
+dispatch it immediately without waiting for another operator prompt: claim each
+item, call `spawn_subagent` with `background=true` and its authorization preamble
+verbatim, then pass the returned `subagent_id` to the item's `start_command`.
+Use one native background worker per dispatch item and an external worktree for
+repository writes. `agent-doc orchestrate` is only the fallback when the native
+tool is genuinely unavailable.
+
 This runbook covers the harness-specific differences in how agent-doc is invoked.
 The core workflow (preflight, respond, persist the response) is identical across all harnesses; see `commit.md` for the shared commit-boundary contract.
 

@@ -30,7 +30,13 @@ detect_target() {
   case "$OS" in
     Linux)
       case "$ARCH" in
-        x86_64 | amd64)  echo "x86_64-unknown-linux-musl" ;;
+        x86_64 | amd64)
+          if is_musl; then
+            echo "x86_64-unknown-linux-musl"
+          else
+            echo "x86_64-unknown-linux-gnu"
+          fi
+          ;;
         aarch64 | arm64) echo "aarch64-unknown-linux-gnu" ;;
         *) unsupported "$OS" "$ARCH" ;;
       esac
@@ -50,6 +56,27 @@ detect_target() {
       ;;
     *) unsupported "$OS" "$ARCH" ;;
   esac
+}
+
+is_musl() {
+  # Prefer the active loader's own report. A glibc host can have an optional
+  # musl loader installed for compatibility; its mere presence must not switch
+  # the selected release asset away from GNU (GH #363).
+  if command -v ldd >/dev/null 2>&1; then
+    LDD_OUTPUT="$(ldd --version 2>&1 || true)"
+    case "$LDD_OUTPUT" in
+      *musl*) return 0 ;;
+      *glibc* | *GLIBC* | *"GNU libc"*) return 1 ;;
+    esac
+  fi
+
+  # Some minimal musl systems provide a loader but no useful `ldd --version`.
+  for loader in /lib/ld-musl-*.so.1 /usr/lib/ld-musl-*.so.1; do
+    if [ -e "$loader" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 unsupported() {
@@ -94,6 +121,33 @@ need_cmd curl
 need_cmd grep
 need_cmd sed
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | sed 's/[[:space:]].*$//'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | sed 's/[[:space:]].*$//'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | sed 's/^.*= //'
+  else
+    echo "ERROR: A SHA-256 tool is required (sha256sum, shasum, or openssl)." >&2
+    exit 1
+  fi
+}
+
+checksum_from_sidecar() {
+  while read -r digest listed_name _rest; do
+    listed_name="${listed_name#\*}"
+    case "$digest" in
+      '' | *[!0-9A-Fa-f]*) continue ;;
+    esac
+    if [ "${#digest}" -eq 64 ] && [ "$listed_name" = "$ARCHIVE_NAME" ]; then
+      echo "$digest"
+      return 0
+    fi
+  done < "$1"
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Resolve release tag
 # ---------------------------------------------------------------------------
@@ -132,6 +186,7 @@ else
 fi
 
 DOWNLOAD_URL="${GITHUB_DL}/${TAG}/${ARCHIVE_NAME}"
+CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
 echo "Target   : ${TARGET}"
 echo "Archive  : ${ARCHIVE_NAME}"
@@ -159,6 +214,21 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 echo ""
 echo "Downloading ${DOWNLOAD_URL}..."
 curl -fSL --progress-bar "${DOWNLOAD_URL}" -o "${TMP_DIR}/${ARCHIVE_NAME}"
+echo "Downloading ${CHECKSUM_URL}..."
+curl -fSL --progress-bar "${CHECKSUM_URL}" -o "${TMP_DIR}/${ARCHIVE_NAME}.sha256"
+
+if ! EXPECTED_SHA256="$(checksum_from_sidecar "${TMP_DIR}/${ARCHIVE_NAME}.sha256")"; then
+  echo "ERROR: Checksum sidecar has no valid entry for ${ARCHIVE_NAME}." >&2
+  exit 1
+fi
+ACTUAL_SHA256="$(sha256_file "${TMP_DIR}/${ARCHIVE_NAME}")"
+if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+  echo "ERROR: Integrity check failed for ${ARCHIVE_NAME}; refusing to install." >&2
+  echo "  Expected: ${EXPECTED_SHA256}" >&2
+  echo "  Actual  : ${ACTUAL_SHA256}" >&2
+  exit 1
+fi
+echo "Checksum verified: ${ARCHIVE_NAME}"
 
 if is_windows; then
   # Windows: unzip

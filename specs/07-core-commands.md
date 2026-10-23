@@ -541,6 +541,11 @@ the release is not fully installed; it never reports success over a skew. When
 the binary upgrade itself fails, plugins are left alone rather than moved ahead
 of the binary.
 
+The printed `install.sh` recovery path follows the same platform-pair contract:
+it selects GNU versus musl from the active Linux x86_64 loader and verifies the
+archive-specific `.sha256` sidecar before extraction. An absent or mismatched
+sidecar fails closed without replacing the installed binary (GH #363).
+
 `agent-doc upgrade --auto [--interval-seconds N]` is a foreground release watcher.
 It checks immediately and then polls every 900 seconds by default; the interval
 floor is 60 seconds. One recoverable per-user PID lock prevents concurrent

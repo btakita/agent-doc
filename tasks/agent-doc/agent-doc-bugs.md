@@ -312,7 +312,42 @@ The Stop hook returned its intentional fail-closed continuation result because t
 The underlying mistake was in the prior coordinator closeout: batched free-text answers require an explicit multi-head `agent-doc queue consume --count N`. The one-head default is deliberate so agent-doc does not guess which unrelated queue entries an answer covers.
 
 No repair subagent was spawned because the conditional defect was not present. The documented next-admission reconciliation should strike the prior-cycle answered residue; it should not be manually deleted or force-written. The separately added `release + publish` item is already claimed by the existing release worker, so it was not dispatched again.
-<!-- agent:boundary:a6285369 -->
+
+### Re: Subagent completed: `subagent:gh355-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/355” — agent-doc
+<!-- agent-doc-subagent-response sha256=9db2ecd4467e2d89a31a510b786f9de51368af9085ae59f4f54b5ee98ebfc010 -->
+> **Subagent response:**
+>
+> GH #355 was already resolved; no duplicate patch was needed. Original fix 4bb0b43868326b25c1c65fcdcef7231a19abf695 shipped in v0.35.544. Current origin/main 3a1d3cb8dc contains it; later GH #360 intentionally superseded guessed same-width Remote Dev replacement behavior. Verification passed: GH #355 regression 1/1, unknown-route regressions 2/2, cargo check --workspace --all-targets, and CI on the exact SHA. Verification branch verify/gh355-current-20261023 is clean; no files changed, commit, push, or follow-up.
+<!-- agent-doc-subagent-completion key=86bba04122fb6d650069b9f5c27b12fa29632891abec23a99012793c3d21a2cf -->
+
+### Re: Subagent completed: `subagent:gh358-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/358” — agent-doc
+<!-- agent-doc-subagent-response sha256=a71f6f83cd527d1dc81d821b47cb87b8dcf5cc8e42dda02616152f65c03be4eb -->
+> **Subagent response:**
+>
+> GH #358 was already fixed and closed; no duplicate patch was needed. Landed fix: 78a19dc8da8c8a0c2b00fe553e4d264ea3d20cd2. Verification branch verify/gh358-20261023-a283fe6e is clean. Exact CLI regression passed: 1 passed, 0 failed. No new files changed, commit, push, close action, or follow-up.
+<!-- agent-doc-subagent-completion key=e57e823f2264b34d520b3b91c5fe8425cebf4131ab87ed8e28e68e46c04cc51e -->
+
+### Re: Subagent completed: `subagent:gh359-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/359” — agent-doc
+<!-- agent-doc-subagent-response sha256=16d7e9e057770290fc731c0ae2b6e92defcbb74c6fd2cd99b08878ee7f211ae5 -->
+> **Subagent response:**
+>
+> GH #359 is complete. Root fix already landed on origin/main as ce122c320f and the issue was already closed. Added explicit GH-359 spec and regression traceability on pushed branch fix/gh359-land-existing-20261023, commit 928ed0d8657fe34fd062df159d9af50123da453f. Focused tests: 2 passed, 0 failed; git diff --check passed. Full make check was interrupted to free the slot and is not claimed as passed. Follow-up: merge/cherry-pick 928ed0d865, then normal CI.
+<!-- agent-doc-subagent-completion key=bcd3ffef20dcbac6f65042829380fbdf20082374f90fd01677ee351d27d0dba6 -->
+
+### Re: Subagent completed: `subagent:gh360-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/360” — agent-doc
+<!-- agent-doc-subagent-response sha256=9427034415bc46b46a0de683a620181f52cb7fb54e4a79859ddf94008bb1acd4 -->
+> **Subagent response:**
+>
+> GH #360 was already fixed, pushed, mainlined, and closed. Original branch fix/gh360-flat-evidence-20261022 at d33a37681f; mainline equivalent ce122c320f plus readiness diagnostics db1fef1ae6. Targeted regressions: 2 passed, 0 failed; workspace all-target check passed. No duplicate commit or close action. The guess occurred because tmux width plus an unordered visible-file set was treated as structural evidence; the fix only permits focusing an already-live pane, otherwise routing fails closed without changing layout.
+<!-- agent-doc-subagent-completion key=9a312f137dccb0e94e418f760c557c58764866a568259ab8b4f95bb99f4a8e52 -->
+> **Chat prompt (#chatprompt:51ec3bef4f1d):** Is the latest release published?
+
+### Re: Latest release publication — gpt-5 · 2026-10-23T03:17-04:00
+
+Yes. **v0.35.546** is published as a normal, non-draft, non-prerelease [GitHub release](https://github.com/btakita/agent-doc/releases/tag/v0.35.546), published at 2026-10-23 05:23:26 UTC. The installed CLI is also 0.35.546, and `origin/main` is tagged `v0.35.546` at `3a1d3cb8dc`.
+
+The queued follow-up, v0.35.547, has not been published yet.
+<!-- agent:boundary:a23a3d5b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -320,22 +355,22 @@ No repair subagent was spawned because the conditional defect was not present. T
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-issue https://github.com/btakita/agent-doc/issues/355~~
+- ☑️ [#subagent:gh355-fix#2] #gh-issue https://github.com/btakita/agent-doc/issues/355
 - ☑️ [#subagent:gh356#1] #gh-issue https://github.com/btakita/agent-doc/issues/356
 - ☑️ [#subagent:gh355status#1] Is `☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355` done? It is leftover in the queue. Issues 353, 354, 355, 357 remain open on github.
 - ☑️ [#subagent:gh353fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/353
 - ☑️ [#subagent:gh354fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/354
-- ☑️ [#subagent:gh355#1] #gh-fix https://github.com/btakita/agent-doc/issues/355
+- ☑️ [#subagent:gh355-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/355
 - ☑️ [#subagent:gh357-release-audit#4] #gh-fix https://github.com/btakita/agent-doc/issues/357
 - ☑️ [#subagent:coder-pane-routing#2] Did you reimplement "guessing"? The tmux panes are reversed on my coder instance. The "guessing" seems to be wrong more often than not.
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/358
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/359
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/360
-- 📥 "Re: Subagent completed:" should immediately add the response into agent:exchange.
-- 📥 How do we improve the reliability of the routing? Why did the guess occur in https://github.com/btakita/agent-doc/issues/360? On top of fail no-close routing, we need to figure out how to not get into the fail state.
-- 📥 Automate publication of all three compatibility-ranged JetBrains updates to Marketplace, with token/onboarding and exact-range verification, so Remote Dev synchronizes the modular ZIP to both peers and prevents one-sided installs.
+- ☑️ [#subagent:gh358-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/358
+- ☑️ [#subagent:gh359-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/359
+- ☑️ [#subagent:gh360-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/360
+- 🚧 [#subagent:completion-exchange#2] "Re: Subagent completed:" should immediately add the response into agent:exchange.
+- 🚧 [#subagent:gh360-fix#2] How do we improve the reliability of the routing? Why did the guess occur in https://github.com/btakita/agent-doc/issues/360? On top of fail no-close routing, we need to figure out how to not get into the fail state.
+- 🚧 [#subagent:release-publish#3] Automate publication of all three compatibility-ranged JetBrains updates to Marketplace, with token/onboarding and exact-range verification, so Remote Dev synchronizes the modular ZIP to both peers and prevents one-sided installs.
 - ☑️ [#subagent:sdk-demo-pr166#2] In sdk-demo.md, no queue item status despite agent running: `- [#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`
-- 📥 release + publish: no `agent:run` + `agent:loop`
+- 🚧 [#subagent:release-runloop#2] release + publish: no `agent:run` + `agent:loop`
 - ☑️ [#subagent:operator-request-format#1] The formatting of a subagent operator request is difficult to read the key + values. What are some formatting options to make it easier to see the keys + values? How about making a nested24list and emphasizing the keys `- *kind:*`?
 - ☑️ [#subagent:rename-queue-run#1] Rename `agent:queue` to `agent:run`. Keep the alias compatability.
 - ☑️ [#subagent:rename-loop#1] . What are some formatting options to make it easie Rename `agent:run loop`/`agent:queue loop` to `agent:loop`. Keep backward compatability.
@@ -350,9 +385,9 @@ No repair subagent was spawned because the conditional defect was not present. T
 - ☑️ [#subagent:coder-readiness#1] I have to manually run `agent-doc` from the terminal on my Coder instance. Did you fix the bugs so I can properly use agent-doc on Coder?
 - ☑️ [#subagent:request-format-release#1] I still don't see proper "subagent operator request" formatting in the exchange on this machine. Has this feature been released? See the last subagent operator request in api.md.
 - ☑️ [#subagent:idea-notification-dedupe#1] There is 1 prompt in this session, but there were 3 Idea notifications stacked on top of each other.
-- 🚧 [#subagent:followup-release#1] release + publish: include completed follow-up fixes from the completion-feedback, Coder readiness, subagent-request formatting, and IDEA notification-deduplication investigations after v0.35.546
+- 🚧 [#subagent:followup-release-batch#2] release + publish: include completed follow-up fixes from the completion-feedback, Coder readiness, subagent-request formatting, and IDEA notification-deduplication investigations after v0.35.546
 - ☑️ [#subagent:gh363#1] #gh-issue https://github.com/btakita/agent-doc/issues/363
-- release + publish
+- 🚧 [#subagent:release-publish-recheck#1] release + publish[]
 <!-- /agent:queue -->
 
 ## Queue: Issues

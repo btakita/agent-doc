@@ -394,11 +394,18 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   remedy, the `attach_refused_<token>` ops-log status token, whether the hold is
   persisted and surfaced without waiting for an editor action (the three
   projection-hold reasons), whether the refusal needs a reliable-liveness
-  republish (`replica_register_stale_editor_endpoint`), and the hold
-  notification text. `CrdtReplicaManager.recordRegisterFailure` asks it once per
+  republish (`replica_register_stale_editor_endpoint`), whether retry is automatic
+  or must await operator evidence, and the hold notification text.
+  `CrdtReplicaManager.recordRegisterFailure` asks it once per
   failure, after the retired-generation check, and executes the answer in the
   pre-#326 order: the hold event and notification, then the liveness republish,
-  then the retry. Compact Exchange asks it on its pooled thread, records the
+  then either a bounded retry or an operator-evidence pause. The three
+  projection holds never arm a timer: close/repair/reopen (or an explicit typed
+  recovery request) supplies the next evidence, so an unchanged buffer cannot
+  drive a background register/deregister loop. On tab close, a refused hold with
+  no attached forwarder releases editor liveness without publishing the
+  ambiguous cut; detached repair remains the authority-reconciliation boundary.
+  Compact Exchange asks it on its pooled thread, records the
   refusal event, formats the refusal there, and only shows it on the EDT. A new
   reason, remedy, or wording needs no plugin generation; a new *kind* of effect
   does.

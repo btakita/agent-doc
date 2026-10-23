@@ -405,25 +405,60 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
-    fun `an ambiguous hold suppresses refresh until its retry is due`() {
+    fun `an ambiguous hold suppresses refresh until explicit recovery supplies evidence`() {
         assertFalse(
             retainedProjectionHoldAllowsRefreshUtil(
                 holdActive = true,
-                registrationAttemptDue = false,
+                explicitRecoveryRequest = false,
             ),
         )
         assertTrue(
             retainedProjectionHoldAllowsRefreshUtil(
                 holdActive = true,
-                registrationAttemptDue = true,
+                explicitRecoveryRequest = true,
             ),
         )
         assertTrue(
             retainedProjectionHoldAllowsRefreshUtil(
                 holdActive = false,
-                registrationAttemptDue = false,
+                explicitRecoveryRequest = false,
             ),
         )
+    }
+
+    @Test
+    fun `closing a refused projection hold releases authority without publishing the ambiguous cut`() {
+        assertFalse(
+            closingDocumentHoldRequiresPublicationUtil(
+                hasAttachedForwarder = false,
+                operatorEvidenceHoldActive = true,
+            ),
+        )
+        assertTrue(
+            closingDocumentHoldRequiresPublicationUtil(
+                hasAttachedForwarder = true,
+                operatorEvidenceHoldActive = true,
+            ),
+        )
+        assertTrue(
+            closingDocumentHoldRequiresPublicationUtil(
+                hasAttachedForwarder = false,
+                operatorEvidenceHoldActive = false,
+            ),
+        )
+
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            )
+        val close =
+            source.substringAfter("    private fun publishClosingDocumentCut(")
+                .substringBefore("    private fun clearClosingDocumentState(")
+        val held = close.indexOf("closingDocumentHoldRequiresPublicationUtil(")
+        val publish = close.indexOf("forwarder.ensureEditorText(closingText)")
+        assertTrue(held in 0 until publish)
+        assertTrue(close.substring(held, publish).contains("clearRegisterFailure(filePath)"))
+        assertTrue(close.substring(held, publish).contains("return@submit true"))
     }
 
     @Test

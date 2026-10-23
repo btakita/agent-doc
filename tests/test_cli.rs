@@ -14962,6 +14962,9 @@ fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_confi
         "A missing token emits",
         "do not hold the CLI, GitHub, PyPI, ZIP, or custom",
         "agent-doc plugin install jetbrains",
+        "### Virgin Coder workspace with stock Toolbox",
+        "There is no backend-initiated stock install",
+        "Marketplace publication is the only stock path",
     ] {
         assert!(
             distribution.contains(required),
@@ -14972,8 +14975,9 @@ fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_confi
         fs::read_to_string(manifest_dir.join("editors/jetbrains/SPEC.md")).unwrap();
     assert!(
         specification.contains("validate the complete three-ZIP set")
-            && specification.contains("Remote Dev synchronization channel"),
-        "the JetBrains distribution spec must require the three-update gate and Marketplace peer synchronization",
+            && specification.contains("only stock automatic Remote Dev synchronization channel")
+            && specification.contains("affect only the selected peer"),
+        "the JetBrains distribution spec must require the three-update gate and make non-Marketplace installs explicitly single-peer",
     );
 }
 

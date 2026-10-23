@@ -4,7 +4,10 @@
 //! run (GH #107), failing loudly when they cannot be updated. Auto mode is a foreground watcher that checks
 //! immediately, polls stable GitHub releases, retries transient failures, and
 //! uses a per-user PID lock so only one watcher runs. Release archives are
-//! installed only after verification against the release's `SHA256SUMS`.
+//! installed only after verification against its archive-specific `.sha256`
+//! sidecar. The aggregate `SHA256SUMS` remains the all-platform completion
+//! marker for PyPI and Homebrew, not a prerequisite for an already-published
+//! platform archive (GH #363).
 //!
 //! GH #113: replacing the executable on disk does not replace the running
 //! process image, so after a binary upgrade the plugin reconcile runs as a child
@@ -200,7 +203,9 @@ fn run_once() -> Result<()> {
         let Some(installed_exe) = upgrade_binary(&latest, &target) else {
             // Never move plugins ahead of a binary that stayed behind.
             print_manual_upgrade_instructions();
-            return Ok(());
+            bail!(
+                "automatic upgrade to v{latest} failed; the current binary remains v{CURRENT_VERSION}"
+            );
         };
         Some(installed_exe)
     } else {
@@ -496,7 +501,7 @@ fn checksum_from_manifest<'a>(manifest: &'a str, asset_name: &str) -> Option<&'a
 
 fn verify_release_archive(asset_name: &str, bytes: &[u8], manifest: &str) -> Result<()> {
     let expected = checksum_from_manifest(manifest, asset_name)
-        .with_context(|| format!("SHA256SUMS has no entry for {asset_name}"))?;
+        .with_context(|| format!("checksum sidecar has no entry for {asset_name}"))?;
     let actual = agent_doc_hash::bytes_hash(bytes);
     if !actual.eq_ignore_ascii_case(expected) {
         bail!(
@@ -513,7 +518,12 @@ fn try_github_release_upgrade(version: &str, exe_path: &Path) -> Result<PathBuf>
     let target = detect_target().context("no prebuilt archive for this platform")?;
     let archive_name = format!("{CRATE_NAME}-{target}.tar.gz");
     let archive_url = release_asset_url(version, &archive_name);
-    let manifest_url = release_asset_url(version, "SHA256SUMS");
+    // GH #363: platform jobs publish each archive and its sidecar before the
+    // aggregate SHA256SUMS completion marker exists. Requiring that aggregate
+    // made the latest release temporarily impossible to install even though
+    // this platform's complete, verifiable pair was already public.
+    let sidecar_name = format!("{archive_name}.sha256");
+    let sidecar_url = release_asset_url(version, &sidecar_name);
     eprintln!("Downloading from GitHub Releases...\n  {archive_url}");
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_recv_body(Some(Duration::from_secs(30)))
@@ -521,9 +531,10 @@ fn try_github_release_upgrade(version: &str, exe_path: &Path) -> Result<PathBuf>
         .build()
         .into();
     let archive_bytes = download_bytes(&agent, &archive_url)?;
-    let manifest_bytes = download_bytes(&agent, &manifest_url)?;
-    let manifest = std::str::from_utf8(&manifest_bytes).context("SHA256SUMS is not UTF-8")?;
-    verify_release_archive(&archive_name, &archive_bytes, manifest)?;
+    let sidecar_bytes = download_bytes(&agent, &sidecar_url)?;
+    let sidecar = std::str::from_utf8(&sidecar_bytes)
+        .with_context(|| format!("{sidecar_name} is not UTF-8"))?;
+    verify_release_archive(&archive_name, &archive_bytes, sidecar)?;
 
     install_release_archive(&archive_bytes, exe_path, version)?;
     Ok(exe_path.to_path_buf())
@@ -1191,12 +1202,12 @@ mod tests {
     }
 
     #[test]
-    fn archive_verification_fails_closed() {
+    fn archive_verification_accepts_per_archive_sidecar_and_fails_closed() {
         let name = "agent-doc-linux.tar.gz";
         let digest = agent_doc_hash::bytes_hash(b"payload");
-        let manifest = format!("{digest}  {name}\n");
-        verify_release_archive(name, b"payload", &manifest).unwrap();
-        assert!(verify_release_archive(name, b"tampered", &manifest).is_err());
+        let sidecar = format!("{digest}  {name}\n");
+        verify_release_archive(name, b"payload", &sidecar).unwrap();
+        assert!(verify_release_archive(name, b"tampered", &sidecar).is_err());
         assert!(verify_release_archive(name, b"payload", "").is_err());
     }
 
@@ -1207,6 +1218,10 @@ mod tests {
         let url = release_asset_url("1.2.3", &name);
         assert!(url.starts_with("https://github.com/btakita/agent-doc/releases/download/v1.2.3/"));
         assert!(url.ends_with(".tar.gz"));
+        assert_eq!(
+            release_asset_url("1.2.3", &format!("{name}.sha256")),
+            format!("{url}.sha256")
+        );
     }
 
     #[test]

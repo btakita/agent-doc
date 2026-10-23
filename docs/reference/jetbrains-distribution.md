@@ -128,6 +128,37 @@ after the two-sided install is ready. Marketplace hosting is the automatic way
 to synchronize a compatible plugin to the Remote Dev peer; custom-repository and
 local-ZIP installs require this explicit two-sided update.
 
+### Virgin Coder workspace with stock Toolbox
+
+There is no backend-initiated stock install that can place an unpublished
+split plugin into both processes. JetBrains' plugin synchronization currently
+resolves the other peer only through Marketplace metadata. Running
+`agent-doc plugin install jetbrains` in a Coder workspace therefore updates the
+backend filesystem only; it cannot write the JetBrains Client installation on
+the operator's machine. The command prints this scope when it selects a modular
+262 or 263 package rather than implying that Remote Dev is ready.
+
+Before Marketplace onboarding is complete, the reliable fallback is explicit
+two-sided installation:
+
+1. In the Coder workspace, install the matching modular package into the Remote
+   Dev backend with `agent-doc plugin install jetbrains`, or add the matching
+   custom-repository URL to the backend plugin manager.
+2. In JetBrains Client/Gateway on the operator's machine, add the same listing
+   under Settings → Plugins → gear → Manage Plugin Repositories and
+   install the same Agent Doc version there. Installing from the backend does
+   not perform this step.
+3. Confirm that both plugin managers report the identical Agent Doc version,
+   restart both processes, and require an authenticated same-generation surface
+   publication before treating the split plugin as ready.
+
+This procedure uses stock JetBrains plugin management, but it is manual on each
+new Remote Dev environment. Marketplace publication is the only stock path that
+automatically synchronizes the compatible package to both peers. Organizations
+using JetBrains IDE Services may instead provision a corporate-repository plugin,
+but that is an additional managed service rather than the stock Toolbox/Coder
+flow.
+
 ## Release proof
 
 `scripts/jetbrains-custom-repository.py` reads all three distribution ZIPs, validates

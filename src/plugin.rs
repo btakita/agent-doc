@@ -784,7 +784,25 @@ fn install_jetbrains_into(
         jetbrains_install_result_message(target_dir, &outcome, &expected_version)?
     );
     print_jetbrains_activation_outcome(outcome.clone());
+    print_jetbrains_remote_dev_install_scope(package_range);
     Ok(outcome)
+}
+
+fn jetbrains_remote_dev_install_scope_notice(
+    package_range: JetbrainsPackageRange,
+) -> Option<&'static str> {
+    match package_range {
+        JetbrainsPackageRange::Classic242To261 => None,
+        JetbrainsPackageRange::Modular262 | JetbrainsPackageRange::Modular263 => Some(
+            "Remote Dev installation scope: this command updated only the selected plugins directory. It cannot install Agent Doc into the other peer. JetBrains Marketplace synchronization is the only stock automatic cross-peer path; with a custom repository or local ZIP, install the same Agent Doc version explicitly in both JetBrains Client/Gateway and the Remote Dev backend.",
+        ),
+    }
+}
+
+fn print_jetbrains_remote_dev_install_scope(package_range: JetbrainsPackageRange) {
+    if let Some(notice) = jetbrains_remote_dev_install_scope_notice(package_range) {
+        eprintln!("NOTICE: {notice}");
+    }
 }
 
 /// GH #108: the headline for a finished release install. A staged package left
@@ -1008,6 +1026,7 @@ fn find_local_build_dir() -> Result<PathBuf> {
 fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalInstallOutcome> {
     let dirs = jetbrains_plugin_dirs();
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
+    let package_range = jetbrains_package_range(&target_dir)?;
     let zip_path = local_jetbrains_zip(&target_dir)?;
     let outcome = install_jetbrains_local_zip_into(&zip_path, &target_dir)?;
     match &outcome {
@@ -1036,6 +1055,7 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalI
             eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
         }
     }
+    print_jetbrains_remote_dev_install_scope(package_range);
     Ok(outcome)
 }
 
@@ -5580,6 +5600,30 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             installed.starts_with("Plugin installed (v0.2.479)"),
             "{installed}"
         );
+    }
+
+    #[test]
+    fn modular_install_scope_notice_refuses_to_imply_cross_peer_installation() {
+        assert!(super::jetbrains_remote_dev_install_scope_notice(
+            super::JetbrainsPackageRange::Classic242To261
+        )
+        .is_none());
+
+        for package_range in [
+            super::JetbrainsPackageRange::Modular262,
+            super::JetbrainsPackageRange::Modular263,
+        ] {
+            let notice = super::jetbrains_remote_dev_install_scope_notice(package_range)
+                .expect("modular installs must explain their single-peer scope");
+            for required in [
+                "only the selected plugins directory",
+                "cannot install Agent Doc into the other peer",
+                "only stock automatic cross-peer path",
+                "both JetBrains Client/Gateway and the Remote Dev backend",
+            ] {
+                assert!(notice.contains(required), "missing {required:?}: {notice}");
+            }
+        }
     }
 
     #[test]

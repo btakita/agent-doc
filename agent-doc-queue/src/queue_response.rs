@@ -6,6 +6,22 @@
 
 use agent_doc_document::queue_projection::strip_priority_markers;
 use anyhow::Result;
+use std::borrow::Cow;
+
+/// Text that may carry direct coordinator answer evidence.
+///
+/// Binary-owned subagent completion cells quote the worker's response. That
+/// response commonly carries its own `> **Queue prompt:**` echo, but it is a
+/// handoff awaiting coordinator integration, not the coordinator's answer.
+/// Keep those cells out of every response-evidence matcher while preserving
+/// heading-shaped prose that lacks the binary attestation.
+fn direct_response_text(text: &str) -> Cow<'_, str> {
+    if agent_doc_document::subagent_completion::completion_cell_line_ranges(text).is_empty() {
+        Cow::Borrowed(text)
+    } else {
+        Cow::Owned(agent_doc_document::subagent_completion::strip_completion_cells(text))
+    }
+}
 
 pub fn queue_prompt_done_id(text: &str) -> Option<String> {
     let marker = text.find('#')?;
@@ -227,11 +243,12 @@ pub fn prompt_preset_head_answered_by_response(
     response_body: &str,
     head_text: &str,
 ) -> bool {
+    let response_body = direct_response_text(response_body);
     let expansions = queue_prompt_preset_expansions(content, head_text);
     if expansions.is_empty() {
         return false;
     }
-    let response = normalize_for_answer_match(response_body);
+    let response = normalize_for_answer_match(&response_body);
     let bodies_present = expansions.into_iter().all(|(_, body)| {
         let body = normalize_for_answer_match(&body);
         !body.is_empty() && response.contains(&body)
@@ -941,13 +958,14 @@ fn response_heading_targets_distinctive_identifier(response_body: &str, head_tex
 /// accepted by [`free_text_head_answered_by_response`]: callers may use it to
 /// prove that the responder observed a queue head selected during the turn.
 pub fn free_text_head_has_explicit_answer_evidence(response_body: &str, head_text: &str) -> bool {
+    let response_body = direct_response_text(response_body);
     // Strip the leading operator/agent pin (`:pushpin:` ...) first -- its literal
     // shortcode word would otherwise survive normalization and break the match.
     let head_clean = strip_priority_markers(head_text);
-    if head_echoed_only_in_bare_singular_blocks(response_body, &head_clean) {
+    if head_echoed_only_in_bare_singular_blocks(&response_body, &head_clean) {
         return false;
     }
-    response_explicit_queue_prompt_echoes_head(response_body, &head_clean)
+    response_explicit_queue_prompt_echoes_head(&response_body, &head_clean)
 }
 
 /// True when the committed `response_body` answers the free-text queue head
@@ -958,16 +976,17 @@ pub fn free_text_head_has_explicit_answer_evidence(response_body: &str, head_tex
 /// conservative direction, because a false positive silently drops an unaddressed
 /// operator report.
 pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str) -> bool {
+    let response_body = direct_response_text(response_body);
     // Strip the leading operator/agent pin (`:pushpin:` ...) first -- its literal
     // shortcode word would otherwise survive normalization and break the match.
     let head_clean = strip_priority_markers(head_text);
-    if head_echoed_only_in_bare_singular_blocks(response_body, &head_clean) {
+    if head_echoed_only_in_bare_singular_blocks(&response_body, &head_clean) {
         return false;
     }
-    if free_text_head_has_explicit_answer_evidence(response_body, &head_clean) {
+    if free_text_head_has_explicit_answer_evidence(&response_body, &head_clean) {
         return true;
     }
-    if response_heading_targets_distinctive_identifier(response_body, &head_clean) {
+    if response_heading_targets_distinctive_identifier(&response_body, &head_clean) {
         return true;
     }
     // `#ftstrike-fence`: match on the prose prefix, not the full node text -- a head
@@ -980,7 +999,7 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
     // `#qheadnest`: anchored to a quoted entry's start, never "anywhere in the
     // quoted region" -- one prompt citing another head's text is not an answer
     // to that head.
-    response_blockquote_entry_candidates(response_body)
+    response_blockquote_entry_candidates(&response_body)
         .iter()
         .any(|entry| entry.starts_with(&head_norm))
 }
@@ -1049,6 +1068,7 @@ const FREE_TEXT_HEAD_DEFERRAL_MARKERS: &[&str] = &[
 /// ever PREVENTS a strike, so a false positive costs one extra cycle while a
 /// false negative loses the operator's work.
 pub fn response_defers_free_text_head(response_body: &str, head_text: &str) -> bool {
+    let response_body = direct_response_text(response_body);
     let head_clean = strip_priority_markers(head_text);
     let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
     if head_norm.is_empty() {
@@ -1081,6 +1101,7 @@ pub fn response_defers_free_text_head(response_body: &str, head_text: &str) -> b
 /// the completed-residue set, while a later answered echo (the closing cycle)
 /// makes it residue again.
 pub fn latest_free_text_head_echo_is_deferral(text: &str, head_text: &str) -> bool {
+    let text = direct_response_text(text);
     let head_clean = strip_priority_markers(head_text);
     let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
     if head_norm.is_empty() {
@@ -1939,6 +1960,33 @@ mod tests {
         assert!(
             !free_text_head_answered_by_response(unlabeled, "deploy"),
             "an unlabeled blockquote is not enough proof for a short head"
+        );
+    }
+
+    #[test]
+    fn subagent_completion_cell_is_not_direct_answer_evidence() {
+        let head = "Fix the queue state regression after worker completion";
+        let worker_response =
+            format!("> **Queue prompt:** {head}\n\nImplemented the fix and all tests pass.");
+        let completion = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:queue-state",
+            head,
+            "attempt-key",
+            &worker_response,
+        )
+        .unwrap();
+
+        assert!(
+            !free_text_head_has_explicit_answer_evidence(&completion, head),
+            "a worker echo nested in binary completion feedback is a handoff, not a coordinator answer"
+        );
+        assert!(
+            !free_text_head_answered_by_response(&completion, head),
+            "completion feedback must not make the live row completed residue"
+        );
+        assert!(
+            free_text_head_answered_by_response(&worker_response, head),
+            "the same echo remains answer evidence when it is a direct response"
         );
     }
 

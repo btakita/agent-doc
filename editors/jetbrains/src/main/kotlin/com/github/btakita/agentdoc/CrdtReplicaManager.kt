@@ -1227,6 +1227,23 @@ internal fun unforwardedOperatorTextSpliceUtil(
 internal fun pullDeliveryRequestsReplicaRefreshUtil(delivery: ReplicaPullDelivery): Boolean =
     delivery is ReplicaPullDelivery.Unavailable
 
+/**
+ * Count only work that advanced a pulled remote frontier toward a visible receipt.
+ *
+ * A pull can return the same retained update indefinitely while the editor baseline
+ * guard refuses to apply it. Treating the number of *fetched* updates as progress
+ * bypasses [scheduleRemoteDrainAfterBackoff] and turns that safe retry into a tight
+ * controller/IDE feedback loop. The serialized drain attempt has made useful progress
+ * only after it accepted the baseline and either queued or synchronously recovered the
+ * visible editor projection.
+ */
+internal fun remoteDrainProgressCountUtil(
+    baselineAccepted: Boolean,
+    peerUpdateCount: Int,
+    visibleProjectionAdvanced: Boolean,
+): Int =
+    if (baselineAccepted && visibleProjectionAdvanced) peerUpdateCount else 0
+
 private data class PendingRemoteEditorApply(
     val filePath: String,
     val expectedText: String,
@@ -2701,7 +2718,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
             val updates = (delivery as ReplicaPullDelivery.Deltas).updates
             updateCount = updates.size
-            usefulWork = updateCount
             if (updates.isEmpty()) {
                 if (retainedCanonicalProjectionPaths.contains(filePath)) {
                     val canonical = forwarder.replicaText()
@@ -2712,11 +2728,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 return usefulWork
             }
 
-        if (!editorReplicaBaselineMatches(filePath, forwarder, expectedText, updates)) {
-            return usefulWork
-        }
+            val baselineAccepted = editorReplicaBaselineMatches(filePath, forwarder, expectedText, updates)
+            if (!baselineAccepted) {
+                return remoteDrainProgressCountUtil(
+                    baselineAccepted = false,
+                    peerUpdateCount = updateCount,
+                    visibleProjectionAdvanced = false,
+                )
+            }
             val appliedRemoteUpdates = mutableListOf<ReplicaRemoteUpdate>()
             var converged: String? = null
+            var visibleProjectionAdvanced = false
             for (update in updates) {
                 if (hasPendingLocal(filePath)) break
                 if (!shouldApplyRemoteCrdtUpdateUtil(update, forwarder.clientId)) {
@@ -2752,14 +2774,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         appliedRemoteUpdates,
                     )
                 ) {
-                    RemoteTextApplyDisposition.Queued -> queuedForEditor = true
-                    RemoteTextApplyDisposition.Recovered -> usefulWork++
+                    RemoteTextApplyDisposition.Queued -> {
+                        queuedForEditor = true
+                        visibleProjectionAdvanced = true
+                    }
+                    RemoteTextApplyDisposition.Recovered -> visibleProjectionAdvanced = true
                     RemoteTextApplyDisposition.RetryFailClosed -> {
                         editorBufferText(filePath)?.let { current -> shadows[filePath] = current }
                     }
                 }
             }
-            usefulWork = peerUpdateCount
+            usefulWork = remoteDrainProgressCountUtil(
+                baselineAccepted = true,
+                peerUpdateCount = peerUpdateCount,
+                visibleProjectionAdvanced = visibleProjectionAdvanced,
+            )
         } finally {
             logSlow(
                 "remote-drain-file",

@@ -315,6 +315,57 @@ class CrdtReplicaProjectionFrontierTest {
         )
     }
 
+    /**
+     * A retained controller update is not progress merely because the editor fetched
+     * it again. In particular, baseline rejection requests a retry; it must return
+     * zero so that retry enters the bounded no-op backoff instead of pulling the same
+     * generation in a tight loop.
+     */
+    @Test
+    fun `redelivered frontier without visible progress enters no-op backoff`() {
+        assertEquals(
+            0,
+            remoteDrainProgressCountUtil(
+                baselineAccepted = false,
+                peerUpdateCount = 1,
+                visibleProjectionAdvanced = false,
+            ),
+        )
+        assertEquals(
+            0,
+            remoteDrainProgressCountUtil(
+                baselineAccepted = true,
+                peerUpdateCount = 1,
+                visibleProjectionAdvanced = false,
+            ),
+        )
+        assertEquals(
+            3,
+            remoteDrainProgressCountUtil(
+                baselineAccepted = true,
+                peerUpdateCount = 3,
+                visibleProjectionAdvanced = true,
+            ),
+        )
+
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val drainBody = Files.readString(managerPath)
+            .substringAfter("private fun drainRemoteUpdatesFor(")
+            .substringBefore("/**\n     * D2")
+
+        assertFalse(
+            "fetched update count must not bypass no-op backoff before baseline acceptance",
+            drainBody.contains("usefulWork = updateCount"),
+        )
+        assertTrue(
+            "baseline rejection and visible projection outcomes must use the progress classifier",
+            drainBody.split("remoteDrainProgressCountUtil(").size - 1 >= 2,
+        )
+    }
+
     @Test
     fun `visible canonical projection is acknowledged independently of disk persistence`() {
         assertTrue(

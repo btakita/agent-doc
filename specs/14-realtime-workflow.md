@@ -3187,6 +3187,11 @@ Implementations must keep tests for these cases:
   evidence of retained work and drains urgently. The per-document Lazily key
   coalesces repeated projection demand; no ACK-replay or force-refresh
   escalation exists;
+- a pulled remote update is progress only when the editor accepts its baseline
+  and queues or recovers the visible projection. Fetching the same retained
+  generation after baseline rejection or a fail-closed projection does not
+  reset the no-op drain backoff; the retry remains retained and advances on the
+  bounded scheduled effect rather than a controller/IDE pull loop;
 - response-cell retry materialization normalizes transient ` (HEAD)` and
   boundary annotations, and a latest complete response supersedes only
   uncommitted assistant-response nodes after the last unchanged committed

@@ -313,13 +313,6 @@ The underlying mistake was in the prior coordinator closeout: batched free-text 
 
 No repair subagent was spawned because the conditional defect was not present. The documented next-admission reconciliation should strike the prior-cycle answered residue; it should not be manually deleted or force-written. The separately added `release + publish` item is already claimed by the existing release worker, so it was not dispatched again.
 
-### Re: Subagent completed: `subagent:gh355-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/355” — agent-doc
-<!-- agent-doc-subagent-response sha256=9db2ecd4467e2d89a31a510b786f9de51368af9085ae59f4f54b5ee98ebfc010 -->
-> **Subagent response:**
->
-> GH #355 was already resolved; no duplicate patch was needed. Original fix 4bb0b43868326b25c1c65fcdcef7231a19abf695 shipped in v0.35.544. Current origin/main 3a1d3cb8dc contains it; later GH #360 intentionally superseded guessed same-width Remote Dev replacement behavior. Verification passed: GH #355 regression 1/1, unknown-route regressions 2/2, cargo check --workspace --all-targets, and CI on the exact SHA. Verification branch verify/gh355-current-20261023 is clean; no files changed, commit, push, or follow-up.
-<!-- agent-doc-subagent-completion key=86bba04122fb6d650069b9f5c27b12fa29632891abec23a99012793c3d21a2cf -->
-
 ### Re: Subagent completed: `subagent:gh358-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/358” — agent-doc
 <!-- agent-doc-subagent-response sha256=a71f6f83cd527d1dc81d821b47cb87b8dcf5cc8e42dda02616152f65c03be4eb -->
 > **Subagent response:**
@@ -427,7 +420,7 @@ The leading GH-355 row was already resolved and its completion evidence is prese
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:gh355-fix#2] #gh-issue https://github.com/btakita/agent-doc/issues/355
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/355~~
 - ☑️ [#subagent:gh356#1] #gh-issue https://github.com/btakita/agent-doc/issues/356
 - ☑️ [#subagent:gh355status#1] Is `☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355` done? It is leftover in the queue. Issues 353, 354, 355, 357 remain open on github.
 - ☑️ [#subagent:gh353fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/353

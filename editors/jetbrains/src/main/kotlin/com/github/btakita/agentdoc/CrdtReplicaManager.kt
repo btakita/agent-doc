@@ -2048,6 +2048,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             documentWorkers.forDocument(filePath).submit<Boolean> {
                 val attachedForwarder = forwarders[filePath]?.takeIf { it.attached }
                 if (
+                    !closingDocumentHoldRequiresPublicationUtil(
+                        hasAttachedForwarder = attachedForwarder != null,
+                        operatorEvidenceHoldActive = retainedProjectionHoldPaths.contains(filePath),
+                    )
+                ) {
+                    // Closing the tab is the operator-evidence boundary named by
+                    // the hold diagnosis. The refused replica never acquired
+                    // authority, so publishing this ambiguous buffer would choose
+                    // a side of the conflict. Release liveness unchanged and let
+                    // detached repair reconcile disk/controller state instead.
+                    clearRegisterFailure(filePath)
+                    clearClosingDocumentState(filePath)
+                    return@submit true
+                }
+                if (
                     !closingDocumentCutRequiresTextUtil(
                         hasAttachedForwarder = attachedForwarder != null,
                         knownNotAgentDocDocument =
@@ -3976,20 +3991,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             recordNotAgentDocDocument(filePath)
             return null
         }
-        // A three-generation reconciliation hold is a real registration
-        // failure, even when a controller event asks for a forced refresh.
-        // Honor its exponential backoff so missing-replica notifications do
+        // A three-generation reconciliation hold is waiting for operator
+        // evidence, not time. Only the controller's typed, bounded recovery
+        // request may probe it; ordinary refresh/typing events and timers must
         // not turn the fail-closed decision into a register/deregister storm.
         val retainedProjectionHeld = retainedProjectionHoldPaths.contains(filePath)
-        val retainedProjectionRetryDue =
-            !retainedProjectionHeld || shouldAttemptRegister(filePath)
-        if (
-            !bypassRetainedProjectionHold &&
-            !retainedProjectionHoldAllowsRefreshUtil(
-                retainedProjectionHeld,
-                retainedProjectionRetryDue,
-            )
-        ) {
+        if (!retainedProjectionHoldAllowsRefreshUtil(retainedProjectionHeld, bypassRetainedProjectionHold)) {
             return cached
         }
         if (bypassRegisterBackoff) {
@@ -4545,9 +4552,26 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (diagnosis.needsLivenessRepublish) {
             // The owning controller never received this generation's open report, so it
-            // still names another generation as the live endpoint. Republish, then retry
-            // promptly instead of waiting out a backoff that cannot change the answer.
+            // still names another generation as the live endpoint. Republish before
+            // applying the retry disposition so independent diagnosis fields compose.
             ReliableSyncLivenessListener.republishDocument(project, filePath)
+        }
+        if (diagnosis.retryDisposition == AttachFailureDiagnosis.RetryDisposition.AwaitOperatorEvidence) {
+            // The diagnosis names the event that can change this answer. Keep
+            // the hold and its reason visible, but disarm every time-driven
+            // retry surface so IDEA and agent-doc remain idle until then.
+            registerRetryAfterMs.remove(filePath)
+            registerRetryProjections.remove(filePath)
+            registerRetryTasks.remove(filePath)?.cancel(false)
+            log.warn(
+                "[crdt-replica] register retry paused for ${File(filePath).name}; " +
+                    "reason=$reason retry=await_operator_evidence",
+            )
+            return false
+        }
+        if (diagnosis.needsLivenessRepublish) {
+            // Retry promptly instead of waiting out a backoff that cannot
+            // change the stale-endpoint answer.
             return scheduleRegisterRetry(filePath, minOf(projection.backoffMs, STALE_ENDPOINT_REGISTER_RETRY_MS))
         }
         return scheduleRegisterRetry(filePath, projection.backoffMs)
@@ -6253,6 +6277,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 !disposed.get() &&
                     !PluginGeneration.retired &&
                     !extractFrozenPaths.contains(filePath) &&
+                    !retainedProjectionHoldPaths.contains(filePath) &&
                     attachFailureReasons[filePath] != "not_agent_doc_document",
             attachInFlight = (inFlightAttaches[filePath]?.get() ?: 0) > 0,
             retryScheduled = registerRetryTasks[filePath]?.isDone == false,
@@ -6309,6 +6334,16 @@ internal fun closingDocumentCutRequiresTextUtil(
     hasAttachedForwarder: Boolean,
     knownNotAgentDocDocument: Boolean,
 ): Boolean = hasAttachedForwarder || !knownNotAgentDocDocument
+
+/**
+ * A projection hold refused the candidate replica before it acquired editor
+ * authority. An explicit tab close therefore releases liveness without trying
+ * to publish the same ambiguous buffer that caused the refusal.
+ */
+internal fun closingDocumentHoldRequiresPublicationUtil(
+    hasAttachedForwarder: Boolean,
+    operatorEvidenceHoldActive: Boolean,
+): Boolean = hasAttachedForwarder || !operatorEvidenceHoldActive
 
 /**
  * Whether adopting a retained controller canonical projection would destroy
@@ -6574,8 +6609,8 @@ internal fun retainedCanonicalWouldClobberOperatorTextUtil(
 
 internal fun retainedProjectionHoldAllowsRefreshUtil(
     holdActive: Boolean,
-    registrationAttemptDue: Boolean,
-): Boolean = !holdActive || registrationAttemptDue
+    explicitRecoveryRequest: Boolean,
+): Boolean = !holdActive || explicitRecoveryRequest
 
 internal fun shouldApplyRemoteCrdtUpdateUtil(update: ReplicaRemoteUpdate, clientId: Long): Boolean =
     update.origin != clientId

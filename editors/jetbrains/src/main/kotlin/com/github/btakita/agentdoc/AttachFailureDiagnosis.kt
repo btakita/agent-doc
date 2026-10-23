@@ -15,9 +15,10 @@ import javax.swing.SwingUtilities
  * A failed registration records a reason. `CrdtReplicaManager.recordRegisterFailure` and Compact
  * Exchange turn that reason into an operator remedy, the `attach_refused_<token>` ops-log status,
  * whether the hold is surfaced without waiting for an editor action, whether reliable liveness is
- * republished, and the notification text. Those rules are the native `attach_failure_diagnosis`
+ * republished, whether another attach may be scheduled without new evidence, and the notification
+ * text. Those rules are the native `attach_failure_diagnosis`
  * derivation now. The plugin sends the reason and the document's file name ([evidence]) and
- * executes the answer itself, in the same order as before.
+ * executes the answer itself in the prescribed effect order.
  *
  * Every caller asks off the EDT. [frozen] answers only when no native generation does, and fills
  * an output field a library leaves out. It composes the pre-#326 rules
@@ -41,8 +42,14 @@ internal object AttachFailureDiagnosis {
         val statusToken: String,
         val needsOperatorSurface: Boolean,
         val needsLivenessRepublish: Boolean,
+        val retryDisposition: RetryDisposition,
         val holdMessage: String?,
     )
+
+    internal enum class RetryDisposition {
+        Automatic,
+        AwaitOperatorEvidence,
+    }
 
     internal fun evidence(reason: String, fileName: String?): Evidence = Evidence(reason, fileName)
 
@@ -77,6 +84,9 @@ internal object AttachFailureDiagnosis {
                 statusToken = root.get("status_token").stringOrNull()?.takeIf { it.isNotBlank() } ?: floor.statusToken,
                 needsOperatorSurface = root.flag("needs_operator_surface") ?: floor.needsOperatorSurface,
                 needsLivenessRepublish = root.flag("needs_liveness_republish") ?: floor.needsLivenessRepublish,
+                retryDisposition =
+                    root.get("retry_disposition").stringOrNull()?.let(::retryDisposition)
+                        ?: floor.retryDisposition,
                 holdMessage =
                     if (wantsHoldMessage) {
                         root.get("hold_message").stringOrNull() ?: floor.holdMessage
@@ -95,17 +105,29 @@ internal object AttachFailureDiagnosis {
     private fun JsonObject.flag(name: String): Boolean? =
         get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean
 
+    private fun retryDisposition(token: String): RetryDisposition? = when (token) {
+        "automatic" -> RetryDisposition.Automatic
+        "await_operator_evidence" -> RetryDisposition.AwaitOperatorEvidence
+        else -> null
+    }
+
     /**
      * GH #326 compatibility floor: the pre-#326 attach-failure rules, frozen. Used only when no
-     * native generation answers. Never extend it; change the native derivation instead.
+     * native generation answers. A newer output field may compose those same frozen facts (as the
+     * retry disposition does), but reason-specific policy is never added here; change the native
+     * derivation instead.
      */
     internal fun frozen(reason: String, fileName: String?): Diagnosis {
         val remedy = CrdtReplicaManager.attachFailureRemedy(reason)
+        val needsOperatorSurface = retainedProjectionHoldNeedsOperatorSurfaceUtil(reason)
         return Diagnosis(
             remedy = remedy,
             statusToken = attachFailureStatusToken(reason),
-            needsOperatorSurface = retainedProjectionHoldNeedsOperatorSurfaceUtil(reason),
+            needsOperatorSurface = needsOperatorSurface,
             needsLivenessRepublish = registerFailureNeedsLivenessRepublishUtil(reason),
+            retryDisposition =
+                if (needsOperatorSurface) RetryDisposition.AwaitOperatorEvidence
+                else RetryDisposition.Automatic,
             holdMessage = fileName?.let { frozenHoldMessage(it, reason) },
         )
     }

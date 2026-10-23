@@ -51,15 +51,32 @@ pub struct AttachFailureDiagnosis {
     /// The owning controller names another generation's endpoint, so the
     /// plugin republishes reliable liveness and retries promptly.
     pub needs_liveness_republish: bool,
+    /// Whether the adapter may schedule another attach attempt without new
+    /// external evidence. Projection holds require the operator to close,
+    /// repair, and reopen the document, so polling them cannot change the
+    /// answer and only creates a background register/deregister loop.
+    pub retry_disposition: AttachFailureRetryDisposition,
     /// The operator notification for a hold, present exactly when the evidence
     /// carries a file name.
     pub hold_message: Option<String>,
+}
+
+/// The next admissible registration trigger after an attach failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachFailureRetryDisposition {
+    /// A transient failure may use the ordinary capped backoff timer.
+    Automatic,
+    /// No timer may run; a close/repair/reopen or another explicit recovery
+    /// event must supply new evidence before registration is attempted again.
+    AwaitOperatorEvidence,
 }
 
 /// Diagnose one attach failure reason.
 pub fn diagnose_attach_failure(evidence: &AttachFailureEvidence) -> AttachFailureDiagnosis {
     let reason = evidence.reason.as_deref().unwrap_or("");
     let remedy = attach_failure_remedy(reason);
+    let needs_operator_surface = needs_operator_surface(reason);
     let hold_message = evidence
         .file_name
         .as_deref()
@@ -67,8 +84,13 @@ pub fn diagnose_attach_failure(evidence: &AttachFailureEvidence) -> AttachFailur
     AttachFailureDiagnosis {
         remedy: remedy.map(str::to_string),
         status_token: status_token(reason),
-        needs_operator_surface: needs_operator_surface(reason),
+        needs_operator_surface,
         needs_liveness_republish: reason.contains("replica_register_stale_editor_endpoint"),
+        retry_disposition: if needs_operator_surface {
+            AttachFailureRetryDisposition::AwaitOperatorEvidence
+        } else {
+            AttachFailureRetryDisposition::Automatic
+        },
         hold_message,
     }
 }
@@ -200,6 +222,10 @@ mod tests {
         assert_eq!(answer.status_token, "unknown");
         assert!(!answer.needs_operator_surface);
         assert!(!answer.needs_liveness_republish);
+        assert_eq!(
+            answer.retry_disposition,
+            AttachFailureRetryDisposition::Automatic
+        );
         assert_eq!(answer.hold_message, None);
     }
 
@@ -230,6 +256,10 @@ mod tests {
             file_name: Some("plan.md".to_string()),
         });
         assert!(answer.needs_operator_surface);
+        assert_eq!(
+            answer.retry_disposition,
+            AttachFailureRetryDisposition::AwaitOperatorEvidence
+        );
         let message = answer.hold_message.unwrap();
         assert!(message.starts_with(
             "Agent Doc could not attach the open editor replica for plan.md. \
@@ -246,6 +276,7 @@ mod tests {
         .unwrap();
         assert_eq!(json["status_token"], "controller_error");
         assert_eq!(json["needs_liveness_republish"], true);
+        assert_eq!(json["retry_disposition"], "automatic");
         assert!(json["remedy"].is_null());
         assert!(json["hold_message"].is_null());
     }

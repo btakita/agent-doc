@@ -1,6 +1,6 @@
 {
   "derivation": "attach_failure_diagnosis",
-  "about": "GH #326 phase 5b parity cases. The Rust `attach_failure_diagnosis` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (AttachFailureDiagnosisTest) both answer every case. `input` is exactly what the plugin sends: the recorded failure reason and, for the operator notification, the document's file name. An absent field is omitted. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "about": "GH #326 phase 5b parity cases. The Rust `attach_failure_diagnosis` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (AttachFailureDiagnosisTest) both answer every case. `input` is exactly what the plugin sends: the recorded failure reason and, for the operator notification, the document's file name. The answer also owns whether another attach is automatic or must await operator evidence. An absent field is omitted. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
   "cases": [
     {
       "name": "an IDE running a plugin generation older than the install names a restart",
@@ -12,6 +12,7 @@
         "status_token": "controller_error",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -25,6 +26,7 @@
         "status_token": "controller_error",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -38,6 +40,7 @@
         "status_token": "not_agent_doc_document",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -52,6 +55,7 @@
         "status_token": "retained-reseed-missing-settled-shadow",
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
         "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged."
       }
     },
@@ -66,6 +70,7 @@
         "status_token": "ambiguous-retained-projection",
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
         "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged."
       }
     },
@@ -80,6 +85,7 @@
         "status_token": "ambiguous-reregister-projection",
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
         "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged."
       }
     },
@@ -93,6 +99,7 @@
         "status_token": "attach-timeout-pending",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -107,6 +114,7 @@
         "status_token": "native-ffi-unavailable",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: native-ffi-unavailable. Inspect About Agent Doc or the IDE log for the executable and library that failed to load. Fix or remove that incompatible install so PATH resolves to the intended agent-doc; the native loader retries automatically. `agent-doc admin reload-lib` cannot reach this editor until FFI loads. The editor buffer and disk were left unchanged."
       }
     },
@@ -120,6 +128,7 @@
         "status_token": "native-handoff-timeout",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -133,6 +142,7 @@
         "status_token": "attach-exception",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -146,6 +156,7 @@
         "status_token": "attach-worker-failed",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -159,6 +170,7 @@
         "status_token": "unknown-attach-refusal",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -172,6 +184,7 @@
         "status_token": "controller-register",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -185,6 +198,7 @@
         "status_token": "controller_error",
         "needs_operator_surface": false,
         "needs_liveness_republish": true,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -198,6 +212,7 @@
         "status_token": "controller_error",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -211,6 +226,7 @@
         "status_token": "editor-file-unavailable",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -224,6 +240,7 @@
         "status_token": "editor-document-unavailable",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -238,6 +255,7 @@
         "status_token": "native-reload-document-unavailable",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: native-reload-document-unavailable. The editor buffer and disk were left unchanged."
       }
     },
@@ -251,6 +269,7 @@
         "status_token": "path-transition-register",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -264,6 +283,7 @@
         "status_token": "detached_authority_after_socket_unavailable",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -278,6 +298,7 @@
         "status_token": "ambiguous-retained-projection_after_retained-reseed-missing-settled-shadow",
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
         "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: ambiguous-retained-projection after retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged."
       }
     },
@@ -291,6 +312,7 @@
         "status_token": "attach_worker_failed",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -304,6 +326,7 @@
         "status_token": "lead_trail",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -317,6 +340,7 @@
         "status_token": "unknown",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -330,6 +354,7 @@
         "status_token": "unknown",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -341,6 +366,7 @@
         "status_token": "unknown",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -354,6 +380,7 @@
         "status_token": "unknown",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: . The editor buffer and disk were left unchanged."
       }
     },
@@ -367,6 +394,7 @@
         "status_token": "n_code_f_ilure",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -380,6 +408,7 @@
         "status_token": "crash",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -393,6 +422,7 @@
         "status_token": "kelvin-check",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -406,6 +436,7 @@
         "status_token": "i_d-check",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": null
       }
     },
@@ -420,6 +451,7 @@
         "status_token": "controller-register_second_line",
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
         "hold_message": "Agent Doc could not attach the open editor replica for notes.md. Cause: controller-register\r\nsecond line. Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas. The editor buffer and disk were left unchanged."
       }
     }

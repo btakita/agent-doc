@@ -33,6 +33,13 @@ class AttachFailureDiagnosisTest {
             addProperty("status_token", diagnosis.statusToken)
             addProperty("needs_operator_surface", diagnosis.needsOperatorSurface)
             addProperty("needs_liveness_republish", diagnosis.needsLivenessRepublish)
+            addProperty(
+                "retry_disposition",
+                when (diagnosis.retryDisposition) {
+                    AttachFailureDiagnosis.RetryDisposition.Automatic -> "automatic"
+                    AttachFailureDiagnosis.RetryDisposition.AwaitOperatorEvidence -> "await_operator_evidence"
+                },
+            )
             add("hold_message", diagnosis.holdMessage?.let { gson.toJsonTree(it) } ?: JsonNull.INSTANCE)
         }
 
@@ -69,7 +76,8 @@ class AttachFailureDiagnosisTest {
                 sent = input
                 // A rule the frozen floor does not have: the native answer wins.
                 """{"remedy":"Recycle the controller.","status_token":"controller_timeout",""" +
-                    """"needs_operator_surface":true,"needs_liveness_republish":true,"hold_message":"newer text"}"""
+                    """"needs_operator_surface":true,"needs_liveness_republish":true,""" +
+                    """"retry_disposition":"await_operator_evidence","hold_message":"newer text"}"""
             }
         assertEquals("attach_failure_diagnosis", asked)
         assertEquals(
@@ -82,6 +90,7 @@ class AttachFailureDiagnosisTest {
                 statusToken = "controller_timeout",
                 needsOperatorSurface = true,
                 needsLivenessRepublish = true,
+                retryDisposition = AttachFailureDiagnosis.RetryDisposition.AwaitOperatorEvidence,
                 holdMessage = "newer text",
             ),
             diagnosis,
@@ -93,7 +102,8 @@ class AttachFailureDiagnosisTest {
         val diagnosis =
             AttachFailureDiagnosis.diagnose("native-ffi-unavailable") { _, _ ->
                 """{"remedy":null,"status_token":"native-ffi-unavailable",""" +
-                    """"needs_operator_surface":false,"needs_liveness_republish":false,"hold_message":null}"""
+                    """"needs_operator_surface":false,"needs_liveness_republish":false,""" +
+                    """"retry_disposition":"automatic","hold_message":null}"""
             }
         assertNull(diagnosis.remedy)
         assertNull("no file name was asked about", diagnosis.holdMessage)
@@ -136,6 +146,9 @@ class AttachFailureDiagnosisTest {
         assertTrue(diagnose < hold && hold < republish)
         assertTrue(failure.contains("diagnosis.needsOperatorSurface"))
         assertTrue(failure.contains("diagnosis.needsLivenessRepublish"))
+        assertTrue(failure.contains("diagnosis.retryDisposition"))
+        assertTrue(failure.contains("retry=await_operator_evidence"))
+        assertTrue(failure.contains("registerRetryTasks.remove(filePath)?.cancel(false)"))
         assertTrue(failure.contains("\"attach_refused_\${diagnosis.statusToken}\""))
         for (rule in listOf(
             "retainedProjectionHoldNeedsOperatorSurfaceUtil(",
@@ -146,6 +159,26 @@ class AttachFailureDiagnosisTest {
         )) {
             assertFalse("the rule $rule is asked through the derivation", failure.contains(rule))
         }
+    }
+
+    @Test
+    fun `operator evidence holds do not arm the timed register retry`() {
+        val manager = source("CrdtReplicaManager.kt")
+        val failure =
+            manager.substringAfter("    private fun recordRegisterFailure(")
+                .substringBefore("    /**")
+        val republish = failure.indexOf("diagnosis.needsLivenessRepublish")
+        val pause = failure.indexOf("RetryDisposition.AwaitOperatorEvidence")
+        val retry = failure.lastIndexOf("scheduleRegisterRetry(")
+        assertTrue(pause >= 0)
+        assertTrue(republish < pause && pause < retry)
+        assertTrue(failure.substring(pause, retry).contains("return false"))
+
+        val gate =
+            manager.substringAfter("internal fun retainedProjectionHoldAllowsRefreshUtil(")
+                .substringBefore("internal fun shouldApplyRemoteCrdtUpdateUtil(")
+        assertTrue(gate.contains("explicitRecoveryRequest"))
+        assertFalse(gate.contains("registrationAttemptDue"))
     }
 
     @Test

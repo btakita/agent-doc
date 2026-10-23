@@ -40,6 +40,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -96,29 +97,24 @@ class FrontendSurfaceSnapshotService(
      * bounded retries instead of permanently leaving two loaded plugin modules disconnected.
      */
     private suspend fun maintainIngress() {
-        var consecutiveEmptyCompletions = 0
-        while (true) {
-            var observedLease = false
-            SurfaceSnapshotRpcApi.getInstance()
-                .openIngress(project.projectId(), frontendInstanceId)
-                .collectLatest { lease ->
-                    observedLease = true
-                    consecutiveEmptyCompletions = 0
-                    LOG.info(
-                        "[split-surface] frontend/backend ingress connected " +
-                            "generation=${lease.connectionGeneration}",
-                    )
-                    publishForLease(lease)
-                }
-
-            val retryDelayMs = frontendIngressRetryDelayMillis(consecutiveEmptyCompletions)
-            if (!observedLease) consecutiveEmptyCompletions++
-            LOG.warn(
-                "[split-surface] frontend/backend ingress completed " +
-                    "lease_observed=$observedLease retry_in_ms=$retryDelayMs",
-            )
-            delay(retryDelayMs)
-        }
+        maintainFrontendIngress(
+            openIngress = {
+                SurfaceSnapshotRpcApi.getInstance().openIngress(project.projectId(), frontendInstanceId)
+            },
+            onLease = { lease ->
+                LOG.info(
+                    "[split-surface] frontend/backend ingress connected " +
+                        "generation=${lease.connectionGeneration}",
+                )
+                publishForLease(lease)
+            },
+            onNormalCompletion = { observedLease, retryDelayMs ->
+                LOG.warn(
+                    "[split-surface] frontend/backend ingress completed " +
+                        "lease_observed=$observedLease retry_in_ms=$retryDelayMs",
+                )
+            },
+        )
     }
 
     private suspend fun publishForLease(lease: SurfaceIngressLease) {
@@ -290,6 +286,28 @@ internal const val FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
 internal fun frontendIngressRetryDelayMillis(consecutiveEmptyCompletions: Int): Long {
     val exponent = consecutiveEmptyCompletions.coerceIn(0, 5)
     return (1_000L * (1L shl exponent)).coerceAtMost(30_000L)
+}
+
+internal suspend fun maintainFrontendIngress(
+    openIngress: suspend () -> Flow<SurfaceIngressLease>,
+    onLease: suspend (SurfaceIngressLease) -> Unit,
+    onNormalCompletion: (observedLease: Boolean, retryDelayMs: Long) -> Unit,
+    sleep: suspend (Long) -> Unit = { delay(it) },
+) {
+    var consecutiveEmptyCompletions = 0
+    while (true) {
+        var observedLease = false
+        openIngress().collectLatest { lease ->
+            observedLease = true
+            consecutiveEmptyCompletions = 0
+            onLease(lease)
+        }
+
+        val retryDelayMs = frontendIngressRetryDelayMillis(consecutiveEmptyCompletions)
+        if (!observedLease) consecutiveEmptyCompletions++
+        onNormalCompletion(observedLease, retryDelayMs)
+        sleep(retryDelayMs)
+    }
 }
 
 /**

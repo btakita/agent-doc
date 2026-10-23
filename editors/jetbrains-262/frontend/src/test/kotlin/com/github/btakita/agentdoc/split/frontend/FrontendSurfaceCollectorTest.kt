@@ -3,11 +3,16 @@ package com.github.btakita.agentdoc.split.frontend
 import com.github.btakita.agentdoc.split.EditorWindowBounds
 import com.github.btakita.agentdoc.split.EditorWindowSnapshot
 import com.github.btakita.agentdoc.split.FrontendLayoutColumn
+import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceRole
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 
 class FrontendSurfaceCollectorTest {
     @Test
@@ -25,6 +30,27 @@ class FrontendSurfaceCollectorTest {
         assertEquals(30_000L, frontendIngressRetryDelayMillis(5))
         assertEquals(30_000L, frontendIngressRetryDelayMillis(100))
         assertEquals(1_000L, frontendIngressRetryDelayMillis(-1))
+    }
+
+    @Test
+    fun emptyIngressFlowRetriesAndAcceptsTheNextLease() = runBlocking {
+        var attempts = 0
+        val sleeps = mutableListOf<Long>()
+
+        assertFailsWith<StopIngressTest> {
+            maintainFrontendIngress(
+                openIngress = {
+                    attempts++
+                    if (attempts == 1) emptyFlow() else flowOf(SurfaceIngressLease("lease-2", 2))
+                },
+                onLease = { throw StopIngressTest() },
+                onNormalCompletion = { _, _ -> },
+                sleep = { sleeps += it },
+            )
+        }
+
+        assertEquals(2, attempts)
+        assertEquals(listOf(1_000L), sleeps)
     }
 
     @Test
@@ -144,3 +170,5 @@ class FrontendSurfaceCollectorTest {
         assertEquals(setOf(SurfaceIncarnation("detached-1", 4)), mountedSurfaceKeysToRestore(mounted, live))
     }
 }
+
+private class StopIngressTest : RuntimeException()

@@ -207,6 +207,11 @@ pub fn start_command(document: &str, item: &str) -> String {
     core::start_command_for(document, item)
 }
 
+/// The generation-fenced completion handoff template sent to a running worker.
+pub fn report_complete_command(document: &str, item: &str) -> String {
+    core::report_complete_command_for(document, item)
+}
+
 /// The `agent-doc queue brief` command that prints `item`'s subagent
 /// authorization preamble (`#waypostauthorization`).
 pub fn brief_command(document: &str, item: &str) -> String {

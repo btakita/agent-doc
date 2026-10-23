@@ -3587,6 +3587,7 @@ mod tests {
         // operator authorization into each subagent prompt.
         assert!(bundled_instruction_text().contains("`authorization.subagent_prompt_preamble` VERBATIM"));
         assert!(bundled_instruction_text().contains("agent-doc queue brief <FILE> --item <...>"));
+        assert!(bundled_instruction_text().contains("report_complete_command"));
         let runbook = |name: &str| {
             BUNDLED_RUNBOOKS
                 .iter()
@@ -3611,6 +3612,8 @@ mod tests {
             "`authorization.subagent_prompt_preamble` VERBATIM",
             "`unresolved_preset`",
             "agent-doc queue brief <FILE> --item <...>",
+            "entry's `report_complete_command`",
+            "off the coordinator's critical path",
         ] {
             assert!(respond.contains(needle), "respond.md missing {needle:?}");
         }

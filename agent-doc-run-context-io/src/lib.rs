@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_doc_element::element::{self, Component};
-use agent_doc_frontmatter::frontmatter::{self, Frontmatter};
+use agent_doc_frontmatter::frontmatter::{Frontmatter, apply_required_ssh_defaults};
 use agent_doc_frontmatter::project_config::ProjectConfig;
 use agent_doc_frontmatter_io::session::ResolvedSshContext;
 use lazily::{TypedCellHandle, TypedContext, TypedFactoryContext, TypedSlotHandle};
@@ -188,9 +188,22 @@ where
     ctx.memoized_slot::<SshContextKey, _, _>(|ctx| {
         let config: Arc<ProjectConfig> = ctx.get(project_config_slot(ctx));
         let doc_rel: Option<String> = ctx.get(doc_relative_slot(ctx));
+        let path: PathBuf = ctx.get(canonical_path_slot(ctx));
+        let frontmatter_defaults =
+            match agent_doc_frontmatter_io::session::project_frontmatter_defaults_for_file(&path) {
+                Ok(defaults) => Arc::new(defaults),
+                Err(error) => {
+                    eprintln!(
+                        "[graph] project frontmatter load failed for {}: {error}",
+                        path.display()
+                    );
+                    Arc::default()
+                }
+            };
         Arc::new(ResolvedSshContext {
             config,
             doc_relative: doc_rel.unwrap_or_default(),
+            frontmatter_defaults,
         })
     })
 }
@@ -206,8 +219,13 @@ where
             .unwrap_or_default();
         let ssh: Arc<ResolvedSshContext> = ctx.get(ssh_context_slot(ctx));
         let resolver = ssh.as_resolver_context(&ssh.doc_relative);
-        let fm = frontmatter::parse_with_ssh_resolver(&content, &resolver)
-            .map(|(fm, _)| fm)
+        let fm = ssh
+            .frontmatter_defaults
+            .parse(&content)
+            .and_then(|(mut fm, _)| {
+                apply_required_ssh_defaults(&mut fm, &resolver)?;
+                Ok(fm)
+            })
             .unwrap_or_default();
         Arc::new(fm)
     })
@@ -1017,6 +1035,7 @@ mod tests {
         let val = ResolvedSshContext {
             config,
             doc_relative: "path/to/doc.md".to_string(),
+            frontmatter_defaults: Arc::default(),
         };
 
         let resolver = val.as_resolver_context("doc.md");
@@ -1474,6 +1493,48 @@ mod tests {
             Some("claude"),
             "invalidating project config also refreshes the effective config"
         );
+    }
+
+    #[test]
+    fn project_frontmatter_overrides_config_and_both_reload_in_open_context() {
+        let _env_guard = env_lock();
+        let config_root = TempDir::new().unwrap();
+        let config_dir = config_root.path().join("agent-doc");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(config_dir.join("config.toml"), "default_agent = \"grok\"\n").unwrap();
+        let _xdg = EnvVarRestore::set("XDG_CONFIG_HOME", config_root.path());
+
+        let project = TempDir::new().unwrap();
+        let project_config = setup_project(project.path());
+        std::fs::write(&project_config, "default_agent = \"codex\"\n").unwrap();
+        let project_frontmatter = project.path().join(".agent-doc/project.md");
+        std::fs::write(
+            &project_frontmatter,
+            "---\nagent: claude\nmodel: project-v1\n---\n",
+        )
+        .unwrap();
+        let doc = project.path().join("doc.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = cycle_context(doc);
+        assert_eq!(rc.global_config().default_agent.as_deref(), Some("codex"));
+        assert_eq!(rc.frontmatter().agent.as_deref(), Some("claude"));
+        assert_eq!(rc.frontmatter().model.as_deref(), Some("project-v1"));
+
+        std::fs::write(&project_config, "default_agent = \"opencode\"\n").unwrap();
+        std::fs::write(
+            &project_frontmatter,
+            "---\nagent: grok\nmodel: project-v2\n---\n",
+        )
+        .unwrap();
+        rc.on_config_change();
+
+        assert_eq!(
+            rc.global_config().default_agent.as_deref(),
+            Some("opencode")
+        );
+        assert_eq!(rc.frontmatter().agent.as_deref(), Some("grok"));
+        assert_eq!(rc.frontmatter().model.as_deref(), Some("project-v2"));
     }
 
     #[test]

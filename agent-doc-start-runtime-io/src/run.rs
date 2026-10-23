@@ -1657,7 +1657,11 @@ pub fn run_with_reap_policy_resume_and_harness(
                 "start_runtime_restart_frontmatter",
             )
             .ok()
-            .and_then(|content| frontmatter::parse(&content).ok().map(|(fm, _)| fm));
+            .and_then(|content| {
+                agent_doc_frontmatter_io::session::parse_for_file(&content, file)
+                    .ok()
+                    .map(|(fm, _)| fm)
+            });
             match restart_fm {
                 Some(mut restart_fm) => {
                     let authority_harness = shared.resolve_document_harness(

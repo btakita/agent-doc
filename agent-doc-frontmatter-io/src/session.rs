@@ -10,8 +10,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use agent_doc_frontmatter::frontmatter::{
-    Frontmatter, PromptPresets, SshResolverContext, contextualize_parse_error,
-    ensure_session_with_ssh_resolver, parse_with_ssh_resolver, session_id_from_content,
+    Frontmatter, FrontmatterDefaults, PromptPresets, SshResolverContext,
+    apply_required_ssh_defaults, contextualize_parse_error, ensure_session_with_ssh_resolver,
+    parse_with_ssh_resolver, session_id_from_content,
 };
 use agent_doc_frontmatter::project_config::{self, ProjectConfig};
 
@@ -24,6 +25,10 @@ use agent_doc_frontmatter::project_config::{self, ProjectConfig};
 pub struct ResolvedSshContext {
     pub config: Arc<ProjectConfig>,
     pub doc_relative: String,
+    /// Project frontmatter defaults captured for the same actor/cycle context.
+    /// Long-lived callers replace this context after a project configuration
+    /// change rather than performing hidden filesystem reads in pure slots.
+    pub frontmatter_defaults: Arc<FrontmatterDefaults>,
 }
 
 impl ResolvedSshContext {
@@ -48,7 +53,16 @@ pub fn parse_for_file<'a>(content: &'a str, file: &Path) -> Result<(Frontmatter,
         doc_relative: &doc_relative,
         file_display: &display,
     };
-    parse_with_ssh_resolver(content, &ctx).map_err(|err| contextualize_parse_error(&display, err))
+    // Preserve the established path/line/excerpt diagnostic for malformed
+    // document-local YAML before overlaying project defaults.
+    parse_with_ssh_resolver(content, &ctx)?;
+    let defaults = project_frontmatter_defaults_for_file(file)?;
+    let (mut fm, body) = defaults
+        .parse(content)
+        .map_err(|err| contextualize_parse_error(&display, err))?;
+    apply_required_ssh_defaults(&mut fm, &ctx)
+        .map_err(|err| contextualize_parse_error(&display, err))?;
+    Ok((fm, body))
 }
 
 /// Parse frontmatter using a cached SSH/project context.
@@ -59,7 +73,53 @@ pub fn parse_for_file_with_context<'a>(
 ) -> Result<(Frontmatter, &'a str)> {
     let display = file.display().to_string();
     let ctx = ssh.as_resolver_context(&display);
-    parse_with_ssh_resolver(content, &ctx).map_err(|err| contextualize_parse_error(&display, err))
+    parse_with_ssh_resolver(content, &ctx)?;
+    let (mut fm, body) = ssh
+        .frontmatter_defaults
+        .parse(content)
+        .map_err(|err| contextualize_parse_error(&display, err))?;
+    apply_required_ssh_defaults(&mut fm, &ctx)
+        .map_err(|err| contextualize_parse_error(&display, err))?;
+    Ok((fm, body))
+}
+
+/// Parse the effective frontmatter for a concrete document without applying
+/// `.agent-doc/config.toml` SSH defaults. Project frontmatter is read on every
+/// call so long-lived callers can invalidate/re-read it alongside config.toml.
+fn parse_effective_project_frontmatter<'a>(
+    content: &'a str,
+    file: &Path,
+) -> Result<(Frontmatter, &'a str)> {
+    let defaults = project_frontmatter_defaults_for_file(file)?;
+    defaults
+        .parse(content)
+        .map_err(|err| contextualize_parse_error(&file.display().to_string(), err))
+}
+
+/// Load the project-frontmatter layers visible to `file`. Farther ancestors
+/// are applied first so nearer roots can override them.
+pub fn project_frontmatter_defaults_for_file(file: &Path) -> Result<FrontmatterDefaults> {
+    let mut defaults = FrontmatterDefaults::default();
+    if let Some(nearest_root) = agent_doc_project_config_io::project_root_for_doc(file) {
+        let roots = agent_doc_fs::ancestors_within_root_ceiling(&nearest_root);
+        for root in roots.into_iter().rev() {
+            let project_file = root.join(".agent-doc").join("project.md");
+            let project_content = match std::fs::read_to_string(&project_file) {
+                Ok(content) => content,
+                Err(err) if err.kind() == ErrorKind::NotFound => continue,
+                Err(err) => {
+                    anyhow::bail!(
+                        "failed to read project frontmatter file {}: {err}",
+                        project_file.display()
+                    );
+                }
+            };
+            defaults.overlay_document(&project_content).map_err(|err| {
+                contextualize_parse_error(&project_file.display().to_string(), err)
+            })?;
+        }
+    }
+    Ok(defaults)
 }
 
 /// Resolve the prompt presets visible to a concrete project document.
@@ -72,34 +132,9 @@ pub fn parse_for_file_with_context<'a>(
 /// documents. Missing project files are skipped. Other read failures and malformed
 /// project frontmatter fail closed with the project-file path in the error.
 pub fn effective_prompt_presets_for_file(content: &str, file: &Path) -> Result<PromptPresets> {
-    let display = file.display().to_string();
-    let mut local = agent_doc_frontmatter::frontmatter::parse(content)
-        .map_err(|err| contextualize_parse_error(&display, err))?
+    let mut local = parse_effective_project_frontmatter(content, file)?
         .0
         .prompt_presets;
-    if let Some(nearest_root) = agent_doc_project_config_io::project_root_for_doc(file) {
-        for root in agent_doc_fs::ancestors_within_root_ceiling(&nearest_root) {
-            let project_file = root.join(".agent-doc").join("project.md");
-            let project_content = match std::fs::read_to_string(&project_file) {
-                Ok(content) => Some(content),
-                Err(err) if err.kind() == ErrorKind::NotFound => None,
-                Err(err) => {
-                    anyhow::bail!(
-                        "failed to read project preset file {}: {err}",
-                        project_file.display()
-                    );
-                }
-            };
-            if let Some(project_content) = project_content {
-                let project_display = project_file.display().to_string();
-                let defaults = agent_doc_frontmatter::frontmatter::parse(&project_content)
-                    .map_err(|err| contextualize_parse_error(&project_display, err))?
-                    .0
-                    .prompt_presets;
-                local.inherit_defaults(&defaults);
-            }
-        }
-    }
     local.resolve_nested_references().map_err(|err| {
         anyhow::anyhow!(
             "failed to resolve effective prompt presets for {}: {err}",
@@ -126,39 +161,11 @@ pub struct EffectiveDogfood {
 }
 
 pub fn effective_dogfood_for_file(content: &str, file: &Path) -> Result<EffectiveDogfood> {
-    let display = file.display().to_string();
-    let local = agent_doc_frontmatter::frontmatter::parse(content)
-        .map_err(|err| contextualize_parse_error(&display, err))?
+    if let Some(effective) = parse_effective_project_frontmatter(content, file)?
         .0
-        .dogfood_mode;
-    if let Some(local) = local {
-        return resolve_dogfood_value(file, &local);
-    }
-
-    if let Some(nearest_root) = agent_doc_project_config_io::project_root_for_doc(file) {
-        // `ancestors_within_root_ceiling` is nearest-first. Dogfood is a
-        // tri-state scalar, so the nearest explicit project declaration wins.
-        for root in agent_doc_fs::ancestors_within_root_ceiling(&nearest_root) {
-            let project_file = root.join(".agent-doc").join("project.md");
-            let project_content = match std::fs::read_to_string(&project_file) {
-                Ok(content) => content,
-                Err(err) if err.kind() == ErrorKind::NotFound => continue,
-                Err(err) => {
-                    anyhow::bail!(
-                        "failed to read project dogfood file {}: {err}",
-                        project_file.display()
-                    );
-                }
-            };
-            let project_display = project_file.display().to_string();
-            let project = agent_doc_frontmatter::frontmatter::parse(&project_content)
-                .map_err(|err| contextualize_parse_error(&project_display, err))?
-                .0
-                .dogfood_mode;
-            if let Some(project) = project {
-                return resolve_dogfood_value(file, &project);
-            }
-        }
+        .dogfood_mode
+    {
+        return resolve_dogfood_value(file, &effective);
     }
     Ok(EffectiveDogfood {
         enabled: false,
@@ -551,6 +558,38 @@ mod tests {
     }
 
     #[test]
+    fn project_frontmatter_is_live_for_all_fields_with_document_overrides() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let project_file = dir.path().join(".agent-doc/project.md");
+        std::fs::write(
+            &project_file,
+            "---\nagent: claude\nmodel: project-v1\nagent_doc_clear_threshold: 40\n---\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("tasks/work.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = "---\nmodel: document-model\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let (first, _) = parse_for_file(content, &doc).unwrap();
+        assert_eq!(first.agent.as_deref(), Some("claude"));
+        assert_eq!(first.model.as_deref(), Some("document-model"));
+        assert_eq!(first.clear_threshold, Some(40));
+
+        std::fs::write(
+            &project_file,
+            "---\nagent: codex\nmodel: project-v2\nagent_doc_clear_threshold: 70\n---\n",
+        )
+        .unwrap();
+        let (second, _) = parse_for_file(content, &doc).unwrap();
+        assert_eq!(second.agent.as_deref(), Some("codex"));
+        assert_eq!(second.model.as_deref(), Some("document-model"));
+        assert_eq!(second.clear_threshold, Some(70));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
     fn documented_project_wide_preset_example_resolves() {
         let dir = TempDir::new().unwrap();
         setup_project(dir.path());
@@ -826,6 +865,7 @@ mod tests {
         let ssh = ResolvedSshContext {
             config: Arc::new(ProjectConfig::default()),
             doc_relative: "doc.md".to_string(),
+            frontmatter_defaults: Arc::default(),
         };
         let result_ctx = parse_for_file_with_context(content, &doc, &ssh).unwrap();
 
@@ -846,6 +886,7 @@ mod tests {
         let ssh = ResolvedSshContext {
             config: Arc::new(ProjectConfig::default()),
             doc_relative: "doc.md".to_string(),
+            frontmatter_defaults: Arc::default(),
         };
         let result_ctx = ensure_session_for_file_with_context(content, &doc, &ssh).unwrap();
 

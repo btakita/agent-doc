@@ -1669,6 +1669,135 @@ pub fn raw_frontmatter_yaml(content: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
+/// Project-level frontmatter defaults accumulated from outermost to nearest
+/// project root.
+///
+/// Layers retain raw top-level key presence rather than merging typed
+/// [`Frontmatter`] values. That distinction matters for explicit empty lists or
+/// maps: `links: []` and `env: {}` are declarations that mask a project default,
+/// not an absent value that should inherit it. Every layer is still validated
+/// through the normal typed deserializer before it can contribute defaults.
+#[derive(Debug, Clone, Default)]
+pub struct FrontmatterDefaults {
+    merged: serde_yaml::Mapping,
+}
+
+impl FrontmatterDefaults {
+    /// Overlay one default document. Callers add farther ancestors first and
+    /// nearer project roots last.
+    pub fn overlay_document(&mut self, content: &str) -> Result<()> {
+        let Some((yaml, _)) = split_frontmatter(content)? else {
+            return Ok(());
+        };
+        // Validate each source independently so a malformed farther project
+        // file cannot be hidden by a valid nearer/document declaration.
+        deserialize_frontmatter_yaml(yaml)?;
+        let layer = canonical_frontmatter_mapping(yaml)?;
+        overlay_frontmatter_mapping(&mut self.merged, layer);
+        Ok(())
+    }
+
+    /// Parse a document with these project defaults. Document declarations win
+    /// by top-level frontmatter key. Prompt presets retain their established
+    /// per-name inheritance semantics.
+    pub fn parse<'a>(&self, content: &'a str) -> Result<(Frontmatter, &'a str)> {
+        let Some((yaml, body)) = split_frontmatter(content)? else {
+            let mut fm: Frontmatter =
+                serde_yaml::from_value(serde_yaml::Value::Mapping(self.merged.clone()))?;
+            normalize_queue_control(&mut fm);
+            return Ok((fm, content));
+        };
+        // Preserve the normal document-local diagnostics before combining it
+        // with defaults.
+        deserialize_frontmatter_yaml(yaml)?;
+        let local = canonical_frontmatter_mapping(yaml)?;
+        let mut merged = self.merged.clone();
+        overlay_frontmatter_mapping(&mut merged, local);
+        let mut fm: Frontmatter = serde_yaml::from_value(serde_yaml::Value::Mapping(merged))?;
+        normalize_queue_control(&mut fm);
+        Ok((fm, body))
+    }
+}
+
+fn canonical_frontmatter_mapping(yaml: &str) -> Result<serde_yaml::Mapping> {
+    let value = serde_yaml::from_str::<serde_yaml::Value>(yaml)?;
+    let serde_yaml::Value::Mapping(mut mapping) = value else {
+        anyhow::bail!("frontmatter must be a YAML mapping");
+    };
+
+    // Canonicalize every read-only serde alias before cross-layer overlay so a
+    // local legacy spelling masks the same canonical project key (and vice
+    // versa). Keep this table beside the schema aliases above.
+    for (alias, canonical) in [
+        ("session", "agent_doc_session"),
+        ("mode", "agent_doc_mode"),
+        ("response_mode", "agent_doc_mode"),
+        ("related_docs", "links"),
+        ("agent_doc_dogfood", "dogfood"),
+        ("dogfood_mode", "dogfood"),
+        ("free_text_execution", "agent_doc_free_text_execution"),
+    ] {
+        move_alias_to_canonical(&mut mapping, alias, canonical);
+    }
+    fold_presets_alias_mapping(&mut mapping);
+    Ok(mapping)
+}
+
+fn move_alias_to_canonical(mapping: &mut serde_yaml::Mapping, alias: &str, canonical: &str) {
+    let alias_key = serde_yaml::Value::from(alias);
+    let canonical_key = serde_yaml::Value::from(canonical);
+    if let Some(value) = mapping.remove(&alias_key) {
+        mapping.entry(canonical_key).or_insert(value);
+    }
+}
+
+fn fold_presets_alias_mapping(mapping: &mut serde_yaml::Mapping) {
+    let alias_key = serde_yaml::Value::from(PROMPT_PRESETS_ALIAS_KEY);
+    let canonical_key = serde_yaml::Value::from(PROMPT_PRESETS_KEY);
+    let Some(alias) = mapping.remove(&alias_key) else {
+        return;
+    };
+    match mapping.get_mut(&canonical_key) {
+        Some(serde_yaml::Value::Mapping(canonical)) => {
+            if let serde_yaml::Value::Mapping(alias) = alias {
+                for (name, value) in alias {
+                    if !canonical.contains_key(&name) {
+                        canonical.insert(name, value);
+                    }
+                }
+            }
+        }
+        Some(_) => {}
+        None => {
+            mapping.insert(canonical_key, alias);
+        }
+    }
+}
+
+fn overlay_frontmatter_mapping(base: &mut serde_yaml::Mapping, overlay: serde_yaml::Mapping) {
+    let presets_key = serde_yaml::Value::from(PROMPT_PRESETS_KEY);
+    for (key, value) in overlay {
+        if key == presets_key {
+            match value {
+                serde_yaml::Value::Mapping(overlay_presets) => {
+                    if let Some(serde_yaml::Value::Mapping(base_presets)) = base.get_mut(&key) {
+                        for (name, preset) in overlay_presets {
+                            base_presets.insert(name, preset);
+                        }
+                    } else {
+                        base.insert(key, serde_yaml::Value::Mapping(overlay_presets));
+                    }
+                }
+                value => {
+                    base.insert(key, value);
+                }
+            }
+            continue;
+        }
+        base.insert(key, value);
+    }
+}
+
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
 /// If no frontmatter block is present, returns defaults and the full content as body.
 pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
@@ -4581,6 +4710,55 @@ mod tests {
             document.prompt_presets.keys().cloned().collect::<Vec<_>>(),
             vec!["#shared", "#document-only"]
         );
+    }
+
+    #[test]
+    fn project_frontmatter_defaults_cover_all_fields_and_preserve_explicit_empty_overrides() {
+        let mut defaults = FrontmatterDefaults::default();
+        defaults
+            .overlay_document(
+                "---\nagent: claude\nmodel: outer-model\nagent_doc_mode: template\nlinks:\n  - outer.md\nenv:\n  OUTER: yes\npresets:\n  '#outer': outer\n  '#shared': outer\n---\n",
+            )
+            .unwrap();
+        defaults
+            .overlay_document(
+                "---\nagent: codex\nmodel: nearest-model\nprompt_presets:\n  '#near': near\n  '#shared': near\n---\n",
+            )
+            .unwrap();
+
+        let (fm, body) = defaults
+            .parse(
+                "---\nresponse_mode: append\nlinks: []\nenv: {}\npresets:\n  '#shared': document\n---\nBody\n",
+            )
+            .unwrap();
+
+        assert_eq!(fm.agent.as_deref(), Some("codex"));
+        assert_eq!(fm.model.as_deref(), Some("nearest-model"));
+        assert_eq!(fm.mode.as_deref(), Some("append"));
+        assert!(fm.links.is_empty(), "explicit empty list masks the default");
+        assert!(fm.env.is_empty(), "explicit empty map masks the default");
+        assert_eq!(
+            fm.prompt_presets.get("#outer").map(String::as_str),
+            Some("outer")
+        );
+        assert_eq!(
+            fm.prompt_presets.get("#near").map(String::as_str),
+            Some("near")
+        );
+        assert_eq!(
+            fm.prompt_presets.get("#shared").map(String::as_str),
+            Some("document")
+        );
+        assert_eq!(body, "Body\n");
+    }
+
+    #[test]
+    fn malformed_project_frontmatter_cannot_be_hidden_by_document_override() {
+        let mut defaults = FrontmatterDefaults::default();
+        let err = defaults
+            .overlay_document("---\nagent_doc_format: definitely-invalid\n---\n")
+            .unwrap_err();
+        assert!(err.to_string().contains("definitely-invalid"));
     }
 
     #[test]

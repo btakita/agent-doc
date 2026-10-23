@@ -2,15 +2,13 @@
 
 ## Decision
 
-Project-wide prompt presets live in the YAML frontmatter of
+Project-wide frontmatter defaults live in the YAML frontmatter of
 `.agent-doc/project.md`. Session documents resolve that file dynamically; they
-do not copy or synchronize its preset map. This gives existing documents new
-project presets as soon as the project file changes while keeping one canonical
-source.
-
-The initial inheritance surface is deliberately limited to `presets` (the
-`prompt_presets` alias remains accepted). Other document frontmatter does not
-implicitly become project policy.
+do not copy or synchronize inherited values. This gives existing documents new
+project configuration as soon as the project file changes while keeping one
+canonical source. Every field accepted by document frontmatter is accepted as
+a project default, including `agent`, model selection, environment, guards, and
+prompt presets (`prompt_presets` and its `presets` alias).
 
 ```markdown
 ---
@@ -25,6 +23,12 @@ presets:
 
 This body may explain the project's presets, but is not inherited.
 ```
+
+For ordinary fields, precedence is document frontmatter, nearest project.md,
+farther ancestor project.md, then any corresponding config.toml/global/built-in
+fallback. A top-level declaration replaces the inherited field as a unit, and
+an explicit empty list or map masks the project value. Prompt presets are the
+exception: their established merge-by-name behavior is retained.
 
 ## User setup contract
 
@@ -47,13 +51,13 @@ For a session document under one or more nested project roots:
 1. Walk from the nearest discovered project root through its ancestors, bounded
    by `AGENT_DOC_ROOT_CEILING_DIRECTORIES`, and read every existing
    `.agent-doc/project.md`.
-2. Parse their presets through the same `Frontmatter` / `PromptPresets` path used
-   by session documents, including scalar, multiline, and structured values.
+2. Parse every field through the same typed `Frontmatter` path used by session
+   documents, including aliases and explicit empty collections.
 3. Treat farther ancestors as defaults, overlay nearer project declarations by
-   exact key, then overlay the session document's declarations. A nearer or
-   document-local declaration wins, including an unset, half-typed declaration;
-   it must mask an inherited value rather than execute the ancestor value while
-   the operator is editing an override.
+   canonical top-level key, then overlay the session document's declarations.
+   Prompt presets overlay by exact preset name; an unset, half-typed preset
+   declaration masks an inherited value rather than executing the ancestor
+   value while the operator is editing an override.
 4. Preserve the source preset's diagnostics and structured `runbook` metadata.
    Project-relative runbook paths continue to resolve from the project root.
 5. Resolve on read (or invalidate a cache by project-file identity and content

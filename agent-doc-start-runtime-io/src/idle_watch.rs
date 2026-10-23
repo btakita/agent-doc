@@ -302,6 +302,38 @@ impl AgentChangeFrontmatterRefresh {
     }
 }
 
+/// Compact identity for project configuration that can change the effective
+/// frontmatter without changing the session document revision. Metadata keeps
+/// the idle path cheap while covering atomic replacements and edits to every
+/// inherited ancestor project.
+fn project_configuration_revision(file: &Path) -> String {
+    let Some(nearest_root) = agent_doc_project_config_io::project_root_for_doc(file) else {
+        return "no-project".to_string();
+    };
+    let mut evidence = String::new();
+    for root in agent_doc_fs::ancestors_within_root_ceiling(&nearest_root) {
+        for name in ["config.toml", "project.md"] {
+            let path = root.join(".agent-doc").join(name);
+            evidence.push_str(path.to_string_lossy().as_ref());
+            match std::fs::metadata(&path) {
+                Ok(metadata) => {
+                    evidence.push(':');
+                    evidence.push_str(&metadata.len().to_string());
+                    if let Ok(modified) = metadata.modified()
+                        && let Ok(elapsed) = modified.duration_since(std::time::UNIX_EPOCH)
+                    {
+                        evidence.push(':');
+                        evidence.push_str(&elapsed.as_nanos().to_string());
+                    }
+                }
+                Err(_) => evidence.push_str(":missing"),
+            }
+            evidence.push('\n');
+        }
+    }
+    agent_doc_hash::content_hash(&evidence)
+}
+
 fn idle_watch_revision_observation_due(
     delivery_edge_pending: bool,
     last_safety_revision_observation: Option<std::time::Instant>,
@@ -3476,9 +3508,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // the compact revision as its fail-safe; it must not bypass an
                 // unchanged identity and fan full-document reads across every idle
                 // supervisor.
-                let agent_change_revision = revision_state.tracking().last_observed;
+                let document_revision = revision_state.tracking().last_observed;
+                let agent_change_revision = format!(
+                    "document={};project={}",
+                    document_revision.as_deref().unwrap_or("none"),
+                    project_configuration_revision(&path)
+                );
                 let agent_change_refresh_due = agent_change_frontmatter_refresh
-                    .due(agent_change_revision.as_deref());
+                    .due(Some(&agent_change_revision));
                 let agent_change_view = (agent_change_restart_enabled && agent_change_refresh_due).then(|| {
                     match agent_doc_document_realtime_io::try_resolve_current_document_content(
                         &path,
@@ -3493,10 +3530,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 });
                 if agent_change_view.is_some() {
                     agent_change_frontmatter_refresh
-                        .record(agent_change_revision.as_deref());
+                        .record(Some(&agent_change_revision));
                 }
                 if let Some((content, authoritative_view)) = agent_change_view
-                    && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
+                    && let Ok((fm, _)) =
+                        agent_doc_frontmatter_io::session::parse_for_file(&content, &path)
                 {
                     let global = agent_doc_project_config_io::apply_project_defaults(
                         agent_doc_config::load().unwrap_or_default(),
@@ -6959,6 +6997,28 @@ mod tests {
         unavailable.record(None);
         assert!(!unavailable.due(None));
         assert!(unavailable.due(Some("sv-1")));
+    }
+
+    #[test]
+    fn project_configuration_revision_tracks_both_live_project_files() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let doc = dir.path().join("work.md");
+        std::fs::write(&doc, "body\n").unwrap();
+
+        let initial = project_configuration_revision(&doc);
+        std::fs::write(config_dir.join("project.md"), "---\nagent: claude\n---\n").unwrap();
+        let project_changed = project_configuration_revision(&doc);
+        assert_ne!(project_changed, initial);
+
+        std::fs::write(
+            config_dir.join("config.toml"),
+            "default_agent = \"codex\"\n",
+        )
+        .unwrap();
+        let config_changed = project_configuration_revision(&doc);
+        assert_ne!(config_changed, project_changed);
     }
 
     #[test]

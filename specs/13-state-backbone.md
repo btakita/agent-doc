@@ -535,6 +535,15 @@ decide it.
   derives their layout from its surface Source (`specs/08-session-routing.md`,
   "Editor commands name the propagated surface"). The plugin's `--col` snapshot
   survives only as a logged fallback for a controller without the capability.
+- **Frontend ingress completion is not authority retirement.** The Remote Dev
+  `openIngress` flow is an external event boundary. A normal completion that
+  emitted no lease is absence of frontend-authority evidence, not proof that a
+  loaded frontend module is unavailable. The frontend retries that subscription
+  with bounded exponential backoff, records whether a lease was observed, resets
+  the empty-completion streak when one arrives, and lets coroutine cancellation
+  terminate the retry. A lease event drives the existing snapshot publisher;
+  only an explicit generation-fenced retire event may release backend authority
+  and enable selection fallback (GH #367).
 - **Command applicability is derived from the retained Source's authority.** A
   route may consume flat Remote Dev evidence as a non-structural `ensure`
   request. An exact `Sync Tmux Panes` command requires measured columns; after

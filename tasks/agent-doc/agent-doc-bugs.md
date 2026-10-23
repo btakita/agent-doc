@@ -24,7 +24,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 26 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 30 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -313,6 +313,13 @@ The underlying mistake was in the prior coordinator closeout: batched free-text 
 
 No repair subagent was spawned because the conditional defect was not present. The documented next-admission reconciliation should strike the prior-cycle answered residue; it should not be manually deleted or force-written. The separately added `release + publish` item is already claimed by the existing release worker, so it was not dispatched again.
 
+### Re: Subagent completed: `subagent:gh355-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/355” — agent-doc
+<!-- agent-doc-subagent-response sha256=9db2ecd4467e2d89a31a510b786f9de51368af9085ae59f4f54b5ee98ebfc010 -->
+> **Subagent response:**
+>
+> GH #355 was already resolved; no duplicate patch was needed. Original fix 4bb0b43868326b25c1c65fcdcef7231a19abf695 shipped in v0.35.544. Current origin/main 3a1d3cb8dc contains it; later GH #360 intentionally superseded guessed same-width Remote Dev replacement behavior. Verification passed: GH #355 regression 1/1, unknown-route regressions 2/2, cargo check --workspace --all-targets, and CI on the exact SHA. Verification branch verify/gh355-current-20261023 is clean; no files changed, commit, push, or follow-up.
+<!-- agent-doc-subagent-completion key=86bba04122fb6d650069b9f5c27b12fa29632891abec23a99012793c3d21a2cf -->
+
 ### Re: Subagent completed: `subagent:gh358-fix` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/358” — agent-doc
 <!-- agent-doc-subagent-response sha256=a71f6f83cd527d1dc81d821b47cb87b8dcf5cc8e42dda02616152f65c03be4eb -->
 > **Subagent response:**
@@ -412,7 +419,22 @@ The queue desynchronization causes are only **partly released**:
 - Until that follow-up ships, the coordinator fallback remains necessary; it was used here to repair the current document before cleanup.
 
 The leading GH-355 row was already resolved and its completion evidence is preserved in the exchange before removal.
-<!-- agent:boundary:e37d71fa -->
+> **Chat prompt (#chatprompt:0e145b378893):** Are subagents still running? The state of the queue items seems wrong
+
+> **Chat prompt (#chatprompt:db9d9f1d7ab2):** Did we release the latest commits?
+
+> **Chat prompt (#chatprompt:9acae9a5e377):** clean up the queue
+
+> **Chat prompt (#chatprompt:6acc7d457160):** Have we fixed the causes of the queue getting out of sync?
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/356
+
+### Re: Cleanup continuation — gpt-5 · 2026-10-23T03:45-04:00
+
+The preceding committed response already contains the full answers. This re-admitted cycle confirms the resulting state: no subagents remain running; all prior main-queue work has durable completion evidence; the latest post-v0.35.546 commits are not released; and the completion-receipt root-cause fix is prepared but not yet released. The completed rows are being struck while the newly arrived sdk-demo.md compact-exchange error remains queued as distinct work.
+
+The GH-356 row was previously completed and its durable result is preserved in the exchange before removal.
+<!-- agent:boundary:e5fbc736 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -421,7 +443,7 @@ The leading GH-355 row was already resolved and its completion evidence is prese
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-issue https://github.com/btakita/agent-doc/issues/355~~
-- ☑️ [#subagent:gh356#1] #gh-issue https://github.com/btakita/agent-doc/issues/356
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/356~~
 - ☑️ [#subagent:gh355status#1] Is `☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355` done? It is leftover in the queue. Issues 353, 354, 355, 357 remain open on github.
 - ☑️ [#subagent:gh353fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/353
 - ☑️ [#subagent:gh354fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/354

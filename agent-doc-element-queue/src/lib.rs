@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     name: "queue",
-    aliases: &[],
+    aliases: &["run", "loop"],
     source: ElementSource::BuiltIn,
     shape: ElementShape::Component,
     authority: ElementAuthority::DerivedProjection,
@@ -496,6 +496,13 @@ pub fn strip_intent_tags(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn descriptor_recognizes_run_and_loop_component_spellings() {
+        assert!(super::DESCRIPTOR.matches_name("queue"));
+        assert!(super::DESCRIPTOR.matches_name("run"));
+        assert!(super::DESCRIPTOR.matches_name("loop"));
+    }
+
     /// `#claimdispatchidentity`: tags and markers are routing, not work.
     #[test]
     fn head_identity_ignores_intent_tags_and_markers_but_not_the_work() {

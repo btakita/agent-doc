@@ -78,6 +78,11 @@ pub fn is_queue_bare_flag_attr(key: &str) -> bool {
     )
 }
 
+/// Whether a tagpath component label denotes the active queue model.
+pub fn is_queue_marker_component(component: &str) -> bool {
+    matches!(component, "agent:queue" | "agent:run" | "agent:loop")
+}
+
 /// Whether a component (bare name, e.g. `review`) accepts the bare `priority`
 /// ordering attribute (`#backlog-priority-attribute`, `#reviewpriority`).
 ///
@@ -88,7 +93,7 @@ pub fn is_queue_bare_flag_attr(key: &str) -> bool {
 pub fn is_priority_component(name: &str) -> bool {
     matches!(
         name,
-        "backlog" | "icebox" | "pending" | "review" | "todo" | "queue"
+        "backlog" | "icebox" | "pending" | "review" | "todo" | "queue" | "run" | "loop"
     )
 }
 
@@ -105,12 +110,12 @@ pub fn is_recognized_bare_flag_attr(component: &str, key: &str) -> bool {
             .is_some_and(is_priority_component);
     }
     if is_queue_only_component_attr(key) {
-        return component != "agent:queue" || is_queue_bare_flag_attr(key);
+        return !is_queue_marker_component(component) || is_queue_bare_flag_attr(key);
     }
     if !is_prompt_component_attr(key) {
         return false;
     }
-    if !matches!(component, "agent:queue" | "agent:exchange") {
+    if !is_queue_marker_component(component) && component != "agent:exchange" {
         return true;
     }
     matches!(key, "subagents" | "fan-out")
@@ -503,6 +508,8 @@ mod tests {
     fn bare_preset_is_warning_only_when_misplaced_but_malformed_on_prompt_components() {
         assert!(is_recognized_bare_flag_attr("agent:backlog", "preset"));
         assert!(!is_recognized_bare_flag_attr("agent:queue", "preset"));
+        assert!(!is_recognized_bare_flag_attr("agent:run", "preset"));
+        assert!(!is_recognized_bare_flag_attr("agent:loop", "preset"));
         assert!(!is_recognized_bare_flag_attr("agent:exchange", "preset"));
     }
 
@@ -516,6 +523,8 @@ mod tests {
             "agent:icebox",
             "agent:review",
             "agent:queue",
+            "agent:run",
+            "agent:loop",
         ] {
             assert!(
                 is_recognized_bare_flag_attr(component, "priority"),

@@ -231,6 +231,11 @@ Additional rules:
 
 The `agent:queue` component batches prompts inside the document.
 
+Repeating batches use the canonical `agent:loop` component. It has the same
+body and queue attributes and implies an unbounded loop. `loop=N` keeps the
+finite-pass form. Legacy `agent:queue loop` and `agent:run loop` markers remain
+accepted and are not rewritten solely to migrate their spelling.
+
 ### Syntax
 
 - Single-line prompts use flush-left `- ` list items.

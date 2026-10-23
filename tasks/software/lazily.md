@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a16540-55d7-7e03-bf60-4b6b37955117
+  codex: 01a1659d-f7cf-70d0-9670-5099bc9e705c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -25,7 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0.46.0, lazily-js v0.37.0, and lazily-rs v0.61.0. Rust v0.57.2 compatibility and remaining bindings are pending; operator-deleted queue claims remain cancelled.
 <!-- /agent:status -->
 
@@ -967,17 +967,32 @@ Two have completed:
 - `#fixrunturn`: current `agent-doc` main already contains the exact fix at `8cbd2f5672`; all three incident regressions and full `make check` passed, so no duplicate code commit or install was needed. The item is complete.
 
 The earlier `/root/ambienttokenresolve` and `/root/corecohort` entries shown as interrupted were superseded before claim binding; their active replacements are the workers listed above.
+
+### Re: #lzambienttokenresolve remaining work — gpt-5 · 2026-10-22T23:38-04:00
+
+The agent-owned preparation is complete. The refreshed evidence was integrated in superproject commit `a40d94fde2`; `make publish-credential-proof` passes, and `make review-gate-status` reports `blocked_fresh`. No credentials were read and no publisher was invoked.
+
+What remains is operator-only:
+
+1. Choose a quiet window and stop long-running shells and IDE tasks rooted in this checkout.
+2. Run the patch checks, apply the ignored-file edits and the tracked patches in each named repository, commit each repository separately, and record the commit IDs.
+3. Run the normal non-publish checks and fake-publisher proof. Do not perform a real publish as a scoping test.
+4. Rotate the Cargo, granular npm, retained legacy npm-publish, and PyPI credentials in their registries and in Passage. The npm replacement must have write access and satisfy the registry's 2FA-bypass policy, unless that path is moved to trusted publishing.
+5. Close every process that predates the change/rotation, then verify in a fresh shell that none of the seven publish-variable names is ambient. Validate the next authorized release from its registry receipt.
+
+No additional backlog follow-up is needed because the remaining work is exactly the operator-only review gate and its existing TODO; `#lzambienttokenresolve` remains gated until those steps are complete.
+
+The stale `#lzcorecireachaudit` attempt has also been re-claimed as generation 2 and started on `/root/corecireachaudit2`; it is auditing the settled Spec and nine binding commits under the existing commit-and-push authorization.
+
+Changed paths this cycle: none outside the binary-owned session update. Evidence: worker integration commit `a40d94fde2`, the two non-publishing proof targets above, and the generation-fenced queue claim/start. Confidence: high. Escalation: none. The exchange remains large, but the active queue continues without compaction because no auto-compact opt-in is present.
 <!-- agent:boundary:d62d2747 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- 📫 [#subagent:ambienttokenresolve2#2] do [#lzambienttokenresolve]
-- 🚧 [#subagent:corecohort2#2] do [#lzcorecohort]
-- 📫 [#subagent:fixrunturn#1] do [#fixrunturn]
-- 🚧 [#subagent:corecireachaudit#1] do [#lzcorecireachaudit]
-- 📫 [#subagent:actionable_review#1] #actionable-review
+- ☑️ [#subagent:ambienttokenresolve2#2] do [#lzambienttokenresolve]
+- 🚧 [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]
 <!-- /agent:queue -->
 
 ## Todo
@@ -995,7 +1010,7 @@ The earlier `/root/ambienttokenresolve` and `/root/corecohort` entries shown as 
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzambienttokenresolve] Credential-plan evidence is refreshed and committed; make publish-credential-proof passes and review-gate-status reports blocked_fresh. Waiting only for the operator quiet-window application, Cargo/npm/PyPI credential rotations, and interactive-shell name-only verification.
+- [/] 🚧 [#lzambienttokenresolve] Credential-plan evidence is refreshed and committed; make publish-credential-proof passes and review-gate-status reports blocked_fresh. Waiting only for the operator quiet-window application, Cargo/npm/PyPI credential rotations, and interactive-shell name-only verification.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 <!-- /agent:review -->

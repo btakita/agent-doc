@@ -6,6 +6,63 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JetbrainsHostPlatform {
+    MacOs,
+    Windows,
+    Unix,
+}
+
+impl JetbrainsHostPlatform {
+    fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else if cfg!(target_os = "windows") {
+            Self::Windows
+        } else {
+            Self::Unix
+        }
+    }
+}
+
+fn jetbrains_data_roots_for(
+    platform: JetbrainsHostPlatform,
+    home: Option<PathBuf>,
+    xdg_data_home: Option<PathBuf>,
+    app_data: Option<PathBuf>,
+) -> Vec<PathBuf> {
+    let root = match platform {
+        JetbrainsHostPlatform::MacOs => home.map(|path| path.join("Library/Application Support")),
+        JetbrainsHostPlatform::Windows => {
+            app_data.or_else(|| home.map(|path| path.join("AppData").join("Roaming")))
+        }
+        JetbrainsHostPlatform::Unix => {
+            xdg_data_home.or_else(|| home.map(|path| path.join(".local/share")))
+        }
+    };
+    root.map(|path| vec![path.join("JetBrains")])
+        .unwrap_or_default()
+}
+
+fn jetbrains_system_roots_for(
+    platform: JetbrainsHostPlatform,
+    home: Option<PathBuf>,
+    xdg_cache_home: Option<PathBuf>,
+    local_app_data: Option<PathBuf>,
+) -> Vec<PathBuf> {
+    let root = match platform {
+        JetbrainsHostPlatform::MacOs => home.map(|path| path.join("Library/Caches")),
+        JetbrainsHostPlatform::Windows => {
+            local_app_data.or_else(|| home.map(|path| path.join("AppData").join("Local")))
+        }
+        JetbrainsHostPlatform::Unix => {
+            xdg_cache_home.or_else(|| home.map(|path| path.join(".cache")))
+        }
+    };
+    root.map(|path| vec![path.join("JetBrains")])
+        .unwrap_or_default()
+}
+
 /// The newest installed plugin artifact found under one IDE plugins directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledPluginArtifact {
@@ -61,21 +118,12 @@ pub fn installed_artifacts_in(plugins_dir: &Path) -> Vec<InstalledPluginArtifact
 }
 
 pub fn jetbrains_plugin_dirs() -> Vec<PathBuf> {
-    let home = match std::env::var("HOME") {
-        Ok(h) => PathBuf::from(h),
-        Err(_) => return vec![],
-    };
-
-    let search_roots = if cfg!(target_os = "macos") {
-        vec![home.join("Library/Application Support/JetBrains")]
-    } else {
-        vec![
-            std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".local/share"))
-                .join("JetBrains"),
-        ]
-    };
+    let search_roots = jetbrains_data_roots_for(
+        JetbrainsHostPlatform::current(),
+        std::env::var_os("HOME").map(PathBuf::from),
+        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
+        std::env::var_os("APPDATA").map(PathBuf::from),
+    );
 
     jetbrains_plugin_dirs_in_roots(&search_roots)
 }
@@ -112,8 +160,11 @@ pub fn is_jetbrains_ide_data_dir(name: &str) -> bool {
         "CLion",
         "DataGrip",
         "GoLand",
+        "Gateway",
         "IdeaIC",
         "IntelliJIdea",
+        "JetBrainsClient",
+        "JetBrainsGateway",
         "PhpStorm",
         "PyCharm",
         "Rider",
@@ -776,19 +827,12 @@ pub fn lock_jetbrains_install(plugins_dir: &Path) -> anyhow::Result<std::fs::Fil
 
 /// JetBrains system (cache) roots holding each IDE's `plugins/action.script`.
 pub fn jetbrains_system_roots() -> Vec<PathBuf> {
-    let Ok(home) = std::env::var("HOME").map(PathBuf::from) else {
-        return Vec::new();
-    };
-    if cfg!(target_os = "macos") {
-        vec![home.join("Library/Caches/JetBrains")]
-    } else {
-        vec![
-            std::env::var_os("XDG_CACHE_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".cache"))
-                .join("JetBrains"),
-        ]
-    }
+    jetbrains_system_roots_for(
+        JetbrainsHostPlatform::current(),
+        std::env::var_os("HOME").map(PathBuf::from),
+        std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from),
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+    )
 }
 
 /// GH #87: is plugin `version` already staged for the next IDE start? Either
@@ -856,6 +900,77 @@ pub fn jetbrains_plugin_staged_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platform_roots_cover_windows_without_home_and_keep_unix_mac_locations() {
+        assert_eq!(
+            jetbrains_data_roots_for(
+                JetbrainsHostPlatform::Windows,
+                None,
+                None,
+                Some(PathBuf::from("C:/Users/sample/AppData/Roaming")),
+            ),
+            [PathBuf::from("C:/Users/sample/AppData/Roaming/JetBrains")]
+        );
+        assert_eq!(
+            jetbrains_system_roots_for(
+                JetbrainsHostPlatform::Windows,
+                None,
+                None,
+                Some(PathBuf::from("C:/Users/sample/AppData/Local")),
+            ),
+            [PathBuf::from("C:/Users/sample/AppData/Local/JetBrains")]
+        );
+        assert_eq!(
+            jetbrains_data_roots_for(
+                JetbrainsHostPlatform::MacOs,
+                Some(PathBuf::from("/Users/sample")),
+                None,
+                None,
+            ),
+            [PathBuf::from(
+                "/Users/sample/Library/Application Support/JetBrains"
+            )]
+        );
+        assert_eq!(
+            jetbrains_data_roots_for(
+                JetbrainsHostPlatform::Unix,
+                Some(PathBuf::from("/home/sample")),
+                Some(PathBuf::from("/data/sample")),
+                None,
+            ),
+            [PathBuf::from("/data/sample/JetBrains")]
+        );
+    }
+
+    #[test]
+    fn remote_dev_client_and_gateway_roots_are_discovered_and_versioned() {
+        let tmp = tempfile::tempdir().unwrap();
+        let client = tmp.path().join("JetBrainsClient2026.3/plugins");
+        let gateway = tmp.path().join("JetBrainsGateway2026.2/plugins");
+        let unrelated = tmp.path().join("JetBrainsToolbox2026.3/plugins");
+        for dir in [&client, &gateway, &unrelated] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let client_lib = client.join("agent-doc-jetbrains-263/lib");
+        std::fs::create_dir_all(&client_lib).unwrap();
+        std::fs::write(client_lib.join("agent.doc-0.2.800.jar"), b"client").unwrap();
+
+        assert_eq!(
+            jetbrains_plugin_dirs_in_roots(&[tmp.path().to_path_buf()]),
+            [client.clone(), gateway.clone()]
+        );
+        assert_eq!(jetbrains_platform_build(&client), Some(263));
+        assert_eq!(jetbrains_platform_build(&gateway), Some(262));
+        assert_eq!(
+            installed_artifacts_in(&client)
+                .into_iter()
+                .map(|artifact| artifact.version)
+                .collect::<Vec<_>>(),
+            ["0.2.800"]
+        );
+        assert!(!is_jetbrains_ide_data_dir("JetBrainsToolbox2026.3"));
+    }
 
     #[test]
     fn installed_artifacts_include_all_package_layouts() {

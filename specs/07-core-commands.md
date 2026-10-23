@@ -635,6 +635,15 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   Failure to resolve that project or append the record is never silent: the CLI
   prints a `WARNING:` containing the complete verdict and the logging failure,
   so a package replacement cannot leave no explanation of its outcome (GH #299).
+- `agent-doc upgrade` discovers JetBrains product roots for ordinary IDEs plus
+  JetBrains Client/Gateway. Windows uses `%APPDATA%\JetBrains` for plugin trees
+  and `%LOCALAPPDATA%\JetBrains` for system/action-script state, even when
+  `HOME` is absent. Reconciliation is machine-local evidence: an all-current
+  result says only that targets visible to this process match. For modular
+  Remote Dev targets it explicitly says that a Client/Gateway on another
+  machine was neither verified nor updated and directs the operator to install
+  the matching ZIP there (or use Marketplace synchronization) before restarting
+  both peers (GH #371).
 - A live IDE counts as owning a JetBrains install target only when it loads
   plugins from that target (GH #238). Ownership is decided from process
   evidence BEFORE any package-level refusal, strongest first: an agent-doc

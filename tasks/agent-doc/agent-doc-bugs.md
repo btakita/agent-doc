@@ -251,7 +251,34 @@ JetBrains' current release metadata is available at:
 https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=eap
 
 The canonical artifact URL was checked and currently redirects successfully to JetBrains' download CDN. The exchange remains above its accretion warning threshold; it was not compacted because the queue is active and auto-compaction is not enabled.
-<!-- agent:boundary:6192acdd -->
+
+### Re: do [#upgradedidealatest] — gpt-5 · 2026-10-23T18:43-04:00
+
+> **Operator question:** I upgraded IDEA to the latest release version. Is this architecture different from the Beta? Does this version have the frontend + backend? Or is that something to do with Toolbox + Coder?
+
+The stable and beta builds use the same fundamental Remote Development architecture, but they are different IntelliJ platform branches:
+
+- Latest stable: IntelliJ IDEA 2026.2.3, build `262.10968.63`.
+- Latest beta: IntelliJ IDEA 2026.3 Beta, build `263.7307.44`.
+
+Installing stable IDEA locally does not itself create a frontend/backend pair. That split appears when using JetBrains Remote Development:
+
+- Coder provisions or exposes the remote development environment.
+- A remote IDEA backend runs beside the project and source code.
+- JetBrains Client is the local thin frontend.
+- JetBrains Gateway establishes and manages the remote connection.
+- Toolbox can install or launch the JetBrains products, but Toolbox alone is not what creates the split architecture.
+
+Plugin compatibility follows the platform build branch. A plugin package targeting build 263 is expected to be rejected by stable IDEA 2026.2.x on build 262. For the stable release, use the agent-doc 262-compatible package; reserve the 263 package for the 2026.3 beta. That version mismatch likely explains the incompatible-plugin message, while the separate queued diagnostic can verify the exact package currently installed on each peer.
+
+Official references:
+
+- JetBrains stable release metadata: https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=release
+- JetBrains beta release metadata: https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=eap
+- JetBrains Remote Development overview: https://www.jetbrains.com/help/idea/remote-development-overview.html
+
+The exchange remains above its accretion warning threshold; it was not compacted because the queue is active and auto-compaction is not enabled.
+<!-- agent:boundary:f9beebe9:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -264,10 +291,9 @@ The canonical artifact URL was checked and currently redirects successfully to J
 ## Queue: Issues
 
 <!-- agent:queue id=issues loop interval=1h priority -->
-- ~~do [#latestbetadownload]~~
+- ~~do [#upgradedidealatest]~~
 - 📥 do [#helpregisterjetbrains]
-- ~~do [#upgradeideatest]~~
-- ~~do [#gh363]~~
+- 📥 After the idea plugin, the agent-doc Plugin formatting stopped working and the commands don't show up. The plugin manager says the Agent Doc plugin is incompatible.
 <!-- /agent:queue -->
 
 ## Todo

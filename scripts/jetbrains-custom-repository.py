@@ -561,6 +561,11 @@ def main() -> int:
         metavar=("CLASSIC_VERSION", "MODULAR_VERSION", "MODERN_VERSION"),
         help="re-read the listings in --output-dir and assert range selection",
     )
+    parser.add_argument(
+        "--verify-artifacts",
+        action="store_true",
+        help="verify the three distribution ZIPs without writing repository listings",
+    )
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
@@ -576,6 +581,29 @@ def main() -> int:
             print(f"jetbrains custom repository: {error}", file=sys.stderr)
             return 1
         print("jetbrains custom repository: all ranged listings verified")
+        return 0
+    if args.verify_artifacts:
+        missing = [
+            flag
+            for flag, value in (
+                ("--classic", args.classic),
+                ("--modular", args.modular),
+                ("--modern", args.modern),
+            )
+            if value is None
+        ]
+        if missing:
+            parser.error(f"--verify-artifacts requires: {', '.join(missing)}")
+        try:
+            validate_updates(
+                read_update(args.classic),
+                read_update(args.modular),
+                read_update(args.modern),
+            )
+        except DistributionError as error:
+            print(f"jetbrains custom repository: {error}", file=sys.stderr)
+            return 1
+        print("jetbrains custom repository: all ranged artifacts verified")
         return 0
     missing = [
         flag

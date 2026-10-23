@@ -14888,6 +14888,82 @@ fn test_every_release_publishes_the_editor_packages() {
     );
 }
 
+/// Marketplace must receive the same three ZIPs that passed the custom-feed
+/// range proof, and a failed job must resume without re-uploading versions that
+/// the service already accepted.
+#[test]
+fn test_every_release_publishes_all_ranged_jetbrains_updates_to_marketplace() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
+    let plugins = &release[release
+        .find("  plugins:")
+        .expect("editor-package build job")..];
+    let publish = &plugins[plugins
+        .find("- name: Publish all compatibility-ranged JetBrains updates to Marketplace")
+        .expect("Marketplace publish step")..];
+
+    for required in [
+        "PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}",
+        "--classic \"${artifacts[0]}\"",
+        "--modular \"${artifacts[1]}\"",
+        "--modern \"${artifacts[2]}\"",
+        "--verify-artifacts",
+        "marketplace-uploaded-${artifact##*/}.txt",
+        "gh release view \"$GITHUB_REF_NAME\" --json assets",
+        "https://plugins.jetbrains.com/api/updates/upload",
+        "--form \"xmlId=com.github.btakita.agent-doc\"",
+        "--form \"file=@$artifact\"",
+    ] {
+        assert!(
+            publish.contains(required),
+            "Marketplace publication must retain the exact three-artifact gate and retry marker: {required}",
+        );
+    }
+
+    let verify = publish
+        .find("--verify-artifacts")
+        .expect("exact artifact verification");
+    let upload = publish
+        .find("https://plugins.jetbrains.com/api/updates/upload")
+        .expect("Marketplace upload endpoint");
+    assert!(
+        verify < upload,
+        "all three artifact identities and ranges must verify before the first Marketplace upload",
+    );
+    assert!(
+        !publish.contains("--retry-all-errors"),
+        "the non-idempotent Marketplace POST must not be retried inside curl; release markers own retries",
+    );
+    assert_eq!(
+        publish
+            .matches("https://plugins.jetbrains.com/api/updates/upload")
+            .count(),
+        1,
+        "one loop must publish exactly the three declared artifacts",
+    );
+
+    let distribution =
+        fs::read_to_string(manifest_dir.join("docs/reference/jetbrains-distribution.md")).unwrap();
+    for required in [
+        "#### Marketplace onboarding",
+        "My Tokens",
+        "JETBRAINS_MARKETPLACE_TOKEN",
+        "JetBrains requires the first update",
+    ] {
+        assert!(
+            distribution.contains(required),
+            "Marketplace onboarding must document the external account/token step: {required}",
+        );
+    }
+    let specification =
+        fs::read_to_string(manifest_dir.join("editors/jetbrains/SPEC.md")).unwrap();
+    assert!(
+        specification.contains("validate the complete three-ZIP set")
+            && specification.contains("Remote Dev synchronization channel"),
+        "the JetBrains distribution spec must require the three-update gate and Marketplace peer synchronization",
+    );
+}
+
 /// A slow or failed target must not hold every successful platform archive in
 /// Actions' artifact store. The Release is seeded once; matrix legs upload
 /// distinct archive/checksum pairs directly, while the aggregate manifest

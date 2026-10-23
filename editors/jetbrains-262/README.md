@@ -65,8 +65,10 @@ non-overlapping IDE ranges. Every tag publishes one JetBrains custom-repository
 listing per range (`agent-doc-jetbrains-classic.xml`,
 `agent-doc-jetbrains-262.xml`, `agent-doc-jetbrains-263.xml`), generated and validated by
 `scripts/jetbrains-custom-repository.py`; each IDE process selects the update
-whose `since-build`/`until-build` contains its build. Marketplace hosting of the
-same three ranged updates is the equivalent alternative but is not automated. See
+whose `since-build`/`until-build` contains its build. The same release job first
+validates and publishes all three updates to Marketplace, which synchronizes the
+selected modular ZIP across Remote Dev peers; custom repositories remain the
+manual fallback. See
 [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md).
 
 This package has no restart-free dynamic upgrade entry point: unlike the
@@ -76,8 +78,8 @@ running modular IDE replaces the files and reports that a restart is required
 (`declined_by=modular_package`).
 
 Remote Dev plugin synchronization currently resolves the other side only for
-Marketplace-hosted plugins. A custom repository must be configured and the
-same update installed on both sides; installing a modular ZIP locally on only the
+Marketplace-hosted plugins. When using a custom repository or local ZIP, the
+same update must be installed on both sides; installing a modular ZIP on only the
 backend or only JetBrains Client does not copy it to the other process. For
 local ZIP testing, install the same ZIP explicitly in both backend and
 Client/Gateway, or use `runIdeSplitMode`. A one-sided install is unsupported and

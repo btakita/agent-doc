@@ -906,15 +906,20 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   does not infer order from the editor remove/re-open events. Geometry exists only in the JetBrains
   Client. Snapshot schema 2 carries measured bounds; schema 3 additionally carries the frontend's
   typed `layoutColumns` compatibility vector, frozen at the 8 px x-tolerance and top-to-bottom
-  stacking rule. The backend sends the window evidence to the hot-reloaded native
+  stacking rule. Schema 4 carries `focusedEditorPath`, which is present only when the permanent
+  AWT focus owner belongs to that exact editor window in the active frontend frame. The backend
+  sends the window evidence to the hot-reloaded native
   `client_measured_layout` derivation before consulting that floor, so the connected frontend
   remains the source of structural evidence without making Kotlin the live grouping authority.
   After the same snapshot's
   `editor_view_snapshot_observe` was delivered (whatever the detached-view projection status: 263
   freezes it without terminal capability), it forwards
-  them into the controller surface Source (`editor_surface_observe`) as `column_order=editor`,
-  `preserve_focus=true` (the snapshot names each split's selected document but not which split
-  has keyboard focus). The forward publishes on its own family,
+  them into the controller surface Source (`editor_surface_observe`) as `column_order=editor`.
+  A schema-4 focused-editor proof publishes that document with `preserve_focus=false`, so moving
+  from the left editor split to the right selects the corresponding tmux pane (GH #368). Without
+  that proof—including older schemas and focus in an embedded terminal—the forward remains
+  `preserve_focus=true`; selected tabs alone are never promoted to focus authority. The forward
+  publishes on its own family,
   `jetbrains-rd@<installation>-pid:<pid>`: the same installation as the classic surface and focus
   lanes (so the same navigation lane and focus owner), with its own generation, because the
   frontend authority handoff retires the whole classic `jetbrains@` family. Authority begins when
@@ -939,11 +944,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   membership fold defers (`capture deferred reason=frontend_measured_layout_authority`), so the
   remembered-order fallback, labelled `unknown`/`retained`, remains only for classic installs and
   one-sided installs with no authenticated frontend lease. Schema negotiation keeps old peers
-  working: Fleet RPC decodes with `ignoreUnknownKeys = false` and `encodeDefaults = true`, so the
-  bounds key is never encoded while null (`@EncodeDefault(NEVER)`), and the frontend asks
+  working: Fleet RPC decodes with `ignoreUnknownKeys = false` and `encodeDefaults = true`, so
+  versioned optional keys are never encoded while null (`@EncodeDefault(NEVER)`), and the frontend asks
   `SurfaceSnapshotRpcApi.supportedSnapshotSchemaVersion()` once per lease; a backend that predates
   the call fails it (or does not answer within 5 s) and the frontend publishes schema 1 without
-  geometry. The backend validator accepts schemas 1 through 3. Explicit retirement/release is the
+  geometry. The backend validator accepts schemas 1 through 4. Explicit retirement/release is the
   only transition that hands authority back to the backend fallback. Evidence: the client logs
   `[split-surface] snapshot schema negotiated version=<n> backend_offered=<n|none>
   geometry=measured|unavailable`; the backend logs `[rd-layout] forwarded measured columns

@@ -18,9 +18,8 @@
 //! ([`derive_sync_layout`]), so the forward, the manual sync, and the automatic
 //! surface always agree on the root. The payload's order provenance is
 //! `editor`, because the columns came from measured geometry, and it owns pane
-//! membership and order only (`preserve_focus`): the snapshot names each
-//! split's selected document but not which split has keyboard focus, so it must
-//! not move tmux focus.
+//! membership and order only (`preserve_focus`) until schema-4 evidence names
+//! the selected document of the editor window that owns frontend AWT focus.
 //!
 //! [`derive_remote_client_surface`] is pure except for the nearest
 //! `.agent-doc` project root of a document, a filesystem fact the IO crate
@@ -51,6 +50,13 @@ pub struct RemoteClientSurfaceEvidence {
     /// The selected document of the measured layout (absolute).
     #[serde(default)]
     pub focused: Option<String>,
+    /// The focused editor document when the frontend component tree proves it.
+    /// Absent on older snapshot schemas and while focus is outside an editor.
+    #[serde(default)]
+    pub focus: Option<String>,
+    /// Project root of `focus`, resolved by the plugin as a filesystem fact.
+    #[serde(default)]
+    pub focus_root: Option<String>,
     /// The measured columns in left-to-right order (absolute paths), the
     /// `client_measured_layout` answer.
     #[serde(default)]
@@ -84,12 +90,19 @@ pub fn derive_remote_client_surface(
     evidence: &RemoteClientSurfaceEvidence,
     nearest_root: impl FnMut(&str) -> Option<String>,
 ) -> RemoteClientSurface {
-    let focused = evidence.focused.clone().unwrap_or_default();
+    let focused = evidence
+        .focus
+        .clone()
+        .or_else(|| evidence.focused.clone())
+        .unwrap_or_default();
     let visible = distinct(evidence.columns.iter().flatten());
     let sync = derive_sync_layout(
         &SyncLayoutEvidence {
             base_path: evidence.base_path.clone(),
-            fallback_root: evidence.fallback_root.clone(),
+            fallback_root: evidence
+                .focus_root
+                .clone()
+                .or_else(|| evidence.fallback_root.clone()),
             focused: Some(focused.clone()),
             visible: visible.clone(),
             layout: Some(SyncEditorLayout {
@@ -134,7 +147,7 @@ pub fn derive_remote_client_surface(
             column_order: SurfaceColumnOrder::Editor,
             force_reconcile: false,
             focus_only: false,
-            preserve_focus: true,
+            preserve_focus: evidence.focus.is_none(),
         },
     }
 }
@@ -154,6 +167,8 @@ mod tests {
                 base_path: Some("/repo".into()),
                 fallback_root: Some("/repo".into()),
                 focused: Some("/repo/a.md".into()),
+                focus: None,
+                focus_root: None,
                 columns: vec![strings(&["/repo/b.md"]), strings(&["/repo/a.md"])],
             },
             |_| Some("/repo".into()),
@@ -181,6 +196,8 @@ mod tests {
                 base_path: Some("/repo".into()),
                 fallback_root: Some("/repo/src/one".into()),
                 focused: Some("/repo/src/one/a.md".into()),
+                focus: None,
+                focus_root: None,
                 columns: vec![
                     strings(&["/repo/src/one/a.md"]),
                     strings(&["/repo/src/two/b.md"]),
@@ -200,5 +217,22 @@ mod tests {
         assert!(forwarded.surface.columns.is_empty());
         assert_eq!(forwarded.surface.focused, "");
         assert!(forwarded.surface.preserve_focus);
+    }
+
+    #[test]
+    fn focused_editor_evidence_moves_focus_to_the_selected_split() {
+        let forwarded = derive_remote_client_surface(
+            &RemoteClientSurfaceEvidence {
+                base_path: Some("/repo".into()),
+                fallback_root: Some("/repo".into()),
+                focused: Some("/repo/a.md".into()),
+                focus: Some("/repo/b.md".into()),
+                focus_root: Some("/repo".into()),
+                columns: vec![strings(&["/repo/a.md"]), strings(&["/repo/b.md"])],
+            },
+            |_| Some("/repo".into()),
+        );
+        assert_eq!(forwarded.surface.focused, "/repo/b.md");
+        assert!(!forwarded.surface.preserve_focus);
     }
 }

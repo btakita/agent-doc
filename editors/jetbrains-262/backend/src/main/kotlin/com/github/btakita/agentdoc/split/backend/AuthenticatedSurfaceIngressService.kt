@@ -5,6 +5,7 @@ package com.github.btakita.agentdoc.split.backend
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
+import com.github.btakita.agentdoc.split.FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
 import com.github.btakita.agentdoc.split.isSupportedSurfaceSnapshotSchema
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
@@ -254,6 +255,20 @@ internal object SurfaceSnapshotValidator {
             }
         ) {
             return failure(SurfaceIngressStatus.INVALID_SURFACE, "root/main role mismatch")
+        }
+        for (surface in snapshot.surfaces) {
+            val focusedEditorPath = surface.focusedEditorPath ?: continue
+            if (
+                snapshot.schemaVersion < FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION ||
+                    focusedEditorPath.isBlank() ||
+                    !surface.focused ||
+                    surface.windows.none { it.selectedPath == focusedEditorPath }
+            ) {
+                return failure(
+                    SurfaceIngressStatus.INVALID_SURFACE,
+                    "focused editor must be selected in the active surface",
+                )
+            }
         }
         return null
     }

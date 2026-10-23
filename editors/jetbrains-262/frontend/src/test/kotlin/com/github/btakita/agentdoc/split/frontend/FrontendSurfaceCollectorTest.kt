@@ -13,6 +13,7 @@ import kotlin.test.assertNull
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import javax.swing.JPanel
 
 class FrontendSurfaceCollectorTest {
     @Test
@@ -119,14 +120,15 @@ class FrontendSurfaceCollectorTest {
         assertEquals(first, retained)
     }
 
-    /** Schema 3 carries the frozen frontend column floor; older peers receive only known fields. */
+    /** Schema 4 carries editor-focus proof; older peers receive only known fields. */
     @Test
     fun snapshotSchemaNegotiationFallsBackToSchemaOneForAnOldBackend() {
         assertEquals(1, negotiatedSnapshotSchema(null))
         assertEquals(1, negotiatedSnapshotSchema(1))
         assertEquals(2, negotiatedSnapshotSchema(2))
         assertEquals(3, negotiatedSnapshotSchema(3))
-        assertEquals(3, negotiatedSnapshotSchema(9))
+        assertEquals(4, negotiatedSnapshotSchema(4))
+        assertEquals(4, negotiatedSnapshotSchema(9))
         assertEquals(1, negotiatedSnapshotSchema(0))
     }
 
@@ -153,6 +155,26 @@ class FrontendSurfaceCollectorTest {
             ),
         )
         assertNull(frontendLayoutColumns(listOf(window("/repo/a.md", 0, 0), window("/repo/b.md", 0, 0))))
+    }
+
+    @Test
+    fun permanentFocusOwnerSelectsTheRightEditorWindowOnly() {
+        val left = JPanel()
+        val right = JPanel()
+        val rightEditor = JPanel().also(right::add)
+        assertEquals(
+            "/repo/right.md",
+            focusedEditorPath(
+                rightEditor,
+                listOf(left to "/repo/left.md", right to "/repo/right.md"),
+            ),
+        )
+        assertNull(
+            focusedEditorPath(
+                JPanel(),
+                listOf(left to "/repo/left.md", right to "/repo/right.md"),
+            ),
+        )
     }
 
     @Test

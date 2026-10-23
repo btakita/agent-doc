@@ -18,6 +18,7 @@ import fleet.util.UID
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -242,6 +243,73 @@ class RemoteClientMeasuredLayoutTest {
                 column.asJsonObject.getAsJsonArray("files").map { it.asString }
             },
         )
+    }
+
+    @Test
+    fun schemaFourFocusedEditorMovesFocusToTheRightColumn() {
+        val root = Files.createTempDirectory("rdgeometry-focus").toRealPath()
+        Files.createDirectories(root.resolve(".agent-doc"))
+        val left = root.resolve("left.md").toString()
+        val right = root.resolve("right.md").toString()
+        val main =
+            FrontendSurface(
+                "root",
+                1,
+                SurfaceRole.MAIN,
+                true,
+                listOf(window(0, left, x = 0), window(1, right, x = 640)),
+                layoutColumns =
+                    listOf(
+                        FrontendLayoutColumn(listOf(left)),
+                        FrontendLayoutColumn(listOf(right)),
+                    ),
+                focusedEditorPath = right,
+            )
+        val measured =
+            RemoteClientMeasuredLayout.derive(
+                FrontendSurfaceSnapshot(
+                    frontendInstanceId = "frontend-1",
+                    sequence = 1,
+                    projectId = projectId,
+                    complete = true,
+                    surfaces = listOf(main),
+                ),
+                isSessionDocument = { it == left || it == right },
+                derivation = EditorDerivation.Unavailable,
+            ) as MeasuredMainLayout.Measured
+
+        assertEquals(right, measured.focusedEditor)
+        var nativeEvidence: JsonObject? = null
+        val payload =
+            JsonParser.parseString(
+                RemoteClientSurfacePayload.build(
+                    root.toString(),
+                    measured,
+                ) { derivation, inputJson ->
+                    assertEquals("remote_client_surface", derivation)
+                    nativeEvidence = JsonParser.parseString(inputJson).asJsonObject
+                    """{"project_root":"$root","surface":{"focused":"$right","preserve_focus":false}}"""
+                }.surfaceJson,
+            ).asJsonObject
+        val evidence = requireNotNull(nativeEvidence)
+        assertEquals(left, evidence.get("focused").asString)
+        assertEquals(right, evidence.get("focus").asString)
+        assertEquals(root.toString(), evidence.get("focus_root").asString)
+        assertEquals(right, payload.get("focused").asString)
+        assertFalse(payload.get("preserve_focus").asBoolean)
+
+        // The frozen compatibility floor remains unchanged. A native generation that predates
+        // schema 4 safely preserves focus rather than interpreting the new evidence in Kotlin.
+        val frozen =
+            JsonParser.parseString(
+                RemoteClientSurfacePayload.build(
+                    root.toString(),
+                    measured,
+                    EditorDerivation.Unavailable,
+                ).surfaceJson,
+            ).asJsonObject
+        assertEquals(left, frozen.get("focused").asString)
+        assertTrue(frozen.get("preserve_focus").asBoolean)
     }
 
     private fun surfaceParityCases(): List<JsonObject> {

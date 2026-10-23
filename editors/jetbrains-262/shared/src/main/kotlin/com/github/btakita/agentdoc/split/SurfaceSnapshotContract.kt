@@ -13,13 +13,15 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /**
- * Current snapshot schema. Schema 2 added measured window bounds. Schema 3 adds the frontend's
- * frozen compatibility column vector; the hot-reloaded native library remains the live grouping
- * authority over those bounds (GH #346).
+ * Current snapshot schema. Schema 2 added measured window bounds. Schema 3 added the frontend's
+ * frozen compatibility column vector; schema 4 adds the focused editor document proved by the
+ * frontend component tree (GH #368). The hot-reloaded native library remains the live grouping
+ * authority over the bounds.
  */
-const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 3
+const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 4
 const val GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 2
 const val FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 3
+const val FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 4
 
 /** The oldest snapshot schema a backend still accepts (a frontend that predates geometry). */
 const val LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 1
@@ -161,6 +163,9 @@ data class FrontendSurface(
      */
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val layoutColumns: List<FrontendLayoutColumn>? = null,
+    /** Selected document of the editor window that owns permanent AWT focus. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val focusedEditorPath: String? = null,
 )
 
 @Serializable
@@ -192,6 +197,11 @@ fun FrontendSurfaceSnapshot.forSchema(version: Int): FrontendSurfaceSnapshot {
                 },
                 layoutColumns = if (version >= FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
                     surface.layoutColumns
+                } else {
+                    null
+                },
+                focusedEditorPath = if (version >= FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+                    surface.focusedEditorPath
                 } else {
                     null
                 },

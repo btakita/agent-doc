@@ -2,11 +2,14 @@
 //! completion cell that `agent-doc queue report-complete` appends to
 //! `agent:exchange`, and its structural recognition.
 //!
-//! A completion cell is three contiguous lines, written only by the binary:
+//! A completion cell contains the worker's response, written only by the binary:
 //!
 //! ```text
 //! ### Re: Subagent completed: `subagent:sdk` returned work for queue item “finish sdk” — agent-doc
-//! Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+//! <!-- agent-doc-subagent-response sha256=<body hash> -->
+//! > **Subagent response:**
+//! >
+//! > Implemented the requested change.
 //! <!-- agent-doc-subagent-completion key=<hash> -->
 //! ```
 //!
@@ -16,8 +19,8 @@
 //!
 //! Recognition is structural, never a fuzzy text match on prose: a heading is
 //! a binary completion cell only when it carries the completion heading grammar
-//! AND is followed by the fixed binary body and the keyed completion marker (or,
-//! for the short-lived v0.34 bodyless form, directly by the marker). Recovery
+//! AND is followed by a hash-attested quoted worker response and the keyed
+//! completion marker (or one of the legacy fixed/bodyless forms). Recovery
 //! and closeout classifiers use [`completion_cell_line_ranges`] to keep these
 //! cells out of "agent response" reasoning: they are not a direct patchback, not
 //! a pending response to replay, and not a replayed heading.
@@ -56,6 +59,8 @@ pub const LEGACY_HEADING_PREFIX: &str = "### Re: Subagent completed — agent-do
 pub const BODY: &str = "Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.";
 /// The keyed marker that closes every completion cell.
 pub const MARKER_PREFIX: &str = "<!-- agent-doc-subagent-completion key=";
+/// The digest marker that opens a current worker-response body.
+pub const RESPONSE_DIGEST_PREFIX: &str = "<!-- agent-doc-subagent-response sha256=";
 
 /// The completion heading for `owner` and the one-line `item` text.
 ///
@@ -85,6 +90,40 @@ pub fn cell(owner: &str, item: &str, key: &str) -> String {
     format!("{}\n{BODY}\n{}", heading(owner, item), marker(key))
 }
 
+/// A current completion cell carrying the worker's actual response.
+///
+/// The response is blockquoted so headings, component markers, and other
+/// markdown emitted by a worker remain visible without becoming live session
+/// structure. The digest makes an edited body cease to be binary evidence.
+pub fn cell_with_response(
+    owner: &str,
+    item: &str,
+    key: &str,
+    response: &str,
+) -> anyhow::Result<String> {
+    let response = response.trim();
+    anyhow::ensure!(
+        !response.is_empty(),
+        "subagent completion response must not be empty"
+    );
+    let mut body = String::from("> **Subagent response:**\n>");
+    for line in response.lines() {
+        let line = line.trim_end();
+        body.push('\n');
+        body.push('>');
+        if !line.is_empty() {
+            body.push(' ');
+            body.push_str(line);
+        }
+    }
+    let digest = agent_doc_hash::content_hash(&body);
+    Ok(format!(
+        "{}\n{RESPONSE_DIGEST_PREFIX}{digest} -->\n{body}\n{}",
+        heading(owner, item),
+        marker(key),
+    ))
+}
+
 /// True when `line` carries either completion heading grammar. This is the
 /// heading shape only; whether the heading is a binary cell is decided by
 /// [`completion_cell_line_ranges`].
@@ -108,7 +147,8 @@ pub fn is_marker_line(line: &str) -> bool {
 }
 
 /// Line ranges (0-based, over `text.lines()`) of every binary-attested
-/// completion cell: heading, optional fixed body, keyed marker.
+/// completion cell: heading, attested response or optional legacy fixed body,
+/// keyed marker.
 pub fn completion_cell_line_ranges(text: &str) -> Vec<Range<usize>> {
     let lines: Vec<&str> = text.lines().collect();
     let mut ranges = Vec::new();
@@ -119,7 +159,17 @@ pub fn completion_cell_line_ranges(text: &str) -> Vec<Range<usize>> {
             continue;
         }
         let next = lines.get(index + 1).copied();
-        let end = if next.is_some_and(is_marker_line) {
+        let end = if let Some(expected_digest) = next.and_then(response_digest) {
+            let marker_index = lines[index + 2..]
+                .iter()
+                .position(|line| is_marker_line(line))
+                .map(|offset| index + 2 + offset);
+            marker_index.and_then(|marker_index| {
+                let body = lines[index + 2..marker_index].join("\n");
+                (!body.is_empty() && agent_doc_hash::content_hash(&body) == expected_digest)
+                    .then_some(marker_index + 1)
+            })
+        } else if next.is_some_and(is_marker_line) {
             Some(index + 2)
         } else if next.is_some_and(|line| line.trim() == BODY)
             && lines.get(index + 2).copied().is_some_and(is_marker_line)
@@ -137,6 +187,18 @@ pub fn completion_cell_line_ranges(text: &str) -> Vec<Range<usize>> {
         }
     }
     ranges
+}
+
+fn response_digest(line: &str) -> Option<&str> {
+    line.trim()
+        .strip_prefix(RESPONSE_DIGEST_PREFIX)?
+        .strip_suffix(" -->")
+        .filter(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        })
 }
 
 /// Parse every structurally binary-attested completion cell whose heading
@@ -198,7 +260,7 @@ pub fn completion_cell_heading_lines(text: &str) -> Vec<usize> {
 /// form is one blank line SHORTER than the original — callers compare for
 /// drift, where a missing trailing blank is never prompt- or response-bearing.
 /// Every other line, including a completion-shaped heading that is NOT followed
-/// by the binary body and marker, is preserved byte for byte.
+/// by an attested response (or legacy body) and marker, is preserved byte for byte.
 pub fn strip_completion_cells(text: &str) -> String {
     strip_completion_cells_matching(text, |_| true)
 }
@@ -209,7 +271,8 @@ pub fn strip_completion_cells(text: &str) -> String {
 /// Queue closeout uses this to replace the matching transient "awaiting
 /// integration" notice with the authoritative integrated response while
 /// preserving unrelated worker reports. Heading-shaped prose without the
-/// fixed body and keyed marker is never presented to the predicate or removed.
+/// attested response (or legacy body) and keyed marker is never presented to the
+/// predicate or removed.
 pub fn strip_completion_cells_matching(
     text: &str,
     mut should_strip: impl FnMut(&CompletionEvidence) -> bool,
@@ -299,6 +362,29 @@ mod tests {
         assert_eq!(
             strip_completion_cells(&written),
             "Done.\n<!-- agent:boundary:keep -->\n"
+        );
+    }
+
+    #[test]
+    fn current_cell_carries_and_attests_the_quoted_worker_response() {
+        assert!(cell_with_response("subagent:a", "finish a", "k1", " \n ").is_err());
+        let current = cell_with_response(
+            "subagent:a",
+            "finish a",
+            "k1",
+            "Implemented the fix.\n\n### Tests\n\n- 4 passed",
+        )
+        .unwrap();
+        assert!(current.contains("> Implemented the fix."));
+        assert!(current.contains("> ### Tests"));
+        assert!(current.contains("> - 4 passed"));
+        assert_eq!(completion_cell_line_ranges(&current), vec![0..10]);
+        assert_eq!(completion_evidence(&current)[0].key, "k1");
+
+        let edited = current.replace("> - 4 passed", "> - 5 passed");
+        assert!(
+            completion_cell_line_ranges(&edited).is_empty(),
+            "edited worker prose must not retain binary completion authority"
         );
     }
 

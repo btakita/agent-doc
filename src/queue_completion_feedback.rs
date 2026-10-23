@@ -1,8 +1,9 @@
 //! Binary-owned completion feedback for background-subagent queue claims.
 //!
 //! Workers never write the shared session document. The coordinator reports a
-//! worker result through `queue report-complete`. The binary appends one inert
-//! status artifact to `agent:exchange` through the editor/CRDT authority.
+//! worker result through `queue report-complete`. The binary appends the actual
+//! worker response as one inert, attested artifact in `agent:exchange` through
+//! the editor/CRDT authority.
 //! Reporting keeps the claim active while integration and verification run;
 //! ordinary claim release never implies that a worker completed successfully.
 
@@ -37,14 +38,20 @@ pub(crate) fn report_complete(
     file: &Path,
     item: &str,
     generation: Option<u64>,
+    response: &str,
 ) -> Result<Option<CompletionFeedbackOutcome>> {
-    report_complete_with_lock_wait(file, item, generation, COMPLETION_LOCK_WAIT)
+    anyhow::ensure!(
+        !response.trim().is_empty(),
+        "subagent completion response must not be empty"
+    );
+    report_complete_with_lock_wait(file, item, generation, response, COMPLETION_LOCK_WAIT)
 }
 
 fn report_complete_with_lock_wait(
     file: &Path,
     item: &str,
     generation: Option<u64>,
+    response: &str,
     lock_wait: Duration,
 ) -> Result<Option<CompletionFeedbackOutcome>> {
     // `#subagentcompletionfeedback`: unlike SESSION_ACTOR_WRITE_QUEUE, this
@@ -80,7 +87,8 @@ fn report_complete_with_lock_wait(
     // the first is still awaiting projection.
     let projection =
         agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, &current, None)?;
-    let appended = append_completion_feedback(file, &current, &projection.target_content, &claim)?;
+    let appended =
+        append_completion_feedback(file, &current, &projection.target_content, &claim, response)?;
     agent_doc_queue_io::queue_cmd::record_claim_runtime_projection(file, &projection, None)?;
     Ok(Some(CompletionFeedbackOutcome { claim, appended }))
 }
@@ -97,13 +105,14 @@ fn append_completion_feedback(
     current: &str,
     projected: &str,
     claim: &QueueClaim,
+    response: &str,
 ) -> Result<bool> {
     let key = agent_doc_queue_io::queue_claim::completion_feedback_key(claim)?;
     let marker = agent_doc_document::subagent_completion::marker(&key);
-    // Keep the heading, body, and marker contiguous. The existing N-1 diff
+    // Keep the heading, attested worker response, and marker contiguous. The existing N-1 diff
     // classifier treats a block beginning with `### Re:` as a recovery
     // artifact, while the structural/session-check gate requires substantive
-    // body text after every response heading. A blank line here would split
+    // body text after every response heading. An unquoted blank line here would split
     // the old controller's annotated diff block and make the body look like a
     // new operator prompt during a rolling upgrade. The contiguous
     // heading+body+marker shape is also what lets recovery recognize the cell
@@ -111,7 +120,12 @@ fn append_completion_feedback(
     //
     // The heading's topic names the worker and item (`### Re: topic —
     // agent-doc`), so several cells never collapse to one replay topic.
-    let note = agent_doc_document::subagent_completion::cell(&claim.owner, &claim.item_text, &key);
+    let note = agent_doc_document::subagent_completion::cell_with_response(
+        &claim.owner,
+        &claim.item_text,
+        &key,
+        response,
+    )?;
     let appended = !projected.contains(&marker);
     let updated = if appended {
         agent_doc_element_exchange::insert_prompt_line_before_boundary(projected, &note)?
@@ -320,8 +334,13 @@ mod tests {
         let claim = test_claim();
         let key = agent_doc_queue_io::queue_claim::completion_feedback_key(&claim).unwrap();
         let marker = format!("<!-- agent-doc-subagent-completion key={key} -->");
-        let note =
-            agent_doc_document::subagent_completion::cell(&claim.owner, &claim.item_text, &key);
+        let note = agent_doc_document::subagent_completion::cell_with_response(
+            &claim.owner,
+            &claim.item_text,
+            &key,
+            "Implemented the SDK fix.\n\n- 12 focused tests passed\n- branch pushed",
+        )
+        .unwrap();
         assert!(note.ends_with(&marker));
         assert!(note.contains("“finish sdk.md with deterministic tests” — agent-doc\n"));
         let after =
@@ -331,6 +350,8 @@ mod tests {
         assert!(after.find(&note).unwrap() < after.find("<!-- agent:boundary:keep -->").unwrap());
         assert!(after.contains("- finish sdk.md with deterministic tests"));
         assert!(after.contains(&marker));
+        assert!(after.contains("> Implemented the SDK fix."));
+        assert!(after.contains("> - 12 focused tests passed"));
         let diff = agent_doc_diff::unified_diff_from_contents(before, &after).unwrap();
         let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff);
         assert!(
@@ -511,9 +532,14 @@ mod tests {
         )
         .unwrap();
 
-        let first = report_complete(&doc, "finish sdk.md with deterministic tests", Some(1))
-            .unwrap()
-            .unwrap();
+        let first = report_complete(
+            &doc,
+            "finish sdk.md with deterministic tests",
+            Some(1),
+            "Implemented SDK support.\n\nTests: 12 passed.",
+        )
+        .unwrap()
+        .unwrap();
         assert!(first.appended);
         assert_eq!(
             agent_doc_queue_io::queue_claim::load_ledger(&doc)
@@ -531,9 +557,14 @@ mod tests {
         )
         .unwrap();
         assert_ne!(refreshed.expires_at_secs, first.claim.expires_at_secs);
-        let second = report_complete(&doc, "finish sdk.md with deterministic tests", Some(1))
-            .unwrap()
-            .unwrap();
+        let second = report_complete(
+            &doc,
+            "finish sdk.md with deterministic tests",
+            Some(1),
+            "Implemented SDK support.\n\nTests: 12 passed.",
+        )
+        .unwrap()
+        .unwrap();
         assert!(
             !second.appended,
             "the same completion must dedupe across TTL refresh"
@@ -592,7 +623,7 @@ mod tests {
         agent_doc_queue_io::queue_claim::cancel_removed_attempt(&doc, item, Some(first.generation))
             .unwrap();
         assert!(
-            report_complete(&doc, item, Some(first.generation))
+            report_complete(&doc, item, Some(first.generation), "worker one completed")
                 .unwrap()
                 .is_none(),
             "a tombstoned attempt cannot manufacture completion feedback"
@@ -611,7 +642,8 @@ mod tests {
             replacement.generation,
         )
         .unwrap();
-        let stale = report_complete(&doc, item, Some(first.generation)).unwrap_err();
+        let stale =
+            report_complete(&doc, item, Some(first.generation), "late stale result").unwrap_err();
         assert!(stale.to_string().contains("stale queue claim generation"));
         assert!(
             !fs::read_to_string(&doc)
@@ -684,7 +716,11 @@ mod tests {
             .into_iter()
             .map(|item| {
                 let doc = doc.clone();
-                std::thread::spawn(move || report_complete(&doc, item, Some(1)).unwrap().unwrap())
+                std::thread::spawn(move || {
+                    report_complete(&doc, item, Some(1), "concurrent worker completed")
+                        .unwrap()
+                        .unwrap()
+                })
             })
             .collect::<Vec<_>>();
         let outcomes = threads
@@ -760,9 +796,14 @@ mod tests {
             panic!("fixture must acquire completion lock");
         };
         let started = std::time::Instant::now();
-        let error =
-            report_complete_with_lock_wait(&doc, "finish sdk", Some(1), Duration::from_millis(50))
-                .unwrap_err();
+        let error = report_complete_with_lock_wait(
+            &doc,
+            "finish sdk",
+            Some(1),
+            "worker completed",
+            Duration::from_millis(50),
+        )
+        .unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(error.to_string().contains("timed out after 50ms"));
         assert!(

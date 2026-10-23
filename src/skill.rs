@@ -3575,7 +3575,9 @@ mod tests {
         assert!(bundled_instruction_text().contains("Under `<!-- agent:queue subagents -->`"));
         assert!(bundled_instruction_text().contains("queue claim --refresh --generation <N>"));
         assert!(bundled_instruction_text().contains("--refresh --generation <N>"));
-        assert!(bundled_instruction_text().contains("queue report-complete <FILE> --item <...> --generation <N>"));
+        assert!(bundled_instruction_text().contains(
+            "queue report-complete <FILE> --item <...> --generation <N> --response '<worker response>'"
+        ));
         assert!(bundled_instruction_text().contains("queue release <FILE> --item <...> --generation <N>"));
         assert!(bundled_instruction_text().contains("`🟡` means reserved/dispatching"));
         assert!(bundled_instruction_text().contains("`make install` per integrated batch"));
@@ -3598,7 +3600,7 @@ mod tests {
             "`queue_subagent_dispatch` is the list to dispatch THIS cycle",
             "--owner subagent:<label> --refresh",
             "--refresh --generation <N>",
-            "queue report-complete <FILE> --item <...> --generation <N>",
+            "queue report-complete <FILE> --item <...> --generation <N> --response '<worker response>'",
             "OUTSIDE the IDE-watched project",
             "never run two subagents in\n     one checkout",
             "ONE\n     `make install` per integrated batch",

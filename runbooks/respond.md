@@ -299,15 +299,19 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      unique `mktemp` path (one subagent's commit once carried a sibling's
      message).
   7. As soon as a subagent reports back, run
-     `agent-doc queue report-complete <FILE> --item <...> --generation <N>`.
+     `agent-doc queue report-complete <FILE> --item <...> --generation <N> --response '<worker response>'`.
+     Pass the worker's complete handback verbatim; an empty response is refused,
+     and there is no placeholder-only completion mode.
      The exact generation fence prevents a late result from mutating a reclaimed
      item and changes its marker to `☑️` (worker-complete handoff/outbox, awaiting integration). The binary appends
      immediate, deduplicated completion feedback to `agent:exchange` through
      its cross-process document owner and editor/CRDT authority while leaving
      the claim active; the worker never edits the session document. The
-     feedback is a structurally complete, N−1-inert response cell (heading,
-     non-empty status body, binary marker) whose heading topic names the
-     worker and item. It is binary-owned feedback, not your response: never
+     feedback is a structurally complete, N−1-inert response cell whose
+     heading names the worker and item and whose quoted body is the worker's
+     actual response. A binary digest binds that body to the completion marker,
+     so edited prose loses completion authority. It is binary-owned feedback,
+     not your response: never
      hand-commit, edit, or replay it — the next preflight's document-only
      auto-commit (or your closeout) lands it, however many workers reported.
      If an earlier v0.34 binary wrote

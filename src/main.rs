@@ -4544,6 +4544,10 @@ enum QueueAction {
         /// claims; omitted only for legacy generation-zero rows.
         #[arg(long)]
         generation: Option<u64>,
+        /// The background worker's complete response. It is rendered visibly
+        /// inside the binary-owned completion cell and retained until closeout.
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        response: String,
     },
     /// Repair the v0.34 rolling-upgrade completion notices whose binary marker
     /// was written directly beneath a bodyless `### Re:` heading. Rewrites
@@ -8085,8 +8089,14 @@ fn try_main() -> anyhow::Result<()> {
                 file,
                 item,
                 generation,
+                response,
             } => {
-                match queue_completion_feedback::report_complete(&file, &item, generation)? {
+                match queue_completion_feedback::report_complete(
+                    &file,
+                    &item,
+                    generation,
+                    &response,
+                )? {
                     Some(outcome) => eprintln!(
                         "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration",
                         if outcome.appended {

@@ -224,7 +224,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `preset="#spec-test-build-install-commit-push"` → "update spec + tests.
      build + install for local testing. commit + push"), scoped to that one
      item, plus the coordinator rules (own worktree, never `make install` or a
-     release, never touch the session document, scratch isolation). Never paraphrase or extend it. When
+     release, never manually touch the session document, scratch isolation). The
+     sole session-document command a running worker may execute is the exact
+     generation-fenced `report_complete_command` sent by the coordinator after
+     `start_command` succeeds. Never paraphrase or extend the preamble. When
      `authorization.status` is `unresolved_preset`, the queue names a preset
      frontmatter does not define; the preamble already tells the subagent that
      no authorization beyond the item text was resolved, so do not add any.
@@ -245,6 +248,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      generation binds to at most one worker and one worker binds to at most one
      live claim in the document; a stale generation or conflicting binding is
      refused without mutation.
+     After `start_command` succeeds, immediately send the running worker the
+     entry's `report_complete_command`, with the printed generation filled in.
+     Tell it to substitute its complete final handback for `<worker-response>`
+     and run the command immediately before returning that same handback. This
+     moves completion publication off the coordinator's critical path.
   4. Treat `[#subagent-operator-request-<unique-id>] subagent operator request` as a
      blocking handback, not worker completion. Copy the entire packet verbatim
      into `agent:exchange` so the exact request, why it is needed, target/scope,
@@ -298,10 +306,14 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      scratchpad or `/tmp`, and puts other temp files in its own worktree or a
      unique `mktemp` path (one subagent's commit once carried a sibling's
      message).
-  7. As soon as a subagent reports back, run
-     `agent-doc queue report-complete <FILE> --item <...> --generation <N> --response '<worker response>'`.
-     Pass the worker's complete handback verbatim; an empty response is refused,
-     and there is no placeholder-only completion mode.
+  7. The worker's final step is its generation-fenced
+     `agent-doc queue report-complete <FILE> --item <...> --generation <N> --response '<worker response>'`
+     handoff. It passes the same complete response it returns; an empty response
+     is refused, and there is no placeholder-only completion mode. The command
+     returns after durable controller acceptance instead of waiting for editor
+     projection, so the coordinator can keep working. If the harness cannot send
+     the command to a running worker, the coordinator runs it immediately when
+     the handback arrives. Repeating an already accepted handoff is harmless.
      The exact generation fence prevents a late result from mutating a reclaimed
      item and changes its marker to `☑️` (worker-complete handoff/outbox, awaiting integration). The binary appends
      immediate, deduplicated completion feedback to `agent:exchange` through

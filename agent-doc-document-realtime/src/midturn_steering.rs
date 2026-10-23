@@ -1772,6 +1772,18 @@ pub fn start_command_for(document: &str, verbatim: &str) -> String {
     )
 }
 
+/// The generation-fenced completion command a running worker executes after it
+/// has formed its final handback. The worker substitutes the generation from
+/// the claim and its complete response; the binary owns response-cell
+/// formatting and returns after durable controller acceptance.
+pub fn report_complete_command_for(document: &str, verbatim: &str) -> String {
+    format!(
+        "agent-doc queue report-complete {} --item {} --generation <generation> --response '<worker-response>'",
+        shell_single_quote(document),
+        shell_single_quote(&claim_item_handle(verbatim))
+    )
+}
+
 /// The command that prints the operator-authorization preamble for a
 /// subagent dispatch of `verbatim` in `document` (`#waypostauthorization`).
 pub fn brief_command_for(document: &str, verbatim: &str) -> String {
@@ -1852,11 +1864,15 @@ pub fn render_closeout_steering_context(
                  after the harness returns a worker identity, acknowledge that exact generation \
                  with `{}`; this changes 🟡 dispatching to 🚧 running and is not optional. If it \
                  touches a repository, give the subagent its own git worktree outside the \
-                 IDE-watched project. Paste the output of `{}` verbatim at the top of the \
+                 IDE-watched project. After start succeeds, send the worker `{}` with the \
+                 exact generation and require it to run that binary-owned completion handoff \
+                 immediately before returning its final result; this does not authorize manual \
+                 session-document edits. Paste the output of `{}` verbatim at the top of the \
                  subagent prompt: it carries the operator's authorization for the item \
                  (`#waypostauthorization`). {}",
                 claim_command_for(document, &item.verbatim),
                 start_command_for(document, &item.verbatim),
+                report_complete_command_for(document, &item.verbatim),
                 brief_command_for(document, &item.verbatim),
                 REPORTED_WORKER_CLOSEOUT,
             ),
@@ -3225,6 +3241,12 @@ mod tests {
                 "`agent-doc queue start 'tasks/bugs.md' --item '#preflightdeadline' --owner subagent:<label> --generation <generation> --worker-id <worker-id>`"
             ),
             "the dispatch directive names the worker acknowledgement: {text}"
+        );
+        assert!(
+            text.contains(
+                "`agent-doc queue report-complete 'tasks/bugs.md' --item '#preflightdeadline' --generation <generation> --response '<worker-response>'`"
+            ),
+            "the dispatch directive gives the worker the binary-owned completion handoff: {text}"
         );
         assert!(
             text.contains("`agent-doc queue brief 'tasks/bugs.md' --item '#preflightdeadline'`"),

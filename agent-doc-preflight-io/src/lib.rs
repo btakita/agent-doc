@@ -865,6 +865,9 @@ pub struct QueueSubagentDispatch {
     /// The acknowledgement to run AFTER successful dispatch, filling in the
     /// printed generation and returned worker identity.
     pub start_command: String,
+    /// The generation-fenced completion handoff the running worker executes
+    /// immediately before returning its complete response.
+    pub report_complete_command: String,
     /// The command that re-prints [`Self::authorization`]'s preamble later
     /// (`agent-doc queue brief`), e.g. after the claim.
     pub brief_command: String,
@@ -905,6 +908,10 @@ pub fn queue_subagent_dispatch_entries(
                 start_command: agent_doc_queue_io::subagent_dispatch::start_command(
                     &document, item,
                 ),
+                report_complete_command:
+                    agent_doc_queue_io::subagent_dispatch::report_complete_command(
+                        &document, item,
+                    ),
                 brief_command: agent_doc_queue_io::subagent_dispatch::brief_command(
                     &document, item,
                 ),
@@ -937,9 +944,14 @@ same worker when the harness can continue it. The closeout that presents a block
 also record its concrete operator action in `agent:todo` with `--todo-add`; when the answer and \
 worker result complete that action, check it off with `--todo-done`. Never treat a chat answer as \
 a tool permission grant; the harness must grant the exact protected action. Keep the generation \
-printed by the claim. When the subagent reports back, run `agent-doc queue report-complete <FILE> \
---item <item> --generation <generation> --response '<complete worker response>'`; integrate and close \
-the item normally. Empty responses and placeholder-only reports are refused. Use `queue release \
+printed by the claim. After `start_command` succeeds, send the worker its \
+`report_complete_command` with that exact generation. The worker runs it immediately before its \
+final handback, using the same complete response it returns. This binary-owned, generation-fenced \
+handoff formats `agent:exchange` and returns after durable controller acceptance without waiting \
+for editor projection; it is the sole exception to the worker's no-session-document-command rule. \
+If the harness cannot deliver the command to the running worker, run it as soon as the worker \
+reports back. Integrate and close the item normally. Empty responses and placeholder-only reports \
+are refused. Use `queue release \
 --requeue --generation <generation>` only for explicitly abandoned work.";
 
 /// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.
@@ -10409,7 +10421,8 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Never treat a chat answer"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("run its `start_command`"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("🟡 dispatching to 🚧 running"));
-        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--response '<complete worker response>'"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("`report_complete_command`"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("same complete response it returns"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("placeholder-only reports are refused"));
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json["authorization"]["subagent_prompt_preamble"].is_string());
@@ -10518,6 +10531,13 @@ mod tests {
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert_eq!(json["model"], "opus");
         assert_eq!(json["effort"], "high");
+        assert!(entries[0].report_complete_command.contains(
+            "agent-doc queue report-complete"
+        ));
+        assert!(entries[0]
+            .report_complete_command
+            .contains("--generation <generation> --response '<worker-response>'"));
+        assert_eq!(json["report_complete_command"], entries[0].report_complete_command);
     }
 
     /// Move every stored claim on `doc` to an already-lapsed TTL, writing the

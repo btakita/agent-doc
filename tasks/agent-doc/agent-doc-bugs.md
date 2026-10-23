@@ -24,7 +24,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 21 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 22 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -301,7 +301,18 @@ The queue should not be manually deleted wholesale. This closeout repairs the pu
 PR #166 was already green at `0b6034d8dfff92dd38c27282fb634337d38e2222`; its missing-status lifecycle case is fixed in v0.35.546 by `698999295d`. New operator-request packets use the released nested emphasized formatting; old exchange text is not rewritten retroactively.
 
 The agent-doc Codex skill was updated locally to match CLI v0.35.546 before this reconciliation. Three disposable build directories were also removed earlier, recovering about 113 GB; that deletion is not recoverable. The exchange is above its advisory size threshold, but the queue is active, so it was not compacted during this cycle.
-<!-- agent:boundary:bea35542 -->
+> **Chat prompt (#chatprompt:283fe6e5dae4):** Is the Hook stopped action legitimate or an error? If an error, fix in a subagent.
+
+### Re: Stop-hook action — gpt-5 · 2026-10-23T03:04-04:00
+
+The **Hook stopped** action was legitimate, not a Stop-hook implementation error.
+
+The Stop hook returned its intentional fail-closed continuation result because the preceding response had answered several free-text queue heads while finalize had consumed only one. The remaining answered heads were therefore still active in the committed queue. Codex renders that deliberate block as **Hook stopped**. The hook completed in about four seconds, so this was not a timeout or crash.
+
+The underlying mistake was in the prior coordinator closeout: batched free-text answers require an explicit multi-head `agent-doc queue consume --count N`. The one-head default is deliberate so agent-doc does not guess which unrelated queue entries an answer covers.
+
+No repair subagent was spawned because the conditional defect was not present. The documented next-admission reconciliation should strike the prior-cycle answered residue; it should not be manually deleted or force-written. The separately added `release + publish` item is already claimed by the existing release worker, so it was not dispatched again.
+<!-- agent:boundary:a6285369 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -341,6 +352,7 @@ The agent-doc Codex skill was updated locally to match CLI v0.35.546 before this
 - ☑️ [#subagent:idea-notification-dedupe#1] There is 1 prompt in this session, but there were 3 Idea notifications stacked on top of each other.
 - 🚧 [#subagent:followup-release#1] release + publish: include completed follow-up fixes from the completion-feedback, Coder readiness, subagent-request formatting, and IDEA notification-deduplication investigations after v0.35.546
 - ☑️ [#subagent:gh363#1] #gh-issue https://github.com/btakita/agent-doc/issues/363
+- release + publish
 <!-- /agent:queue -->
 
 ## Queue: Issues

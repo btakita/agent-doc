@@ -4972,7 +4972,10 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
     #[cfg(test)]
     let global_config = agent_doc_config::Config::default();
     #[cfg(not(test))]
-    let global_config = agent_doc_config::load().unwrap_or_default();
+    let global_config = agent_doc_project_config_io::apply_project_defaults(
+        agent_doc_config::load().unwrap_or_default(),
+        &agent_doc_project_config_io::load_project_for_doc(&ctx.canonical_file),
+    );
     if !agent_doc_agent_io::agent::codex::managed_capability_contract_required_for_doc_and_harness(
         &ctx.canonical_file,
         &fm,

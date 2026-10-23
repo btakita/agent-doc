@@ -340,6 +340,10 @@ impl VisionConfig {
 /// Project-level configuration, read from `.agent-doc/config.toml` relative to CWD.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ProjectConfig {
+    /// Default agent backend for documents in this project. Document
+    /// frontmatter and an explicit CLI `--agent` still take precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_agent: Option<String>,
     /// Target tmux session name for this project.
     #[serde(default)]
     pub tmux_session: Option<String>,

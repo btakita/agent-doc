@@ -250,6 +250,9 @@ process (CLI, recovery, or the project controller under a live editor) agrees.
 Location: `.agent-doc/config.toml` (relative to project root).
 
 Fields:
+- `default_agent` — the default agent backend for documents in this project. It
+  overrides the global `default_agent`; document frontmatter and an explicit
+  CLI `--agent` take precedence over both.
 - `tmux_session` — the tmux session name bound to this project.
 - `tmux_sessions = ["<name>", ...]` — allowed tmux sessions for a multi-session project (GH #17, `ghmultitmux`). Empty or absent (the default) keeps the single-session model unchanged. When non-empty, one editor manages panes across every listed session: route, start, claim, sync, layout, resync and `terminal` resolve each document to an allowed session and fail closed on any target outside the list. `tmux_session` then acts as the default pin for unbound documents and must itself be listed. Per-document topic binding uses `tmux_session:` frontmatter, which is honored only in multi-session projects. See [Session Routing](08-session-routing.md#multi-session-projects-ghmultitmux) and `runbooks/multi-tmux-sessions.md`.
 - `tmux_bin` — project override for the tmux client; takes precedence over the global machine value.

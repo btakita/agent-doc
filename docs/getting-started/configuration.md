@@ -59,8 +59,9 @@ The agent backend is resolved in this order:
 
 1. `--agent` CLI flag
 2. `agent:` field in document frontmatter
-3. `default_agent` in config
-4. Fallback: `"claude"`
+3. `default_agent` in the project's `.agent-doc/config.toml`
+4. `default_agent` in the global config
+5. Fallback: `"claude"`
 
 ## Per-document overrides
 
@@ -201,6 +202,7 @@ Location: `.agent-doc/config.toml` (relative to project root).
 
 | Field | Description |
 |-------|-------------|
+| `default_agent` | Default backend for this project (for example, `"codex"`); overrides the global default, while document frontmatter and `--agent` still win |
 | `tmux_session` | Tmux session name bound to this project |
 | `tmux_sessions` | Optional allow-list for multi-session projects (one editor, several tmux sessions); documents bind with `tmux_session:` frontmatter. Empty keeps single-session behavior. See `runbooks/multi-tmux-sessions.md` |
 | `[terminal]` | Project terminal policy; the same fields as global `[terminal]` except session naming remains top-level `tmux_session` |

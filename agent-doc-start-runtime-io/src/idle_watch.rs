@@ -3498,7 +3498,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if let Some((content, authoritative_view)) = agent_change_view
                     && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
                 {
-                    let global = agent_doc_config::load().unwrap_or_default();
+                    let global = agent_doc_project_config_io::apply_project_defaults(
+                        agent_doc_config::load().unwrap_or_default(),
+                        &agent_doc_project_config_io::load_project_for_doc(&path),
+                    );
                     let resolved = shared.resolve_document_harness(
                         fm.agent.as_deref(),
                         global.default_agent.as_deref(),

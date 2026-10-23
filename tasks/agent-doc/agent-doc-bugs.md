@@ -121,6 +121,20 @@ Yes: `agent-doc upgrade` performs a one-shot stable-release upgrade. `agent-doc 
 > **Chat prompt (#chatprompt:5f53f2d52e36):** Would the upgrade work for the cli + any installed plugins?
 
 Yes. The upgrade updates the CLI and reconciles every already-installed agent-doc editor plugin, even when the CLI is already current. It does not install plugins for editors that were never installed, and it fails visibly if an installed plugin cannot be updated.
+
+### Re: Subagent completed: `subagent:queue-state-live-repair` returned work for queue item “Several of this queue's items were in a ❔ state. Now the incorrect 📥 state. They should be in the ☑️ state. Fix agent-doc causes.” — agent-doc
+<!-- agent-doc-subagent-response sha256=f83e2adbceb900af1cea75a8987a778b76b877d7039b15cb3d8e312eb089b47d -->
+> **Subagent response:**
+>
+> Queue-state live repair audit complete. No additional code change is needed beyond the already integrated commits `0c2503e2ff` (proof-gated row-body repair) and `ff0c322c8a` (projection-guard identity repair). The exact controller regression `claim_controller_repairs_torn_duplicate_owner_before_projection_guard` proves the actual torn `[#owner#3📥...` row is canonicalized and the next sdk-demo row can be claimed; unproved lookalikes remain operator text. Verification: `cargo test -p agent-doc-document -p agent-doc-queue -p agent-doc-queue-io` passed, exit 0/no failures; worktree clean. The coordinator combined `make check` after `ff0c322c8a` passed and install completed. No additional commit/push and no follow-up queue items.
+<!-- agent-doc-subagent-completion key=0e31615a199d4231b84cad51354b2384a71993b0c1c968788957f169d962a632 -->
+
+### Re: Subagent completed: `subagent:sdk-demo-compact-attach` returned work for queue item “Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.” — agent-doc
+<!-- agent-doc-subagent-response sha256=b6614c980a6329a6e2b16d4a493a45c44c4bfbaa5baf48eed8a7ecab0ea313c7 -->
+> **Subagent response:**
+>
+> This queue item is a stale duplicate of work already integrated in current main/release. Exact fix: `d1424feed1 fix(jetbrains): pause ambiguous attach retries` is an ancestor of `origin/main` at `9c2375a33c` and shipped in v0.35.547. It includes spec/runbook updates plus Rust/Kotlin/parity regressions for `await_operator_evidence`, no timer retry, refresh suppression, and safe authority release on closing the refused unattached editor. Fresh validation at release head: `agent-doc-editor-surface` 160 tests passed (158 unit + 2 doc), focused JetBrains classes 41 passed (9 AttachFailureDiagnosis + 32 RetainedCanonicalOperatorText), zero failures/skips. Worktree clean; no duplicate edit/commit/push and no follow-up queue heads.
+<!-- agent-doc-subagent-completion key=a09c440ba7ddd7583b549191dff03c3b9229c0f7a9eec00d4e333ad855c02569 -->
 <!-- agent:boundary:1d86f43f -->
 <!-- /agent:exchange -->
 
@@ -132,7 +146,7 @@ Yes. The upgrade updates the CLI and reconciles every already-installed agent-do
 - ☑️ [#subagent:coder-instance-defaulting#1] do [#coderinstancedefaulting]
 - ☑️ [#subagent:gh363-fix#1] do [#gh363]
 - ☑️ [#subagent:gh355-cleanup-rerun#3] #gh-issue https://github.com/btakita/agent-doc/issues/355
-- 📥 Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- ☑️ [#subagent:sdk-demo-compact-attach#3] Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
 - 📥 agent-doc process is thrashing in the background along with Idea.
 - 📥 Investigate the pre-existing JetBrains LazilyGenerationFenceTest stale-disposal failure on untouched main after the lazily-kt 0.46.0 update.
 - 📥 Compact Exchange in sdk-demo.md compacted but did not complete the cycle. There is uncommitted compact summary content in the exchange.
@@ -142,10 +156,28 @@ Yes. The upgrade updates the CLI and reconciles every already-installed agent-do
 - 📥 Coder instance still has backend/frontend communication issues
 - ☑️ [#subagent:gh367-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/367 ⟦effect:1⟧
 - ☑️ [#subagent:gh367-followup#1] #gh-fix https://github.com/btakita/agent-doc/issues/367 ⟦effect:2⟧
-- 🟡 [#subagent:queue-state-fix#3] [#subagent:queue-state-fix#3📥 Several of this queue's items were in a ❔ state. Now the incorrect 📥 state. They should be in the ☑️ state. Fix agent-doc causes.
+- ☑️ [#subagent:queue-state-live-repair#4] Several of this queue's items were in a ❔ state. Now the incorrect 📥 state. They should be in the ☑️ state. Fix agent-doc causes.
 - ☑️ [#subagent:release-367-queue-state#1] release + publish: include issue 367 + queue state fixes
 - ☑️ [#subagent:queue-auto-repair#1] agent-doc should have an auto-recover + repair to clean up the queue. Clean up this queue.
 - ☑️ [#subagent:effect-annotation-explain#1] What is `⟦effect:1⟧`? Why is `⟦` and `⟧` used?
+- 🚧 [#subagent:project-md-frontmatter#1] Allow project.md to configure all frontmatter including `agent: ...`. This would have override precedence over config.toml. Allow changes while the project is open to both config.toml and project.md.
+- 🟡 [#subagent:gh368-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/368
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/369
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/370
+---
+📥 - From sdk-demo.md: Can we make agent-doc allow in-turn upgrades with the new contract? Would that require the agent to restart? Answer only: ```
+❯ agent-doc tasks/sdk/sdk-demo.md                                                                      2:09 PM
+
+
+I'll open the agent-doc session for tasks/sdk/sdk-demo.md and follow the skill before answering.       2:09 PM
+
+◈ Explored 4 files, 1 search, called 3 tools, ran 1 command
+
+Admission is in. The binary is newer than the local skill, and the plan says this sealed turn still    2:09 PM
+has a contract to run. I'll update the skill and pull the queue and backlog. 
+- ```
+---
+- 📥 release + publish: include issues 368-370
 <!-- /agent:queue -->
 
 ## Queue: Issues

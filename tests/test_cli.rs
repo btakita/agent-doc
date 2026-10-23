@@ -14982,9 +14982,10 @@ fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_confi
 }
 
 /// A slow or failed target must not hold every successful platform archive in
-/// Actions' artifact store. The Release is seeded once; matrix legs upload
+/// Actions' artifact store. The prerelease is seeded once; matrix legs upload
 /// distinct archive/checksum pairs directly, while the aggregate manifest
-/// remains a fail-closed all-platform completion marker.
+/// remains a fail-closed all-platform completion marker. GH #369: the tag must
+/// not enter GitHub's stable latest feed until that legacy manifest exists.
 #[test]
 fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -15008,8 +15009,14 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
         prepare.contains("gh release view \"$tag\"")
             && prepare.contains("gh release create \"$tag\"")
             && prepare.contains("--verify-tag")
+            && prepare.contains("--prerelease")
             && prepare.contains("--generate-notes"),
-        "one prerequisite job must create or reuse the public Release before parallel uploads"
+        "one prerequisite job must create or reuse the public prerelease before parallel uploads"
+    );
+    assert!(
+        prepare.contains("grep -Fxq SHA256SUMS")
+            && prepare.contains("gh release edit \"$tag\" --prerelease --latest=false"),
+        "an incomplete release reused by a retry must stay out of the stable latest feed"
     );
 
     let build = job("build");
@@ -15044,8 +15051,21 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
             && finalize.contains("sha256sum \"${archives[@]}\" | sort -k2 > SHA256SUMS")
             && finalize.contains(
                 "gh release upload \"$GITHUB_REF_NAME\" artifacts/SHA256SUMS --clobber"
+            )
+            && finalize.contains(
+                "gh release edit \"$GITHUB_REF_NAME\" --prerelease=false --latest"
             ),
-        "the aggregate checksum must appear only after every public archive and sidecar verifies"
+        "the aggregate checksum must appear after every archive verifies and before stable promotion"
+    );
+    let manifest_upload = finalize
+        .find("gh release upload \"$GITHUB_REF_NAME\" artifacts/SHA256SUMS --clobber")
+        .expect("completion manifest upload");
+    let stable_promotion = finalize
+        .find("gh release edit \"$GITHUB_REF_NAME\" --prerelease=false --latest")
+        .expect("stable latest promotion");
+    assert!(
+        manifest_upload < stable_promotion,
+        "legacy SHA256SUMS clients must never discover the release before its manifest exists"
     );
     let pypi = job("pypi");
     let homebrew = job("homebrew");

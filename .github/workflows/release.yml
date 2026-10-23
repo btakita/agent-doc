@@ -9,7 +9,7 @@ permissions:
 
 # A retry of this tag may clobber the same asset names, but two runs must never
 # do that concurrently. Matrix legs within one run still upload distinct names
-# in parallel after `prepare-release` creates the shared Release exactly once.
+# in parallel after `prepare-release` creates the shared prerelease exactly once.
 concurrency:
   group: release-${{ github.repository }}-${{ github.ref_name }}
   cancel-in-progress: false
@@ -18,14 +18,26 @@ jobs:
   prepare-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Create or reuse the public release
+      - name: Create or reuse the public prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
+          keep_incomplete_release_out_of_latest() {
+            if gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fxq SHA256SUMS; then
+              return
+            fi
+            # GH #369: clients through v0.35.546 fetch the aggregate manifest.
+            # Keep an incomplete tag public for direct asset downloads without
+            # letting /releases/latest advertise an upgrade those clients cannot
+            # install yet.
+            gh release edit "$tag" --prerelease --latest=false
+          }
+
           if gh release view "$tag" >/dev/null 2>&1; then
+            keep_incomplete_release_out_of_latest
             echo "Release $tag already exists; retaining it for an idempotent retry"
             exit 0
           fi
@@ -36,8 +48,10 @@ jobs:
           if ! gh release create "$tag" \
             --verify-tag \
             --title "agent-doc $tag" \
+            --prerelease \
             --generate-notes; then
             gh release view "$tag" >/dev/null
+            keep_incomplete_release_out_of_latest
           fi
 
   build:
@@ -447,6 +461,17 @@ jobs:
         run: |
           set -euo pipefail
           gh release upload "$GITHUB_REF_NAME" artifacts/SHA256SUMS --clobber
+
+      # Promotion is deliberately separate and ordered after the upload. Older
+      # upgraders fetch SHA256SUMS from the stable latest release, so exposing
+      # this tag there before the manifest exists recreates GH #369.
+      - name: Promote the checksum-complete release to stable latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release edit "$GITHUB_REF_NAME" --prerelease=false --latest
 
   # `#pypireleaseworkflow`: start the PyPI publish only once this run's
   # `finalize-release` has uploaded the complete SHA256SUMS. PyPI used to

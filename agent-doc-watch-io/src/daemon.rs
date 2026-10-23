@@ -475,21 +475,31 @@ fn run_event_loop(
 
     let tmux = agent_doc_tmux_io::configured_tmux();
 
-    let config_toml_path = std::env::current_dir()
+    let project_config_dir = std::env::current_dir()
         .ok()
         .and_then(|d| agent_doc_project_root_io::project_root_containing(&d))
-        .map(|r| r.join(".agent-doc").join("config.toml"));
+        .map(|r| r.join(".agent-doc"));
+    let project_config_paths = project_config_dir
+        .as_ref()
+        .map(|dir| [dir.join("config.toml"), dir.join("project.md")]);
     let base_dir = std::env::current_dir().context("resolve watch daemon project root")?;
 
-    if let Some(ref cp) = config_toml_path
-        && cp.exists()
+    // Watch the directory rather than only existing files. This catches edits,
+    // atomic-save replacements, and creation of either supported project
+    // configuration surface while sessions remain open.
+    if let Some(ref config_dir) = project_config_dir
+        && config_dir.exists()
     {
-        match watcher.watch(cp, RecursiveMode::NonRecursive) {
+        match watcher.watch(config_dir, RecursiveMode::NonRecursive) {
             Ok(WatchFallback::Activated) => eprintln!(
                 "[watch] native file-watch quota is exhausted; switched to bounded polling"
             ),
             Ok(WatchFallback::Unchanged) => {}
-            Err(e) => eprintln!("Warning: could not watch config {}: {}", cp.display(), e),
+            Err(e) => eprintln!(
+                "Warning: could not watch project config directory {}: {}",
+                config_dir.display(),
+                e
+            ),
         }
     }
 
@@ -665,11 +675,16 @@ fn run_event_loop(
                 if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
                     for path in event.paths {
                         let canonical = path.canonicalize().unwrap_or(path);
-                        if let Some(ref cp) = config_toml_path
-                            && canonical == *cp
-                        {
+                        if project_config_paths.as_ref().is_some_and(|paths| {
+                            paths.iter().any(|candidate| {
+                                candidate
+                                    .canonicalize()
+                                    .unwrap_or_else(|_| candidate.clone())
+                                    == canonical
+                            })
+                        }) {
                             config_changed = true;
-                            eprintln!("[watch] config change detected");
+                            eprintln!("[watch] project config change detected");
                             continue;
                         }
                         if watched_files

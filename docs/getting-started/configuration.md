@@ -59,9 +59,35 @@ The agent backend is resolved in this order:
 
 1. `--agent` CLI flag
 2. `agent:` field in document frontmatter
-3. `default_agent` in the project's `.agent-doc/config.toml`
-4. `default_agent` in the global config
-5. Fallback: `"claude"`
+3. `agent:` field in the nearest `.agent-doc/project.md` frontmatter
+4. `default_agent` in the project's `.agent-doc/config.toml`
+5. `default_agent` in the global config
+6. Fallback: `"claude"`
+
+## Project-wide frontmatter defaults
+
+Any document frontmatter field can be supplied as a project default in
+`.agent-doc/project.md`:
+
+```yaml
+---
+agent: claude
+model: sonnet
+agent_doc_clear_threshold: 60
+env:
+  PROJECT_MODE: development
+---
+
+# Project defaults
+```
+
+Agent Doc reads this file dynamically. Existing open sessions pick up changes
+to both `.agent-doc/project.md` and `.agent-doc/config.toml` after the project
+configuration change is observed; inherited values are never copied into the
+session document. A document declaration wins by top-level key, including an
+explicit empty list or map. Nested project roots override ancestor project
+defaults. `prompt_presets`/`presets` retain their per-preset merge behavior so a
+document can override one shared preset without replacing the rest.
 
 ## Per-document overrides
 
@@ -75,7 +101,8 @@ opencode_model: zai/glm-5
 ---
 ```
 
-These override the config file for that specific document.
+These override both project-wide frontmatter and the config file for that
+specific document.
 
 `terminal_host: auto|ide|external|none` may also be set in document
 frontmatter. Its precedence is document, project, global, then `auto`. The other

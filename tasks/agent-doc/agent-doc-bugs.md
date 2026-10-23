@@ -24,11 +24,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published agent-doc release: v0.35.542, published on GitHub at 2026-10-22 16:18:25 UTC. JetBrains plugin packages published with that release at the same time: classic 0.2.787, 262 0.2.790, and 263 0.2.791 (latest numeric JetBrains package: 0.2.791). VS Code extension 0.2.83 was also published with the release. Release commit 7e149122474e7a51d3d403af3b722bd7f7013707 is on main, and PyPI publication for agent-doc 0.35.542 passed the release verifier. Post-release main 04673e2feefdcd66e2ee7a8e9b61954b2280fd98 contains the integrated queue-selection and scheduler-recovery fixes and is installed locally. The Homebrew tap still visibly points at v0.35.541 pending its asynchronous bump.
+Latest published agent-doc release: v0.35.544, published on GitHub at 2026-10-22 23:47:03 UTC. JetBrains plugin packages published with that release: classic 0.2.795, 262 0.2.796, and 263 0.2.797 (latest numeric JetBrains package: 0.2.797). VS Code extension 0.2.83 was also published. Release tag v0.35.544 points to 3e975e91f9e94c1865da06d2c8d805bae284013a; all six platform archives and checksums are public, and PyPI agent-doc 0.35.544 passed clean-install verification. Post-release main c501ad975e26ed6f6a7b04666f7af3bb7af16dc7 includes unanswered 🙋☑️ retention and independent idempotent per-platform release uploads; the current mainline binary and editor packages are installed locally. The Homebrew tap still visibly points at v0.35.541 despite the successful release handoff, so its asynchronous bump remains pending.
 <!-- /status:sync -->
 <!-- /agent:status -->
  

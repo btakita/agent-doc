@@ -328,8 +328,40 @@ fn route_claimed_items(
             }
         });
     }
+    // A live editor can transiently publish a stale whole-buffer projection
+    // while its actual operator ops touch only an unrelated queue row. The
+    // projection is authoritative for text display, but it is not sufficient
+    // provenance for the irreversible cancellation tombstone. In that case,
+    // authorize removals only when the editor's captured operations replayed
+    // onto this cycle's baseline remove the same claim identity. Detached disk
+    // edits have no competing editor authority and retain the classic path.
+    let operator_removed =
+        if agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file) {
+            let operator_cut =
+                agent_doc_op_capture_io::operator_text_for_base(file, &watermark.baseline)
+                    .with_context(|| {
+                        format!(
+                            "read operator edit provenance while routing claimed removals for {}",
+                            file.display()
+                        )
+                    })?;
+            Some(
+                operator_cut
+                    .as_deref()
+                    .map(|cut| removed_queue_claim_identities(&watermark.baseline, cut))
+                    .unwrap_or_default(),
+            )
+        } else {
+            None
+        };
     core::append_claimed_queue_removals(items, watermark, content, |text| {
         let identity = agent_doc_queue::queue_claim::claim_identity(text);
+        if operator_removed
+            .as_ref()
+            .is_some_and(|removed| !removed.contains(&identity))
+        {
+            return None;
+        }
         attempts
             .get(&identity)
             .or_else(|| cancellations.get(&identity))
@@ -354,6 +386,33 @@ fn route_claimed_items(
         });
     }
     Ok(())
+}
+
+fn queue_claim_identities(
+    content: &str,
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let body = agent_doc_queue::queue_prompt_drift::queue_component_text(content);
+    agent_doc_queue::document_queue::parse(&body)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|entry| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                Some(agent_doc_queue::queue_claim::claim_identity(&prompt.text))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn removed_queue_claim_identities(
+    before: &str,
+    after: &str,
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let after = queue_claim_identities(after);
+    queue_claim_identities(before)
+        .into_iter()
+        .filter(|identity| !after.contains(identity))
+        .collect()
 }
 
 fn completed_queue_items(content: &str) -> Vec<String> {
@@ -3544,6 +3603,16 @@ mod tests {
         );
 
         let deleted = baseline.replace(&format!("- {head}\n"), "");
+        let removed_line = format!("- {head}\n");
+        agent_doc_op_capture_io::record_editor_op(
+            &file,
+            &agent_doc_hash::content_hash(&baseline),
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset: baseline.find(&removed_line).expect("reported queue row"),
+                len: removed_line.len(),
+            },
+        )
+        .unwrap();
         editor.publish(&deleted);
         let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
         assert_eq!(report.items.len(), 1, "{report:?}");
@@ -3578,6 +3647,82 @@ mod tests {
             agent_doc_queue_io::queue_claim::report_attempt(&file, head, Some(running.generation))
                 .unwrap_err();
         assert!(stale.to_string().contains("stale queue claim generation"));
+    }
+
+    /// A live editor's whole-buffer projection can temporarily omit unrelated
+    /// reported rows even though its captured operator operations edited only
+    /// another part of the document. The projection must not become destructive
+    /// cancellation evidence and regress those rows from `☑️` to `📥`.
+    #[test]
+    fn unrelated_live_editor_op_does_not_cancel_a_reported_queue_row_missing_from_projection() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let head = "finish already reported queue work";
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue go subagents -->\n- current task\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let editor = LiveEditorFixture::new(&file, "reported-state-editor", &baseline);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, head, "subagent:reported", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            head,
+            "subagent:reported",
+            "/root/reported",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &file,
+            head,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+            Some(claim.generation),
+        )
+        .unwrap()
+        .expect("reported receipt");
+
+        // The actual operator lineage only appends a note. A stale full-buffer
+        // projection loses the reported row at the same time.
+        let note = "\noperator is editing another queue row\n";
+        agent_doc_op_capture_io::record_editor_op(
+            &file,
+            &agent_doc_hash::content_hash(&baseline),
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: baseline.len(),
+                text: note.to_string(),
+            },
+        )
+        .unwrap();
+        let stale_projection = format!("{}{}", baseline.replace(&format!("- {head}\n"), ""), note);
+        editor.publish(&stale_projection);
+        backdate(&file);
+        let report = observe(&file, CONSUMER_HOOK, true).unwrap();
+        assert!(
+            report.as_ref().is_none_or(|report| report
+                .items
+                .iter()
+                .all(|item| item.dispatch != core::SteeringDispatch::CancelClaimed)),
+            "{report:?}"
+        );
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        assert!(ledger.cancellations.is_empty(), "{ledger:?}");
+        let receipts = agent_doc_queue_io::claim_release_receipt::load(&file).unwrap();
+        assert_eq!(receipts.receipts.len(), 1, "{receipts:?}");
+        assert_eq!(receipts.receipts[0].generation, claim.generation);
     }
 
     #[test]

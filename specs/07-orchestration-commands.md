@@ -755,8 +755,14 @@ portable agent-doc fallback:
   mechanics, never to whether sunk-cost work continues. Already-crossed
   irreversible effects are reported rather than undone. The binary expresses
   this binary-to-harness contract; it does not claim to kill a harness worker
-  directly. Ambiguous edits and duplicate lineage fail closed without dispatching
-  worker cancellation. A durably terminal struck-row deletion is
+  directly. With live editor authority, the destructive transition requires the
+  editor's captured operator operations, replayed from the cycle baseline, to
+  remove that same claim identity. A whole-buffer projection that omits claimed
+  rows while the captured operation lineage edits only another row is not
+  cancellation evidence: the claim and any reported completion receipt remain
+  intact. Missing, unreadable, mismatched, unrelated, and duplicate lineage all
+  fail closed without dispatching worker cancellation; detached disk edits retain
+  direct deletion semantics. A durably terminal struck-row deletion is
   presentation-only cleanup. If Markdown strikethrough conflicts with a live
   claim, reported receipt, or completion outbox, steering emits
   `degraded_claim_mismatch`, preserves/fences that work, and performs no

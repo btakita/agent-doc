@@ -12,8 +12,13 @@
   generation-fenced releases the claim. Best judgment controls only shutdown
   mechanics, never whether sunk-cost work continues. Irreversible effects already
   crossed are reported rather than undone. The binary emits this binary-to-harness
-  contract without pretending it can kill a harness worker directly, and
-  ambiguous edit or duplicate lineage does not cancel a worker. Deleting a
+  contract without pretending it can kill a harness worker directly. When a
+  live editor owns the document, cancellation additionally requires captured
+  operator-operation lineage that removes the same claim identity; absence from
+  a whole-buffer projection alone is not deletion evidence. Missing, unreadable,
+  mismatched, unrelated, or duplicate lineage fails closed without cancelling a
+  worker or invalidating a reported completion receipt. Detached disk edits keep
+  the direct deletion path. Deleting a
   durably terminal struck row is presentation-only cleanup; a strikethrough that
   conflicts with claim, receipt, or outbox evidence emits a degraded mismatch
   and preserves/fences the work instead of cancelling or integrating it.

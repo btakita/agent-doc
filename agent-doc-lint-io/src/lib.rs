@@ -530,7 +530,9 @@ fn is_agent_doc_known_attr_finding(finding: &LintFinding) -> bool {
         return false;
     };
     match component {
-        "agent:queue" => agent_doc_queue::component_attrs::is_queue_component_attr(attribute),
+        "agent:run" | "agent:queue" => {
+            agent_doc_queue::component_attrs::is_queue_component_attr(attribute)
+        }
         "agent:status" => agent_doc_queue::component_attrs::is_status_component_attr(attribute),
         _ => false,
     }
@@ -558,7 +560,7 @@ fn is_explicit_no_preset_finding(finding: &LintFinding) -> bool {
         return false;
     };
     attribute.trim_end_matches('=') == "preset"
-        && matches!(component, "agent:queue" | "agent:exchange")
+        && matches!(component, "agent:run" | "agent:queue" | "agent:exchange")
 }
 
 /// GH #227: tagpath's `agent-doc/empty-attr-value` hint says
@@ -1560,6 +1562,7 @@ operator-owned scratch state\n\
         for required in [
             "exchange",
             "boundary",
+            "run",
             "queue",
             "salient-response",
             "referral",

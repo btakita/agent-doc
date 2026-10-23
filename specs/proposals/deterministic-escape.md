@@ -205,7 +205,7 @@ a **closed** vocabulary defined by the binary.
 | Mechanism | Deterministic part (binary) | Agentic part | Where |
 | --- | --- | --- | --- |
 | Prompt presets (`prompt_presets` / `presets`, project inheritance, structured `prompt` + `runbook`) | resolution, alias merging, identity-collision registry, expansion into `prompt_preset_expansions`, runbook path confinement | interpreting the expanded prose | [02-document-format](../02-document-format.md), [project-preset-inheritance](../project-preset-inheritance.md), [07-orchestration-commands](../07-orchestration-commands.md), [preset-runbooks](../../runbooks/preset-runbooks.md) |
-| `agent:queue` grammar and attributes (`id=`, `after=`, `subagents[=N]`, `preset=`, `go`/`start`/`stop`/`pause`, `clear`, legacy `disable-auto-clear`, start/stop fences, `--- start at <time>`) | parsing, head selection, dependency gating, activation, consumption proof, auto-strike, atomic refill | answering each head | [02-document-format §2.5](../02-document-format.md), [07-orchestration-commands](../07-orchestration-commands.md), `agent-doc-queue/`, `agent-doc-element-queue/` |
+| `agent:run` grammar and attributes (`id=`, `after=`, `subagents[=N]`, `preset=`, `go`/`start`/`stop`/`pause`, `clear`, legacy `disable-auto-clear`, start/stop fences, `--- start at <time>`) | parsing, head selection, dependency gating, activation, consumption proof, auto-strike, atomic refill | answering each head | [02-document-format §2.5](../02-document-format.md), [07-orchestration-commands](../07-orchestration-commands.md), `agent-doc-queue/`, `agent-doc-element-queue/` |
 | Tracked ids and granular write flags (`--done`, `--backlog-add`, `--backlog-gate`, `--review-add`, `--todo-add`) | component mutation, de-duplication, gates, `agent:todo` checklist-count guard | deciding *which* flags a turn earned | [pending-ops](../../runbooks/pending-ops.md), [pending-system](../pending-system.md) |
 | Slash / builtin queue heads (`/model`, `/compact`, `/clear`) | delivered at idle **without an agent turn**, then struck and committed | none | [07-orchestration-commands § Command classification](../07-orchestration-commands.md) |
 | `agent-doc plan` | `repo_actions` parsed from imperative prose (`extract_imperative_directives` in `agent-doc-diff/src/lib.rs`), `required_commands`, `blockers`, `execution_scope` | executing the plan | `src/plan.rs`, [07-orchestration-commands § plan](../07-orchestration-commands.md) |
@@ -353,12 +353,12 @@ presets:
 ### Phase 3: `/step <name>` as a queue item (deterministic pipeline stage)
 
 ```html
-<!-- agent:queue id=ship -->
+<!-- agent:run id=ship -->
 - fix the failing parser test
 - /step check-fast
 - /step install
 - write release notes for the change
-<!-- /agent:queue -->
+<!-- /agent:run -->
 ```
 
 - `/step` joins the existing slash-command class. It is delivered at idle with
@@ -509,7 +509,7 @@ committed.**
 ## Non-Goals
 
 - **No general-purpose language.** No expressions, variables, loops, or
-  conditionals in the document. Sequencing stays in `agent:queue` (`after=`,
+  conditionals in the document. Sequencing stays in `agent:run` (`after=`,
   `id=`, fences) and `orchestrate --mode dag`.
 - **No executable code in documents.** No fenced blocks that run, and no
   tangle. Code lives in the repository and the document names it.

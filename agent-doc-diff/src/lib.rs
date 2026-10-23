@@ -1824,7 +1824,9 @@ fn line_is_managed_state_only(line: &str) -> bool {
         return true;
     }
     // Queue activity comment marker (with or without `auto`)
-    if trimmed.starts_with("<!-- agent:queue")
+    if trimmed.starts_with("<!-- agent:run")
+        || trimmed.starts_with("<!-- /agent:run")
+        || trimmed.starts_with("<!-- agent:queue")
         || trimmed.starts_with("<!-- /agent:queue")
         || trimmed.starts_with("<!-- agent:backlog")
         || trimmed.starts_with("<!-- /agent:backlog")

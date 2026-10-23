@@ -3572,7 +3572,7 @@ mod tests {
     /// respond and planning-dispatch runbooks own the full procedure.
     #[test]
     fn bundled_surfaces_carry_queue_subagents_coordinator_contract() {
-        assert!(bundled_instruction_text().contains("Under `<!-- agent:queue subagents -->`"));
+        assert!(bundled_instruction_text().contains("Under `<!-- agent:run subagents -->`"));
         assert!(bundled_instruction_text().contains("queue claim --refresh --generation <N>"));
         assert!(bundled_instruction_text().contains("--refresh --generation <N>"));
         assert!(bundled_instruction_text().contains("queue report-complete <FILE> --item <...> --generation <N>"));
@@ -3613,7 +3613,7 @@ mod tests {
             assert!(respond.contains(needle), "respond.md missing {needle:?}");
         }
         let planning = runbook("planning-dispatch.md");
-        assert!(planning.contains("Under `<!-- agent:queue subagents -->`"));
+        assert!(planning.contains("Under `<!-- agent:run subagents -->`"));
         assert!(planning.contains("`agent-doc orchestrate <FILE> --mode parallel`"));
         assert!(planning.contains("(`#queuesubagents`)"));
         assert!(planning.contains("`authorization.subagent_prompt_preamble` pasted verbatim"));
@@ -4144,7 +4144,7 @@ mod tests {
         assert!(content.contains("binary-owned continuation"));
         assert!(content.contains("VCS refresh signal"));
         assert!(content.contains("agent:backlog"));
-        assert!(content.contains("agent:queue"));
+        assert!(content.contains("agent:run"));
         assert!(content.contains("agent:icebox"));
         assert!(content.contains("prompt_presets"));
     }

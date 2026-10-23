@@ -259,7 +259,7 @@ can authorize the bounded bare-`Enter` recovery described above.
   `session-check` interrupted and force the operator into a manual retry. If that drain is blocked, or if a
   dispatch-only reroute still cannot prove the authoritative actor is
   dispatch-ready, route must not inject a duplicate trigger. It appends the
-  pending prompt-bearing request to `agent:queue`, creates the component when
+  pending prompt-bearing request to `agent:run`, creates the component when
   missing, sets `queue_active: true`, adds the `auto` queue attribute, and syncs
   the snapshot to that visible queue state. This makes the queued work
   inspectable and lets the normal Stop-hook/auto-queue path continue it after

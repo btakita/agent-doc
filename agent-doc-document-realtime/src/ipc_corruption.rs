@@ -139,6 +139,8 @@ pub fn detect_response_block_corruption(prior: &str, current: &str) -> Vec<IpcCo
 /// prompt, producing two `<!-- /agent:exchange -->` markers.
 const STRUCTURAL_MARKERS: &[&str] = &[
     "<!-- /agent:exchange -->",
+    "<!-- agent:run -->",
+    "<!-- /agent:run -->",
     "<!-- agent:queue -->",
     "<!-- /agent:queue -->",
     "<!-- agent:backlog -->",

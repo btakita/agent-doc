@@ -10,8 +10,8 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "<!-- agent:exchange patch=append -->\n",
     "<!-- /agent:exchange -->\n",
     "\n## Queue\n\n",
-    "<!-- agent:queue priority subagents clear -->\n",
-    "<!-- /agent:queue -->\n",
+    "<!-- agent:run priority subagents clear -->\n",
+    "<!-- /agent:run -->\n",
     "\n## Todo\n\n",
     "<!-- agent:todo priority -->\n",
     "<!-- /agent:todo -->\n",
@@ -123,11 +123,11 @@ mod tests {
         assert!(scaffold.contains("agent_doc_format: template"));
         assert!(
             scaffold.contains(concat!(
-                "<!-- /agent:queue -->\n",
+                "<!-- /agent:run -->\n",
                 "\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n",
                 "\n## Backlog\n\n<!-- agent:backlog priority queue -->\n"
             )),
-            "agent:todo must sit below agent:queue and above agent:backlog"
+            "agent:todo must sit below agent:run and above agent:backlog"
         );
 
         let components = agent_doc_element::element::parse(&scaffold)
@@ -173,9 +173,7 @@ mod tests {
         assert!(
             components[3..]
                 .iter()
-                .filter(|component| {
-                    component.name != "todo" && component.name != "backlog"
-                })
+                .filter(|component| { component.name != "todo" && component.name != "backlog" })
                 .all(|component| component.attrs.is_empty())
         );
         assert!(

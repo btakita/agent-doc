@@ -206,7 +206,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   the response cycle: review the worker result, answer the exchange prompt, and
   perform the normal binary-owned closeout.
 - **Queue subagents coordinator (`#queuesubagents`).** Under
-  `<!-- agent:queue subagents -->` (alias `fan-out`; bare dispatches every
+  `<!-- agent:run subagents -->` (alias `fan-out`; bare dispatches every
   eligible head and `=N` caps concurrent claims), the in-session agent is the
   coordinator, and `queue_subagent_dispatch` is the list to dispatch THIS cycle. Preflight
   recomputes it every cycle, so a missed claim is offered again. Heads held by

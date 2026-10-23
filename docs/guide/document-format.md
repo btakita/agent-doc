@@ -67,8 +67,13 @@ presets:
 
 Invoke a preset by writing its name wherever you would submit a prompt. For
 example, add `#review` to the session's exchange, or add `- #review` to an active
-`agent:queue`. Agent Doc expands the name to its instruction during preflight;
+`agent:run`. Agent Doc expands the name to its instruction during preflight;
 an associated runbook is loaded only when that preset is invoked.
+
+`agent:run` is the canonical runnable-work component. Existing
+`agent:queue` components remain fully supported as a compatibility alias; Agent
+Doc preserves their spelling, while new documents and generated components use
+`agent:run`.
 Structured presets may also declare `model` and `effort` for queue-dispatched
 subagents. Queue-marker overrides win, then item-specific and queue presets,
 then the session's `subagent_model` / `subagent_effort` defaults. Omitted policy

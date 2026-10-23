@@ -1794,7 +1794,9 @@ pub(crate) fn merge_operator_deleted_struck_queue_items(
                 merged.push_str(text);
             }
             (
-                Node::Component { name: base_name, .. },
+                Node::Component {
+                    name: base_name, ..
+                },
                 Node::Component {
                     name: operator_name,
                     ..
@@ -1888,25 +1890,15 @@ pub fn merge_by_component_with_operator_rearmed(
     })
 }
 
-/// Queue bodies (`<!-- agent:queue ... -->` .. `<!-- /agent:queue -->`) in order.
+/// Runnable component bodies (`agent:run`, including the `agent:queue` alias)
+/// in document order.
 fn queue_component_bodies(text: &str) -> Vec<&str> {
-    let mut bodies = Vec::new();
-    let mut rest = text;
-    let mut offset = 0usize;
-    while let Some(open) = rest.find("<!-- agent:queue") {
-        let after_open = &rest[open..];
-        let Some(open_end) = after_open.find("-->") else {
-            break;
-        };
-        let body_start = offset + open + open_end + "-->".len();
-        let Some(close) = text[body_start..].find("<!-- /agent:queue -->") else {
-            break;
-        };
-        bodies.push(&text[body_start..body_start + close]);
-        offset = body_start + close + "<!-- /agent:queue -->".len();
-        rest = &text[offset..];
-    }
-    bodies
+    agent_doc_element::element::parse(text)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|component| component.name == "queue")
+        .map(|component| component.content(text))
+        .collect()
 }
 
 /// Queue items struck in `base_text`: list-child key -> instruction text.
@@ -4439,7 +4431,8 @@ Second answer line three.
         let ours = doc("- [ ] [#gate1] Verify [#gate1] live\n- [x] [#k3vd] Publish the draft\n");
         let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
         assert!(
-            merged.contains("- [x] [#gate1] Verify [#gate1] live\n- [x] [#k3vd] Publish the draft\n"),
+            merged
+                .contains("- [x] [#gate1] Verify [#gate1] live\n- [x] [#k3vd] Publish the draft\n"),
             "{merged}"
         );
     }
@@ -5788,6 +5781,8 @@ Second answer line three.
         let open =
             "<!-- agent:queue -->\n- do [#open]\n- release + publish\n<!-- /agent:queue -->\n";
         let struck = open.replace("- release + publish", "- ~~release + publish~~");
+        let run_struck =
+            "<!-- agent:run -->\n- do [#open]\n- ~~release + publish~~\n<!-- /agent:run -->\n";
         let outside =
             "~~release + publish~~\n\n<!-- agent:queue -->\n- do [#open]\n<!-- /agent:queue -->\n";
         assert!(!base_holds_struck_queue_item(open));
@@ -5800,6 +5795,7 @@ Second answer line three.
             assert!(operator_rearmed_queue_item_keys(outside, cut).is_empty());
         }
         assert!(base_holds_struck_queue_item(&struck));
+        assert!(base_holds_struck_queue_item(run_struck));
         assert_eq!(operator_rearmed_queue_item_keys(&struck, open).len(), 1);
     }
 

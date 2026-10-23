@@ -23,8 +23,8 @@ Opening attributes are separated by whitespace. A value without spaces may be
 unquoted; use matching single or double quotes for a value containing spaces:
 
 ```markdown
-<!-- agent:queue id=release preset="#build #publish" -->
-<!-- /agent:queue -->
+<!-- agent:run id=release preset="#build #publish" -->
+<!-- /agent:run -->
 ```
 
 Marker-shaped text in inline code or a fenced code block is prose, not
@@ -38,7 +38,7 @@ name alias; use its canonical replacement, `backlog`, in new documents.
 | Component | Ownership and purpose |
 |---|---|
 | `agent:exchange` | Shared conversation history and the normal response destination. Changes can start a turn. Template responses append by default. |
-| `agent:queue` | Binary-managed runnable prompt queue. Queue item syntax, claims, dependencies, scheduling, and consumption apply. |
+| `agent:run` | Binary-managed runnable prompt queue. Queue item syntax, claims, dependencies, scheduling, and consumption apply. |
 | `agent:backlog` | Granular tracked-work source. Use backlog operations instead of replacing its whole body. |
 | `agent:pending` | Legacy alias for `agent:backlog`. |
 | `agent:review` | Granular tracked work waiting at an external or operator review gate. |
@@ -122,7 +122,7 @@ or a compound duration using
 `agent:status` only when `sync` is present. Bare, blank, duplicate, malformed,
 overflowing, and sub-minute values fail closed. The one-minute floor prevents a
 configuration intended to save tokens from instead amplifying prompt traffic.
-(`agent:queue interval=...` retains its independent schedule semantics.) Editing
+(`agent:run interval=...` retains its independent schedule semantics.) Editing
 the interval during an open cycle recalculates the generation-keyed due edge
 from that cycle's start.
 
@@ -163,7 +163,7 @@ or unknown `sync-mode` value fails closed and leaves the status body unchanged.
 
 ## Queue attributes
 
-Only `agent:queue` accepts the full queue vocabulary.
+Only `agent:run` accepts the full queue vocabulary.
 
 | Attribute | Values and behavior |
 |---|---|

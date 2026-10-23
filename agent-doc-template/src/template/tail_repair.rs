@@ -1148,7 +1148,8 @@ pub fn repair_duplicate_exchange_close_mixed_scaffold_tail(doc: &str) -> Result<
 }
 
 pub(crate) fn safe_exchange_tail_from_duplicate_scaffold(segment: &str) -> Result<Option<String>> {
-    let has_scaffold_component = segment.contains("<!-- agent:queue -->")
+    let has_scaffold_component = segment.contains("<!-- agent:run -->")
+        || segment.contains("<!-- agent:queue -->")
         || segment.contains("<!-- agent:backlog")
         || segment.contains("<!-- agent:pending")
         || segment.contains("<!-- agent:done");

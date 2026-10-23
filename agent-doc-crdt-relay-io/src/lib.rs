@@ -1481,8 +1481,8 @@ fn retain_and_publish_queue_region(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueRegionObservation {
     pub file: std::path::PathBuf,
-    /// Hash of the text from the first `<!-- agent:queue` to the end of the
-    /// last `<!-- /agent:queue -->` (a superset of every queue block).
+    /// Hash of the text from the first runnable component marker to the end of
+    /// the last one (a superset of every `agent:run`/`agent:queue` block).
     pub region_hash: u64,
     /// The region mentions a schedule attribute (`interval`, `time=`,
     /// `loop`). An over-approximation the scheduler uses to skip documents
@@ -1522,9 +1522,14 @@ pub fn queue_region_graph() -> (
 /// The queue-region change key of `text`, or `None` when it has no queue.
 pub fn queue_region_observation(file: &Path, text: &str) -> Option<QueueRegionObservation> {
     use std::hash::{Hash, Hasher};
-    let start = text.find("<!-- agent:queue")?;
-    let end = text
-        .rfind("<!-- /agent:queue")
+    let start = ["<!-- agent:run", "<!-- agent:queue"]
+        .into_iter()
+        .filter_map(|marker| text.find(marker))
+        .min()?;
+    let end = ["<!-- /agent:run", "<!-- /agent:queue"]
+        .into_iter()
+        .filter_map(|marker| text.rfind(marker))
+        .max()
         .and_then(|close| text[close..].find("-->").map(|offset| close + offset + 3))
         .filter(|end| *end > start)
         .unwrap_or(text.len());
@@ -6991,6 +6996,16 @@ pub fn route_disk_change_signal_with(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn queue_region_observation_accepts_run_and_legacy_queue_markers() {
+        let file = std::path::Path::new("session.md");
+        let run = "<!-- agent:run interval=1h -->\n- poll\n<!-- /agent:run -->\n";
+        let queue = "<!-- agent:queue interval=1h -->\n- poll\n<!-- /agent:queue -->\n";
+
+        assert!(super::queue_region_observation(file, run).unwrap().schedule_hint);
+        assert!(super::queue_region_observation(file, queue).unwrap().schedule_hint);
+    }
+
     fn rejected_quarantine_test_lock() -> &'static std::sync::Mutex<()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| std::sync::Mutex::new(()))

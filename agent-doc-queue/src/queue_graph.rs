@@ -700,8 +700,8 @@ pub fn apply_append_batch(
         .iter()
         .map(|block| block.id.clone())
         .collect::<Vec<_>>();
-    let legacy_single = graph.blocks().len() == 1
-        && !graph.blocks()[0].component.attrs.contains_key("id");
+    let legacy_single =
+        graph.blocks().len() == 1 && !graph.blocks()[0].component.attrs.contains_key("id");
 
     let mut existing_items: HashMap<String, Vec<QueueEntry>> = HashMap::new();
     let mut creates: Vec<(CreateQueue, Vec<QueueEntry>)> = Vec::new();
@@ -803,7 +803,7 @@ pub fn apply_append_batch(
             ));
         }
         attrs.extend(create.attrs);
-        proposed.push_str("<!-- agent:queue");
+        proposed.push_str("<!-- agent:run");
         for (key, value) in attrs {
             proposed.push(' ');
             proposed.push_str(&key);
@@ -812,7 +812,7 @@ pub fn apply_append_batch(
         }
         proposed.push_str(" -->\n");
         proposed.push_str(&document_queue::render(&items));
-        proposed.push_str("<!-- /agent:queue -->\n");
+        proposed.push_str("<!-- /agent:run -->\n");
     }
 
     let proposed_components =
@@ -1204,11 +1204,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outcome.generation, 8);
+        // Existing aliases are byte-preserved while newly-created components
+        // use the canonical public marker.
         assert!(outcome.content.contains("agent:queue id=default -->"));
         assert!(
             outcome
                 .content
-                .contains("agent:queue id=publish after=default preset=#release -->")
+                .contains("agent:run id=publish after=default preset=#release -->")
         );
         let components = element::parse(&outcome.content).unwrap();
         let graph = QueueGraph::parse(&outcome.content, &components).unwrap();

@@ -82,9 +82,7 @@ pub fn plan_queue_followups(
     let insertion_at = match matches.as_slice() {
         [offset] => queue.open_end + offset,
         [] => bail!("queue follow-up origin {origin:?} not found in queue id `{queue_id}`"),
-        _ => bail!(
-            "queue follow-up origin {origin:?} is ambiguous in queue id `{queue_id}`"
-        ),
+        _ => bail!("queue follow-up origin {origin:?} is ambiguous in queue id `{queue_id}`"),
     };
     let mut insertion = String::new();
     for item in followups {
@@ -192,7 +190,7 @@ fn live_queue_prompts(body: &str) -> Result<Vec<String>> {
 }
 
 /// Plan appending `head` (rendered by [`render_inbound_head`]) to the end of
-/// the document's selected `agent:queue` component (the first one unless a
+/// the document's selected `agent:run` component (the first one unless a
 /// queue set selects another).
 ///
 /// The insertion is byte-preserving: every existing queue line, including
@@ -210,7 +208,7 @@ pub fn plan_inbound_append(
     // head lands where the next preflight looks for queue work.
     let Some(queue) = crate::queue_graph::selected_component(content, &components)? else {
         bail!(
-            "no agent:queue component found. Add `<!-- agent:queue -->` ... `<!-- /agent:queue -->` to the document."
+            "no agent:run component found. Add `<!-- agent:run -->` ... `<!-- /agent:run -->` to the document. (`agent:queue` remains a supported compatibility alias.)"
         );
     };
     let body = &content[queue.open_end..queue.close_start];
@@ -330,8 +328,8 @@ mod tests {
             "#gh-fix https://github.com/btakita/agent-doc/issues/305".to_string(),
             "release + publish".to_string(),
         ];
-        let updated = plan_queue_followups(doc, "issues", "do [#httpsgithubcom]", &followups)
-            .unwrap();
+        let updated =
+            plan_queue_followups(doc, "issues", "do [#httpsgithubcom]", &followups).unwrap();
         assert_eq!(
             updated,
             concat!(
@@ -424,9 +422,6 @@ mod tests {
     #[test]
     fn missing_queue_component_is_refused() {
         let err = plan_inbound_append("# no queue\n", "[from:ci] x", "ci", None).unwrap_err();
-        assert!(
-            err.to_string().contains("no agent:queue component"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("no agent:run component"), "{err}");
     }
 }

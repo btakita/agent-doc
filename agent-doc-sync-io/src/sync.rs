@@ -10634,6 +10634,14 @@ mod tests {
             content.contains("<!-- agent:exchange"),
             "should have exchange component"
         );
+        assert!(
+            content.contains("<!-- agent:run priority subagents clear -->\n<!-- /agent:run -->"),
+            "sync must use claim's canonical agent:run scaffold"
+        );
+        assert!(
+            !content.contains("<!-- agent:queue"),
+            "new sync scaffolds must not emit the legacy agent:queue alias"
+        );
     }
     /// Non-empty .md files without frontmatter should NOT be auto-scaffolded.
     #[test]
@@ -10672,6 +10680,8 @@ mod tests {
         // Verify frontmatter
         assert!(fm.session.is_some(), "must have session UUID");
         assert!(fm.format.is_some(), "must have format set");
+        assert!(content.contains("<!-- agent:run priority subagents clear -->"));
+        assert!(!content.contains("<!-- agent:queue"));
 
         // Sync and Claim for Tmux Pane share this generator. Parse the rendered
         // document so parity covers structure, balance, and canonical ordering.

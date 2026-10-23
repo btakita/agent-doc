@@ -122,6 +122,14 @@ mod tests {
         assert!(scaffold.contains("agent_doc_session: session-1"));
         assert!(scaffold.contains("agent_doc_format: template"));
         assert!(
+            scaffold.contains("<!-- agent:run priority subagents clear -->\n<!-- /agent:run -->"),
+            "new claim scaffolds must use the canonical agent:run marker"
+        );
+        assert!(
+            !scaffold.contains("<!-- agent:queue"),
+            "new claim scaffolds must not emit the legacy agent:queue alias"
+        );
+        assert!(
             scaffold.contains(concat!(
                 "<!-- /agent:run -->\n",
                 "\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n",
@@ -208,6 +216,8 @@ mod tests {
             .unwrap()
             .expect("template without components should scaffold");
         assert!(scaffolded.starts_with("---\nagent_doc_format: template\n---\n\nIntro"));
+        assert!(scaffolded.contains("<!-- agent:run priority subagents clear -->"));
+        assert!(!scaffolded.contains("<!-- agent:queue"));
         let component_names = agent_doc_element::element::parse(&scaffolded)
             .expect("default components must form a valid component AST")
             .into_iter()
@@ -228,6 +238,27 @@ mod tests {
             .expect("default scaffold must contain queue");
         assert_eq!(queue.attrs.get("priority").map(String::as_str), Some(""));
         assert_eq!(queue.attrs.get("subagents").map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn existing_legacy_queue_template_is_not_rewritten() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority -->\n- existing work\n<!-- /agent:queue -->\n",
+        );
+
+        assert!(
+            scaffold_default_template_components(doc).unwrap().is_none(),
+            "claim must preserve an established template instead of renaming legacy markers"
+        );
+        let components = agent_doc_element::element::parse(doc)
+            .expect("legacy agent:queue remains a supported input spelling");
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .expect("legacy queue alias keeps the stable internal queue identity");
+        assert_eq!(queue.content(doc), "- existing work\n");
     }
 
     #[test]

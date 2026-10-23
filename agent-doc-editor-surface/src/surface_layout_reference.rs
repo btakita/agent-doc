@@ -34,7 +34,7 @@ pub const SURFACE_LAYOUT_REFERENCE_CAPABILITY: &str = "surface_layout_reference_
 ///
 /// Keep controller admission failures and editor-facing surface refusals on this
 /// one phrase; the command-specific retry instruction may follow it.
-pub const FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY: &str = "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both";
+pub const FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY: &str = "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both (including the JetBrains Client/Gateway process; restarting only the Remote Dev backend cannot replace its already-loaded frontend module)";
 
 /// Readiness classification for a Remote Dev peer that has not established the
 /// authenticated frontend surface lease after the startup grace period.
@@ -130,7 +130,7 @@ impl SurfaceReferenceRefusal {
             }
             Self::Inert => "No agent-doc session document focused",
             Self::UnknownLayout => {
-                "Remote Dev frontend structural routing is not ready (frontend_authority_absent_or_generation_mismatched; flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both, then retry Sync Tmux Layout."
+                "Remote Dev frontend structural routing is not ready (frontend_authority_absent_or_generation_mismatched; flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both (including the JetBrains Client/Gateway process; restarting only the Remote Dev backend cannot replace its already-loaded frontend module), then retry Sync Tmux Layout."
             }
             Self::StaleFocus => {
                 "Editor focus changed while the split layout was being read; retry after the selection settles."
@@ -445,7 +445,7 @@ mod tests {
         let diagnostic = SurfaceReferenceRefusal::UnknownLayout.diagnostic();
         assert_eq!(
             diagnostic,
-            "surface_reference_unknown_layout: Remote Dev frontend structural routing is not ready (frontend_authority_absent_or_generation_mismatched; flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both, then retry Sync Tmux Layout."
+            "surface_reference_unknown_layout: Remote Dev frontend structural routing is not ready (frontend_authority_absent_or_generation_mismatched; flat_evidence_has_no_column_geometry); the retained tmux layout was not changed. Remedy: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both (including the JetBrains Client/Gateway process; restarting only the Remote Dev backend cannot replace its already-loaded frontend module), then retry Sync Tmux Layout."
         );
         assert!(diagnostic.contains(FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY));
         assert!(diagnostic.contains(FRONTEND_AUTHORITY_UNAVAILABLE_READINESS));

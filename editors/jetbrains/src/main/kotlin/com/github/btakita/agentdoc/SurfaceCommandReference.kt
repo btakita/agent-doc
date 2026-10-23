@@ -24,7 +24,8 @@ import com.google.gson.JsonParser
 internal object SurfaceCommandReference {
     const val FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY =
         "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, " +
-            "verify both sides report that exact plugin version, restart both"
+            "verify both sides report that exact plugin version, restart both (including the JetBrains Client/Gateway " +
+            "process; restarting only the Remote Dev backend cannot replace its already-loaded frontend module)"
 
     const val FRONTEND_AUTHORITY_UNAVAILABLE_READINESS =
         "frontend_authority_absent_or_generation_mismatched"

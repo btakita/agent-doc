@@ -478,6 +478,10 @@ document. Recovery requires the same modular ZIP generation on both peers,
 verification that both report that exact plugin version, and both processes
 restarted. Retrying before that readiness invariant holds cannot create the
 missing authority.
+Restarting only the Remote Dev backend does not replace a frontend module that
+the still-running JetBrains Client/Gateway process already loaded. That client
+process must first have the matching plugin installed and must itself restart
+before its frontend generation can establish structural authority.
 When passive focus escalation cannot use a positive frontend snapshot, its
 receipt is `focus_deferred:<cause>` and is terminal for that observation: it is
 not retained as a failed effect, and the plugin must not translate it into a

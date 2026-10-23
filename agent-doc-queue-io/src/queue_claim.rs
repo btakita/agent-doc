@@ -1387,6 +1387,34 @@ pub fn claimed_live_head_texts_for_content(file: &Path, content: &str) -> Vec<St
     }
 }
 
+/// Live queue-head texts that still match a durable claim attempt, including
+/// attempts whose ownership TTL has expired. This is completion authority, not
+/// dispatch ownership: closeout uses it only together with an exact,
+/// materialized queue-prompt echo so a long-running coordinator can retire the
+/// work its worker completed without keeping an expired claim live.
+pub fn claim_attempt_head_texts_for_content(file: &Path, content: &str) -> Vec<String> {
+    match load_ledger_following(file, content) {
+        Ok(ledger) if ledger.claims.is_empty() => Vec::new(),
+        Ok(ledger) => {
+            let attempts = ClaimedQueueItems::from_identities(
+                ledger.claims.into_iter().map(|claim| claim.identity),
+            );
+            live_queue_head_texts(content)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|head| attempts.claims(head))
+                .collect()
+        }
+        Err(err) => {
+            eprintln!(
+                "[queue-claim] WARNING: could not read queue claim attempts for {}; treating every head as without attempt authority: {err:#}",
+                file.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
 /// Only the worker claims recorded in the ledger, without heads the queue
 /// subagents attribute holds back.
 pub fn ledger_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {

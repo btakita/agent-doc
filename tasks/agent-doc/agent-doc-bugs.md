@@ -135,6 +135,58 @@ Yes. The upgrade updates the CLI and reconciles every already-installed agent-do
 >
 > This queue item is a stale duplicate of work already integrated in current main/release. Exact fix: `d1424feed1 fix(jetbrains): pause ambiguous attach retries` is an ancestor of `origin/main` at `9c2375a33c` and shipped in v0.35.547. It includes spec/runbook updates plus Rust/Kotlin/parity regressions for `await_operator_evidence`, no timer retry, refresh suppression, and safe authority release on closing the refused unattached editor. Fresh validation at release head: `agent-doc-editor-surface` 160 tests passed (158 unit + 2 doc), focused JetBrains classes 41 passed (9 AttachFailureDiagnosis + 32 RetainedCanonicalOperatorText), zero failures/skips. Worktree clean; no duplicate edit/commit/push and no follow-up queue heads.
 <!-- agent-doc-subagent-completion key=a09c440ba7ddd7583b549191dff03c3b9229c0f7a9eec00d4e333ad855c02569 -->
+
+### Re: v0.35.548 release and current upgrade availability
+
+> **Chat prompt (#chatprompt:64f960b49289):** Can I restart Idea?
+
+Yes. Save unsaved editor text first; restarting IDEA is safe and is the correct way to load a plugin generation when dynamic reload is unavailable.
+
+> **Chat prompt (#chatprompt:8758fc3e1d4c):** Can I install the new version in my Coder?
+
+Yes. v0.35.548 is now fully stable and public. The Coder host is x86_64 GNU/glibc, so its correct artifact is x86_64-unknown-linux-gnu.
+
+> **Chat prompt (#chatprompt:ed2288d8237e):** I thought we allowed per environments to be updated
+
+The release pipeline published platform artifacts independently, but the installed v0.35.548 upgrader still selected GitHub's globally stable release. That was the gap: per-environment artifact readiness existed, but the CLI had no per-target stable pointer.
+
+> **Chat prompt (#chatprompt:e76a3286629a):** does agent-doc upgrade not support this?
+
+v0.35.548 does not target an independently ready prerelease artifact. Its upgrade command updates the CLI and reconciles installed plugins, but it resolves the globally stable release. The per-target resolver is now implemented on main for the next release.
+
+> **Chat prompt (#chatprompt:bf3e495313af):** Can we make the stable demarcation be per target or would that be problematic?
+
+Yes. It is safe when the target pointer is checksummed, coupled to the exact editor-package manifest, serialized, fail-closed during pointer replacement, rollback-fenced, and backward-compatible with the global stable channel for old clients.
+
+> **Chat prompt (#chatprompt:9fe2fcecbe2e):** implement in a subagent. Make sure this works.
+
+Implemented by a subagent, reviewed, integrated as `9e366edd73`, and pushed to `main`. The new rolling channel publishes a checksummed manifest per target, distinguishes Linux GNU from musl, promotes a target as soon as both its archive and all JetBrains compatibility packages are ready, revalidates the pointer and archive before installation, refuses unpinned fallback, and provides an explicit verified rollback workflow. Windows readiness metadata is published, but Windows CLI self-upgrade intentionally remains on the legacy/manual path until a detached executable-replacement helper exists. Existing clients retain the global latest plus aggregate SHA256SUMS behavior.
+
+Validation passed on the exact implementation: publisher self-test, Python 3.8 compatibility, Actionlint/ShellCheck, 27 upgrade tests, release workflow contract test, `make check-fast`, and the complete `make check`. The integration checkout repeated the focused tests after cherry-pick. Remote `main` resolves to `9e366edd73a85b7e299eeeae95b8a90f7add5c69`.
+
+This feature is on main but is not part of v0.35.548; installations begin using it after installing a future release that contains the resolver.
+
+> **Queue prompt:** release + publish: include issues 368-371
+
+Release v0.35.548 is complete. GitHub release, all six platform builds, aggregate and per-archive checksums, all editor packages, Homebrew, PyPI publication, and PyPI clean-install verification passed. The public release is stable, non-draft, and non-prerelease: https://github.com/btakita/agent-doc/releases/tag/v0.35.548
+
+### Re: agent run/loop, claim scaffolds, and queue steering
+
+> **Chat prompt (#chatprompt:464a02888085):** Does agent-doc support agent:run and agent:loop?
+
+Yes. Both components are supported: `agent:run` is the one-shot run surface and `agent:loop` is the looping session surface.
+
+> **Chat prompt (#chatprompt:055f31f59dcf):** subagent: The claim template should use agent:run instead of agent:queue.
+
+Fixed and shipped in v0.35.548. Newly scaffolded claim templates emit `agent:run`; existing legacy `agent:queue` documents remain compatible.
+
+> **Chat prompt (#chatprompt:16da2011a0cd):** subagent: agent-doc should treat queue mutations as steering. It should not unregister any items that are edited.
+
+Fixed and shipped in v0.35.548. Editing a claimed queue row preserves its owner and generation and forwards the changed text as steering instead of unregistering or redispatching the item. Regression coverage includes full prose rewrites, tracked-ID changes, distant additions, and false-pair avoidance.
+
+> **Queue prompt:** grok does not seem to run subagents in the queue. Make grok use subagents when `subagents` attribute is set. See the sdk-demo.md session. I had to manually prompt Grok to run subagents for each queue item.
+
+Fixed and shipped in v0.35.548. Grok now uses native background subagents for queue dispatch when `subagents`/fan-out is configured, then generation-fenced starts the exact claims without requiring manual prompts.
 <!-- agent:boundary:1d86f43f -->
 <!-- /agent:exchange -->
 
@@ -160,12 +212,15 @@ Yes. The upgrade updates the CLI and reconciles every already-installed agent-do
 - ☑️ [#subagent:release-367-queue-state#1] release + publish: include issue 367 + queue state fixes
 - ☑️ [#subagent:queue-auto-repair#1] agent-doc should have an auto-recover + repair to clean up the queue. Clean up this queue.
 - ☑️ [#subagent:effect-annotation-explain#1] What is `⟦effect:1⟧`? Why is `⟦` and `⟧` used?
-- 🚧 [#subagent:project-md-frontmatter#1] Allow project.md to configure all frontmatter including `agent: ...`. This would have override precedence over config.toml. Allow changes while the project is open to both config.toml and project.md.
-- 🟡 [#subagent:gh368-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/368
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/369
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/370
+- ☑️ [#subagent:project-md-frontmatter#1] Allow project.md to configure all frontmatter including `agent: ...`. This would have override precedence over config.toml. Allow changes while the project is open to both config.toml and project.md.
+- ☑️ [#subagent:gh368-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/368
+- ☑️ [#subagent:gh369-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/369
+- ☑️ [#subagent:gh370-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/370
+- ☑️ [#subagent:gh371-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/371
+- 📥 fix: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- ☑️ [#subagent:sdk-demo-reroute-recovery#1] In sdk-demo.md, I manually interrupted the Grok turn, ran `/clear`, then attempted to Run Agent Doc from the editor: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md could not be drained before reroute; nothing was dispatched and existing queue head "Unbind the \"s\" key to toggle \"Network Stats\". We are typing into chat and everytime \"s\" is pressed, the Network Stats is toggled." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md
 ---
-📥 - From sdk-demo.md: Can we make agent-doc allow in-turn upgrades with the new contract? Would that require the agent to restart? Answer only: ```
+☑️ [#subagent:in-turn-upgrade-answer#1] - From sdk-demo.md: Can we make agent-doc allow in-turn upgrades with the new contract? Would that require the agent to restart? Answer only: ```
 ❯ agent-doc tasks/sdk/sdk-demo.md                                                                      2:09 PM
 
 
@@ -177,7 +232,8 @@ Admission is in. The binary is newer than the local skill, and the plan says thi
 has a contract to run. I'll update the skill and pull the queue and backlog. 
 - ```
 ---
-- 📥 release + publish: include issues 368-370
+- ☑️ [#subagent:release-368-370#1] release + publish: include issues 368-371
+- ☑️ [#subagent:grok-queue-subagents#1] grok does not seem to run subagents in the queue. Make grok use subagents when `subagents` attribute is set. See the sdk-demo.md session. I had to manually prompt Grok to run subagents for each queue item.
 <!-- /agent:queue -->
 
 ## Queue: Issues

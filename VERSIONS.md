@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.548
+
+- **Remote Dev focus and plugin reconciliation cover the frontend that actually owns the editor (GH #368, #370–#371).**
+  Focus evidence crosses the JetBrains frontend/backend boundary, upgrades discover locally visible Client/Gateway
+  installations on Linux, macOS, and Windows, and diagnostics require both peers to load the same plugin generation
+  without claiming that an unobservable remote peer already matches.
+- **Stable releases become latest only after legacy-compatible checksums are published (GH #369).** Release retries
+  remain public prereleases until aggregate `SHA256SUMS` and per-archive sidecars are uploaded and validated, closing
+  the window where an older upgrader could select an incomplete stable release.
+- **Claimed queue rows survive operator edits as in-flight steering.** Complete prose or tracked-id rewrites preserve
+  the exact owner and generation and forward the new text to that worker, while true deletion and unrelated additions
+  retain their existing cancellation and dispatch semantics.
+- **Project defaults, cleared-turn recovery, and Grok fan-out are live-safe.** `project.md` can layer every typed
+  frontmatter field above `config.toml` with live invalidation; receiptless Grok `/clear` recovery requires two stable
+  empty-composer observations; and Grok now automatically claims, spawns, and starts queue subagents whenever the
+  `subagents` policy requests fan-out.
+- **New claim scaffolds use canonical `agent:run`.** Legacy `agent:queue` documents remain accepted and byte-preserved.
+
 ## 0.35.547
 
 - **Remote Dev frontend authority remains live across an empty ingress completion (GH #367).** A normally completed

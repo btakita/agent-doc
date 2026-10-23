@@ -231,6 +231,26 @@ Yes. Upgrade the test environment to IDEA 263 and install the matching agent-doc
 Then run Agent Doc and verify that paired ingress is deferred or accepted as expected and reaches a completed or connected diagnostic state. This is a manual environment verification, so no repository code, build, or test changes were appropriate in this answer-only cycle. The existing operator TODO now names v0.2.808.
 
 The exchange remains above its accretion warning threshold; it was not compacted because the queue is active and auto-compaction is not enabled.
+
+### Re: do [#latestbetadownload] — gpt-5 · 2026-10-23T18:18-04:00
+
+> **Operator question:** What is the latest beta download URL?
+
+The latest IntelliJ IDEA Ultimate beta is 2026.3 Beta, build `263.7307.44` (2026-10-23).
+
+For this Linux x86_64 environment, download it directly from JetBrains:
+
+https://download.jetbrains.com/idea/idea-263.7307.44.tar.gz
+
+SHA-256 file:
+
+https://download.jetbrains.com/idea/idea-263.7307.44.tar.gz.sha256
+
+JetBrains' current release metadata is available at:
+
+https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=eap
+
+The canonical artifact URL was checked and currently redirects successfully to JetBrains' download CDN. The exchange remains above its accretion warning threshold; it was not compacted because the queue is active and auto-compaction is not enabled.
 <!-- agent:boundary:6192acdd -->
 <!-- /agent:exchange -->
 
@@ -244,8 +264,9 @@ The exchange remains above its accretion warning threshold; it was not compacted
 ## Queue: Issues
 
 <!-- agent:queue id=issues loop interval=1h priority -->
+- ~~do [#latestbetadownload]~~
+- 📥 do [#helpregisterjetbrains]
 - ~~do [#upgradeideatest]~~
-- Help me register the Jetbrains plugin?
 - ~~do [#gh363]~~
 <!-- /agent:queue -->
 
@@ -258,6 +279,7 @@ The exchange remains above its accretion warning threshold; it was not compacted
 
 ## Backlog
 <!-- agent:backlog priority queue -->
+- [ ] [#helpregisterjetbrains] Help me register the Jetbrains plugin?
 <!-- /agent:backlog -->
 
 ## Review

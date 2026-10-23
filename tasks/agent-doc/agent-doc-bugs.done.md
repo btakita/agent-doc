@@ -627,3 +627,4 @@
 - 2026-10-23 [#gh363] #gh-fix https://github.com/btakita/agent-doc/issues/363
 - 2026-10-23 [#coderinstancedefaulting] The coder instance is defaulting to grok. Please make agent configurable in the project settings if not already done?
 - 2026-10-23 [#upgradeideatest] Should we upgrade Idea to test the frontend + backend install?
+- 2026-10-23 [#latestbetadownload] What is the latest beta download url?

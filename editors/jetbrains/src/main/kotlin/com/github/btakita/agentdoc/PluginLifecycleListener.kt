@@ -66,7 +66,12 @@ class PluginLifecycleListener : ProjectManagerListener {
         // Detect editor layout changes (tab drags, new splits) and sync tmux
         LayoutChangeDetector.getInstance(project)
         // Flip the turn-state editor banner on/off as the CP turn phase changes.
-        TurnStateBannerRefresher.getInstance(project).start()
+        val turnStateRefresher = TurnStateBannerRefresher.getInstance(project)
+        // Its project-bus connections must retire with this exact initialization generation.
+        // Registering the refresher also makes disposeProject's explicit retirement cascade to
+        // those connections instead of calling Disposable.dispose() outside the Disposer tree.
+        Disposer.register(lifecycle, turnStateRefresher)
+        turnStateRefresher.start()
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
         val editorTabSync = EditorTabSyncListener.install(project)
         project.messageBus

@@ -4,6 +4,8 @@ import com.intellij.notification.Notification
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.notification.Notifications
+import com.intellij.notification.NotificationsManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
@@ -11,6 +13,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.EditorNotifications
@@ -159,6 +162,11 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     private val transientStatuses = TransientDocumentStatus()
     private val inputRequiredNotifications =
         InputRequiredNotifications<Notification> { it.expire() }
+    private val inputRequiredBusDeduplicator =
+        NotificationBusDeduplicator<Notification, String>(
+            keyOf = ::inputRequiredNotificationKey,
+            expire = Notification::expire,
+        )
     private val deferredClearSupersededNotices = DeferredClearSupersededNotices()
     private val listeners = CopyOnWriteArrayList<Listener>()
 
@@ -191,6 +199,27 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                     }
                 },
             )
+        project.messageBus
+            .connect(this)
+            .subscribe(
+                Notifications.TOPIC,
+                object : Notifications {
+                    override fun notify(notification: Notification) {
+                        if (inputRequiredBusDeduplicator.observe(notification)) {
+                            LOG.info(
+                                "[turn-state] reconciled duplicate input-required notification " +
+                                    "across plugin generations: ${notification.title}",
+                            )
+                        }
+                    }
+                },
+            )
+        // A replacement generation can start while copies raised by leaked predecessors are
+        // already visible. Inventory the platform-owned project model once after subscribing so
+        // startup closes that gap without reintroducing a prompt poller.
+        NotificationsManager.getNotificationsManager()
+            .getNotificationsOfType(Notification::class.java, project)
+            .forEach(inputRequiredBusDeduplicator::observe)
         requestOpenMarkdownRefresh("startup")
     }
 
@@ -332,8 +361,8 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
                 .createNotification(
-                    "Agent input required for $fileName",
-                    "Open the Agent Doc terminal to answer the approval prompt.",
+                    "$INPUT_REQUIRED_TITLE_PREFIX$fileName",
+                    INPUT_REQUIRED_CONTENT,
                     NotificationType.WARNING,
                 )
         notification.isImportant = true
@@ -419,6 +448,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         presentations.clear()
         transientStatuses.clearAll()
         inputRequiredNotifications.clearAll()
+        inputRequiredBusDeduplicator.forgetAll()
         deferredClearSupersededNotices.clearAll()
         listeners.clear()
     }
@@ -426,12 +456,23 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     companion object {
         private val LOG = Logger.getInstance(TurnStateBannerRefresher::class.java)
         private val instances = ConcurrentHashMap<Project, TurnStateBannerRefresher>()
+        private const val INPUT_REQUIRED_TITLE_PREFIX = "Agent input required for "
+        private const val INPUT_REQUIRED_CONTENT =
+            "Open the Agent Doc terminal to answer the approval prompt."
+
+        private fun inputRequiredNotificationKey(notification: Notification): String? {
+            if (notification.groupId != "Agent Doc") return null
+            if (notification.type != NotificationType.WARNING) return null
+            if (!notification.title.startsWith(INPUT_REQUIRED_TITLE_PREFIX)) return null
+            if (notification.content != INPUT_REQUIRED_CONTENT) return null
+            return notification.title
+        }
 
         fun getInstance(project: Project): TurnStateBannerRefresher =
             instances.computeIfAbsent(project, ::TurnStateBannerRefresher)
 
         fun disposeProject(project: Project) {
-            instances.remove(project)?.dispose()
+            instances.remove(project)?.let(Disposer::dispose)
         }
 
         private fun isMarkdown(file: VirtualFile): Boolean = file.name.endsWith(".md")

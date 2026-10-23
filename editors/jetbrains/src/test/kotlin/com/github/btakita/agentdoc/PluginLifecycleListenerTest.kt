@@ -106,6 +106,8 @@ class PluginLifecycleListenerTest {
         assertTrue(turnStateRefresher.contains("instances.computeIfAbsent(project"))
         assertTrue(turnStateRefresher.contains("fun disposeProject(project: Project)"))
         assertTrue(source.contains("TurnStateBannerRefresher.disposeProject(project)"))
+        assertTrue(source.contains("Disposer.register(lifecycle, turnStateRefresher)"))
+        assertTrue(turnStateRefresher.contains("let(Disposer::dispose)"))
 
         val upgradeAction = Files.readString(
             Paths.get("src/main/java/com/github/btakita/agentdoc/JetBrainsPluginUpgradeAction.java")

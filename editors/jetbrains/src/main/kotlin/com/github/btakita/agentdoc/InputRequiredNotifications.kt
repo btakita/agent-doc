@@ -46,3 +46,48 @@ internal class InputRequiredNotifications<T : Any>(private val expire: (T) -> Un
     /** Test seam: whether a notification is currently outstanding for [filePath]. */
     fun isLive(filePath: String): Boolean = live.containsKey(filePath)
 }
+
+/**
+ * Reconciles equivalent notifications observed on the project notification bus.
+ *
+ * A plugin generation owns its own [InputRequiredNotifications] map, but every generation loaded
+ * in one IDE project publishes through the same IntelliJ notification topic. If an incompletely
+ * retired generation still receives controller frames, each private map can legitimately decide
+ * that it is raising the first notification for a document. Observing the shared bus gives the
+ * current generation a classloader-neutral edge at which to expire the previous equivalent handle
+ * and retain only the newest one.
+ *
+ * This reconciler deliberately does not expire retained handles when it is disposed: it observes
+ * notifications owned by other plugin generations, and unloading one observer must not retract a
+ * notification whose owning generation and input-required state are still live.
+ */
+internal class NotificationBusDeduplicator<T : Any, K : Any>(
+    private val keyOf: (T) -> K?,
+    private val expire: (T) -> Unit,
+) {
+    private val latest = ConcurrentHashMap<K, T>()
+
+    /**
+     * Observes [notification] and expires the preceding equivalent handle, if any.
+     *
+     * Returns true only when a distinct preceding handle was reconciled. Re-observing the same
+     * handle (for example, during startup inventory after the bus listener saw it) is a no-op.
+     */
+    fun observe(notification: T): Boolean {
+        val key = keyOf(notification) ?: return false
+        var reconciled = false
+        latest.compute(key) { _, previous ->
+            if (previous != null && previous !== notification) {
+                expire(previous)
+                reconciled = true
+            }
+            notification
+        }
+        return reconciled
+    }
+
+    /** Forget observations without retracting notifications owned by their publishers. */
+    fun forgetAll() {
+        latest.clear()
+    }
+}

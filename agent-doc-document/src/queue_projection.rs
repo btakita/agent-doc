@@ -969,6 +969,7 @@ pub fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: 
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     let mut canonical_operator_action = false;
+    let mut observed_owner = None::<QueueOwnerProjection>;
     loop {
         let trimmed = t.trim_start();
         let stripped = strip_lifecycle_prefix(trimmed)
@@ -977,13 +978,28 @@ pub fn strip_priority_markers(text: &str) -> String {
                 strip_operator_action_marker_prefix(trimmed).inspect(|_| {
                     canonical_operator_action = true;
                 })
-            })
-            .or_else(|| strip_owner_annotation_prefix(trimmed).map(|(_, rest)| rest))
-            .or_else(|| priority_prefix(trimmed).map(|(_, rest)| rest));
-        match stripped {
-            Some(rest) => t = rest.trim_start(),
-            None => break,
+            });
+        if let Some(rest) = stripped {
+            t = rest.trim_start();
+            continue;
         }
+        if let Some((owner, rest)) = strip_owner_annotation_prefix(trimmed) {
+            observed_owner.get_or_insert(owner);
+            t = rest.trim_start();
+            continue;
+        }
+        if let Some(rest) = observed_owner
+            .as_ref()
+            .and_then(|owner| strip_torn_duplicate_owner_lifecycle_prefix(trimmed, owner))
+        {
+            t = rest.trim_start();
+            continue;
+        }
+        if let Some((_, rest)) = priority_prefix(trimmed) {
+            t = rest.trim_start();
+            continue;
+        }
+        break;
     }
     let mut bare = t.trim();
     if let Some((id, after, start)) = trailing_operator_action_annotation(bare)
@@ -1397,6 +1413,7 @@ mod tests {
             format!("🟡 [#subagent:queue-state-fix#3] [#subagent:queue-state-fix#3📥 {prompt}");
 
         assert_eq!(strip_in_progress_marker(&torn), prompt);
+        assert_eq!(strip_priority_markers(&torn), prompt);
         assert_eq!(
             apply_owner_projection(&torn, Some(&owner)),
             format!("🟡 [#subagent:queue-state-fix#3] {prompt}")
@@ -1407,6 +1424,11 @@ mod tests {
             apply_owner_projection(&unproven, None),
             unproven,
             "a lookalike without durable or preceding owner evidence is operator text"
+        );
+        assert_eq!(
+            strip_priority_markers(&unproven),
+            unproven,
+            "identity normalization must not repair a lookalike without owner evidence"
         );
     }
 

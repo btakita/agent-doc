@@ -862,6 +862,18 @@ pub fn answered_free_text_head_node_keys_with_claims(
     )
 }
 
+fn loop_queue_node_prefixes(content: &str) -> Result<HashSet<String>> {
+    Ok(element::parse(content)?
+        .into_iter()
+        .enumerate()
+        .filter(|(_, component)| {
+            component.name == "queue"
+                && crate::queue_schedule::queue_retains_struck_heads(&component.attrs)
+        })
+        .map(|(component_index, _)| format!("queue:{component_index}:"))
+        .collect())
+}
+
 /// [`answered_free_text_head_node_keys_with_claims`] plus the free-text heads
 /// selected by this cycle's preflight. Selection is durable binary authority,
 /// unlike the cosmetic `🚧` projection in `content`, so an exactly echoed and
@@ -905,6 +917,18 @@ pub fn answered_free_text_head_node_keys_with_authority(
             ));
         }
     };
+    // GH #361: `#ftstrike` is a document-wide catch-up projection for ordinary
+    // queues. A loop queue has its own pass-scoped consume/restore lifecycle;
+    // striking one of its rows because another queue echoed identical text can
+    // leave that standing program struck until a later due tick. Exclude every
+    // loop component here. Its selected head is still struck by normal queue
+    // consumption and restored from the pass roster when that pass completes.
+    let current_loop_queue_node_prefixes = loop_queue_node_prefixes(content)?;
+    let is_loop_queue_node = |node_key: &str| {
+        current_loop_queue_node_prefixes
+            .iter()
+            .any(|prefix| node_key.starts_with(prefix))
+    };
     // `#ftstrikeonce` (live, agent-doc-bugs.md 2026-09-30): queue consume and
     // this answered-head projection both act on the same answer. When consume
     // had already struck the answered copy this cycle, the "first unstruck
@@ -913,8 +937,14 @@ pub fn answered_free_text_head_node_keys_with_authority(
     // now than in the baseline has already had its answer applied.
     let struck_counts = |doc: &str| -> std::collections::HashMap<String, usize> {
         let mut counts = std::collections::HashMap::new();
+        let loop_prefixes = loop_queue_node_prefixes(doc).unwrap_or_default();
         if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(doc, "queue") {
-            for node in nodes.into_iter().filter(|n| n.item.struck) {
+            for node in nodes.into_iter().filter(|node| {
+                node.item.struck
+                    && !loop_prefixes
+                        .iter()
+                        .any(|prefix| node.node_key.starts_with(prefix))
+            }) {
                 *counts
                     .entry(normalize_queue_prompt_text(node.item.text.trim()))
                     .or_insert(0) += 1;
@@ -936,7 +966,7 @@ pub fn answered_free_text_head_node_keys_with_authority(
     let mut keys = Vec::new();
     let mut struck_texts = already_applied;
     for node in nodes {
-        if node.item.struck {
+        if node.item.struck || is_loop_queue_node(&node.node_key) {
             continue;
         }
         let text = node.item.text.trim();
@@ -3899,6 +3929,42 @@ Old.
     }
 
     #[test]
+    fn answered_free_text_auto_strike_skips_loop_copy_and_strikes_ordinary_copy() {
+        let head = "#upgrade";
+        let response =
+            format!("### Re: upgrade — gpt-6.1-sol\n\n> **Queue prompt:** {head}\n\nUpgraded.\n");
+        let document = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue loop interval=1h id=hourly -->\n",
+                "- {head}\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:queue go id=release -->\n",
+                "- {head}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response = response,
+            head = head,
+        );
+
+        let projected = project_answered_free_text_strike(&document, &response, Some(&document))
+            .unwrap()
+            .expect("the ordinary queue copy should be struck");
+        assert_eq!(projected.node_keys.len(), 1);
+        assert!(projected.target_content.contains(concat!(
+            "<!-- agent:queue loop interval=1h id=hourly -->\n",
+            "- #upgrade\n",
+            "<!-- /agent:queue -->",
+        )));
+        assert!(projected.target_content.contains(concat!(
+            "<!-- agent:queue go id=release -->\n",
+            "- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike)\n",
+            "<!-- /agent:queue -->",
+        )));
+    }
+
+    #[test]
     fn answered_free_text_projection_without_queue_component_is_a_noop() {
         let document = concat!(
             "---\n",
@@ -4013,10 +4079,10 @@ Old.
         );
     }
 
-    /// GH #327: the finalize strike that answers a `loop` queue's last head
-    /// keeps the struck row instead of clearing the drained body.
+    /// GH #361: finalization's document-wide auto-strike never owns a `loop`
+    /// row. The pass-owned normal consume is what strikes it for restoration.
     #[test]
-    fn answered_free_text_projection_keeps_a_drained_loop_queue_struck_row() {
+    fn answered_free_text_projection_does_not_strike_a_loop_queue_row() {
         let document = concat!(
             "---\n",
             "agent_doc_session: queue-projection\n",
@@ -4027,9 +4093,9 @@ Old.
             "> **Queue prompt:**\n>\n> final question\n\n",
             "Answered.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue loop interval=1h -->\n",
+            "<!-- agent:loop interval=1h -->\n",
             "- final question\n",
-            "<!-- /agent:queue -->\n",
+            "<!-- /agent:loop -->\n",
         );
         let response = concat!(
             "### Re: final question — gpt-5\n\n",
@@ -4037,25 +4103,11 @@ Old.
             "Answered.\n",
         );
 
-        let projected = project_answered_free_text_strike(document, response, Some(document))
-            .unwrap()
-            .expect("the answered loop head is struck");
-        let queue_id = crate::queue_schedule::identified_queue_schedules(&projected.target_content)
-            .unwrap()
-            .remove(0)
-            .queue_id;
         assert!(
-            crate::queue_schedule::live_heads_for_queue(&projected.target_content, &queue_id)
+            project_answered_free_text_strike(document, response, Some(document))
                 .unwrap()
-                .is_empty()
-        );
-        assert_eq!(
-            crate::queue_schedule::completed_heads_for_queue(&projected.target_content, &queue_id)
-                .unwrap()
-                .len(),
-            1,
-            "the struck row stays for the loop restore:\n{}",
-            projected.target_content
+                .is_none(),
+            "#ftstrike must leave loop rows live for pass-owned consumption"
         );
     }
 

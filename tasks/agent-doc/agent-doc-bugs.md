@@ -441,7 +441,11 @@ The GH-356 row was previously completed and its durable result is preserved in t
 >
 > Duplicate cleanup audit: GH #355 is already resolved by 4bb0b43868, released in v0.35.544, and present in current v0.35.546 main. Existing GH-355 and unknown-route regressions passed in the prior isolated verification. No duplicate change, commit, issue action, or release is required.
 <!-- agent-doc-subagent-completion key=cfde8eab28a1bbb4adbb41d63161a5b97758a93f97eafb34100c0fe15f867113 -->
-<!-- agent:boundary:e5fbc736 -->
+<!-- no-free-text-queue-head-guard -->
+### Re: Intentional queue cleanup boundary — gpt-5 · 2026-10-23T03:47-04:00
+
+The operator explicitly requested queue cleanup. The removed historical rows all had durable reported/completion evidence and were intentionally cleared after their results were summarized in the preceding response. They were not silently dropped. The fenced GH-355 claim/outbox mismatch and the newly dispatched sdk-demo.md compact-exchange defect remain in the queue.
+<!-- agent:boundary:67a15c86 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -450,7 +454,7 @@ The GH-356 row was previously completed and its durable result is preserved in t
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ☑️ [#subagent:gh355-cleanup-rerun#3] #gh-issue https://github.com/btakita/agent-doc/issues/355
-- 📥 Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- 🚧 [#subagent:sdk-compact-replica#1] Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
 <!-- /agent:queue -->
 
 ## Queue: Issues

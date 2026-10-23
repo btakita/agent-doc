@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.546
+
+- **Canonical session components are now `agent:run` for queued work and `agent:loop` for recurring schedules.**
+  Legacy `agent:queue`, `agent:run loop`, and `agent:queue loop` spellings remain accepted as compatibility aliases;
+  the parser keeps the stable internal queue identity and rejects mixed opening/closing spellings.
+- **Subagent handoffs remain actionable through coordinator closeout.** Completion feedback includes the worker's
+  response immediately, operator-answer rows keep their queue lifecycle, and operator-request packets render as
+  nested emphasized key/value lists.
+- **JetBrains Remote Dev routing is generation-safe across frontend and backend peers.** Frontend authority readiness
+  is diagnosed explicitly, all three compatibility-ranged plugin artifacts are verified as one set, and release CI
+  can publish that exact set to Marketplace once repository onboarding and its permanent token are configured.
+
 ## 0.35.545
 
 - **Remote Dev routing no longer guesses pane membership or left/right order from flat evidence (GH #359–#360).**

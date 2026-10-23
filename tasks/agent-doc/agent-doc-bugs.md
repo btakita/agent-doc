@@ -24,11 +24,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 12 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 21 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest published agent-doc release: v0.35.545, published on GitHub at 2026-10-23 02:16:55 UTC from b3839fdd6d90cb50e00551f1ec7e9fc30d28edaa. GitHub Release publication is complete with 21 assets; PyPI build, publish, and clean-install verification passed; the public wheel is agent_doc-0.35.545-py3-none-any.whl. Remote main and tag v0.35.545 both resolve to b3839fdd6d, and agent-doc 0.35.545 is installed locally. The post-release integration branch is at 09aa2b50b6 with response-bearing subagent completion feedback, positive Remote Dev frontend-authority readiness diagnostics, three-range JetBrains Marketplace automation, JetBrains generations 0.2.798/0.2.799/0.2.800, operator-answer lifecycle/inline-code parsing fixes, and nested emphasized operator-request formatting. Canonical agent:loop is fully verified and awaiting integration; canonical agent:run is in its corrected final composite check. Marketplace publication for the next release is blocked on one-time vendor/listing onboarding and the missing JETBRAINS_MARKETPLACE_TOKEN repository secret. The Homebrew tap still visibly points at v0.35.541, so its asynchronous bump remains pending.
+Latest published agent-doc release: v0.35.546, published on GitHub at 2026-10-23 05:23:26 UTC from 3a1d3cb8dcac7f9e5633b2bc58940e7701e57dde. GitHub Release publication completed successfully with 21 assets; all platform builds, all three JetBrains compatibility packages, PyPI, and Homebrew passed, and agent-doc 0.35.546 is installed locally. This release includes canonical agent:run and agent:loop, nested emphasized operator-request formatting, Remote Dev frontend-authority readiness diagnostics, the three-range JetBrains package set (classic 0.2.798, 262 0.2.799, 263 0.2.800), nonblocking Marketplace onboarding, long-run strike fixes, loop-row protection, and fail-closed editor provenance before queue-claim cancellation. JetBrains Marketplace listing is still pending one-time vendor/listing onboarding and JETBRAINS_MARKETPLACE_TOKEN, but this no longer blocks GitHub/PyPI/Homebrew releases; agent-doc plugin install jetbrains remains the immediate installer fallback and Remote Dev still requires installation on both peers. Follow-up release v0.35.547 remains queued and is not yet assembled or published. Its reported branches are completion-feedback async commit 40f7bc8b7b, IDEA notification dedupe commit 8e0a69fef7, evidence-only Coder pane routing commit 3f5d4f3f89, and partial-publication upgrade checksum commit 59f7bc833e.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -167,7 +167,141 @@ Marketplace distribution lets JetBrains install the correct compatibility-ranged
 Without Marketplace, Agent Doc still works through manual ZIP installation, but the matching plugin must be installed manually on both peers. A backend-only install causes the one-sided state behind the recent routing failures.
 
 The release automation publishes separate builds for classic IDEs, 262, and 263 so Marketplace can select the correct one. Marketplace is therefore not required for local development, but it is the reliable installation/update channel for Remote Dev. The plugin is not listed there yet because vendor onboarding and `JETBRAINS_MARKETPLACE_TOKEN` remain outstanding. [JetBrains Marketplace API documentation](https://plugins.jetbrains.com/docs/marketplace/plugin-details.html)
-<!-- agent:boundary:0f221edb -->
+
+### Re: Subagent completed: `subagent:gh357-release-audit` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/357” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=bcaf343dba9207d22e994d9a8bdb56d07cd338160a29995dd9a2aeb9273460a2 -->
+
+### Re: Subagent completed: `subagent:gh362` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/362” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=66973137803a273486f743268f17e026ac55b0762421a2f2881aed74c7d87480 -->
+
+### Re: Subagent completed: `subagent:queue-state-regression` returned work for queue item “The previous state of various items in this queue were ☑️, but now the state is 📥.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=185aad60af08cd3a32c5e8b380efbce16642971ae9822c5ffa985aa84d5973d7 -->
+
+### Re: Subagent completed: `subagent:release-publish` returned work for queue item “release + publish: Include "There is a long list of "Subagent completed" but no response..."” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=3add6f4e457812ac0507549a3f7f6f6d084e9ecb8b57ae7a390506226ae435bc -->
+
+### Re: Subagent completed: `subagent:coder-readiness` returned work for queue item “I have to manually run `agent-doc` from the terminal on my Coder instance. Did you fix the bugs so I can properly use agent-doc on Coder?” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=c64526b5ad28c3859a04174100780d28e65fc2782cbab3447d6dfdfddef81c56 -->
+
+### Re: Subagent completed: `subagent:request-format-release` returned work for queue item “I still don't see proper "subagent operator request" formatting in the exchange on this machine. Has this feature been released? See the last subagent operator request in api.md.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=a8990e56905460e1df3d1e68ee3d8bda25f7b0de9f324da7005e7b395b21a8e0 -->
+
+### Re: Subagent completed: `subagent:completion-feedback-async` returned work for queue item “There is a long list of "Subagent completed" but no response. agent-doc should immediately respond with the subagent completion feedback for tracked queue items. Can this be done without slowing down the agent? Like a fire & forget with agent-doc correctly formatting the exchange response?” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=bc6a24cd0d6fb3c96cceb1acad50accd657fc43f16c33e0016a712d774c4e490 -->
+
+### Re: Subagent completed: `subagent:idea-notification-dedupe` returned work for queue item “There is 1 prompt in this session, but there were 3 Idea notifications stacked on top of each other.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=b555228e7e349e3430414b636d93b4eb910ef01d189c684f0a941058878e846b -->
+
+### Re: Subagent completed: `subagent:sdk-demo-pr166` returned work for queue item “In sdk-demo.md, no queue item status despite agent running: `- [#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`” — agent-doc
+<!-- agent-doc-subagent-response sha256=dfd4ea26848f1c7d732ef8f593ad159275c92437cd0e7546b5376910785c8138 -->
+> **Subagent response:**
+>
+> Verified no-op; no new commit or push was needed. PR #166 is already published at `0b6034d8dfff92dd38c27282fb634337d38e2222`. The missing status came from execution resuming without claim → start evidence. The exact case is fixed and released in v0.35.546 by `698999295d`, with four focused regression tests and `cargo build -p agent-doc` passing.
+<!-- agent-doc-subagent-completion key=53372c1c7b73976deae196d2c14ee39d222bb0df526ff2479b04adf469601731 -->
+
+### Re: Subagent completed: `subagent:coder-pane-routing` returned work for queue item “Did you reimplement "guessing"? The tmux panes are reversed on my coder instance. The "guessing" seems to be wrong more often than not.” — agent-doc
+<!-- agent-doc-subagent-response sha256=992150777b4097b825bf46a57ea5efd83a25b8f946cdae0505c5d395090b1251 -->
+> **Subagent response:**
+>
+> Implemented and pushed the pane-routing fix.
+>
+> - Branch: `fix/coder-pane-routing-evidence-20261023`
+> - Commit: `3f5d4f3f8931e21fd759edea56304e0446c24940`
+> - Diagnosis: unresolved managed files could still reach tmux-router's unordered visible-spare assignment, reversing Coder panes.
+> - Fix: propagate exact provision receipts, disable spare-pane guessing, and fail closed before reconciliation if any managed document lacks an exact pane assignment.
+> - `make check-fast`: passed.
+> - `make tmux-ci`: passed.
+> - `make check`: all 11,446 Rust tests and docs passed; overall gate hit an unrelated, reproducible JetBrains `LazilyGenerationFenceTest` baseline failure. Latest main CI is green.
+> - Worktree is clean; no install was run per coordinator rules.
+<!-- agent-doc-subagent-completion key=ba20afe5751cb9809b74310ba5ab0f9caf0cdb0b6d2f45d40ec472611f5e626e -->
+
+### Re: Subagent completed: `subagent:gh363` returned work for queue item “#gh-issue https://github.com/btakita/agent-doc/issues/363” — agent-doc
+<!-- agent-doc-subagent-response sha256=d35058c2dfbc2a77ecec168ae882097ea90f1fb0f723af3e0ba734cf40401c6b -->
+> **Subagent response:**
+>
+> Implemented and pushed the GitHub #363 fix.
+>
+> - Branch: `fix/gh363-upgrade-checksum-20261023`
+> - Commit: `59f7bc833e4652287f92969891febbbf259b0ff7`
+> - Files: `src/upgrade.rs`, `specs/07-core-commands.md`, `docs/getting-started/installation.md`
+> - Full environment-correct `make check`: passed.
+> - Worktree: clean.
+> - No install or release performed.
+>
+> The upgrader now verifies the selected platform archive using its `.sha256` sidecar instead of waiting for aggregate `SHA256SUMS`. Failed one-shot upgrades also return nonzero while leaving the existing binary and plugins unchanged.
+<!-- agent-doc-subagent-completion key=a7f55f0457cddf6ebd32423cc371d1ea7c3cf28b0905920febcce3fd8c67580b -->
+> **Chat prompt (#chatprompt:4af102e5768f):** Is agent-doc in the JB marketplace now?
+> **Chat prompt (#chatprompt:837d86227ded):** Why do we need JB Marketplace? For a proper frontend install?
+> **Chat prompt (#chatprompt:02bb79600d71):** I'm concerned that it will take some time to get listed on the marketplace
+> **Chat prompt (#chatprompt:ce99f9e60d4a):** Can the agent-doc plugin cli install pick the correct plugin?
+> **Chat prompt (#chatprompt:5b70e3ae4dfd):** do we have a running publish or is there only 1 pending publish?
+> **Chat prompt (#chatprompt:326c3b2dde5d):** YOu can start the release with what we have.
+> **Chat prompt (#chatprompt:553aaeaccd9e):** And queue up a followup release
+> **Chat prompt (#chatprompt:5fdf2705db46):** Will the 📥 queue items be repaired to their correct state or are these done and can be deleted?
+
+### Re: v0.35.546 release, Marketplace, and queue reconciliation — gpt-5 · 2026-10-23T02:47-04:00
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/355
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/356
+> **Queue prompt:** Is `☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355` done? It is leftover in the queue. Issues 353, 354, 355, 357 remain open on github.
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/353
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/354
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/355
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/357
+> **Queue prompt:** In sdk-demo.md, no queue item status despite agent running: `- [#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`
+> **Queue prompt:** release + publish: no `agent:run` + `agent:loop`
+> **Queue prompt:** The formatting of a subagent operator request is difficult to read the key + values. What are some formatting options to make it easier to see the keys + values? How about making a nested24list and emphasizing the keys `- *kind:*`?
+> **Queue prompt:** Rename `agent:queue` to `agent:run`. Keep the alias compatability.
+> **Queue prompt:** . What are some formatting options to make it easie Rename `agent:run loop`/`agent:queue loop` to `agent:loop`. Keep backward compatability.
+> **Queue prompt:** release + publish: include `agent:run` + `agent:loop`
+> **Queue prompt:** Even though this run has been going for > 3 hours, agent-doc should still strike items that can be deleted.
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/361
+> **Queue prompt:** sdk-demo.md subagent operator request does not have the italics and list items. Is this implemented and installed locally?
+> **Queue prompt:** The previous state of various items in this queue were ☑️, but now the state is 📥.
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/362
+> **Queue prompt:** release + publish
+> **Queue prompt:** I have to manually run `agent-doc` from the terminal on my Coder instance. Did you fix the bugs so I can properly use agent-doc on Coder?
+> **Queue prompt:** I still don't see proper "subagent operator request" formatting in the exchange on this machine. Has this feature been released? See the last subagent operator request in api.md.
+
+v0.35.546 is fully released. GitHub published 21 assets from `3a1d3cb8dcac7f9e5633b2bc58940e7701e57dde`; all platform builds, all three JetBrains packages, PyPI, Homebrew, and the finalization job passed. The local CLI is also v0.35.546.
+
+There is no publish currently running. There is one queued follow-up release, v0.35.547, and it has not been assembled or published.
+
+Agent Doc is not yet listed in JetBrains Marketplace. The remaining work is the one-time vendor/listing onboarding and a `JETBRAINS_MARKETPLACE_TOKEN`; Marketplace publication is intentionally nonblocking, so review latency does not hold up GitHub, PyPI, Homebrew, or CLI-based plugin delivery.
+
+Marketplace is mainly the proper automatic installation/update channel for JetBrains Remote Dev: the compatible plugin needs to reach both the remote IDE backend and the local JetBrains Client/Gateway frontend. It is convenient, not required. Until listing completes, `agent-doc plugin install jetbrains` is the supported fallback, and Remote Dev installations must run it on both peers.
+
+The CLI installer selects the package from the detected IDE build:
+
+- classic package 0.2.798 for IDE builds 242–261;
+- modular package 0.2.799 for build 262;
+- modular package 0.2.800 for build 263.
+
+It fails rather than silently choosing an ambiguous or incompatible artifact. Classic support remains necessary for the installed 242–261 IDE population; removing it would break those users, while the split packages keep newer frontend/backend behavior isolated.
+
+`status:sync` is current. It records v0.35.546 as published and installed, Marketplace as pending but nonblocking, and v0.35.547 as queued with these reported branches:
+
+- completion-feedback async: `40f7bc8b7b`;
+- IDEA notification dedupe: `8e0a69fef7`;
+- evidence-only Coder pane routing: `3f5d4f3f89`;
+- partial-publication upgrade checksum: `59f7bc833e`.
+
+Those four fixes are not released yet. The Coder pane fix removes the remaining unordered visible-spare assignment and fails closed without exact pane evidence. The #363 fix verifies the selected archive using its own `.sha256` sidecar, so upgrades can succeed before aggregate `SHA256SUMS` appears. Both were pushed and reported; they remain awaiting integration into v0.35.547.
+
+The queue should not be manually deleted wholesale. This closeout repairs the published v0.35.546 rows above to their completed/struck state using their durable receipts. Genuine pending rows—including issues #358–#360, Marketplace onboarding, the remaining routing investigation, and the v0.35.547 work—stay in the queue. Reported-but-unintegrated rows remain ☑️; active release work remains 🚧. The v0.35.546 provenance fix prevents an unrelated mid-turn queue edit from fabricating cancellation tombstones or regressing completed receipts back to 📥.
+
+PR #166 was already green at `0b6034d8dfff92dd38c27282fb634337d38e2222`; its missing-status lifecycle case is fixed in v0.35.546 by `698999295d`. New operator-request packets use the released nested emphasized formatting; old exchange text is not rewritten retroactively.
+
+The agent-doc Codex skill was updated locally to match CLI v0.35.546 before this reconciliation. Three disposable build directories were also removed earlier, recovering about 113 GB; that deletion is not recoverable. The exchange is above its advisory size threshold, but the queue is active, so it was not compacted during this cycle.
+<!-- agent:boundary:bea35542 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -175,21 +309,21 @@ The release automation publishes separate builds for classic IDEs, 262, and 263 
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355
+- ~~#gh-issue https://github.com/btakita/agent-doc/issues/355~~
 - ☑️ [#subagent:gh356#1] #gh-issue https://github.com/btakita/agent-doc/issues/356
 - ☑️ [#subagent:gh355status#1] Is `☑️ [#subagent:gh355#1] #gh-issue https://github.com/btakita/agent-doc/issues/355` done? It is leftover in the queue. Issues 353, 354, 355, 357 remain open on github.
 - ☑️ [#subagent:gh353fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/353
 - ☑️ [#subagent:gh354fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/354
 - ☑️ [#subagent:gh355#1] #gh-fix https://github.com/btakita/agent-doc/issues/355
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/357
-- 📥 Did you reimplement "guessing"? The tmux panes are reversed on my coder instance. The "guessing" seems to be wrong more often than not.
+- ☑️ [#subagent:gh357-release-audit#4] #gh-fix https://github.com/btakita/agent-doc/issues/357
+- ☑️ [#subagent:coder-pane-routing#2] Did you reimplement "guessing"? The tmux panes are reversed on my coder instance. The "guessing" seems to be wrong more often than not.
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/358
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/359
 - 📥 #gh-fix https://github.com/btakita/agent-doc/issues/360
 - 📥 "Re: Subagent completed:" should immediately add the response into agent:exchange.
 - 📥 How do we improve the reliability of the routing? Why did the guess occur in https://github.com/btakita/agent-doc/issues/360? On top of fail no-close routing, we need to figure out how to not get into the fail state.
 - 📥 Automate publication of all three compatibility-ranged JetBrains updates to Marketplace, with token/onboarding and exact-range verification, so Remote Dev synchronizes the modular ZIP to both peers and prevents one-sided installs.
-- 📥 In sdk-demo.md, no queue item status despite agent running: `- [#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`
+- ☑️ [#subagent:sdk-demo-pr166#2] In sdk-demo.md, no queue item status despite agent running: `- [#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`
 - 📥 release + publish: no `agent:run` + `agent:loop`
 - ☑️ [#subagent:operator-request-format#1] The formatting of a subagent operator request is difficult to read the key + values. What are some formatting options to make it easier to see the keys + values? How about making a nested24list and emphasizing the keys `- *kind:*`?
 - ☑️ [#subagent:rename-queue-run#1] Rename `agent:queue` to `agent:run`. Keep the alias compatability.
@@ -198,9 +332,15 @@ The release automation publishes separate builds for classic IDEs, 262, and 263 
 - ☑️ [#subagent:longrun-strike#1] Even though this run has been going for > 3 hours, agent-doc should still strike items that can be deleted.
 - ☑️ [#subagent:gh361#1] #gh-fix https://github.com/btakita/agent-doc/issues/361
 - ☑️ [#subagent:sdk-request-format#1] sdk-demo.md subagent operator request does not have the italics and list items. Is this implemented and installed locally?
-- 🚧 [#subagent:queue-state-regression#1] The previous state of various items in this queue were ☑️, but now the state is 📥.
-- 🚧 [#subagent:completion-feedback-async#1] There is a long list of "Subagent completed" but no response. agent-doc should immediately respond with the subagent completion feedback for tracked queue items. Can this be done without slowing down the agent? Like a fire & forget with agent-doc correctly formatting the exchange response?
-- 🚧 [#subagent:gh362#1] #gh-fix https://github.com/btakita/agent-doc/issues/362
+- ☑️ [#subagent:queue-state-regression#1] The previous state of various items in this queue were ☑️, but now the state is 📥.
+- ☑️ [#subagent:gh362#1] #gh-fix https://github.com/btakita/agent-doc/issues/362
+- ☑️ [#subagent:release-publish#1] release + publish
+- ☑️ [#subagent:completion-feedback-async#1] There is a long list of "Subagent completed" but no response. agent-doc should immediately respond with the subagent completion feedback for tracked queue items. Can this be done without slowing down the agent? Like a fire & forget with agent-doc correctly formatting the exchange response?
+- ☑️ [#subagent:coder-readiness#1] I have to manually run `agent-doc` from the terminal on my Coder instance. Did you fix the bugs so I can properly use agent-doc on Coder?
+- ☑️ [#subagent:request-format-release#1] I still don't see proper "subagent operator request" formatting in the exchange on this machine. Has this feature been released? See the last subagent operator request in api.md.
+- ☑️ [#subagent:idea-notification-dedupe#1] There is 1 prompt in this session, but there were 3 Idea notifications stacked on top of each other.
+- 🚧 [#subagent:followup-release#1] release + publish: include completed follow-up fixes from the completion-feedback, Coder readiness, subagent-request formatting, and IDEA notification-deduplication investigations after v0.35.546
+- ☑️ [#subagent:gh363#1] #gh-issue https://github.com/btakita/agent-doc/issues/363
 <!-- /agent:queue -->
 
 ## Queue: Issues

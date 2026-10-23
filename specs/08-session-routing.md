@@ -463,10 +463,11 @@ with unknown Remote Dev geometry may use a positive live-tmux observation only
 to prove that its target document already has a pane, in which case dispatch is
 focus-only. Equal observed and requested widths do not prove editor membership
 or left-to-right assignment, so a one-for-one or complete-width replacement is
-still refused rather than filling tmux slots from an unordered visible set.
+still refused rather than filling tmux slots from an unordered visible set
+(GH #359).
 Manual `Sync Tmux Layout` likewise refuses unknown geometry with `surface_reference_unknown_layout`
 and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence.
-That flat evidence is the causal boundary from GH #360: the backend knew only an
+That flat evidence is the causal boundary from GH #359 and GH #360: the backend knew only an
 unordered selected-file set while the missing frontend module was the sole
 source of editor column membership and order. Combining the set with live tmux
 width would guess both membership and left-to-right assignment, which is why the

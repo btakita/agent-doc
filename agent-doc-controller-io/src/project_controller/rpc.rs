@@ -48409,8 +48409,10 @@ mod tests {
         assert!(!ops.contains("publish_live_tmux_replacement"), "{ops}");
     }
 
+    /// GH #352/#359: two equal-width live panes plus a two-document flat
+    /// visible set still prove neither membership nor left-to-right order.
     #[test]
-    fn gh352_unknown_route_refuses_complete_named_two_column_visible_set() {
+    fn gh352_gh359_unknown_route_refuses_complete_named_two_column_visible_set() {
         struct LiveLayoutGuard;
         impl Drop for LiveLayoutGuard {
             fn drop(&mut self) {

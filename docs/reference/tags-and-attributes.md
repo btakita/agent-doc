@@ -32,13 +32,15 @@ protocol. Quote examples in backticks or a code fence.
 
 ## Built-in components
 
-These names have built-in semantic behavior. `pending` is the only component
-name alias; use its canonical replacement, `backlog`, in new documents.
+These names have built-in semantic behavior. New repeating work should use
+`loop`; `queue loop` (and `run loop`) remain compatibility spellings. `pending`
+is the legacy alias for `backlog`.
 
 | Component | Ownership and purpose |
 |---|---|
 | `agent:exchange` | Shared conversation history and the normal response destination. Changes can start a turn. Template responses append by default. |
 | `agent:run` | Binary-managed runnable prompt queue. Queue item syntax, claims, dependencies, scheduling, and consumption apply. |
+| `agent:loop` | Repeating runnable prompt queue. It implies an unbounded loop; add `loop=N` for a finite number of passes. Legacy `agent:queue loop` and `agent:run loop` markers behave identically. |
 | `agent:backlog` | Granular tracked-work source. Use backlog operations instead of replacing its whole body. |
 | `agent:pending` | Legacy alias for `agent:backlog`. |
 | `agent:review` | Granular tracked work waiting at an external or operator review gate. |
@@ -163,7 +165,8 @@ or unknown `sync-mode` value fails closed and leaves the status body unchanged.
 
 ## Queue attributes
 
-Only `agent:run` accepts the full queue vocabulary.
+`agent:run` and `agent:loop` accept the full queue vocabulary. Legacy
+`agent:queue` does too as a compatibility alias.
 
 | Attribute | Values and behavior |
 |---|---|
@@ -182,7 +185,7 @@ Only `agent:run` accepts the full queue vocabulary.
 | `priority` | Bare priority ordering, as described above. |
 | `interval` | Schedule interval: a bare integer in seconds or a compound duration such as `30s`, `5m`, `1h30m`, or `1d`. Values below the scheduler floor are clamped with a warning. |
 | `time` | One or more comma-separated local times in `HH:MM` form. It may be combined with `interval`; the earlier next deadline wins. |
-| `loop` | Bare repeats passes without limit; `loop=N` runs a positive number of passes. Without `interval` or `time`, the scheduler floor separates passes. |
+| `loop` | Implied by `agent:loop`; retained as a compatibility attribute on `agent:queue` / `agent:run`. Bare repeats passes without limit; `loop=N` runs a positive number of passes. Without `interval` or `time`, the scheduler floor separates passes. |
 
 `start`, `go`, `pause`, `stop`, `auto`, `clear`, `disable-auto-clear`, and bare
 `subagents`/`fan-out` are flags, not `key=true` settings. Queue maintenance

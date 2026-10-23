@@ -530,7 +530,7 @@ fn is_agent_doc_known_attr_finding(finding: &LintFinding) -> bool {
         return false;
     };
     match component {
-        "agent:run" | "agent:queue" => {
+        "agent:queue" | "agent:run" | "agent:loop" => {
             agent_doc_queue::component_attrs::is_queue_component_attr(attribute)
         }
         "agent:status" => agent_doc_queue::component_attrs::is_status_component_attr(attribute),
@@ -560,7 +560,8 @@ fn is_explicit_no_preset_finding(finding: &LintFinding) -> bool {
         return false;
     };
     attribute.trim_end_matches('=') == "preset"
-        && matches!(component, "agent:run" | "agent:queue" | "agent:exchange")
+        && (agent_doc_queue::component_attrs::is_queue_marker_component(component)
+            || component == "agent:exchange")
 }
 
 /// GH #227: tagpath's `agent-doc/empty-attr-value` hint says
@@ -1237,6 +1238,25 @@ operator-owned scratch state\n\
         });
         run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
             panic!("valid queue `id` / `interval` attributes must pass strict lint: {error:#}")
+        });
+    }
+
+    #[test]
+    fn canonical_loop_component_passes_strict_lint() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:loop id=issues interval=1h priority -->\n\
+            - hourly\n\
+            <!-- /agent:loop -->\n\n\
+            <!-- agent:run id=compat interval=1h loop -->\n\
+            - compatibility\n\
+            <!-- /agent:run -->\n";
+        let file = write_doc(&dir, "canonical-loop.md", doc);
+        run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+            panic!("canonical agent:loop attributes must pass strict lint: {error:#}")
         });
     }
 

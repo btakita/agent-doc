@@ -1,7 +1,8 @@
 //! Pure queue schedule policy (`interval=`, `time=`, `loop`).
 //!
-//! `<!-- agent:queue interval=30m time=09:00,17:30 loop=3 -->` turns an
-//! `agent:queue` into a *scheduled* queue. Each queue's schedule is independent:
+//! `<!-- agent:loop interval=30m time=09:00,17:30 -->` declares a repeating
+//! scheduled run. Legacy `agent:queue loop` / `loop=N` markers remain accepted.
+//! Each queue's schedule is independent:
 //! its identity, durable state, open window, and loop roster are keyed by the
 //! canonical `(document, queue_id)` pair. A scheduled queue does not drain the
 //! moment it has a live head; it drains only inside a **window** the project
@@ -355,6 +356,12 @@ impl IdentifiedQueueSchedule {
 /// canonical queue IDs used by dependency scheduling. Multiple queues must
 /// therefore already have explicit or binary-backfilled IDs.
 pub fn identified_queue_schedules(content: &str) -> anyhow::Result<Vec<IdentifiedQueueSchedule>> {
+    if !content.contains("agent:queue")
+        && !content.contains("agent:run")
+        && !content.contains("agent:loop")
+    {
+        return Ok(Vec::new());
+    }
     let components = element::parse(content)?;
     let graph = QueueGraph::parse(content, &components).map_err(anyhow::Error::new)?;
     Ok(graph
@@ -1768,6 +1775,43 @@ mod tests {
             next_deadline(&state, &spec, &UTC),
             Some(400 + MIN_SCHEDULE_INTERVAL_SECS)
         );
+    }
+
+    #[test]
+    fn canonical_loop_component_is_an_unbounded_repeating_queue() {
+        let content = concat!(
+            "<!-- agent:loop id=issues interval=5m -->\n",
+            "- poll issues\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let schedules = identified_queue_schedules(content).unwrap();
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(schedules[0].queue_id, "issues");
+        assert_eq!(
+            schedules[0].spec.as_ref().unwrap().loop_limit,
+            LoopLimit::Unbounded
+        );
+        assert_eq!(
+            live_heads_for_queue(content, "issues").unwrap(),
+            heads(&["poll issues"])
+        );
+    }
+
+    #[test]
+    fn run_loop_and_queue_loop_compatibility_spellings_match_agent_loop() {
+        for content in [
+            "<!-- agent:loop id=issues interval=5m -->\n- poll issues\n<!-- /agent:loop -->\n",
+            "<!-- agent:run id=issues interval=5m loop -->\n- poll issues\n<!-- /agent:run -->\n",
+            "<!-- agent:queue id=issues interval=5m loop -->\n- poll issues\n<!-- /agent:queue -->\n",
+        ] {
+            let schedule = identified_queue_schedules(content).unwrap().remove(0);
+            assert_eq!(schedule.queue_id, "issues");
+            assert_eq!(schedule.spec.unwrap().loop_limit, LoopLimit::Unbounded);
+            assert_eq!(
+                live_heads_for_queue(content, "issues").unwrap(),
+                heads(&["poll issues"])
+            );
+        }
     }
 
     #[test]

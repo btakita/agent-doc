@@ -84,19 +84,6 @@ pub const RUN_COMPONENT: &str = "run";
 /// Backward-compatible document marker alias for [`RUN_COMPONENT`].
 pub const QUEUE_COMPONENT_ALIAS: &str = "queue";
 
-/// Normalize public document marker names to the stable internal queue model.
-///
-/// Queue is retained as the internal semantic name so persisted node keys, IPC
-/// operations, and existing integrations do not churn when the public marker
-/// becomes `agent:run`. Both public spellings therefore produce a component
-/// whose `name` is `queue`; writers use `agent:run` for new documents.
-fn canonical_component_name(name: &str) -> &str {
-    match name {
-        RUN_COMPONENT | QUEUE_COMPONENT_ALIAS => QUEUE_COMPONENT_ALIAS,
-        _ => name,
-    }
-}
-
 /// Legacy alias for the backlog component.
 pub const BACKLOG_ALIAS: &str = "pending";
 
@@ -111,6 +98,37 @@ pub const ICEBOX_COMPONENT: &str = "icebox";
 
 /// Canonical component name for the conversation exchange.
 const EXCHANGE_COMPONENT: &str = "exchange";
+
+/// Internal component name for runnable queue work.
+///
+/// `agent:loop` is the canonical spelling for a repeating run, while the
+/// legacy `agent:queue loop` spelling remains accepted. Both project onto the
+/// same queue model internally; the raw marker bytes remain untouched.
+pub const QUEUE_COMPONENT: &str = "queue";
+
+/// Canonical component name for repeating queue work.
+pub const LOOP_COMPONENT: &str = "loop";
+
+/// Normalize public document marker names to the stable internal queue model.
+///
+/// Queue is retained as the internal semantic name so persisted node keys, IPC
+/// operations, and existing integrations do not churn. New documents use
+/// `agent:run` or `agent:loop`; all three public spellings project to `queue`.
+pub fn canonical_component_name(name: &str) -> &str {
+    match name {
+        RUN_COMPONENT | QUEUE_COMPONENT_ALIAS | LOOP_COMPONENT => QUEUE_COMPONENT,
+        _ => name,
+    }
+}
+
+/// Add semantics implied by a component's canonical marker spelling.
+fn apply_component_implied_attrs(name: &str, attrs: &mut HashMap<String, String>) {
+    if name == LOOP_COMPONENT {
+        // `agent:loop` is the canonical replacement for `agent:queue loop`.
+        // An explicit `loop=N` still wins and preserves finite-pass behavior.
+        attrs.entry("loop".to_string()).or_default();
+    }
+}
 
 /// Check whether a component name refers to the backlog component
 /// (accepts both canonical `"backlog"` and legacy `"pending"`).
@@ -1441,7 +1459,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                 .into());
             }
             match stack.pop() {
-                Some((open_name, canonical_name, open_attrs, open_start, open_end)) => {
+                Some((open_name, canonical_name, mut open_attrs, open_start, open_end)) => {
                     if open_name != name {
                         return Err(ComponentParseError::Mismatched {
                             open_name,
@@ -1451,6 +1469,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                         }
                         .into());
                     }
+                    apply_component_implied_attrs(name, &mut open_attrs);
                     templates.push(Component {
                         name: canonical_name,
                         attrs: open_attrs,
@@ -2529,6 +2548,41 @@ mod tests {
         let mixed = "<!-- agent:run -->\nwork\n<!-- /agent:queue -->\n";
         let error = parse(mixed).unwrap_err().to_string();
         assert!(error.contains("mismatched component"), "{error}");
+    }
+
+    #[test]
+    fn loop_component_projects_to_repeating_queue_semantics() {
+        let doc = "<!-- agent:loop interval=5m -->\n- poll\n<!-- /agent:loop -->\n";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].name, QUEUE_COMPONENT);
+        assert_eq!(ranges[0].attrs.get("loop"), Some(&String::new()));
+        assert_eq!(
+            ranges[0].attrs.get("interval").map(String::as_str),
+            Some("5m")
+        );
+        assert_eq!(ranges[0].content(doc), "- poll\n");
+        assert_eq!(
+            &doc[ranges[0].open_start..ranges[0].open_end],
+            "<!-- agent:loop interval=5m -->\n"
+        );
+    }
+
+    #[test]
+    fn loop_component_preserves_explicit_finite_pass_limit() {
+        let doc = "<!-- agent:loop loop=3 -->\n- poll\n<!-- /agent:loop -->\n";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges[0].name, QUEUE_COMPONENT);
+        assert_eq!(ranges[0].attrs.get("loop").map(String::as_str), Some("3"));
+    }
+
+    #[test]
+    fn run_loop_compatibility_spelling_projects_to_repeating_queue_semantics() {
+        let doc = "<!-- agent:run loop interval=5m -->\n- poll\n<!-- /agent:run -->\n";
+        let ranges = parse(doc).unwrap();
+        assert_eq!(ranges[0].name, QUEUE_COMPONENT);
+        assert_eq!(ranges[0].attrs.get("loop"), Some(&String::new()));
+        assert_eq!(ranges[0].content(doc), "- poll\n");
     }
 
     #[test]

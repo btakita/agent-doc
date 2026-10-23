@@ -188,6 +188,30 @@ fn parse_close_marker(trimmed: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// Project public runnable-component spellings onto the queue AST model after
+/// exact raw open/close matching has succeeded.
+fn project_runnable_component(component: &mut Component) {
+    if matches!(component.name.as_str(), "run" | "loop") {
+        if component.name == "loop"
+            && !component
+                .attrs
+                .split_whitespace()
+                .any(|token| token == "loop" || token.starts_with("loop="))
+        {
+            component.attrs = if component.attrs.is_empty() {
+                "loop".to_string()
+            } else {
+                format!("{} loop", component.attrs)
+            };
+        }
+        component.name = "queue".to_string();
+    }
+}
+
+fn is_runnable_component(name: &str) -> bool {
+    matches!(name, "queue" | "run" | "loop")
+}
+
 /// Strip a leading list bullet (`- `, `* `, `N. `) returning the item content.
 pub(crate) fn strip_bullet(line: &str) -> Option<&str> {
     let t = line.trim_start();
@@ -921,6 +945,7 @@ pub fn components(source: &str) -> Vec<Component> {
             if let Some(mut comp) = open.take() {
                 if comp.name == name {
                     comp.end_byte = offset;
+                    project_runnable_component(&mut comp);
                     include_queue_multiline_items(source, &mut comp, line_start, &ranges);
                     out.push(comp);
                     continue;
@@ -933,6 +958,7 @@ pub fn components(source: &str) -> Vec<Component> {
         if let Some((name, attrs)) = parse_open_marker(trimmed) {
             // A new open marker closes any dangling component implicitly.
             if let Some(mut comp) = open.take() {
+                project_runnable_component(&mut comp);
                 include_queue_multiline_items(source, &mut comp, line_start, &ranges);
                 out.push(comp);
             }
@@ -950,7 +976,9 @@ pub fn components(source: &str) -> Vec<Component> {
         {
             comp.items
                 .push(parse_item(item_content, line_start, offset));
-            if comp.name == "queue" && queue_item_accepts_continuation(item_content) {
+            if is_runnable_component(&comp.name)
+                && queue_item_accepts_continuation(item_content)
+            {
                 // `item_content` is a suffix slice of `content`, which starts at
                 // `line_start`.
                 continuable_item = Some((
@@ -961,6 +989,7 @@ pub fn components(source: &str) -> Vec<Component> {
         }
     }
     if let Some(mut comp) = open.take() {
+        project_runnable_component(&mut comp);
         include_queue_multiline_items(source, &mut comp, source.len(), &ranges);
         out.push(comp);
     }
@@ -1035,6 +1064,24 @@ trailing residue
         assert!(!queue.items[3].text.contains("beta"));
         assert!(queue.items[4].struck);
         assert!(!queue.items[4].text.contains("residue"));
+    }
+
+    #[test]
+    fn loop_and_run_components_project_to_queue_items_after_exact_marker_matching() {
+        for (name, attrs) in [("loop", "interval=5m"), ("run", "loop interval=5m")] {
+            let doc = format!(
+                "<!-- agent:{name} {attrs} -->\n- first\n  continuation\n<!-- /agent:{name} -->\n"
+            );
+            let parsed = components(&doc);
+            assert_eq!(parsed.len(), 1, "{name}");
+            assert_eq!(parsed[0].name, "queue", "{name}");
+            assert!(parsed[0].attrs.split_whitespace().any(|attr| attr == "loop"));
+            assert_eq!(parsed[0].items.len(), 1, "{name}");
+            assert_eq!(parsed[0].items[0].text, "first\n  continuation", "{name}");
+        }
+
+        let mismatched = "<!-- agent:loop -->\n- first\n<!-- /agent:run -->\n";
+        assert_ne!(components(mismatched)[0].end_byte, mismatched.len());
     }
 
     #[test]

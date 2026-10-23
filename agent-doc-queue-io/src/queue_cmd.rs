@@ -1173,6 +1173,38 @@ mod tests {
     }
 
     #[test]
+    fn claim_controller_repairs_torn_duplicate_owner_before_projection_guard() {
+        let dir = tempfile::tempdir().unwrap();
+        let torn_item = "Several of this queue's items were in a ❔ state. Now the incorrect 📥 state. They should be in the ☑️ state. Fix agent-doc causes.";
+        let next_item = "sdk demo follow-up";
+        let body = format!(
+            "- 🟡 [#subagent:queue-state-fix#3] [#subagent:queue-state-fix#3📥 {torn_item}\n- 📥 {next_item}\n"
+        );
+        let doc = write_claim_projection_doc(dir.path(), &body);
+        crate::queue_claim::claim(&doc, next_item, "subagent:sdk-demo", 600).unwrap();
+
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let projection = derive_claim_runtime_projection(&doc, &current, None)
+            .expect("controller projection must repair the proven torn duplicate owner");
+
+        assert!(projection.changed);
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 📥 {torn_item}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 🟡 [#subagent:sdk-demo#1] {next_item}\n")),
+            "{}",
+            projection.target_content
+        );
+    }
+
+    #[test]
     fn claim_start_report_and_release_project_the_complete_visible_lifecycle() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_claim_projection_doc(

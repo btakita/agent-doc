@@ -90,8 +90,15 @@ the backend logs `frontend layout publisher unavailable` with
 `readiness_reason=frontend_authority_absent_or_generation_mismatched`,
 `geometry_reason=flat_evidence_has_no_column_geometry`, and the two-sided
 same-version install/restart remedy; route failures surface the same actionable
-reason. This is a distribution/readiness fault, not geometry the backend may
-reconstruct and not a transient that retrying can repair. The backend still
+reason. When the frontend module is absent, this is a distribution/readiness
+fault, not geometry the backend may reconstruct and not a transient that
+retrying can repair. When both modules are loaded but the backend project is
+not resolvable during frontend startup, the lease flow completes without
+authority; the frontend retries that normal empty completion with bounded
+1–30 second backoff. The client and backend logs then pair
+`frontend/backend ingress completed` with either `ingress deferred` or
+`ingress accepted`, so a transport/module fault is distinguishable from the
+transient project-registration race. The backend still
 observes remote-client selection changes (Remote Dev `CONTROLLER` and Code With Me
 `GUEST` sessions; GH #262) while no frontend snapshot has been accepted, so
 focus for an already-live main-layout document continues for diagnostic/local

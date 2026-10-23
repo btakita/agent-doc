@@ -17,6 +17,17 @@ class FrontendSurfaceCollectorTest {
     }
 
     @Test
+    fun emptyIngressCompletionRetriesWithBoundedBackoff() {
+        assertEquals(1_000L, frontendIngressRetryDelayMillis(0))
+        assertEquals(2_000L, frontendIngressRetryDelayMillis(1))
+        assertEquals(4_000L, frontendIngressRetryDelayMillis(2))
+        assertEquals(16_000L, frontendIngressRetryDelayMillis(4))
+        assertEquals(30_000L, frontendIngressRetryDelayMillis(5))
+        assertEquals(30_000L, frontendIngressRetryDelayMillis(100))
+        assertEquals(1_000L, frontendIngressRetryDelayMillis(-1))
+    }
+
+    @Test
     fun terminalCommandUsesOnlyControllerProvidedSession() {
         assertEquals(
             listOf("tmux", "attach-session", "-t", "agent-doc-view-bound"),

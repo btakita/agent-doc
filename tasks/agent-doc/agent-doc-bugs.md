@@ -195,6 +195,22 @@ Fixed and shipped in v0.35.548. Grok now uses native background subagents for qu
 No new code is needed; this was a stale duplicate incident class. Existing fix `d1424feed1 fix(jetbrains): pause ambiguous attach retries` is an ancestor of current `main` at `9e366edd73`. It converts ambiguous retained/reregister projection into an operator-evidence hold, suppresses unsafe retry/refresh behavior, and safely releases authority when the refused editor closes.
 
 Fresh current-main validation passed: `agent-doc-editor-surface` completed with zero failures, `AttachFailureDiagnosisTest` passed 9/9, and `RetainedCanonicalOperatorTextTest` passed 32/32. The isolated worktree is clean; no duplicate commit or follow-up queue item was created.
+
+### Re: recovered response
+
+Implemented and pushed to `main` at `9e366edd73`.
+
+It adds:
+
+- Independent stable channels for GNU Linux, musl Linux, and macOS targets.
+- Early promotion once the target archive and compatible plugins are ready.
+- Checksummed manifests, editor-package coupling, TOCTOU protection, and explicit rollback.
+- Backward-compatible global stable behavior for older clients.
+- Windows readiness metadata; Windows CLI self-upgrade remains manual pending safe executable replacement.
+
+Validation passed: full `make check`, `make check-fast`, Actionlint/ShellCheck, publisher self-test, 27 upgrade tests, and integration tests.
+
+v0.35.548 is fully released, but this feature landed afterward. Your Coder can upgrade to 0.35.548 now; per-target upgrading will activate after the next release containing this resolver. Main CI is still running at handoff.
 <!-- agent:boundary:1d86f43f -->
 <!-- /agent:exchange -->
 

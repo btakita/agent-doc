@@ -2440,6 +2440,7 @@ mod tests {
         let _ = super::drain_open_closeout_before_routed_dispatch(
             &doc,
             super::route_closeout_drain_effects(super::route_repair_closeout),
+            || false,
         );
 
         let after = std::fs::read_to_string(&doc).unwrap();
@@ -2482,6 +2483,7 @@ mod tests {
         let outcome = super::drain_open_closeout_before_routed_dispatch(
             &doc,
             super::route_closeout_drain_effects(super::route_repair_closeout),
+            || false,
         )
         .unwrap();
 
@@ -2498,6 +2500,38 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    /// Grok cannot always publish a hook/transcript turn-end receipt after the
+    /// operator interrupts and clears the conversation. When route proves the
+    /// exact pane remains at an empty ready composer across two captures, the
+    /// drain must consult the dedicated reclaim effect before its 30s wait.
+    #[test]
+    fn drain_reclaims_fresh_empty_preflight_from_stable_dispatch_ready_pane() {
+        use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("drain-grok-cleared-preflight.md");
+        let content = "---\nagent_doc_session: test\n---\n\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let mut effects = super::route_closeout_drain_effects(super::route_repair_closeout);
+        effects.cancel_empty_preflight = |_| Ok(false);
+        effects.cancel_empty_preflight_after_stable_dispatch_ready_pane = |_| Ok(true);
+        effects.repair_closeout = |_| panic!("stable pane proof must recover before repair");
+        effects.await_closeout_projection =
+            |_, _, _| panic!("stable pane proof must recover before the 30s projection wait");
+
+        let outcome =
+            super::drain_open_closeout_before_routed_dispatch(&doc, effects, || true).unwrap();
+        assert_eq!(
+            outcome,
+            DrainOutcome::Recovered(
+                "empty_preflight_cancelled_after_stable_dispatch_ready_pane".to_string()
+            )
+        );
     }
 
     /// GH #228: the 2026-10-09 timeline. A live turn opened an empty
@@ -2560,7 +2594,8 @@ mod tests {
         let mut effects = super::route_closeout_drain_effects(super::route_repair_closeout);
         // 21:42:32 in the trace: the projection wait reported OwnerReleased.
         effects.await_closeout_projection = |_, _, _| Ok(CloseoutCycleWaitOutcome::OwnerReleased);
-        let outcome = super::drain_open_closeout_before_routed_dispatch(&doc, effects).unwrap();
+        let outcome =
+            super::drain_open_closeout_before_routed_dispatch(&doc, effects, || false).unwrap();
 
         let DrainOutcome::Blocked { reason, context } = outcome else {
             panic!("a live turn's open cycle must block the route: {outcome:?}");
@@ -2624,7 +2659,8 @@ mod tests {
         let mut effects = super::route_closeout_drain_effects(super::route_repair_closeout);
         effects.await_closeout_projection =
             |_, _, _| panic!("an unlandable capture must not wait on the closeout projection");
-        let outcome = super::drain_open_closeout_before_routed_dispatch(&doc, effects).unwrap();
+        let outcome =
+            super::drain_open_closeout_before_routed_dispatch(&doc, effects, || false).unwrap();
 
         let DrainOutcome::Unlandable(report) = outcome else {
             panic!("expected Unlandable, got {outcome:?}");
@@ -2751,6 +2787,7 @@ mod tests {
             ReopenMode::DispatchOnly,
             AuthoritativeActorDispatchIntent::PlainTrigger,
             super::route_closeout_drain_effects(super::route_repair_closeout),
+            || false,
         )
         .unwrap();
         assert!(

@@ -71,6 +71,13 @@ pub enum EmptyPreflightCancelAuthority {
     /// both halves together prove the cycle is orphaned without waiting out the
     /// stall deadline. See [`harness_turn_end_proves_orphaned_preflight`].
     HarnessTurnEnded,
+    /// The authoritative route observed the exact bound pane at a structurally
+    /// empty dispatch-ready composer across two captures, while the turn fence
+    /// reports no live lease. This covers harnesses such as Grok whose manual
+    /// interrupt + `/clear` transition is visible in the pane but cannot emit a
+    /// hook/transcript turn-end receipt. The controller still applies the
+    /// terminal cycle + actor + inactive-turn fence atomically.
+    StableDispatchReadyPane,
 }
 
 /// `#runctrlclaude`: does a harness turn-end receipt prove an empty
@@ -128,7 +135,10 @@ impl EmptyPreflightCancelAuthority {
     /// Whether the reclaim must read the authoritative actor's turn fence and
     /// abandon only while that fence is unchanged.
     pub const fn requires_turn_fence(self) -> bool {
-        matches!(self, Self::OwnerReleased | Self::HarnessTurnEnded)
+        matches!(
+            self,
+            Self::OwnerReleased | Self::HarnessTurnEnded | Self::StableDispatchReadyPane
+        )
     }
 
     /// Ops-log token naming which proof was (or was not) carried.
@@ -138,6 +148,7 @@ impl EmptyPreflightCancelAuthority {
             Self::RunCancelled => "run_cancelled",
             Self::OwnerReleased => "owner_released",
             Self::HarnessTurnEnded => "harness_turn_ended",
+            Self::StableDispatchReadyPane => "stable_dispatch_ready_pane",
         }
     }
 }
@@ -279,6 +290,15 @@ mod tests {
         assert!(!EmptyPreflightCancelAuthority::Unproven.requires_turn_fence());
     }
 
+    #[test]
+    fn stable_dispatch_ready_pane_authority_needs_a_fence_but_not_a_receipt_or_stall() {
+        let authority = EmptyPreflightCancelAuthority::StableDispatchReadyPane;
+        assert!(authority.authorizes_cancel());
+        assert!(authority.requires_turn_fence());
+        assert!(!authority.requires_harness_turn_end());
+        assert!(!authority.requires_stalled_cycle());
+    }
+
     /// `#runctrlclaude` truth table. The only authorizing row is: no live
     /// lease AND a receipt strictly newer than the cycle's last (re)entry.
     #[test]
@@ -326,6 +346,7 @@ mod tests {
             EmptyPreflightCancelAuthority::RunCancelled.proof(),
             EmptyPreflightCancelAuthority::OwnerReleased.proof(),
             EmptyPreflightCancelAuthority::HarnessTurnEnded.proof(),
+            EmptyPreflightCancelAuthority::StableDispatchReadyPane.proof(),
         ];
 
         assert_eq!(

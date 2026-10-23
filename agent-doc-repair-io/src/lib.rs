@@ -3114,6 +3114,24 @@ pub fn cancel_preflight_cycle_after_harness_turn_end(
     )
 }
 
+/// Reclaim a fresh empty preflight after the authoritative route observed the
+/// exact bound pane at an empty dispatch-ready composer across two captures.
+///
+/// This proof is used when the harness cannot publish a turn-end receipt for a
+/// manual interrupt + clear transition. It still reads the authoritative turn
+/// fence, refuses a live lease, and abandons only while the controller can
+/// atomically prove the cycle and actor binding have not changed.
+pub fn cancel_preflight_cycle_after_stable_dispatch_ready_pane(
+    effects: &impl RepairIoEffects,
+    file: &Path,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    cancel_preflight_cycle_with_authority(
+        effects,
+        file,
+        agent_doc_turn::repair::EmptyPreflightCancelAuthority::StableDispatchReadyPane,
+    )
+}
+
 /// Reclaim the empty preflight left behind by an owner the controller proved
 /// RELEASED the cycle.
 ///
@@ -4971,6 +4989,38 @@ mod tests {
             "{log}"
         );
         assert!(log.contains("proof=harness_turn_ended"), "{log}");
+    }
+
+    /// Grok's passive lifecycle cannot always publish a `/clear` turn-end
+    /// receipt. Stable structural pane readiness is an independent proof, but
+    /// the authoritative turn fence still vetoes a live lease.
+    #[test]
+    fn stable_dispatch_ready_pane_reclaims_fresh_empty_preflight_without_receipt() {
+        let (dir, doc, cycle) = fresh_empty_preflight_world();
+        let effects = TestRepairIoEffects::default();
+
+        effects.preflight_turn_active.set(true);
+        assert_eq!(
+            cancel_preflight_cycle_after_stable_dispatch_ready_pane(&effects, &doc).unwrap(),
+            agent_doc_turn::repair::CancelOutcome::Protected,
+            "direct pane readiness cannot overtake a live authoritative lease"
+        );
+        assert_eq!(effects.abandoned_calls.get(), 0);
+
+        effects.preflight_turn_active.set(false);
+        assert_eq!(
+            cancel_preflight_cycle_after_stable_dispatch_ready_pane(&effects, &doc).unwrap(),
+            agent_doc_turn::repair::CancelOutcome::Abandoned,
+        );
+        assert_eq!(effects.abandoned_calls.get(), 1);
+        let after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(
+            !after.is_open(),
+            "the pane-proven orphan is closed: {after:?}"
+        );
+        assert_eq!(after.cycle_id, cycle.cycle_id);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("proof=stable_dispatch_ready_pane"), "{log}");
     }
 
     /// `#runctrlclaude`: a turn that RE-ENTERED the open cycle after the

@@ -25,6 +25,9 @@ pub struct RouteCloseoutDrainEffects {
     pub force_disk_route_writes: fn() -> bool,
     pub run_pending_maintenance: fn(&Path, bool) -> Result<()>,
     pub cancel_empty_preflight: fn(&Path) -> Result<bool>,
+    /// Reclaim an empty preflight after route observed the authoritative pane
+    /// at a structurally empty dispatch-ready composer across two captures.
+    pub cancel_empty_preflight_after_stable_dispatch_ready_pane: fn(&Path) -> Result<bool>,
     /// `#duplicatepreflightunblock`: reclaim an empty preflight once the
     /// controller projection has PROVEN the owning actor released the cycle.
     /// `cancel_empty_preflight` above carries no such proof, so it refuses by
@@ -91,6 +94,7 @@ fn project_closeout_recovery_effects(
 pub fn drain_open_closeout_before_routed_dispatch(
     file: &Path,
     effects: RouteCloseoutDrainEffects,
+    stable_dispatch_ready_pane: impl FnOnce() -> bool,
 ) -> Result<RouteCloseoutDrainOutcome> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
@@ -114,6 +118,22 @@ pub fn drain_open_closeout_before_routed_dispatch(
             file,
             &format!(
                 "route_dispatch_drain_empty_preflight_cancelled file={} cycle_id={}",
+                file.display(),
+                state.cycle_id,
+            ),
+        );
+        return Ok(RouteCloseoutDrainOutcome::Recovered(label));
+    }
+    if cycle.is_empty_preflight()
+        && state.tracked_work_maintenance_required_at_preflight != Some(true)
+        && stable_dispatch_ready_pane()
+        && (effects.cancel_empty_preflight_after_stable_dispatch_ready_pane)(file)?
+    {
+        let label = "empty_preflight_cancelled_after_stable_dispatch_ready_pane".to_string();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_drain_empty_preflight_cancelled_after_stable_dispatch_ready_pane file={} cycle_id={}",
                 file.display(),
                 state.cycle_id,
             ),
@@ -281,10 +301,11 @@ pub fn apply_routed_dispatch_closeout_policy(
     mode: ReopenMode,
     intent: AuthoritativeActorDispatchIntent,
     effects: RouteCloseoutDrainEffects,
+    stable_dispatch_ready_pane: impl FnOnce() -> bool,
 ) -> Result<RouteCloseoutDrainOutcome> {
     match classify_route_closeout_drain_policy(mode, intent) {
         RouteCloseoutDrainPolicy::DrainBeforeDispatch => {
-            drain_open_closeout_before_routed_dispatch(file, effects)
+            drain_open_closeout_before_routed_dispatch(file, effects, stable_dispatch_ready_pane)
         }
     }
 }
@@ -347,6 +368,7 @@ mod tests {
             force_disk_route_writes: || false,
             run_pending_maintenance: |_, _| Ok(()),
             cancel_empty_preflight: |_| Ok(false),
+            cancel_empty_preflight_after_stable_dispatch_ready_pane: |_| Ok(false),
             cancel_empty_preflight_after_owner_release: |_| Ok(false),
             repair_closeout: |_| Ok(String::new()),
             inspect_session: |_| Ok(SessionCheckStatus::Ok("stub".to_string())),

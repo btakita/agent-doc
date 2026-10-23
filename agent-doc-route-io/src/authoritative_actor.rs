@@ -880,6 +880,23 @@ pub fn current_generation_ready_prompt_proven(
     )
 }
 
+/// Direct structural proof that the exact authoritative pane currently shows
+/// an empty dispatch-ready composer. Unlike
+/// [`current_generation_ready_prompt_proven`], this never falls back to a
+/// prior actor transition: callers that use the observation as closeout
+/// recovery authority need current pane evidence.
+pub fn current_pane_ready_prompt_proven(
+    tmux: &Tmux,
+    target: &AuthoritativeActorDispatchTarget,
+    harness: &HarnessConfig,
+) -> bool {
+    agent_doc_tmux_io::capture_pane(tmux, &target.record.pane_id)
+        .ok()
+        .is_some_and(|content| {
+            pane_ready_prompt_candidate(tmux, &target.record.pane_id, &content, harness).is_some()
+        })
+}
+
 /// Outcome of a route-side controller dispatch authorization.
 ///
 /// `#qflood2`: a benign in-flight coalesce (an identical dispatch for this cycle is

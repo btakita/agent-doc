@@ -38,7 +38,8 @@ use crate::authoritative_actor::{
     AuthoritativeActorDispatchTarget, PendingHarnessSwitch, RouteDispatchAuthorization,
     actor_dispatch_state, authoritative_actor_dispatch_recovery_hint,
     authorize_controller_dispatch, current_generation_ready_prompt_proven,
-    load_authoritative_actor_binding, promote_starting_authoritative_actor_if_dispatch_ready,
+    current_pane_ready_prompt_proven, load_authoritative_actor_binding,
+    promote_starting_authoritative_actor_if_dispatch_ready,
     recover_starting_timeout_blocked_actor_if_dispatch_ready, route_dispatch_deduped_pane,
     wait_for_authoritative_actor_ready,
 };
@@ -85,6 +86,19 @@ fn confirm_pane_still_idle(tmux: &Tmux, pane: &str, harness: &HarnessConfig) -> 
         Ok(content) => !harness.has_busy_cue(&content),
         Err(_) => false,
     }
+}
+
+/// Re-capture the authoritative pane after the same torn-frame guard interval
+/// and require the full empty-composer projection again. Closeout recovery
+/// needs stronger evidence than stale-busy promotion: a draft or unknown idle
+/// screen on the second frame must not authorize abandoning a cycle.
+fn confirm_pane_still_dispatch_ready(
+    tmux: &Tmux,
+    actor: &AuthoritativeActorDispatchTarget,
+    harness: &HarnessConfig,
+) -> bool {
+    std::thread::sleep(Duration::from_millis(250));
+    current_pane_ready_prompt_proven(tmux, actor, harness)
 }
 
 fn detect_active_queue_continuation(
@@ -328,12 +342,21 @@ pub fn route_via_authoritative_actor(
     if let Some(pending) = actor.pending_harness_switch.as_ref() {
         return accept_pending_harness_switch(tmux, file, &actor, pending);
     }
+    let closeout_harness = actor_transport_harness(&actor.record.harness);
     let closeout_drain = agent_doc_tmux_io::with_current_pane_id_override(&dispatch_pane, || {
         apply_routed_dispatch_closeout_policy(
             file,
             reopen_mode,
             dispatch_intent,
             effects.closeout_drain_effects,
+            || {
+                // Grok's passive lifecycle cannot always publish a turn-end
+                // receipt after a manual interrupt + `/clear`. Require current
+                // structural readiness across two captures before offering
+                // pane state as closeout recovery authority.
+                current_pane_ready_prompt_proven(tmux, &actor, &closeout_harness)
+                    && confirm_pane_still_dispatch_ready(tmux, &actor, &closeout_harness)
+            },
         )
     })?;
     match closeout_drain {

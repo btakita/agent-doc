@@ -461,9 +461,17 @@ replacement slot for focus escalation or explicit routing (GH #322; see
 `07-session-tmux-commands.md`). A foreground `Run Agent Doc` `ensure` request
 with unknown Remote Dev geometry may use a positive live-tmux observation only
 to prove that its target document already has a pane, in which case dispatch is
-focus-only. Equal observed and requested widths do not prove editor membership
-or left-to-right assignment, so a one-for-one or complete-width replacement is
-still refused rather than filling tmux slots from an unordered visible set.
+focus-only. If the controller's actor projection instead proves a live target
+pane outside the visible layout, route skips the structural publication and
+delivers to that exact pane under `background_existing_pane_only`: pane
+resolution re-proves ownership/liveness, stash rescue and focus stay disabled,
+and the visible layout remains unchanged. This prevents a missing frontend
+publisher from turning an already-running target into an avoidable route
+failure without promoting tmux observation to editor authority. A target with
+no proven pane still fails closed. Equal observed and requested widths do not
+prove editor membership or left-to-right assignment, so a one-for-one or
+complete-width replacement is still refused rather than filling tmux slots
+from an unordered visible set.
 Manual `Sync Tmux Layout` likewise refuses unknown geometry with `surface_reference_unknown_layout`
 and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence.
 That flat evidence is the causal boundary from GH #360: the backend knew only an

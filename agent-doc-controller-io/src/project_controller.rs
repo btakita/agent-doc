@@ -140,9 +140,11 @@ pub struct ControllerEditorRouteInvocation {
     /// lookup. Targeted controller recovery already owns a proven pane and
     /// must not mutate unrelated sessions.
     pub prune_before_lookup: bool,
-    /// Background recovery is restricted to the already-proven pane and must
-    /// preserve the operator's current tmux client/window/pane focus. It may not
-    /// rescue a stash pane, select an alternate pane, or auto-start a new pane.
+    /// A topology-neutral route is restricted to the already-proven pane and
+    /// must preserve the operator's current tmux client/window/pane focus. This
+    /// covers controller background recovery and a flat-evidence editor route
+    /// to a parked live actor (GH #360). It may not rescue a stash pane, select
+    /// an alternate pane, or auto-start a new pane.
     pub background_existing_pane_only: bool,
     /// A prior orphan-drain attempt already yielded to a supervisor that
     /// recovered after the controller sweep. The next attempt may use the

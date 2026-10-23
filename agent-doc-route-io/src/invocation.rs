@@ -17,11 +17,13 @@ thread_local! {
     static WAIT_FOR_READY_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
     /// Per-invocation flag forcing route-owned document mutations to disk.
     static FORCE_DISK_ROUTE_WRITES: Cell<bool> = const { Cell::new(false) };
-    /// Controller background recovery may only submit to its already-proven pane.
+    /// A topology-neutral route may only submit to its already-proven pane.
     ///
     /// It must never rescue a stashed pane into the visible layout, select an
-    /// alternate pane, or cold-start a replacement. Foreground editor routes
-    /// leave this false and retain the normal routing behavior.
+    /// alternate pane, or cold-start a replacement. In addition to controller
+    /// recovery, a foreground editor route uses this when flat Remote Dev
+    /// evidence can prove an existing parked actor but no editor structure
+    /// (GH #360).
     static BACKGROUND_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
     /// This background route is the bounded retry after a recovered supervisor
     /// failed to drain during the preceding orphan-dispatch backoff interval.

@@ -10795,6 +10795,81 @@ fn editor_route_other_lane_pane(
     }
 }
 
+/// A flat Remote Dev route can still deliver to a proven existing actor pane
+/// without claiming any editor-layout authority.
+///
+/// GH #360 removed the unsafe same-width replacement fallback: an unordered
+/// visible-document set plus tmux width proves neither membership nor order.
+/// That safety boundary must not turn a parked, already-owned target into an
+/// avoidable route failure, though. When the target's actor pane is live but is
+/// outside the requesting lane's visible window, route may preserve the window
+/// and dispatch to that pane in place. Pane resolution re-proves ownership at
+/// the delivery edge through `background_existing_pane_only`; this observation
+/// only selects that existing fail-closed route policy.
+fn flat_route_background_pane(
+    column_order: agent_doc_tmux::LayoutColumnOrder,
+    actor_pane: Option<&str>,
+    pane_window: Option<&str>,
+    layout_window: Option<&str>,
+) -> Option<String> {
+    if column_order == agent_doc_tmux::LayoutColumnOrder::Editor {
+        return None;
+    }
+    let pane = actor_pane.map(str::trim).filter(|pane| !pane.is_empty())?;
+    let pane_window = pane_window
+        .map(str::trim)
+        .filter(|window| !window.is_empty())?;
+    if layout_window.is_some_and(|window| window == pane_window) {
+        return None;
+    }
+    Some(pane.to_string())
+}
+
+fn editor_route_flat_background_pane(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    routed_document: &Path,
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+    tmux: &tmux_router::Tmux,
+) -> Option<String> {
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &routed_document.to_string_lossy(),
+    );
+    let actor_pane = runtime
+        .actor_store_snapshot()
+        .get(&document_id)
+        .filter(|record| record.state != agent_doc_controller::actor::ActorState::Closed)
+        .map(|record| record.pane_id.as_str())
+        .map(str::to_string);
+    let pane_window = actor_pane
+        .as_deref()
+        .and_then(|pane| tmux.pane_window(pane).ok());
+    let lane_session = (!lane.is_shared())
+        .then(|| {
+            navigation_lane_sessions(
+                &bootstrap.project_root,
+                runtime.editor_surface_graph.navigation_mode(),
+                lane,
+            )
+            .map(|(_, lane_session)| lane_session)
+        })
+        .flatten();
+    let layout_window = pane_layout_target_window_id_for_lane(
+        &bootstrap.project_root,
+        tmux,
+        invocation.window.as_deref(),
+        lane_session.as_deref(),
+    );
+    flat_route_background_pane(
+        invocation.column_order,
+        actor_pane.as_deref(),
+        pane_window.as_deref(),
+        layout_window.as_deref(),
+    )
+}
+
 fn handle_crdt_current_text_rpc(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
@@ -12185,59 +12260,86 @@ fn handle_editor_route_rpc_with_layout_delegate(
     // every frame it projects. Publishing would wait on a frame that can never
     // show the document; dispatch into the pane where it lives instead (its
     // single live owner: no second harness, no pane move) and say where it is.
+    let configured_tmux = live_tmux.is_none().then(agent_doc_tmux_io::configured_tmux);
+    let route_tmux = live_tmux
+        .or(configured_tmux.as_ref())
+        .expect("a configured tmux is present when no test tmux was injected");
     let other_lane =
         editor_route_other_lane_pane(bootstrap, runtime, &route_lane, &canonical, |pane| {
-            match live_tmux {
-                Some(tmux) => tmux.pane_session(pane).ok(),
-                None => agent_doc_tmux_io::configured_tmux().pane_session(pane).ok(),
-            }
+            route_tmux.pane_session(pane).ok()
         });
-    let mut route_layout_lease = match &other_lane {
-        Some(other) => {
-            agent_doc_ops_log_io::log_op(
+    let flat_background_pane = other_lane
+        .is_none()
+        .then(|| {
+            editor_route_flat_background_pane(
+                bootstrap,
+                runtime,
+                &route_lane,
                 &canonical,
-                &format!(
-                    "controller_editor_route_owned_by_other_lane file={} navigation_lane={} owner_lane={} owner_session={} pane={} outcome=dispatched_in_other_lane layout=unpublished",
-                    canonical.display(),
-                    route_lane.label(),
-                    other.owner_lane,
-                    other.owner_session,
-                    other.pane,
-                ),
-            );
-            None
-        }
-        None => {
-            let (layout_receipt, layout_observations, route_layout_lease) =
-                route_editor_layout_with_owner(
-                    bootstrap,
-                    runtime,
-                    &route_lane,
-                    &canonical,
-                    &routed_document,
-                    layout_invocation,
-                    payload.layout_mode.as_deref(),
-                    route_deadline,
-                    live_tmux,
-                    delegate_layout,
-                )?;
-            agent_doc_ops_log_io::log_op(
+                &layout_invocation,
+                route_tmux,
+            )
+        })
+        .flatten();
+    let mut route_layout_lease = if let Some(other) = &other_lane {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_owned_by_other_lane file={} navigation_lane={} owner_lane={} owner_session={} pane={} outcome=dispatched_in_other_lane layout=unpublished",
+                canonical.display(),
+                route_lane.label(),
+                other.owner_lane,
+                other.owner_session,
+                other.pane,
+            ),
+        );
+        None
+    } else if let Some(pane) = flat_background_pane.as_deref() {
+        // GH #360 prevention: the target already has a proven live owner,
+        // so missing frontend geometry does not need to become either a
+        // guessed structural replacement or a failed Run action. Preserve
+        // the visible layout and let the route layer re-prove this exact
+        // pane before delivering in place.
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_layout_deferred file={} reason=flat_evidence_target_outside_visible_layout action=dispatch_background_existing_pane pane={} navigation_lane={} focus_effect=preserved pane_effect=none",
+                canonical.display(),
+                pane,
+                route_lane.label(),
+            ),
+        );
+        None
+    } else {
+        let (layout_receipt, layout_observations, route_layout_lease) =
+            route_editor_layout_with_owner(
+                bootstrap,
+                runtime,
+                &route_lane,
                 &canonical,
-                &format!(
-                    "controller_editor_route_layout_converged file={} columns={} focus={} reason={} observations={} wait_for_ready_secs={} harness_ready_secs={}",
-                    canonical.display(),
-                    layout_receipt.columns.len(),
-                    layout_receipt.focus.as_deref().unwrap_or("none"),
-                    layout_receipt.reason,
-                    layout_observations,
-                    wait_secs,
-                    route_deadline
-                        .saturating_duration_since(Instant::now())
-                        .as_secs(),
-                ),
-            );
-            route_layout_lease
-        }
+                &routed_document,
+                layout_invocation,
+                payload.layout_mode.as_deref(),
+                route_deadline,
+                live_tmux,
+                delegate_layout,
+            )?;
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_layout_converged file={} columns={} focus={} reason={} observations={} wait_for_ready_secs={} harness_ready_secs={}",
+                canonical.display(),
+                layout_receipt.columns.len(),
+                layout_receipt.focus.as_deref().unwrap_or("none"),
+                layout_receipt.reason,
+                layout_observations,
+                wait_secs,
+                route_deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_secs(),
+            ),
+        );
+        route_layout_lease
     };
     let harness_ready_secs = route_deadline
         .saturating_duration_since(Instant::now())
@@ -12263,7 +12365,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
         effects.run_editor_route(ControllerEditorRouteInvocation {
             file: canonical.clone(),
             relative_path: relative_path.clone(),
-            pane: None,
+            pane: flat_background_pane.clone(),
             layout_args,
             dispatch_only: payload.dispatch_only.unwrap_or(true),
             plain_trigger: payload.plain_trigger.unwrap_or(true),
@@ -12271,14 +12373,14 @@ fn handle_editor_route_rpc_with_layout_delegate(
             wait_for_ready_secs: Some(harness_ready_secs),
             force_disk: payload.force_disk.unwrap_or(false),
             prune_before_lookup: true,
-            background_existing_pane_only: false,
+            background_existing_pane_only: flat_background_pane.is_some(),
             background_recovered_actor_fallback: false,
             // An editor Run Agent Doc is operator-initiated.
             dispatch_origin:
                 agent_doc_controller::dispatch::AuthoritativeActorDispatchOrigin::Operator,
             // `#routelaterescue`: the layout above already converged; from here the
             // layout plane is the only topology writer for this route.
-            layout_owned_by_controller: true,
+            layout_owned_by_controller: flat_background_pane.is_none(),
             // P6: a pane this route starts lives in the requester's lane session.
             navigation_client_id: (!route_lane.is_shared())
                 .then(|| payload.client_id.clone())
@@ -48325,6 +48427,50 @@ mod tests {
             ),
             "{}",
             fixture.ops_log()
+        );
+    }
+
+    /// GH #360 follow-up: flat evidence does not need to become a failure when
+    /// the target already has a live owner outside the visible layout. The
+    /// route can deliver there without publishing or focusing any structure.
+    #[test]
+    fn gh360_flat_route_uses_a_parked_actor_without_entering_structural_failure() {
+        let unknown = agent_doc_tmux::LayoutColumnOrder::Unknown;
+        assert_eq!(
+            flat_route_background_pane(unknown, Some("%42"), Some("@stash"), Some("@agent-doc"),),
+            Some("%42".to_string()),
+            "a proven off-layout owner can receive the route without changing topology",
+        );
+        assert_eq!(
+            flat_route_background_pane(unknown, Some("%42"), Some("@stash"), None),
+            Some("%42".to_string()),
+            "a missing visible target window does not invalidate the live background owner",
+        );
+
+        assert_eq!(
+            flat_route_background_pane(
+                unknown,
+                Some("%42"),
+                Some("@agent-doc"),
+                Some("@agent-doc"),
+            ),
+            None,
+            "a co-visible pane keeps the ordinary focus-only route",
+        );
+        assert_eq!(
+            flat_route_background_pane(
+                agent_doc_tmux::LayoutColumnOrder::Editor,
+                Some("%42"),
+                Some("@stash"),
+                Some("@agent-doc"),
+            ),
+            None,
+            "positive editor geometry keeps foreground structural routing",
+        );
+        assert_eq!(
+            flat_route_background_pane(unknown, None, None, Some("@agent-doc")),
+            None,
+            "a pane-less target still fails closed instead of being invented",
         );
     }
 

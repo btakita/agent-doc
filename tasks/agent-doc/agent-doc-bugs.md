@@ -24,7 +24,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 19 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -187,6 +187,14 @@ Fixed and shipped in v0.35.548. Editing a claimed queue row preserves its owner 
 > **Queue prompt:** grok does not seem to run subagents in the queue. Make grok use subagents when `subagents` attribute is set. See the sdk-demo.md session. I had to manually prompt Grok to run subagents for each queue item.
 
 Fixed and shipped in v0.35.548. Grok now uses native background subagents for queue dispatch when `subagents`/fan-out is configured, then generation-fenced starts the exact claims without requiring manual prompts.
+
+### Re: Ambiguous retained projection repair verification
+
+> **Queue prompt:** fix: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+
+No new code is needed; this was a stale duplicate incident class. Existing fix `d1424feed1 fix(jetbrains): pause ambiguous attach retries` is an ancestor of current `main` at `9e366edd73`. It converts ambiguous retained/reregister projection into an operator-evidence hold, suppresses unsafe retry/refresh behavior, and safely releases authority when the refused editor closes.
+
+Fresh current-main validation passed: `agent-doc-editor-surface` completed with zero failures, `AttachFailureDiagnosisTest` passed 9/9, and `RetainedCanonicalOperatorTextTest` passed 32/32. The isolated worktree is clean; no duplicate commit or follow-up queue item was created.
 <!-- agent:boundary:1d86f43f -->
 <!-- /agent:exchange -->
 
@@ -217,7 +225,7 @@ Fixed and shipped in v0.35.548. Grok now uses native background subagents for qu
 - ☑️ [#subagent:gh369-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/369
 - ☑️ [#subagent:gh370-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/370
 - ☑️ [#subagent:gh371-fix#1] #gh-fix https://github.com/btakita/agent-doc/issues/371
-- 📥 fix: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- ☑️ [#subagent:agent-doc-bugs-attach-repair#1] fix: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
 - ☑️ [#subagent:sdk-demo-reroute-recovery#1] In sdk-demo.md, I manually interrupted the Grok turn, ran `/clear`, then attempted to Run Agent Doc from the editor: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md could not be drained before reroute; nothing was dispatched and existing queue head "Unbind the \"s\" key to toggle \"Network Stats\". We are typing into chat and everytime \"s\" is pressed, the Network Stats is toggled." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md
 ---
 ☑️ [#subagent:in-turn-upgrade-answer#1] - From sdk-demo.md: Can we make agent-doc allow in-turn upgrades with the new contract? Would that require the agent to restart? Answer only: ```

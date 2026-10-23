@@ -336,7 +336,30 @@ So:
 “First publication” also does not mean Agent Doc's first historical GitHub release. It means its first version **on JetBrains Marketplace**. Therefore using the older signed 0.2.801 ZIP as a hidden bootstrap update remains appropriate; the current 0.2.806/0.2.807/0.2.808 versions remain available for the automated production upload afterward.
 
 JetBrains states both sides of this distinction: the [publishing guide](https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html) says the first plugin publication must be manual, while the [new-plugin guide](https://plugins.jetbrains.com/docs/marketplace/uploading-a-new-plugin.html) separately says authors who have never uploaded any plugin must also accept the agreement and create a vendor profile.
-<!-- agent:boundary:1e40f569:agent-doc-bugs -->
+> **Queue prompt:** After the idea plugin, the agent-doc Plugin formatting stopped working and the commands don't show up. The plugin manager says the Agent Doc plugin is incompatible.
+
+### Re: IDEA plugin compatibility restored — gpt-5 · 2026-10-23T19:10-04:00
+
+The cause is confirmed. The running IDE is IntelliJ IDEA build `IU-262.10968.63`, but its plugin directory contained Agent Doc `0.2.806`, the classic package whose compatibility stops at `261.*`. IDEA therefore refused to load it; `idea.log` states:
+
+```text
+Plugin 'Agent Doc' (com.github.btakita.agent-doc, version=0.2.806) requires IDE build 261.* or older, but the current build is IU-262.10968.63
+```
+
+That explains both symptoms: the Agent Doc formatting disappeared and its commands were not registered. It is a local package-range mismatch, not a general formatting regression.
+
+I installed the correct v0.35.548 package into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.2`:
+
+```text
+agent-doc-jetbrains-262-0.2.807.zip
+```
+
+The installer verified it against `EDITOR-PACKAGES.sha256`. Post-install checks now report Agent Doc `0.2.807`, and the installed `plugin.xml` declares exactly `since-build="262"` through `until-build="262.*"` under the same plugin ID.
+
+IDEA is still running, so the replacement package is staged rather than loaded. Save any unsaved files and restart IntelliJ IDEA once. After restart, verify that Agent Doc formatting returns and that its actions appear under Tools and the editor/project context menus. I did not restart IDEA automatically because doing so could discard live editor state.
+
+If this IDE is later used as one side of Remote Development, install the matching 0.2.807 package on both the Client/Gateway and backend; this local install updated only the named IDEA plugin directory. No repository source files changed in this cycle.
+<!-- agent:boundary:4528051c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -350,7 +373,7 @@ JetBrains states both sides of this distinction: the [publishing guide](https://
 
 <!-- agent:queue id=issues loop interval=1h priority -->
 - ~~do [#helpregisterjetbrains]~~
-- 📥 After the idea plugin, the agent-doc Plugin formatting stopped working and the commands don't show up. The plugin manager says the Agent Doc plugin is incompatible.
+- ~~After the idea plugin, the agent-doc Plugin formatting stopped working and the commands don't show up. The plugin manager says the Agent Doc plugin is incompatible.~~
 - Register agent-doc at https://plugins.jetbrains.com/plugin/add#intellij. Create a nice profile.
 - In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.
 <!-- /agent:queue -->

@@ -24,7 +24,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 22 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 26 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -347,7 +347,79 @@ No repair subagent was spawned because the conditional defect was not present. T
 Yes. **v0.35.546** is published as a normal, non-draft, non-prerelease [GitHub release](https://github.com/btakita/agent-doc/releases/tag/v0.35.546), published at 2026-10-23 05:23:26 UTC. The installed CLI is also 0.35.546, and `origin/main` is tagged `v0.35.546` at `3a1d3cb8dc`.
 
 The queued follow-up, v0.35.547, has not been published yet.
-<!-- agent:boundary:a23a3d5b -->
+
+### Re: Subagent completed: `subagent:completion-exchange` returned work for queue item “"Re: Subagent completed:" should immediately add the response into agent:exchange.” — agent-doc
+<!-- agent-doc-subagent-response sha256=0fc659c2f663ecd4a0aafeb182ac2bf04c7753be7357ba70fec7f146442115af -->
+> **Subagent response:**
+>
+> Implemented and pushed on branch fix/completion-exchange-20261023 at 4da4cd8ad50aecf05c0206f170b4b74c9e6096e4. Six focused contract tests passed; all 11,444 Rust tests passed. The remaining full-check failure was environmental at jetbrains-262-check because /tmp was full. No install, release, version bump, or tag was performed.
+<!-- agent-doc-subagent-completion key=0486ad9860e0dbd5d7d4fe16e88a5518ad8943bfd644fd7f3a935777ab386c8d -->
+
+### Re: Subagent completed: `subagent:release-publish` returned work for queue item “Automate publication of all three compatibility-ranged JetBrains updates to Marketplace, with token/onboarding and exact-range verification, so Remote Dev synchronizes the modular ZIP to both peers and prevents one-sided installs.” — agent-doc
+<!-- agent-doc-subagent-response sha256=a6b5558b3ce70fc65f9ed81373b17abf046edd257bef4aca46d19ca58f35def4 -->
+> **Subagent response:**
+>
+> Already implemented on origin/main by 2e4cc6d7fb and 0e2df8590a; no duplicate change was made. JetBrains repository self-test and exact Marketplace workflow regression passed. External onboarding, token creation, workflow rerun, and approval remain.
+<!-- agent-doc-subagent-completion key=cfc359fbc036c5c758dc8c21ef755c95b409e81ff2b10e94a2462dcd79399194 -->
+
+### Re: Subagent completed: `subagent:release-runloop` returned work for queue item “release + publish: no `agent:run` + `agent:loop`” — agent-doc
+<!-- agent-doc-subagent-response sha256=42521babcc171cd0d04515bbc4692cc0ee13619489e564d28a292eb3fcaac921 -->
+> **Subagent response:**
+>
+> Already satisfied by published v0.35.546. Canonical agent:run and agent:loop are included via 2c70641826 and 67f4ef23a4. Focused tests and cargo check passed; no changes, commit, push, or duplicate release were made.
+<!-- agent-doc-subagent-completion key=1047f4229b0d030081337df5bc218fa4c1457404a84ca952cb9ba28a3b37cf83 -->
+
+### Re: Subagent completed: `subagent:release-publish` returned work for queue item “release + publish” — agent-doc
+<!-- agent-doc-subagent-response sha256=4a2e5c617cbdecde7e86a5423b79b1ed1c2a0867d915480ce88b545f4181a68e -->
+> **Subagent response:**
+>
+> No-op audit: v0.35.546 is already public and stable at 3a1d3cb8dc; GitHub release and PyPI publication succeeded. No files changed and no duplicate release was attempted. Homebrew remains at 0.35.541 because the token was absent; Marketplace publication is separate.
+<!-- agent-doc-subagent-completion key=43bda87e7a70e49c4dc03479b3f9b2c8612b4f71e6f4b504c897c2f698ba375a -->
+
+### Re: Subagent completed: `subagent:gh360-fix` returned work for queue item “How do we improve the reliability of the routing? Why did the guess occur in https://github.com/btakita/agent-doc/issues/360? On top of fail no-close routing, we need to figure out how to not get into the fail state.” — agent-doc
+<!-- agent-doc-subagent-response sha256=e709218116be4adfb2ca629a4422872ffa33abe2cc567f5e28d6c91ec1d4c7cb -->
+> **Subagent response:**
+>
+> Implemented and pushed on branch fix/gh360-routing-reliability-20261023 at 277c86effabca6c2ed15a425fb67831701c697c3. Flat evidence now routes to a proven parked live actor pane without structural publication; pane-less targets still fail closed. Focused Rust tests passed, Rust nextest passed 11,444/11,444, and the JetBrains suite passed 934/934 with the declared Lazily 0.46.0. The final corrected full rerun was interrupted for queue cleanup and is not claimed as passed.
+<!-- agent-doc-subagent-completion key=ec5ef725bb242590f7f9a60f7ea0b403ccc83fce70116b7c4c29ab893e7b7f53 -->
+
+### Re: Subagent completed: `subagent:followup-release-batch` returned work for queue item “release + publish: include completed follow-up fixes from the completion-feedback, Coder readiness, subagent-request formatting, and IDEA notification-deduplication investigations after v0.35.546” — agent-doc
+<!-- agent-doc-subagent-response sha256=f9d02729a3bb1398924fbdd0872820881bb6a64b5239685f1e584d3aeeebbd00 -->
+> **Subagent response:**
+>
+> Follow-up batch prepared and pushed on branch batch/followup-v035546-20261023-a283fe6e at 1627f533157b2171d5966679e314c106d17e4a86, containing completion-feedback commit 0bb2f44191 and IDEA notification-dedupe commit 1627f53315. Focused Rust tests passed 1,812/1,812; JetBrains test/build passed; workspace nextest passed 11,444/11,444. Full make check still requires the retained JetBrains package-generation/version bump and a rerun; no release, tag, version bump, or publication was performed.
+<!-- agent-doc-subagent-completion key=b11dcc37a718740fd895ef6a856a15db6f2f300f67f78b146712fecb937ce1cb -->
+> **Chat prompt (#chatprompt:0e145b378893):** Are subagents still running? The state of the queue items seems wrong
+
+> **Chat prompt (#chatprompt:db9d9f1d7ab2):** Did we release the latest commits?
+
+> **Chat prompt (#chatprompt:9acae9a5e377):** clean up the queue
+
+> **Chat prompt (#chatprompt:6acc7d457160):** Have we fixed the causes of the queue getting out of sync?
+
+> **Queue prompt:** #gh-issue https://github.com/btakita/agent-doc/issues/355
+
+### Re: Queue state, release coverage, and cleanup — gpt-5 · 2026-10-23T03:43-04:00
+
+No background subagents are still running. At the start of this audit, only two were genuinely active: the follow-up release batch and routing-reliability work. Four other rows incorrectly remained 🚧 after their workers had completed because their completion receipts had not reached the queue controller. Both real workers have now completed, the missing receipts were published, and all 33 main-queue rows are now verified ☑️. This closeout removes those 33 completed rows, including the replayed duplicate release item; the scheduled GitHub-issue watcher queue remains intact.
+
+The latest commits are **not released yet**. Published `v0.35.546` and `origin/main` both remain at `3a1d3cb8dc`. Post-release work exists on branches, including:
+
+- follow-up batch `1627f53315`, containing completion feedback and IDEA notification deduplication;
+- routing reliability `277c86effa`;
+- completion-exchange handoff `4da4cd8ad5`;
+- Coder pane evidence `3f5d4f3f89`;
+- upgrade checksum handling `59f7bc833e`;
+- GH-359 traceability `928ed0d865`.
+
+The queue desynchronization causes are only **partly released**:
+
+- The dangerous ☑️→📥 regression—an unrelated edit causing fabricated cancellation tombstones—is fixed and released in v0.35.546 through the fail-closed provenance boundary.
+- The stale 🚧 problem—workers finishing without immediately publishing a generation-fenced completion receipt—is fixed on `4da4cd8ad5` and included in the prepared follow-up batch as `0bb2f44191`, but it is not on `main` or in a release yet.
+- Until that follow-up ships, the coordinator fallback remains necessary; it was used here to repair the current document before cleanup.
+
+The leading GH-355 row was already resolved and its completion evidence is preserved in the exchange before removal.
+<!-- agent:boundary:e37d71fa -->
 <!-- /agent:exchange -->
 
 <!--
@@ -366,11 +438,11 @@ The queued follow-up, v0.35.547, has not been published yet.
 - ☑️ [#subagent:gh358-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/358
 - ☑️ [#subagent:gh359-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/359
 - ☑️ [#subagent:gh360-fix#2] #gh-fix https://github.com/btakita/agent-doc/issues/360
-- 🚧 [#subagent:completion-exchange#2] "Re: Subagent completed:" should immediately add the response into agent:exchange.
-- 🚧 [#subagent:gh360-fix#2] How do we improve the reliability of the routing? Why did the guess occur in https://github.com/btakita/agent-doc/issues/360? On top of fail no-close routing, we need to figure out how to not get into the fail state.
-- 🚧 [#subagent:release-publish#3] Automate publication of all three compatibility-ranged JetBrains updates to Marketplace, with token/onboarding and exact-range verification, so Remote Dev synchronizes the modular ZIP to both peers and prevents one-sided installs.
+- ☑️ [#subagent:completion-exchange#2] "Re: Subagent completed:" should immediately add the response into agent:exchange.
+- ☑️ [#subagent:gh360-fix#2] How do we improve the reliability of the routing? Why did the guess occur in https://github.com/btakita/agent-doc/issues/360? On top of fail no-close routing, we need to figure out how to not get into the fail state.
+- ☑️ [#subagent:release-publish#3] Automate publication of all three compatibility-ranged JetBrains updates to Marketplace, with token/onboarding and exact-range verification, so Remote Dev synchronizes the modular ZIP to both peers and prevents one-sided installs.
 - ☑️ [#subagent:sdk-demo-pr166#2] In sdk-demo.md, no queue item status despite agent running: `- [#subagent-operator-request-publish-ci-pr166]: **Commit and push to PR #166**`
-- 🚧 [#subagent:release-runloop#2] release + publish: no `agent:run` + `agent:loop`
+- ☑️ [#subagent:release-runloop#2] release + publish: no `agent:run` + `agent:loop`
 - ☑️ [#subagent:operator-request-format#1] The formatting of a subagent operator request is difficult to read the key + values. What are some formatting options to make it easier to see the keys + values? How about making a nested24list and emphasizing the keys `- *kind:*`?
 - ☑️ [#subagent:rename-queue-run#1] Rename `agent:queue` to `agent:run`. Keep the alias compatability.
 - ☑️ [#subagent:rename-loop#1] . What are some formatting options to make it easie Rename `agent:run loop`/`agent:queue loop` to `agent:loop`. Keep backward compatability.
@@ -385,9 +457,10 @@ The queued follow-up, v0.35.547, has not been published yet.
 - ☑️ [#subagent:coder-readiness#1] I have to manually run `agent-doc` from the terminal on my Coder instance. Did you fix the bugs so I can properly use agent-doc on Coder?
 - ☑️ [#subagent:request-format-release#1] I still don't see proper "subagent operator request" formatting in the exchange on this machine. Has this feature been released? See the last subagent operator request in api.md.
 - ☑️ [#subagent:idea-notification-dedupe#1] There is 1 prompt in this session, but there were 3 Idea notifications stacked on top of each other.
-- 🚧 [#subagent:followup-release-batch#2] release + publish: include completed follow-up fixes from the completion-feedback, Coder readiness, subagent-request formatting, and IDEA notification-deduplication investigations after v0.35.546
+- ☑️ [#subagent:followup-release-batch#2] release + publish: include completed follow-up fixes from the completion-feedback, Coder readiness, subagent-request formatting, and IDEA notification-deduplication investigations after v0.35.546
 - ☑️ [#subagent:gh363#1] #gh-issue https://github.com/btakita/agent-doc/issues/363
-- 🚧 [#subagent:release-publish-recheck#1] release + publish[]
+- ☑️ [#subagent:release-publish#1] release + publish
+- Compact Exchange on sdk-demo.md error: Agent Doc could not attach the open editor replica for sdk-demo.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
 <!-- /agent:queue -->
 
 ## Queue: Issues

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 /// Archive reaped pending items to `agent:done`.
 ///
 /// When the archive component is absent, create a visible
-/// `## Completed / Reaped` section after the tracked work components before
+/// `## Done` section after the tracked work components before
 /// appending the entries. Returns `Some(new_content)` when archival happened,
 /// `None` only when there is no tracked-work anchor to place the archive.
 pub fn archive_pending_done(
@@ -519,7 +519,7 @@ mod tests {
     fn archive_attr(marker: &str) -> String {
         // Markers must sit at column 0 — an indented marker is not recognised.
         let content = format!(
-            "## Completed / Reaped\n\n<!-- agent:done {marker} -->\n<!-- /agent:done -->\n"
+            "## Done\n\n<!-- agent:done {marker} -->\n<!-- /agent:done -->\n"
         );
         let components = agent_doc_element::element::parse(&content).expect("parse");
         components

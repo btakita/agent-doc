@@ -25,9 +25,9 @@ pub fn descriptor() -> ElementDescriptor {
     DESCRIPTOR
 }
 
-pub const DONE_SECTION_HEADING: &str = "## Completed / Reaped";
+pub const DONE_SECTION_HEADING: &str = "## Done";
 pub const EMPTY_DONE_COMPONENT: &str =
-    "## Completed / Reaped\n\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+    "## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalDebrisPrune {
@@ -415,7 +415,7 @@ mod tests {
         let updated = insert_done_component_after_tracked_work(content).unwrap();
 
         assert!(updated.contains(EMPTY_DONE_COMPONENT));
-        assert!(updated.contains("<!-- /agent:backlog -->\n\n## Completed / Reaped"));
+        assert!(updated.contains("<!-- /agent:backlog -->\n\n## Done"));
     }
 
     #[test]

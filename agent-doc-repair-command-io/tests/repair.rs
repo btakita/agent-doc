@@ -574,7 +574,7 @@ mod tests {
             "<!-- agent:icebox -->\n",
             "- [ ] Source-backed work is explicit and audited.\n",
             "<!-- /agent:icebox -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done archive=done.md -->\n\n",
             "<!-- completed work archived in done.md -->\n",
             "<!-- /agent:done -->",

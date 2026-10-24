@@ -230,7 +230,7 @@ On every preflight run:
    - Remove the line from the component.
    - `[ ]` and `[/]` are never auto-reaped. `[/]` explicitly survives forever until an operator moves it to `[x]`. No TTL on gated state — the operator owns the gate.
    - Append an archive entry to canonical `agent:done`. If the component does not
-     already exist, create a visible `## Completed / Reaped` section after the
+     already exist, create a visible `## Done` section after the
      tracked work components first, then append the entry. If the opening marker
      uses `archive=<project-relative>.done.md`, append to that external markdown
      file instead and create it when missing. This unprefixed form preserves the

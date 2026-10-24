@@ -2418,7 +2418,7 @@ mod tests {
             "<!-- agent:review -->\n",
             "- [x] [#seocat] Implemented and deployed\n",
             "<!-- /agent:review -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "<!-- /agent:done -->\n"
         );

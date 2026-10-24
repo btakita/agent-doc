@@ -929,7 +929,7 @@ fn finalize_editor_absent_skips_ipc_and_applies_done_directly() {
     assert!(
         content.contains("<!-- agent:done -->")
             && content.contains("[#done1] Close the loop")
-            && content.contains("## Completed / Reaped"),
+            && content.contains("## Done"),
         "--done should be reaped only after the direct write succeeds:\n{content}"
     );
     assert_ne!(
@@ -2841,7 +2841,7 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
     let content = fs::read_to_string(&doc).unwrap();
     assert!(!content.contains("- [ ] [#done1] Close the loop"));
     assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
-    assert!(content.contains("## Completed / Reaped"));
+    assert!(content.contains("## Done"));
     assert!(content.contains("<!-- agent:done -->"));
     assert!(content.contains("[#done1] Close the loop"));
 

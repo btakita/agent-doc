@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.551
+
+- **Reported queue work now converges to the visible document without overwriting concurrent edits.** Completion
+  projection patches only the queue marker prefix, rebases against live editor text, persists identities that follow
+  operator edits, and provides `queue repair-projection` for an actionable, receipt-backed retry.
+- **Captured closeouts recover after an owner session is replaced.** Intent materialization is selected consistently
+  across recovery guards, ownerless captured-finalize work has a typed recovery route, and editor re-registration can
+  safely reconnect an open document without resetting or force-writing its session state.
+- **Canonical `agent:run` markers support compact heading placement.** A marker may share its heading line, diagnostics
+  name the source tag and its actual line instead of the internal queue component, generated claim templates are more
+  compact, and completed work is archived under `## Done`.
+- **Queue and JetBrains diagnostics stay actionable without duplicate alerts.** Claim reports distinguish durable
+  dispatch evidence from heartbeat or external-job progress, while each IDE surfaces an ambiguous retained-projection
+  hold once per path and reason even when retry state changes.
+- **Local editor packages advance with the recovery fixes.** JetBrains classic, 2026.2, and 2026.3 package generations
+  are 0.2.822, 0.2.823, and 0.2.824 respectively; modular IDEs still require a restart to load the replaced plugin.
+
 ## 0.35.550
 
 - **Remote Dev update-channel ownership now lives in the JetBrains Client frontend (GH #372).** The modular

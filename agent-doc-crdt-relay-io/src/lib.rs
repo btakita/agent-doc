@@ -11507,7 +11507,7 @@ mod tests {
         assert!(editor.text().contains("<!-- agent: priority queue -->\n"));
         assert_eq!(
             agent_doc_element::element::structural_corruption_reason(&editor.text()).as_deref(),
-            Some("parse_error: invalid component name: ''"),
+            Some("parse_error: invalid component name in tag 'agent:' at line 10"),
             "fixture: reproduces the case-1 logged reason"
         );
         // Drop ` queue`, one backspace at a time, from the end of the attributes.
@@ -11556,7 +11556,7 @@ mod tests {
         assert_eq!(
             agent_doc_element::element::structural_corruption_reason(&editor.text()).as_deref(),
             Some(
-                "parse_error: closing marker for component 'backlog' without matching open marker"
+                "parse_error: closing tag '/agent:backlog' for component 'backlog' without matching opening tag 'agent:backlog' (closing marker at line 12)"
             ),
             "fixture: reproduces the case-2 logged reason"
         );

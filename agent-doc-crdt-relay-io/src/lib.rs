@@ -8641,6 +8641,43 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), stale);
     }
 
+    #[test]
+    fn cold_controller_restart_reprojects_a_durable_claim_onto_stale_disk() {
+        let (dir, doc) = temp_doc("boss-room-claim-restart.md");
+        let item = "verify the Boss Room queue claim survives restart";
+        let stale = format!(
+            "<!-- agent:queue subagents go -->\n- 📥 {item}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &stale).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(item, "subagent:sdk-demo", now, 3600);
+        persist_queue_claim_ledger(dir.path(), &doc, &ledger);
+
+        let assert_claimed = || {
+            with_hub_seeded_from_file(&doc, |hub| {
+                let canonical = hub.canonical_text();
+                assert!(
+                    canonical.contains(&format!("- 🟡 [#subagent:sdk-demo#1] {item}\n")),
+                    "{canonical}"
+                );
+            })
+            .unwrap();
+        };
+
+        // Load Boss Room: the durable ledger overlays the stale disk cut.
+        assert_claimed();
+        // Stop Boss Room: discard every process-local controller projection,
+        // while state.db and the intentionally stale disk file remain.
+        drop_controller_state_for_test(&doc);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), stale);
+        // Start Boss Room: cold hydration must re-project the same claim.
+        assert_claimed();
+    }
+
     /// `#relayhubperdoclock`: one busy document must not block another.
     ///
     /// This is the saturation fix's whole point, and it is a *structural* claim,

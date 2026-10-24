@@ -14,8 +14,7 @@ use agent_doc_queue::queue::{
     clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
     idle_queue_context_clear_in_flight_decision, idle_queue_context_clear_in_flight_settle_ticks,
     idle_queue_context_reset_decision_with_current_transition,
-    idle_queue_drain_decision_with_current_transition, rearm_queue_dispatch_dedup,
-    stale_drain_recycle_yield_requested,
+    idle_queue_drain_decision_with_current_transition, stale_drain_recycle_yield_requested,
 };
 #[cfg(test)]
 use agent_doc_queue::queue::{idle_queue_context_reset_decision, idle_queue_drain_decision};
@@ -699,6 +698,33 @@ fn queue_auto_clear_latest_cycle(path: &Path) -> Option<(String, bool)> {
         })
 }
 
+/// The committed cycle whose captured response explicitly deferred `head`.
+///
+/// The queue row intentionally remains pending after a scoped `**Deferred:**`
+/// marker, so head identity alone cannot distinguish "the dispatched turn is
+/// still running" from "that turn finished and requested a continuation".
+fn committed_deferred_queue_cycle(path: &Path, head: &str) -> Option<String> {
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(path)
+        .ok()
+        .flatten()?;
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
+        return None;
+    }
+    let capture = agent_doc_cycle_state_io::load_closeout_projection(path)
+        .ok()
+        .flatten()?
+        .captured_response?;
+    if capture.cycle_id != state.cycle_id
+        || !agent_doc_queue::queue_response::response_defers_free_text_head(
+            &capture.response_body,
+            head,
+        )
+    {
+        return None;
+    }
+    Some(state.cycle_id)
+}
+
 fn queue_auto_clear_baseline_now(
     path: &Path,
     head: Option<&str>,
@@ -849,6 +875,7 @@ fn queue_auto_clear_boundary(
     harness: &agent_doc_harness::HarnessConfig,
     baseline: &agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline,
     head: &str,
+    deferred_same_head_retry: bool,
 ) -> agent_doc_queue::queue_auto_clear::QueueAutoClearDecision {
     use agent_doc_queue::queue_auto_clear::{
         AutoClearComposer, LatestCycle, QueueAutoClearDecision, QueueAutoClearFacts,
@@ -864,6 +891,7 @@ fn queue_auto_clear_boundary(
         baseline,
         latest_cycle,
         active_head: Some(head),
+        deferred_same_head_retry,
         composer: AutoClearComposer::default(),
         exchange_steering_pending: false,
         claims_in_flight: false,
@@ -2142,6 +2170,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             };
             publish_recycle_settled(&mut recycle_settle_publish);
             let mut last_dispatched: Option<String> = None;
+            // A committed explicit deferral retains the same head, so head-only
+            // dedup cannot notice the new continuation edge. Fence the retry by
+            // cycle id: one committed deferral schedules one fresh drain.
+            let mut last_scheduled_deferred_cycle_id: Option<String> = None;
             let queue_head_settle_duration = std::time::Duration::from_millis(
                 agent_doc_preflight_io::debounce::authority_settle_ms(&path),
             );
@@ -3331,6 +3363,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let mut head_pending = false;
                 let mut drain_completed = false;
                 let mut queue_head_settled = false;
+                let mut deferred_same_head_retry = false;
                 'drain: {
                 if idle_watch_queue_observation_held_for_test() {
                     break 'drain;
@@ -3406,8 +3439,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     steering_wake.subject(),
                 );
             }
-            last_dispatched =
-                rearm_queue_dispatch_dedup(last_dispatched, active_head.as_deref());
+            let deferred_cycle_id = active_head
+                .as_deref()
+                .and_then(|head| committed_deferred_queue_cycle(&path, head));
+            let previously_scheduled_deferred_cycle_id =
+                last_scheduled_deferred_cycle_id.clone();
+            (last_dispatched, last_scheduled_deferred_cycle_id) =
+                agent_doc_queue::queue::rearm_queue_dispatch_for_deferred_cycle(
+                    last_dispatched,
+                    active_head.as_deref(),
+                    deferred_cycle_id.as_deref(),
+                    last_scheduled_deferred_cycle_id.as_deref(),
+                );
+            if last_scheduled_deferred_cycle_id
+                != previously_scheduled_deferred_cycle_id
+                && let (Some(cycle_id), Some(head)) = (
+                    last_scheduled_deferred_cycle_id.as_deref(),
+                    active_head.as_deref(),
+                )
+            {
+                agent_doc_ops_log_io::log_op(
+                    &path,
+                    &format!(
+                        "queue_deferred_continuation_scheduled file={} cycle_id={} next_action=clear_or_restart_then_redispatch head_sha256={} (#deferredliveness)",
+                        path.display(),
+                        cycle_id,
+                        agent_doc_hash::content_hash(head),
+                    ),
+                );
+            }
+            deferred_same_head_retry = deferred_cycle_id.is_some()
+                && deferred_cycle_id.as_deref()
+                    == last_scheduled_deferred_cycle_id.as_deref();
             if !auto_clear_baseline_refined
                 && active_transition != IdleQueueTransition::Unresolved
             {
@@ -6293,7 +6356,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     {
                         use agent_doc_queue::queue_auto_clear::QueueAutoClearDecision;
                         let decision =
-                            queue_auto_clear_boundary(&path, &shared, &harness, baseline, head);
+                            queue_auto_clear_boundary(
+                                &path,
+                                &shared,
+                                &harness,
+                                baseline,
+                                head,
+                                deferred_same_head_retry,
+                            );
                         if decision == QueueAutoClearDecision::Clear {
                             let committed_cycle = queue_auto_clear_latest_cycle(&path)
                                 .map(|(cycle_id, _)| cycle_id)
@@ -8672,7 +8742,7 @@ mod tests {
         let baseline = queue_auto_clear_baseline_now(&doc, Some("do [#a]"));
         assert_eq!(baseline.committed_cycle_id, None);
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#a]"),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#a]", false),
             QueueAutoClearDecision::SkipCycleOpen,
             "never clear mid-turn"
         );
@@ -8700,7 +8770,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]"),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]", false),
             QueueAutoClearDecision::SkipComposerUnobservable,
             "a completed item passes every document gate; only the composer remains"
         );
@@ -8710,7 +8780,7 @@ mod tests {
         let after_clear = queue_auto_clear_baseline_now(&doc, Some("do [#b]"));
         assert!(after_clear.committed_cycle_id.is_some());
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &after_clear, "do [#b]"),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &after_clear, "do [#b]", false),
             QueueAutoClearDecision::SkipNoCompletedItem
         );
 
@@ -8730,7 +8800,7 @@ mod tests {
         );
         std::fs::write(&doc, &steered).unwrap();
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]"),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]", false),
             QueueAutoClearDecision::SkipSteeringPending,
             "never clear over unanswered operator steering"
         );
@@ -8739,8 +8809,72 @@ mod tests {
         let disabled = advanced.replace("agent:queue go", "agent:queue go disable-auto-clear");
         std::fs::write(&doc, &disabled).unwrap();
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]"),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]", false),
             QueueAutoClearDecision::SkipDisabled
+        );
+    }
+
+    #[test]
+    fn committed_deferred_queue_cycle_reads_the_exact_captured_response() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("sdk-demo.md");
+        let head = "When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.";
+        let content = format!(
+            "<!-- agent:queue go -->\n- 📥 {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let started =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content))
+                .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&content),
+            Some(&content),
+            "response-sha",
+            Some(&started.cycle_id),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::append_response_captured_body(
+            &doc,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &started.cycle_id,
+                capture_id: &started.cycle_id,
+                response_sha256: "response-sha",
+                response_body: &format!(
+                    "> **Queue prompt:** {head}\n\n**Deferred:** restart the API before retrying.\n"
+                ),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: Some(&content),
+            },
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
+
+        assert_eq!(
+            committed_deferred_queue_cycle(&doc, head).as_deref(),
+            Some(started.cycle_id.as_str())
+        );
+        assert_eq!(
+            committed_deferred_queue_cycle(&doc, "a different pending head"),
+            None
         );
     }
 
@@ -8811,7 +8945,7 @@ mod tests {
         // The pre-fix first-tick baseline counted A as already seen.
         let first_tick = queue_auto_clear_baseline_now(&doc, Some(&head_b));
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &first_tick, &head_b),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &first_tick, &head_b, false),
             QueueAutoClearDecision::SkipNoCompletedItem
         );
 
@@ -8819,7 +8953,7 @@ mod tests {
             refine_queue_auto_clear_generation_baseline(&doc, generation.clone(), Some(&head_b));
         assert_eq!(refined, generation);
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &refined, &head_b),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &refined, &head_b, false),
             QueueAutoClearDecision::SkipComposerUnobservable,
             "A's completion is due a clear; only the composer gate remains"
         );
@@ -8909,7 +9043,7 @@ mod tests {
         );
         assert_eq!(continued, outgoing);
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &continued.baseline, &head_b),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &continued.baseline, &head_b, false),
             QueueAutoClearDecision::SkipComposerUnobservable,
             "A's completion is due a clear; only the composer gate remains"
         );
@@ -8920,7 +9054,7 @@ mod tests {
         let rerecorded =
             refine_queue_auto_clear_generation_baseline(&doc, rerecorded.baseline, Some(&head_b));
         assert_eq!(
-            queue_auto_clear_boundary(&doc, &shared, &harness, &rerecorded, &head_b),
+            queue_auto_clear_boundary(&doc, &shared, &harness, &rerecorded, &head_b, false),
             QueueAutoClearDecision::SkipNoCompletedItem
         );
 

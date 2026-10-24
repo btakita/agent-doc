@@ -14,6 +14,13 @@ authorizes a strike. Unselected, struck, id-backed, and foreign-exchange work is
 outside this gate. The pure policy owner is `queue_closeout_guard`; no new
 retry loop, cache, or state authority is introduced.
 
+When an exact free-text quote is followed by a scoped `**Deferred:**`, the
+operator-facing closeout diagnostic must say that the head remains pending
+because of that deferral; it must not claim the exact Queue echo was missing.
+The diagnostic also names the next executable step: resolve the blocker and
+rerun `agent-doc <FILE>`. For an active `go` queue, the committed deferral is a
+new continuation edge and the supervisor schedules that rerun automatically.
+
 ## Response checkpoints and sealing
 
 `response-checkpoint <FILE>` reads a cumulative response from stdin and accepts

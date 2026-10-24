@@ -133,7 +133,8 @@ pub fn queue_auto_clear_enabled(content: &str) -> bool {
 
 /// The context state the supervisor last observed as "fresh": the last
 /// committed cycle and the queue head at that moment. A clear is due once a
-/// newer committed cycle exists AND the queue head moved past `head`.
+/// newer committed cycle exists and the queue head moved past `head`, or that
+/// cycle explicitly deferred the same head and scheduled a fresh retry.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QueueAutoClearBaseline {
     /// The latest committed cycle when the baseline was taken. `None` when no
@@ -301,6 +302,9 @@ pub struct QueueAutoClearFacts<'a> {
     /// The latest cycle; `None` when there is none or it could not be read.
     pub latest_cycle: Option<LatestCycle<'a>>,
     pub active_head: Option<&'a str>,
+    /// The newest committed cycle explicitly deferred this same active head and
+    /// the continuation state machine has scheduled its one retry edge.
+    pub deferred_same_head_retry: bool,
     pub composer: AutoClearComposer,
     /// Settled exchange steering a committed cycle left unanswered.
     pub exchange_steering_pending: bool,
@@ -376,7 +380,7 @@ pub fn queue_auto_clear_decision(facts: QueueAutoClearFacts<'_>) -> QueueAutoCle
     if facts.baseline.committed_cycle_id.as_deref() == Some(latest.cycle_id) {
         return QueueAutoClearDecision::SkipNoCompletedItem;
     }
-    if facts.baseline.head.as_deref() == Some(head) {
+    if facts.baseline.head.as_deref() == Some(head) && !facts.deferred_same_head_retry {
         return QueueAutoClearDecision::SkipHeadNotAdvanced;
     }
     if facts.claims_in_flight {
@@ -545,6 +549,7 @@ mod tests {
             baseline,
             latest_cycle: latest,
             active_head: head,
+            deferred_same_head_retry: false,
             composer: ready_composer(),
             exchange_steering_pending: false,
             claims_in_flight: false,
@@ -561,6 +566,21 @@ mod tests {
         let base = baseline(Some("cycle-a"), Some("do [#a]"));
         assert_eq!(
             queue_auto_clear_decision(facts(&base, Some(COMMITTED_B), Some("do [#b]"))),
+            QueueAutoClearDecision::Clear
+        );
+    }
+
+    #[test]
+    fn clears_before_retrying_a_committed_deferral_of_the_same_head() {
+        let base = baseline(Some("cycle-a"), Some("restart Boss Room"));
+        let mut retry = facts(&base, Some(COMMITTED_B), Some("restart Boss Room"));
+        assert_eq!(
+            queue_auto_clear_decision(retry),
+            QueueAutoClearDecision::SkipHeadNotAdvanced
+        );
+        retry.deferred_same_head_retry = true;
+        assert_eq!(
+            queue_auto_clear_decision(retry),
             QueueAutoClearDecision::Clear
         );
     }

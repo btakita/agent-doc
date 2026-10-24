@@ -181,6 +181,7 @@ mod queue_auto_clear_first_observation_model {
                     committed: true,
                 }),
                 active_head: Some(self.active_head),
+                deferred_same_head_retry: false,
                 composer: AutoClearComposer {
                     observed: true,
                     dispatch_ready: true,
@@ -214,6 +215,7 @@ mod queue_auto_clear_first_observation_model {
                     committed: true,
                 }),
                 active_head: Some(NEXT_HEAD),
+                deferred_same_head_retry: false,
                 composer: AutoClearComposer {
                     observed: true,
                     dispatch_ready: true,
@@ -8499,6 +8501,10 @@ enum SimCommand {
     ///
     /// A go-mode `queue_active: true` head is waiting to drain.
     ActivateGoModeQueueHead,
+    /// `#deferredliveness`: the active queue turn committed an explicit scoped
+    /// `**Deferred:**` response, retaining the same head for a fresh retry.
+    /// Targeted tests only; the random corpus remains unchanged.
+    CommitDeferredQueueHead,
     /// `#qfocsup`: a `[focused-cycle]` head is active. The in-session loop must
     /// yield it, then the supervisor clears and re-dispatches it into a fresh agent.
     ActivateFocusedCycleQueueHead,
@@ -9125,6 +9131,12 @@ struct RecycleClearModel {
     recycle_resume_consumed: bool,
     /// The head the idle-queue watch last injected a trigger for (drain dedup).
     last_dispatched: Option<String>,
+    /// Latest committed scoped deferral for the still-active queue head.
+    deferred_cycle_id: Option<String>,
+    /// Deferral cycle whose retry edge the supervisor already scheduled.
+    last_scheduled_deferred_cycle_id: Option<String>,
+    /// Monotonic identity source for targeted deferred-cycle transitions.
+    deferred_cycle_sequence: u64,
     /// `#qflood2`: the watch sent its OWN `/clear` (an opt-in context reset or a
     /// `/clear` queue head) and must hold the next drain trigger until the pane
     /// settles, so the trigger is not injected into the in-flight clear.
@@ -9317,6 +9329,9 @@ struct Coverage {
     /// A go-mode queue head was dispatched by the idle-queue drain decision after
     /// the recycle + clear settled.
     go_drain_dispatches: usize,
+    /// `#deferredliveness`: committed explicit deferrals that rearmed the same
+    /// pending head exactly once instead of leaving it ownerless.
+    deferred_queue_retries_scheduled: usize,
     /// `#qfocsup`: session-check yielded a focused-cycle head to the supervisor
     /// clear-and-continue path with `ui_outcome=deferred_for_supervisor_drain`.
     focused_cycle_supervisor_yields: usize,
@@ -9564,6 +9579,7 @@ impl Coverage {
         self.supervisor_recycles += other.supervisor_recycles;
         self.supervisor_recycle_failures += other.supervisor_recycle_failures;
         self.go_drain_dispatches += other.go_drain_dispatches;
+        self.deferred_queue_retries_scheduled += other.deferred_queue_retries_scheduled;
         self.focused_cycle_supervisor_yields += other.focused_cycle_supervisor_yields;
         self.focused_cycle_context_resets += other.focused_cycle_context_resets;
         self.focused_cycle_fresh_agent_drains += other.focused_cycle_fresh_agent_drains;
@@ -13166,6 +13182,40 @@ fn focused_cycle_yields_to_supervisor_clear_and_fresh_agent_drain() {
     assert!(ops_log.contains("next_action=yield_to_supervisor_clear_and_continue"));
     assert!(ops_log.contains("#qfocsup"));
     assert!(ops_log.contains("response_materialized=true"));
+}
+
+#[test]
+fn committed_deferral_cannot_leave_a_pending_head_without_a_continuation() {
+    // `#deferredliveness`: model the historical Grok/Boss Room failure. The
+    // first dispatch completes with an explicit deferral, so the row correctly
+    // stays pending and has no active owner. That committed cycle must become a
+    // new continuation edge exactly once; head-text dedup must not strand it.
+    let mut world = SimWorld::new(8_417);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.go_drain_dispatches, 1);
+
+    world.apply(SimCommand::CommitDeferredQueueHead).unwrap();
+    assert!(world.recycle_clear.queue_active_head.is_some());
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 2,
+        "the committed deferral must schedule a fresh retry for the same head"
+    );
+    assert_eq!(world.coverage.deferred_queue_retries_scheduled, 1);
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.go_drain_dispatches, 2,
+        "one deferred cycle schedules one retry, never an idle-tick hot loop"
+    );
+    assert_eq!(world.coverage.deferred_queue_retries_scheduled, 1);
+
+    let ops_log = world.ops_log.join("\n");
+    assert!(ops_log.contains("outcome=deferred head_state=pending owner=none"));
+    assert!(ops_log.contains("next_action=clear_or_restart_then_redispatch"));
 }
 
 #[test]

@@ -133,6 +133,50 @@ class AttachFailureDiagnosisTest {
     }
 
     @Test
+    fun `an unchanged operator evidence hold surfaces only once after retry state resets`() {
+        assertTrue(
+            shouldSurfaceRegisterFailureUtil(
+                failureCount = 1,
+                needsOperatorSurface = true,
+                surfacedReason = null,
+                reason = "ambiguous-retained-projection",
+            ),
+        )
+        assertFalse(
+            shouldSurfaceRegisterFailureUtil(
+                failureCount = 1,
+                needsOperatorSurface = true,
+                surfacedReason = "ambiguous-retained-projection",
+                reason = "ambiguous-retained-projection",
+            ),
+        )
+        assertTrue(
+            shouldSurfaceRegisterFailureUtil(
+                failureCount = 1,
+                needsOperatorSurface = true,
+                surfacedReason = "retained-reseed-missing-settled-shadow",
+                reason = "ambiguous-retained-projection",
+            ),
+        )
+        assertFalse(
+            shouldSurfaceRegisterFailureUtil(
+                failureCount = 2,
+                needsOperatorSurface = true,
+                surfacedReason = null,
+                reason = "ambiguous-retained-projection",
+            ),
+        )
+        assertFalse(
+            shouldSurfaceRegisterFailureUtil(
+                failureCount = 1,
+                needsOperatorSurface = false,
+                surfacedReason = null,
+                reason = "controller-register",
+            ),
+        )
+    }
+
+    @Test
     fun `recordRegisterFailure asks the derivation once and executes the answer in the old order`() {
         val manager = source("CrdtReplicaManager.kt")
         val failure =
@@ -145,6 +189,8 @@ class AttachFailureDiagnosisTest {
         assertTrue(retired in 0 until diagnose)
         assertTrue(diagnose < hold && hold < republish)
         assertTrue(failure.contains("diagnosis.needsOperatorSurface"))
+        assertTrue(failure.contains("surfacedAttachFailureReasons.compute(filePath)"))
+        assertTrue(failure.contains("shouldSurfaceRegisterFailureUtil("))
         assertTrue(failure.contains("diagnosis.needsLivenessRepublish"))
         assertTrue(failure.contains("diagnosis.retryDisposition"))
         assertTrue(failure.contains("retry=await_operator_evidence"))
@@ -159,6 +205,19 @@ class AttachFailureDiagnosisTest {
         )) {
             assertFalse("the rule $rule is asked through the derivation", failure.contains(rule))
         }
+    }
+
+    @Test
+    fun `resolved or terminal registration episodes rearm operator hold surfacing`() {
+        val manager = source("CrdtReplicaManager.kt")
+        val terminal =
+            manager.substringAfter("    private fun recordTerminalRegisterRefusal(")
+                .substringBefore("    /** Persist and surface")
+        val clear =
+            manager.substringAfter("    private fun clearRegisterFailure(")
+                .substringBefore("    /**")
+        assertTrue(terminal.contains("surfacedAttachFailureReasons.remove(filePath)"))
+        assertTrue(clear.contains("surfacedAttachFailureReasons.remove(filePath)"))
     }
 
     @Test

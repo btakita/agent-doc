@@ -605,6 +605,16 @@ internal fun replicaRegistrationAttemptDueUtil(
     nowMs: Long,
 ): Boolean = projection == null || nowMs >= projection.retryAfterMs
 
+internal fun shouldSurfaceRegisterFailureUtil(
+    failureCount: Int,
+    needsOperatorSurface: Boolean,
+    surfacedReason: String?,
+    reason: String,
+): Boolean =
+    failureCount == 1 &&
+        needsOperatorSurface &&
+        surfacedReason != reason
+
 private data class RemotePersistOutcome(
     val diskPersisted: Boolean,
     val editorTextForProjection: String?,
@@ -4576,7 +4586,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // the ops-log token, the notification) is the native `attach_failure_diagnosis`
         // derivation. Every caller records a failure off the EDT, so it is asked here.
         val diagnosis = AttachFailureDiagnosis.diagnose(reason, File(filePath).name)
-        if (projection.failureCount == 1 && diagnosis.needsOperatorSurface) {
+        var shouldSurface = false
+        surfacedAttachFailureReasons.compute(filePath) { _, surfacedReason ->
+            if (shouldSurfaceRegisterFailureUtil(
+                    failureCount = projection.failureCount,
+                    needsOperatorSurface = diagnosis.needsOperatorSurface,
+                    surfacedReason = surfacedReason,
+                    reason = reason,
+                )) {
+                shouldSurface = true
+                reason
+            } else {
+                surfacedReason
+            }
+        }
+        if (shouldSurface) {
             recordRetainedProjectionHold(filePath, reason, diagnosis)
         }
         if (diagnosis.needsLivenessRepublish) {
@@ -4633,6 +4657,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     private fun recordTerminalRegisterRefusal(filePath: String, reason: String) {
         retainedProjectionHoldPaths.remove(filePath)
+        surfacedAttachFailureReasons.remove(filePath)
         registerFailureCounts.remove(filePath)
         registerRetryAfterMs.remove(filePath)
         registerRetryProjections.remove(filePath)
@@ -4684,6 +4709,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun clearRegisterFailure(filePath: String) {
         attachFailureReasons.remove(filePath)
         retainedProjectionHoldPaths.remove(filePath)
+        surfacedAttachFailureReasons.remove(filePath)
         registerFailureCounts.remove(filePath)
         registerRetryAfterMs.remove(filePath)
         registerRetryProjections.remove(filePath)
@@ -6275,6 +6301,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /** Last refusal reason per document path; cleared on a successful register. */
     private val attachFailureReasons = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Last operator-facing hold reason surfaced in the current refusal episode.
+     *
+     * An operator-evidence pause deliberately clears the retry projection, so a later explicit
+     * recovery attempt starts again at failure count one. Keep notification memory separate from
+     * that retry state; success, tab close, or terminal reclassification clears the episode.
+     */
+    private val surfacedAttachFailureReasons = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /**
      * GH #276: open-document attaches submitted to a document worker and not yet

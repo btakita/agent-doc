@@ -399,7 +399,14 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   `CrdtReplicaManager.recordRegisterFailure` asks it once per
   failure, after the retired-generation check, and executes the answer in the
   pre-#326 order: the hold event and notification, then the liveness republish,
-  then either a bounded retry or an operator-evidence pause. The three
+  then either a bounded retry or an operator-evidence pause. A hold reason is
+  surfaced once per continuous refusal episode. Its per-path surface memory is
+  separate from retry projection state because an operator-evidence pause
+  deliberately clears the retry projection; repeated explicit recovery with
+  the same unresolved reason therefore cannot stack notifications or duplicate
+  hold events merely because its failure count starts again at one. Successful
+  registration, tab close, or terminal reclassification clears that surface
+  memory and rearms a later episode. The three
   projection holds never arm a timer: close/repair/reopen (or an explicit typed
   recovery request) supplies the next evidence, so an unchanged buffer cannot
   drive a background register/deregister loop. On tab close, a refused hold with

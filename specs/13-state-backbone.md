@@ -544,6 +544,15 @@ decide it.
   terminate the retry. A lease event drives the existing snapshot publisher;
   only an explicit generation-fenced retire event may release backend authority
   and enable selection fallback (GH #367).
+- **Authenticated frontend ingress is not by itself pane-layout authority.** The
+  modular frontend also opens the snapshot protocol in a monolithic IDE. The
+  authority transition is enabled only when the authenticated client id names a
+  remote platform session (`ClientType.isRemote`). A local lease may continue to
+  carry the atomic editor-view snapshot, but `layoutAuthorityActive` remains
+  false, the classic editor-surface frame remains live, and no Remote Dev layout
+  endpoint may publish or retire. This guard must precede the handoff: filtering
+  only the later forward creates a no-publisher state in which the classic source
+  is retired and the local snapshot is rejected as `local_client`.
 - **Command applicability is derived from the retained Source's authority.** A
   route may consume flat Remote Dev evidence as a non-structural `ensure`
   request. An exact `Sync Tmux Panes` command requires measured columns; after

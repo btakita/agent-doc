@@ -33,6 +33,18 @@ class BackendRemoteSessionGateTest {
     }
 
     @Test
+    fun authenticatedLocalFrontendDoesNotOwnRemotePaneLayout() {
+        val sessions = listOf(
+            "Host" to ClientType.LOCAL,
+            "remote-1" to ClientType.CONTROLLER,
+        )
+
+        assertFalse(BackendRemoteSessionGate.ownsLayout("Host", sessions))
+        assertTrue(BackendRemoteSessionGate.ownsLayout("remote-1", sessions))
+        assertFalse(BackendRemoteSessionGate.ownsLayout("missing", sessions))
+    }
+
+    @Test
     fun everyPlatformClientTypeHasAnExplicitDecision() {
         // A new platform ClientType must be classified here deliberately, not inherited silently.
         assertEquals(

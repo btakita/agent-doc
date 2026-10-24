@@ -923,7 +923,8 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `jetbrains-rd@<installation>-pid:<pid>`: the same installation as the classic surface and focus
   lanes (so the same navigation lane and focus owner), with its own generation, because the
   frontend authority handoff retires the whole classic `jetbrains@` family. Authority begins when
-  the authenticated ingress lease opens, before its first snapshot: the frontend intentionally
+  an authenticated ingress lease whose client id resolves to a remote `ClientType` opens, before
+  its first snapshot: the frontend intentionally
   waits 75 ms to coalesce event bursts, then captures on the EDT; first-lease schema negotiation
   may wait up to 5 s, and transport may fail. Throughout that pending window the backend fallback
   is fenced and may only leave the last accepted frontend structure in force. It cannot invent,
@@ -931,8 +932,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   connection publishes its own endpoint `remote-client:<clientId>:<connectionGeneration>`, retired
   when that connection retires or the backend project closes; before this JVM's first forward to
   a root it retires the installation's `jetbrains-rd` family there, so a dead backend JVM's forward
-  cannot keep driving. Only a remote session (`ClientType.isRemote`) is forwarded; a monolithic
-  IDE's own frontend is already measured by the classic window path. A schema-1 peer has no
+  cannot keep driving. Only a remote session (`ClientType.isRemote`) acquires that authority and is
+  forwarded. A monolithic IDE's own authenticated frontend remains valid detached-view transport,
+  but it leaves `layoutAuthorityActive=false`, does not retire the classic
+  `EditorTabSyncListener` projection, and does not open a `jetbrains-rd` layout endpoint: its
+  windows are already measured by the classic path. This classification gates the authority
+  transition itself, not merely the later delivery; otherwise the local lease can retire the
+  classic publisher before the forwarder rejects it as `local_client`, leaving automatic tmux sync
+  with no source. A schema-1 peer has no
   geometry and a schema-2 peer uses its positive bounds only for compatibility. For schema 3,
   a missing column vector is `Unavailable` only when no native generation can answer; a native
   answer is authoritative and the last accepted frontend snapshot stays in force when it reports
@@ -940,7 +947,8 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   The same hold applies to a split whose selected tab is not a session document
   while its tabs hold one (`#stickymdpane`: that column is unknown, not gone); a split holding no
   session document contributes no column, so closing a split still collapses the layout. While a
-  authenticated frontend lease is live for a project (`RemoteClientLayoutAuthority`), the backend's remote-client
+  authenticated remote layout-authority lease is live for a project
+  (`RemoteClientLayoutAuthority`), the backend's remote-client
   membership fold defers (`capture deferred reason=frontend_measured_layout_authority`), so the
   remembered-order fallback, labelled `unknown`/`retained`, remains only for classic installs and
   one-sided installs with no authenticated frontend lease. Schema negotiation keeps old peers

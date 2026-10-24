@@ -404,7 +404,11 @@ canonical managed components in this order: `agent:status`, `agent:exchange`,
 `agent:done`, `agent:notes`. Thus `agent:todo` sits directly below
 `agent:run` and above `agent:backlog`, matching the auto-created placement,
 and its marker carries bare `priority` by default. Existing `agent:todo` markers
-remain unchanged.
+remain unchanged. To maximize visible content in a tmux view pane, each generated
+level-two heading shares its line with its component opening tag (for example,
+`## Run <!-- agent:run priority subagents clear -->`); the runnable-work heading
+is `## Run`, not `## Queue`. Existing document headings and markers are not
+rewritten.
 
 **Operator-todo advisory.** When a closeout opens a human gate in
 `agent:review` (`--review-add`, `--backlog-add-gated`, or `--backlog-gate`) and

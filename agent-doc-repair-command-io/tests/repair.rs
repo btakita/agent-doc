@@ -2658,6 +2658,67 @@ mod tests {
         ));
     }
 
+    /// A capture can retain a response-only proof and a larger write intent.
+    /// Repair must validate the projection it just proved materialized, not
+    /// switch back to the smaller proof and diagnose the applied write as
+    /// hostile baseline drift.
+    #[test]
+    fn write_applied_materialized_intent_owns_baseline_validation() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: append\n",
+            "agent_doc_write: merge\n",
+            "---\n\n",
+            "## User\n\n",
+            "Hello\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+
+        let proof = "canonical response-only proof";
+        let intent = "materialized complete response intent";
+        agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            proof,
+            baseline,
+            Some(intent),
+            None,
+        )
+        .unwrap();
+        let applied = format!("{baseline}\n## Assistant\n\n{intent}\n");
+        std::fs::write(&doc, &applied).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "test_materialized_intent_write_applied",
+            Some(&applied),
+            Some(&applied),
+        )
+        .unwrap();
+
+        let outcome = repair(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::AlreadyApplied);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result.matches(intent).count(), 1);
+        assert!(!result.contains(proof));
+        assert!(matches!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("cycle state")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        ));
+    }
+
     /// `#captureresumereplaynotidempotent` — the resume replayed a
     /// `--backlog-add` its own earlier run had already inserted, hit the
     /// `#preset-item-id-collision-enforce` guard, and reported

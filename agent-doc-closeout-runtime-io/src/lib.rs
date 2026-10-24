@@ -869,7 +869,10 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             && capture.response_sha256 == response_sha256
             && agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                         file,
-                        &capture.response_body,
+                        agent_doc_turn::response_replay::retained_response_materialization_body(
+                            &capture.response_body,
+                            capture.intent_body.as_deref(),
+                        ),
                         CapturedFinalizeSource::FalseStaleRetirementSettlement.as_str(),
                     )?
             {
@@ -924,7 +927,12 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             };
             if capture.cycle_id != state.cycle_id
                 || capture.response_sha256 != response_sha256
-                || capture.response_body.trim().is_empty()
+                || agent_doc_turn::response_replay::retained_response_materialization_body(
+                    &capture.response_body,
+                    capture.intent_body.as_deref(),
+                )
+                .trim()
+                .is_empty()
                 || agent_doc_document_realtime_io::pending_document_write(file).is_none()
             {
                 return Ok(Outcome::NotApplicable);
@@ -933,15 +941,20 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                 file,
                 CapturedFinalizeSource::CommittedEffectSinkCurrent.as_str(),
             )?;
+            let materialization_body =
+                agent_doc_turn::response_replay::retained_response_materialization_body(
+                    &capture.response_body,
+                    capture.intent_body.as_deref(),
+                );
             if !agent_doc_turn::response_replay::response_materialized_in_content(
-                &capture.response_body,
+                materialization_body,
                 &current,
             ) {
                 return Ok(Outcome::NotApplicable);
             }
             return match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                 file,
-                &capture.response_body,
+                materialization_body,
                 CapturedFinalizeSource::CommittedEffectSinkSettlement.as_str(),
             ) {
                 Ok(true) => Ok(Outcome::Committed),
@@ -1002,9 +1015,14 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         else {
             return Ok(Outcome::NotApplicable);
         };
+        let materialization_body =
+            agent_doc_turn::response_replay::retained_response_materialization_body(
+                &capture.response_body,
+                capture.intent_body.as_deref(),
+            );
         if capture.cycle_id != state.cycle_id
             || capture.response_sha256 != response_sha256
-            || capture.response_body.trim().is_empty()
+            || materialization_body.trim().is_empty()
         {
             return Ok(Outcome::NotApplicable);
         }
@@ -1014,7 +1032,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         if has_retained_delivery {
             let settled = match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                 file,
-                &capture.response_body,
+                materialization_body,
                 CapturedFinalizeSource::RetainedProjectionSettlement.as_str(),
             ) {
                 Ok(settled) => settled,
@@ -1041,14 +1059,14 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             )?;
             let response_materialized =
                 agent_doc_turn::response_replay::response_materialized_in_content(
-                    &capture.response_body,
+                    materialization_body,
                     &current,
                 );
             if current != disk || !response_materialized {
                 match agent_doc_document_realtime_io::
                     settle_projected_captured_response_through_authority(
                         file,
-                        &capture.response_body,
+                        materialization_body,
                         CapturedFinalizeSource::NativeSaveWithoutRetainedIntent.as_str(),
                     ) {
                     Ok(Some(projected)) => {
@@ -1075,7 +1093,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                     cycle_phase: state.phase,
                     response_materialized_in_authority:
                         agent_doc_turn::response_replay::response_materialized_in_content(
-                            &capture.response_body,
+                            materialization_body,
                             &current,
                         ),
                     authority_matches_disk: current == disk,
@@ -1157,7 +1175,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         };
         if disk != current
             || !agent_doc_turn::response_replay::response_materialized_in_content(
-                &capture.response_body,
+                materialization_body,
                 &current,
             )
         {

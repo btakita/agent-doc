@@ -231,6 +231,7 @@ pub fn live_owner_turn_route_outcome(
             &fields,
             explicit_items,
             RouteOwnerTurnEvidence::Live,
+            RouteCloseoutBlockContext::LiveOwnerTurn,
         );
     }
     let work = match head {
@@ -253,6 +254,7 @@ pub fn closeout_wait_route_outcome(
     outcome_fields: &str,
     explicit_items: usize,
     owner_turn: RouteOwnerTurnEvidence,
+    closeout_context: RouteCloseoutBlockContext,
 ) -> CloseoutWaitRouteOutcome {
     match classify_route_explicit_send(explicit_items, owner_turn) {
         RouteExplicitSendDecision::DeliverToLiveOwner => {
@@ -270,10 +272,23 @@ pub fn closeout_wait_route_outcome(
                 file.display(),
             ))
         }
-        RouteExplicitSendDecision::BlockOwnerAbsent => CloseoutWaitRouteOutcome::Deferred(format!(
-            "[route] explicit send for {} is blocked: {explicit_items} pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: {blocker}). steering_delivered=0 sent=explicit {outcome_fields}",
-            file.display(),
-        )),
+        RouteExplicitSendDecision::BlockOwnerAbsent => {
+            let automatic_recovery = match closeout_context {
+                RouteCloseoutBlockContext::OpenEmptyPreflight => {
+                    "The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence"
+                }
+                RouteCloseoutBlockContext::CapturedFinalizeRecovery => {
+                    "The retained captured-finalize worker re-evaluates this durable response on controller state and delivery edges; this route already ran immediate repair and a bounded closeout wait"
+                }
+                RouteCloseoutBlockContext::LiveOwnerTurn | RouteCloseoutBlockContext::Other => {
+                    "The closeout owner re-evaluates recovery when its durable state changes"
+                }
+            };
+            CloseoutWaitRouteOutcome::Deferred(format!(
+                "[route] explicit send for {} is blocked: {explicit_items} pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. {automatic_recovery}; no second send is required. Otherwise follow the named recovery (blocker: {blocker}). steering_delivered=0 sent=explicit {outcome_fields}",
+                file.display(),
+            ))
+        }
         RouteExplicitSendDecision::DeferNoExplicitItems => {
             CloseoutWaitRouteOutcome::Deferred(format!(
                 "[route] active closeout for {} could not be drained before reroute; nothing was dispatched and existing queue head {:?} remains queued behind the closeout (blocker: {}) {}",
@@ -559,6 +574,7 @@ pub fn route_via_authoritative_actor(
                         &fields,
                         explicit,
                         owner_turn,
+                        context,
                     );
                     eprintln!("{}", outcome.message());
                     outcome.record(file, explicit);
@@ -1716,6 +1732,7 @@ mod tests {
             &fields,
             2,
             RouteOwnerTurnEvidence::Live,
+            RouteCloseoutBlockContext::LiveOwnerTurn,
         );
         let CloseoutWaitRouteOutcome::SteeringDelivered(message) = &delivered else {
             panic!("an explicit send with pending steering is a delivery: {delivered:?}");
@@ -1749,6 +1766,7 @@ mod tests {
             &fields,
             0,
             RouteOwnerTurnEvidence::Live,
+            RouteCloseoutBlockContext::LiveOwnerTurn,
         );
         let CloseoutWaitRouteOutcome::Deferred(message) = &deferred else {
             panic!("{deferred:?}");
@@ -1771,6 +1789,7 @@ mod tests {
             &fields,
             1,
             RouteOwnerTurnEvidence::Absent,
+            RouteCloseoutBlockContext::OpenEmptyPreflight,
         );
         let CloseoutWaitRouteOutcome::Deferred(message) = outcome else {
             panic!("ownerless explicit send must be blocked");
@@ -1782,6 +1801,32 @@ mod tests {
         assert!(message.contains("no second send is required"), "{message}");
         assert!(message.contains("ui_outcome_class=blocked"), "{message}");
         assert!(!message.contains("steering_delivered=1"), "{message}");
+    }
+
+    #[test]
+    fn ownerless_write_applied_send_names_captured_finalize_recovery() {
+        let file = Path::new("/tmp/sample-session.md");
+        let blocker = "closeout recovery blocked [open_cycle]: retained commit recovery owns the terminal boundary";
+        let fields = agent_doc_controller::dispatch::route_closeout_user_outcome_fields(
+            Some("agent-doc admin reregister-editor /tmp/sample-session.md"),
+            RouteOwnerTurnEvidence::Absent,
+        );
+        let outcome = closeout_wait_route_outcome(
+            file,
+            "do [#sample]",
+            blocker,
+            &fields,
+            1,
+            RouteOwnerTurnEvidence::Absent,
+            RouteCloseoutBlockContext::CapturedFinalizeRecovery,
+        );
+        let CloseoutWaitRouteOutcome::Deferred(message) = outcome else {
+            panic!("ownerless explicit send must be blocked");
+        };
+        assert!(message.contains("retained captured-finalize worker"), "{message}");
+        assert!(message.contains("state and delivery edges"), "{message}");
+        assert!(message.contains("already ran immediate repair"), "{message}");
+        assert!(!message.contains("stale-empty-preflight"), "{message}");
     }
 
     /// GH #228 live repro (2026-10-09): a route during a healthy live turn

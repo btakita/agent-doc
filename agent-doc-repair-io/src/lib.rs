@@ -1044,9 +1044,10 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             doc_content = materialized_content;
         }
         if let Some(ref capture) = capture {
-            agent_doc_capture_io::validate_replay_with_current_content(
+            agent_doc_capture_io::validate_materialized_replay_with_current_content(
                 &canonical,
                 capture,
+                &response,
                 &doc_content,
             )?;
         }
@@ -2607,7 +2608,12 @@ pub fn historical_committed_capture_replay(
             cycle_id: capture.cycle_id,
             capture_id: capture.capture_id,
             response_sha256: capture.response_sha256,
-            response_body: capture.response_body,
+            response_body:
+                agent_doc_turn::response_replay::retained_response_materialization_body(
+                    &capture.response_body,
+                    capture.intent_body.as_deref(),
+                )
+                .to_string(),
             file_hash: capture.file_hash,
             baseline_content: capture.baseline_content,
         },
@@ -2641,7 +2647,12 @@ fn restore_committed_head_after_authority_regression(
             cycle_id: capture.cycle_id,
             capture_id: capture.capture_id,
             response_sha256: capture.response_sha256,
-            response_body: capture.response_body,
+            response_body:
+                agent_doc_turn::response_replay::retained_response_materialization_body(
+                    &capture.response_body,
+                    capture.intent_body.as_deref(),
+                )
+                .to_string(),
             file_hash: capture.file_hash,
             baseline_content: capture.baseline_content,
         }
@@ -3839,9 +3850,14 @@ fn committed_capture_response_materialized_in_head(file: &Path, head_doc: &str) 
             return false;
         }
     };
-    !capture.response_body.trim().is_empty()
-        && agent_doc_turn::response_replay::response_materialized_in_content(
+    let materialization_body =
+        agent_doc_turn::response_replay::retained_response_materialization_body(
             &capture.response_body,
+            capture.intent_body.as_deref(),
+        );
+    !materialization_body.trim().is_empty()
+        && agent_doc_turn::response_replay::response_materialized_in_content(
+            materialization_body,
             head_doc,
         )
 }
@@ -3886,7 +3902,11 @@ fn projected_committed_capture_response(file: &Path) -> Result<Option<Historical
         cycle_id: projected.cycle_id,
         capture_id: projected.capture_id,
         response_sha256: projected.response_sha256,
-        response_body: projected.response_body,
+        response_body: agent_doc_turn::response_replay::retained_response_materialization_body(
+            &projected.response_body,
+            projected.intent_body.as_deref(),
+        )
+        .to_string(),
         file_hash: projected.file_hash,
         baseline_content: projected.baseline_content,
     }))
@@ -4001,7 +4021,13 @@ fn captured_response_materialized_in_head(
         && projected.cycle_id == state.cycle_id
         && state.response_sha256.as_deref() == Some(projected.response_sha256.as_str())
     {
-        Some(projected.response_body)
+        Some(
+            agent_doc_turn::response_replay::retained_response_materialization_body(
+                &projected.response_body,
+                projected.intent_body.as_deref(),
+            )
+            .to_string(),
+        )
     } else {
         None
     };

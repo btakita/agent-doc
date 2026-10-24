@@ -3955,6 +3955,10 @@ pub enum RouteCloseoutDrainOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteCloseoutBlockContext {
     OpenEmptyPreflight,
+    /// A durable captured response owns closeout. Its retained finalize worker
+    /// reacts to controller state/delivery edges; it is not governed by the
+    /// stale-empty-preflight cadence.
+    CapturedFinalizeRecovery,
     /// GH #228 (`#routeliveturnverdict`): session-check classified the open
     /// cycle as a live owner-scoped `preflight_started` turn (IN PROGRESS) and
     /// the live-turn guards refused to cancel or repair it. The owner is busy

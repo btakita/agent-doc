@@ -3801,9 +3801,27 @@ mod tests {
                 explanation["claimed_queue_items"][0]["owner"], "subagent:runctrlclaude",
                 "{parsed:#}"
             );
+            assert_eq!(
+                explanation["claimed_queue_items"][0]["state"], "claimed",
+                "{parsed:#}"
+            );
+            assert_eq!(
+                explanation["claimed_queue_items"][0]["generation"], 1,
+                "{parsed:#}"
+            );
+            assert!(
+                explanation["claimed_queue_items"][0]["worker_id"].is_null(),
+                "{parsed:#}"
+            );
             let guidance = explanation["guidance"].as_str().unwrap();
             assert!(
-                guidance.contains("is claimed by subagent:runctrlclaude, expires "),
+                guidance.contains(
+                    "has durable state `claimed` (dispatching, no worker bound) for subagent:runctrlclaude generation 1"
+                ),
+                "{guidance}"
+            );
+            assert!(
+                guidance.contains("not a worker heartbeat or proof of progress in an external job"),
                 "{guidance}"
             );
             let state = agent_doc_cycle_state_io::load(&doc).unwrap();

@@ -4615,9 +4615,10 @@ enum QueueAction {
     },
     /// List live queue-head claim attempts as JSON (`#queueclaim`), including
     /// lost/expired attempts with their cause and actionable recovery. Each
-    /// also carries `owner_session_state` (`live` / `unrecorded` / `ended`):
-    /// whether the coordinator session that made the claim is still running
-    /// (`#claimownerliveness`).
+    /// also carries a durable-evidence assessment, claim/worker ages, remaining
+    /// TTL, and `owner_session_state` (`live` / `unrecorded` / `ended`). A
+    /// worker binding proves dispatch, not current worker or external-job
+    /// progress (`#claimownerliveness`, `#claimfreshnessdiagnostics`).
     Claims {
         /// Path to the session document
         file: PathBuf,

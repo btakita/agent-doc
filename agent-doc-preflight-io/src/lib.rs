@@ -3218,16 +3218,26 @@ fn claimed_queue_head_facts(
                 .find(|head| agent_doc_queue::queue_claim::claim_identity(head) == claim.identity)
                 .map(|head| strip_in_progress_marker(head))
                 .unwrap_or_else(|| claim.item_text.trim().to_string());
-            let owner_session_ended =
+            let (owner_session_state, owner_session_ended) =
                 match agent_doc_queue_io::queue_claim::claim_owner_liveness(file, &claim) {
-                    agent_doc_queue::queue_claim::ClaimOwnerLiveness::Ended(reason) => {
-                        Some(stale_claim_fact(file, &claim, reason))
+                    agent_doc_queue::queue_claim::ClaimOwnerLiveness::Live => ("live", None),
+                    agent_doc_queue::queue_claim::ClaimOwnerLiveness::Unrecorded => {
+                        ("unrecorded", None)
                     }
-                    _ => None,
+                    agent_doc_queue::queue_claim::ClaimOwnerLiveness::Ended(reason) => {
+                        ("ended", Some(stale_claim_fact(file, &claim, reason)))
+                    }
                 };
             agent_doc_queue::no_changes_explanation::ClaimedQueueItemFact {
                 item,
                 owner: claim.owner,
+                generation: claim.generation,
+                state: claim.state,
+                worker_id: claim.worker.as_ref().map(|worker| worker.worker_id.clone()),
+                worker_started_at: claim.worker.as_ref().map(|worker| {
+                    agent_doc_log_time::format_log_timestamp(worker.started_at_secs)
+                }),
+                owner_session_state: owner_session_state.to_string(),
                 expires_at: agent_doc_log_time::format_log_timestamp(claim.expires_at_secs),
                 owner_session_ended,
             }

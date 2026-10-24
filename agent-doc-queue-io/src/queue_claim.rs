@@ -1246,9 +1246,65 @@ pub struct ClaimReport {
     /// Why the owner session ended, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_session_end_reason: Option<&'static str>,
+    /// Binary assessment of the durable attempt evidence. This is deliberately
+    /// narrower than "the worker is making progress": agent-doc can prove a
+    /// worker binding and coordinator-session liveness, but cannot observe the
+    /// worker's current activity or an external job it is waiting on.
+    pub assessment: &'static str,
+    /// Operator-facing interpretation of `assessment`.
+    pub assessment_detail: String,
+    /// Age of the attempt from its original claim boundary.
+    pub claim_age_secs: u64,
+    /// Time until the attempt expires. Zero for an expired/lost attempt.
+    pub ttl_remaining_secs: u64,
+    /// Age of the positive worker-dispatch acknowledgement, when one exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_started_age_secs: Option<u64>,
     /// Present for a retained lost attempt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lost_recovery: Option<LostClaimRecovery>,
+}
+
+fn claim_assessment(
+    claim: &QueueClaim,
+    owner_session_state: &str,
+) -> (&'static str, String) {
+    use agent_doc_queue::queue_claim::QueueClaimState;
+
+    match claim.state {
+        QueueClaimState::Lost => (
+            "lost",
+            "The attempt expired or was abandoned; it is recovery-eligible and does not prove current work.".to_string(),
+        ),
+        QueueClaimState::Reported => (
+            "reported_pending_integration",
+            "The worker reported completion; coordinator integration, verification, and queue closeout are still pending.".to_string(),
+        ),
+        QueueClaimState::Claimed => (
+            if owner_session_state == "ended" {
+                "stale_owner_session_ended"
+            } else {
+                "dispatching_no_worker"
+            },
+            if owner_session_state == "ended" {
+                "The claiming coordinator session ended and no worker is bound; nothing proves this attempt is running.".to_string()
+            } else {
+                "The head is reserved for dispatch, but no worker is bound; this is not evidence that a worker is running.".to_string()
+            },
+        ),
+        QueueClaimState::Running if owner_session_state == "ended" => (
+            "stale_owner_session_ended",
+            "A worker was bound, but the claiming coordinator session ended; current progress is unverifiable until the claim is adopted or released.".to_string(),
+        ),
+        QueueClaimState::Running if owner_session_state == "unrecorded" => (
+            "worker_bound_owner_unrecorded",
+            "A worker dispatch is acknowledged, but coordinator-session liveness was not recorded. Agent-doc cannot observe worker progress or external jobs; use the expiry and inspect the worker before deciding whether the claim is stale.".to_string(),
+        ),
+        QueueClaimState::Running => (
+            "worker_bound_owner_live",
+            "A worker dispatch is acknowledged and the coordinator session is live. Agent-doc cannot observe worker progress or external jobs; an old claim timestamp alone does not make the claim stale.".to_string(),
+        ),
+    }
 }
 
 fn lost_claim_recovery(file: &Path, claim: &QueueClaim) -> LostClaimRecovery {
@@ -1274,6 +1330,7 @@ fn lost_claim_recovery(file: &Path, claim: &QueueClaim) -> LostClaimRecovery {
 /// Every live queue-head attempt, including retained lost attempts, with its
 /// owner-session verdict and actionable expiry recovery.
 pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<ClaimReport>> {
+    let now = claim_clock_now_secs();
     Ok(claim_states_for_content(file, content)?
         .into_iter()
         .map(|claim| {
@@ -1282,7 +1339,16 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 ClaimOwnerLiveness::Unrecorded => ("unrecorded", None),
                 ClaimOwnerLiveness::Ended(reason) => ("ended", Some(reason.as_str())),
             };
+            let (assessment, assessment_detail) = claim_assessment(&claim, state);
             ClaimReport {
+                assessment,
+                assessment_detail,
+                claim_age_secs: now.saturating_sub(claim.claimed_at_secs),
+                ttl_remaining_secs: claim.expires_at_secs.saturating_sub(now),
+                worker_started_age_secs: claim
+                    .worker
+                    .as_ref()
+                    .map(|worker| now.saturating_sub(worker.started_at_secs)),
                 lost_recovery: (claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
                     .then(|| lost_claim_recovery(file, &claim)),
                 claim,
@@ -1604,6 +1670,10 @@ mod tests {
             report.claim.state,
             agent_doc_queue::queue_claim::QueueClaimState::Lost
         );
+        assert_eq!(report.assessment, "lost");
+        assert_eq!(report.claim_age_secs, 10);
+        assert_eq!(report.ttl_remaining_secs, 0);
+        assert_eq!(report.worker_started_age_secs, Some(10));
         let recovery = report.lost_recovery.as_ref().unwrap();
         assert_eq!(recovery.reason, "claim_ttl_expired");
         assert!(
@@ -1620,6 +1690,63 @@ mod tests {
                     .contains("--owner 'subagent:lostdiag'"),
             "{}",
             recovery.reclaim_command
+        );
+    }
+
+    /// `#claimfreshnessdiagnostics`: `Running` proves that dispatch bound a
+    /// concrete worker, not that the worker or an external job is progressing.
+    /// The claims projection exposes both the durable evidence and its limits.
+    #[test]
+    fn running_claim_report_distinguishes_worker_binding_from_current_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#runningdiag]"]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let pinned = 2_000_000;
+        let _claimed_at = pin_claim_clock_for_current_thread(pinned);
+        let (_, claim) = claim_with_session(
+            &doc,
+            "#runningdiag",
+            "subagent:runningdiag",
+            120,
+            Some(ClaimOwnerSession {
+                harness: Some("codex".to_string()),
+                session_id: Some("runningdiag-session".to_string()),
+                pane: None,
+                pid: Some(std::process::id()),
+            }),
+        )
+        .unwrap();
+        start_attempt(
+            &doc,
+            "#runningdiag",
+            "subagent:runningdiag",
+            "/root/runningdiag",
+            120,
+            claim.generation,
+        )
+        .unwrap();
+
+        let _observed_at = pin_claim_clock_for_current_thread(pinned + 40);
+        let reports = claim_reports_for_content(&doc, &content).unwrap();
+        assert_eq!(reports.len(), 1, "{reports:#?}");
+        let report = &reports[0];
+        assert_eq!(report.assessment, "worker_bound_owner_live");
+        assert_eq!(report.claim_age_secs, 40);
+        assert_eq!(report.ttl_remaining_secs, 80);
+        assert_eq!(report.worker_started_age_secs, Some(40));
+        assert!(
+            report
+                .assessment_detail
+                .contains("cannot observe worker progress or external jobs"),
+            "{}",
+            report.assessment_detail
+        );
+        assert!(
+            report
+                .assessment_detail
+                .contains("old claim timestamp alone does not make the claim stale"),
+            "{}",
+            report.assessment_detail
         );
     }
 

@@ -22,6 +22,7 @@
 //! queue items are waiting on a go-ahead, and the guidance text.
 
 use agent_doc_element_queue::strip_priority_markers;
+use crate::queue_claim::QueueClaimState;
 use serde::{Deserialize, Serialize};
 
 /// Where the preflight read the current document from.
@@ -57,6 +58,20 @@ pub struct ClaimedQueueItemFact {
     pub item: String,
     /// The claim owner, e.g. `subagent:runctrlclaude`.
     pub owner: String,
+    /// Exact fenced attempt generation shown in the queue annotation.
+    pub generation: u64,
+    /// Durable attempt state; unlike the old generic "in flight" wording this
+    /// distinguishes dispatch reservation, worker binding, and reported debt.
+    pub state: QueueClaimState,
+    /// Concrete harness worker positively bound by `queue start`, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_id: Option<String>,
+    /// When the worker binding was acknowledged, ISO-8601 UTC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_started_at: Option<String>,
+    /// `live`, `unrecorded`, or `ended`. This states only coordinator-session
+    /// liveness; it is not a worker heartbeat or external-job observation.
+    pub owner_session_state: String,
     /// When the claim expires, ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`).
     pub expires_at: String,
     /// `#claimownerliveness`: set when the coordinator session that made the
@@ -90,8 +105,8 @@ pub struct NoChangesFacts<'a> {
     /// Whether the queue will run on its own: active, or deferred to a start
     /// time. Waiting items are only reported when it will not.
     pub queue_runs: bool,
-    /// Live heads a worker claim holds. They are in flight elsewhere, so a
-    /// running queue whose only heads are claimed has nothing for this session.
+    /// Live heads a durable claim holds. They are reserved from this session,
+    /// but the claim alone is not a worker heartbeat or external-job status.
     pub claimed_queue_items: &'a [ClaimedQueueItemFact],
 }
 
@@ -103,9 +118,9 @@ pub struct NoChangesExplanation {
     /// stripped). They are why an operator may expect work that never starts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub waiting_queue_items: Vec<String>,
-    /// Queue heads held by a live worker claim (`#explicitrunqueue`): why an
+    /// Queue heads held by a durable worker claim (`#explicitrunqueue`): why an
     /// explicit Run Agent Doc on a queue whose heads are all claimed opens no
-    /// cycle. Relay "claimed by <owner>, expires <t>" and leave the claim alone.
+    /// cycle. Relay the exact attempt state and its observation limits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub claimed_queue_items: Vec<ClaimedQueueItemFact>,
     /// What to tell the operator. Relay this instead of improvising a cause.
@@ -134,10 +149,10 @@ pub fn queue_item_texts(content: &str) -> Vec<String> {
         .collect()
 }
 
-/// `#explicitrunqueue`: the non-error outcome for queue heads a live worker
-/// claim holds — `` `do [#id]` is claimed by <owner>, expires <t> `` — plus the
-/// instruction the mid-turn steering path already gives for a claimed item
-/// (`dispatch=forward_to_owner`): nothing to dispatch, do not re-claim.
+/// `#explicitrunqueue` / `#claimfreshnessdiagnostics`: the non-error outcome
+/// for queue heads a durable claim holds. It names the exact attempt state,
+/// worker binding, owner-session evidence, and expiry without converting those
+/// facts into an unobservable worker-heartbeat or external-progress claim.
 ///
 /// `#claimownerliveness`: a claim whose owner session ended is a **stale
 /// claim**. It is never described as in flight; the guidance names why it is
@@ -153,17 +168,43 @@ pub fn claimed_queue_guidance(claimed: &[ClaimedQueueItemFact]) -> String {
         let listed = live
             .iter()
             .map(|fact| {
-                format!(
-                    "`{}` is claimed by {}, expires {}",
-                    fact.item, fact.owner, fact.expires_at
-                )
+                let owner_state = fact.owner_session_state.as_str();
+                match (fact.state, fact.worker_id.as_deref()) {
+                    (QueueClaimState::Claimed, _) => format!(
+                        "`{}` has durable state `claimed` (dispatching, no worker bound) for {} generation {}; coordinator session {}; expires {}",
+                        fact.item, fact.owner, fact.generation, owner_state, fact.expires_at
+                    ),
+                    (QueueClaimState::Running, Some(worker)) => format!(
+                        "`{}` has durable state `running`: worker `{worker}` is bound to {} generation {}; coordinator session {}; worker started {}; expires {}",
+                        fact.item,
+                        fact.owner,
+                        fact.generation,
+                        owner_state,
+                        fact.worker_started_at.as_deref().unwrap_or("at an unknown time"),
+                        fact.expires_at
+                    ),
+                    (QueueClaimState::Running, None) => format!(
+                        "`{}` has inconsistent durable state `running` without a worker binding for {} generation {}; coordinator session {}; expires {}",
+                        fact.item, fact.owner, fact.generation, owner_state, fact.expires_at
+                    ),
+                    (QueueClaimState::Reported, _) => format!(
+                        "`{}` has durable state `reported` for {} generation {}; coordinator integration and closeout remain; expires {}",
+                        fact.item, fact.owner, fact.generation, fact.expires_at
+                    ),
+                    (QueueClaimState::Lost, _) => format!(
+                        "`{}` has durable state `lost` for {} generation {}; recovery is required",
+                        fact.item, fact.owner, fact.generation
+                    ),
+                }
             })
             .collect::<Vec<_>>()
             .join("; ");
         parts.push(format!(
-            "Queue work is in flight elsewhere: {listed}. Nothing to dispatch in this session; \
-             do NOT respond to, re-dispatch, re-claim, or release a claimed item. It returns to \
-             the queue when its owner finishes or the claim expires."
+            "Queue claim state: {listed}. These are durable dispatch facts, not a worker heartbeat \
+             or proof of progress in an external job. Nothing to dispatch in this session; do NOT \
+             respond to, re-dispatch, re-claim, or release a claim solely because its original \
+             claim timestamp is old. Inspect the named worker/external wait when progress matters; \
+             the item returns to the queue when its owner finishes or the claim expires."
         ));
     }
     for fact in stale {
@@ -311,6 +352,11 @@ mod tests {
         let claimed = [ClaimedQueueItemFact {
             item: "do [#runctrlclaude]".to_string(),
             owner: "subagent:runctrlclaude".to_string(),
+            generation: 1,
+            state: QueueClaimState::Claimed,
+            worker_id: None,
+            worker_started_at: None,
+            owner_session_state: "live".to_string(),
             expires_at: "2026-10-10T19:32:32Z".to_string(),
             owner_session_ended: None,
         }];
@@ -324,12 +370,17 @@ mod tests {
         assert!(explanation.waiting_queue_items.is_empty());
         assert!(
             explanation.guidance.contains(
-                "`do [#runctrlclaude]` is claimed by subagent:runctrlclaude, expires 2026-10-10T19:32:32Z"
+                "`do [#runctrlclaude]` has durable state `claimed` (dispatching, no worker bound) for subagent:runctrlclaude generation 1; coordinator session live; expires 2026-10-10T19:32:32Z"
             ),
             "{}",
             explanation.guidance
         );
         assert!(explanation.guidance.contains("Nothing to dispatch"));
+        assert!(
+            explanation
+                .guidance
+                .contains("durable dispatch facts, not a worker heartbeat")
+        );
         let json = serde_json::to_value(&explanation).unwrap();
         assert_eq!(
             json["claimed_queue_items"][0]["owner"],
@@ -347,6 +398,11 @@ mod tests {
             ClaimedQueueItemFact {
                 item: "do [#cligenport]".to_string(),
                 owner: "subagent:cligoshell-then-cligenport".to_string(),
+                generation: 4,
+                state: QueueClaimState::Running,
+                worker_id: Some("worker:cligenport".to_string()),
+                worker_started_at: Some("2026-10-11T07:00:00Z".to_string()),
+                owner_session_state: "ended".to_string(),
                 expires_at: "2026-10-11T08:30:00Z".to_string(),
                 owner_session_ended: Some(StaleClaimFact {
                     reason: "session_replaced".to_string(),
@@ -361,6 +417,11 @@ mod tests {
             ClaimedQueueItemFact {
                 item: "do [#live]".to_string(),
                 owner: "subagent:live".to_string(),
+                generation: 2,
+                state: QueueClaimState::Running,
+                worker_id: Some("worker:live".to_string()),
+                worker_started_at: Some("2026-10-11T07:30:00Z".to_string()),
+                owner_session_state: "live".to_string(),
                 expires_at: "2026-10-11T09:00:00Z".to_string(),
                 owner_session_ended: None,
             },
@@ -368,7 +429,13 @@ mod tests {
         let guidance = claimed_queue_guidance(&claimed);
         let (live_part, stale_part) = guidance.split_once("Stale claim:").unwrap();
         assert!(
-            live_part.contains("`do [#live]` is claimed by subagent:live"),
+            live_part.contains(
+                "`do [#live]` has durable state `running`: worker `worker:live` is bound to subagent:live generation 2"
+            ),
+            "{guidance}"
+        );
+        assert!(
+            live_part.contains("not a worker heartbeat or proof of progress in an external job"),
             "{guidance}"
         );
         assert!(!live_part.contains("cligenport"), "{guidance}");

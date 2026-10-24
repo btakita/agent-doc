@@ -254,6 +254,27 @@ Compacted content:
 >
 > Independent verification passed: sdk-demo is no longer wedged or out of sync. Grok generation 13 pane %58 is ready/alive; cycle synthetic-1792830619703 is committed with commit_success, open=false, editor convergence and closeout commit both OK, lint clean, and no document diff. The live trace safely re-registered the editor, resumed the retained write-applied capture, committed exactly once, and recorded terminal file/snapshot/HEAD agreement. v0.35.551 includes e470d0038f ownerless captured-finalize recovery, 97856c9eb9 projection convergence, and 3563c0f3df claim evidence. The authoritative session-check returned queue_continuation_required=false and next_action=no_agent_action. This head can close; do not reload, reregister, reset, finalize, write, or run another session-check.
 <!-- agent-doc-subagent-completion key=c5a51f82eae66f98980bd81e416482e9d124f73c63860834e5914214ff740e8d -->
+
+### Re: recovered response
+
+Implemented, installed, released, and reconciled.
+
+- Root cause: `Deferred` committed correctly, but head-only dedup suppressed the required continuation. Fixed in the state machine and regression coverage.
+- Yes, state-machine analysis could identify it: the missing forbidden state was “committed Deferred + pending head + no owner + no scheduled continuation.”
+- Local install: `agent-doc 0.35.551`.
+- Editor packages: VS Code `0.2.83`; JetBrains classic/262/263 `0.2.822/0.2.823/0.2.824`.
+- sdk-demo is synchronized and healthy: Grok pane `%58` is ready, the cycle committed successfully, and `next_action=no_agent_action`.
+- All named queue receipts are now visibly `☑️` and the session document is committed.
+- Published release: [v0.35.551](https://github.com/btakita/agent-doc/releases/tag/v0.35.551), with 24 assets and a successful PyPI publication.
+
+Action required:
+
+1. Restart IntelliJ IDEA 2026.3 to load plugin `0.2.824`.
+2. Verify the “Cannot Upgrade Plugins” warning clears.
+3. If it remains, capture the configured repository entry and relevant `idea.log` update-check lines under Todo `#jb263-feed-verify`.
+4. Do not restart, reload, reset, or rerun sdk-demo; it needs no further action.
+
+The remaining untagged/noise queue heads are assigned to the supervisor’s automatic clear-and-continue path—not an operator blocker.
 <!-- agent:boundary:00b621d9 -->
 <!-- /agent:exchange -->
 

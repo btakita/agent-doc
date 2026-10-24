@@ -10259,6 +10259,7 @@ pub enum RetainedWriteCycleBoundary {
     Preflight,
     SessionCheck,
     FinalizePreCapture,
+    QueueProjectionRepair,
     RegressionTest,
 }
 
@@ -10268,6 +10269,7 @@ impl RetainedWriteCycleBoundary {
             Self::Preflight => "preflight_retained_write_recovery",
             Self::SessionCheck => "session_check_retained_write_recovery",
             Self::FinalizePreCapture => "finalize_pre_capture_retained_write_recovery",
+            Self::QueueProjectionRepair => "queue_projection_repair_retained_write_recovery",
             Self::RegressionTest => "preflight_retained_write_recovery_test",
         }
     }
@@ -10277,6 +10279,7 @@ impl RetainedWriteCycleBoundary {
             Self::Preflight => "preflight_retained_document_write_gate",
             Self::SessionCheck => "session_check_retained_write_gate",
             Self::FinalizePreCapture => "finalize_pre_capture_retained_write_gate",
+            Self::QueueProjectionRepair => "queue_projection_repair_retained_write_gate",
             Self::RegressionTest => "retained_write_recovery_test_gate",
         }
     }
@@ -10286,6 +10289,9 @@ impl RetainedWriteCycleBoundary {
             Self::Preflight => "preflight_retained_write_recovered_settlement",
             Self::SessionCheck => "session_check_retained_write_recovered_settlement",
             Self::FinalizePreCapture => "finalize_pre_capture_retained_write_recovered_settlement",
+            Self::QueueProjectionRepair => {
+                "queue_projection_repair_retained_write_recovered_settlement"
+            }
             Self::RegressionTest => "retained_write_recovery_test_settlement",
         }
     }

@@ -26,6 +26,9 @@ use agent_doc_document::subagent_completion::{
 pub(crate) struct CompletionFeedbackOutcome {
     pub claim: QueueClaim,
     pub appended: bool,
+    /// Durable editor-authority target still awaiting visible projection.
+    pub projection_pending: bool,
+    pub intent_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -69,11 +72,14 @@ fn report_complete_with_lock_wait(
     let resolved =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
     // A retained successor is the latest complete desired cut even while the
-    // attached editor has not materialized it. Compose concurrent reports on
-    // that cut so no accepted completion cell is lost.
-    let current = agent_doc_document_realtime_io::pending_document_write(file)
-        .map(|pending| pending.target_content)
-        .unwrap_or(resolved);
+    // attached editor has not materialized it. Rebase that successor over the
+    // fresh editor cut before composing another report: blindly preferring the
+    // retained whole-document target would attribute later operator edits to
+    // this completion write (or drop them).
+    let current = agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
+        file, &resolved,
+    )?
+    .unwrap_or(resolved);
     let Some(claim) = observed_claim(file, item, &current)? else {
         return Ok(None);
     };
@@ -87,10 +93,15 @@ fn report_complete_with_lock_wait(
     // the first is still awaiting projection.
     let projection =
         agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, &current, None)?;
-    let appended =
+    let (appended, intent_id) =
         append_completion_feedback(file, &current, &projection.target_content, &claim, response)?;
     agent_doc_queue_io::queue_cmd::record_claim_runtime_projection(file, &projection, None)?;
-    Ok(Some(CompletionFeedbackOutcome { claim, appended }))
+    Ok(Some(CompletionFeedbackOutcome {
+        claim,
+        appended,
+        projection_pending: intent_id.is_some(),
+        intent_id,
+    }))
 }
 
 fn observed_claim(file: &Path, item: &str, current: &str) -> Result<Option<QueueClaim>> {
@@ -106,7 +117,7 @@ fn append_completion_feedback(
     projected: &str,
     claim: &QueueClaim,
     response: &str,
-) -> Result<bool> {
+) -> Result<(bool, Option<String>)> {
     let key = agent_doc_queue_io::queue_claim::completion_feedback_key(claim)?;
     let marker = agent_doc_document::subagent_completion::marker(&key);
     // Keep the heading, attested worker response, and marker contiguous. The existing N-1 diff
@@ -133,7 +144,10 @@ fn append_completion_feedback(
         projected.to_string()
     };
     if updated == current {
-        return Ok(false);
+        let intent_id = agent_doc_document_realtime_io::pending_document_write(file)
+            .filter(|pending| pending.target_content == current)
+            .map(|pending| pending.intent_id);
+        return Ok((false, intent_id));
     }
     let scope = changed_component_scope(current, &updated)
         .context("subagent completion feedback must change only agent:exchange/queue")?;
@@ -170,7 +184,43 @@ fn append_completion_feedback(
                 .unwrap_or_default(),
         ),
     );
-    Ok(appended)
+    Ok((appended, retained_intent))
+}
+
+/// Settle any retained completion successor, then rederive the queue marker
+/// from the durable claim ledger. This never releases a claim or writes behind
+/// an editor-owned buffer.
+pub(crate) fn repair_claim_projection(
+    file: &Path,
+    effects: &impl agent_doc_queue_io::queue_cmd::QueueCommandEffects,
+) -> Result<bool> {
+    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
+    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
+    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
+        bail!(
+            "timed out after {}ms waiting to repair queue projection for {}; retry `agent-doc queue repair-projection {:?}`",
+            COMPLETION_LOCK_WAIT.as_millis(),
+            file.display(),
+            file,
+        );
+    };
+
+    if agent_doc_document_realtime_io::pending_document_write(file).is_some() {
+        agent_doc_document_realtime_io::recover_retained_document_write_before_new_cycle(
+            file,
+            agent_doc_document_realtime_io::RetainedWriteCycleBoundary::QueueProjectionRepair,
+        )?;
+    }
+    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
+        bail!(
+            "queue projection is durably retained as intent {} but no editor delivery receipt is available; open {} in the active editor/project, then rerun `agent-doc queue repair-projection {:?}`",
+            pending.intent_id,
+            file.display(),
+            file,
+        );
+    }
+
+    agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(effects, file, None)
 }
 
 /// Repair the short-lived v0.34 rolling-upgrade artifact that put all visible
@@ -541,6 +591,7 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(first.appended);
+        assert!(!first.projection_pending);
         assert_eq!(
             agent_doc_queue_io::queue_claim::load_ledger(&doc)
                 .unwrap()
@@ -588,6 +639,52 @@ mod tests {
         assert!(
             content.find("### Re: Subagent completed").unwrap()
                 < content.find("<!-- agent:boundary:keep -->").unwrap()
+        );
+    }
+
+    #[test]
+    fn projection_repair_changes_only_visible_marker_and_keeps_reported_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        fs::write(
+            &doc,
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:queue subagents -->\n",
+                "- 🚧 [#subagent:sdk#1] finish sdk\n",
+                "<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "finish sdk", "subagent:sdk", 600)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "finish sdk",
+            "subagent:sdk",
+            "worker:sdk",
+            600,
+            1,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "finish sdk", Some(1)).unwrap();
+
+        assert!(
+            repair_claim_projection(&doc, &crate::CliQueueCommandEffects).unwrap(),
+            "the stale running marker should be repaired",
+        );
+        let repaired = fs::read_to_string(&doc).unwrap();
+        assert!(repaired.contains("- ☑️ [#subagent:sdk#1] finish sdk"));
+        let claims = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims;
+        assert_eq!(claims.len(), 1);
+        assert_eq!(
+            claims[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported,
         );
     }
 
@@ -728,6 +825,7 @@ mod tests {
             .map(|thread| thread.join().unwrap())
             .collect::<Vec<_>>();
         assert!(outcomes.iter().all(|outcome| outcome.appended));
+        assert!(outcomes.iter().all(|outcome| outcome.projection_pending));
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "four reports must return on durable acceptance, not wait for editor projection"
@@ -767,6 +865,109 @@ mod tests {
         );
         agent_doc_crdt_relay_io::deregister_replica_for_file(&doc, "completion-feedback-editor")
             .unwrap();
+    }
+
+    #[test]
+    fn later_report_rebases_retained_feedback_over_concurrent_editor_queue_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        let initial = concat!(
+            "---\nagent_doc_session: sdk-feedback-rebase\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents -->\n",
+            "- first worker\n",
+            "- second worker\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, initial).unwrap();
+        for (item, owner, worker) in [
+            ("first worker", "subagent:first", "worker:first"),
+            ("second worker", "subagent:second", "worker:second"),
+        ] {
+            agent_doc_queue_io::queue_claim::claim(&doc, item, owner, 600).unwrap();
+            agent_doc_queue_io::queue_claim::start_attempt(
+                &doc, item, owner, worker, 600, 1,
+            )
+            .unwrap();
+        }
+
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: "completion-feedback-rebase-editor".to_string(),
+            }]);
+        let (client_id, _bootstrap) = agent_doc_crdt_relay_io::register_replica_for_file(
+            &doc,
+            "completion-feedback-rebase-editor",
+        )
+        .unwrap()
+        .expect("editor replica attaches");
+
+        let first = report_complete(&doc, "first worker", Some(1), "first result")
+            .unwrap()
+            .unwrap();
+        assert!(first.projection_pending);
+
+        agent_doc_crdt_relay_io::with_hub(&doc, |hub| {
+            let before_edit = hub.canonical_text();
+            let insertion_byte = before_edit
+                .find("<!-- /agent:queue -->")
+                .expect("queue closing marker");
+            let insertion_char = before_edit[..insertion_byte].chars().count() as u32;
+            hub.local_edit(
+                client_id,
+                insertion_char,
+                0,
+                "- operator added while reports were arriving\n",
+            )
+            .unwrap();
+        })
+        .unwrap();
+        let authoritative = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            &doc,
+            "completion_feedback_concurrent_edit_test",
+        )
+        .unwrap();
+        assert!(
+            authoritative.contains("operator added while reports were arriving"),
+            "fixture must expose the concurrent editor cut:\n{authoritative}",
+        );
+
+        let second = report_complete(&doc, "second worker", Some(1), "second result")
+            .unwrap()
+            .unwrap();
+        assert!(second.projection_pending);
+        let pending = agent_doc_document_realtime_io::pending_document_write(&doc)
+            .expect("both reports remain in one retained successor");
+        assert!(
+            pending
+                .target_content
+                .contains("operator added while reports were arriving"),
+            "the concurrent queue edit must survive:\n{}",
+            pending.target_content,
+        );
+        assert_eq!(
+            pending
+                .target_content
+                .matches("### Re: Subagent completed")
+                .count(),
+            2,
+        );
+        assert!(pending.target_content.contains("- ☑️ [#subagent:first#1] first worker"));
+        assert!(pending.target_content.contains("- ☑️ [#subagent:second#1] second worker"));
+
+        agent_doc_crdt_relay_io::deregister_replica_for_file(
+            &doc,
+            "completion-feedback-rebase-editor",
+        )
+        .unwrap();
     }
 
     #[test]

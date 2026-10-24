@@ -1678,7 +1678,37 @@ pub fn project_prompt_runtime_projections(
     let mut projected = body.to_string();
     for ((before, range), after) in spans.iter().zip(&marked_entries).rev() {
         if before != after {
-            projected.replace_range(range.clone(), &render(std::slice::from_ref(after)));
+            let source = &body[range.clone()];
+            let replacement = match (before, after) {
+                // Runtime projection owns only the marker/attempt annotation in
+                // an otherwise-live row. Preserve the operator's exact source
+                // wrapper instead of canonicalizing a recovered multiline
+                // head (`---` + title + evidence fence) while the editor may
+                // also be adding a following row. Canonical rendering here can
+                // insert a synthetic closing fence and retarget that neighbor.
+                (
+                    QueueEntry::Prompt(before_prompt),
+                    QueueEntry::Prompt(after_prompt),
+                )
+                | (
+                    QueueEntry::Completed(before_prompt),
+                    QueueEntry::Completed(after_prompt),
+                ) if before_prompt.text != after_prompt.text => {
+                    let before_prefix = before_prompt.text.lines().next().unwrap_or_default();
+                    let after_prefix = after_prompt.text.lines().next().unwrap_or_default();
+                    source.find(before_prefix).map(|offset| {
+                        let mut preserved = source.to_string();
+                        preserved.replace_range(
+                            offset..offset + before_prefix.len(),
+                            after_prefix,
+                        );
+                        preserved
+                    })
+                    .unwrap_or_else(|| render(std::slice::from_ref(after)))
+                }
+                _ => render(std::slice::from_ref(after)),
+            };
+            projected.replace_range(range.clone(), &replacement);
         }
     }
     let reparsed = parse(&projected)?;
@@ -4702,6 +4732,58 @@ mod tests {
 
         assert_eq!(projected, "- 🟡 [#subagent:worker#1] dispatched worker work\n");
         assert_eq!(project_prompt_runtime_projections(&projected, &targets).unwrap(), None);
+    }
+
+    #[test]
+    fn runtime_projection_preserves_recovered_multiline_source_and_following_row() {
+        use agent_doc_document::queue_projection::{
+            QueueLifecycleMarker, QueueOwnerProjection,
+        };
+        let body = concat!(
+            "---\n",
+            "Run Agent Doc on sdk-demo.md (Grok)\n",
+            "```\n",
+            "operator evidence\n",
+            "```\n",
+            "- operator-added follow-up [#next]\n",
+        );
+        let text = concat!(
+            "Run Agent Doc on sdk-demo.md (Grok)\n",
+            "```\n",
+            "operator evidence\n",
+            "```",
+        );
+        let targets = vec![QueueRowProjection {
+            text: text.to_string(),
+            marker: QueueLifecycleMarker::Claimed,
+            owner: Some(QueueOwnerProjection {
+                owner: "subagent:grok".to_string(),
+                generation: 1,
+            }),
+            reopen_completed: false,
+        }];
+
+        let (projected, entries) = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("the recovered multiline head should gain its claim marker");
+
+        assert_eq!(
+            projected,
+            concat!(
+                "---\n",
+                "🟡 [#subagent:grok#1] Run Agent Doc on sdk-demo.md (Grok)\n",
+                "```\n",
+                "operator evidence\n",
+                "```\n",
+                "- operator-added follow-up [#next]\n",
+            ),
+            "projection must not insert a canonical closing fence or rewrite the following row",
+        );
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[1],
+            QueueEntry::Prompt(QueuePrompt::new("operator-added follow-up [#next]"))
+        );
     }
 
     #[test]

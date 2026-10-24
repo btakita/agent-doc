@@ -4558,6 +4558,14 @@ enum QueueAction {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Reconcile durable queue-claim state into visible queue markers without
+    /// releasing a claim or changing queue work. A retained editor write must
+    /// receive a safe delivery/save receipt before this reports success.
+    #[command(name = "repair-projection")]
+    RepairProjection {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Release a queue claim (`#queueclaim`) when its subagent reported back but
     /// the result is not persisted yet. The line stays queued and unanswered:
     /// release records that its worker reported (`#reportedrelease`), so the
@@ -8106,7 +8114,7 @@ fn try_main() -> anyhow::Result<()> {
                     &response,
                 )? {
                     Some(outcome) => eprintln!(
-                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration",
+                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration{}",
                         if outcome.appended {
                             "accepted"
                         } else {
@@ -8115,6 +8123,19 @@ fn try_main() -> anyhow::Result<()> {
                         outcome.claim.item_text,
                         outcome.claim.owner,
                         outcome.claim.generation,
+                        if outcome.projection_pending {
+                            format!(
+                                "; visible projection pending{} — open the document in the active editor/project, then run `agent-doc queue repair-projection {:?}`",
+                                outcome
+                                    .intent_id
+                                    .as_deref()
+                                    .map(|intent| format!(" (intent {intent})"))
+                                    .unwrap_or_default(),
+                                file,
+                            )
+                        } else {
+                            String::new()
+                        },
                     ),
                     None => eprintln!(
                         "[queue] no subagent claim on {item:?}; no completion feedback written"
@@ -8133,6 +8154,21 @@ fn try_main() -> anyhow::Result<()> {
                     },
                     outcome.repaired,
                     if outcome.repaired == 1 { "" } else { "s" },
+                );
+                Ok(())
+            }
+            QueueAction::RepairProjection { file } => {
+                let queue_effects = CliQueueCommandEffects;
+                let changed =
+                    queue_completion_feedback::repair_claim_projection(&file, &queue_effects)?;
+                eprintln!(
+                    "[queue] visible claim projection {} for {}; claims and queue work unchanged",
+                    if changed {
+                        "repaired"
+                    } else {
+                        "already synchronized"
+                    },
+                    file.display(),
                 );
                 Ok(())
             }

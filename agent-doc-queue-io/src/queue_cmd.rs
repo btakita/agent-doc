@@ -1252,6 +1252,20 @@ mod tests {
         );
 
         crate::queue_claim::report_attempt(&doc, "dispatched worker work", Some(1)).unwrap();
+        let drift = claim_reports_with_effects(&effects, &doc).unwrap();
+        assert_eq!(drift.len(), 1);
+        assert_eq!(drift[0].visible_projection_state, "out_of_sync");
+        assert_eq!(drift[0].expected_visible_marker, "☑️");
+        assert_eq!(drift[0].observed_visible_markers, ["🚧"]);
+        assert_eq!(
+            drift[0].next_action_argv,
+            Some(vec![
+                "agent-doc".to_string(),
+                "queue".to_string(),
+                "repair-projection".to_string(),
+                doc.to_string_lossy().into_owned(),
+            ]),
+        );
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let reported = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -1260,6 +1274,9 @@ mod tests {
             ),
             "{reported}"
         );
+        let synchronized = claim_reports_with_effects(&effects, &doc).unwrap();
+        assert_eq!(synchronized[0].visible_projection_state, "synchronized");
+        assert!(synchronized[0].next_action_argv.is_none());
 
         let released = crate::claim_release_receipt::release_attempt(
             &doc,

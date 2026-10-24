@@ -29,11 +29,11 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-✅ Release v0.35.548 was published from `56046b3880` and verified end to end. The stable, non-draft GitHub release has 21 assets; all 11 release jobs passed, including six platform builds, plugins, Homebrew, PyPI, and finalization. Issues #368–#371 are closed.
+✅ Release v0.35.551 was published from `03433d0494` and verified end to end. The stable, non-draft GitHub release has 24 assets; all 12 release jobs passed, and the PyPI wheel is public.
 
-Remote `main` is at `9e366edd73`. Its post-release per-target stable upgrade-channel implementation is pushed, and CI, Book, and Pages workflows all passed. The feature is not part of v0.35.548; it will activate after a future release containing the resolver.
+Remote `main` includes the issue #372, sdk-demo queue/UI recovery, lazily blocked-reason diagnostics, deferred-continuation, claim-freshness, editor alert deduplication, and template fixes shipped in v0.35.551. The authoritative suite passed 11,494 Rust tests, 204 VS Code tests, cross-editor SimWorld, all JetBrains variants, bootstrap/docs/parity, tmux CI, and state-machine checks.
 
-This host reports agent-doc CLI 0.35.548. Installed editor packages are IntelliJ classic 0.2.806, Rider/262 0.2.807, and VSCodium 0.2.83. The v0.35.548 release also publishes JetBrains 263 package 0.2.808; it is not installed on this host.
+This host reports agent-doc CLI 0.35.551. Installed editor packages are JetBrains classic 0.2.822, 262 0.2.823, 263 0.2.824, and VS Code/VSCodium 0.2.83. Running modular JetBrains IDEs require restart to load the new package; verification is tracked by Todo #jb263-feed-verify.
 <!-- /status:sync -->
 <!-- /agent:status -->
  

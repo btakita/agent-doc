@@ -108,6 +108,7 @@ The Marketplace wording **first publication** means the first published release/
 
 ## Queue: Main
 <!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)
 <!-- /agent:queue -->
 
 ## Queue: Issues

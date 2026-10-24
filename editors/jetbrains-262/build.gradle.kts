@@ -242,6 +242,9 @@ tasks {
                 check(descriptorDependencies.getValue("agent.doc.backend").containsAll(
                     setOf("intellij.platform.backend", "agent.doc.shared"),
                 )) { "backend descriptor lost its side/shared dependencies: $descriptorDependencies" }
+                check("intellij.platform.backend.split" !in descriptorDependencies.getValue("agent.doc.backend")) {
+                    "backend descriptor must remain loadable in monolithic IDEs: $descriptorDependencies"
+                }
 
                 val backendJar = archive.entries().asSequence()
                     .single { it.name.endsWith("/lib/modules/agent.doc.backend.jar") }

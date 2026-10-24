@@ -14,6 +14,9 @@ dependencies {
         bundledModule("intellij.platform.kernel.backend")
         bundledModule("intellij.platform.rpc.backend")
         bundledModule("intellij.platform.backend")
+        // Compile the Remote Dev fallback against its split-only listener API,
+        // but do not add this module to the shipped descriptor: monolithic IDEs
+        // provide the backend role without intellij.platform.backend.split.
         bundledModule("intellij.platform.backend.split")
         bundledModule("intellij.platform.vcs")
         bundledPlugin("org.jetbrains.plugins.terminal")
@@ -139,7 +142,6 @@ val generateBackendDescriptor by tasks.registering {
         val dependencies = result.createElement("dependencies")
         listOf(
             "intellij.platform.backend",
-            "intellij.platform.backend.split",
             "intellij.platform.kernel.backend",
             "intellij.platform.vcs",
             "agent.doc.shared",

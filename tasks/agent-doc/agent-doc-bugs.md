@@ -100,24 +100,101 @@ For this IDEA Beta (`IU-263.7307.44`), I installed exact-263 Agent Doc `0.2.816`
 I also fixed the 263 modular package so it loads in IDEA's monolith mode: the backend descriptor no longer requires the split-only `intellij.platform.backend.split` module. The full `make check` suite passed after the installer, compatibility, and update-channel changes. The pushed commits are `ff1fdf2d3b` (CLI installer action), `ee87d7b70b` (263 monolith compatibility), and `d1b5bb0224` (GitHub update-channel toggle).
 
 The Marketplace wording **first publication** means the first published release/listing of this plugin, not the publisher account's first-ever publication.
-<!-- agent:boundary:df6b991a -->
+
+### Re: Subagent completed: `subagent:gh372` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?” — agent-doc
+<!-- agent-doc-subagent-response sha256=04a628fabc2cea780ffa4579d722652d6005c4b18c0aa62457fdb6227b195b24 -->
+> **Subagent response:**
+>
+> GH #372 worker complete; issue intentionally remains OPEN pending coordinator integration.
+>
+> Branch: codex/gh-372-ipc-sync
+> Commit: 3630ef2f4d67a145493b20620c5ebc166b236fd5
+> Push: origin/codex/gh-372-ipc-sync succeeded.
+> Worktree: clean.
+>
+> Diagnosis/fix: JetBrains' platform PairedPluginStateEnforcer owns VERSION_MISMATCH and disables an inconsistent frontend/backend pair before Agent Doc RPC/schema negotiation, so bringing structural guessing back would bypass the wrong boundary. The actual in-repo distribution defect was that AgentDoc.UpdateChannel lived in the modular backend descriptor even though UpdateSettings is process-local. The fix registers a dedicated action in agent.doc.frontend, strips the classic action from the generated modular backend descriptor, preserves the focus-only/no-geometry fallback, and adds package ownership checks plus policy tests/spec/docs.
+>
+> Files (7):
+> - docs/reference/jetbrains-distribution.md
+> - editors/jetbrains/SPEC.md
+> - editors/jetbrains-262/backend/build.gradle.kts
+> - editors/jetbrains-262/build.gradle.kts
+> - editors/jetbrains-262/frontend/src/main/resources/agent.doc.frontend.xml
+> - editors/jetbrains-262/frontend/src/main/kotlin/com/github/btakita/agentdoc/split/frontend/FrontendAgentDocUpdateChannelAction.kt
+> - editors/jetbrains-262/frontend/src/test/kotlin/com/github/btakita/agentdoc/split/frontend/FrontendAgentDocUpdateChannelActionTest.kt
+>
+> Exact verification:
+> - focused frontend test: PASS
+> - make jetbrains-262-check: PASS
+> - make jetbrains-263-check: PASS
+> - packaged ZIP ownership inspection: PASS
+> - make audit-docs: PASS
+> - git diff --check: PASS
+> - make check: stopped only at the expected plugin-generation fence; coordinator integration must perform the single generation bump.
+>
+> Integration: cherry-pick 3630ef2f4d, run the single coordinator-owned package generation bump, full make check, install, push main, and close #372. No follow-up queue items.
+<!-- agent-doc-subagent-completion key=1d7c03d755c4cd3c4fd830a916190dba2a407cbb8993c5dfcec5c59aa443f9cc -->
+> **Chat prompt (#chatprompt:d614b74e9c96):** Why do we need different versions for different versions of JetBrains?
+> **Chat prompt (#chatprompt:23558803734b):** Why can't one version cover all architectures?
+> **Chat prompt (#chatprompt:9f33ade70ec4):** Can we have the same version number with a arch suffix?
+> **Chat prompt (#chatprompt:cf0de9ba86d4):** I mean target suffit
+> **Chat prompt (#chatprompt:9c51866ed278):** suffix
+> **Chat prompt (#chatprompt:a67fcaed859d):** cont
+
+> **Queue prompt:** release + publish
+
+### Re: release + publish — gpt-5 · 2026-10-24T00:43-04:00
+
+Released and published agent-doc v0.35.549 from commit 0f39749adb.
+
+- main and tag v0.35.549 were pushed.
+- The authoritative make check and make tmux-ci both passed before release.
+- The [release workflow](https://github.com/btakita/agent-doc/actions/runs/40059564299) completed successfully across Linux GNU, Linux musl, Linux ARM64, macOS Apple Silicon, macOS Intel, Windows, editor-package publishing, PyPI dispatch, and Homebrew.
+- The [public release](https://github.com/btakita/agent-doc/releases/tag/v0.35.549) is final, not a draft or prerelease, with 24 assets including platform archives, checksums, three JetBrains packages/feed manifests, and the VS Code package.
+- The PyPI publication workflow completed successfully, and the installed CLI reports agent-doc 0.35.549.
+- Release packages were JetBrains classic 0.2.815, exact-262 0.2.817, exact-263 0.2.816, and VS Code 0.2.83.
+
+### Re: JetBrains target packages and version suffixes — gpt-5 · 2026-10-24T00:43-04:00
+
+These are JetBrains **platform targets**, not CPU architectures. The classic 242–261 IDE line uses a monolithic plugin. Build 262 uses Plugin Model v2 with separate frontend/backend modules, and 263 changed the module rules again. JetBrains validates and loads that static descriptor/module graph before Agent Doc code can run.
+
+That is why one ZIP cannot safely cover every target: runtime conditionals execute too late to change the package graph. A universal archive would leave some IDEs with missing modules and others with duplicate services or incompatible classloader ownership.
+
+A shared base generation with a target suffix is feasible and clearer, for example 0.2.820-classic, 0.2.820-262, and 0.2.820-263, provided JetBrains Marketplace accepts and orders those versions correctly. I would avoid SemVer build metadata such as 0.2.820+262, because some version comparators ignore it; a numeric fallback such as 0.2.820.0, .262, and .263 is safer. I did not change the version scheme during this release.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
+
+### Re: GH #372 frontend/backend communication — gpt-5 · 2026-10-24T00:43-04:00
+
+Fixed and closed [GH #372](https://github.com/btakita/agent-doc/issues/372) without restoring structural guessing.
+
+JetBrains' PairedPluginStateEnforcer must continue rejecting inconsistent frontend/backend packages before Agent Doc RPC negotiation. The actual defect was package ownership: AgentDoc.UpdateChannel was registered in the modular backend even though UpdateSettings is process-local. The fix moves that action into agent.doc.frontend, removes the classic action from the modular backend, and preserves focus-only pane synchronization as the safe fallback when geometry is unavailable.
+
+The fix landed on main in:
+
+- 3630ef2f4d — fix(jetbrains): configure updates in Remote Dev frontend
+- f18ccff986 — chore(jetbrains): bump modular package generations
+
+Verification passed: the focused frontend regression test, make jetbrains-262-check, make jetbrains-263-check, packaged ownership inspection, documentation audit, git diff --check, and the post-integration authoritative make check (exit 0, zero detected failures). One coordinator-owned make install also succeeded and installed exact-262 0.2.819 and exact-263 0.2.818.
+
+The push-triggered [CI run](https://github.com/btakita/agent-doc/actions/runs/40063238982) was observed in progress after the push, as required by the project policy; local verification is complete. Running 262/263 IDE instances need a restart to load these Kotlin/plugin changes because those modular package lines do not support a safe whole-package hot swap.
+<!-- agent:boundary:00b621d9 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Queue: Main
-<!-- agent:queue id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)
-<!-- /agent:queue -->
+<!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 📥 Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)
+- ☑️ [#subagent:gh372#1] #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
+<!-- /agent:run -->
 
 ## Queue: Issues
-
-<!-- agent:queue id=issues loop interval=1h priority -->
-- ~~In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 release + publish
+<!-- agent:loop id=issues interval=1h priority -->
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 [#coder-remote-install-02805]: done: but still not syncing
-<!-- /agent:queue -->
+<!-- /agent:loop -->
 
 ## Todo
 <!-- agent:todo -->

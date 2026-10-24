@@ -70,7 +70,7 @@ internal object BackendGuestSelectionFallback {
             scope.cancel()
         }
         scope.launch {
-            ingress.frontendAuthorityActive
+            ingress.layoutAuthorityActive
                 .filter { it }
                 .collect {
                     log.info("[layout-sync] frontend surface authority accepted; retiring backend fallback")
@@ -90,7 +90,7 @@ internal object BackendGuestSelectionFallback {
                     // remedy instead of suggesting another backend-only IDE restart (GH #352).
                     launch {
                         delay(FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS)
-                        if (!ingress.frontendAuthorityActive.value) {
+                        if (!ingress.layoutAuthorityActive.value) {
                             log.warn(frontendAuthorityUnavailableDiagnostic(sessionId, session.type))
                         }
                     }
@@ -105,7 +105,7 @@ internal object BackendGuestSelectionFallback {
                     }
                     val gate = BackendGuestSelectionGate<FileEditorWithProvider>()
                     manager.getSelectedEditorWithProviderFlow()
-                        .combine(ingress.frontendAuthorityActive) { selection, frontendActive ->
+                        .combine(ingress.layoutAuthorityActive) { selection, frontendActive ->
                             selection to frontendActive
                         }
                         .collect { (selection, frontendActive) ->
@@ -113,7 +113,7 @@ internal object BackendGuestSelectionFallback {
                             ApplicationManager.getApplication().invokeLater {
                                 // One-shot effect-time fence: an accepted frontend snapshot may
                                 // arrive after the flow edge but before this EDT delivery.
-                                if (project.isDisposed || ingress.frontendAuthorityActive.value) {
+                                if (project.isDisposed || ingress.layoutAuthorityActive.value) {
                                     return@invokeLater
                                 }
                                 log.info(
@@ -185,6 +185,10 @@ internal object BackendGuestSelectionFallback {
  */
 internal object BackendRemoteSessionGate {
     fun observes(type: ClientType): Boolean = type.isRemote
+
+    /** A lease owns measured layout only when its authenticated id names a remote session. */
+    fun ownsLayout(clientId: String, sessions: List<Pair<String, ClientType>>): Boolean =
+        sessions.any { (id, type) -> id == clientId && observes(type) }
 
     fun selectionProvesFocus(type: ClientType): Boolean = type == ClientType.CONTROLLER
 

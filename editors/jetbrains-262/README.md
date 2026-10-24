@@ -140,7 +140,12 @@ into the controller surface Source (`editor_surface_observe`) labelled
 `column_order=editor`, on its own `jetbrains-rd@<installation>-pid:<pid>` family
 and one `remote-client:<clientId>:<connectionGeneration>` endpoint per frontend
 connection. While that forward is live, the backend's remote-client membership
-fold does not publish layout. Schema negotiation
+fold does not publish layout. Acquiring this layout authority is conditional on the authenticated
+client id resolving to a remote `ClientType`. The modular frontend also opens an authenticated
+lease in a monolithic IDE; that local lease remains valid for the atomic snapshot/presentation
+protocol but cannot retire or suppress the classic window projection and is never forwarded on a
+`jetbrains-rd` endpoint. The classification therefore gates the authority transition itself, not
+only the later forward. Schema negotiation
 (`supportedSnapshotSchemaVersion()`) keeps mixed versions working: a backend that
 predates schema 2 never receives the bounds key, and a schema-1 frontend keeps the
 backend's `unknown`-labelled fallback.

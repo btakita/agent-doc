@@ -307,15 +307,19 @@ internal object RemoteClientSurfacePayload {
  * main/detached policy sees the complete snapshot before any layout effect.
  */
 internal interface RemoteClientLayoutForwarder {
-    /** Establish pending frontend authority before schema negotiation or the first snapshot. */
-    fun open(clientId: String, generation: Long)
+    /**
+     * Establish pending measured-layout authority before the first snapshot, but only for an
+     * authenticated remote session. A modular frontend also runs in a monolithic IDE; that local
+     * lease is detached-view transport, not permission to retire the classic layout projection.
+     */
+    fun open(clientId: String, generation: Long): Boolean
 
     fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot)
 
     fun retire(clientId: String, generation: Long)
 
     object Disabled : RemoteClientLayoutForwarder {
-        override fun open(clientId: String, generation: Long) = Unit
+        override fun open(clientId: String, generation: Long): Boolean = false
 
         override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) = Unit
 
@@ -344,10 +348,15 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     private val lastUnavailable = mutableMapOf<String, String>()
     private val familyRetiredRoots = mutableSetOf<String>()
 
-    override fun open(clientId: String, generation: Long) {
+    override fun open(clientId: String, generation: Long): Boolean {
         val surfaceId = remoteClientSurfaceId(clientId, generation)
+        if (!isRemoteClient(clientId)) {
+            execute { noteUnavailable(surfaceId, "local_client") }
+            return false
+        }
         liveSurfaces += surfaceId
         RemoteClientLayoutAuthority.activate(project, surfaceId)
+        return true
     }
 
     override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) {
@@ -451,9 +460,12 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     }
 
     private fun isRemoteClient(clientId: String): Boolean =
-        ClientSessionsManager.getProjectSessions(project, ClientKind.ALL).any { session ->
-            session.clientId.value == clientId && BackendRemoteSessionGate.observes(session.type)
-        }
+        BackendRemoteSessionGate.ownsLayout(
+            clientId,
+            ClientSessionsManager.getProjectSessions(project, ClientKind.ALL).map { session ->
+                session.clientId.value to session.type
+            },
+        )
 
     private fun isSessionDocument(path: String): Boolean {
         val file = LocalFileSystem.getInstance().findFileByPath(path) ?: return false

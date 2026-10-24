@@ -70,10 +70,11 @@ class AuthenticatedSurfaceIngressStateTest {
     @Test
     fun authenticatedOpenOwnsLayoutBeforeFirstSnapshotAndThroughDeliveryFailure() = runBlocking {
         val publisher = RecordingPublisher()
-        val state = AuthenticatedSurfaceIngressState(publisher)
+        val state = AuthenticatedSurfaceIngressState(publisher, RecordingForwarder())
         val lease = state.open("client-a", "frontend-a")
 
         assertTrue(state.frontendAuthorityActive.value, "the debounce/schema/transport window is fenced")
+        assertTrue(state.layoutAuthorityActive.value, "a remote lease owns measured layout immediately")
         publisher.deliver = false
         assertEquals(
             SurfaceIngressStatus.DELIVERY_FAILED,
@@ -83,6 +84,26 @@ class AuthenticatedSurfaceIngressStateTest {
 
         state.retire("client-a", lease)
         assertFalse(state.frontendAuthorityActive.value)
+        assertFalse(state.layoutAuthorityActive.value)
+    }
+
+    @Test
+    fun localFrontendLeaseNeverRetiresOrReplacesTheClassicLayoutProjection() = runBlocking {
+        val publisher = RecordingPublisher()
+        val forwarder = RecordingForwarder(acquiresLayout = false)
+        val state = AuthenticatedSurfaceIngressState(publisher, forwarder)
+        val lease = state.open("Host", "local-frontend")
+
+        assertTrue(state.frontendAuthorityActive.value, "the snapshot lease remains live")
+        assertFalse(state.layoutAuthorityActive.value, "a local lease is not pane-layout authority")
+        assertEquals(
+            SurfaceIngressStatus.ACCEPTED,
+            state.publish("Host", lease, snapshot("local-frontend", 1)).status,
+        )
+        assertTrue(forwarder.forwarded.isEmpty(), "local snapshots stay off the Remote Dev layout lane")
+
+        state.retire("Host", lease)
+        assertTrue(forwarder.retired.isEmpty(), "no unowned layout endpoint is retired")
     }
 
     @Test
@@ -159,13 +180,14 @@ class AuthenticatedSurfaceIngressStateTest {
         surfaces = listOf(FrontendSurface("root", 1, SurfaceRole.MAIN, true, emptyList())),
     )
 
-    private class RecordingForwarder : RemoteClientLayoutForwarder {
+    private class RecordingForwarder(private val acquiresLayout: Boolean = true) : RemoteClientLayoutForwarder {
         val opened = mutableListOf<Pair<String, Long>>()
         val forwarded = mutableListOf<Triple<String, Long, Long>>()
         val retired = mutableListOf<Pair<String, Long>>()
 
-        override fun open(clientId: String, generation: Long) {
+        override fun open(clientId: String, generation: Long): Boolean {
             opened += clientId to generation
+            return acquiresLayout
         }
 
         override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) {

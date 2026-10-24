@@ -39,6 +39,9 @@ internal class AuthenticatedSurfaceIngressService(project: Project) : Disposable
     /** True from authenticated lease open through explicit retirement, including pre-snapshot. */
     val frontendAuthorityActive: StateFlow<Boolean> = state.frontendAuthorityActive
 
+    /** True only when an authenticated *remote* lease owns measured pane-layout authority. */
+    val layoutAuthorityActive: StateFlow<Boolean> = state.layoutAuthorityActive
+
     suspend fun open(authenticatedClientId: String, frontendInstanceId: String): SurfaceIngressLease =
         state.open(authenticatedClientId, frontendInstanceId)
 
@@ -71,29 +74,32 @@ internal class AuthenticatedSurfaceIngressState(
     private val connections = mutableMapOf<String, ConnectionState>()
     private val mutableFrontendAuthorityActive = MutableStateFlow(false)
     val frontendAuthorityActive: StateFlow<Boolean> = mutableFrontendAuthorityActive.asStateFlow()
+    private val mutableLayoutAuthorityActive = MutableStateFlow(false)
+    val layoutAuthorityActive: StateFlow<Boolean> = mutableLayoutAuthorityActive.asStateFlow()
 
     suspend fun open(
         authenticatedClientId: String,
         frontendInstanceId: String,
     ): SurfaceIngressLease = mutex.withLock {
         connections.remove(authenticatedClientId)?.let { previous ->
-            layoutForwarder.retire(previous.clientId, previous.lease.connectionGeneration)
+            if (previous.layoutAuthority) {
+                layoutForwarder.retire(previous.clientId, previous.lease.connectionGeneration)
+            }
             publisher.retire(previous.clientId, previous.lease.connectionGeneration)
         }
         val lease = SurfaceIngressLease(
             leaseId = UUID.randomUUID().toString(),
             connectionGeneration = generation.incrementAndGet(),
         )
+        val layoutAuthority = layoutForwarder.open(authenticatedClientId, lease.connectionGeneration)
         connections[authenticatedClientId] = ConnectionState(
             clientId = authenticatedClientId,
             frontendInstanceId = frontendInstanceId,
             lease = lease,
             acceptedSequence = 0,
             acceptedSurfaces = emptyMap(),
+            layoutAuthority = layoutAuthority,
         )
-        // The authenticated frontend owns layout immediately. Its first snapshot can be delayed by
-        // debounce, EDT scheduling, schema negotiation, or transport; none authorizes fallback.
-        layoutForwarder.open(authenticatedClientId, lease.connectionGeneration)
         refreshFrontendAuthority()
         lease
     }
@@ -138,7 +144,9 @@ internal class AuthenticatedSurfaceIngressState(
         // measured main-window geometry may drive pane layout. The pane-layout surface fences
         // its own generation/sequence; the policy's projection status (frozen without terminal
         // capability on 263, or stale behind a pre-restart generation) is about detached views.
-        layoutForwarder.forward(authenticatedClientId, lease.connectionGeneration, snapshot)
+        if (current.layoutAuthority) {
+            layoutForwarder.forward(authenticatedClientId, lease.connectionGeneration, snapshot)
+        }
         SurfaceIngressAck(
             status = SurfaceIngressStatus.ACCEPTED,
             connectionGeneration = lease.connectionGeneration,
@@ -191,13 +199,16 @@ internal class AuthenticatedSurfaceIngressState(
         val current = connections[authenticatedClientId]
         if (current?.lease != lease) return@withLock
         connections.remove(authenticatedClientId)
-        layoutForwarder.retire(authenticatedClientId, lease.connectionGeneration)
+        if (current.layoutAuthority) {
+            layoutForwarder.retire(authenticatedClientId, lease.connectionGeneration)
+        }
         publisher.retire(authenticatedClientId, lease.connectionGeneration)
         refreshFrontendAuthority()
     }
 
     private fun refreshFrontendAuthority() {
         mutableFrontendAuthorityActive.value = connections.isNotEmpty()
+        mutableLayoutAuthorityActive.value = connections.values.any { it.layoutAuthority }
     }
 
     private fun rejected(
@@ -217,6 +228,7 @@ internal class AuthenticatedSurfaceIngressState(
         val lease: SurfaceIngressLease,
         val acceptedSequence: Long,
         val acceptedSurfaces: Map<String, Long>,
+        val layoutAuthority: Boolean,
     )
 }
 

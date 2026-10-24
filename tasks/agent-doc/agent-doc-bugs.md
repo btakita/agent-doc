@@ -46,7 +46,25 @@ This host reports agent-doc CLI 0.35.548. Installed editor packages are IntelliJ
 Compacted content:
 - Archived 15 response topic(s): Release v0.35.547, queue repair, and project agent configuration; Release availability and upgrades; Subagent completed: `subagent:queue-state-live-repair` returned work for queue item “Several of this queue's items we...; 12 more
 - Prior summary/context: prior compacted content: Archived 53 response topic(s): Release v0.35.544 published and release workflow hardened; Co...
-<!-- agent:boundary:4528051c:agent-doc-bugs -->
+> **Queue prompt:** Register agent-doc at https://plugins.jetbrains.com/plugin/add#intellij. Create a nice profile.
+
+### Re: JetBrains Marketplace registration — gpt-5 · 2026-10-23T20:26-04:00
+
+Registered Agent Doc on JetBrains Marketplace as plugin **35436**:
+
+- Listing: https://plugins.jetbrains.com/plugin/35436-agent-doc
+- Plugin ID: `com.github.btakita.agent-doc`
+- Bootstrap version: `0.2.801` (signed ZIP; SHA-256 `bfffacb69f0631af720bfa52f034ccddf727e378d5caca014f52fcd2219d3f91`)
+- Vendor: Brian Takita
+- License: Apache 2.0
+- Source: https://github.com/btakita/agent-doc
+- Tags: AI, Formatting, Productivity, Tools Integration
+- Advertising: none
+
+The listing is hidden and under JetBrains' initial moderation, which the Marketplace says can take up to two business days. The current plugin metadata supplies the icon and basic description, but JetBrains disables substantive listing changes while moderation is active. I recorded a review-gated follow-up to publish the polished description, Getting Started section, documentation link, and bug-tracker link after approval; that review item captures all remaining profile work, so no additional backlog follow-up is needed.
+
+I also created a dedicated permanent Marketplace token and stored it directly as the GitHub Actions secret `JETBRAINS_MARKETPLACE_TOKEN` in `btakita/agent-doc`; the token value was not written to the session document or terminal output. I did not run the release workflow yet because the queued install-command implementation precedes the release/publish item, and the first Marketplace upload is still under moderation.
+<!-- agent:boundary:456c15a6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -59,10 +77,9 @@ Compacted content:
 ## Queue: Issues
 
 <!-- agent:queue id=issues loop interval=1h priority -->
-- ~~do [#helpregisterjetbrains]~~
-- ~~After the idea plugin, the agent-doc Plugin formatting stopped working and the commands don't show up. The plugin manager says the Agent Doc plugin is incompatible.~~
-- 📥 Register agent-doc at https://plugins.jetbrains.com/plugin/add#intellij. Create a nice profile.
+- ~~Register agent-doc at https://plugins.jetbrains.com/plugin/add#intellij. Create a nice profile.~~
 - 📥 In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.
+- 📥 release + publish
 <!-- /agent:queue -->
 
 ## Todo
@@ -80,7 +97,8 @@ Compacted content:
 
 ## Review
 <!-- agent:review -->
-- [/] 🚧 [#helpregisterjetbrains] [operator-verify] Complete the first manual JetBrains Marketplace upload and add JETBRAINS_MARKETPLACE_TOKEN; then rerun v0.35.548 Release and verify the three compatibility-ranged updates.
+- [/] [#jetbrainsmarketplaceprofile] [marketplace-approval] [agent-doc] Plugin 35436 is hidden and under initial JetBrains moderation; after approval, replace the basic description with polished copy, add Getting Started, Documentation, and Bugtracker URLs, then verify the public listing.
+- [/] [#helpregisterjetbrains] [operator-verify] Complete the first manual JetBrains Marketplace upload and add JETBRAINS_MARKETPLACE_TOKEN; then rerun v0.35.548 Release and verify the three compatibility-ranged updates.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.

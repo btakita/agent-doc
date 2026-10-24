@@ -64,7 +64,27 @@ Registered Agent Doc on JetBrains Marketplace as plugin **35436**:
 The listing is hidden and under JetBrains' initial moderation, which the Marketplace says can take up to two business days. The current plugin metadata supplies the icon and basic description, but JetBrains disables substantive listing changes while moderation is active. I recorded a review-gated follow-up to publish the polished description, Getting Started section, documentation link, and bug-tracker link after approval; that review item captures all remaining profile work, so no additional backlog follow-up is needed.
 
 I also created a dedicated permanent Marketplace token and stored it directly as the GitHub Actions secret `JETBRAINS_MARKETPLACE_TOKEN` in `btakita/agent-doc`; the token value was not written to the session document or terminal output. I did not run the release workflow yet because the queued install-command implementation precedes the release/publish item, and the first Marketplace upload is still under moderation.
-<!-- agent:boundary:456c15a6 -->
+
+> **Chat prompt (#chatprompt:fe551a10d205):** I'm using Idea Beta. Update the agent-doc plugin
+
+> **Queue prompt:** In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.
+
+### Re: JetBrains CLI installer and IDEA Beta update — gpt-5 · 2026-10-23T22:36-04:00
+
+Implemented and pushed a JetBrains action for Marketplace-first users who have the plugin but not the CLI:
+
+- **Tools → Install Agent Doc CLI** is also reachable from **Agent Doc Actions → More Actions**.
+- The action asks for confirmation and displays the exact official command before running it: `curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh`.
+- Installation runs off the UI thread with a five-minute timeout, reports bounded failure output in the IDE Event Log, and verifies the resulting `agent-doc --version` before reporting success.
+- Windows failures include the documented POSIX-shell requirement and the `py -m pip install --user --upgrade agent-doc` fallback.
+- Added unit coverage for the official command, project enablement, bounded errors, action registration, and popup reachability.
+
+The package generations advanced to classic `0.2.809`, exact-262 `0.2.811`, and exact-263/IDEA Beta `0.2.810`. Focused JetBrains tests, `make check-fast`, all package builds, and the authoritative `make check` passed. Commit `ff1fdf2d3b` (`feat(jetbrains): add CLI installer action`) was fast-forwarded to `btakita/agent-doc` `main`. CI run https://github.com/btakita/agent-doc/actions/runs/40054851664 was in progress at the required one-time check; local verification is the completion gate, so I did not wait on it.
+
+For the live IDEA Beta request, I identified `IU-263.7307.44` (2026.3 Beta). Its incompatible `0.2.807` package was replaced first with released exact-263 `0.2.808`, then with the newly verified local exact-263 package `0.2.810`; `/home/brian/.local/share/JetBrains/IntelliJIdea2026.3/agent-doc-jetbrains/lib/agent.doc-0.2.810.jar` is now staged. JetBrains 263's modular package cannot be hot-swapped safely, so the running IDE still uses its old generation until IDEA restarts. The restart is captured in Todo.
+
+The existing `release + publish` queue head already owns publication of these package generations, so no additional backlog follow-up is needed.
+<!-- agent:boundary:e1ac3147:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -77,9 +97,9 @@ I also created a dedicated permanent Marketplace token and stored it directly as
 ## Queue: Issues
 
 <!-- agent:queue id=issues loop interval=1h priority -->
-- ~~Register agent-doc at https://plugins.jetbrains.com/plugin/add#intellij. Create a nice profile.~~
-- 📥 In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.
+- ~~In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 release + publish
+- 📥 [#coder-remote-install-02805]: done: but still not syncing
 <!-- /agent:queue -->
 
 ## Todo

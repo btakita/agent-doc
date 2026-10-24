@@ -569,10 +569,15 @@ pub fn start_attempt(
     if worker_id.trim().is_empty() {
         bail!("queue start needs a non-empty --worker-id from the successful harness dispatch");
     }
-    let (target, _) = resolve_live_claim_target(file, item, "queue_claim_start")?;
+    let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_start")?;
     let now = now_secs();
     let owner_session = current_owner_session();
     let outcome = mutate_ledger(file, |ledger| {
+        // Resolution follows edits on a read-only ledger copy. Persist that
+        // same authoritative rekey in the transaction before addressing the
+        // attempt by its current text; otherwise `claims` can show the edited
+        // item while `start` still reports the attempt missing.
+        log_followed(file, &ledger.follow_edits(now, &heads));
         let mut claim = ledger
             .start(&target, owner, worker_id, now, ttl_secs, Some(generation))
             .map_err(anyhow::Error::from)?;
@@ -663,12 +668,13 @@ fn refresh_attempt_at(
     }
     // Same resolution as `claim`, so `--item #id` refreshes a
     // `#subagents do [#id]` head and a closed head is a typed miss.
-    let (target, _) = resolve_live_claim_target(file, item, "queue_claim_refresh")?;
+    let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_refresh")?;
     // `#claimownerliveness`: a refresh also adopts the claim into the
     // caller's session, so a post-`/clear` coordinator that still hears from
     // the subagent makes the claim live again.
     let owner_session = current_owner_session();
     let outcome = mutate_ledger(file, |ledger| {
+        log_followed(file, &ledger.follow_edits(now, &heads));
         Ok(ledger.refresh_attempt_in_session(
             &target,
             owner,
@@ -706,8 +712,10 @@ fn refresh_attempt_at(
 
 /// Mark one exact worker attempt as reported/awaiting integration.
 pub fn report_attempt(file: &Path, item: &str, generation: Option<u64>) -> Result<QueueClaim> {
-    let (target, _) = resolve_live_claim_target(file, item, "queue_claim_report")?;
+    let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_report")?;
+    let now = now_secs();
     let claim = mutate_ledger(file, |ledger| {
+        log_followed(file, &ledger.follow_edits(now, &heads));
         ledger
             .report(&target, generation)
             .map_err(anyhow::Error::from)
@@ -748,10 +756,17 @@ fn prepare_reported_release_inner(
     generation: Option<u64>,
     enforce_generation: bool,
 ) -> Result<Option<QueueClaim>> {
-    let target = resolve_live_claim_target(file, item, "queue_claim_reported_release")
-        .map(|(target, _)| target)
-        .unwrap_or_else(|_| item.to_string());
+    let resolved = resolve_live_claim_target(file, item, "queue_claim_reported_release").ok();
+    let target = resolved
+        .as_ref()
+        .map(|(target, _)| target.clone())
+        .unwrap_or_else(|| item.to_string());
+    let heads = resolved.map(|(_, heads)| heads);
+    let now = now_secs();
     mutate_ledger(file, |ledger| {
+        if let Some(heads) = heads.as_deref() {
+            log_followed(file, &ledger.follow_edits(now, heads));
+        }
         let report = |ledger: &mut QueueClaimLedger, candidate: &str| {
             let expected = if enforce_generation {
                 generation
@@ -861,10 +876,17 @@ fn owner_session_log_token(session: Option<&ClaimOwnerSession>) -> String {
 
 /// Release the claim on `item`. Returns the released claim, if there was one.
 pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
-    let target = resolve_live_claim_target(file, item, "queue_claim_release")
-        .map(|(target, _)| target)
-        .unwrap_or_else(|_| item.to_string());
+    let resolved = resolve_live_claim_target(file, item, "queue_claim_release").ok();
+    let target = resolved
+        .as_ref()
+        .map(|(target, _)| target.clone())
+        .unwrap_or_else(|| item.to_string());
+    let heads = resolved.map(|(_, heads)| heads);
+    let now = now_secs();
     let released = mutate_ledger(file, |ledger| {
+        if let Some(heads) = heads.as_deref() {
+            log_followed(file, &ledger.follow_edits(now, heads));
+        }
         Ok(ledger.release(&target).or_else(|| ledger.release(item)))
     })?;
     Ok(released)
@@ -878,8 +900,8 @@ pub fn release_attempt(
     // Release by the same resolution `claim` used, so `--item #id` releases a
     // `#subagents do [#id]` head; fall back to the literal item (a closed head
     // can still hold a stale claim worth releasing).
-    let target = match resolve_live_claim_target(file, item, "queue_claim_release") {
-        Ok((target, _)) => target,
+    let (target, heads) = match resolve_live_claim_target(file, item, "queue_claim_release") {
+        Ok((target, heads)) => (target, Some(heads)),
         Err(err) => {
             if err.downcast_ref::<QueueClaimMiss>().is_none() {
                 eprintln!(
@@ -887,10 +909,14 @@ pub fn release_attempt(
                     file.display()
                 );
             }
-            item.to_string()
+            (item.to_string(), None)
         }
     };
+    let now = now_secs();
     let released = mutate_ledger(file, |ledger| {
+        if let Some(heads) = heads.as_deref() {
+            log_followed(file, &ledger.follow_edits(now, heads));
+        }
         match ledger.release_fenced(&target, generation)? {
             Some(claim) => Ok(Some(claim)),
             None => ledger
@@ -913,10 +939,17 @@ pub fn release_attempt(
 /// The retained `Lost` attempt is non-blocking and can be reclaimed as the next
 /// generation, while its live queue row can never regress to bare.
 pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
-    let target = resolve_live_claim_target(file, item, "queue_claim_abandon")
-        .map(|(target, _)| target)
-        .unwrap_or_else(|_| item.to_string());
+    let resolved = resolve_live_claim_target(file, item, "queue_claim_abandon").ok();
+    let target = resolved
+        .as_ref()
+        .map(|(target, _)| target.clone())
+        .unwrap_or_else(|| item.to_string());
+    let heads = resolved.map(|(_, heads)| heads);
+    let now = now_secs();
     mutate_ledger(file, |ledger| {
+        if let Some(heads) = heads.as_deref() {
+            log_followed(file, &ledger.follow_edits(now, heads));
+        }
         let released = ledger.release(&target).or_else(|| ledger.release(item));
         Ok(released.map(|mut claim| {
             claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
@@ -932,10 +965,17 @@ pub fn abandon_attempt(
     item: &str,
     generation: Option<u64>,
 ) -> Result<Option<QueueClaim>> {
-    let target = resolve_live_claim_target(file, item, "queue_claim_abandon")
-        .map(|(target, _)| target)
-        .unwrap_or_else(|_| item.to_string());
+    let resolved = resolve_live_claim_target(file, item, "queue_claim_abandon").ok();
+    let target = resolved
+        .as_ref()
+        .map(|(target, _)| target.clone())
+        .unwrap_or_else(|| item.to_string());
+    let heads = resolved.map(|(_, heads)| heads);
+    let now = now_secs();
     mutate_ledger(file, |ledger| {
+        if let Some(heads) = heads.as_deref() {
+            log_followed(file, &ledger.follow_edits(now, heads));
+        }
         let released = match ledger.release_fenced(&target, generation)? {
             Some(claim) => Some(claim),
             None => ledger.release_fenced(item, generation)?,
@@ -1249,6 +1289,13 @@ pub struct ClaimReport {
     /// Present for a retained lost attempt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lost_recovery: Option<LostClaimRecovery>,
+    /// Whether operator-visible queue markers agree with durable claim state.
+    pub visible_projection_state: &'static str,
+    pub expected_visible_marker: String,
+    pub observed_visible_markers: Vec<String>,
+    /// Exact argv for state-preserving repair when projection is out of sync.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_action_argv: Option<Vec<String>>,
 }
 
 fn lost_claim_recovery(file: &Path, claim: &QueueClaim) -> LostClaimRecovery {
@@ -1274,6 +1321,24 @@ fn lost_claim_recovery(file: &Path, claim: &QueueClaim) -> LostClaimRecovery {
 /// Every live queue-head attempt, including retained lost attempts, with its
 /// owner-session verdict and actionable expiry recovery.
 pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<ClaimReport>> {
+    let components = agent_doc_element::element::parse(content)?;
+    let observed = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .flat_map(|component| {
+            agent_doc_queue::document_queue::parse(component.content(content)).unwrap_or_default()
+        })
+        .filter_map(|entry| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+            | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => Some((
+                agent_doc_queue::queue_claim::claim_identity(&prompt.text),
+                agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                    .map(|marker| marker.prefix().to_string())
+                    .unwrap_or_else(|| "bare".to_string()),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     Ok(claim_states_for_content(file, content)?
         .into_iter()
         .map(|claim| {
@@ -1282,12 +1347,37 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 ClaimOwnerLiveness::Unrecorded => ("unrecorded", None),
                 ClaimOwnerLiveness::Ended(reason) => ("ended", Some(reason.as_str())),
             };
+            let expected_visible_marker = claim.state.projection_marker().prefix().to_string();
+            let observed_visible_markers = observed
+                .iter()
+                .filter(|(identity, _)| identity == &claim.identity)
+                .map(|(_, marker)| marker.clone())
+                .collect::<Vec<_>>();
+            let synchronized = !observed_visible_markers.is_empty()
+                && observed_visible_markers
+                    .iter()
+                    .all(|marker| marker == &expected_visible_marker);
             ClaimReport {
                 lost_recovery: (claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
                     .then(|| lost_claim_recovery(file, &claim)),
                 claim,
                 owner_session_state: state,
                 owner_session_end_reason: reason,
+                visible_projection_state: if synchronized {
+                    "synchronized"
+                } else {
+                    "out_of_sync"
+                },
+                expected_visible_marker,
+                observed_visible_markers,
+                next_action_argv: (!synchronized).then(|| {
+                    vec![
+                        "agent-doc".to_string(),
+                        "queue".to_string(),
+                        "repair-projection".to_string(),
+                        file.to_string_lossy().into_owned(),
+                    ]
+                }),
             }
         })
         .collect())
@@ -1322,7 +1412,10 @@ pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> Claime
             claims
                 .into_iter()
                 .filter(|claim| {
-                    matches!(claim.state, QueueClaimState::Claimed | QueueClaimState::Running)
+                    matches!(
+                        claim.state,
+                        QueueClaimState::Claimed | QueueClaimState::Running
+                    )
                 })
                 .map(|claim| claim.identity),
         ),
@@ -1819,6 +1912,54 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn start_persists_followed_edit_before_addressing_current_claim_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = "Run Agent Doc on sdk-demo.md (Grok)";
+        let edited = "Run Agent Doc on sdk-demo.md (Grok): line 229 is not correct";
+        let doc = write_doc(dir.path(), &[original]);
+        let (_, claimed) = claim(&doc, original, "subagent:run-sdk-demo-grok", 600).unwrap();
+        let current = std::fs::read_to_string(&doc)
+            .unwrap()
+            .replace(original, edited);
+        std::fs::write(&doc, current).unwrap();
+
+        let started = start_attempt(
+            &doc,
+            original,
+            "subagent:run-sdk-demo-grok",
+            "worker:run-sdk-demo-grok",
+            600,
+            claimed.generation,
+        )
+        .expect("the original dispatch text must resolve through the followed edit");
+
+        assert_eq!(started.item_text, edited);
+        assert_eq!(started.followed_from, [original]);
+        assert_eq!(
+            started.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert_eq!(
+            start_attempt(
+                &doc,
+                edited,
+                "subagent:run-sdk-demo-grok",
+                "worker:run-sdk-demo-grok",
+                600,
+                claimed.generation,
+            )
+            .expect("the current exact item text must replay idempotently")
+            .worker
+            .unwrap()
+            .worker_id,
+            "worker:run-sdk-demo-grok",
+        );
+        let durable = load_ledger(&doc).unwrap().claims.remove(0);
+        assert_eq!(durable.item_text, edited);
+        assert_eq!(durable.followed_from, [original]);
     }
 
     #[test]

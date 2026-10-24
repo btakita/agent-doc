@@ -516,7 +516,7 @@ fn ensure_component(mut doc: String, name: &str) -> Result<String> {
         "todo" => "Todo",
         "review" => "Review",
         "icebox" => "Icebox",
-        "done" => "Completed / Reaped",
+        "done" => "Done",
         "notes" => "Notes",
         _ => bail!("unsupported focused-extract component '{name}'"),
     };

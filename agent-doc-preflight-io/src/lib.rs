@@ -11085,7 +11085,7 @@ mod tests {
                  ## Backlog\n\n<!-- agent:backlog priority -->\n<!-- /agent:backlog -->\n\n\
                  ## Review\n\n<!-- agent:review -->\n- [/] [#r1] item\n<!-- /agent:review -->\n\n\
                  ## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n\
-                 ## Completed / Reaped\n\n<!-- agent:done archive=\"tasks/infra.done.md\"-->\n- [x] [#d1] done\n<!-- /agent:done -->\n"
+                 ## Done\n\n<!-- agent:done archive=\"tasks/infra.done.md\"-->\n- [x] [#d1] done\n<!-- /agent:done -->\n"
             )
         };
         let old = "Create a PR to fix the SBX + STG drift.";
@@ -15405,7 +15405,7 @@ mod tests {
             "- do [#alpha]\n",
             "- do [#beta]\n",
             "<!-- /agent:queue -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "- [x] [#alpha] First done.\n",
             "- [x] [#beta] Second done.\n",
@@ -15479,7 +15479,7 @@ mod tests {
             "- do [#alpha]\n",
             "- do [#beta]\n",
             "<!-- /agent:queue -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "- [x] [#alpha] First done.\n",
             "- [x] [#beta] Second done.\n",
@@ -15553,7 +15553,7 @@ mod tests {
                 "- do [#alpha]\n",
                 "{operator_line}\n",
                 "<!-- /agent:queue -->\n\n",
-                "## Completed / Reaped\n\n",
+                "## Done\n\n",
                 "<!-- agent:done -->\n",
                 "- [x] [#alpha] First done.\n",
                 "<!-- /agent:done -->\n"
@@ -15709,7 +15709,7 @@ mod tests {
             "- do [#alpha]\n",
             "- do [#beta]\n",
             "<!-- /agent:queue -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "- [x] [#alpha] First done.\n",
             "<!-- /agent:done -->\n"
@@ -15775,7 +15775,7 @@ mod tests {
             "- do [#alpha]\n",
             "- do [#beta]\n",
             "<!-- /agent:queue -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done archive -->\n",
             "<!-- completed work archived in target.done.md -->\n",
             "<!-- /agent:done -->\n"
@@ -16522,7 +16522,7 @@ mod tests {
             .to_string();
         assert!(!file_backlog_after.contains("[#reap1]"));
         assert!(file_after.contains("[#keep1]"));
-        assert!(file_after.contains("## Completed / Reaped"));
+        assert!(file_after.contains("## Done"));
         assert!(file_after.contains("<!-- agent:done -->"));
         assert!(file_after.contains("[#reap1] Reap me"));
 
@@ -16538,7 +16538,7 @@ mod tests {
             .to_string();
         assert!(!snapshot_backlog_after.contains("[#reap1]"));
         assert!(snapshot_after.contains("[#keep1]"));
-        assert!(snapshot_after.contains("## Completed / Reaped"));
+        assert!(snapshot_after.contains("## Done"));
         assert!(snapshot_after.contains("<!-- agent:done -->"));
         assert!(snapshot_after.contains("[#reap1] Reap me"));
     }
@@ -16599,7 +16599,7 @@ mod tests {
         assert!(backlog_after.contains("[#reopened]"));
         assert!(backlog_after.contains("[#noproof]"));
         assert!(review_after.contains("[#reviewkeep]"));
-        assert!(file_after.contains("## Completed / Reaped"));
+        assert!(file_after.contains("## Done"));
         assert!(file_after.contains("[#doneci] #agent-doc-bug DONE 7b60fcdc"));
         assert!(file_after.contains("[#reviewdone] SHIPPED abcdef1"));
 
@@ -16800,7 +16800,7 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "- [ ] [#fixapiissue] Fix api.md issue: I typed in the following but agent-doc deleted it\n",
             "<!-- /agent:backlog -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "- [x] [#fixapiissue] Fix agent-doc api.md issue: the retained write never settled\n",
             "<!-- /agent:done -->\n",
@@ -16843,7 +16843,7 @@ mod tests {
             "- [/] [#done2] already archived review\n",
             "- [/] [#keep2] keep review\n",
             "<!-- /agent:review -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "- [x] [#done1] already archived backlog\n",
             "- [x] [#done2] already archived review\n",
@@ -17146,7 +17146,7 @@ mod tests {
             .to_string();
         assert!(!file_icebox_after.contains("[#ice01]"));
         assert!(file_after.contains("[#keep2]"));
-        assert!(file_after.contains("## Completed / Reaped"));
+        assert!(file_after.contains("## Done"));
         assert!(file_after.contains("[#ice01] Reap me from icebox"));
 
         let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
@@ -17161,7 +17161,7 @@ mod tests {
             .to_string();
         assert!(!snapshot_icebox_after.contains("[#ice01]"));
         assert!(snapshot_after.contains("[#keep2]"));
-        assert!(snapshot_after.contains("## Completed / Reaped"));
+        assert!(snapshot_after.contains("## Done"));
         assert!(snapshot_after.contains("[#ice01] Reap me from icebox"));
     }
     #[test]
@@ -17455,7 +17455,7 @@ mod tests {
             "completed item must be reaped from the authoritative document:\n{file_after}"
         );
         assert!(
-            file_after.contains("## Completed / Reaped") && file_after.contains("[#reap1] Reap me"),
+            file_after.contains("## Done") && file_after.contains("[#reap1] Reap me"),
             "completed item must be archived in the document:\n{file_after}"
         );
     }

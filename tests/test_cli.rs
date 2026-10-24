@@ -23951,7 +23951,7 @@ fn test_agent_doc_element_done_owns_done_archive_content_policy() {
         "fn collect_done_document_own_ids(",
         "trimmed.starts_with(\"- \")",
         "trimmed.find(\"[#\")",
-        "## Completed / Reaped\\n\\n<!-- agent:done -->",
+        "## Done\\n\\n<!-- agent:done -->",
     ] {
         assert!(
             !preflight.contains(forbidden),

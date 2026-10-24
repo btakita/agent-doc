@@ -420,7 +420,7 @@ mod tests {
             "- [ ] [#open1] Open item\n",
             "- [/] [#gate1] Awaiting review\n",
             "<!-- /agent:backlog -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "<!-- /agent:done -->\n",
         );
@@ -461,7 +461,7 @@ mod tests {
                 "### Operator notes\n",
                 "Keep this structural postlude.\n",
                 "<!-- /agent:backlog -->\n\n",
-                "## Completed / Reaped\n\n",
+                "## Done\n\n",
                 "<!-- agent:done -->\n",
                 "<!-- /agent:done -->\n",
             ),

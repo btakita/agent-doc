@@ -376,7 +376,7 @@ fn pending_reap_removes_checked_items() {
     assert!(backlog.contains("aaaa"));
     assert!(!backlog.contains("bbbb"));
     assert!(backlog.contains("cccc"));
-    assert!(content.contains("## Completed / Reaped"));
+    assert!(content.contains("## Done"));
     assert!(content.contains("<!-- agent:done -->"));
     assert!(content.contains("[#bbbb] drop"));
 }

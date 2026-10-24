@@ -6924,7 +6924,7 @@ mod tests {
             "force-disk maintenance must retain unrelated active items:\n{result}"
         );
         assert!(
-            result.contains("## Completed / Reaped") && result.contains("[#done1] Reap me"),
+            result.contains("## Done") && result.contains("[#done1] Reap me"),
             "force-disk maintenance must archive the reaped item:\n{result}"
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();

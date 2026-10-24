@@ -2979,7 +2979,7 @@ mod tests {
         assert!(pending.contains("active"), "{content}");
         assert!(!pending.contains("done"), "{content}");
         assert!(!pending.contains("finished"), "{content}");
-        assert!(content.contains("## Completed / Reaped"), "{content}");
+        assert!(content.contains("## Done"), "{content}");
     }
 
     #[test]

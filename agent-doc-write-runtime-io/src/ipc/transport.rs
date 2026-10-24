@@ -1525,7 +1525,7 @@ Created the proposal and implementation plan.
             "<!-- agent:backlog -->\n",
             "- [ ] [#aaaa] keep me\n",
             "<!-- /agent:backlog -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "<!-- /agent:done -->\n"
         );
@@ -1560,7 +1560,7 @@ Created the proposal and implementation plan.
             "<!-- agent:backlog -->\n",
             "- [ ] [#aaaa] keep me\n",
             "<!-- /agent:backlog -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "<!-- /agent:done -->\n",
             "corky.md The arrow\n",
@@ -1575,7 +1575,7 @@ Created the proposal and implementation plan.
             "<!-- agent:backlog -->\n",
             "- [ ] [#aaaa] keep me\n",
             "<!-- /agent:backlog -->\n\n",
-            "## Completed / Reaped\n\n",
+            "## Done\n\n",
             "<!-- agent:done -->\n",
             "<!-- /agent:done -->\n"
         );

@@ -43,6 +43,8 @@ class AgentDocPopupAction : AnAction(), DumbAware {
         )
 
         internal val OVERFLOW_ACTION_IDS = listOf(
+            // One-time setup for Marketplace users who installed the plugin first.
+            "AgentDoc.InstallCli",
             "AgentDoc.RunWithJunie",
             "AgentDoc.ForceClaim",
             // The explicit interrupting clear remains behind More Actions.

@@ -229,6 +229,12 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.InstallCli"
+                class="com.github.btakita.agentdoc.InstallAgentDocCliAction"
+                text="Install Agent Doc CLI"
+                description="Install or update the agent-doc command-line tool with the official checksummed installer">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.ResyncFixSessions"
                 class="com.github.btakita.agentdoc.ResyncFixSessionsAction"
                 text="Resync / Fix Sessions"

@@ -4595,9 +4595,10 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
-    /// List the document's active queue claims as JSON (`#queueclaim`), each
-    /// with `owner_session_state` (`live` / `unrecorded` / `ended`): whether the
-    /// coordinator session that made the claim is still running
+    /// List live queue-head claim attempts as JSON (`#queueclaim`), including
+    /// lost/expired attempts with their cause and actionable recovery. Each
+    /// also carries `owner_session_state` (`live` / `unrecorded` / `ended`):
+    /// whether the coordinator session that made the claim is still running
     /// (`#claimownerliveness`).
     Claims {
         /// Path to the session document

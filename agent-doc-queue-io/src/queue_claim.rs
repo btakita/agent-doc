@@ -1221,8 +1221,22 @@ pub fn claim_states_for_content(file: &Path, content: &str) -> Result<Vec<QueueC
         .collect())
 }
 
-/// One active claim with its owner-session verdict, for `queue claims`
-/// (`#claimownerliveness`).
+/// Actionable recovery for a lost/expired claim shown by `queue claims`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LostClaimRecovery {
+    /// Why the attempt no longer owns the queue head.
+    pub reason: &'static str,
+    /// What to do when the bound worker may have completed after expiry.
+    pub recover_completed_worker_result: String,
+    /// Exact command that creates the next fenced generation when no usable
+    /// worker result exists.
+    pub reclaim_command: String,
+}
+
+/// One live queue-head claim attempt with its owner-session verdict, for
+/// `queue claims` (`#claimownerliveness`). This includes retained `Lost`
+/// attempts: hiding an expired attempt leaves the visible `⚠️` marker without
+/// either its cause or an actionable recovery.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ClaimReport {
     #[serde(flatten)]
@@ -1232,11 +1246,35 @@ pub struct ClaimReport {
     /// Why the owner session ended, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_session_end_reason: Option<&'static str>,
+    /// Present for a retained lost attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lost_recovery: Option<LostClaimRecovery>,
 }
 
-/// [`active_claims_for_content`] with each claim's owner-session verdict.
+fn lost_claim_recovery(file: &Path, claim: &QueueClaim) -> LostClaimRecovery {
+    let document = shell_single_quote(&file.display().to_string());
+    let item = shell_single_quote(&agent_doc_queue::queue_claim::claim_item_handle(
+        &claim.item_text,
+    ));
+    let owner = shell_single_quote(&claim.owner);
+    let worker = claim
+        .worker
+        .as_ref()
+        .map(|binding| binding.worker_id.as_str())
+        .unwrap_or("the prior worker");
+    LostClaimRecovery {
+        reason: "claim_ttl_expired",
+        recover_completed_worker_result: format!(
+            "Check {worker} for a completed result. If it completed, integrate that exact result and close the queue head through the normal agent-doc response (`--done <id>` for an id-backed head or the exact `> **Queue prompt:**` echo for free text)."
+        ),
+        reclaim_command: format!("agent-doc queue claim {document} --item {item} --owner {owner}"),
+    }
+}
+
+/// Every live queue-head attempt, including retained lost attempts, with its
+/// owner-session verdict and actionable expiry recovery.
 pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<ClaimReport>> {
-    Ok(active_claims_for_content(file, content)?
+    Ok(claim_states_for_content(file, content)?
         .into_iter()
         .map(|claim| {
             let (state, reason) = match claim_owner_liveness(file, &claim) {
@@ -1245,6 +1283,8 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 ClaimOwnerLiveness::Ended(reason) => ("ended", Some(reason.as_str())),
             };
             ClaimReport {
+                lost_recovery: (claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
+                    .then(|| lost_claim_recovery(file, &claim)),
                 claim,
                 owner_session_state: state,
                 owner_session_end_reason: reason,
@@ -1532,6 +1572,54 @@ mod tests {
             claim_clock_now_secs(),
             pinned,
             "the inner pin restores the outer one"
+        );
+    }
+
+    /// `#queueclaim`: a visible lost row remains diagnosable after its TTL.
+    /// The read-only claims command must not hide the attempt or leave the
+    /// operator with only an unexplained `⚠️` marker.
+    #[test]
+    fn claim_reports_include_expired_reason_and_actionable_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#lostdiag]"]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let pinned = 1_000_000;
+        let _outer = pin_claim_clock_for_current_thread(pinned);
+        let (_, claim) = claim(&doc, "#lostdiag", "subagent:lostdiag", 10).unwrap();
+        start_attempt(
+            &doc,
+            "#lostdiag",
+            "subagent:lostdiag",
+            "/root/lostdiag",
+            10,
+            claim.generation,
+        )
+        .unwrap();
+
+        let _expired = pin_claim_clock_for_current_thread(pinned + 10);
+        let reports = claim_reports_for_content(&doc, &content).unwrap();
+        assert_eq!(reports.len(), 1, "{reports:#?}");
+        let report = &reports[0];
+        assert_eq!(
+            report.claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Lost
+        );
+        let recovery = report.lost_recovery.as_ref().unwrap();
+        assert_eq!(recovery.reason, "claim_ttl_expired");
+        assert!(
+            recovery
+                .recover_completed_worker_result
+                .contains("/root/lostdiag"),
+            "{}",
+            recovery.recover_completed_worker_result
+        );
+        assert!(
+            recovery.reclaim_command.contains("--item '#lostdiag'")
+                && recovery
+                    .reclaim_command
+                    .contains("--owner 'subagent:lostdiag'"),
+            "{}",
+            recovery.reclaim_command
         );
     }
 

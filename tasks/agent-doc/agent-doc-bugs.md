@@ -64,7 +64,6 @@ Registered Agent Doc on JetBrains Marketplace as plugin **35436**:
 The listing is hidden and under JetBrains' initial moderation, which the Marketplace says can take up to two business days. The current plugin metadata supplies the icon and basic description, but JetBrains disables substantive listing changes while moderation is active. I recorded a review-gated follow-up to publish the polished description, Getting Started section, documentation link, and bug-tracker link after approval; that review item captures all remaining profile work, so no additional backlog follow-up is needed.
 
 I also created a dedicated permanent Marketplace token and stored it directly as the GitHub Actions secret `JETBRAINS_MARKETPLACE_TOKEN` in `btakita/agent-doc`; the token value was not written to the session document or terminal output. I did not run the release workflow yet because the queued install-command implementation precedes the release/publish item, and the first Marketplace upload is still under moderation.
-
 > **Chat prompt (#chatprompt:fe551a10d205):** I'm using Idea Beta. Update the agent-doc plugin
 
 > **Queue prompt:** In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.
@@ -84,7 +83,24 @@ The package generations advanced to classic `0.2.809`, exact-262 `0.2.811`, and 
 For the live IDEA Beta request, I identified `IU-263.7307.44` (2026.3 Beta). Its incompatible `0.2.807` package was replaced first with released exact-263 `0.2.808`, then with the newly verified local exact-263 package `0.2.810`; `/home/brian/.local/share/JetBrains/IntelliJIdea2026.3/agent-doc-jetbrains/lib/agent.doc-0.2.810.jar` is now staged. JetBrains 263's modular package cannot be hot-swapped safely, so the running IDE still uses its old generation until IDEA restarts. The restart is captured in Todo.
 
 The existing `release + publish` queue head already owns publication of these package generations, so no additional backlog follow-up is needed.
-<!-- agent:boundary:e1ac3147:agent-doc-bugs -->
+> **Chat prompt (#chatprompt:413813e2ca8f):** The plugin couldn't update. Can we setup a repo like with IdeaVim? [Image #1]
+
+> **Chat prompt (#chatprompt:15a2d4f93ad7):** IdeaVim has an EAP repo as an option. I couldn't make a screenshot of the selection.
+
+### Re: IdeaVim-style Agent Doc update channel — gpt-5 · 2026-10-23T23:14-04:00
+
+Yes. Agent Doc now has an IdeaVim-style custom update-channel toggle:
+
+- **Tools → Enable Agent Doc GitHub Updates** adds the compatibility-specific Agent Doc feed to JetBrains' stored plugin hosts; the action changes to **Disable Agent Doc GitHub Updates** while enabled.
+- The same action is available under **Agent Doc Actions → More Actions**.
+- It preserves unrelated custom repositories, including the IdeaVim EAP host, and chooses the feed for the running IDE baseline: classic, exact-262, or exact-263.
+
+For this IDEA Beta (`IU-263.7307.44`), I installed exact-263 Agent Doc `0.2.816` and configured its feed alongside the existing IdeaVim EAP repository in `/home/brian/.config/JetBrains/IntelliJIdea2026.3/options/updates.xml`. The screenshot warning appeared because the locally installed ZIP had no remembered update source. The configured feed fixes that provenance for future releases; `0.2.816` is newer than the latest artifact currently published on that feed, so it will remain installed until a later release is available.
+
+I also fixed the 263 modular package so it loads in IDEA's monolith mode: the backend descriptor no longer requires the split-only `intellij.platform.backend.split` module. The full `make check` suite passed after the installer, compatibility, and update-channel changes. The pushed commits are `ff1fdf2d3b` (CLI installer action), `ee87d7b70b` (263 monolith compatibility), and `d1b5bb0224` (GitHub update-channel toggle).
+
+The Marketplace wording **first publication** means the first published release/listing of this plugin, not the publisher account's first-ever publication.
+<!-- agent:boundary:df6b991a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -98,7 +114,7 @@ The existing `release + publish` queue head already owns publication of these pa
 
 <!-- agent:queue id=issues loop interval=1h priority -->
 - ~~In the JetBrains plugin, provide a command to install agent-doc binary on the system. This will be for people who install the agent-doc plugin.~~ — auto-struck: answered this cycle (#ftstrike)
-- 📥 release + publish
+- 🚧 release + publish
 - 📥 [#coder-remote-install-02805]: done: but still not syncing
 <!-- /agent:queue -->
 

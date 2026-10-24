@@ -75,6 +75,11 @@ content here
 
 Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (close). Names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`. Components are patched via `agent-doc patch`.
 
+An opening marker may share a line with a matching ATX heading, for example
+`## Run <!-- agent:run priority subagents -->`. The heading text must match the
+exact source tag name case-insensitively; closing markers remain on their own
+line. Other prose welded before or after a marker remains structural corruption.
+
 `agent:run` is the canonical runnable-work component. The former
 `agent:queue` spelling remains a backward-compatible alias with identical queue
 semantics, attributes, node identity, and mutation behavior. Agent Doc accepts
@@ -95,7 +100,7 @@ The default `sync-mode` is `additive` (and `sync-mode="additive"` is accepted ex
 
 **Code range exclusion:** Component marker detection uses pulldown-cmark for CommonMark-compliant code range detection, replacing the previous regex-based approach. Markers inside inline code spans or fenced code blocks are excluded and never treated as component boundaries. A same-line backtick pair of any run length always quotes what it encloses, independent of the surrounding block (HTML blocks, block quotes, list items, bold), so prose that names a marker — e.g. ``- **`<!-- agent:run disable-auto-clear ... -->`** turns it off`` — is never parsed as a component opener (`#inlinecodemarker`). Every marker scanner (component parser, boundary/patch scanners, structural-corruption gate, queue/backlog parsers, lint) consumes the same `find_code_ranges` / `find_marker_prose_ranges` exclusion instead of re-implementing it.
 
-**Parse refusals name lines:** an unclosed opener reports `unclosed component: <!-- agent:NAME --> without matching close (opening marker at line N)`, and a mismatched close reports both the opening and closing marker lines, so a refusal points at the exact line to fix. Response landability is checked before capture (a live marker in a response body is refused with its payload line and the `quote marker text in backticks` remedy), and the commit gate refuses any document whose components fail to parse (`commit refused structurally corrupt document ...`), so a closeout never commits a document its own parser rejects.
+**Parse refusals name exact tags and lines:** an unclosed opener reports `unclosed component: <!-- agent:NAME --> without matching close (opening marker at line N)`, and invalid, unmatched, or mismatched tags report their exact source spelling (`agent:run`, not its internal `queue` projection) plus the offending line. Structural-marker refusals likewise derive their line from the marker in the merged target rather than from another component or stale source cut. Response landability is checked before capture (a live marker in a response body is refused with its payload line and the `quote marker text in backticks` remedy), and the commit gate refuses any document whose components fail to parse (`commit refused structurally corrupt document ...`), so a closeout never commits a document its own parser rejects.
 
 **Structured semantic CRDT:** The markdown AST crate owns the component/node schema used by Lazily current state. Each component and item has stable semantic identity, spans, kind metadata, and operator/agent provenance. The live structure exists only in Lazily replicas; cold structured recovery checkpoints are stored in `state.db`. No legacy whole-document Yrs root or overlay file is imported, and no recovery checkpoint may become a merge base ahead of Lazily current text.
 

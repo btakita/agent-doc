@@ -22,6 +22,12 @@
 //! - Opening markers may carry space-separated `key=value` inline attributes
 //!   (e.g., `patch=append`). `patch=` takes precedence over the legacy `mode=` alias;
 //!   `patch_mode()` encapsulates this lookup.
+//! - An opening marker may share a line with an ATX heading whose text matches
+//!   the exact tag name, e.g. `## Run <!-- agent:run priority subagents -->`.
+//!   Closing markers and all other opening-marker shapes remain standalone.
+//! - Tag-related parse and structural errors preserve the exact source spelling
+//!   (`agent:run`, not the internal `queue` projection) and report its line in
+//!   the document target being validated.
 //! - The non-agent comment fast path only previews comment text on UTF-8 char boundaries, so
 //!   ordinary prose comments near multibyte glyphs never panic the parser.
 //! - Marker `open_end` / `close_end` byte offsets include a trailing newline when present,
@@ -249,6 +255,10 @@ pub struct Component {
 pub enum ComponentParseError {
     InvalidName {
         name: String,
+        /// Whether the invalid name came from a closing tag.
+        closing: bool,
+        /// 1-based line of the invalid tag.
+        line: usize,
     },
     Mismatched {
         open_name: String,
@@ -260,6 +270,8 @@ pub enum ComponentParseError {
     },
     UnmatchedClose {
         name: String,
+        /// 1-based line of the closing tag with no opener.
+        line: usize,
     },
     Unclosed {
         name: String,
@@ -273,7 +285,17 @@ pub enum ComponentParseError {
 impl fmt::Display for ComponentParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidName { name } => write!(f, "invalid component name: '{name}'"),
+            Self::InvalidName {
+                name,
+                closing,
+                line,
+            } => {
+                let slash = if *closing { "/" } else { "" };
+                write!(
+                    f,
+                    "invalid component name in tag '{slash}agent:{name}' at line {line}"
+                )
+            }
             Self::Mismatched {
                 open_name,
                 close_name,
@@ -281,11 +303,11 @@ impl fmt::Display for ComponentParseError {
                 close_line,
             } => write!(
                 f,
-                "mismatched component: opened '{open_name}' but closed '{close_name}' (opening marker at line {open_line}, closing marker at line {close_line})"
+                "mismatched component tags: opened 'agent:{open_name}' but closed '/agent:{close_name}' (opening marker at line {open_line}, closing marker at line {close_line})"
             ),
-            Self::UnmatchedClose { name } => write!(
+            Self::UnmatchedClose { name, line } => write!(
                 f,
-                "closing marker for component '{name}' without matching open marker"
+                "closing tag '/agent:{name}' for component '{name}' without matching opening tag 'agent:{name}' (closing marker at line {line})"
             ),
             Self::Unclosed { name, line } => write!(
                 f,
@@ -303,7 +325,7 @@ pub fn unmatched_component_close_name(error: &anyhow::Error) -> Option<&str> {
         cause
             .downcast_ref::<ComponentParseError>()
             .and_then(|parse_error| match parse_error {
-                ComponentParseError::UnmatchedClose { name } => Some(name.as_str()),
+                ComponentParseError::UnmatchedClose { name, .. } => Some(name.as_str()),
                 _ => None,
             })
     })
@@ -1223,8 +1245,47 @@ pub struct StructuralMarkerOccurrence {
     pub start: usize,
     /// 1-based line number.
     pub line: usize,
-    /// Whether the marker leads its own line (only whitespace before `<!--`).
+    /// Whether the marker has a valid structural anchor: either it leads its
+    /// own line, or an opening tag follows an ATX heading with the same name.
+    ///
+    /// The field keeps its historical name for API compatibility.
     pub line_anchored: bool,
+}
+
+/// Return the exact document tag token (`agent:run`, `/agent:run`, ...)
+/// carried by one component marker.
+fn component_marker_tag(doc: &str, marker_start: usize, marker_end: usize) -> Option<&str> {
+    let inner = doc
+        .get(marker_start + 4..marker_end.checked_sub(3)?)?
+        .trim();
+    let tag = inner.split_whitespace().next()?;
+    (tag.starts_with("agent:") || tag.starts_with("/agent:")).then_some(tag)
+}
+
+/// A component opener may share a line with the ATX heading that labels it,
+/// for example `## Run <!-- agent:run priority subagents -->`.
+///
+/// Requiring the heading text to equal the exact source tag name keeps prose
+/// such as `## Notes about queues <!-- agent:run -->` fail-closed. Closing tags
+/// remain standalone.
+fn component_heading_prefix_matches_tag(prefix: &str, tag: &str) -> bool {
+    let Some(name) = tag.strip_prefix("agent:") else {
+        return false;
+    };
+    let indent_len = prefix.len() - prefix.trim_start_matches([' ', '\t']).len();
+    if indent_len > 3 || prefix[..indent_len].contains('\t') {
+        return false;
+    }
+    let heading = prefix[indent_len..].trim_end();
+    let hash_count = heading.bytes().take_while(|byte| *byte == b'#').count();
+    if !(1..=6).contains(&hash_count) {
+        return false;
+    }
+    let rest = &heading[hash_count..];
+    if !rest.starts_with(char::is_whitespace) {
+        return false;
+    }
+    rest.trim().eq_ignore_ascii_case(name)
 }
 
 /// Every `<!-- agent:` / `<!-- /agent:` occurrence outside code and quoted
@@ -1246,17 +1307,24 @@ pub fn structural_marker_occurrences(text: &str) -> Vec<StructuralMarkerOccurren
             continue;
         }
         let inner_end = inner.find("-->").unwrap_or(inner.len());
-        if is_agent_boundary_marker(&inner[..inner_end]) {
+        let marker_body = &inner[..inner_end];
+        if is_agent_boundary_marker(marker_body) {
             continue;
         }
         if byte_in_ranges(start, &masked) {
             continue;
         }
         let line_start = text[..start].rfind('\n').map_or(0, |pos| pos + 1);
+        let prefix = &text[line_start..start];
+        let line_anchored = prefix.trim().is_empty()
+            || marker_body
+                .split_whitespace()
+                .next()
+                .is_some_and(|tag| component_heading_prefix_matches_tag(prefix, tag));
         out.push(StructuralMarkerOccurrence {
             start,
             line: text[..start].bytes().filter(|byte| *byte == b'\n').count() + 1,
-            line_anchored: text[line_start..start].trim().is_empty(),
+            line_anchored,
         });
     }
     out
@@ -1455,6 +1523,8 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
             if !is_valid_name(name) {
                 return Err(ComponentParseError::InvalidName {
                     name: name.to_string(),
+                    closing: true,
+                    line: line_number_at(bytes, marker_start),
                 }
                 .into());
             }
@@ -1482,6 +1552,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                 None => {
                     return Err(ComponentParseError::UnmatchedClose {
                         name: name.to_string(),
+                        line: line_number_at(bytes, marker_start),
                     }
                     .into());
                 }
@@ -1499,6 +1570,8 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
             if !is_valid_name(name) {
                 return Err(ComponentParseError::InvalidName {
                     name: name.to_string(),
+                    closing: false,
+                    line: line_number_at(bytes, marker_start),
                 }
                 .into());
             }
@@ -2237,7 +2310,7 @@ pub fn recover_spliced_queue_close_from_projection(
 /// explicitly bails when there is also text after it. Nothing handled the
 /// trailing-only case, so a single stray keystroke on a marker line wedged the
 /// entire session: `structural_corruption_reason` returns
-/// `non_standalone_component_marker:<name>:<kind>:line<n>`, every write refuses,
+/// `non_standalone_component_marker:<tag>:<kind>:line<n>`, every write refuses,
 /// and — because the poisoned copy also lives in the durable intent — every
 /// reconnect re-fails identically. Observed 2026-08-23 on
 /// `tasks/software/tsift.md`: an operator meant to press their tmux prefix
@@ -2364,31 +2437,39 @@ pub fn structural_corruption_reason(doc: &str) -> Option<String> {
     for c in &components {
         let marker = &doc[c.open_start..c.open_end];
         if marker_has_unterminated_quote(marker) {
-            return Some(format!("malformed_attr:{}", c.name));
+            let marker_end = find_comment_end(doc.as_bytes(), c.open_start)?;
+            let tag =
+                component_marker_tag(doc, c.open_start, marker_end).unwrap_or("agent:unknown");
+            let line = line_number_at(doc.as_bytes(), c.open_start);
+            return Some(format!("malformed_attr:{tag}:line{line}"));
         }
 
-        // Component markers are binary-owned scaffolding and must occupy their
-        // own line. The parser intentionally accepts a balanced marker wherever
-        // it occurs, but that made `operator text<!-- /agent:queue -->` look
-        // structurally valid after a stale component merge welded the closing
-        // marker onto a progressively typed queue line.
+        // Component markers are binary-owned scaffolding. They normally occupy
+        // their own line; an opening tag may instead follow its matching ATX
+        // heading (`## Run <!-- agent:run ... -->`). The parser intentionally
+        // accepts a balanced marker wherever it occurs, but that made
+        // `operator text<!-- /agent:queue -->` look structurally valid after a
+        // stale component merge welded the closing marker onto a progressively
+        // typed queue line.
         for (kind, marker_start) in [("open", c.open_start), ("close", c.close_start)] {
             let marker_end = find_comment_end(doc.as_bytes(), marker_start)?;
             let line_start = doc[..marker_start].rfind('\n').map_or(0, |pos| pos + 1);
             let line_end = doc[marker_end..]
                 .find('\n')
                 .map_or(doc.len(), |relative| marker_end + relative);
-            if !doc[line_start..marker_start].trim().is_empty()
-                || !doc[marker_end..line_end].trim().is_empty()
-            {
-                let line = doc[..marker_start]
-                    .bytes()
-                    .filter(|byte| *byte == b'\n')
-                    .count()
-                    + 1;
+            let tag =
+                component_marker_tag(doc, marker_start, marker_end).unwrap_or(if kind == "open" {
+                    "agent:unknown"
+                } else {
+                    "/agent:unknown"
+                });
+            let prefix = &doc[line_start..marker_start];
+            let prefix_is_valid = prefix.trim().is_empty()
+                || (kind == "open" && component_heading_prefix_matches_tag(prefix, tag));
+            if !prefix_is_valid || !doc[marker_end..line_end].trim().is_empty() {
+                let line = line_number_at(doc.as_bytes(), marker_start);
                 return Some(format!(
-                    "non_standalone_component_marker:{}:{kind}:line{line}",
-                    c.name
+                    "non_standalone_component_marker:{tag}:{kind}:line{line}"
                 ));
             }
         }
@@ -2544,6 +2625,46 @@ mod tests {
     }
 
     #[test]
+    fn matching_heading_may_share_the_opening_tag_line() {
+        let doc = concat!(
+            "## Run <!-- agent:run priority subagents -->\n",
+            "- ship it\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog priority -->\n",
+            "- [ ] [#next] next\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let components = parse(doc).expect("heading-collocated opening tags must parse");
+        assert_eq!(components.len(), 2);
+        assert_eq!(components[0].name, QUEUE_COMPONENT);
+        assert_eq!(components[0].content(doc), "- ship it\n");
+        assert_eq!(structural_corruption_reason(doc), None);
+        assert!(
+            structural_marker_occurrences(doc)
+                .iter()
+                .all(|occurrence| occurrence.line_anchored),
+            "matching heading anchors are structural markers"
+        );
+    }
+
+    #[test]
+    fn nonmatching_heading_refusal_names_the_exact_tag_and_merged_target_line() {
+        let mut doc = "filler\n".repeat(184);
+        doc.push_str("## Work <!-- agent:run priority subagents -->\n");
+        doc.push_str("- ship it\n<!-- /agent:run -->\n");
+        // Put another component heading at line 229: the diagnostic must not
+        // borrow that later line or the internal canonical name `queue`.
+        doc.push_str(&"filler\n".repeat(41));
+        doc.push_str("## Backlog <!-- agent:backlog -->\n<!-- /agent:backlog -->\n");
+
+        assert_eq!(
+            structural_corruption_reason(&doc).as_deref(),
+            Some("non_standalone_component_marker:agent:run:open:line185")
+        );
+    }
+
+    #[test]
     fn run_component_alias_pair_must_use_one_spelling() {
         let mixed = "<!-- agent:run -->\nwork\n<!-- /agent:queue -->\n";
         let error = parse(mixed).unwrap_err().to_string();
@@ -2638,7 +2759,13 @@ beta
     fn unmatched_close_error() {
         let doc = "Content\n<!-- /agent:orphan -->\n";
         let err = parse(doc).unwrap_err();
-        assert!(err.to_string().contains("without matching open"));
+        let message = err.to_string();
+        assert!(message.contains("tag '/agent:orphan'"), "{message}");
+        assert!(message.contains("line 2"), "{message}");
+        assert!(
+            message.contains("without matching opening tag"),
+            "{message}"
+        );
         assert_eq!(unmatched_component_close_name(&err), Some("orphan"));
     }
 
@@ -2646,14 +2773,19 @@ beta
     fn mismatched_names_error() {
         let doc = "<!-- agent:foo -->\n<!-- /agent:bar -->\n";
         let err = parse(doc).unwrap_err();
-        assert!(err.to_string().contains("mismatched"));
+        let message = err.to_string();
+        assert!(message.contains("opened 'agent:foo'"), "{message}");
+        assert!(message.contains("closed '/agent:bar'"), "{message}");
+        assert!(message.contains("line 1") && message.contains("line 2"));
     }
 
     #[test]
     fn invalid_name() {
         let doc = "<!-- agent:-bad -->\n<!-- /agent:-bad -->\n";
         let err = parse(doc).unwrap_err();
-        assert!(err.to_string().contains("invalid component name"));
+        let message = err.to_string();
+        assert!(message.contains("tag 'agent:-bad'"), "{message}");
+        assert!(message.contains("line 1"), "{message}");
     }
 
     #[test]
@@ -4182,7 +4314,7 @@ Fix applied to skip non-agent <!-- sequences.
         let doc = "<!-- agent:queue -->\n- next\ni<!-- /agent:queue -->\n";
         let reason = structural_corruption_reason(doc).expect("welded marker must be refused");
         assert!(
-            reason.starts_with("non_standalone_component_marker:queue:close"),
+            reason.starts_with("non_standalone_component_marker:/agent:queue:close"),
             "reason was: {reason}"
         );
         // A backtick pair on an EARLIER line does not reach across the newline.
@@ -4308,7 +4440,7 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
         let err = parse(&doc).expect_err("an unquoted opener must not parse");
         let message = err.to_string();
         assert!(
-            message.contains("opened 'queue' but closed 'exchange'"),
+            message.contains("opened 'agent:queue' but closed '/agent:exchange'"),
             "{message}"
         );
         assert!(
@@ -4395,7 +4527,7 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
         let reason =
             structural_corruption_reason(doc).expect("unterminated quote attr must be flagged");
         assert!(
-            reason.starts_with("malformed_attr:queue"),
+            reason.starts_with("malformed_attr:agent:queue:line4"),
             "reason was: {reason}"
         );
     }
@@ -4405,14 +4537,14 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
         let welded_close = "<!-- agent:queue -->\n- do [#x] complete prompt<!-- /agent:queue -->\n";
         assert_eq!(
             structural_corruption_reason(welded_close).as_deref(),
-            Some("non_standalone_component_marker:queue:close:line2")
+            Some("non_standalone_component_marker:/agent:queue:close:line2")
         );
 
         let welded_open =
             "operator text<!-- agent:queue -->\n- do [#x] complete prompt\n<!-- /agent:queue -->\n";
         assert_eq!(
             structural_corruption_reason(welded_open).as_deref(),
-            Some("non_standalone_component_marker:queue:open:line1")
+            Some("non_standalone_component_marker:agent:queue:open:line1")
         );
     }
 
@@ -4430,7 +4562,7 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
         );
         assert_eq!(
             structural_corruption_reason(typo).as_deref(),
-            Some("non_standalone_component_marker:queue:close:line3"),
+            Some("non_standalone_component_marker:/agent:queue:close:line3"),
             "precondition: this is the shape that wedged the session"
         );
 

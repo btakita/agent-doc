@@ -3,32 +3,23 @@ use anyhow::Result;
 use agent_doc_frontmatter::{frontmatter, project_config};
 
 const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
-    "\n\n## Status\n\n",
-    "<!-- agent:status patch=replace -->\n",
+    "\n\n## Status <!-- agent:status patch=replace -->\n",
     "<!-- /agent:status -->\n",
-    "\n## Exchange\n\n",
-    "<!-- agent:exchange patch=append -->\n",
+    "\n## Exchange <!-- agent:exchange patch=append -->\n",
     "<!-- /agent:exchange -->\n",
-    "\n## Queue\n\n",
-    "<!-- agent:run priority subagents clear -->\n",
+    "\n## Run <!-- agent:run priority subagents clear -->\n",
     "<!-- /agent:run -->\n",
-    "\n## Todo\n\n",
-    "<!-- agent:todo priority -->\n",
+    "\n## Todo <!-- agent:todo priority -->\n",
     "<!-- /agent:todo -->\n",
-    "\n## Backlog\n\n",
-    "<!-- agent:backlog priority queue -->\n",
+    "\n## Backlog <!-- agent:backlog priority queue -->\n",
     "<!-- /agent:backlog -->\n",
-    "\n## Review\n\n",
-    "<!-- agent:review -->\n",
+    "\n## Review <!-- agent:review -->\n",
     "<!-- /agent:review -->\n",
-    "\n## Icebox\n\n",
-    "<!-- agent:icebox -->\n",
+    "\n## Icebox <!-- agent:icebox -->\n",
     "<!-- /agent:icebox -->\n",
-    "\n## Done\n\n",
-    "<!-- agent:done -->\n",
+    "\n## Done <!-- agent:done -->\n",
     "<!-- /agent:done -->\n",
-    "\n## Notes\n\n",
-    "<!-- agent:notes -->\n",
+    "\n## Notes <!-- agent:notes -->\n",
     "<!-- /agent:notes -->\n",
 );
 
@@ -121,6 +112,26 @@ mod tests {
         let scaffold = render_empty_template_scaffold("session-1");
         assert!(scaffold.contains("agent_doc_session: session-1"));
         assert!(scaffold.contains("agent_doc_format: template"));
+        let section_headers = scaffold
+            .lines()
+            .filter(|line| line.starts_with("## "))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            section_headers,
+            [
+                "## Status <!-- agent:status patch=replace -->",
+                "## Exchange <!-- agent:exchange patch=append -->",
+                "## Run <!-- agent:run priority subagents clear -->",
+                "## Todo <!-- agent:todo priority -->",
+                "## Backlog <!-- agent:backlog priority queue -->",
+                "## Review <!-- agent:review -->",
+                "## Icebox <!-- agent:icebox -->",
+                "## Done <!-- agent:done -->",
+                "## Notes <!-- agent:notes -->",
+            ],
+            "claim scaffolds keep every level-two heading on its component opening-tag line"
+        );
+        assert!(!scaffold.contains("## Queue"));
         assert!(
             scaffold.contains("<!-- agent:run priority subagents clear -->\n<!-- /agent:run -->"),
             "new claim scaffolds must use the canonical agent:run marker"
@@ -132,8 +143,8 @@ mod tests {
         assert!(
             scaffold.contains(concat!(
                 "<!-- /agent:run -->\n",
-                "\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n",
-                "\n## Backlog\n\n<!-- agent:backlog priority queue -->\n"
+                "\n## Todo <!-- agent:todo priority -->\n<!-- /agent:todo -->\n",
+                "\n## Backlog <!-- agent:backlog priority queue -->\n"
             )),
             "agent:todo must sit below agent:run and above agent:backlog"
         );
@@ -216,7 +227,12 @@ mod tests {
             .unwrap()
             .expect("template without components should scaffold");
         assert!(scaffolded.starts_with("---\nagent_doc_format: template\n---\n\nIntro"));
-        assert!(scaffolded.contains("<!-- agent:run priority subagents clear -->"));
+        assert!(
+            scaffolded.contains(
+                "## Run <!-- agent:run priority subagents clear -->\n<!-- /agent:run -->"
+            )
+        );
+        assert!(!scaffolded.contains("## Queue"));
         assert!(!scaffolded.contains("<!-- agent:queue"));
         let component_names = agent_doc_element::element::parse(&scaffolded)
             .expect("default components must form a valid component AST")

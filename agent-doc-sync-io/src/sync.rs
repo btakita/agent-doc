@@ -10635,9 +10635,12 @@ mod tests {
             "should have exchange component"
         );
         assert!(
-            content.contains("<!-- agent:run priority subagents clear -->\n<!-- /agent:run -->"),
+            content.contains(
+                "## Run <!-- agent:run priority subagents clear -->\n<!-- /agent:run -->"
+            ),
             "sync must use claim's canonical agent:run scaffold"
         );
+        assert!(!content.contains("## Queue"));
         assert!(
             !content.contains("<!-- agent:queue"),
             "new sync scaffolds must not emit the legacy agent:queue alias"

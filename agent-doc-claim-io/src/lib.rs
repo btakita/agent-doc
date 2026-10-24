@@ -46,8 +46,9 @@
 //!   wrong session (`pane_session != target_session` in `route.rs`).
 //! - Sets `agent_doc_format=template` and `agent_doc_write=crdt` in frontmatter when
 //!   neither `format`, `write_mode`, nor legacy `mode` is present.
-//! - Scaffolds default `## Status` and `## Exchange` component sections when the
-//!   document has none and format is `template`.
+//! - Scaffolds the canonical managed component sections when the document has none
+//!   and format is `template`. Each `##` heading shares the component opening-tag
+//!   line, and the runnable-work section is titled `## Run`.
 //! - Merges default component configuration into `.agent-doc/config.toml` (under the
 //!   `[components]` section) if the document is template format.
 //! - Registers the session→pane mapping using the pane's own PID (not the short-lived
@@ -72,7 +73,8 @@
 //!   `format`, `write_mode`, and `mode` are absent — existing mode configuration
 //!   is never overwritten.
 //! - Component scaffolding is only applied when the document has no `status` or
-//!   `exchange` component yet; existing components are preserved.
+//!   `exchange` component yet; existing components and their heading layout are
+//!   preserved.
 //! - **Snapshot initialization:** After registration, saves a snapshot with empty
 //!   exchange content. Existing user text in the exchange becomes a diff on the
 //!   next run, ensuring unresponded prompts are not absorbed into the baseline.

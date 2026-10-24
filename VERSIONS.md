@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.549
+
+- **Upgrades now resolve a stable channel for the running target.** Release publication writes signed, per-target
+  channel manifests, and `agent-doc upgrade` prefers the matching target channel while retaining the legacy global
+  fallback for older releases and clients.
+- **JetBrains users can install the Agent Doc CLI from the IDE.** The new Tools action shows and runs the official
+  installer off the UI thread, verifies the installed binary, and reports bounded diagnostics with a Windows
+  fallback when a POSIX shell is unavailable.
+- **JetBrains 263 works in both monolith and split deployments.** The modular package no longer requires the
+  split-only backend module when IDEA 2026.3 loads it in monolith mode.
+- **JetBrains gains an IdeaVim-style GitHub update channel.** A Tools action enables or disables the
+  compatibility-specific Agent Doc plugin repository without disturbing unrelated custom plugin hosts.
+
 ## 0.35.548
 
 - **Remote Dev focus and plugin reconciliation cover the frontend that actually owns the editor (GH #368, #370–#371).**

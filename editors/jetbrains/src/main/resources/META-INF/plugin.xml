@@ -235,6 +235,12 @@
                 description="Install or update the agent-doc command-line tool with the official checksummed installer">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.UpdateChannel"
+                class="com.github.btakita.agentdoc.AgentDocUpdateChannelAction"
+                text="Enable Agent Doc GitHub Updates"
+                description="Toggle the compatibility-matched Agent Doc GitHub update repository">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.ResyncFixSessions"
                 class="com.github.btakita.agentdoc.ResyncFixSessionsAction"
                 text="Resync / Fix Sessions"

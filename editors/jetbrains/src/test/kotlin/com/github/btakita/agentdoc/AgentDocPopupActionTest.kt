@@ -44,6 +44,7 @@ class AgentDocPopupActionTest {
         assertEquals(
             listOf(
                 "AgentDoc.InstallCli",
+                "AgentDoc.UpdateChannel",
                 "AgentDoc.RunWithJunie",
                 "AgentDoc.ForceClaim",
                 "AgentDoc.InterruptClearSessionContext",

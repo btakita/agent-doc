@@ -41,6 +41,14 @@ offers an update whose `since-build`/`until-build` contains its own build, so a
 242–261 IDE never sees the 262 update and a 262 IDE never sees the classic one.
 Builds below 242 or above `263.*` are offered nothing.
 
+The plugin also exposes **Tools → Enable Agent Doc GitHub Updates** (and the
+same command under **Agent Doc Actions → More Actions**). Like IdeaVim's EAP
+toggle, it adds the compatibility-matched repository URL to JetBrains'
+`storedPluginHosts`; running it again removes the Agent Doc URL without touching
+other custom repositories. This GitHub channel receives the verified release
+artifacts before Marketplace availability, which makes it the opt-in early
+update path for local/custom-repository installs.
+
 ### Marketplace
 
 When `JETBRAINS_MARKETPLACE_TOKEN` is configured, every tagged release uploads

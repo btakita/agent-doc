@@ -268,6 +268,11 @@ pub fn drain_open_closeout_before_routed_dispatch(
         RouteCloseoutBlockContext::LiveOwnerTurn
     } else if cycle.is_empty_preflight() {
         RouteCloseoutBlockContext::OpenEmptyPreflight
+    } else if matches!(
+        state.phase,
+        agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
+    ) {
+        RouteCloseoutBlockContext::CapturedFinalizeRecovery
     } else {
         RouteCloseoutBlockContext::Other
     };
@@ -291,6 +296,7 @@ pub fn drain_open_closeout_before_routed_dispatch(
 pub fn route_closeout_block_context_label(context: RouteCloseoutBlockContext) -> &'static str {
     match context {
         RouteCloseoutBlockContext::OpenEmptyPreflight => "open_empty_preflight",
+        RouteCloseoutBlockContext::CapturedFinalizeRecovery => "captured_finalize_recovery",
         RouteCloseoutBlockContext::LiveOwnerTurn => "live_owner_turn",
         RouteCloseoutBlockContext::Other => "other",
     }

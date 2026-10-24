@@ -898,10 +898,15 @@ impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuar
             return Ok(Some(capture));
         }
         Ok(agent_doc_capture_io::load_active(file)?.map(|capture| {
+            let response_body = agent_doc_turn::response_replay::retained_response_materialization_body(
+                &capture.response_body,
+                capture.intent_body.as_deref(),
+            )
+            .to_string();
             agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization {
                 capture_id: capture.capture_id,
                 response_sha256: capture.response_sha256,
-                response_body: capture.response_body,
+                response_body,
                 terminal: matches!(
                     capture.state,
                     agent_doc_workflow::capture::CaptureState::Committed
@@ -971,7 +976,12 @@ fn projected_active_capture_materialization(
         agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization {
             capture_id: projected.capture_id,
             response_sha256: projected.response_sha256,
-            response_body: projected.response_body,
+            response_body:
+                agent_doc_turn::response_replay::retained_response_materialization_body(
+                    &projected.response_body,
+                    projected.intent_body.as_deref(),
+                )
+                .to_string(),
             terminal: !state.is_open(),
         },
     ))
@@ -3544,12 +3554,24 @@ fn captured_response_body_for_commit(
         && state.cycle_id == projected.cycle_id
         && state.response_sha256.as_deref() == Some(projected.response_sha256.as_str())
     {
-        return Some(projected.response_body);
+        return Some(
+            agent_doc_turn::response_replay::retained_response_materialization_body(
+                &projected.response_body,
+                projected.intent_body.as_deref(),
+            )
+            .to_string(),
+        );
     }
     agent_doc_capture_io::load_active(file)
         .ok()
         .flatten()
-        .map(|capture| capture.response_body)
+        .map(|capture| {
+            agent_doc_turn::response_replay::retained_response_materialization_body(
+                &capture.response_body,
+                capture.intent_body.as_deref(),
+            )
+            .to_string()
+        })
 }
 
 fn exchange_has_unanswered_disk_only_prompt_target_for_commit(

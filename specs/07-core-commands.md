@@ -666,6 +666,14 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   Failure to resolve that project or append the record is never silent: the CLI
   prints a `WARNING:` containing the complete verdict and the logging failure,
   so a package replacement cannot leave no explanation of its outcome (GH #299).
+- `agent-doc admin reregister-editor <FILE>` asks every reachable live editor
+  replica for that document to re-register and publish its retained frontier.
+  This is the editor-preserving recovery for a drifted captured-response
+  baseline: it does not unload the native generation, replace the visible
+  buffer from disk, clear session state, or resubmit the response. The command
+  prints found/notified counts and exits nonzero when no live replica accepted
+  the request, directing the operator to reopen the tab or restart the editor.
+  A successful re-registration publishes the ordinary captured-finalize wake.
 - `agent-doc upgrade` discovers JetBrains product roots for ordinary IDEs plus
   JetBrains Client/Gateway. Windows uses `%APPDATA%\JetBrains` for plugin trees
   and `%LOCALAPPDATA%\JetBrains` for system/action-script state, even when

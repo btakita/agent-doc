@@ -7672,8 +7672,8 @@ mod tests {
         );
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("capture_baseline_refreshed_for_benign_drift"),
-            "preflight must drive validate_replay's baseline refresh path:\n{log}"
+            log.contains("capture_baseline_refreshed_from_materialized_response_intent"),
+            "preflight must refresh the baseline from the retained response projection:\n{log}"
         );
     }
 

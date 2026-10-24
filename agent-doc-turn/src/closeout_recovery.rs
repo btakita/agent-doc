@@ -184,6 +184,10 @@ pub enum MetadataDriftAuthority {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseoutRecoveryMutationReason {
     BenignReplayBaseline,
+    /// The exact retained response intent selected by repair is already
+    /// materialized in the current document. Capture canonicalization may
+    /// intentionally retain a smaller proof body than the full write intent.
+    MaterializedResponseIntent,
     QueueOnlyReplayBaseline,
     WholeDocumentReplayCoalescedBaseline,
     AuthoritativeReplayBaseline,
@@ -199,6 +203,7 @@ impl CloseoutRecoveryMutationReason {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::BenignReplayBaseline => "benign_replay_baseline",
+            Self::MaterializedResponseIntent => "materialized_response_intent",
             Self::QueueOnlyReplayBaseline => "queue_only_replay_baseline",
             Self::WholeDocumentReplayCoalescedBaseline => {
                 "whole_document_replay_coalesced_baseline"
@@ -215,6 +220,9 @@ impl CloseoutRecoveryMutationReason {
 
     pub const fn capture_refresh_event(self) -> &'static str {
         match self {
+            Self::MaterializedResponseIntent => {
+                "capture_baseline_refreshed_from_materialized_response_intent"
+            }
             Self::QueueOnlyReplayBaseline => "capture_baseline_refreshed_for_queue_only_drift",
             Self::WholeDocumentReplayCoalescedBaseline => {
                 "capture_baseline_refreshed_for_whole_document_replay_coalescence"
@@ -228,6 +236,9 @@ impl CloseoutRecoveryMutationReason {
 
     pub const fn capture_refresh_message(self) -> &'static str {
         match self {
+            Self::MaterializedResponseIntent => {
+                "retained response intent is already materialized"
+            }
             Self::QueueOnlyReplayBaseline => "queue-only drift detected",
             Self::WholeDocumentReplayCoalescedBaseline => {
                 "whole-document replay coalescence detected"
@@ -1151,6 +1162,10 @@ mod tests {
             "benign_replay_baseline"
         );
         assert_eq!(
+            CloseoutRecoveryMutationReason::MaterializedResponseIntent.as_str(),
+            "materialized_response_intent"
+        );
+        assert_eq!(
             CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.as_str(),
             "queue_only_replay_baseline"
         );
@@ -1211,6 +1226,14 @@ mod tests {
         assert_eq!(
             CloseoutRecoveryMutationReason::BenignReplayBaseline.capture_refresh_message(),
             "benign drift detected"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::MaterializedResponseIntent.capture_refresh_event(),
+            "capture_baseline_refreshed_from_materialized_response_intent"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::MaterializedResponseIntent.capture_refresh_message(),
+            "retained response intent is already materialized"
         );
     }
 

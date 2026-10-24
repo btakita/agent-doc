@@ -144,7 +144,12 @@ pub(crate) fn captured_response_guard_evidence(
         && state.cycle_id == projected.cycle_id
     {
         return Ok(Some(CapturedResponseGuardEvidence {
-            response_body: projected.response_body,
+            response_body:
+                agent_doc_turn::response_replay::retained_response_materialization_body(
+                    &projected.response_body,
+                    projected.intent_body.as_deref(),
+                )
+                .to_string(),
             capture_committed: state.phase == agent_doc_turn::CyclePhase::Committed,
         }));
     }

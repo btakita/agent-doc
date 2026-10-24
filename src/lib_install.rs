@@ -384,15 +384,25 @@ pub fn reload_lib() -> Result<ReloadLibReport> {
 
 /// GH #94 — the exit verdict of `admin reload-lib`.
 ///
-/// Success means every live endpoint acknowledged (or was deliberately
-/// deferred / reported as restart-only). An endpoint that was unreachable or
+/// Success means every live endpoint acknowledged (or was reported as
+/// restart-only). A deliberate mid-cycle deferral is safe for install fan-out,
+/// but it is not success for the explicit operator command: that command is
+/// also printed as a recovery step, and reporting success while the open cycle
+/// prevents delivery creates a recovery loop. An endpoint that was unreachable or
 /// refused the intent did NOT reload, so reporting `1 unavailable` with exit 0
 /// let the attached-editor refusal's "run reload-lib, then retry" read as a
 /// performed step. Name each endpoint and say plainly that the remedy is an
 /// editor restart: reload-lib needs the very endpoint that is gone.
 pub fn reload_lib_verdict(report: &ReloadLibReport) -> Result<()> {
-    if report.failed == 0 {
+    if report.failed == 0 && report.deferred_cycle_open == 0 {
         return Ok(());
+    }
+    if report.failed == 0 {
+        anyhow::bail!(
+            "[admin] reload-lib: cdylib v{} was safely deferred for {} editor endpoint(s) because a document cycle is open; the request is queued for that cycle's idle boundary, so reload-lib did not perform an immediate recovery. For an editor-owned document that must re-publish its current buffer, run `agent-doc admin reregister-editor <FILE>` or reopen its editor tab",
+            report.lib_version,
+            report.deferred_cycle_open,
+        );
     }
     let mut named = report
         .failures
@@ -684,10 +694,17 @@ mod tests {
             reload_lib_verdict(&idle).is_ok(),
             "no editors is not a failure"
         );
+    }
+
+    #[test]
+    fn reload_lib_verdict_reports_mid_cycle_deferral_as_unperformed() {
         let mut deferred = reload_report(0, Vec::new());
         deferred.editor_endpoints = 1;
         deferred.deferred_cycle_open = 1;
-        assert!(reload_lib_verdict(&deferred).is_ok());
+        let message = format!("{:#}", reload_lib_verdict(&deferred).unwrap_err());
+        assert!(message.contains("safely deferred"), "{message}");
+        assert!(message.contains("did not perform an immediate recovery"), "{message}");
+        assert!(message.contains("admin reregister-editor <FILE>"), "{message}");
     }
 
     #[test]

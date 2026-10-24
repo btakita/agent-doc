@@ -3,6 +3,18 @@ use std::collections::HashSet;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
 
+/// The exact retained projection whose materialization proves that a captured
+/// write landed. Capture canonicalization may store a response-only proof body
+/// while `intent_body` retains the complete command that was actually applied.
+/// Every repair, commit, and closeout guard must choose this projection the
+/// same way or one stage can reject the write another stage just proved.
+pub fn retained_response_materialization_body<'a>(
+    response_body: &'a str,
+    intent_body: Option<&'a str>,
+) -> &'a str {
+    intent_body.unwrap_or(response_body)
+}
+
 pub fn first_response_heading_line(response: &str) -> Option<&str> {
     response
         .lines()

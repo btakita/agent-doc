@@ -3803,6 +3803,16 @@ enum AdminAction {
         #[arg(long)]
         json: bool,
     },
+    /// Ask the live editor holding a document to re-register its replica and
+    /// re-publish its current buffer without replacing the native library.
+    #[command(name = "reregister-editor")]
+    ReregisterEditor {
+        /// Session document whose live editor replica should re-register
+        document: PathBuf,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
     /// Steward the systemd `tmux-spawn-*.scope` units tmux creates per pane
     /// (`#tmuxscopesteward`): reset failed scopes, stop orphaned scopes that
     /// hold only agent-doc test-fixture leaks, and report every other orphaned
@@ -7310,6 +7320,56 @@ fn try_main() -> anyhow::Result<()> {
                     }
                     lib_install::reload_lib_verdict(&report)
                 }
+                AdminAction::ReregisterEditor { document, json } => {
+                    let document = document.canonicalize().with_context(|| {
+                        format!(
+                            "failed to resolve document for editor re-registration: {}",
+                            document.display()
+                        )
+                    })?;
+                    let outcome = agent_doc_crdt_relay_io::signal_crdt_replica_event_reporting(
+                        &document,
+                        agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
+                        0,
+                    )?;
+                    let diagnosis = outcome.diagnosis();
+                    agent_doc_ops_log_io::log_op(
+                        &document,
+                        &format!(
+                            "admin_editor_replica_reregister file={} found={} notified={} diagnosis={} recovery=resume_captured_finalize",
+                            document.display(),
+                            outcome.found,
+                            outcome.notified,
+                            diagnosis,
+                        ),
+                    );
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "document": document.display().to_string(),
+                                "found": outcome.found,
+                                "notified": outcome.notified,
+                                "diagnosis": diagnosis,
+                            })
+                        );
+                    } else {
+                        println!(
+                            "[admin] reregister-editor: requested {}/{} live editor replica(s) for {} ({})",
+                            outcome.notified,
+                            outcome.found,
+                            document.display(),
+                            diagnosis,
+                        );
+                    }
+                    anyhow::ensure!(
+                        outcome.notified > 0,
+                        "[admin] reregister-editor could not reach a live editor replica for {} ({}). Reopen the document tab so the editor publishes its current buffer, or restart the editor if reopening is unavailable",
+                        document.display(),
+                        diagnosis,
+                    );
+                    Ok(())
+                }
                 AdminAction::KillSupervisor {
                     document,
                     grace_secs,
@@ -9062,6 +9122,26 @@ mod recycle_force_tests {
                 assert!(target.is_none());
             }
             _ => panic!("expected admin recycle subcommand"),
+        }
+    }
+
+    #[test]
+    fn reregister_editor_parses_document_and_json() {
+        let cmd = parse(&[
+            "agent-doc",
+            "admin",
+            "reregister-editor",
+            "tasks/session.md",
+            "--json",
+        ]);
+        match cmd {
+            Commands::Admin {
+                action: AdminAction::ReregisterEditor { document, json },
+            } => {
+                assert_eq!(document, PathBuf::from("tasks/session.md"));
+                assert!(json);
+            }
+            _ => panic!("expected admin reregister-editor subcommand"),
         }
     }
 

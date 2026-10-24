@@ -1023,10 +1023,58 @@ pub fn validate_replay_with_current_content(
     // the reattach that re-bootstraps the authority from the editor text; keep
     // the reset only as the headless fallback.
     anyhow::bail!(
-        "captured response baseline no longer matches current document for {}. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session {}`",
+        "captured response baseline no longer matches current document for {}. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reregister-editor {}` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session {}`",
+        file.display(),
         file.display(),
         file.display()
     );
+}
+
+/// Validate the same retained response projection that repair has already
+/// proven materialized in `current_file`.
+///
+/// Capture canonicalization may persist a response-only proof in
+/// [`CaptureRecord::response_body`] while retaining the complete write command
+/// in [`CaptureRecord::intent_body`]. Repair replays the intent because it owns
+/// all document mutations. Once that exact intent is visible, validating drift
+/// against only the smaller proof body can contradict the preceding
+/// materialization result and strand a `write_applied` cycle. Keep identity
+/// strict, re-prove materialization here, then advance the capture baseline to
+/// the already-applied cut.
+pub fn validate_materialized_replay_with_current_content(
+    file: &Path,
+    capture: &CaptureRecord,
+    materialized_response: &str,
+    current_file: &str,
+) -> Result<()> {
+    let belongs_to_capture = capture.response_body == materialized_response
+        || capture.intent_body.as_deref() == Some(materialized_response);
+    anyhow::ensure!(
+        belongs_to_capture,
+        "refusing to validate an unrelated materialized response against capture {} for {}",
+        capture.capture_id,
+        file.display(),
+    );
+
+    let current_file_hash = replay_file_hash(current_file);
+    if capture.file_hash.as_deref() == Some(current_file_hash.as_str()) {
+        return Ok(());
+    }
+    if capture_matches_open_cycle(file, capture)?
+        && response_body_intact_in_current(file, materialized_response, current_file)?
+    {
+        refresh_replay_baseline_for_reason(
+            file,
+            capture,
+            &current_file_hash,
+            Some(&current_file_hash),
+            Some(current_file),
+            CloseoutRecoveryMutationReason::MaterializedResponseIntent,
+        )?;
+        return Ok(());
+    }
+
+    validate_replay_with_current_content(file, capture, current_file)
 }
 
 fn captured_baseline_coalesces_to_current(
@@ -1963,13 +2011,55 @@ mod tests {
         );
         // `#editorbaseunblocker`: the first exact command is the editor-preserving
         // reattach, never the reset that pushes the authority onto the editor.
+        let expected = format!("agent-doc admin reregister-editor {}", doc.display());
         assert_eq!(
             agent_doc_turn::closeout_recovery::short_recovery_command_from_recommendation(
                 &err.to_string()
             )
             .as_deref(),
-            Some("agent-doc admin reload-lib")
+            Some(expected.as_str())
         );
+    }
+
+    #[test]
+    fn materialized_intent_refreshes_the_same_capture_baseline() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let baseline = "---\nsession: test\n---\n\n## User\n\nPrompt\n";
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        let capture = capture_response_with_current_content_and_intent(
+            &doc,
+            "canonical proof body",
+            baseline,
+            Some("materialized retained intent"),
+        )
+        .unwrap();
+        let applied = format!("{baseline}\n## Assistant\n\nmaterialized retained intent\n");
+
+        validate_materialized_replay_with_current_content(
+            &doc,
+            &capture,
+            "materialized retained intent",
+            &applied,
+        )
+        .unwrap();
+
+        let refreshed = load_by_id(&doc, &capture.capture_id)
+            .unwrap()
+            .expect("capture remains active");
+        let applied_hash = replay_file_hash(&applied);
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(applied_hash.as_str())
+        );
+        assert_eq!(refreshed.baseline_content.as_deref(), Some(applied.as_str()));
     }
 
     #[test]

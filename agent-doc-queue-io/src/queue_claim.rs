@@ -1118,7 +1118,7 @@ pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<Queue
 /// A claimed queue attempt whose harness spawn was never acknowledged with
 /// `queue start`. This is an actionable coordinator obligation, not evidence
 /// that a worker is running (`#queueclaimworker`, GH #301).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DispatchAcknowledgementObligation {
     pub item: String,
     pub owner: String,

@@ -31505,9 +31505,13 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "plan.rs must not select the raw first queue head; use the deferral-aware selector (#planhead)"
     );
     assert!(
-        plan_source.contains("agent_doc_queue::queue_continuation::dispatchable_head_prompt_text")
+        plan_source.contains(
+            "agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_excluding_claimed"
+        ) && plan_source.contains(
+            "agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan"
+        )
             && plan_source.contains("agent_doc_queue::queue_heads::queue_is_active_for_diff"),
-        "plan.rs should call active queue activation policy through agent-doc-queue directly"
+        "plan.rs should call active queue selection policy through agent-doc-queue and exclude the shared out-of-loop projection"
     );
 
     let queue_closeout_guard =

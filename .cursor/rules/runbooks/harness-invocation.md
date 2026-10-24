@@ -57,6 +57,13 @@ Use one native background worker per dispatch item and an external worktree for
 repository writes. `agent-doc orchestrate` is only the fallback when the native
 tool is genuinely unavailable.
 
+The connected plan is Grok's queue-lifecycle contract. A non-empty
+`queue_dispatch_acknowledgement_required` means an earlier claim never reached
+the worker-bound state: use its exact `start_command` if the spawn succeeded,
+or its `release_command` to requeue if no worker was spawned. These fields are
+actionable even when `prompt_targets` is empty; never interpret that combination
+as `no_changes` or resume the work inline (`#connectedqueuedispatch`).
+
 This runbook covers the harness-specific differences in how agent-doc is invoked.
 The core workflow (preflight, respond, persist the response) is identical across all harnesses; see `commit.md` for the shared commit-boundary contract.
 

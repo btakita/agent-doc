@@ -19,6 +19,9 @@
 //!   so the planning record is binary-owned rather than free-form skill prose.
 //! - `build(file)`: pure planning entry point for tests/callers after the file
 //!   read + diff computation; returns the structured plan instead of printing.
+//! - Connected harnesses receive queue-subagent dispatch and unbound-claim
+//!   recovery in this same record. A lightweight MCP admission therefore cannot
+//!   hide the queue lifecycle contract that hook-driven preflight normally emits.
 //!
 //! ## Agentic Contracts
 //! - The plan record is deterministic for a given document + snapshot pair.
@@ -63,6 +66,19 @@ use agent_doc_workflow::session_cycle::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DispatchPlan {
+    /// Unclaimed queue heads that this cycle must dispatch to background
+    /// workers. Connected harnesses consume this projection because their
+    /// lightweight admission does not emit the hook preflight contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_subagent_dispatch: Vec<agent_doc_preflight_io::QueueSubagentDispatch>,
+    /// How to execute [`Self::queue_subagent_dispatch`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_subagent_dispatch_guidance: Option<String>,
+    /// Claims that still need the successful spawn's worker id, or must be
+    /// released for redispatch when no worker was spawned.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_dispatch_acknowledgement_required:
+        Vec<agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_targets: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -201,6 +217,35 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)
             .with_context(|| format!("failed to resolve prompt presets for {}", file.display()))?;
 
+    // `#connectedqueuedispatch`: hook-driven entrypoints receive these fields
+    // in preflight output. Grok's connected path deliberately uses lightweight
+    // `agent_doc_admit` followed by this plan, so plan must project the same
+    // queue state or a subagents queue silently becomes inline work. A claim is
+    // actionable immediately at this explicit planning boundary: either bind
+    // the worker returned by the successful spawn or release it for redispatch.
+    let pending_queue_subagent_dispatch =
+        agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+            file, &content,
+        )?;
+    let queue_subagent_dispatch = agent_doc_preflight_io::queue_subagent_dispatch_entries(
+        file,
+        &content,
+        &pending_queue_subagent_dispatch,
+    )?;
+    let queue_dispatch_acknowledgement_required =
+        agent_doc_queue_io::queue_claim::dispatch_acknowledgement_obligations_for_content_at(
+            file,
+            &content,
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+            0,
+        )?;
+    let queue_subagent_dispatch_guidance = (!queue_subagent_dispatch.is_empty())
+        .then(|| agent_doc_preflight_io::QUEUE_SUBAGENT_DISPATCH_GUIDANCE.to_string());
+    let queue_lifecycle_required_commands = queue_lifecycle_required_commands(
+        &queue_subagent_dispatch,
+        &queue_dispatch_acknowledgement_required,
+    );
+
     let doc_diff = agent_doc_diff_io::compute(
         &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
         file,
@@ -222,9 +267,19 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     // selection preflight uses; when no head is drainable in this scope, plan
     // reports no queue-driven work rather than inventing one.
     let queue_prompt = if doc_diff.is_none() && harness_diff.is_none() {
-        agent_doc_queue::queue_continuation::dispatchable_head_prompt_text(
+        let mut out_of_loop =
+            agent_doc_queue_io::queue_claim::ledger_claimed_items_for_content(file, &content);
+        if let Some(queue_subagent_plan) =
+            agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan(file, &content)
+        {
+            out_of_loop = out_of_loop
+                .with_heads(&pending_queue_subagent_dispatch)
+                .with_heads(&queue_subagent_plan.held);
+        }
+        agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_excluding_claimed(
             &content,
             agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
+            &out_of_loop,
         )
     } else {
         None
@@ -263,19 +318,30 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         .or(queue_diff)
         .or(chat_diff)
     else {
-        let (task_class, blockers, warnings) = match sealed_turn.as_ref() {
-            Some(cycle) => (
-                "preflight_sealed".to_string(),
+        let has_queue_lifecycle_work = !queue_lifecycle_required_commands.is_empty();
+        let (task_class, blockers, warnings) = if has_queue_lifecycle_work {
+            (
+                "queue_subagent_dispatch".to_string(),
                 Vec::new(),
-                vec![sealed_turn_warning(&cycle.cycle_id)],
-            ),
-            None => (
-                "no_changes".to_string(),
-                vec!["No changes detected since the last snapshot.".to_string()],
                 Vec::new(),
-            ),
+            )
+        } else {
+            match sealed_turn.as_ref() {
+                Some(cycle) => (
+                    "preflight_sealed".to_string(),
+                    Vec::new(),
+                    vec![sealed_turn_warning(&cycle.cycle_id)],
+                ),
+                None => (
+                    "no_changes".to_string(),
+                    vec!["No changes detected since the last snapshot.".to_string()],
+                    Vec::new(),
+                ),
+            }
         };
-        let required_commands = finalize_placeholder_commands(file, &fm, &[]);
+        let mut required_commands = queue_lifecycle_required_commands;
+        required_commands.extend(finalize_placeholder_commands(file, &fm, &[]));
+        let parallelizable = queue_subagent_dispatch.len() > 1;
         let blockers_for_tree = blockers.clone();
         let operation_tree = build_operation_tree(
             &[],
@@ -286,20 +352,31 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             &blockers_for_tree,
         );
         return Ok(DispatchPlan {
+            queue_subagent_dispatch,
+            queue_subagent_dispatch_guidance,
+            queue_dispatch_acknowledgement_required,
             prompt_targets: Vec::new(),
             graph_evidence: None,
-            dispatch_candidate: false,
+            dispatch_candidate: has_queue_lifecycle_work,
             task_class,
-            risk: "low".to_string(),
-            parallelizable: false,
+            risk: if has_queue_lifecycle_work {
+                "medium".to_string()
+            } else {
+                "low".to_string()
+            },
+            parallelizable,
             suggested_parent_tier: "low".to_string(),
             model_tier: "low".to_string(),
             dispatch_mode: dispatch_mode(&fm),
             manual_packet_only: false,
-            context_budget_tokens: 0,
-            job_packet_budget_tokens: 0,
+            context_budget_tokens: if has_queue_lifecycle_work { 6000 } else { 0 },
+            job_packet_budget_tokens: if has_queue_lifecycle_work { 4000 } else { 0 },
             write_scope: Vec::new(),
-            required_proof: Vec::new(),
+            required_proof: if has_queue_lifecycle_work {
+                vec!["queue_worker_binding".to_string()]
+            } else {
+                Vec::new()
+            },
             tsift_context: tsift_context_plan(file, &content, &[]),
             execution_scope: ExecutionScope::Normal,
             repo_actions: Vec::new(),
@@ -362,6 +439,20 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &pending_mutations,
         &fm,
     );
+    if !queue_lifecycle_required_commands.is_empty() {
+        routing.dispatch_candidate = true;
+        routing.parallelizable |= queue_subagent_dispatch.len() > 1;
+        routing.context_budget_tokens = routing.context_budget_tokens.max(6000);
+        routing.job_packet_budget_tokens = routing.job_packet_budget_tokens.max(4000);
+        agent_doc_prompt_contract::push_unique_strings(
+            &mut routing.required_proof,
+            ["queue_worker_binding".to_string()],
+        );
+        if prompt_targets.is_empty() && repo_actions.is_empty() && pending_mutations.is_empty() {
+            routing.task_class = "queue_subagent_dispatch".to_string();
+            routing.risk = "medium".to_string();
+        }
+    }
     let release_publish_requested = execution_scope == ExecutionScope::Normal
         && prompt_targets
             .iter()
@@ -403,7 +494,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         }
     };
 
-    let mut required_commands = Vec::new();
+    let mut required_commands = queue_lifecycle_required_commands;
     let mut handoff = HandoffTarget::None;
 
     // `#releasepublishcontract`: a branch push, local install, or successful tag
@@ -512,6 +603,9 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     );
 
     Ok(DispatchPlan {
+        queue_subagent_dispatch,
+        queue_subagent_dispatch_guidance,
+        queue_dispatch_acknowledgement_required,
         prompt_targets,
         graph_evidence,
         dispatch_candidate: routing.dispatch_candidate,
@@ -593,6 +687,29 @@ fn build_operation_tree(
             }],
         },
     }
+}
+
+fn queue_lifecycle_required_commands(
+    dispatch: &[agent_doc_preflight_io::QueueSubagentDispatch],
+    acknowledgements: &[agent_doc_queue_io::queue_claim::DispatchAcknowledgementObligation],
+) -> Vec<String> {
+    let mut commands = dispatch
+        .iter()
+        .map(|entry| {
+            format!(
+                "Dispatch queue item {:?} now: run `{}`; launch one native background subagent \
+                 with `authorization.subagent_prompt_preamble` verbatim; after spawn returns its \
+                 worker id, run `{}` with that id and the claim's printed generation.",
+                entry.item, entry.claim_command, entry.start_command,
+            )
+        })
+        .collect::<Vec<_>>();
+    commands.extend(
+        acknowledgements
+            .iter()
+            .map(|obligation| obligation.message()),
+    );
+    commands
 }
 
 fn selected_operation_phases(
@@ -1569,6 +1686,141 @@ mod tests {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         dir
+    }
+
+    fn subagents_queue_doc() -> &'static str {
+        r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Queue
+
+<!-- agent:queue priority subagents go -->
+- Fix the claim button.
+- Align the Close button.
+<!-- /agent:queue -->
+"#
+    }
+
+    #[test]
+    fn connected_plan_exposes_queue_subagent_dispatch_without_a_document_diff() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = subagents_queue_doc();
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.task_class, "queue_subagent_dispatch");
+        assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+        assert_eq!(plan.queue_subagent_dispatch.len(), 2);
+        assert_eq!(
+            plan.queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Fix the claim button.", "Align the Close button."]
+        );
+        assert!(plan.queue_subagent_dispatch_guidance.is_some());
+        assert_eq!(
+            plan.required_commands
+                .iter()
+                .filter(|command| command.contains("launch one native background subagent"))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn connected_plan_keeps_new_subagent_heads_out_of_inline_targets() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let current = subagents_queue_doc();
+        let baseline = current.replace("- Fix the claim button.\n- Align the Close button.\n", "");
+        std::fs::write(&doc, current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&baseline), Some(current)).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.queue_subagent_dispatch.len(), 2);
+        assert_eq!(plan.task_class, "queue_subagent_dispatch");
+        assert!(plan.dispatch_candidate);
+        assert!(plan.parallelizable);
+        assert!(
+            plan.prompt_targets.is_empty(),
+            "subagent dispatch heads must not be selected inline: {:?}",
+            plan.prompt_targets
+        );
+        assert!(
+            plan.repo_actions.is_empty(),
+            "subagent dispatch heads must not become inline repo actions: {:?}",
+            plan.repo_actions
+        );
+    }
+
+    #[test]
+    fn connected_plan_turns_an_unbound_claim_into_exact_recovery_commands() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = subagents_queue_doc();
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "Fix the claim button.",
+            "subagent:claim-button",
+            600,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.queue_subagent_dispatch.len(), 1);
+        assert_eq!(plan.queue_dispatch_acknowledgement_required.len(), 1);
+        let obligation = &plan.queue_dispatch_acknowledgement_required[0];
+        assert_eq!(obligation.item, "Fix the claim button.");
+        assert_eq!(obligation.generation, claim.generation);
+        assert!(obligation.start_command.contains("queue start"));
+        assert!(obligation.start_command.contains("--worker-id <worker-id>"));
+        assert!(obligation.release_command.contains("release"));
+        assert!(obligation.release_command.contains("--requeue"));
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|command| command.contains("no worker acknowledgement was recorded"))
+        );
     }
 
     /// `#noparallelfanoutwhennotparallelizable`: the plan must not order a

@@ -923,10 +923,27 @@ pub fn supervisor_unavailable_fallback_guidance(readiness: &str) -> String {
 /// scope's deferral set so an `[operator-verify]` item is never selected either
 /// way.
 pub fn dispatchable_head_prompt_text(content: &str, scope: DrainScope) -> Option<String> {
-    if let Some(text) = live_drainable_head_prompt_text(content, scope) {
+    dispatchable_head_prompt_text_excluding_claimed(content, scope, &ClaimedQueueItems::none())
+}
+
+/// [`dispatchable_head_prompt_text`], skipping heads `claimed` by a worker.
+///
+/// Connected planning uses this projection so queue-level subagent heads do not
+/// leak back into the parent session as inline work. The manual-queue fallback
+/// remains part of this selector: unlike an explicit go-mode queue, a manually
+/// activated queue has no live drainable head but still supplies plan work.
+pub fn dispatchable_head_prompt_text_excluding_claimed(
+    content: &str,
+    scope: DrainScope,
+    claimed: &ClaimedQueueItems,
+) -> Option<String> {
+    if let Some(text) = live_drainable_head_prompt_text_excluding_claimed(content, scope, claimed) {
         return Some(text);
     }
     let head = crate::queue_heads::active_queue_prompt(content)?;
+    if claimed.claims(&head) {
+        return None;
+    }
     let deferred = deferred_backlog_ids_split(content, scope);
     match extract_head_id(&head) {
         Some(id) if deferred.defers(&id, false) => None,

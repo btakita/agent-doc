@@ -404,7 +404,7 @@ fn tools_list_result() -> Value {
             {
                 "name": "agent_doc_plan",
                 "title": "Build agent-doc plan",
-                "description": "Derive the structured post-preflight planning record for a session document.",
+                "description": "Derive the structured planning record for a session document, including connected queue-subagent dispatch and unbound-claim recovery actions.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -1368,6 +1368,90 @@ mod tests {
 
         let state = agent_doc_cycle_state_io::load(&file).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+    }
+
+    #[test]
+    fn connected_admit_then_plan_returns_queue_subagent_dispatch_contract() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let file = root.join("session.md");
+        let content = r#"---
+agent_doc_session: sid-1
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Queue
+
+<!-- agent:queue priority subagents go -->
+- Fix the claim button.
+- Align the Close button.
+<!-- /agent:queue -->
+"#;
+        std::fs::write(&file, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let admit = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 40,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_admit",
+                "arguments": { "file": file.display().to_string() }
+            }
+        }));
+        assert_eq!(admit["result"]["isError"], false);
+
+        let plan = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_plan",
+                "arguments": { "file": file.display().to_string() }
+            }
+        }));
+
+        assert_eq!(plan["result"]["isError"], false);
+        let contract = &plan["result"]["structuredContent"]["plan"];
+        assert_eq!(contract["task_class"], "queue_subagent_dispatch");
+        assert_eq!(
+            contract["queue_subagent_dispatch"]
+                .as_array()
+                .expect("dispatch list")
+                .len(),
+            2
+        );
+        assert_eq!(
+            contract["queue_subagent_dispatch"][0]["item"],
+            "Fix the claim button."
+        );
+        assert!(
+            contract["queue_subagent_dispatch"][0]["claim_command"]
+                .as_str()
+                .unwrap()
+                .contains("queue claim")
+        );
+        assert!(
+            contract["queue_subagent_dispatch"][0]["start_command"]
+                .as_str()
+                .unwrap()
+                .contains("queue start")
+        );
     }
 
     #[test]

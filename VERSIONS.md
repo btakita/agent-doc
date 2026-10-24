@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.550
+
+- **Remote Dev update-channel ownership now lives in the JetBrains Client frontend (GH #372).** The modular
+  frontend configures its process-local update settings, paired frontend/backend generations are checked explicitly,
+  and the backend fallback remains focus-only instead of reviving structural guessing.
+- **Committed deferred queue heads resume instead of becoming permanently deduplicated.** A deferred cycle rearms
+  the same pending head exactly once, with SimWorld liveness coverage, cold-restart claim projection, and an
+  actionable manual continuation when automatic restart is unavailable.
+- **Lost subagent claims explain why they stopped and how to recover.** `queue claims` retains live-row Lost attempts,
+  reports TTL expiry, and distinguishes late-result persistence from an exact generation-safe reclaim action.
+- **Local modular JetBrains sessions retain automatic tmux pane sync.** Only authenticated Remote Dev clients can
+  acquire measured-layout authority and retire the classic publisher, so a local `Host` lease no longer creates a
+  no-publisher state while the manual Sync Tmux Panes command remains a fallback.
+- **Connected Grok planning exposes native subagent work and unbound-claim recovery.** `agent_doc_plan` returns
+  dispatchable subagent heads plus exact start-or-release obligations, and those heads cannot leak into inline
+  execution or disappear behind a no-change plan.
+
 ## 0.35.549
 
 - **Upgrades now resolve a stable channel for the running target.** Release publication writes signed, per-target

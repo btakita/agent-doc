@@ -45,9 +45,13 @@ The plugin also exposes **Tools → Enable Agent Doc GitHub Updates** (and the
 same command under **Agent Doc Actions → More Actions**). Like IdeaVim's EAP
 toggle, it adds the compatibility-matched repository URL to JetBrains'
 `storedPluginHosts`; running it again removes the Agent Doc URL without touching
-other custom repositories. This GitHub channel receives the verified release
-artifacts before Marketplace availability, which makes it the opt-in early
-update path for local/custom-repository installs.
+other custom repositories. In a modular Remote Dev installation the action is
+owned by `agent.doc.frontend` and therefore changes the JetBrains Client's
+process-local update settings, not only the backend's settings. This GitHub
+channel receives the verified release artifacts before Marketplace availability,
+which makes it the opt-in early update path for local/custom-repository installs.
+The backend still needs the identical update through its own repository or CLI
+installation path before both processes restart.
 
 ### Marketplace
 
@@ -111,13 +115,17 @@ of being flattened into the main window's split columns. A custom repository
 does not provide Marketplace's automatic cross-side synchronization.
 
 The modular surface bridge is available only after both processes load the same
-plugin generation and establish the authenticated, generation-fenced bridge. A
-missing, inactive, or mismatched peer is a one-sided install: detached-view and
-frontend presentation effects remain unavailable. While no accepted frontend
-snapshot exists, the backend observes the guest editor-manager selection flow so
-ordinary main-layout tab changes still reach the controller; accepted frontend
-authority suppresses that limited fallback. This degradation does not fabricate
-detached-window identities and is not a reason to widen either update's range.
+plugin generation and establish the authenticated, generation-fenced bridge.
+JetBrains' paired-plugin state enforcer classifies a version mismatch as an
+inconsistent pair and disables the pair before Agent Doc's RPC can establish a
+lease; an Agent Doc timeout or compatibility fallback cannot override that
+platform fence. A missing, inactive, or mismatched peer is a one-sided install:
+detached-view and frontend presentation effects remain unavailable. While no
+accepted frontend snapshot exists, the backend observes the guest editor-manager
+selection flow so ordinary main-layout tab changes still reach the controller;
+accepted frontend authority suppresses that limited fallback. This degradation
+does not fabricate detached-window identities and is not a reason to widen
+either update's range.
 For a Remote Dev `CONTROLLER` session, the delivered selection is also positive
 focus evidence: the backend must not require a Swing active window that exists
 only in the thin client. Focus-projection gates and task failures are logged at
@@ -152,10 +160,12 @@ two-sided installation:
 1. In the Coder workspace, install the matching modular package into the Remote
    Dev backend with `agent-doc plugin install jetbrains`, or add the matching
    custom-repository URL to the backend plugin manager.
-2. In JetBrains Client/Gateway on the operator's machine, add the same listing
-   under Settings → Plugins → gear → Manage Plugin Repositories and
-   install the same Agent Doc version there. Installing from the backend does
-   not perform this step.
+2. In JetBrains Client/Gateway on the operator's machine, use **Tools → Enable
+   Agent Doc GitHub Updates** and check for plugin updates, or add the same
+   listing under Settings → Plugins → gear → Manage Plugin Repositories.
+   Install the same Agent Doc version there. The modular action deliberately
+   runs in the frontend process; installing from the backend does not perform
+   this step.
 3. Confirm that both plugin managers report the identical Agent Doc version,
    restart both processes, and require an authenticated same-generation surface
    publication before treating the split plugin as ready.

@@ -9,4 +9,15 @@
         <postStartupActivity implementation="com.github.btakita.agentdoc.split.frontend.SurfaceSnapshotFrontendActivity"/>
         <fileEditorProvider implementation="com.github.btakita.agentdoc.split.frontend.DetachedPlaceholderFileEditorProvider"/>
     </extensions>
+
+    <!-- UpdateSettings is process-local. Keep this action in the JetBrains Client process so a
+         Remote Dev backend cannot report success after changing only its own repository list. -->
+    <actions>
+        <action id="AgentDoc.UpdateChannel"
+                class="com.github.btakita.agentdoc.split.frontend.FrontendAgentDocUpdateChannelAction"
+                text="Enable Agent Doc GitHub Updates"
+                description="Toggle the compatibility-matched Agent Doc GitHub update repository in this JetBrains Client">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

@@ -246,6 +246,21 @@ tasks {
                     "backend descriptor must remain loadable in monolithic IDEs: $descriptorDependencies"
                 }
 
+                val updateChannelOwners = moduleDescriptors.mapValues { (_, descriptor) ->
+                    val document = parsePluginXml(descriptor)
+                    document.getElementsByTagName("action").let { actions ->
+                        (0 until actions.length)
+                            .mapNotNull { actions.item(it) as? Element }
+                            .any { it.getAttribute("id") == "AgentDoc.UpdateChannel" }
+                    }
+                }
+                check(updateChannelOwners.getValue("agent.doc.frontend")) {
+                    "modular update-channel action must execute in the JetBrains Client: $updateChannelOwners"
+                }
+                check(!updateChannelOwners.getValue("agent.doc.backend")) {
+                    "backend-local UpdateSettings cannot update the JetBrains Client: $updateChannelOwners"
+                }
+
                 val backendJar = archive.entries().asSequence()
                     .single { it.name.endsWith("/lib/modules/agent.doc.backend.jar") }
                 val backendEntries = JarInputStream(archive.getInputStream(backendJar)).use { jar ->

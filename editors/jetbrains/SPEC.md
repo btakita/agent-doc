@@ -8,7 +8,7 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 - **Name:** Agent Doc
 - **Restart:** Required for every package upgrade on builds with asynchronous classloader retirement; compatible builds may upgrade dynamically
 - **Native upgrades:** Safe in-process generation handoff
-- **Distribution:** The 242-261 classic and exact-262/exact-263 modular updates share this ID but use distinct versions and disjoint compatibility ranges. A tag must validate the complete three-ZIP set before publication; when Marketplace credentials are configured, it revalidates that set before uploading each update. Missing Marketplace onboarding defers only that channel and never blocks the core GitHub/PyPI release. GitHub retains one validated custom-repository listing per range, and `agent-doc plugin install jetbrains` selects the ZIP from the target IDE build without guessing. Marketplace is the only stock automatic Remote Dev synchronization channel for installing the selected modular ZIP on both peers. CLI, local-ZIP, and custom-repository installs affect only the selected peer and must say so; a non-Marketplace setup installs the identical version explicitly in JetBrains Client/Gateway and the backend. See [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md)
+- **Distribution:** The 242-261 classic and exact-262/exact-263 modular updates share this ID but use distinct versions and disjoint compatibility ranges. A tag must validate the complete three-ZIP set before publication; when Marketplace credentials are configured, it revalidates that set before uploading each update. Missing Marketplace onboarding defers only that channel and never blocks the core GitHub/PyPI release. GitHub retains one validated custom-repository listing per range, and `agent-doc plugin install jetbrains` selects the ZIP from the target IDE build without guessing. Marketplace is the only stock automatic Remote Dev synchronization channel for installing the selected modular ZIP on both peers. CLI, local-ZIP, and custom-repository installs affect only the selected peer and must say so; a non-Marketplace setup installs the identical version explicitly in JetBrains Client/Gateway and the backend. The modular `AgentDoc.UpdateChannel` action is registered only in `agent.doc.frontend`: JetBrains `UpdateSettings` is process-local, so a backend-owned toggle would strand the Client on the old generation while appearing to succeed. The classic distribution keeps its local action. See [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md)
 
 ## Implementation Details
 
@@ -959,6 +959,17 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `pane_layout_desired_published ... column_order=editor`. `Sync Tmux Layout` recovers stale tmux
   structure only by publishing the current positive frontend column vector; an unknown or partial
   capture preserves/defer structure and may update focus intent only.
+- **A modular version mismatch is a distribution state, not a layout input (GH #372).** JetBrains'
+  paired-plugin state enforcer owns the pre-RPC transition: equal, loaded frontend/backend plugin
+  versions may open the authenticated ingress lease; `VERSION_MISMATCH`, missing, or unloaded on
+  either peer disables the inconsistent pair before Agent Doc can negotiate a snapshot schema.
+  Agent Doc must not turn backend `visible`/`selected`/`open` lists into columns while that gate is
+  closed. Its only fallback remains focus/liveness for a positively observed document, with
+  structural routing blocked. Because `UpdateSettings` is process-local, the modular GitHub
+  update-channel action is a frontend-module action: it mutates the JetBrains Client repository
+  list, after which the operator installs the identical update on both peers and restarts both.
+  The backend content module must not register that action. Classic IDEs keep the ordinary local
+  action because their UI and plugin runtime are one process.
 - **Run Agent Doc and Sync Tmux Layout act on the propagated surface, not a click-time snapshot**
   (`surface_layout_reference_v1`; the rule is `specs/13-state-backbone.md`, "State Propagation, Not
   Effect Inference"). On the EDT the command captures the surface through the same

@@ -160,6 +160,18 @@ val generateBackendDescriptor by tasks.registering {
                 val child = node.item(index)
                 if (child is org.w3c.dom.Element && child.tagName == tag) {
                     val imported = result.importNode(child, true) as org.w3c.dom.Element
+                    if (tag == "actions") {
+                        // UpdateSettings is local to the process executing the action. The modular
+                        // distribution registers this action in agent.doc.frontend instead, where
+                        // it updates the JetBrains Client rather than only the Remote Dev backend.
+                        val actions = imported.getElementsByTagName("action")
+                        for (actionIndex in actions.length - 1 downTo 0) {
+                            val action = actions.item(actionIndex) as? org.w3c.dom.Element ?: continue
+                            if (action.getAttribute("id") == "AgentDoc.UpdateChannel") {
+                                action.parentNode.removeChild(action)
+                            }
+                        }
+                    }
                     root.appendChild(imported)
                     copiedSections[tag] = imported
                 }

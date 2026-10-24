@@ -590,6 +590,9 @@ impl SimWorld {
             SimCommand::ActivateGoModeQueueHead => {
                 self.recycle_clear.queue_active_head = Some("#govqueuehead".to_string());
             }
+            SimCommand::CommitDeferredQueueHead => {
+                self.commit_deferred_queue_head()?;
+            }
             SimCommand::ActivateFocusedCycleQueueHead => {
                 self.recycle_clear.queue_active_head = Some("do [#qfocsup-focused]".to_string());
             }
@@ -1384,6 +1387,22 @@ impl SimWorld {
             SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
         );
         let has_active_head = self.recycle_clear.queue_active_head.is_some();
+        let previously_scheduled = self.recycle_clear.last_scheduled_deferred_cycle_id.clone();
+        (
+            self.recycle_clear.last_dispatched,
+            self.recycle_clear.last_scheduled_deferred_cycle_id,
+        ) = agent_doc_queue::queue::rearm_queue_dispatch_for_deferred_cycle(
+            self.recycle_clear.last_dispatched.take(),
+            self.recycle_clear.queue_active_head.as_deref(),
+            self.recycle_clear.deferred_cycle_id.as_deref(),
+            previously_scheduled.as_deref(),
+        );
+        if self.recycle_clear.last_scheduled_deferred_cycle_id != previously_scheduled {
+            self.coverage.deferred_queue_retries_scheduled += 1;
+            self.record_ops_proof(
+                "queue_deferred_continuation_scheduled next_action=clear_or_restart_then_redispatch (#deferredliveness)",
+            );
+        }
         // `#stalereexecstarve`: a drain-scoped early exit suppresses the DRAIN, not
         // the whole tick. Production used to `continue` here, which also skipped the
         // stale-binary recycle decision below — so a supervisor whose drain kept
@@ -1693,6 +1712,27 @@ impl SimWorld {
             self.coverage.go_drain_dispatches += 1;
             self.record_ops_proof("recycle_session_reclear action=idle_queue_drain result=dispatch proof=go_drain_dispatch");
         }
+        Ok(())
+    }
+
+    fn commit_deferred_queue_head(&mut self) -> Result<()> {
+        let head = self
+            .recycle_clear
+            .queue_active_head
+            .as_deref()
+            .ok_or_else(|| anyhow!("deferred queue commit requires an active head"))?;
+        if self.recycle_clear.last_dispatched.as_deref() != Some(head) {
+            bail!("deferred queue commit requires a dispatched owner for {head:?}");
+        }
+        self.recycle_clear.deferred_cycle_sequence =
+            self.recycle_clear.deferred_cycle_sequence.saturating_add(1);
+        self.recycle_clear.deferred_cycle_id = Some(format!(
+            "deferred-cycle-{}",
+            self.recycle_clear.deferred_cycle_sequence
+        ));
+        self.record_ops_proof(
+            "queue_cycle_committed outcome=deferred head_state=pending owner=none (#deferredliveness)",
+        );
         Ok(())
     }
 

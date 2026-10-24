@@ -168,6 +168,39 @@ pub fn rearm_queue_dispatch_dedup(
     }
 }
 
+/// A committed response that explicitly deferred the still-active head is a
+/// new continuation edge, even though the head text did not change.
+///
+/// Ordinary head-based deduplication must remain armed until a dispatch either
+/// fails or the head changes; otherwise one accepted trigger can be injected on
+/// every idle poll. A deferred response is different: its committed cycle
+/// proves that the accepted dispatch finished without consuming the head. Rearm
+/// exactly once for that cycle so a `go` queue gets a fresh continuation while
+/// retaining the queue row.
+pub fn rearm_queue_dispatch_for_deferred_cycle(
+    last_dispatched: Option<String>,
+    active_head: Option<&str>,
+    deferred_cycle_id: Option<&str>,
+    last_scheduled_deferred_cycle_id: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let new_deferred_cycle =
+        deferred_cycle_id.filter(|cycle_id| Some(*cycle_id) != last_scheduled_deferred_cycle_id);
+    if active_head.is_some()
+        && let Some(cycle_id) = new_deferred_cycle
+    {
+        let rearmed = if last_dispatched.as_deref() == active_head {
+            None
+        } else {
+            rearm_queue_dispatch_dedup(last_dispatched, active_head)
+        };
+        return (rearmed, Some(cycle_id.to_string()));
+    }
+    (
+        rearm_queue_dispatch_dedup(last_dispatched, active_head),
+        last_scheduled_deferred_cycle_id.map(str::to_string),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IdleQueueDrainDecisionFacts<'a> {
     pub clear_cooldown_active: bool,
@@ -422,6 +455,40 @@ mod tests {
         assert_eq!(
             rearm_queue_dispatch_dedup(Some("do [#a]".to_string()), Some("do [#b]")),
             None
+        );
+    }
+
+    #[test]
+    fn committed_deferred_cycle_rearms_the_same_pending_head_once() {
+        let head = "restart Boss Room and verify the durable claim";
+        let (last_dispatched, scheduled_cycle) = rearm_queue_dispatch_for_deferred_cycle(
+            Some(head.to_string()),
+            Some(head),
+            Some("cycle-deferred-1"),
+            None,
+        );
+        assert_eq!(last_dispatched, None);
+        assert_eq!(scheduled_cycle.as_deref(), Some("cycle-deferred-1"));
+
+        let (last_dispatched, scheduled_cycle) = rearm_queue_dispatch_for_deferred_cycle(
+            Some(head.to_string()),
+            Some(head),
+            Some("cycle-deferred-1"),
+            scheduled_cycle.as_deref(),
+        );
+        assert_eq!(last_dispatched.as_deref(), Some(head));
+        assert_eq!(scheduled_cycle.as_deref(), Some("cycle-deferred-1"));
+
+        let (last_dispatched, scheduled_cycle) = rearm_queue_dispatch_for_deferred_cycle(
+            None,
+            Some(head),
+            Some("cycle-deferred-before-restart"),
+            None,
+        );
+        assert_eq!(last_dispatched, None);
+        assert_eq!(
+            scheduled_cycle.as_deref(),
+            Some("cycle-deferred-before-restart")
         );
     }
 

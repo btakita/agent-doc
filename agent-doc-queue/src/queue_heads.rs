@@ -200,15 +200,15 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
     let Some(queue_head) = active_queue_head_text(content)? else {
         return queue_skip_diagnostic_for_content(content);
     };
-    let expansions = crate::queue_response::queue_prompt_preset_expansions(content, &queue_head);
-    if expansions.is_empty() {
-        return queue_skip_diagnostic_for_content(content);
-    }
     let queue_head_display = display_queue_prompt_text(&queue_head);
     if crate::queue_response::response_defers_free_text_head(response, &queue_head) {
         return Ok(format!(
-            "[queue] kept prompt-preset head `{queue_head_display}` because the response explicitly defers that quoted head; remove the adjacent deferral marker only after the work is complete."
+            "[queue] kept free-text head `{queue_head_display}` pending because the response explicitly defers that quoted head. Next: resolve the blocker named in `**Deferred:**`, then run `agent-doc <FILE>` again; an active `go` queue schedules that retry automatically. Remove the adjacent deferral marker only after the work is complete."
         ));
+    }
+    let expansions = crate::queue_response::queue_prompt_preset_expansions(content, &queue_head);
+    if expansions.is_empty() {
+        return queue_skip_diagnostic_for_content(content);
     }
     if crate::queue_response::queue_head_answered_by_response(content, response, &queue_head) {
         return Ok(format!(
@@ -1056,6 +1056,25 @@ mod tests {
     }
 
     #[test]
+    fn deferred_free_text_skip_diagnostic_explains_retention_and_next_action() {
+        let head = "When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.";
+        let content = format!(
+            "---\nqueue_active: true\n---\n\n<!-- agent:queue go -->\n- 📥 {head}\n<!-- /agent:queue -->\n"
+        );
+        let response = format!(
+            "> **Queue prompt:** {head}\n\n**Deferred:** the running API could not be reloaded this cycle.\n\n### Re: claim survives restart\n\nThe durable path was diagnosed, but no fix was loaded.\n"
+        );
+
+        let message = queue_skip_diagnostic_for_response(&content, &response).unwrap();
+        assert!(message.contains(&format!("kept free-text head `{head}` pending")));
+        assert!(message.contains("response explicitly defers that quoted head"));
+        assert!(message.contains("resolve the blocker named in `**Deferred:**`"));
+        assert!(message.contains("run `agent-doc <FILE>` again"));
+        assert!(message.contains("active `go` queue schedules that retry automatically"));
+        assert!(!message.contains("supplied neither an exact"));
+    }
+
+    #[test]
     fn prompt_preset_skip_diagnostic_names_the_actual_response_contract() {
         let content = concat!(
             "---\nqueue_active: true\nprompt_presets:\n",
@@ -1084,6 +1103,7 @@ mod tests {
         )
         .unwrap();
         assert!(deferred.contains("explicitly defers that quoted head"));
+        assert!(deferred.contains("kept free-text head `#upgrade` pending"));
     }
 
     #[test]

@@ -893,6 +893,16 @@ distinct from the one-shot restart auto-trigger:
 - `SkipAlreadyDispatched` dedups a head that is still present after a dispatch
 (cycle not yet consumed, or the dispatch failed to drain), so a stuck head
 cannot hot-loop the watch every idle tick.
+- **Deferred-head liveness (`#deferredliveness`).** A committed response that
+  exactly quotes and explicitly defers the still-active head proves the prior
+  dispatch ended without consuming it. That cycle is a new continuation edge:
+  the watch rearms `SkipAlreadyDispatched` once for the cycle, clears or freshly
+  restarts the harness under the normal auto-clear policy, and redispatches the
+  retained head. The cycle-id fence prevents idle-tick hot loops. Thus the
+  state `pending deferred head + no active owner + no scheduled continuation`
+  is forbidden for active `go`; when automatic continuation is unavailable,
+  closeout names the explicit `agent-doc <FILE>` action and the blocker that
+  must be resolved first.
 - Ordinary heads are Lazily state edges, not recursive CLI commands. The
 process-scoped graph derives one continuation effect from the head identity,
 tracks document-state and failed-effect retry epochs separately, and consumes

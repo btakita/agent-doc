@@ -27949,6 +27949,7 @@ fn layout_sync_state_operator_owned_documents(
     physical_panes: &[String],
     actor_store: &BTreeMap<String, agent_doc_controller::actor::ActorRecord>,
     effect_file_panes: &[(String, String)],
+    registered_supervisor_file_panes: &[(String, String)],
 ) -> Vec<String> {
     actor_store
         .values()
@@ -27958,11 +27959,15 @@ fn layout_sync_state_operator_owned_documents(
         })
         .filter_map(|record| {
             let document = canonical_layout_document_id(project_root, &record.document_id);
-            let structurally_assigned = effect_file_panes.iter().any(|(file, pane)| {
-                *pane == record.pane_id
-                    && canonical_layout_document_id(project_root, file) == document
-            });
-            (!structurally_assigned).then_some(document)
+            let controller_owned =
+                effect_file_panes.iter().any(|(file, pane)| {
+                    *pane == record.pane_id
+                        && canonical_layout_document_id(project_root, file) == document
+                }) || registered_supervisor_file_panes.iter().any(|(file, pane)| {
+                    *pane == record.pane_id
+                        && canonical_layout_document_id(project_root, file) == document
+                });
+            (!controller_owned).then_some(document)
         })
         .filter(|document| !expected_documents.contains(document))
         .collect::<BTreeSet<_>>()
@@ -30534,6 +30539,7 @@ fn tmux_layout_sync_state_for_invocation_in_session(
         &panes,
         &actor_store,
         &visible_effect_file_panes,
+        registered_supervisor_file_panes,
     );
     let (synced, reason) = layout_sync_state_result(
         &expected_documents,
@@ -53142,6 +53148,7 @@ mod tests {
                 &physical_panes,
                 &actor_store,
                 &graph.ctx.get(&graph.owned_assignments),
+                &[],
             )
             .is_empty()
         );
@@ -53152,6 +53159,7 @@ mod tests {
                 &expected_documents,
                 &physical_panes,
                 &actor_store,
+                &[],
                 &[],
             ),
             vec![outgoing.clone()],
@@ -53164,9 +53172,50 @@ mod tests {
                 &physical_panes,
                 &actor_store,
                 &[(outgoing, "%2".to_string())],
+                &[],
             )
             .is_empty(),
             "a superseded structural effect remains controller-owned and must be reconciled by the newest exact-visible generation",
+        );
+    }
+
+    #[test]
+    fn fresh_controller_registered_supervisor_is_not_operator_owned() {
+        use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
+
+        let project_root = Path::new("/project");
+        let outgoing = "/project/tasks/outgoing.md".to_string();
+        let actor_store = BTreeMap::from([(
+            outgoing.clone(),
+            ActorRecord {
+                document_id: outgoing.clone(),
+                session_id: "outgoing-session".to_string(),
+                generation: 7,
+                pane_id: "%2".to_string(),
+                window_id: "@1".to_string(),
+                harness: "codex".to_string(),
+                state: ActorState::Ready,
+                last_transition: ActorLastTransition {
+                    caller: "test".to_string(),
+                    reason: "ready".to_string(),
+                    timestamp: 0,
+                    prior_generation: 6,
+                    new_generation: 7,
+                },
+            },
+        )]);
+
+        assert!(
+            layout_sync_state_operator_owned_documents(
+                project_root,
+                &["/project/tasks/current.md".to_string()],
+                &["%1".to_string(), "%2".to_string()],
+                &actor_store,
+                &[],
+                &[(outgoing, "%2".to_string())],
+            )
+            .is_empty(),
+            "a recovered supervisor binding is controller-owned even before this controller generation has a structural receipt",
         );
     }
 

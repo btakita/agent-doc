@@ -14,6 +14,7 @@
 - [Commands](guide/commands.md)
 - [Document Format](guide/document-format.md)
 - [Components](guide/components.md)
+- [Queue Markers](guide/queue-markers.md)
 - [Dashboard-as-Document](guide/dashboard.md)
 - [Run Flow](guide/submit-flow.md)
 - [Editor Integration](guide/editor-integration.md)

@@ -1194,6 +1194,16 @@ pub fn apply_patches_with_overrides_pure(
             );
             new_content = healed;
         }
+        // `#queuemarkerlegend`: the status write owns the queue marker legend
+        // line through the same projection `write --status` uses, so a
+        // response that drops, edits, or repeats it still lands exactly one.
+        if patch.name == "status" {
+            new_content = agent_doc_document::status_projection::reconcile_status_body_queue_legend(
+                &result,
+                comp,
+                &new_content,
+            );
+        }
         if agent_doc_element::todo::is_todo_component(&patch.name) {
             let before = comp.content(&result);
             // `#todoids`: an operator `[x]` is sticky. A patch built from a
@@ -2491,6 +2501,44 @@ All green.
         assert!(result.contains("<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->"));
         agent_doc_document::status_projection::status_sync_directive(&result)
             .expect("patched status satisfies the preflight sync contract");
+    }
+
+    /// `#queuemarkerlegend`: `patch:status` lands exactly one legend line as
+    /// the last status paragraph, whether the response dropped, kept, or
+    /// repeated it, and the result matches the `write --status` projection.
+    #[test]
+    fn apply_patches_status_patch_keeps_exactly_one_queue_marker_legend() {
+        let legend = agent_doc_document::status_projection::apply_queue_marker_legend("\n", true)
+            .trim()
+            .to_string();
+        let doc = format!(
+            "<!-- agent:status patch=replace -->\nold\n\n{legend}\n<!-- /agent:status -->\n\n## Run <!-- agent:run -->\n- do [#a]\n<!-- /agent:run -->\n"
+        );
+        let configs = std::collections::HashMap::new();
+        let max_lines = std::collections::HashMap::new();
+        for patch_text in [
+            "Working on #a.".to_string(),
+            format!("Working on #a.\n\n{legend}"),
+            format!("{legend}\nWorking on #a.\n{legend}"),
+        ] {
+            let patch = PatchBlock::new("status", &patch_text);
+            let result =
+                apply_patches_pure(&doc, &[patch], "", None, &configs, &max_lines).unwrap();
+            assert_eq!(result.matches("Queue markers:").count(), 1, "{result}");
+            assert!(
+                result.contains(&format!(
+                    "Working on #a.\n\n{legend}\n<!-- /agent:status -->"
+                )),
+                "{result}"
+            );
+            assert!(result.contains("- do [#a]\n"), "queue rows untouched");
+        }
+
+        let opted_out = doc.replace("patch=replace", "patch=replace queue-legend=off");
+        let patch = PatchBlock::new("status", "Working on #a.");
+        let result =
+            apply_patches_pure(&opted_out, &[patch], "", None, &configs, &max_lines).unwrap();
+        assert!(!result.contains("Queue markers:"), "{result}");
     }
 
     #[test]

@@ -2,9 +2,9 @@ use anyhow::Result;
 
 use agent_doc_frontmatter::{frontmatter, project_config};
 
-const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
-    "\n\n## Status <!-- agent:status patch=replace -->\n",
-    "<!-- /agent:status -->\n",
+const DEFAULT_TEMPLATE_STATUS_OPEN: &str = "\n\n## Status <!-- agent:status patch=replace -->\n";
+const DEFAULT_TEMPLATE_STATUS_CLOSE: &str = "<!-- /agent:status -->\n";
+const DEFAULT_TEMPLATE_COMPONENTS_AFTER_STATUS: &str = concat!(
     "\n## Exchange <!-- agent:exchange patch=append -->\n",
     "<!-- /agent:exchange -->\n",
     "\n## Run <!-- agent:run priority subagents clear -->\n",
@@ -23,13 +23,26 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "<!-- /agent:notes -->\n",
 );
 
+/// The default managed components. The status body starts with the
+/// binary-owned queue marker legend (`#queuemarkerlegend`) so a new document
+/// explains its `agent:run` prefixes before the first status write; later
+/// status writes keep exactly one legend line.
+fn default_template_components() -> String {
+    let status_body = crate::status_projection::apply_queue_marker_legend("\n", true);
+    format!(
+        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_COMPONENTS_AFTER_STATUS}",
+        status_body.trim_start_matches('\n')
+    )
+}
+
 pub fn should_scaffold_empty_markdown(content: &str, extension: Option<&str>) -> bool {
     content.trim().is_empty() && extension == Some("md")
 }
 
 pub fn render_empty_template_scaffold(session_id: &str) -> String {
     format!(
-        "---\nagent_doc_session: {session_id}\nagent_doc_format: template\nagent_doc_write: crdt\n---{DEFAULT_TEMPLATE_COMPONENTS}"
+        "---\nagent_doc_session: {session_id}\nagent_doc_format: template\nagent_doc_write: crdt\n---{}",
+        default_template_components()
     )
 }
 
@@ -68,8 +81,9 @@ pub fn scaffold_default_template_components(content: &str) -> Result<Option<Stri
         return Ok(None);
     }
     Ok(Some(format!(
-        "{}{DEFAULT_TEMPLATE_COMPONENTS}",
-        content.trim_end()
+        "{}{}",
+        content.trim_end(),
+        default_template_components()
     )))
 }
 
@@ -196,11 +210,41 @@ mod tests {
                 .all(|component| component.attrs.is_empty())
         );
         assert!(
-            components
+            components[1..]
                 .iter()
                 .all(|component| component.content(&scaffold).is_empty()),
-            "newly scaffolded components must start empty"
+            "newly scaffolded components other than status must start empty"
         );
+        // `#queuemarkerlegend`: status starts with exactly the legend line.
+        assert_eq!(
+            components[0].content(&scaffold),
+            format!(
+                "{}\n",
+                agent_doc_frontmatter::frontmatter::queue_marker_legend_line()
+            )
+        );
+    }
+
+    #[test]
+    fn scaffold_legend_survives_a_status_write_exactly_once() {
+        let scaffold = render_empty_template_scaffold("session-1");
+        let written =
+            crate::status_projection::update_status_content(&scaffold, "Working on #a.").unwrap();
+        let status = agent_doc_element::element::parse(&written)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "status")
+            .unwrap();
+        assert_eq!(
+            status.content(&written),
+            format!(
+                "\nWorking on #a.\n\n{}\n",
+                agent_doc_frontmatter::frontmatter::queue_marker_legend_line()
+            )
+        );
+        let again =
+            crate::status_projection::update_status_content(&written, "Working on #a.").unwrap();
+        assert_eq!(again, written, "a repeated status write is a fixed point");
     }
 
     #[test]

@@ -73,8 +73,11 @@ only the compact routing table that survives context compaction.
 - Subagent claims are attempt- and worker-fenced (`#queueclaimstate`,
   `#queueclaimworker`). Save the claim generation. `📥` is pending/unclaimed,
   `🟡` is reserved/dispatching, `🚧` is worker-bound/running,
-  `☑️` is worker-complete handoff/outbox, `⚠️` is lost, and `❔`/`🔄` need
-  reconciliation. Worker-owned rows also name their exact owner and generation.
+  `☑️` is worker-complete handoff/outbox, `⚠️` is lost, `❔` is unknown or
+  contradictory state (diagnose, never redispatch), and `🔄` is finished-work
+  evidence with no current claim (close or reconcile, never redispatch).
+  `agent-doc queue legend` prints every marker (`#queuemarkerlegend`).
+  Worker-owned rows also name their exact owner and generation.
   Claim, spawn, start with the concrete worker id, report completion, integrate
   serially, and persist the result in the same turn. The complete coordinator
   protocol lives in [respond.md](respond.md) (`#queuesubagents`).

@@ -3563,6 +3563,10 @@ enum Commands {
         action: ReviewAction,
     },
     /// Manage the agent:queue component
+    ///
+    /// The prefixes on queue rows are binary-owned lifecycle markers; the
+    /// legend below (also `agent-doc queue legend`) says what each one means.
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Queue {
         #[command(subcommand)]
         action: QueueAction,
@@ -4502,6 +4506,7 @@ enum QueueAction {
     /// does not prove that a worker is running; `queue start` records that
     /// proof after a successful spawn. The claim ends when the item leaves the
     /// queue, on `queue release`, or when its TTL expires.
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Claim {
         /// Path to the session document
         file: PathBuf,
@@ -4530,6 +4535,7 @@ enum QueueAction {
     /// Acknowledge that a successful harness dispatch bound one concrete
     /// worker to one exact claim generation. This is the only transition from
     /// 🟡 claimed/dispatching to 🚧 running (`#queueclaimworker`).
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Start {
         /// Path to the session document
         file: PathBuf,
@@ -4552,7 +4558,7 @@ enum QueueAction {
     /// Publish immediate binary-owned `agent:exchange` feedback that a claimed
     /// background subagent reported back. The claim remains active while the
     /// coordinator integrates and verifies the result.
-    #[command(name = "report-complete")]
+    #[command(name = "report-complete", after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     ReportComplete {
         /// Path to the session document
         file: PathBuf,
@@ -4580,7 +4586,7 @@ enum QueueAction {
     /// Reconcile durable queue-claim state into visible queue markers without
     /// releasing a claim or changing queue work. A retained editor write must
     /// receive a safe delivery/save receipt before this reports success.
-    #[command(name = "repair-projection")]
+    #[command(name = "repair-projection", after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     RepairProjection {
         /// Path to the session document
         file: PathBuf,
@@ -4592,6 +4598,7 @@ enum QueueAction {
     /// the result in the same turn (`finalize` with the `> **Queue prompt:**`
     /// echo, or `--done <id>`). A finalize that strikes the line ends its claim
     /// by itself; no release is needed first.
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Release {
         /// Path to the session document
         file: PathBuf,
@@ -4612,6 +4619,7 @@ enum QueueAction {
     /// names, and the queue/item preset bodies, plus the coordinator rules.
     /// Paste it verbatim at the top of the subagent's prompt. Same text as the
     /// item's `queue_subagent_dispatch[].authorization.subagent_prompt_preamble`.
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Brief {
         /// Path to the session document
         file: PathBuf,
@@ -4622,12 +4630,25 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
+    /// Print the queue marker legend (`#queuemarkerlegend`): what each
+    /// binary-owned prefix on a queue row means, using the configured
+    /// `[queue_icons]` palette. `--line` prints the one-line legend the binary
+    /// keeps in `agent:status`; `--markdown` prints the book's table.
+    Legend {
+        /// Print only the one-line document legend
+        #[arg(long, conflicts_with = "markdown")]
+        line: bool,
+        /// Print the Markdown table embedded in docs/guide/queue-markers.md
+        #[arg(long)]
+        markdown: bool,
+    },
     /// List live queue-head claim attempts as JSON (`#queueclaim`), including
     /// lost/expired attempts with their cause and actionable recovery. Each
     /// also carries a durable-evidence assessment, claim/worker ages, remaining
     /// TTL, and `owner_session_state` (`live` / `unrecorded` / `ended`). A
     /// worker binding proves dispatch, not current worker or external-job
     /// progress (`#claimownerliveness`, `#claimfreshnessdiagnostics`).
+    #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Claims {
         /// Path to the session document
         file: PathBuf,
@@ -4697,7 +4718,7 @@ enum QueueAction {
         json: bool,
     },
     /// Reconstruct historical queue heads from snapshots, sidecars, and git history
-    #[command(name = "recover-lost")]
+    #[command(name = "recover-lost", after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     RecoverLost {
         /// Path to the session document
         file: PathBuf,
@@ -8131,6 +8152,27 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
+            QueueAction::Legend { line, markdown } => {
+                if line {
+                    println!(
+                        "{}",
+                        agent_doc_frontmatter::frontmatter::queue_marker_legend_line()
+                    );
+                } else if markdown {
+                    print!(
+                        "{}",
+                        agent_doc_frontmatter::frontmatter::queue_marker_legend_markdown_table()
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        agent_doc_frontmatter::frontmatter::queue_marker_legend_help_for(
+                            agent_doc_frontmatter::frontmatter::queue_icons()
+                        )
+                    );
+                }
+                Ok(())
+            }
             QueueAction::Schedule { file, json } => {
                 let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
                     &file,
@@ -8804,6 +8846,64 @@ mod recycle_force_tests {
             .expect("spawn parse thread")
             .join()
             .expect("parse thread")
+    }
+
+    /// `#queuemarkerlegend`: `queue --help` and every lifecycle subcommand's
+    /// long help end with the generated marker legend.
+    #[test]
+    fn queue_help_carries_the_marker_legend() {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let legend = agent_doc_frontmatter::frontmatter::queue_marker_legend_help();
+                let mut cli = Cli::command();
+                let queue = cli.find_subcommand_mut("queue").expect("queue subcommand");
+                let help = queue.render_long_help().to_string();
+                assert!(help.contains(&legend), "{help}");
+                assert!(help.contains("🔄  needs reconcile"), "{help}");
+                for name in [
+                    "claim",
+                    "start",
+                    "report-complete",
+                    "repair-projection",
+                    "release",
+                    "brief",
+                    "claims",
+                    "recover-lost",
+                ] {
+                    let sub = queue.find_subcommand_mut(name).expect(name);
+                    assert!(
+                        sub.render_long_help().to_string().contains(&legend),
+                        "queue {name} --help lacks the marker legend"
+                    );
+                }
+                assert!(queue.find_subcommand_mut("legend").is_some());
+            })
+            .expect("spawn help thread")
+            .join()
+            .expect("help thread");
+    }
+
+    #[test]
+    fn queue_legend_subcommand_parses_its_modes() {
+        assert!(matches!(
+            parse(&["agent-doc", "queue", "legend"]),
+            Commands::Queue {
+                action: QueueAction::Legend {
+                    line: false,
+                    markdown: false
+                }
+            }
+        ));
+        assert!(matches!(
+            parse(&["agent-doc", "queue", "legend", "--line"]),
+            Commands::Queue {
+                action: QueueAction::Legend {
+                    line: true,
+                    markdown: false
+                }
+            }
+        ));
     }
 
     #[test]

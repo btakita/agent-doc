@@ -27,7 +27,9 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
 
 /// Prompt defaults shared by `agent:queue` and `agent:exchange`.
 const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "presets", "subagents", "fan-out"];
-const STATUS_COMPONENT_ATTRS: &[&str] = &["sync", "sync-mode"];
+/// `queue-legend` toggles the binary-owned queue marker legend line
+/// (`#queuemarkerlegend`); `queue-legend=off` opts the document out.
+const STATUS_COMPONENT_ATTRS: &[&str] = &["sync", "sync-mode", "queue-legend"];
 
 /// Whether `key` is a flag/value attribute owned by `agent:queue`.
 ///
@@ -223,6 +225,15 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                         "`sync-mode` on `agent:status` requires a non-empty `sync` instruction"
                             .to_string(),
                     );
+                } else if key == "queue-legend"
+                    && !matches!(
+                        value.trim().to_ascii_lowercase().as_str(),
+                        "" | "on" | "off" | "true" | "false" | "yes" | "no" | "1" | "0"
+                    )
+                {
+                    issues.push(format!(
+                        "`queue-legend={value}` on `agent:status` is not recognized (use `queue-legend=off` to hide the queue marker legend)"
+                    ));
                 }
             } else if key == "queue" && matches!(component.name.as_str(), "backlog" | "pending") {
                 if BacklogQueueSyncMode::parse(value).is_none() {
@@ -278,6 +289,26 @@ mod tests {
         assert!(body.contains("no mutation"));
     }
 
+    /// `#queuemarkerlegend`: `queue-legend` is a recognized status attribute.
+    #[test]
+    fn queue_legend_is_a_status_attribute_with_on_off_values() {
+        for value in ["queue-legend=off", "queue-legend=on", "queue-legend"] {
+            let status =
+                format!("<!-- agent:status patch=replace {value} -->\n<!-- /agent:status -->\n");
+            assert!(
+                component_attr_warning(&status).is_none(),
+                "{value}: {:?}",
+                component_attr_warning(&status)
+            );
+        }
+        let bad = "<!-- agent:status queue-legend=maybe -->\n<!-- /agent:status -->\n";
+        let warning = component_attr_warning(bad).expect("unknown queue-legend value warns");
+        assert!(warning.message_body().contains("queue-legend=maybe"));
+        let misplaced = "<!-- agent:backlog queue-legend=off -->\n<!-- /agent:backlog -->\n";
+        let warning = component_attr_warning(misplaced).expect("queue-legend off status warns");
+        assert!(warning.message_body().contains("status-only attribute"));
+    }
+
     #[test]
     fn clear_is_queue_only_and_valid_as_a_bare_queue_flag() {
         let queue = "<!-- agent:queue clear subagents -->\n- a\n<!-- /agent:queue -->\n";
@@ -293,7 +324,11 @@ mod tests {
     #[test]
     fn component_attr_warning_accepts_valid_schedule_and_flags_bad_values() {
         let valid = "<!-- agent:queue interval=30m time=09:00,17:30 loop=3 -->\n- a\n<!-- /agent:queue -->\n";
-        assert!(component_attr_warning(valid).is_none(), "{:?}", component_attr_warning(valid));
+        assert!(
+            component_attr_warning(valid).is_none(),
+            "{:?}",
+            component_attr_warning(valid)
+        );
         let bare_loop = "<!-- agent:queue loop -->\n- a\n<!-- /agent:queue -->\n";
         assert!(component_attr_warning(bare_loop).is_none());
         let bad = "<!-- agent:queue interval=soon time=25:00 -->\n- a\n<!-- /agent:queue -->\n";
@@ -301,7 +336,8 @@ mod tests {
         assert_eq!(warning.issues.len(), 2, "{:?}", warning.issues);
         assert!(warning.has_fatal_schedule_issue);
         assert!(warning.message_body().contains("fail-closed"));
-        let misplaced = "<!-- agent:backlog interval=5m -->\n- [ ] [#x1] a\n<!-- /agent:backlog -->\n";
+        let misplaced =
+            "<!-- agent:backlog interval=5m -->\n- [ ] [#x1] a\n<!-- /agent:backlog -->\n";
         assert!(
             component_attr_warning(misplaced)
                 .unwrap()
@@ -584,6 +620,7 @@ mod tests {
     fn status_sync_attributes_are_status_only_and_require_an_instruction() {
         assert!(is_status_component_attr("sync"));
         assert!(is_status_component_attr("sync-mode"));
+        assert!(is_status_component_attr("queue-legend"));
         assert!(is_status_component_attr("interval"));
         assert!(!is_status_component_attr("unknown"));
 

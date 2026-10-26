@@ -111,6 +111,30 @@ guided tour, see the [Quick Start](docs/getting-started/quick-start.md); for
 multi-pane tmux setups, remote workspaces, and running two IDEs on one project,
 see [Tmux Routing and Navigation Lanes](docs/guide/tmux-routing.md).
 
+## Queue markers
+
+agent-doc prefixes each row in an `agent:run` section with its state:
+
+| Marker | Meaning |
+|--------|---------|
+| `📥` | pending, ready to run |
+| `🟡` | claimed for a worker that has not started yet |
+| `🚧` | a worker is running it |
+| `☑️` | the worker reported back; the coordinator still has to integrate and close it |
+| `⚠️` | lost: the claim expired; it can be reclaimed |
+| `🔄` | needs reconcile: there is finished-work evidence but no current claim; it is not dispatched again |
+| `❔` | unknown: the state is unreadable or contradicts the row |
+| `⏭️` | skipped this pass |
+| `⏳` | waiting on an operator verdict |
+| `🙋` | an operator request is open for the row |
+| `📌` / `📍` | operator / agent priority pin |
+
+A session document with an `agent:run` section keeps this legend on one line
+at the end of its `agent:status` section (hide it with `queue-legend=off` on
+the status marker), and `agent-doc queue --help` prints it. See
+[Queue Markers](docs/guide/queue-markers.md#queue-markers) for the full legend,
+including the `[#owner#N]` and `⟦effect:N⟧` annotations.
+
 ## Learn more
 
 - [Documentation home](docs/README.md) (also built as an mdBook)

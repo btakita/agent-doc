@@ -16,6 +16,162 @@ pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your sup
 pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📤 Queue handoff:";
 const LEGACY_REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
 
+/// `agent:status` opening-marker attribute that turns the per-document queue
+/// marker legend off (`queue-legend=off`, `#queuemarkerlegend`).
+pub const STATUS_QUEUE_LEGEND_ATTR: &str = "queue-legend";
+
+/// Whether a `queue-legend` attribute value turns the legend off.
+pub fn queue_legend_attr_disables(value: Option<&str>) -> bool {
+    matches!(
+        value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("off" | "false" | "no" | "0")
+    )
+}
+
+/// Whether `queue-legend` carries a recognized value (bare, on/off, true/false,
+/// yes/no, 1/0).
+pub fn is_valid_queue_legend_attr_value(value: Option<&str>) -> bool {
+    match value.map(|value| value.trim().to_ascii_lowercase()) {
+        None => true,
+        Some(value) => matches!(
+            value.as_str(),
+            "on" | "off" | "true" | "false" | "yes" | "no" | "1" | "0"
+        ),
+    }
+}
+
+/// Whether the document's `agent:status` component should carry the
+/// binary-owned queue marker legend line (`#queuemarkerlegend`): the document
+/// has a runnable-work component (`agent:run`, `agent:loop`, or legacy
+/// `agent:queue`) and the status marker does not opt out with
+/// `queue-legend=off`.
+pub fn status_queue_legend_wanted(content: &str, status: &element::Component) -> bool {
+    let marker = &content[status.open_start..status.open_end];
+    let opted_out = element::open_marker_attr_tokens(marker)
+        .map(|attrs| {
+            attrs.iter().any(|(key, value)| {
+                key == STATUS_QUEUE_LEGEND_ATTR && queue_legend_attr_disables(value.as_deref())
+            })
+        })
+        .unwrap_or(false);
+    if opted_out {
+        return false;
+    }
+    element::parse(content)
+        .map(|components| {
+            components.iter().any(|component| {
+                element::canonical_component_name(&component.name) == element::QUEUE_COMPONENT
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// A fenced-code opener: up to three spaces, then three or more backticks or
+/// tildes (a backtick info string may not contain a backtick).
+fn fence_opener(line: &str) -> Option<(char, usize)> {
+    let trimmed = line.trim_start_matches(' ');
+    if line.len() - trimmed.len() > 3 {
+        return None;
+    }
+    let ch = trimmed
+        .chars()
+        .next()
+        .filter(|ch| matches!(ch, '`' | '~'))?;
+    let run = trimmed.chars().take_while(|c| *c == ch).count();
+    if run < 3 || (ch == '`' && trimmed[run..].contains('`')) {
+        return None;
+    }
+    Some((ch, run))
+}
+
+fn closes_fence(line: &str, (ch, run): (char, usize)) -> bool {
+    let trimmed = line.trim_start_matches(' ');
+    if line.len() - trimmed.len() > 3 {
+        return false;
+    }
+    let closing = trimmed.chars().take_while(|c| *c == ch).count();
+    closing >= run && trimmed[closing * ch.len_utf8()..].trim().is_empty()
+}
+
+/// Reconcile the binary-owned queue marker legend line in a status body
+/// (`#queuemarkerlegend`).
+///
+/// Every legend line outside fenced code is removed, then, when `wanted`, one
+/// canonical line rendered from the installed palette is appended as the last
+/// paragraph. The result is a fixed point: applying it again changes nothing,
+/// so a status write never accumulates legends and an unchanged legend never
+/// churns the document. When the body ends inside an unterminated fence the
+/// legend is not appended, because it would render as code. A body with no
+/// legend line and `wanted == false` is returned byte-for-byte.
+pub fn apply_queue_marker_legend(status_body: &str, wanted: bool) -> String {
+    let mut kept = String::with_capacity(status_body.len());
+    let mut removed = false;
+    let mut fence: Option<(char, usize)> = None;
+    for segment in status_body.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        match fence {
+            Some(open) => {
+                if closes_fence(line, open) {
+                    fence = None;
+                }
+                kept.push_str(segment);
+            }
+            None => {
+                if let Some(open) = fence_opener(line) {
+                    fence = Some(open);
+                    kept.push_str(segment);
+                } else if agent_doc_frontmatter::frontmatter::is_queue_marker_legend_line(line) {
+                    removed = true;
+                } else {
+                    kept.push_str(segment);
+                }
+            }
+        }
+    }
+    if !wanted {
+        return if removed {
+            collapse_trailing_blank_lines(&kept)
+        } else {
+            status_body.to_string()
+        };
+    }
+    if fence.is_some() {
+        return if removed {
+            kept
+        } else {
+            status_body.to_string()
+        };
+    }
+    let legend = agent_doc_frontmatter::frontmatter::queue_marker_legend_line();
+    let prose = kept.trim_end_matches(['\n', ' ', '\t']);
+    if prose.trim().is_empty() {
+        format!("\n{legend}\n")
+    } else {
+        format!("{prose}\n\n{legend}\n")
+    }
+}
+
+fn collapse_trailing_blank_lines(body: &str) -> String {
+    let trimmed = body.trim_end_matches(['\n', ' ', '\t']);
+    if trimmed.trim().is_empty() {
+        "\n".to_string()
+    } else {
+        format!("{trimmed}\n")
+    }
+}
+
+/// Apply [`apply_queue_marker_legend`] to a status component body about to be
+/// written into `content`.
+pub fn reconcile_status_body_queue_legend(
+    content: &str,
+    status: &element::Component,
+    status_body: &str,
+) -> String {
+    apply_queue_marker_legend(status_body, status_queue_legend_wanted(content, status))
+}
+
 use crate::status_sync_tree::{
     ManagedStatusSyncBlock, ensure_well_formed_output, managed_status_sync_block,
     normalize_status_sync_body, normalized_status_sync_payload, parse_status_write,
@@ -396,6 +552,7 @@ pub fn update_status_content(content: &str, text: &str) -> Result<String> {
         return replace_status_content(content, text);
     };
     let body = apply_status_sync_body(status.content(content), text, directive.mode)?;
+    let body = reconcile_status_body_queue_legend(content, status, &body);
     Ok(status.replace_content(content, &body))
 }
 
@@ -411,6 +568,7 @@ pub fn replace_status_content(content: &str, text: &str) -> Result<String> {
     let healed = normalize_status_sync_body(text)?;
     let text = healed.as_deref().map(str::trim_end).unwrap_or(text);
     let new_content = format!("\n{}\n", text);
+    let new_content = reconcile_status_body_queue_legend(content, &status, &new_content);
     Ok(status.replace_content(content, &new_content))
 }
 
@@ -573,19 +731,14 @@ fn reported_queue_status_line(reported_count: usize) -> String {
 /// The line is projection-only telemetry. It is replaced rather than appended,
 /// so changing counts cannot accumulate stale summaries, and count zero removes
 /// it while preserving every operator-authored status line.
-pub fn apply_reported_queue_status(
-    status_body: &str,
-    reported_count: usize,
-) -> Option<String> {
+pub fn apply_reported_queue_status(status_body: &str, reported_count: usize) -> Option<String> {
     let expected = (reported_count > 0).then(|| reported_queue_status_line(reported_count));
     let mut retained = String::new();
     let mut existing = Vec::new();
     for segment in status_body.split_inclusive('\n') {
         let line = segment.strip_suffix('\n').unwrap_or(segment);
         if line.trim().starts_with(REPORTED_QUEUE_STATUS_PREFIX)
-            || line
-                .trim()
-                .starts_with(LEGACY_REPORTED_QUEUE_STATUS_PREFIX)
+            || line.trim().starts_with(LEGACY_REPORTED_QUEUE_STATUS_PREFIX)
         {
             existing.push(line.trim().to_string());
         } else {
@@ -613,7 +766,10 @@ pub fn reconcile_reported_queue_status_content(
     reported_count: usize,
 ) -> Result<Option<String>> {
     let components = element::parse(content).context("failed to parse components")?;
-    let Some(status) = components.iter().find(|component| component.name == "status") else {
+    let Some(status) = components
+        .iter()
+        .find(|component| component.name == "status")
+    else {
         return Ok(None);
     };
     match apply_reported_queue_status(status.content(content), reported_count) {
@@ -625,6 +781,105 @@ pub fn reconcile_reported_queue_status_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn legend() -> String {
+        agent_doc_frontmatter::frontmatter::queue_marker_legend_line()
+    }
+
+    fn status_body(doc: &str) -> String {
+        let status = element::parse(doc)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "status")
+            .unwrap();
+        status.content(doc).to_string()
+    }
+
+    fn queue_doc(status_marker: &str, status: &str) -> String {
+        format!(
+            "## Status {status_marker}\n{status}<!-- /agent:status -->\n\n## Run <!-- agent:run -->\n- do [#a]\n<!-- /agent:run -->\n"
+        )
+    }
+
+    #[test]
+    fn queue_legend_is_appended_once_and_is_a_fixed_point() {
+        let doc = queue_doc("<!-- agent:status patch=replace -->", "old\n");
+        let once = update_status_content(&doc, "Working.").unwrap();
+        assert_eq!(status_body(&once), format!("\nWorking.\n\n{}\n", legend()));
+        let twice = update_status_content(&once, "Working.").unwrap();
+        assert_eq!(twice, once);
+        // A response that echoes (or repeats) the legend still lands one.
+        let echoed = format!("{}\nWorking.\n{}", legend(), legend());
+        let thrice = update_status_content(&once, &echoed).unwrap();
+        assert_eq!(status_body(&thrice).matches("Queue markers:").count(), 1);
+        assert!(status_body(&thrice).ends_with(&format!("{}\n", legend())));
+    }
+
+    #[test]
+    fn queue_legend_needs_a_run_component_and_honors_opt_out() {
+        let no_queue =
+            "## Status <!-- agent:status patch=replace -->\nold\n<!-- /agent:status -->\n";
+        let out = update_status_content(no_queue, "new").unwrap();
+        assert_eq!(status_body(&out), "\nnew\n");
+
+        let opted_out = queue_doc(
+            "<!-- agent:status patch=replace queue-legend=off -->",
+            "old\n",
+        );
+        let out = update_status_content(&opted_out, &format!("new\n\n{}", legend())).unwrap();
+        assert_eq!(
+            status_body(&out),
+            "\nnew\n",
+            "opt-out also removes a stale legend"
+        );
+
+        for loop_marker in ["<!-- agent:loop -->", "<!-- agent:queue -->"] {
+            let doc = format!(
+                "<!-- agent:status -->\nx\n<!-- /agent:status -->\n{loop_marker}\n<!-- /{} -->\n",
+                &loop_marker[5..loop_marker.len() - 4]
+            );
+            let out = update_status_content(&doc, "y").unwrap();
+            assert!(status_body(&out).contains(&legend()), "{loop_marker}");
+        }
+    }
+
+    #[test]
+    fn queue_legend_never_lands_in_or_is_read_from_fenced_code() {
+        let fenced = format!("```\n{}\n```", legend());
+        let body = apply_queue_marker_legend(&format!("\n{fenced}\n"), true);
+        assert_eq!(body, format!("\n{fenced}\n\n{}\n", legend()));
+
+        let unterminated = "\nlog:\n```\nstill code\n";
+        assert_eq!(apply_queue_marker_legend(unterminated, true), unterminated);
+    }
+
+    #[test]
+    fn queue_legend_composes_with_status_sync_and_handoff_line() {
+        let doc = queue_doc(
+            "<!-- agent:status patch=replace sync=\"Keep release current\" -->",
+            "\nprose\n",
+        );
+        let out = update_status_content(&doc, "Published: v2").unwrap();
+        let body = status_body(&out);
+        assert!(body.contains("<!-- status:sync -->\nPublished: v2\n<!-- /status:sync -->"));
+        assert!(body.ends_with(&format!("<!-- /status:sync -->\n\n{}\n", legend())));
+        assert_eq!(update_status_content(&out, "Published: v2").unwrap(), out);
+
+        let handoff = apply_reported_queue_status(&body, 2).unwrap();
+        assert!(handoff.starts_with(&format!("\n{REPORTED_QUEUE_STATUS_PREFIX} 2")));
+        assert!(handoff.ends_with(&format!("{}\n", legend())));
+        assert_eq!(apply_queue_marker_legend(&handoff, true), handoff);
+    }
+
+    #[test]
+    fn queue_legend_attr_values() {
+        assert!(queue_legend_attr_disables(Some("off")));
+        assert!(queue_legend_attr_disables(Some("FALSE")));
+        assert!(!queue_legend_attr_disables(None));
+        assert!(!queue_legend_attr_disables(Some("on")));
+        assert!(is_valid_queue_legend_attr_value(Some("no")));
+        assert!(!is_valid_queue_legend_attr_value(Some("maybe")));
+    }
 
     #[test]
     fn reconciles_stale_top_backlog_status_to_live_head() {
@@ -813,7 +1068,10 @@ mod tests {
         assert!(!cleared.contains(REPORTED_QUEUE_STATUS_PREFIX));
         assert!(cleared.contains("Operator-authored summary."));
 
-        let legacy = one.replace(REPORTED_QUEUE_STATUS_PREFIX, LEGACY_REPORTED_QUEUE_STATUS_PREFIX);
+        let legacy = one.replace(
+            REPORTED_QUEUE_STATUS_PREFIX,
+            LEGACY_REPORTED_QUEUE_STATUS_PREFIX,
+        );
         let migrated = reconcile_reported_queue_status_content(&legacy, 1)
             .unwrap()
             .expect("the former pending/report marker should migrate deterministically");

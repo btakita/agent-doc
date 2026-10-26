@@ -2,12 +2,13 @@
 //!
 //! ## Spec
 //! - Orchestrates fan-out of multiple Claude tasks across isolated git worktrees inside tmux panes.
-//! - For each task: optionally creates a git worktree (`worktree::create`), writes the task prompt to `.agent-doc-prompt.txt`, spawns `claude -p --output-format json` in a new tmux pane, and stashes the pane out of the user's view.
+//! - For each task: optionally creates a git worktree (`worktree::create`), writes the task prompt to `.agent-doc-prompt.txt`, launches `claude -p --output-format json` as a new tmux pane's own process (`agent_doc_tmux_io::launch_command_in_pane_at`, never typed into the pane's fresh shell), and stashes the pane out of the user's view. The pane ends when `claude` exits.
+//! - Frontmatter `env` exports are prepended unexpanded; the pane's `/bin/sh` expands `$(passage ...)`, so secret values never reach the tmux argv, the process list, the ops log, or scrollback.
 //! - With `--no-worktree`: all tasks run in the project root directory (no isolation).
 //! - Polls for pane death at a fixed 2-second interval; enforces a per-task timeout (kills remaining panes when exceeded).
 //! - Collects results: extracts `"result"` text from Claude's JSON output, reads the stderr log, and optionally reads `git diff` from each worktree.
 //! - Disposes of each worktree it created after results are collected (`#orchworktreeleak`): removes the ones holding only orchestrate scaffolding, keeps and names the ones holding authored work. The timeout path breaks into collection rather than returning, so killed tasks reach the same decision.
-//! - Unwinds every worktree it created when the fan-out aborts mid-spawn (worktree creation, prompt write, pane creation, or send-keys failure), instead of stranding them.
+//! - Unwinds every worktree it created when the fan-out aborts mid-spawn (worktree creation, prompt write, pane creation, or pane launch failure), instead of stranding them.
 //! - Formats all results as a markdown document (`## Deep Results` → `### Task N — …` sections with collapsible diff and stderr blocks) and prints to stdout.
 //! - `--dry-run` prints the plan (project root, session, task list) and exits without spawning.
 //!
@@ -188,33 +189,15 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
         };
         eprintln!("[parallel]   Pane: {}", pane_id);
 
-        // Build the claude command
-        let mut cmd_parts = Vec::new();
-        cmd_parts.push("claude -p --output-format json".to_string());
-        if let Some(ref model) = config.model {
-            cmd_parts.push(format!("--model {}", model));
-        }
-        cmd_parts.push(format!(
-            "< {} > {} 2>{}; exit",
-            PROMPT_FILENAME, RESULT_FILENAME, LOG_FILENAME
-        ));
-        // Prepend frontmatter env exports (unexpanded — target shell handles $(passage ...)
-        // so secrets never appear in the tmux send-keys argument list or scrollback).
         let env_prefix = agent_doc_config::env::shell_export_prefix(&fm.env);
-        let cmd_str = format!("{}{}", env_prefix, cmd_parts.join(" "));
+        let cmd_str = fanout_task_command(&env_prefix, config.model.as_deref());
 
-        // Send the command to the pane
-        if let Err(err) = agent_doc_tmux_io::send_submitted_text_logged(
-            &tmux,
-            &pane_id,
-            &cmd_str,
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
-            "sessions.send_submitted_text",
-        ) {
+        // Run the task as the pane's own process; never type it into the
+        // pane's freshly spawned shell (see `fanout_task_command`).
+        if let Err(err) = launch_fanout_task(&tmux, file, &pane_id, &task_cwd, &cmd_str) {
             abort_spawn(&project_root, &task_states, created_worktree.as_ref());
-            return Err(err).with_context(|| {
-                format!("failed to send keys to pane {} for task {}", pane_id, i + 1)
-            });
+            return Err(err)
+                .with_context(|| format!("failed to launch task {} in pane {}", i + 1, pane_id));
         }
 
         // Stash the pane so it doesn't clutter the user's view
@@ -438,6 +421,62 @@ fn remove_worktree_reporting(project_root: &Path, worktree: &crate::worktree::Wo
     }
 }
 
+/// The `/bin/sh` command a fan-out pane runs as its own process: the
+/// frontmatter env exports, then `claude -p` reading the task prompt and
+/// writing its result and stderr log into the task directory.
+///
+/// `env_prefix` stays unexpanded (`export KEY="$(passage show ...)" && `): the
+/// pane's `/bin/sh` runs the substitution, so a secret value lives only in
+/// that shell's and `claude`'s environment, never in the tmux argv, the
+/// process list, the ops log (which records the command's hash), or the
+/// scrollback. The command ends the pane when `claude` exits
+/// ([`agent_doc_tmux_io::PaneLaunchExit::EndWithCommand`]), the completion
+/// signal `run` polls for; the typed form needed a trailing `; exit` for that.
+fn fanout_task_command(env_prefix: &str, model: Option<&str>) -> String {
+    let mut cmd_parts = vec!["claude -p --output-format json".to_string()];
+    if let Some(model) = model {
+        cmd_parts.push(format!("--model {model}"));
+    }
+    cmd_parts.push(format!(
+        "< {PROMPT_FILENAME} > {RESULT_FILENAME} 2>{LOG_FILENAME}"
+    ));
+    format!("{env_prefix}{}", cmd_parts.join(" "))
+}
+
+/// Launch `command` as `pane`'s own process in `task_cwd` (the directory its
+/// redirects are relative to), logged to `file`'s ops log as
+/// `transform=parallel_task_launch key=launch` with the command's length and
+/// hash only.
+///
+/// A fan-out pane is created just before this, so its interactive shell may
+/// not be reading its command line yet: an rc step that reads the terminal
+/// first (zsh's `zsh-newuser-install` with no `~/.zshrc`) swallowed the first
+/// typed byte of a command. Launching it as the pane process has no such race.
+fn launch_fanout_task(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    file: &Path,
+    pane_id: &str,
+    task_cwd: &Path,
+    command: &str,
+) -> Result<()> {
+    agent_doc_tmux_io::input_diag::log_pane_launch(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
+        "parallel.fanout",
+        &format!("pane:{pane_id}"),
+        command,
+        Some("claude"),
+        "parallel_task_launch",
+    );
+    agent_doc_tmux_io::launch_command_in_pane_at(
+        tmux,
+        pane_id,
+        task_cwd,
+        command,
+        agent_doc_tmux_io::PaneLaunchExit::EndWithCommand,
+    )?;
+    Ok(())
+}
+
 /// Extract the result text from Claude's `--output-format json` output.
 ///
 /// The JSON format is: `{"type":"result","result":"...","session_id":"..."}`
@@ -611,5 +650,138 @@ mod tests {
 
         assert!(!already_path.exists(), "{}", already_path.display());
         assert!(!in_flight_path.exists(), "{}", in_flight_path.display());
+    }
+
+    #[test]
+    fn fanout_task_command_keeps_the_secret_reference_unexpanded_and_ends_the_pane() {
+        let env: agent_doc_config::env::EnvMap = [(
+            "API_KEY".to_string(),
+            Some("$(passage show team/api-key)".to_string()),
+        )]
+        .into_iter()
+        .collect();
+
+        let command = fanout_task_command(
+            &agent_doc_config::env::shell_export_prefix(&env),
+            Some("opus"),
+        );
+
+        assert_eq!(
+            command,
+            "export API_KEY=\"$(passage show team/api-key)\" && claude -p --output-format json --model opus < .agent-doc-prompt.txt > .agent-doc-result.json 2>.agent-doc-result.log"
+        );
+        assert!(
+            !command.contains("exit"),
+            "the launch ends the pane with the command; no typed `; exit` is needed"
+        );
+    }
+
+    /// A fan-out pane's shell reads the terminal before its first command line
+    /// (zsh with no `~/.zshrc`), and the task still runs whole as the pane's
+    /// own process: the frontmatter env prefix expands `$(passage ...)` inside
+    /// the pane only, `claude` gets the prompt and the secret, the pane ends
+    /// when it exits (the completion signal `run` polls), and nothing was
+    /// typed for the shell to swallow. Isolated tmux server with a clean
+    /// `HOME` only.
+    #[cfg(unix)]
+    #[test]
+    fn fanout_task_runs_as_the_pane_process_under_a_terminal_reading_shell() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let bin = dir.path().join("bin");
+        let project = dir.path().join("proj");
+        let task_cwd = project.join("task-0");
+        for path in [&home, &bin, &project.join(".agent-doc"), &task_cwd] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        let doc = project.join("session.md");
+        std::fs::write(&doc, "---\nagent_doc_session: fanout\n---\n").unwrap();
+        for (name, body) in [
+            (
+                "passage",
+                "#!/bin/sh\n[ \"$1 $2\" = 'show team/api-key' ] && printf s3cret-value\n",
+            ),
+            (
+                "claude",
+                "#!/bin/sh\nprintf '{\"result\":\"prompt=%s key=%s\"}\\n' \"$(cat)\" \"$API_KEY\"\n",
+            ),
+        ] {
+            let path = bin.join(name);
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::write(task_cwd.join(PROMPT_FILENAME), "hello").unwrap();
+        let shell = agent_doc_tmux_io::write_terminal_reading_test_shell(dir.path());
+        let tmux = agent_doc_tmux_io::isolated_test_tmux_with_default_shell(
+            "agent-doc-parallel-fanout-launch",
+            &shell,
+            &home,
+        );
+        let pane = tmux.auto_start("main", &task_cwd).unwrap();
+        let env: agent_doc_config::env::EnvMap = [
+            ("PATH".to_string(), Some(format!("{}:$PATH", bin.display()))),
+            (
+                "API_KEY".to_string(),
+                Some("$(passage show team/api-key)".to_string()),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let command = fanout_task_command(&agent_doc_config::env::shell_export_prefix(&env), None);
+        assert!(!command.contains("s3cret-value"));
+
+        launch_fanout_task(&*tmux, &doc, &pane, &task_cwd, &command).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while tmux.pane_alive(&pane) {
+            assert!(
+                Instant::now() < deadline,
+                "the fan-out pane {pane} never ended with its task"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            std::fs::read_to_string(task_cwd.join(RESULT_FILENAME))
+                .ok()
+                .as_deref()
+                .and_then(extract_result_text)
+                .as_deref(),
+            Some("prompt=hello key=s3cret-value"),
+            "claude ran in the task directory with the pane-expanded secret; log: {:?}",
+            std::fs::read_to_string(task_cwd.join(LOG_FILENAME)).ok()
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("consumed")).unwrap_or_default(),
+            "",
+            "nothing was typed for the pane's shell to swallow"
+        );
+        let logged = walk_text(&project.join(".agent-doc"));
+        assert!(
+            logged.contains("source=parallel.fanout")
+                && logged.contains("transform=parallel_task_launch key=launch"),
+            "the launch is recorded in the session's ops log: {logged}"
+        );
+        assert!(
+            !logged.contains("s3cret-value") && !logged.contains("passage"),
+            "the ops log carries the command's hash, never its text or a secret: {logged}"
+        );
+    }
+
+    fn walk_text(dir: &Path) -> String {
+        let mut text = String::new();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return text;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                text.push_str(&walk_text(&path));
+            } else if let Ok(contents) = std::fs::read_to_string(&path) {
+                text.push_str(&contents);
+            }
+        }
+        text
     }
 }

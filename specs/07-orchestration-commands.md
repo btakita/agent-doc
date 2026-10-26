@@ -142,6 +142,7 @@ Additional rules:
 
 - Resolves tasks and presets first, then hands them to the existing worktree fan-out backend.
 - The legacy `agent-doc parallel` entry is only a compatibility wrapper over this same dispatch path.
+- Each fan-out pane runs its `claude -p` task as the pane's own process (never typed into the pane's fresh shell) and ends with it; the frontmatter `env` prefix is expanded by the pane's `/bin/sh`, so `$(passage ...)` values never reach the tmux argv, the process list, or logs. See [Session & tmux commands](07-session-tmux-commands.md) (start pane launch).
 - If a materialized tsift graph database exists and resolved tasks include `do #id` / `do [#id]` items, orchestration attempts to collect the same graph evidence, conflict matrix, and dispatch trace as `plan`. Sequential and DAG child prompts receive a bounded `<tsift_graph_evidence>` JSON block outside the document mutation only when graph evidence is available. Parallel worktree job packets receive the same block in the task prompt when available, including a normalized `lower_agent_job_packet` derived from the worker prompt packet's owned files, read-only context, forbidden files, expected tests, expansion commands, token budget, fail-closed prompt text, dispatch-trace graph links, worker feedback, projection hashes, and replay/repair commands. If graph collection fails, orchestration warns and continues without the graph block; if collection succeeds, parallel mode still fails closed when the conflict matrix reports `can_parallel=false` or `fail_closed=true`.
 
 ## `--mode dag`

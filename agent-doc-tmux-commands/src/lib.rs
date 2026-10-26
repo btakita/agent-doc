@@ -119,7 +119,36 @@ pub const PANE_LAUNCH_INTERPRETER: &str = "/bin/sh";
 /// - No interactive shell reads the terminal before `command` starts, so no rc
 ///   prompt (zsh's `zsh-newuser-install`) can swallow its first bytes.
 pub fn pane_launch_script(command: &str) -> String {
-    format!("set -m 2>/dev/null; trap : INT; {command}; exec \"${{SHELL:-/bin/sh}}\"")
+    pane_launch_script_with_exit(command, PaneLaunchExit::HandOffToShell)
+}
+
+/// What a launched pane's process does once its command exits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneLaunchExit {
+    /// `exec` the operator's shell in place of the wrapper, so the pane keeps a
+    /// shell after the command exits, exactly as a command typed into one did.
+    HandOffToShell,
+    /// End the pane's process with the command: the pane dies (or shows tmux's
+    /// dead-pane notice under `remain-on-exit`). For panes whose death is the
+    /// completion signal, such as the `parallel` fan-out, which typed
+    /// `<command>; exit` before.
+    EndWithCommand,
+}
+
+/// [`pane_launch_script`] with an explicit [`PaneLaunchExit`].
+///
+/// `command` is parsed by `/bin/sh` inside the pane, never by the process
+/// that builds this script, so a `$(...)` in it (the fan-out's
+/// `export KEY="$(passage show ...)"` prefix) expands only in the pane's own
+/// environment: no secret value reaches the tmux argv, the process list, or a
+/// log.
+pub fn pane_launch_script_with_exit(command: &str, exit: PaneLaunchExit) -> String {
+    match exit {
+        PaneLaunchExit::HandOffToShell => {
+            format!("set -m 2>/dev/null; trap : INT; {command}; exec \"${{SHELL:-/bin/sh}}\"")
+        }
+        PaneLaunchExit::EndWithCommand => format!("set -m 2>/dev/null; {command}"),
+    }
 }
 
 /// Replace `target`'s process with `command`, followed by the operator's
@@ -133,6 +162,16 @@ pub fn respawn_pane_with_launch_script(
     cwd: Option<&str>,
     command: &str,
 ) -> TmuxCommand {
+    respawn_pane_with_launch_script_and_exit(target, cwd, command, PaneLaunchExit::HandOffToShell)
+}
+
+/// [`respawn_pane_with_launch_script`] with an explicit [`PaneLaunchExit`].
+pub fn respawn_pane_with_launch_script_and_exit(
+    target: &str,
+    cwd: Option<&str>,
+    command: &str,
+    exit: PaneLaunchExit,
+) -> TmuxCommand {
     let mut args = vec![
         "respawn-pane".to_string(),
         "-k".to_string(),
@@ -145,7 +184,7 @@ pub fn respawn_pane_with_launch_script(
     args.extend([
         PANE_LAUNCH_INTERPRETER.to_string(),
         "-c".to_string(),
-        pane_launch_script(command),
+        pane_launch_script_with_exit(command, exit),
     ]);
     TmuxCommand::new(args)
 }
@@ -1047,6 +1086,42 @@ mod tests {
             ]
         );
         assert!(!command.is_read_only());
+    }
+
+    #[test]
+    fn pane_launch_script_ending_with_the_command_never_hands_off_to_a_shell() {
+        assert_eq!(
+            pane_launch_script_with_exit(
+                "export K=\"$(passage show k)\" && claude -p < in > out",
+                PaneLaunchExit::EndWithCommand,
+            ),
+            "set -m 2>/dev/null; export K=\"$(passage show k)\" && claude -p < in > out"
+        );
+    }
+
+    #[test]
+    fn respawn_pane_with_launch_script_and_exit_keeps_a_secret_reference_unexpanded() {
+        let command = respawn_pane_with_launch_script_and_exit(
+            "%9",
+            Some("/wt"),
+            "export K=\"$(passage show k)\" && claude -p",
+            PaneLaunchExit::EndWithCommand,
+        );
+
+        assert_eq!(
+            command.args(),
+            [
+                "respawn-pane",
+                "-k",
+                "-t",
+                "%9",
+                "-c",
+                "/wt",
+                "/bin/sh",
+                "-c",
+                "set -m 2>/dev/null; export K=\"$(passage show k)\" && claude -p",
+            ]
+        );
     }
 
     #[test]

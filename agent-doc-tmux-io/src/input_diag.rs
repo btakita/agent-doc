@@ -105,6 +105,32 @@ pub fn log_text_submit(
     );
 }
 
+/// Record a command launched as a pane's own process
+/// ([`crate::launch_command_in_pane_at`]). Like [`log_text_submit`] it logs
+/// only the command's length and SHA-256, never its text, under
+/// `key=launch`; unlike it, there is no submit-key event, because nothing is
+/// typed into the pane.
+pub fn log_pane_launch(
+    sink: InputDiagSink<'_>,
+    source: &str,
+    destination: &str,
+    command: &str,
+    harness: Option<&str>,
+    transform: &str,
+) {
+    emit(
+        sink,
+        input_diag::format_payload_event(
+            source,
+            destination,
+            transform,
+            "launch",
+            command.as_bytes(),
+            harness,
+        ),
+    );
+}
+
 pub fn log_byte_events(
     sink: InputDiagSink<'_>,
     source: &str,
@@ -148,4 +174,58 @@ pub fn log_prompt_detection(
         sink,
         input_diag::format_prompt_detection(source, destination, harness, reason, state),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static LOGGED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn record(_file: &Path, message: &str) {
+        LOGGED.with(|logged| logged.borrow_mut().push(message.to_string()));
+    }
+
+    #[test]
+    fn pane_launch_logs_one_hashed_launch_event_and_no_submit_key() {
+        let command = "export K=\"$(passage show k)\" && claude -p";
+
+        log_pane_launch(
+            InputDiagSink::new(Some(Path::new("doc.md")), record),
+            "route.auto_start",
+            "pane:%3",
+            command,
+            Some("claude"),
+            "route_owned_start_launch",
+        );
+
+        let logged = LOGGED.with(|logged| logged.borrow().clone());
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        let event = &logged[0];
+        assert!(
+            event.starts_with(
+                "tmux_input_event source=route.auto_start destination=pane:%3 transform=route_owned_start_launch key=launch "
+            ),
+            "{event}"
+        );
+        assert!(
+            event.contains(&format!("bytes={}", command.len())),
+            "{event}"
+        );
+        assert!(
+            event.contains(&format!(
+                "sha256={}",
+                input_diag::bytes_hash(command.as_bytes())
+            )),
+            "{event}"
+        );
+        assert!(event.contains("harness=claude"), "{event}");
+        assert!(
+            !event.contains("passage") && !event.contains("Enter"),
+            "the command text and a submit key never reach the log: {event}"
+        );
+    }
 }

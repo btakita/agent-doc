@@ -33,7 +33,7 @@ pub use observation_cache::{
 
 use std::error::Error;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
@@ -47,10 +47,12 @@ use agent_doc_tmux_commands::{
     list_windows as list_windows_command, list_windows_all as list_windows_all_command,
     new_window_in_cwd as new_window_in_cwd_command, rename_window as rename_window_command,
     resize_window_height as resize_window_height_command, respawn_pane as respawn_pane_command,
-    respawn_pane_with_launch_script, send_key as send_key_command,
+    respawn_pane_with_launch_script_and_exit, send_key as send_key_command,
     swap_window as swap_window_command, text_only_command, text_submit_command,
     tmux_submit_profile_for_harness,
 };
+
+pub use agent_doc_tmux_commands::PaneLaunchExit;
 
 static TMUX_BIN_RESOLUTION: OnceLock<agent_doc_project_config_io::TmuxBinResolution> =
     OnceLock::new();
@@ -576,10 +578,36 @@ pub fn launch_command_in_pane(
 ) -> Result<(), TmuxIoError> {
     let cwd = pane_current_path(runner, target);
     runner
-        .run(&respawn_pane_with_launch_script(
+        .run(&respawn_pane_with_launch_script_and_exit(
             target,
             cwd.as_deref().and_then(|cwd| cwd.to_str()),
             command,
+            PaneLaunchExit::HandOffToShell,
+        ))
+        .map(|_| ())
+}
+
+/// [`launch_command_in_pane`] in a directory the caller already knows (the
+/// one it created the pane in), with an explicit [`PaneLaunchExit`].
+///
+/// A caller that built `command` relative to `cwd` (route startup rewrites
+/// the document path against it; the fan-out redirects prompt and result
+/// files relative to it) passes that directory instead of re-reading the
+/// pane's, so the command runs where it was built for even if something moved
+/// the pane's shell first.
+pub fn launch_command_in_pane_at(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    target: &str,
+    cwd: &Path,
+    command: &str,
+    exit: PaneLaunchExit,
+) -> Result<(), TmuxIoError> {
+    runner
+        .run(&respawn_pane_with_launch_script_and_exit(
+            target,
+            cwd.to_str(),
+            command,
+            exit,
         ))
         .map(|_| ())
 }
@@ -1392,6 +1420,36 @@ mod tests {
         kill_window(&runner, "@9").unwrap();
 
         assert_eq!(runner.commands(), vec![vec!["kill-window", "-t", "@9"]]);
+    }
+
+    #[test]
+    fn launch_command_in_pane_at_uses_the_callers_directory_and_exit() {
+        let runner = RecordingRunner::new();
+
+        launch_command_in_pane_at(
+            &runner,
+            "%5",
+            Path::new("/wt/task-0"),
+            "claude -p",
+            PaneLaunchExit::EndWithCommand,
+        )
+        .unwrap();
+
+        assert_eq!(
+            runner.commands(),
+            vec![vec![
+                "respawn-pane",
+                "-k",
+                "-t",
+                "%5",
+                "-c",
+                "/wt/task-0",
+                "/bin/sh",
+                "-c",
+                "set -m 2>/dev/null; claude -p",
+            ]],
+            "no directory read and no typing: one respawn in the caller's directory"
+        );
     }
 
     #[test]

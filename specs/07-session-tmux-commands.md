@@ -90,6 +90,34 @@ may republish the retained intent, but remains subject to the same rule.
   reads one terminal byte before its first command line (`pane_launch_live_*`, plus real
   zsh with an empty `HOME` when installed), and `start_bootstrap_runs_the_start_whole_under_a_terminal_reading_shell`
   drives `start`'s own provisioning and dispatch against it.
+- Every other freshly provisioned pane launches its command the same way, never by
+  typing it into the pane's new shell:
+  - Route-owned auto-start (`agent-doc-route-io` `route.auto_start`) runs
+    `agent-doc start --route-owned ...` with `agent_doc_tmux_io::launch_command_in_pane_at`
+    in the directory the document path was rewritten against, handing the pane to the
+    operator's shell when the start exits (`PaneLaunchExit::HandOffToShell`). Its input
+    diagnostic is one `tmux_input_event source=route.auto_start destination=pane:<id>
+    transform=route_owned_start_launch key=launch bytes=<n> detail=sha256=<hash>` event
+    in the document's ops log; the typed path's `transform=route_owned_start_enter`
+    text + `key=Enter` pair no longer exists, because nothing is typed.
+    `route_owned_start_runs_as_the_pane_process_under_a_terminal_reading_shell` covers it.
+  - `parallel` fan-out panes run their task (`<env exports>claude -p --output-format json
+    --model ... < .agent-doc-prompt.txt > .agent-doc-result.json 2>.agent-doc-result.log`)
+    as the pane's own process in the task directory, ending the pane with the task
+    (`PaneLaunchExit::EndWithCommand`, the completion signal `parallel` polls; the typed
+    form appended `; exit`). The frontmatter `env` prefix stays unexpanded
+    (`export KEY="$(passage show ...)" && `): the pane's `/bin/sh` expands it, so a secret
+    value reaches only that shell's and `claude`'s environment, never the tmux argv, the
+    process list, the ops log (`source=parallel.fanout transform=parallel_task_launch
+    key=launch`, length + hash only), or scrollback.
+    `fanout_task_runs_as_the_pane_process_under_a_terminal_reading_shell` covers it.
+  - A process environment note: a launched command gets the tmux session environment
+    plus the launching client's `PATH`, not the operator's interactive rc. The typed
+    form ran inside the pane's interactive shell and saw whatever its rc exported.
+  - The controller's supervisor-replacement cold start into a *preserved* pane
+    (`controller.supervisor_replacement.cold_start_preserve_pane`) still types its
+    start: that pane is an existing idle shell the operator kept, not a fresh one, and
+    respawning it would discard the operator's shell.
 - Navigation lanes (`#ideriderindependentnav` P6): `--client-id` names the requesting editor
   surface client. From outside tmux, with `editor_navigation = "per_installation"`, a
   `tmux_session` pin, and an installation-scoped client, the start pane is created in that

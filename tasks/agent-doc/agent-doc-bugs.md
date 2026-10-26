@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a16c3d-3d49-7cf0-b01f-4162cae1bd7d
+  codex: 01a17616-9ddc-7ee0-86df-a42c74605356
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -364,6 +364,46 @@ Verification:
 - Diff checks passed; the isolated worktree is clean; the latest five base-branch GitHub Actions runs are green.
 
 Confidence is high (0.95). The running binary has not yet received the patch, so the live failure can continue until installation and idle-boundary recycle. Installing while this response cycle is open risks stranding the attached editor replica; the required install/recycle/live proof is therefore tracked as [#layoutunprovenliveverify] for the next clean cycle.
+
+### Re: tmux pane sync recovery and recurrence prevention — gpt-5 · 2026-10-25T23:24-04:00
+
+> **Queue prompt:** There is still only 1 tmux pane with 2 agent-doc documents open in the editor. Sync still fails. How can we ensure this issue won't happen again?
+
+The repeated failure was a delivery gap, not evidence that the proposed policy fix was wrong. Remote `main` and the installed controller were still at `03433d0494`; the fix `cb2f9068e3` existed only on a verification branch. The live state matched that old build exactly: tmux had only pane `%2`, while `sdk-demo.md` remained bound to dead pane `%58`, and structural sync stopped at `ActorOwnershipUnproven`.
+
+I completed the missing delivery path:
+
+- Fast-forwarded `cb2f9068e3` to remote `main`.
+- Installed it from the clean isolated worktree. The native reload reached the editor endpoint, and the supervisors/controllers were marked for safe idle-boundary recycle.
+- Preserved the safety boundary: explicit `ProvisionForLayout` and `ResumeLatest` may replace an ownership-unproven stale actor when the session is known; passive `ObserveOnly` still cannot focus or reuse that pane.
+
+To prevent recurrence, completion now has three distinct proofs:
+
+1. The fix commit must be reachable from remote `main`; a pushed worker branch alone is not integration.
+2. The installed build ID/inode must correspond to the patched build; version `0.35.551` alone is insufficient because patched and unpatched builds share it.
+3. Live acceptance must replace the dead binding, produce two tmux panes, and remove the unresolved cross-root diagnostics.
+
+The first two proofs are complete. The third remains tracked by existing backlog item `#layoutunprovenliveverify`; its supervisor/controller recycle is intentionally deferred to the idle boundary rather than forced during this document closeout.
+
+### Re: deterministic cross-root regression — gpt-5 · 2026-10-25T23:24-04:00
+
+> **Queue prompt:** Add a deterministic controller/SimWorld regression and routing-spec clause for cross-root Sync Tmux Layout with two editor-visible documents where the second has a ready actor bound to a dead or ownership-unproven pane; assert ProvisionForLayout replaces the stale binding and converges to two panes while ObserveOnly never focuses/reuses the unproven pane.
+
+Implemented, integrated, pushed, and installed as commit `2490d2496ed965d371604320a6d58880fa82b52d` on remote `main`.
+
+The new deterministic controller SimWorld models two cross-root editor-visible documents, one valid pane, and a ready second actor bound to a dead/ownership-unproven pane. It proves that passive `ObserveOnly` emits no focus or provisioning effect, while explicit `ProvisionForLayout` replaces the stale binding and converges to exactly two panes. The matching invariant is recorded in `specs/07-session-tmux-commands.md`.
+
+Verification:
+
+- Focused cross-root regression: 1 passed, 0 failed.
+- `cargo test -p agent-doc-controller-io`: 821 passed, 0 failed, 10 ignored; integration targets passed.
+- `make audit-docs` and `make build`: passed.
+- A queue-finalization test that stopped the worker's first full run passed when reproduced alone.
+- Coordinator authoritative `make check`: passed with exit 0 and zero failure groups.
+- Final `make install`: passed; reload intent reached 1/1 editor endpoint.
+- GitHub Actions run 40263702209 for `2490d2496e` is currently in progress.
+
+The exchange remains large, but the active queue continues, so I did not compact it.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -463,13 +503,16 @@ force-write the file, and do not delete the queue items.                        
 ☑️ [#subagent:sdk_demo_route_recovery#1] Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
 ---
 - ☑️ [#subagent:release_publish_patch#3] release + publish
+- ☑️ [#subagent:pane_sync_retry#1] There is still only 1 tmux pane with 2 agent-doc documents open in the editor. Sync still fails. How can we ensure this issue won't happen again?
+- ☑️ [#subagent:cross_root_sync_regression#1] Add a deterministic controller/SimWorld regression and routing-spec clause for cross-root Sync Tmux Layout with two editor-visible documents where the second has a ready actor bound to a dead or ownership-unproven pane; assert ProvisionForLayout replaces the stale binding and converges to two panes while ObserveOnly never focuses/reuses the unproven pane.
 <!-- /agent:run -->
 
 ## Run: Issues
 <!-- agent:loop id=issues interval=1h priority -->
+- 🚧 [#subagent:layout_liveverify#1] do [#layoutunprovenliveverify]
 - ☑️ [#subagent:grokqueuesubagents_closeout#1] do [#grokqueuesubagents]
 - ☑️ [#subagent:release_publish_patch#3] release + publish
-- 📥 We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
+- 🚧 We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
 <!-- /agent:loop -->
 
 ## Todo
@@ -484,7 +527,7 @@ force-write the file, and do not delete the queue items.                        
 
 ## Backlog
 <!-- agent:backlog priority queue -->
-- [ ] [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
+- [ ] 🚧 [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [ ] 🚧 [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
 <!-- /agent:backlog -->
 

@@ -212,7 +212,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd(
         "/agent-doc doctor",
         "<FILE> [--preflight-json PATH] [--session-check-json PATH] [--limit N] [--json]",
-        "Diagnose workflow invariant status and print exact repair/operator actions",
+        "Diagnose workflow invariant status and print exact repair/operator actions; exits 0 ok, 3 recoverable, 4 operator, 5 blocked",
     ));
     cmds.push(cmd(
         "/agent-doc lint",

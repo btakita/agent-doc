@@ -2950,6 +2950,10 @@ enum Commands {
         probe: bool,
     },
     /// Diagnose workflow invariant status for a session document
+    ///
+    /// Exit status reports the overall outcome: 0 ok, 3 recoverable (a safe
+    /// repair command exists), 4 operator (a person must act), 5 blocked
+    /// (required evidence is missing). 1 means the doctor itself failed.
     #[command(visible_alias = "diagnose")]
     Doctor {
         /// Path to the session document
@@ -5216,6 +5220,12 @@ fn main() -> ExitCode {
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
+            // A completed `doctor` diagnosis whose outcome is not `ok`. The
+            // report is already printed; the outcome is the exit status, with
+            // no `Error:` report and no dogfood fix prompt.
+            if let Some(status) = agent_doc_workflow_io::doctor::workflow_doctor_exit_status(&err) {
+                return ExitCode::from(status);
+            }
             if let Some(deferral) =
                 agent_doc_write_converge_io::retained_cli_write::retained_cli_write_deferral(&err)
             {

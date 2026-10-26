@@ -174,6 +174,22 @@ agent-doc commit <FILE>
 
 Git add + commit with an auto-generated `agent-doc: YYYY-MM-DD HH:MM:SS` timestamp message.
 
+## doctor
+
+```
+agent-doc doctor <FILE> [--preflight-json PATH] [--session-check-json PATH] [--limit N] [--json]
+```
+
+Diagnose the session document against the workflow invariant catalog (alias: `diagnose`). Each invariant reports `ok`, `recoverable`, `operator`, or `blocked` with the exact repair commands or operator steps; the report goes to stdout (JSON with `--json`). The exit status is the overall (most severe) outcome, so scripts and CI can act on it:
+
+| Exit | Outcome | Meaning |
+|------|---------|---------|
+| 0 | `ok` | Every invariant holds. |
+| 3 | `recoverable` | A safe repair exists: run the printed `repair:` commands or `agent-doc autofix <FILE> --apply`. |
+| 4 | `operator` | A person must act on the printed `operator:` steps. |
+| 5 | `blocked` | Required evidence is missing; gather it with the printed command (for example `--preflight-json` from `agent-doc preflight <FILE> --probe`). |
+| 1 | — | The doctor itself failed (unreadable document or capture). |
+
 ## compact
 
 ```

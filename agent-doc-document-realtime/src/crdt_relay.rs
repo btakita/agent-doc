@@ -686,6 +686,11 @@ pub struct RetainedCanonicalProjection {
     /// round trip lands, the empty hub is transport state, not document
     /// authority, and must not satisfy a commit/read barrier.
     pub retained_replica_reseed_pending: bool,
+    /// `#componentownclose` live fence: a live editor update removed a
+    /// component marker and broke the pairing. A replacement controller that
+    /// reattaches to this projection keeps refusing adoption until the
+    /// operator repairs the markers.
+    pub component_structure_fenced: bool,
 }
 
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
@@ -765,6 +770,15 @@ pub struct RelayHub {
     /// installed an empty relay frontier, but the editor has not yet published
     /// the retained state that makes that frontier authoritative.
     retained_replica_reseed_pending: Source<bool>,
+    /// `#componentownclose` live fence: set when a live editor update removed
+    /// a component marker and left the canonical with a component parse
+    /// failure. The CRDT canonical keeps absorbing the editor's ops (so the
+    /// operator's buffer is never reverted), but while the canonical still
+    /// fails to parse it is not current text and does not pass the commit
+    /// barrier, so nothing persists, snapshots, or commits it. The last valid
+    /// revision stays the committed/persisted one. Cleared by the first op
+    /// that leaves the canonical parseable again.
+    component_structure_fenced: bool,
     /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
     /// the **single** source of truth for whether a member is connected — the former
     /// `Member.live` field is gone. The present set only grows (deferral, not
@@ -1523,6 +1537,7 @@ impl RelayHub {
             ctx,
             controller_projection_established,
             retained_replica_reseed_pending,
+            component_structure_fenced: false,
             liveness,
             membership_epoch,
             live_editor_count,
@@ -1611,6 +1626,7 @@ impl RelayHub {
             &hub.retained_replica_reseed_pending,
             projection.retained_replica_reseed_pending,
         );
+        hub.component_structure_fenced = projection.component_structure_fenced;
         if hub.live_document_projection_enabled() {
             let recovered_text = hub.canonical.text();
             hub.reset_live_document_projection(&recovered_text);
@@ -1631,6 +1647,7 @@ impl RelayHub {
             automatic_history_compaction_requested: self
                 .automatic_history_compaction_requested,
             retained_replica_reseed_pending: self.retained_replica_reseed_pending(),
+            component_structure_fenced: self.component_structure_fenced,
         }
     }
 
@@ -1853,6 +1870,48 @@ impl RelayHub {
             return None;
         }
         element::component_parse_failure(&self.canonical.text())
+    }
+
+    /// `#componentownclose` live fence: a live editor update removed a
+    /// component marker and broke the pairing. Refuse adoption instead of
+    /// restoring the last valid text over the operator's buffer: the canonical
+    /// keeps the operator's ops (no revert, no push-back to the editor), and
+    /// [`Self::component_structure_refusal`] keeps it out of current-text
+    /// reads and the commit barrier until the markers pair again.
+    pub fn fence_component_structure(&mut self) {
+        if !self.component_structure_fenced {
+            self.component_structure_fenced = true;
+            self.bump_delivery_epoch();
+        }
+    }
+
+    /// Whether the live component-structure fence is up (it may already be
+    /// releasable; see [`Self::component_structure_refusal`]).
+    pub fn component_structure_fenced(&self) -> bool {
+        self.component_structure_fenced
+    }
+
+    /// `#componentownclose`: why the canonical is not adoptable right now.
+    /// The live fence's parse failure first, else a pending retained reseed's.
+    /// `None` when neither fence holds the canonical back.
+    pub fn component_structure_refusal(&self) -> Option<String> {
+        if self.component_structure_fenced
+            && let Some(reason) = element::component_parse_failure(&self.canonical.text())
+        {
+            return Some(reason);
+        }
+        self.retained_replica_reseed_structural_refusal()
+    }
+
+    /// Drop the live fence once the canonical parses again: the operator's
+    /// repair is adopted as ordinary current text on the op that made it.
+    fn release_repaired_component_structure_fence(&mut self) {
+        if self.component_structure_fenced
+            && element::component_parse_failure(&self.canonical.text()).is_none()
+        {
+            self.component_structure_fenced = false;
+            self.bump_delivery_epoch();
+        }
     }
 
     /// Whether additive updates from `client_id` must remain quarantined until
@@ -2158,6 +2217,7 @@ impl RelayHub {
         // frontier. Only this content-bearing round trip can promote the
         // fresh controller's temporary empty hub to document authority.
         self.complete_retained_replica_reseed();
+        self.release_repaired_component_structure_fence();
         Ok(packet)
     }
 
@@ -2282,6 +2342,7 @@ impl RelayHub {
         if lineage.is_some() && self.canonical.state_vector() != before_frontier {
             self.complete_retained_replica_reseed();
         }
+        self.release_repaired_component_structure_fence();
         Ok(DocumentOpDeltaOutcome::Applied {
             changed: self.canonical.text() != before,
         })
@@ -2939,6 +3000,13 @@ impl RelayHub {
         let settled = flush_to_commit_barrier(&self.canonical, &self.live_editors())?;
         let after_text = self.canonical.text();
         self.sync_live_document_projection(&before_text, &after_text);
+        // `#componentownclose`: a canonical whose markers a live edit broke is
+        // never a committable cut, however settled the replicas are.
+        if self.component_structure_fenced
+            && element::component_parse_failure(&after_text).is_some()
+        {
+            return Ok(false);
+        }
         Ok(settled)
     }
 
@@ -2946,6 +3014,11 @@ impl RelayHub {
     /// editors (no flush) — the non-mutating barrier probe.
     pub fn commit_barrier_ready(&self) -> Result<bool> {
         if self.retained_replica_reseed_pending() {
+            return Ok(false);
+        }
+        if self.component_structure_fenced
+            && element::component_parse_failure(&self.canonical.text()).is_some()
+        {
             return Ok(false);
         }
         commit_barrier_ready(&self.canonical, &self.live_editors())
@@ -6360,6 +6433,77 @@ mod tests {
         assert_eq!(hub.canonical_text(), repaired);
         assert!(!hub.retained_replica_reseed_pending());
         assert!(hub.retained_replica_reseed_structural_refusal().is_none());
+        assert!(hub.commit_barrier_ready().unwrap());
+    }
+
+    /// `#componentownclose` live fence: on a running hub, a member update that
+    /// deletes the loop close and the sibling todo opener is kept in the
+    /// canonical (no compensating ops, nothing queued back to the editor), but
+    /// the canonical is not a committable cut. The member's repair releases it,
+    /// and the fence survives a controller handoff through the retained
+    /// projection.
+    #[test]
+    fn componentownclose_live_marker_removal_fences_without_reverting_the_editor() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit, OpenerStyle};
+        let valid = fx::document(OpenerStyle::HeadingPrefixed, LoopEdit::None);
+        let broken = fx::document(
+            OpenerStyle::HeadingPrefixed,
+            LoopEdit::DeleteThroughTodoBody,
+        );
+        let mut hub = RelayHub::from_text(1, &valid);
+        hub.establish_controller_projection();
+        let member = 7;
+        hub.register(member).unwrap();
+        let editor = ReplicaState::from_encoded(member, &hub.canonical_encoded_state()).unwrap();
+        assert!(hub.commit_barrier_ready().unwrap());
+        // Drain the registration deliveries so only this update's are seen.
+        for pending in hub.pending_updates(member).unwrap() {
+            editor.apply_update(&pending.update).unwrap();
+        }
+        assert_eq!(editor.text(), valid);
+        let queued_before = hub.pending_updates(member).unwrap().len();
+
+        let before = editor.state_vector();
+        for (offset, delete_len, insert) in minimal_char_span_edits(&valid, &broken).unwrap() {
+            editor.apply_local_edit(offset, delete_len, &insert);
+        }
+        let packet = hub
+            .relay_update(member, &editor.diff(&before).unwrap())
+            .unwrap();
+        assert!(!packet.targets.contains(&member));
+        hub.fence_component_structure();
+
+        assert_eq!(hub.canonical_text(), broken);
+        assert_eq!(hub.member_text(member).as_deref(), Some(broken.as_str()));
+        assert_eq!(hub.pending_updates(member).unwrap().len(), queued_before);
+        assert!(!hub.awaits_canonical_projection(member));
+        assert!(!hub.commit_barrier_ready().unwrap());
+        assert!(!hub.commit_barrier().unwrap());
+        assert!(
+            hub.component_structure_refusal()
+                .unwrap()
+                .contains("opened 'agent:loop' but closed '/agent:todo'")
+        );
+
+        // A replacement controller reattaching to the retained projection keeps
+        // refusing adoption.
+        let projection = hub.retained_canonical_projection();
+        assert!(projection.component_structure_fenced);
+        let handed_off = RelayHub::from_retained_canonical_projection(2, &projection).unwrap();
+        assert!(handed_off.component_structure_fenced());
+        assert!(!handed_off.commit_barrier_ready().unwrap());
+
+        // The operator restores the markers: the same op releases the fence.
+        let repaired = fx::document(OpenerStyle::HeadingPrefixed, LoopEdit::DeleteRowsKeepClose);
+        let before = editor.state_vector();
+        for (offset, delete_len, insert) in minimal_char_span_edits(&broken, &repaired).unwrap() {
+            editor.apply_local_edit(offset, delete_len, &insert);
+        }
+        hub.relay_update(member, &editor.diff(&before).unwrap())
+            .unwrap();
+        assert_eq!(hub.canonical_text(), repaired);
+        assert!(!hub.component_structure_fenced());
+        assert!(hub.component_structure_refusal().is_none());
         assert!(hub.commit_barrier_ready().unwrap());
     }
 

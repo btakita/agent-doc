@@ -150,12 +150,26 @@ guesses a span:
   readable as current text and does not pass the commit barrier, so retained
   persistence, snapshots, and commits cannot adopt it. The hub keeps absorbing
   the editor's ops, so the reseed
-  completes on the first op after the operator repairs the markers. A live
-  update that removes a marker and breaks the pairing keeps the last valid
-  canonical (`#replica-structure-guard`).
+  completes on the first op after the operator repairs the markers.
+- A running controller applies the same fence to a live editor update that
+  removes a marker and breaks the pairing (`#replica-structure-guard`). The
+  relay does not restore the last valid text over the editor, push it back to
+  the editor, or force the editor to reproject. The hub keeps the operator's
+  ops, so the editor buffer and the relay hold the same text. While the
+  canonical still fails to parse, it is fenced
+  (`RelayHub::component_structure_refusal`). It is not current text and does
+  not pass the commit barrier. The last valid revision therefore stays the
+  persisted, snapshotted, and committed one. The first op that leaves the
+  markers paired releases the fence, and that op is adopted as ordinary current
+  text. The fence is carried across a controller handoff in the retained
+  canonical projection. On 2026-10-26, after the reseed fix, an
+  already-running controller still reverted the incident edit (gap 2).
 - Each refusal is surfaced to the operator at ingest, with the markers, lines,
-  and repair: `crdt_replica_reseed_structural_refused` or
-  `crdt_replica_update_component_markers_removed` in ops.log. The binary also
+  and repair. ops.log gets `crdt_replica_reseed_structural_refused`, or
+  `crdt_replica_update_component_structure_fenced` plus
+  `crdt_replica_update_component_markers_removed` for a live update. A repair
+  logs `crdt_replica_reseed_structural_cleared` or
+  `crdt_replica_update_component_markers_repaired`. The binary also
   writes `.agent-doc/state/editor-route-errors/<doc>.txt`, which the JetBrains
   plugin shows as the editor's `⚠ agent-doc:` status. Promotion clears it.
   agent-doc never reverts the operator's text to repair it. The editor buffer

@@ -3686,12 +3686,13 @@ pub fn relay_replica_update_for_file(
     // controller-to-editor canonical projection repairs the consumer; the stale
     // editor baseline is never adopted as whole-document authority.
     let mut reseed_structure = RetainedReseedStructure::Unchanged;
+    let mut live_structure = LiveComponentStructure::Unchanged;
     let (
         packet,
         reattached,
         canonical_projection_pending,
         editor_reseed_requested,
-        corruption_restored,
+        markers_removed,
         isolation_refused_lossy,
         isolation_regions_restored,
         queue_attempt_projection,
@@ -3699,6 +3700,7 @@ pub fn relay_replica_update_for_file(
         automatic_history_compaction_deferred,
     ) = with_hub_seeded_from_file(file, |hub| -> Result<_> {
         let retained_reseed_was_pending = hub.retained_replica_reseed_pending();
+        let structure_was_fenced = hub.component_structure_fenced();
         let registered = hub.is_registered(client_id);
         let decision = decide_cold_start_replica_update(
             registered,
@@ -3707,10 +3709,9 @@ pub fn relay_replica_update_for_file(
             !registered && relay_holds_only_disk_rung(hub, file),
         );
         // #replica-structure-guard: capture the clean pre-update canonical so a
-        // connected editor pushing a stale/truncated buffer (one whose merged
-        // result would structurally corrupt the canonical — e.g. tombstoning a
-        // component close marker) can be rejected and the canonical restored
-        // before the corruption ever becomes authoritative.
+        // connected editor buffer whose merged result structurally breaks the
+        // canonical (e.g. deleting a component close marker) is detected
+        // before that text can become authoritative.
         let before_text = hub.canonical_text();
         let (packet, reattached, canonical_projection_pending, editor_reseed_requested) =
             match decision {
@@ -3735,7 +3736,7 @@ pub fn relay_replica_update_for_file(
                 // projection, nothing queued over the editor's buffer.
                 ColdStartReplicaUpdateDecision::RequestEditorReseed => (None, false, false, true),
             };
-        let mut corruption_restored = None;
+        let mut markers_removed = None;
         // `#reconcilesyntheticbase`: a region-scoped restore rides the normal
         // delta in `packet.update` and names `origin` among its targets, so the
         // editor that produced the update converges from that delta like any
@@ -3781,18 +3782,21 @@ pub fn relay_replica_update_for_file(
                 && let Some(reason) =
                     agent_doc_element::element::structural_corruption_reason(&after_text)
             {
-                // The merged update structurally corrupted the canonical.
-                // Restore it to the clean pre-update text. `apply_canonical_replace`
-                // generates proper CRDT ops and fans the restoration out to every
-                // live member (including the corrupting editor), so hub-side
-                // mirrors re-converge to the clean canonical. The corrupting
-                // editor is also forced to re-project so a still-stale editor
-                // buffer cannot immediately re-push the same corruption.
-                hub.apply_canonical_replace(&after_text, &before_text)?;
-                hub.require_canonical_projection(client_id);
-                corruption_restored = Some(reason);
+                // `#componentownclose` (live path): the update removed a
+                // component marker and broke the pairing. The editor buffer is
+                // operator-visible text and stays authoritative, so nothing is
+                // restored over it and nothing is pushed back to the editor:
+                // restoring `before_text` here is what reverted operator text.
+                // Instead the hub fences the canonical. It keeps the operator's
+                // ops, but it is not current text and does not pass the commit
+                // barrier, so the last valid revision stays the persisted and
+                // committed one. The first op that repairs the markers releases
+                // the fence and is adopted normally.
+                hub.fence_component_structure();
+                markers_removed = Some(reason);
             }
         }
+        live_structure = LiveComponentStructure::observe(structure_was_fenced, hub);
         // A retained editor reseed is allowed to restore operator text, but its
         // document cut is not authority for durable queue-attempt state. Repair
         // the just-materialized canonical before any consumer can observe the
@@ -3834,7 +3838,7 @@ pub fn relay_replica_update_for_file(
             reattached,
             canonical_projection_pending,
             editor_reseed_requested,
-            corruption_restored,
+            markers_removed,
             isolation_refused_lossy,
             isolation_regions_restored,
             queue_attempt_projection,
@@ -3870,6 +3874,7 @@ pub fn relay_replica_update_for_file(
         }));
     }
     reseed_structure.surface(file, "replica_update");
+    live_structure.surface(file, "replica_update");
     if isolation_regions_restored {
         agent_doc_ops_log_io::log_op(
             file,
@@ -3890,24 +3895,18 @@ pub fn relay_replica_update_for_file(
             ),
         );
     }
-    if let Some(reason) = corruption_restored {
-        // `#componentownclose`: the operator's edit removed a component marker
-        // and broke the pairing. Say so in the editor right away, naming the
-        // markers, before any later path can act on the buffer.
-        surface_component_structure_refusal(
-            file,
-            "crdt_replica_update_component_markers_removed",
-            "replica_update",
-            reason.strip_prefix("parse_error: ").unwrap_or(&reason),
-            "action=canonical_kept_at_last_valid_revision",
-        );
+    if let Some(reason) = markers_removed {
+        // `#componentownclose`: the edit itself is recorded once per
+        // introduction; the editor diagnostic (`live_structure.surface` above)
+        // names the markers and the repair.
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_replica_update_corruption_rejected file={} authority=multi_replica client_id={} reason={} recovery=canonical_restored_and_member_reprojected",
+                "{} file={} authority=multi_replica client_id={} reason={} recovery=editor_text_kept canonical_adoption=refused commit=refused #componentownclose",
+                LIVE_STRUCTURE_FENCED_EVENT,
                 file.display(),
                 client_id,
-                reason,
+                reason.split_whitespace().collect::<Vec<_>>().join("_"),
             ),
         );
     }
@@ -5633,10 +5632,13 @@ pub fn apply_document_op_delta_for_file_in_lineage(
     delta: &[u8],
 ) -> Result<Option<DocumentOpDeltaOutcome>> {
     let mut reseed_structure = RetainedReseedStructure::Unchanged;
+    let mut live_structure = LiveComponentStructure::Unchanged;
     let Some(result) = with_existing_hub(file, |hub| -> Result<_> {
         let retained_reseed_was_pending = hub.retained_replica_reseed_pending();
+        let structure_was_fenced = hub.component_structure_fenced();
         let outcome = hub.apply_document_op_delta_in_lineage(lineage, delta)?;
         reseed_structure = RetainedReseedStructure::observe(retained_reseed_was_pending, hub);
+        live_structure = LiveComponentStructure::observe(structure_was_fenced, hub);
         let queue_attempt_projection =
             if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {
                 reconcile_durable_queue_attempts_on_hub(file, hub)?
@@ -5668,6 +5670,7 @@ pub fn apply_document_op_delta_for_file_in_lineage(
     };
     let (outcome, fence, queue_attempt_projection) = result?;
     reseed_structure.surface(file, "document_op");
+    live_structure.surface(file, "document_op");
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -5757,7 +5760,62 @@ impl RetainedReseedStructure {
                 reason,
                 "action=keep_reseed_fence canonical=not_adopted",
             ),
-            Self::Promoted => clear_reseed_structure_refusal(file, source),
+            Self::Promoted => clear_component_structure_refusal(
+                file,
+                "crdt_replica_reseed_structural_cleared",
+                source,
+                "action=reseed_promoted",
+            ),
+        }
+    }
+}
+
+/// ops.log event for a live editor update that removed a component marker
+/// and broke the pairing (`#componentownclose`, live path).
+pub const LIVE_STRUCTURE_FENCED_EVENT: &str = "crdt_replica_update_component_structure_fenced";
+
+/// `#componentownclose` (live path): what one relay ingest did to the hub's
+/// live component-structure fence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LiveComponentStructure {
+    /// The fence was not up and is not up.
+    Unchanged,
+    /// The canonical's markers do not pair: the operator's text is kept, but
+    /// nothing adopts it as canonical, snapshot, or commit.
+    Fenced(String),
+    /// The operator's edit repaired the markers and the canonical was adopted.
+    Released,
+}
+
+impl LiveComponentStructure {
+    fn observe(was_fenced: bool, hub: &RelayHub) -> Self {
+        if hub.component_structure_fenced()
+            && let Some(reason) = hub.component_structure_refusal()
+        {
+            return Self::Fenced(reason);
+        }
+        if was_fenced && !hub.component_structure_fenced() {
+            return Self::Released;
+        }
+        Self::Unchanged
+    }
+
+    fn surface(&self, file: &Path, source: &str) {
+        match self {
+            Self::Unchanged => {}
+            Self::Fenced(reason) => surface_component_structure_refusal(
+                file,
+                "crdt_replica_update_component_markers_removed",
+                source,
+                reason,
+                "action=editor_text_kept canonical=not_adopted commit=refused",
+            ),
+            Self::Released => clear_component_structure_refusal(
+                file,
+                "crdt_replica_update_component_markers_repaired",
+                source,
+                "action=repaired_buffer_adopted",
+            ),
         }
     }
 }
@@ -5809,7 +5867,7 @@ fn surface_component_structure_refusal(
     );
 }
 
-fn clear_reseed_structure_refusal(file: &Path, source: &str) {
+fn clear_component_structure_refusal(file: &Path, event: &str, source: &str, action: &str) {
     let Some(path) =
         agent_doc_controller::editor_route_error::editor_route_error_path_for_file(file)
     else {
@@ -5821,7 +5879,7 @@ fn clear_reseed_structure_refusal(file: &Path, source: &str) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_replica_reseed_structural_cleared file={} source={source} action=reseed_promoted #componentownclose",
+                "{event} file={} source={source} {action} #componentownclose",
                 file.display(),
             ),
         );
@@ -10000,6 +10058,194 @@ mod tests {
         );
     }
 
+    /// `#componentownclose` gap 2 (2026-10-26, after `d8794daf9a`): an
+    /// already-running controller receives one live editor update that
+    /// deletes `<!-- /agent:loop -->` together with the sibling todo's opener
+    /// (the incident span: loop tail rows through the todo body). The relay
+    /// used to restore the last valid canonical and push it back into the
+    /// editor, reverting operator text. It must keep the editor text (no
+    /// delivery that changes the editor buffer, no forced reprojection),
+    /// keep the last valid revision as the only committed/persistable one
+    /// (no current text, no commit barrier), and show the `⚠ agent-doc:`
+    /// marker diagnostic. The operator's repair edit is adopted normally and
+    /// clears the diagnostic.
+    #[test]
+    fn componentownclose_running_controller_keeps_operator_text_when_markers_are_removed() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit};
+        for style in fx::ALL_STYLES {
+            let (dir, doc) = temp_doc("todocollapse-live.md");
+            std::fs::write(&doc, fx::document(style, LoopEdit::None)).unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+            seed_live_reliable_sync_open(&doc.display().to_string());
+            let identity = "intellij:todocollapse-live";
+            let (client_id, bootstrap) =
+                register_replica_for_file_with_liveness(&doc, identity, |_| true)
+                    .unwrap()
+                    .expect("editor replica attaches to the running controller");
+            let editor =
+                agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
+                    .unwrap();
+            let valid = editor.text();
+            assert!(agent_doc_element::element::component_parse_failure(&valid).is_none());
+            with_hub(&doc, |hub| {
+                assert_eq!(hub.canonical_text(), valid);
+                assert!(hub.commit_barrier_ready().unwrap());
+            })
+            .unwrap();
+            let committed_before = with_hub(&doc, |hub| {
+                hub.retained_canonical_projection().last_committed_text
+            })
+            .unwrap();
+
+            // One operator transaction: delete from after the Watch row up to
+            // `<!-- /agent:todo -->`, taking the loop close and the todo opener.
+            let watch_end = valid.find(fx::WATCH_ROW).unwrap() + fx::WATCH_ROW.len();
+            let todo_close = valid.find("<!-- /agent:todo -->").unwrap();
+            let todo_heading = valid.find("## Todo").unwrap();
+            let broken = format!("{}{}", &valid[..watch_end], &valid[todo_close..]);
+            assert!(!broken.contains("<!-- /agent:loop -->"));
+            assert!(!broken.contains("<!-- agent:todo -->"));
+            let frontier = editor.state_vector();
+            apply_text_change(&editor, &valid, &broken);
+            let fanout =
+                relay_replica_update_for_file(&doc, identity, &editor.diff(&frontier).unwrap())
+                    .unwrap()
+                    .expect("the live update reaches the running controller");
+            assert!(
+                !fanout.targets.contains(&client_id),
+                "nothing is fanned back to the editing replica"
+            );
+
+            // Operator text is kept: the editor buffer is unchanged, the hub
+            // holds exactly that text, and nothing queued for the editor would
+            // change its buffer.
+            assert_eq!(editor.text(), broken);
+            let probe_state = editor.encode_state();
+            with_hub(&doc, |hub| {
+                assert_eq!(
+                    hub.canonical_text(),
+                    broken,
+                    "the relay never reverts operator text"
+                );
+                assert_eq!(hub.member_text(client_id).as_deref(), Some(broken.as_str()));
+                assert!(
+                    !hub.awaits_canonical_projection(client_id),
+                    "the editor is not forced to reproject the last valid canonical"
+                );
+                let probe =
+                    agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &probe_state)
+                        .unwrap();
+                for pending in hub.pending_updates(client_id).unwrap() {
+                    probe.apply_update(&pending.update).unwrap();
+                }
+                assert_eq!(probe.text(), broken, "no delivery pushes old text back");
+                // Adoption refused: not a committable cut, not readable text.
+                assert!(hub.component_structure_fenced());
+                assert!(!hub.commit_barrier_ready().unwrap());
+                assert!(!hub.commit_barrier().unwrap());
+                let reason = hub.component_structure_refusal().unwrap();
+                assert!(
+                    reason.contains("opened 'agent:loop' but closed '/agent:todo'"),
+                    "{reason}"
+                );
+                assert_eq!(
+                    hub.retained_canonical_projection().last_committed_text,
+                    committed_before,
+                    "the last valid revision stays the committed one"
+                );
+            })
+            .unwrap();
+            assert_eq!(
+                current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+                CurrentText::EditorSyncPending,
+            );
+
+            // The diagnostic fires once, in ops.log and the editor status file.
+            let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+            let ops = std::fs::read_to_string(&ops_path).unwrap();
+            assert_eq!(ops.matches(LIVE_STRUCTURE_FENCED_EVENT).count(), 1, "{ops}");
+            let surfaced: Vec<&str> = ops
+                .lines()
+                .filter(|line| line.contains("crdt_replica_update_component_markers_removed"))
+                .collect();
+            assert_eq!(surfaced.len(), 1, "{ops}");
+            assert!(
+                surfaced[0].contains("action=editor_text_kept"),
+                "{}",
+                surfaced[0]
+            );
+            assert!(
+                !ops.contains("crdt_replica_update_corruption_rejected"),
+                "{ops}"
+            );
+            let status =
+                agent_doc_controller::editor_route_error::editor_route_error_path_for_file(&doc)
+                    .unwrap();
+            let diagnostic = std::fs::read_to_string(&status).unwrap();
+            assert!(
+                diagnostic.starts_with(RESEED_STRUCTURE_REFUSAL_HEADER),
+                "{diagnostic}"
+            );
+            assert!(
+                diagnostic.contains("show HEAD:./todocollapse-live.md"),
+                "{diagnostic}"
+            );
+
+            // Typing elsewhere while still broken is kept and stays fenced
+            // without repeating the receipt.
+            let typed = broken.replace("# agent-doc bugs\n", "# agent-doc bugs!\n");
+            let frontier = editor.state_vector();
+            apply_text_change(&editor, &broken, &typed);
+            relay_replica_update_for_file(&doc, identity, &editor.diff(&frontier).unwrap())
+                .unwrap()
+                .unwrap();
+            with_hub(&doc, |hub| {
+                assert_eq!(hub.canonical_text(), typed);
+                assert!(!hub.commit_barrier_ready().unwrap());
+            })
+            .unwrap();
+            let ops = std::fs::read_to_string(&ops_path).unwrap();
+            assert_eq!(
+                ops.matches("crdt_replica_update_component_markers_removed")
+                    .count(),
+                1,
+                "{ops}"
+            );
+
+            // The repair edit (restore the loop close and the todo) is adopted
+            // as ordinary current text and clears the diagnostic.
+            let repaired = format!(
+                "{}<!-- /agent:loop -->\n\n{}",
+                &valid[..watch_end],
+                &valid[todo_heading..]
+            )
+            .replace("# agent-doc bugs\n", "# agent-doc bugs!\n");
+            assert!(agent_doc_element::element::component_parse_failure(&repaired).is_none());
+            let frontier = editor.state_vector();
+            apply_text_change(&editor, &typed, &repaired);
+            relay_replica_update_for_file(&doc, identity, &editor.diff(&frontier).unwrap())
+                .unwrap()
+                .unwrap();
+            with_hub(&doc, |hub| {
+                assert_eq!(hub.canonical_text(), repaired);
+                assert!(!hub.component_structure_fenced());
+                assert!(hub.component_structure_refusal().is_none());
+                assert!(hub.commit_barrier_ready().unwrap());
+            })
+            .unwrap();
+            match current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap() {
+                CurrentText::Current { text, .. } => assert_eq!(text, repaired),
+                other => panic!("the repaired buffer must be current text: {other:?}"),
+            }
+            assert!(!status.exists(), "the repair clears the diagnostic");
+            let ops = std::fs::read_to_string(&ops_path).unwrap();
+            assert!(
+                ops.contains("crdt_replica_update_component_markers_repaired"),
+                "{ops}"
+            );
+        }
+    }
+
     #[test]
     fn retained_replica_handoff_cannot_regress_a_running_queue_attempt_to_bare() {
         let (dir, doc) = temp_doc("retained-reseed-running-claim.md");
@@ -11589,15 +11835,20 @@ mod tests {
         with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), next)).unwrap();
     }
 
-    /// `#replica-structure-guard`: a connected editor that pushes a stale/truncated
-    /// buffer whose merged result would structurally corrupt the canonical (here,
-    /// tombstoning the `<!-- /agent:done -->` close marker so `agent:done` is left
-    /// unclosed) must not be able to make that corruption authoritative. The guard
-    /// restores the canonical to its clean pre-update text and forces the corrupting
-    /// editor to re-project. Regression for the 2026-08-06 agent-doc-bugs2.md wedge
-    /// where a JetBrains replica_update left the canonical missing its close marker.
+    /// `#replica-structure-guard`: a connected editor whose merged update
+    /// structurally breaks the canonical (here, tombstoning the
+    /// `<!-- /agent:done -->` close marker so `agent:done` is left unclosed)
+    /// must not be able to make that text authoritative. Regression for the
+    /// 2026-08-06 agent-doc-bugs2.md wedge where a JetBrains replica_update left
+    /// the canonical missing its close marker.
+    ///
+    /// `#componentownclose`: the guard used to restore the clean pre-update
+    /// text and force the editor to re-project it, which reverts operator text
+    /// whenever the operator made the edit. Now the editor buffer is kept and
+    /// the canonical is fenced: not current text, not committable, diagnostic
+    /// shown.
     #[test]
-    fn relay_update_that_corrupts_canonical_structure_is_restored() {
+    fn relay_update_that_corrupts_canonical_structure_is_fenced_not_reverted() {
         let (_dir, doc) = temp_doc("replica-structure-guard.md");
         let body = concat!(
             "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
@@ -11644,32 +11895,31 @@ mod tests {
             .unwrap()
             .expect("corrupting relay update is handled, not a transport error");
 
-        // The canonical must be restored to its clean pre-update state: the close
-        // marker survived and the document is not structurally corrupt.
+        // The editor's text is kept, but the broken canonical is fenced: it
+        // is neither a committable cut nor readable current text.
         with_hub(&doc, |hub| {
-            let canonical = hub.canonical_text();
+            assert_eq!(hub.canonical_text(), editor.text());
             assert!(
-                canonical.contains("<!-- /agent:done -->"),
-                "canonical close marker must survive a corrupting replica update:\n{canonical}"
+                !hub.awaits_canonical_projection(client_id),
+                "the editor must not be forced to re-project over its buffer"
             );
-            assert!(
-                agent_doc_element::element::structural_corruption_reason(&canonical).is_none(),
-                "canonical must remain structurally clean:\n{canonical}"
-            );
-            assert!(
-                hub.awaits_canonical_projection(client_id),
-                "the corrupting editor must be forced to re-project the clean canonical"
-            );
+            assert!(hub.component_structure_fenced());
+            assert!(!hub.commit_barrier_ready().unwrap());
         })
         .unwrap();
+        assert_eq!(
+            current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+            CurrentText::EditorSyncPending,
+        );
 
-        // The rejection is audited.
+        // The refusal is audited.
         let ops_log =
             std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("crdt_replica_update_corruption_rejected"),
-            "ops.log must audit the rejected corruption:\n{ops_log}"
+            ops_log.contains(LIVE_STRUCTURE_FENCED_EVENT),
+            "ops.log must audit the fenced update:\n{ops_log}"
         );
+        assert!(!ops_log.contains("crdt_replica_update_corruption_rejected"));
         // `#componentownclose`: and the operator is told at ingest, in the
         // editor status diagnostic, which markers the edit broke.
         assert!(
@@ -11747,7 +11997,7 @@ mod tests {
             std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log"))
                 .unwrap_or_default();
         assert!(
-            !ops_log.contains("crdt_replica_update_corruption_rejected"),
+            !ops_log.contains(LIVE_STRUCTURE_FENCED_EVENT),
             "operator typing must not be audited as corruption:\n{ops_log}"
         );
     }
@@ -11837,7 +12087,7 @@ mod tests {
             std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log"))
                 .unwrap_or_default();
         assert!(
-            !ops_log.contains("crdt_replica_update_corruption_rejected"),
+            !ops_log.contains(LIVE_STRUCTURE_FENCED_EVENT),
             "operator marker edits must not be audited as corruption:\n{ops_log}"
         );
     }
@@ -11981,9 +12231,11 @@ mod tests {
 
     /// GH #239 keeps the stale-buffer guard: an editor update that deletes a
     /// whole opening marker LINE (text and newline, nothing in its place) is
-    /// still restored and the editor reprojected.
+    /// still caught. Since `#componentownclose` gap 2 it is fenced (kept in the
+    /// editor, never adopted or committed) rather than restored over the
+    /// editor, and restoring the line in the editor releases the fence.
     #[test]
-    fn relay_update_deleting_a_whole_marker_line_is_still_restored() {
+    fn relay_update_deleting_a_whole_marker_line_is_fenced_until_restored() {
         let identity = "intellij:stale-buffer-drops-marker-line";
         let (_dir, doc, client_id, editor, body) =
             marker_edit_fixture("marker-edit-line-drop.md", identity);
@@ -12003,18 +12255,38 @@ mod tests {
             .unwrap()
             .expect("corrupting relay update is handled, not a transport error");
 
+        let dropped = editor.text();
         with_hub(&doc, |hub| {
             assert_eq!(
                 hub.canonical_text(),
-                body,
-                "the dropped marker line is restored"
+                dropped,
+                "the editor's text is kept, not reverted"
             );
-            assert!(hub.awaits_canonical_projection(client_id));
+            assert!(!hub.awaits_canonical_projection(client_id));
+            assert!(hub.component_structure_fenced());
+            assert!(!hub.commit_barrier_ready().unwrap());
         })
         .unwrap();
         let ops_log =
             std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("crdt_replica_update_corruption_rejected"));
+        assert!(ops_log.contains(LIVE_STRUCTURE_FENCED_EVENT));
+
+        // The operator retypes the marker line: adopted, fence released.
+        relay_operator_keystroke(
+            &doc,
+            identity,
+            client_id,
+            &editor,
+            char_offset_of_text(&body, line),
+            0,
+            line,
+        );
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), body);
+            assert!(!hub.component_structure_fenced());
+            assert!(hub.commit_barrier_ready().unwrap());
+        })
+        .unwrap();
     }
 
     /// The `#markerlineedit` discriminator in isolation: what the update deleted

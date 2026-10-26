@@ -1031,12 +1031,18 @@ validation occurs before any traversal of the replica graph so neither a cyclic
 payload nor validation of a large retained history can pin the Project
 Controller while it holds document authority.
 
-A graph-valid update can still structurally corrupt the canonical: a stale or
-truncated editor buffer tombstones a component marker line and leaves the
-document unparseable (`#replica-structure-guard`). The relay restores the clean
-pre-update canonical, fences the sender for canonical projection, and logs
-`crdt_replica_update_corruption_rejected`, but only when the update introduced
-a `parse_error:` into a canonical that had none **and deleted a marker line**.
+A graph-valid update can still structurally corrupt the canonical: an editor
+buffer (an operator's deletion, or a stale or truncated buffer) tombstones a
+component marker line and leaves the document unparseable
+(`#replica-structure-guard`). The relay never reverts the editor to repair it:
+operator-visible text is authoritative. It keeps the update and fences the
+canonical (`#componentownclose`, `specs/02-document-format.md`). The fenced
+canonical is not current text and does not pass the commit barrier, so the last
+valid revision stays the persisted and committed one. The relay logs
+`crdt_replica_update_component_structure_fenced` and shows the `⚠ agent-doc:`
+marker diagnostic. The first update that pairs the markers again releases the
+fence. The fence is engaged only when the update introduced a `parse_error:`
+into a canonical that had none **and deleted a marker line**.
 An unparseable result alone is not evidence: operator typing passes through
 unparseable states. A half-typed code fence hides markers without deleting any
 (`#typingfencerevert`), and retyping a component name, changing a marker's

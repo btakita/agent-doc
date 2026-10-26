@@ -2837,6 +2837,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "tmux-router",
 ]
 

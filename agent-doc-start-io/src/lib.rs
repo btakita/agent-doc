@@ -426,17 +426,25 @@ pub fn bootstrap_start_inside_tmux_for_client(
         resume,
         harness_override,
     )?;
-    tmux.send_keys(&target.pane_id, &command).with_context(|| {
-        format!(
-            "failed to re-exec agent-doc start in pane {}",
-            target.pane_id
-        )
-    })?;
+    dispatch_start_into_pane(&tmux, &target.pane_id, &command)?;
     eprintln!(
         "[start] dispatched into tmux session '{}' pane {}; attach with: {}",
         target.outcome.session_name, target.pane_id, target.outcome.attach_command,
     );
     Ok(Some(target.outcome))
+}
+
+/// Run the re-exec'd start in its freshly provisioned pane.
+///
+/// The start becomes the pane's own process (then the operator's shell once
+/// it exits); it is never typed into the pane's new shell. No signal proves an
+/// interactive shell is reading its command line, and an rc step that reads
+/// the terminal first swallows typed bytes: zsh with no `~/.zshrc` ate the
+/// leading `/` of the absolute agent-doc path, and waiting longer would not
+/// have helped because its prompt waits for that input.
+fn dispatch_start_into_pane(tmux: &tmux_router::Tmux, pane_id: &str, command: &str) -> Result<()> {
+    agent_doc_tmux_io::launch_command_in_pane(tmux, pane_id, command)
+        .with_context(|| format!("failed to re-exec agent-doc start in pane {pane_id}"))
 }
 
 /// What an outside-tmux start does with its document.
@@ -3449,6 +3457,69 @@ mod tests {
             shared_mode,
             ensure_tmux_session_with_ide(&tmux, &file, None, true).unwrap(),
             "shared mode is the pre-lane ensure byte for byte"
+        );
+    }
+
+    /// An outside-tmux start provisions its pane in a session whose shell
+    /// reads the terminal before its first command line (zsh with no
+    /// `~/.zshrc`), and the re-exec'd start still runs whole, in the pane's
+    /// directory, with no byte left for the shell to swallow.
+    /// Isolated tmux server with a clean `HOME` only.
+    #[cfg(unix)]
+    #[test]
+    fn start_bootstrap_runs_the_start_whole_under_a_terminal_reading_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("proj");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        let file = root.join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: tmux-shell-ready\n---\n").unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\n",
+        )
+        .unwrap();
+        let shell = agent_doc_tmux_io::write_terminal_reading_test_shell(dir.path());
+        let tmux = agent_doc_tmux_io::isolated_test_tmux_with_default_shell(
+            "agent-doc-start-shell-ready",
+            &shell,
+            &home,
+        );
+        let target = match start_bootstrap_target(&tmux, &file, false, None).unwrap() {
+            StartBootstrap::Start(target) => target,
+            StartBootstrap::Reuse(outcome) => panic!("unexpected reuse of {outcome:?}"),
+        };
+        let launched = dir.path().join("launched");
+        // An absolute program path first, like the real re-exec command.
+        let command = format!("/bin/sh -c 'pwd > {}'", launched.display());
+
+        dispatch_start_into_pane(&tmux, &target.pane_id, &command).unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let recorded = loop {
+            if let Some(text) = std::fs::read_to_string(&launched)
+                .ok()
+                .filter(|text| !text.is_empty())
+            {
+                break text;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the dispatched start never ran in pane {}",
+                target.pane_id
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert_eq!(
+            std::fs::canonicalize(recorded.trim()).unwrap(),
+            std::fs::canonicalize(&root).unwrap(),
+            "the start runs in the provisioned pane's directory"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("consumed")).unwrap_or_default(),
+            "",
+            "nothing was typed for the pane's shell to swallow"
         );
     }
 

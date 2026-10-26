@@ -128,6 +128,81 @@ pub fn isolated_test_tmux(label: &str) -> IsolatedTestTmux {
     }
 }
 
+/// [`isolated_test_tmux`] whose server runs with a clean environment (`HOME`
+/// = `home`, a minimal `PATH`) and `default-shell` = `shell`, so a test can
+/// reproduce an operator shell (for example zsh with no `~/.zshrc`) without
+/// touching the operator's own shell or rc files.
+///
+/// The server holds a `main` session whose only pane is a long `sleep`, so it
+/// outlives the panes a test creates; every later pane starts `shell`.
+pub fn isolated_test_tmux_with_default_shell(
+    label: &str,
+    shell: &Path,
+    home: &Path,
+) -> IsolatedTestTmux {
+    let tmux = isolated_test_tmux(label);
+    let status = tmux
+        .cmd()
+        .env_clear()
+        .env("HOME", home)
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("TERM", "xterm-256color")
+        .env("SHELL", shell)
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            "main",
+            "-x",
+            "120",
+            "-y",
+            "30",
+            "/bin/sh",
+            "-c",
+            "exec sleep 600",
+        ])
+        .status()
+        .expect("start isolated tmux server");
+    assert!(
+        status.success(),
+        "isolated tmux new-session failed: {status}"
+    );
+    tmux.raw_cmd(&[
+        "set-option",
+        "-g",
+        "default-shell",
+        &shell.to_string_lossy(),
+    ])
+    .expect("set isolated default-shell");
+    tmux
+}
+
+/// Write an executable stand-in shell to `dir` whose startup reads one byte
+/// from the terminal before it reads any command line, recording that byte in
+/// `<dir>/consumed`, then becomes an interactive `sh`.
+///
+/// It reproduces zsh with no `~/.zshrc`, whose `zsh-newuser-install` menu
+/// swallowed the first typed byte, without needing zsh. It shows no prompt
+/// until it gets input, so a test can also show that no readiness wait could
+/// ever end.
+#[cfg(unix)]
+pub fn write_terminal_reading_test_shell(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let shell = dir.join("newuser-shell");
+    let consumed = dir.join("consumed");
+    std::fs::write(
+        &shell,
+        format!(
+            "#!/bin/sh\ndd bs=1 count=1 of='{}' 2>/dev/null\nexec /bin/sh -i\n",
+            consumed.display()
+        ),
+    )
+    .expect("write stand-in shell");
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod stand-in shell");
+    shell
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3666,11 +3666,13 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     } else {
         content.clone()
     };
-    // `#queueclaim`: heads claimed by a worker outside the in-session loop (a
-    // dispatched subagent) are in flight, so they are neither counted nor
-    // selected for this cycle.
-    let claimed_queue_items = if activation.active {
-        agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content)
+    // `#queueclaim`: heads whose workers are still claimed/dispatching or
+    // running outside the in-session loop are in flight, so they are neither
+    // counted nor selected for this cycle. Reported attempts are deliberately
+    // not excluded: their workers are finished and coordinator
+    // integration/writeback is now the drainable work (`#reportedwritebackdebt`).
+    let in_flight_queue_items = if activation.active {
+        agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(file, &content)
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
@@ -3703,7 +3705,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         None
     };
     let queue_supervisor_drainable = queue_supervisor_continuation_head.is_some();
-    let claimed_queue_heads = if activation.active && !claimed_queue_items.is_empty() {
+    let claimed_queue_heads = if activation.active {
         claimed_queue_head_facts(file, &content)
     } else {
         Vec::new()
@@ -3717,7 +3719,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     let projected_in_progress_queue_heads = load_projected_in_progress_queue_heads(file);
     let projection_entries = entries_without_out_of_loop_heads(
         &activation.entries_after,
-        &claimed_queue_items,
+        &in_flight_queue_items,
         &subagent_dispatch,
     );
     let selected_queue_prompts = if activation.active {
@@ -3735,7 +3737,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         )
         .prompts
         .into_iter()
-        .filter(|prompt| !claimed_queue_items.claims(prompt))
+        .filter(|prompt| !in_flight_queue_items.claims(prompt))
         // `#closeout-steering`: a new subagent-intent line is dispatched, not
         // drained inline (`queue_subagent_dispatch`).
         .filter(|prompt| {
@@ -6844,16 +6846,20 @@ pub fn run_queue_maintenance_with_coin_gate(
     }
 
     let mut in_progress_markers_changed = false;
-    // `#queueclaim`: a head claimed by a worker outside the in-session loop (a
-    // dispatched subagent) is in flight; this cycle must not select or consume
-    // it. It remains part of the visible in-progress projection below, so every
-    // claimed worker head carries `🚧` alongside the independently selected
-    // inline head. `#closeout-steering`: likewise a new subagent-intent line the
-    // cycle must dispatch (`queue_subagent_dispatch`). Both leave the selection
-    // projection BEFORE it picks heads, so the next head runs inline instead of
-    // the cycle selecting nothing.
-    let claimed_queue_items = if activation.active {
-        agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &current_content)
+    // `#queueclaim`: a head whose worker is still claimed/dispatching or
+    // running outside the in-session loop is in flight; this cycle must not
+    // select or consume it. Reported attempts stay fenced from redispatch but
+    // return to coordinator selection for integration/writeback
+    // (`#reportedwritebackdebt`). `#closeout-steering`: likewise a new
+    // subagent-intent line the cycle must dispatch (`queue_subagent_dispatch`).
+    // Both leave the selection projection BEFORE it picks heads, so the next
+    // coordinator-owned head runs inline instead of the cycle selecting
+    // nothing.
+    let in_flight_queue_items = if activation.active {
+        agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(
+            file,
+            &current_content,
+        )
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
@@ -6875,7 +6881,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     };
     let projection_entries = entries_without_out_of_loop_heads(
         &activation.entries_after,
-        &claimed_queue_items,
+        &in_flight_queue_items,
         &subagent_dispatch,
     );
     let active_queue_projection = if activation.active {
@@ -6933,7 +6939,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     let active_queue_prompt_texts: Vec<String> = active_queue_projection
         .prompts
         .into_iter()
-        .filter(|prompt| !claimed_queue_items.claims(prompt))
+        .filter(|prompt| !in_flight_queue_items.claims(prompt))
         .filter(|prompt| {
             !agent_doc_queue_io::subagent_dispatch::is_dispatch_item(&subagent_dispatch, prompt)
         })
@@ -7397,7 +7403,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         None
     };
     let queue_supervisor_drainable = queue_supervisor_continuation_head.is_some();
-    let claimed_queue_heads = if activation.active && !claimed_queue_items.is_empty() {
+    let claimed_queue_heads = if activation.active {
         claimed_queue_head_facts(file, &current_content)
     } else {
         Vec::new()
@@ -18981,7 +18987,7 @@ mod tests {
         agent_doc_queue_io::queue_claim::report_attempt(&doc, head, Some(running.generation))
             .unwrap();
 
-        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let queue_state = run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -19005,6 +19011,13 @@ mod tests {
             ledger.claims[0].state,
             agent_doc_queue::queue_claim::QueueClaimState::Reported
         );
+        assert_eq!(
+            queue_state.selected_queue_prompts,
+            vec![head.to_string()],
+            "a reported attempt is coordinator writeback debt, not in-flight worker work: {queue_state:#?}"
+        );
+        assert_eq!(queue_state.queue_drainable_head_count, 1);
+        assert!(queue_state.queue_continuation_required);
     }
 
     #[test]

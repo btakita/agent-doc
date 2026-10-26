@@ -27,7 +27,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.555 from release commit `f11ad5932f`; tag `v0.35.555` is the stable latest release (GitHub Latest, PyPI 0.35.555, stable target channels), replacing the cancelled v0.35.554; JetBrains classic/262/263 0.2.833/0.2.834/0.2.835, VS Code 0.2.83; GH #377 and #378 closed. Post-release `origin/main` is `2ebf740bcc` and installed locally (unreleased): loop no-resurrect/no-insert, single strike formatter, any-heading component prefixes, the fail-closed component-structure fix and live no-revert fence, GH #378, and strikes ending finished claims.
+Released and published agent-doc v0.35.555 from release commit `f11ad5932f`; tag `v0.35.555` is the stable latest release (GitHub Latest, PyPI 0.35.555, stable target channels), replacing the cancelled v0.35.554; JetBrains classic/262/263 0.2.833/0.2.834/0.2.835, VS Code 0.2.83; GH #377 and #378 closed. Post-release `origin/main` is `f155fe0076` (unreleased): loop no-resurrect/no-insert, single strike formatter, any-heading component prefixes, the fail-closed component-structure fix and live no-revert fence, GH #378, strikes ending finished claims, and the editor re-attach fix (JetBrains 0.2.836/0.2.837/0.2.838, local install in progress).
 <!-- /status:sync -->
 <!-- /agent:status -->
  

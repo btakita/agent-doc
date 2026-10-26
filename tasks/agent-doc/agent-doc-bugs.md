@@ -25,11 +25,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 27 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 30 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release, PyPI serves 0.35.553, all six native archives promoted to their stable target channels, and Homebrew is bumped. JetBrains classic/262/263 stay at 0.2.825/0.2.826/0.2.827 and VS Code at 0.2.83 (sources unchanged). Post-release `origin/main` is `3cdcc5a31e` and includes the `#claimrowmigrate` claim-row fix and the Marketplace retained-version fix; that mainline is installed locally.
+Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release, PyPI serves 0.35.553, all six native archives promoted to their stable target channels, and Homebrew is bumped. Post-release `origin/main` is `5fe17385b5` (unreleased, ships in the next release): the `#claimrowmigrate` claim-row fix, the Marketplace retained-version fix, GH #375 (JetBrains 0.2.828/0.2.829/0.2.830), GH #373 (zero-column route), and GH #374 (heading-anchored `agent:run` respond + merge). #373 and #375 are closed and installed locally; #374 is installing.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -510,6 +510,48 @@ The worker's commit `a50a1e89eb` fast-forwarded `main`. Its verification:
 `make install` installed JetBrains classic 0.2.828, 2026.2 0.2.829, and 2026.3 0.2.830. The running IntelliJ 2026.3 and Rider 2026.2 must restart to load the new generation. VS Code packaging was skipped because `vsce` is not installed, and the extension source is unchanged. The fix ships in the next agent-doc release.
 
 The #373, #374, and queue mirror-sync workers are still running.
+
+### Re: GH #373 and GH #374 fixed — opus-5 · 2026-10-26T10:53-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/373
+
+[GH #373](https://github.com/btakita/agent-doc/issues/373) is fixed in `589c4b6d70`, installed, and closed.
+
+**Cause:** On a Remote Dev backend, the plugin's `--col` fallback sees no selected files or focused editor. The route request therefore carried zero columns. The controller refused any zero-column request with `editor route requires the exact visible layout before dispatch`. That refusal ran before the GH #347 focus-only dispatch and before the GH #360 install-remedy refusal.
+
+**Fix:** A non-`exact` route whose `--col` arguments name no document is now a one-column `ensure` route for the routed document.
+- A document with a live pane gets a focus-only dispatch. No layout is published.
+- A document with no pane gets the `flat_evidence_has_no_column_geometry` refusal and its install remedy.
+- An `exact` route with zero columns still refuses. No column is guessed.
+
+This is a controller-only change, so plugin 0.2.824 needs no update.
+
+**Verification:** The 3 new regressions pass, and each fails with the fix disabled. The 35 related route tests and `make check-fast` pass. After the rebase, the coordinator reran the `editor_route` tests, and they passed.
+
+The worker's full controller-crate run showed one failure. It is in an unrelated test, `retained_transition_adapter_does_not_hold_the_reactive_context`, which passes when run alone. That test is queued as its own follow-up, and `subagent:retainedgateflake` is working on it.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/374
+
+[GH #374](https://github.com/btakita/agent-doc/issues/374) is fixed in `5fe17385b5`, installed, and closed.
+
+**Cause:** v0.35.551 taught the element parser to accept `## Run <!-- agent:run ... -->`, but not the markdown-AST overlay. `respond` and the node-keyed mutations find components through that overlay, so they failed with "component `queue` was not found".
+
+The document-cell merge had a second copy of the same opener rule. It also looked components up by raw name, so `run` never matched `queue`. As a result, every `agent:run` body merged to empty, even with the marker on its own line. That bug predates v0.35.551.
+
+**Fix:** One shared rule, `component_heading_prefix_matches_tag`, now decides heading-anchored openers, and every opener scanner calls it. `projected_component_name` maps `run` and `loop` to `queue`.
+
+**Verification:** Each new regression fails without the fix. The four affected crates pass: markdown-ast 66, element 247, merge 410, queue 920. `make check-fast` ran 2,005 tests, all passing. After the rebase, the coordinator reran all four crates, and they passed.
+
+The worker's follow-up is in progress as `subagent:mergepairbyid`. The merge still pairs same-named components by first match. It should pair them by `id=` or by occurrence.
+
+**Mirror-sync worker:** It reported back as `72477ee33f`, which I have rebased onto main. Integration is next.
+
+- Claim markers were painted only onto the queue preflight had selected. The other queue's rows froze.
+- The binary deleted the `do [#claimrowmigrate]` row. Its done-id parser read `subagent` from the owner marker, and a tombstone pass then dropped the live row.
+
+The duplicate `jb263-feed-verify` row is your own second copy. Both rows correctly show one claim.
+
+JetBrains is still reporting plugin 0.2.827. Restart the IDE to load 0.2.828, 0.2.829, and 0.2.830.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -610,7 +652,7 @@ force-write the file, and do not delete the queue items.                        
 ---
 ☑️ [#subagent:sdk_demo_route_recovery#1] Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
 ---
-- 📥 release + publish ⟦effect:2⟧
+- ~~release + publish ⟦effect:2⟧~~
 - ☑️ [#subagent:loop_routing#1] The agent:loop is getting items sent to it, but the items should have been sent into `agent:run`.
 - ☑️ [#subagent:queue_completion_audit#1] The queue is full of items with ☑️. Are there complete? Why are they not struck?
 - ☑️ [#subagent:auto_sync_project#1] tmux pane auto-sync not working in this agent-doc project instance
@@ -623,9 +665,11 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
 - ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
-- 🚧 [#subagent:gh373#1] #gh-fix https://github.com/btakita/agent-doc/issues/373
-- 🚧 [#subagent:gh374#1] #gh-fix https://github.com/btakita/agent-doc/issues/374
-- ☑️ [#subagent:gh375#1] #gh-fix https://github.com/btakita/agent-doc/issues/375
+- ☑️ [#subagent:gh373#1] #gh-fix https://github.com/btakita/agent-doc/issues/373
+- 🚧 [#subagent:retainedgateflake#1] fix nondeterministic project_controller::tests::retained_transition_adapter_does_not_hold_the_reactive_context — the shared blocking_effect_gate::RETAINED_TRANSITION counter is incremented by concurrent tests (passes in isolation, fails under the parallel crate suite)
+- ☑️ [#subagent:gh374#1] #gh-fix https://github.com/btakita/agent-doc/issues/374
+- 🚧 [#subagent:mergepairbyid#1] document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/375~~
 <!-- /agent:run -->
 
 ##~ Run: Issues

@@ -606,6 +606,7 @@ dependencies = [
  "agent-doc-editor-transport-health-io",
  "agent-doc-element",
  "agent-doc-fs",
+ "agent-doc-git-io",
  "agent-doc-hash",
  "agent-doc-ipc-io",
  "agent-doc-ipc-protocol",

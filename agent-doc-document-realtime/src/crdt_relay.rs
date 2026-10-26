@@ -3118,6 +3118,19 @@ impl RelayHub {
     /// mirror is reseeded from it, so a stale editor mirror cannot re-introduce the
     /// discarded ops at the next flush. Returns whether a rebuild happened.
     pub fn reconcile_canonical_against_baseline(&mut self, on_disk: &str) -> Result<bool> {
+        Ok(self
+            .reconcile_canonical_against_baseline_keeping_prior(on_disk)?
+            .is_some())
+    }
+
+    /// [`Self::reconcile_canonical_against_baseline`], returning the canonical
+    /// text the rebuild replaced (`None` when nothing was rebuilt), so a caller
+    /// can judge the adopted disk text against the last valid revision
+    /// (`#componentownclose`) without a second materialization.
+    pub fn reconcile_canonical_against_baseline_keeping_prior(
+        &mut self,
+        on_disk: &str,
+    ) -> Result<Option<String>> {
         let last = match self.last_committed_text.as_deref() {
             Some(t) => t.to_string(),
             // No baseline yet (a hub allocated mid-session before any commit was
@@ -3128,19 +3141,19 @@ impl RelayHub {
             None => {
                 self.last_committed_text = Some(on_disk.to_string());
                 self.last_committed_state_vector = None;
-                return Ok(false);
+                return Ok(None);
             }
         };
         if on_disk == last {
             // Disk is unchanged since our last commit → nothing out of band.
-            return Ok(false);
+            return Ok(None);
         }
         if on_disk == self.canonical.text() {
             // The canonical already agrees with the corrected disk; no rebuild
             // needed, just advance the recorded baseline so we do not re-detect it.
             self.last_committed_text = Some(on_disk.to_string());
             self.last_committed_state_vector = Some(self.canonical.state_vector());
-            return Ok(false);
+            return Ok(None);
         }
         // Out-of-band correction: rebuild the canonical from the corrected baseline.
         let before_text = self.canonical.text();
@@ -3161,7 +3174,11 @@ impl RelayHub {
         }
         self.last_committed_text = Some(on_disk.to_string());
         self.last_committed_state_vector = Some(self.canonical.state_vector());
-        Ok(true)
+        // `#componentownclose`: an out-of-band disk repair (e.g. the
+        // diagnostic's `git show HEAD:` restore) is adopted like an editor
+        // repair, so a canonical that parses again drops the fence.
+        self.release_repaired_component_structure_fence();
+        Ok(Some(before_text))
     }
 
     /// Force the canonical (and every member replica) to `text`, unconditionally,

@@ -391,7 +391,11 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   The registration's clean-merge fact also answers true when native proves the
   live buffer already carries every canonical change since the settled shadow
   (`#lagcanonicalrollforward`, in `agent-doc-merge` `rebase`); the merge it then
-  publishes is the buffer itself. `forwarderFor` releases the retained native
+  publishes is the buffer itself. When canonical also carries a controller
+  change the buffer lacks (a response, an appended row), native answers a
+  row-aware merge instead (`#lagcanonicalrowmerge`): the buffer's text with
+  that change rolled forward and canonical's claim marker on the buffer's row
+  of the same work id. `forwarderFor` releases the retained native
   resume state only at its two commit points
   (`releaseRetainedResumeStateOnCommitUtil`, `#resumefrontierlostonfailedattach`),
   and logs a swap refusal with whether that frontier was kept.

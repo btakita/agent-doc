@@ -78,6 +78,12 @@ Rust binary.
   and generation-fenced backend/frontend activation of the same verified
   artifact. Native derivations may still hot-reload when the JetBrains source
   digest is unchanged.
+- A restart-only upgrade must reach the IDE. The JetBrains plugin compares its
+  loaded version with the versioned jar in its installed tree and the
+  restart-required marker's `staged_version=`, and raises a sticky in-IDE
+  restart prompt with an IDE-native **Restart IDE** action once the mismatch is
+  stable across two polls. A leftover marker whose restart already happened
+  never prompts.
 
 There is no filesystem delivery queue, live-value projection, receipt file,
 plugin-owner file, queue journal, or file-signal compatibility transport.

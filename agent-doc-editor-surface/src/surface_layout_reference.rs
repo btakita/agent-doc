@@ -272,6 +272,57 @@ pub fn route_layout_from_surface(
     })
 }
 
+/// `layout_authority` of an `editor_route` whose editor deferred its own
+/// surface because the JetBrains Client's measured geometry owns the Remote
+/// Dev layout (GH #320 option B, `frontend_measured_layout_authority`). The
+/// route then carries no column; the measured columns arrive separately on
+/// the installation's [`REMOTE_CLIENT_MEASURED_SURFACE_FAMILY`] lane (GH #376).
+pub const ROUTE_LAYOUT_AUTHORITY_FRONTEND_MEASURED: &str = "frontend_measured";
+
+/// The surface family a Remote Dev backend forwards the JetBrains Client's
+/// measured main-window columns as (`jetbrains-rd@<installation>-pid:<pid>`).
+pub const REMOTE_CLIENT_MEASURED_SURFACE_FAMILY: &str = "jetbrains-rd";
+
+/// GH #376: whether `client_id` is the measured-layout forward of the editor
+/// `installation` (the same installation, the measured family).
+pub fn is_measured_layout_client_of(client_id: &str, installation: &str) -> bool {
+    client_id
+        .split_once('@')
+        .is_some_and(|(family, _)| family == REMOTE_CLIENT_MEASURED_SURFACE_FAMILY)
+        && crate::editor_installation(client_id) == Some(installation)
+}
+
+/// GH #376: the layout a retained measured surface gives an editor route that
+/// observed no column, or `None` when that surface cannot answer it.
+///
+/// It answers only while it is live, carries a known split measured in editor
+/// order, and holds the routed document (`holds_routed` compares one surface
+/// path with it). A measurement that does not show the routed document is an
+/// older layout than the one the operator acted on, so it is not used.
+pub fn measured_route_layout(
+    retained: &RetainedEditorSurface,
+    holds_routed: impl Fn(&str) -> bool,
+) -> Option<SurfaceRouteLayout> {
+    let surface = &retained.surface;
+    if retained.retired
+        || surface.column_order != SurfaceColumnOrder::Editor
+        || column_entries(surface).is_empty()
+    {
+        return None;
+    }
+    let shows_routed = surface
+        .sync_columns()
+        .iter()
+        .flat_map(|column| column.files.iter())
+        .chain(surface.visible.iter())
+        .map(|file| file.trim())
+        .any(|file| !file.is_empty() && holds_routed(file));
+    if !shows_routed {
+        return None;
+    }
+    route_layout_from_surface(surface).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,6 +504,77 @@ mod tests {
             SurfaceReferenceRefusal::StaleFocus
                 .diagnostic()
                 .starts_with("surface_reference_stale_focus: ")
+        );
+    }
+
+    /// GH #376: only the same installation's measured forward is its measured
+    /// layout; the classic, focus, and another installation's families are not.
+    #[test]
+    fn measured_layout_client_is_the_same_installations_forward_family() {
+        let installation = "IU.0a1b2c3d";
+        assert!(is_measured_layout_client_of(
+            "jetbrains-rd@IU.0a1b2c3d-pid:41",
+            installation
+        ));
+        for other in [
+            "jetbrains@IU.0a1b2c3d-pid:41",
+            "jetbrains-focus@IU.0a1b2c3d-pid:41",
+            "jetbrains-rd@IU.ffffffff-pid:41",
+            "jetbrains-rd@IU.0a1b2c3d",
+            "jetbrains-rd",
+        ] {
+            assert!(
+                !is_measured_layout_client_of(other, installation),
+                "{other}"
+            );
+        }
+    }
+
+    /// GH #376: a live, editor-ordered measured split that shows the routed
+    /// document is the route's exact layout; anything else cannot answer it.
+    #[test]
+    fn measured_route_layout_needs_a_live_editor_ordered_split_showing_the_routed_document() {
+        let measured = surface(
+            &[&["/p/b.md"], &["/p/a.md"]],
+            &["/p/b.md", "/p/a.md"],
+            "/p/b.md",
+        );
+        let is_a = |file: &str| file == "/p/a.md";
+        let layout = measured_route_layout(&retained(measured.clone(), 4, false), is_a)
+            .expect("the measured split answers the route");
+        assert_eq!(
+            layout.layout_args,
+            vec!["--col", "/p/b.md", "--col", "/p/a.md", "--focus", "/p/b.md"]
+        );
+        assert_eq!(layout.layout_mode, ROUTE_LAYOUT_MODE_EXACT);
+        assert_eq!(layout.column_order, SurfaceColumnOrder::Editor);
+
+        assert_eq!(
+            measured_route_layout(&retained(measured.clone(), 4, true), is_a),
+            None,
+            "a retired forward is not the current layout"
+        );
+        assert_eq!(
+            measured_route_layout(&retained(measured.clone(), 4, false), |file: &str| {
+                file == "/p/c.md"
+            }),
+            None,
+            "a measurement that does not show the routed document predates the route"
+        );
+        let unknown_order = EditorSurface {
+            column_order: SurfaceColumnOrder::Unknown,
+            ..measured.clone()
+        };
+        assert_eq!(
+            measured_route_layout(&retained(unknown_order, 4, false), is_a),
+            None,
+            "flat membership order is not a measurement"
+        );
+        let unknown_split = surface(&[], &["/p/b.md", "/p/a.md"], "/p/a.md");
+        assert_eq!(
+            measured_route_layout(&retained(unknown_split, 4, false), is_a),
+            None,
+            "an unknown split carries no structure"
         );
     }
 

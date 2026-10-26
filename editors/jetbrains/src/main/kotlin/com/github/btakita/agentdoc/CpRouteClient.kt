@@ -819,6 +819,7 @@ internal object CpRouteClient {
         columnOrder: String? = null,
         layoutMode: String? = null,
         surfaceReference: SurfaceLayoutReference? = null,
+        layoutAuthority: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         if (commandPlaneEnabled()) {
@@ -835,6 +836,7 @@ internal object CpRouteClient {
                 controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
                 columnOrder = columnOrder,
                 surfaceReference = surfaceReference,
+                layoutAuthority = layoutAuthority,
             )
             return try {
                 replayIdempotentControllerCommandOnce(
@@ -883,6 +885,7 @@ internal object CpRouteClient {
             columnOrder = columnOrder,
             layoutMode = layoutMode,
             surfaceReference = surfaceReference,
+            layoutAuthority = layoutAuthority,
         )
         return try {
             sendToSocket(socket, request)
@@ -1098,6 +1101,7 @@ internal object CpRouteClient {
         layoutMode: String? = null,
         clientId: String? = navigationClientId,
         surfaceReference: SurfaceLayoutReference? = null,
+        layoutAuthority: String? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("source", "jetbrains_plugin")
@@ -1123,6 +1127,10 @@ internal object CpRouteClient {
         // observation. An older controller ignores the unknown field.
         columnOrder?.let { payload.addProperty("column_order", it) }
         layoutMode?.let { payload.addProperty("layout_mode", it) }
+        // GH #376: say why the `--col` fallback may name no document. `frontend_measured` lets
+        // the controller take, or await, the installation's measured Remote Dev forward. An
+        // older controller ignores the field.
+        layoutAuthority?.let { payload.addProperty("layout_authority", it) }
         return payload
     }
 
@@ -1137,6 +1145,7 @@ internal object CpRouteClient {
         layoutMode: String? = null,
         clientId: String? = navigationClientId,
         surfaceReference: SurfaceLayoutReference? = null,
+        layoutAuthority: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -1148,6 +1157,7 @@ internal object CpRouteClient {
             layoutMode,
             clientId,
             surfaceReference,
+            layoutAuthority,
         )
         val request = JsonObject()
         request.addProperty("command", EditorCommandName.EditorRoute.token)
@@ -1182,6 +1192,7 @@ internal object CpRouteClient {
         layoutMode: String? = null,
         clientId: String? = navigationClientId,
         surfaceReference: SurfaceLayoutReference? = null,
+        layoutAuthority: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -1193,6 +1204,7 @@ internal object CpRouteClient {
             layoutMode,
             clientId,
             surfaceReference,
+            layoutAuthority,
         )
         return commandSubmitRequest(
             filePath = filePath,

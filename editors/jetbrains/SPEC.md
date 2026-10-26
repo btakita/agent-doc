@@ -958,7 +958,10 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   session document contributes no column, so closing a split still collapses the layout. While a
   authenticated remote layout-authority lease is live for a project
   (`RemoteClientLayoutAuthority`), the backend's remote-client
-  membership fold defers (`capture deferred reason=frontend_measured_layout_authority`), so the
+  membership fold defers (`capture deferred reason=frontend_measured_layout_authority`); a Run
+  Agent Doc whose surface reference is unavailable for that reason sends its `--col` fallback with
+  `layout_authority = "frontend_measured"`, so the controller takes or awaits the measured forward
+  instead of failing on an empty fallback (GH #376). The
   remembered-order fallback, labelled `unknown`/`retained`, remains only for classic installs and
   one-sided installs with no authenticated frontend lease. Schema negotiation keeps old peers
   working: Fleet RPC decodes with `ignoreUnknownKeys = false` and `encodeDefaults = true`, so

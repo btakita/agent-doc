@@ -87,10 +87,11 @@ pub use replica_registration::{
 };
 pub use surface_layout_reference::{
     CONTROLLER_SURFACE_CAPABILITIES, FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
-    FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY, RetainedEditorSurface,
+    FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY, REMOTE_CLIENT_MEASURED_SURFACE_FAMILY,
+    ROUTE_LAYOUT_AUTHORITY_FRONTEND_MEASURED, RetainedEditorSurface,
     SURFACE_LAYOUT_REFERENCE_CAPABILITY, SurfaceLayoutReference, SurfaceReferenceRefusal,
-    SurfaceRouteLayout, SurfaceSyncLayout, resolve_surface_reference, route_layout_from_surface,
-    sync_layout_from_surface,
+    SurfaceRouteLayout, SurfaceSyncLayout, is_measured_layout_client_of, measured_route_layout,
+    resolve_surface_reference, route_layout_from_surface, sync_layout_from_surface,
 };
 pub use surface_projection::{
     RemoteSurfaceEvidence, SurfaceLayoutSource, SurfaceProjection, SurfaceProjectionEvidence,

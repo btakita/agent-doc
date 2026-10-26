@@ -258,6 +258,59 @@ class SurfaceCommandReferenceTest {
         assertEquals(listOf("--surface-reference", "frame-1@3"), byReference.diagnosticArgs)
     }
 
+    /**
+     * GH #376: a Remote Dev backend whose surface defers to the JetBrains Client's measured layout
+     * sends a `--col` fallback that names no document. The route names that authority so the
+     * controller takes, or awaits, the measured forward; without it the field is absent.
+     */
+    @Test
+    fun `a measured-authority snapshot fallback names its layout authority`() {
+        val nothingVisible = routeSnapshot("/proj", emptyList(), null, null)
+        assertTrue(nothingVisible.layoutArgs.isEmpty())
+        assertNull(nothingVisible.layoutAuthority)
+        assertNull(nothingVisible.withMeasuredLayoutAuthority(active = false).layoutAuthority)
+        val measured = nothingVisible.withMeasuredLayoutAuthority(active = true)
+        assertEquals("frontend_measured", measured.layoutAuthority)
+        assertEquals(nothingVisible.copy(layoutAuthority = "frontend_measured"), measured)
+
+        val request = CpRouteClient.editorCommandSubmitRequest(
+            filePath = "/proj/tasks/one.md",
+            relativePath = "tasks/one.md",
+            layoutArgs = measured.layoutArgs,
+            waitForReadySeconds = 120,
+            attemptId = "attempt-1",
+            routeKey = "route-1",
+            commandId = "cmd-route",
+            columnOrder = measured.columnOrder,
+            layoutMode = measured.layoutMode,
+            clientId = "jetbrains@test-pid:1",
+            layoutAuthority = measured.layoutAuthority,
+        )
+        val message = JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        val payload = inlinePayload(message.getAsJsonObject("CommandSubmit"))
+        assertEquals(0, payload.getAsJsonArray("layout_args").size())
+        assertEquals("frontend_measured", payload.get("layout_authority").asString)
+
+        val classic = CpRouteClient.editorRouteRequest(
+            filePath = "/proj/tasks/one.md",
+            relativePath = "tasks/one.md",
+            layoutArgs = emptyList(),
+            waitForReadySeconds = 120,
+            attemptId = null,
+            routeKey = null,
+        )
+        val classicPayload = JsonParser.parseString(classic.get("diagnostic_payload").asString).asJsonObject
+        assertFalse(classicPayload.has("layout_authority"))
+
+        val source = Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt")
+            .toFile().readText()
+        val resolve = source.substringAfter("private fun resolveRouteLayout(")
+            .substringBefore("private fun editorSnapshotRouteLayout(")
+        assertTrue(resolve.contains("RemoteClientLayoutAuthority.isActive(project)"))
+        assertTrue(resolve.contains("withMeasuredLayoutAuthority(measuredAuthority)"))
+        assertTrue(source.contains("layoutAuthority = routeLayout.layoutAuthority"))
+    }
+
     @Test
     fun `run builds no col arguments outside the logged snapshot fallback`() {
         val source = Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt")

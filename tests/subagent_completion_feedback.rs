@@ -245,6 +245,96 @@ fn repair_completion_feedback_cli_migrates_bodyless_notices_without_replaying_cl
     assert_eq!(fs::read_to_string(&doc).unwrap(), repaired);
 }
 
+/// `#stalecompletionrepair` through the real CLI: the dry run lists the cell a
+/// pre-`#strikeretires` strike left behind and changes nothing; `--apply`
+/// retires only that cell (operator text and the live row's cell stay, the
+/// result still passes session-check), and a rerun is a no-op.
+#[test]
+fn repair_stale_completion_cli_is_dry_run_first_narrow_and_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let stale = agent_doc_document::subagent_completion::cell_with_response(
+        "subagent:release_publish_patch",
+        "release + publish",
+        "stalekey",
+        "Released 0.35.500.",
+    )
+    .unwrap();
+    let live = agent_doc_document::subagent_completion::cell_with_response(
+        "subagent:open",
+        "finish dev",
+        "livekey",
+        "Still integrating.",
+    )
+    .unwrap();
+    let original = format!(
+        concat!(
+            "---\nagent_doc_session: stale-completion-repair\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n\n",
+            "{stale}\n\n{live}\n",
+            "Operator edit that must survive.\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~~release + publish~~\n",
+            "- finish dev\n",
+            "<!-- /agent:queue -->\n",
+        ),
+        stale = stale,
+        live = live,
+    );
+    fs::write(&doc, &original).unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let run = |extra: &[&str]| {
+        let mut args = vec!["queue", "repair-stale-completion", doc.to_str().unwrap()];
+        args.extend_from_slice(extra);
+        let output = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "repair failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    let (stdout, _) = run(&[]);
+    assert!(
+        stdout.contains("would retire completion cell key=stalekey"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("livekey retire"), "{stdout}");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), original, "dry run writes nothing");
+
+    let (stdout, _) = run(&["--apply"]);
+    assert!(stdout.contains("retired completion cell key=stalekey"), "{stdout}");
+    let repaired = fs::read_to_string(&doc).unwrap();
+    assert!(!repaired.contains(&stale), "{repaired}");
+    assert!(repaired.contains(&live), "{repaired}");
+    assert!(repaired.contains("### Re: prior — gpt-5\n\nDone.\n"));
+    assert!(repaired.contains("Operator edit that must survive.\n"));
+    assert!(repaired.contains("- ~~release + publish~~\n- finish dev\n"));
+    agent_doc_lint_io::validate_structure_on_content(&doc, &repaired)
+        .expect("the repaired document must pass the session-check integrity classifier");
+
+    let (stdout, stderr) = run(&["--apply"]);
+    assert!(!stdout.contains("retired completion cell"), "{stdout}");
+    assert!(stderr.contains("0 stale completion cell(s)"), "{stderr}");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), repaired);
+}
+
 fn git(root: &std::path::Path, args: &[&str]) -> std::process::Output {
     let output = Command::new("git")
         .current_dir(root)

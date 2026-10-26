@@ -186,7 +186,7 @@ fn queue_write_landed(
 /// unanswered document edit. The closeout is the only owner of this write, so
 /// it waits for the landing like the tracked-work closeout does
 /// (`#retaineddeferwedge`).
-fn converge_awaiting_retained_delivery(
+pub(crate) fn converge_awaiting_retained_delivery(
     effects: &dyn QueueConsumeWriteEffects,
     file: &Path,
     target_content: &str,
@@ -252,7 +252,7 @@ fn log_snapshot_sync_skipped(file: &Path, context: &str, detail: impl Display) {
     );
 }
 
-fn load_snapshot_recovery_only(file: &Path, context: &str) -> Option<String> {
+pub(crate) fn load_snapshot_recovery_only(file: &Path, context: &str) -> Option<String> {
     match agent_doc_snapshot_io::load_document_baseline(file) {
         Ok(snapshot) => snapshot,
         Err(err) => {
@@ -262,7 +262,7 @@ fn load_snapshot_recovery_only(file: &Path, context: &str) -> Option<String> {
     }
 }
 
-fn save_snapshot_recovery_only(file: &Path, content: &str, context: &str) {
+pub(crate) fn save_snapshot_recovery_only(file: &Path, content: &str, context: &str) {
     if let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
         content,

@@ -19,5 +19,6 @@ pub mod queue_edit_owner;
 pub mod queue_lineage;
 pub mod queue_schedule;
 pub mod queue_tombstone;
+pub mod stale_completion_repair;
 pub mod subagent_dispatch;
 pub mod write_queue;

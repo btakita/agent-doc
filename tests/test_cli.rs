@@ -29584,12 +29584,13 @@ fn test_agent_doc_document_owns_write_normalization_policy() {
 }
 
 #[test]
-fn test_agent_doc_document_owns_queue_in_progress_projection_policy() {
+fn test_agent_doc_document_owns_queue_lifecycle_projection_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_projection =
         fs::read_to_string(manifest_dir.join("agent-doc-document/src/queue_projection.rs"))
             .unwrap();
     for required in [
+        "pub fn set_work_item_lifecycle_markers(",
         "pub fn set_in_progress_work_item_markers(",
         "pub fn sync_in_progress_marker_regions(",
         "pub fn strip_in_progress_marker(",
@@ -29604,6 +29605,7 @@ fn test_agent_doc_document_owns_queue_in_progress_projection_policy() {
     let maintenance =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
+        "fn set_work_item_lifecycle_markers(",
         "fn set_in_progress_work_item_markers(",
         "fn sync_in_progress_marker_regions(",
     ] {
@@ -29613,9 +29615,9 @@ fn test_agent_doc_document_owns_queue_in_progress_projection_policy() {
         );
     }
     assert!(
-        maintenance.contains("set_in_progress_work_item_markers")
+        maintenance.contains("set_work_item_lifecycle_markers")
             && maintenance.contains("sync_in_progress_marker_regions"),
-        "preflight maintenance should call focused queue in-progress projection policy directly"
+        "preflight maintenance should call focused typed queue lifecycle projection policy directly"
     );
 }
 

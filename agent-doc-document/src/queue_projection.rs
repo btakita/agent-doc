@@ -143,60 +143,7 @@ pub fn lifecycle_markers() -> Vec<&'static str> {
 
 /// Binary-owned visible lifecycle states. These prefixes are projection only:
 /// every parser strips them before queue-item identity is computed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum QueueLifecycleMarker {
-    Pending,
-    Claimed,
-    Running,
-    Reported,
-    Lost,
-    Reconciling,
-    Unknown,
-    Skipped,
-    AwaitingOperator,
-}
-
-pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 9] = [
-    QueueLifecycleMarker::Pending,
-    QueueLifecycleMarker::Claimed,
-    QueueLifecycleMarker::Running,
-    QueueLifecycleMarker::Reported,
-    QueueLifecycleMarker::Lost,
-    QueueLifecycleMarker::Reconciling,
-    QueueLifecycleMarker::Unknown,
-    QueueLifecycleMarker::Skipped,
-    QueueLifecycleMarker::AwaitingOperator,
-];
-
-impl QueueLifecycleMarker {
-    pub fn prefix(self) -> &'static str {
-        match self {
-            Self::Pending => &queue_icons().pending,
-            Self::Claimed => &queue_icons().claimed,
-            Self::Running => &queue_icons().running,
-            Self::Reported => &queue_icons().reported,
-            Self::Lost => &queue_icons().lost,
-            Self::Reconciling => &queue_icons().reconciling,
-            Self::Unknown => &queue_icons().unknown,
-            Self::Skipped => &queue_icons().skipped,
-            Self::AwaitingOperator => &queue_icons().awaiting_operator,
-        }
-    }
-
-    pub const fn default_prefix(self) -> &'static str {
-        match self {
-            Self::Pending => PENDING_MARKER,
-            Self::Claimed => CLAIMED_MARKER,
-            Self::Running => RUNNING_MARKER,
-            Self::Reported => REPORTED_MARKER,
-            Self::Lost => LOST_MARKER,
-            Self::Reconciling => RECONCILING_MARKER,
-            Self::Unknown => UNKNOWN_MARKER,
-            Self::Skipped => SKIP_MARKER,
-            Self::AwaitingOperator => AWAITING_OPERATOR_MARKER,
-        }
-    }
-}
+pub use agent_doc_frontmatter::frontmatter::{ALL_LIFECYCLE_STATES, QueueLifecycleMarker};
 
 /// Formal worker-state projection (`#queueworkevidence`). For a live queue row
 /// `q`, let `A(q)` be a bound claim attempt, `R(q)` a durable reported-release
@@ -910,6 +857,20 @@ pub fn set_in_progress_work_item_markers(
     content: &str,
     active_ids: &HashSet<String>,
 ) -> Result<(String, bool)> {
+    let lifecycle_by_id = active_ids
+        .iter()
+        .map(|id| (id.clone(), QueueLifecycleMarker::Running))
+        .collect();
+    set_work_item_lifecycle_markers(content, &lifecycle_by_id)
+}
+
+/// Mirror typed queue lifecycle state into linked tracked-work rows. Queue
+/// state is the source; stale tracked-work markers are removed in the same
+/// projection pass.
+pub fn set_work_item_lifecycle_markers(
+    content: &str,
+    lifecycle_by_id: &HashMap<String, QueueLifecycleMarker>,
+) -> Result<(String, bool)> {
     let mut updated = content.to_string();
     let mut changed = false;
     let components = agent_doc_element::element::parse(&updated)?;
@@ -923,10 +884,11 @@ pub fn set_in_progress_work_item_markers(
         })
         .rev()
     {
-        let (new_body, body_changed) = agent_doc_element_backlog::backlog::set_in_progress_item_ids(
-            component.content(&updated),
-            active_ids,
-        );
+        let (new_body, body_changed) =
+            agent_doc_element_backlog::backlog::set_lifecycle_item_markers(
+                component.content(&updated),
+                lifecycle_by_id,
+            );
         if body_changed {
             updated = component.replace_content(&updated, &new_body);
             changed = true;
@@ -1535,6 +1497,29 @@ mod tests {
         assert!(updated.contains("- [ ] 🚧 [#alpha] Alpha"));
         assert!(updated.contains("- [ ] [#beta] Beta"));
         assert!(updated.contains("- [ ] 🚧 [#alpha] Alpha review"));
+    }
+
+    #[test]
+    fn set_work_item_lifecycle_markers_mirrors_typed_queue_state() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] 🚧 [#reported] Reported work\n",
+            "- [ ] 🚧 [#running] Running work\n",
+            "- [ ] 🚧 [#stale] Stale work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let lifecycle_by_id = HashMap::from([
+            ("reported".to_string(), QueueLifecycleMarker::Reported),
+            ("running".to_string(), QueueLifecycleMarker::Running),
+        ]);
+
+        let (updated, changed) =
+            set_work_item_lifecycle_markers(content, &lifecycle_by_id).unwrap();
+
+        assert!(changed);
+        assert!(updated.contains("- [ ] ☑️ [#reported] Reported work"));
+        assert!(updated.contains("- [ ] 🚧 [#running] Running work"));
+        assert!(updated.contains("- [ ] [#stale] Stale work"));
     }
 
     #[test]

@@ -55,6 +55,65 @@ pub struct QueueIconSet {
     pub agent_prioritized: String,
 }
 
+/// Binary-owned visible lifecycle states shared by queue rows and their linked
+/// tracked-work rows. These prefixes are projections only; durable queue state
+/// remains authoritative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum QueueLifecycleMarker {
+    Pending,
+    Claimed,
+    Running,
+    Reported,
+    Lost,
+    Reconciling,
+    Unknown,
+    Skipped,
+    AwaitingOperator,
+}
+
+pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 9] = [
+    QueueLifecycleMarker::Pending,
+    QueueLifecycleMarker::Claimed,
+    QueueLifecycleMarker::Running,
+    QueueLifecycleMarker::Reported,
+    QueueLifecycleMarker::Lost,
+    QueueLifecycleMarker::Reconciling,
+    QueueLifecycleMarker::Unknown,
+    QueueLifecycleMarker::Skipped,
+    QueueLifecycleMarker::AwaitingOperator,
+];
+
+impl QueueLifecycleMarker {
+    pub fn prefix(self) -> &'static str {
+        let icons = queue_icons();
+        match self {
+            Self::Pending => &icons.pending,
+            Self::Claimed => &icons.claimed,
+            Self::Running => &icons.running,
+            Self::Reported => &icons.reported,
+            Self::Lost => &icons.lost,
+            Self::Reconciling => &icons.reconciling,
+            Self::Unknown => &icons.unknown,
+            Self::Skipped => &icons.skipped,
+            Self::AwaitingOperator => &icons.awaiting_operator,
+        }
+    }
+
+    pub const fn default_prefix(self) -> &'static str {
+        match self {
+            Self::Pending => "📥",
+            Self::Claimed => "🟡",
+            Self::Running => "🚧",
+            Self::Reported => "☑️",
+            Self::Lost => "⚠️",
+            Self::Reconciling => "🔄",
+            Self::Unknown => "❔",
+            Self::Skipped => "⏭️",
+            Self::AwaitingOperator => "⏳",
+        }
+    }
+}
+
 impl Default for QueueIconSet {
     fn default() -> Self {
         Self {

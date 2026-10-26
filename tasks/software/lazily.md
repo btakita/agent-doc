@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a1659d-f7cf-70d0-9670-5099bc9e705c
+  codex: 01a166d2-8127-7cf3-85fc-ab12b5f67d2d
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -985,14 +985,23 @@ No additional backlog follow-up is needed because the remaining work is exactly 
 The stale `#lzcorecireachaudit` attempt has also been re-claimed as generation 2 and started on `/root/corecireachaudit2`; it is auditing the settled Spec and nine binding commits under the existing commit-and-push authorization.
 
 Changed paths this cycle: none outside the binary-owned session update. Evidence: worker integration commit `a40d94fde2`, the two non-publishing proof targets above, and the generation-fenced queue claim/start. Confidence: high. Escalation: none. The exchange remains large, but the active queue continues without compaction because no auto-compact opt-in is present.
-<!-- agent:boundary:d62d2747 -->
+> **Queue prompt:** do [#lzcorecireachaudit]: Why is this blocked?
+
+> **Operator note:** Why is this blocked?
+
+**Deferred:** The visible `⚠️` was a lost-worker state: the generation-2 subagent claim expired without a completion report. It did not mean the CI reachability audit had found a technical blocker. I reclaimed the item as generation 3 and bound it to `/root/corecireachaudit3`; that worker is now running the authorized audit in an isolated worktree. The item remains open until its implementation, verification, commit, and push report is integrated.
+
+### Re: lzcorecireachaudit status — gpt-5 · 2026-10-25T23:19-04:00
+
+The audit is no longer blocked. Its prior execution attempt was lost, and the replacement worker is running under a fresh generation fence. The large exchange remains active because the queue is still draining; I have not compacted it without an explicit auto-compact opt-in.
+<!-- agent:boundary:e199c066 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
 - ☑️ [#subagent:ambienttokenresolve2#2] do [#lzambienttokenresolve]
-- 🚧 [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]
+- 🚧 [#subagent:corecireachaudit3#3] do [#lzcorecireachaudit]: Why is this blocked?
 <!-- /agent:queue -->
 
 ## Todo
@@ -1004,7 +1013,7 @@ Changed paths this cycle: none outside the binary-owned session update. Evidence
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift.
+- [ ] [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift. (stays open: generation 3 worker /root/corecireachaudit3 is running the audit and will report exact verification evidence)
 <!-- /agent:backlog -->
 
 ## Review

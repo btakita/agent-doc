@@ -815,13 +815,6 @@ One limitation: a plugin older than 0.2.833 does not send the new field. Its rou
 
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`~~
-- ~~On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.~~
-- ~~release + publish: include issue 372 + sdk-demo.md issue + lazily.md issue~~
-- ~~tmux pane auto sync is not working. Sync Tmux Panes works.~~
-- ~~In the Claim for Tmux Pane template, make each `##` header on the same line as the open tag such as: `## Run <!-- agent:run priority subagents -->`. This is to reduce extra spaces in the document to allow for more information to be added in the view pane. `## Queue` should be renamed to `## Run`.~~
-- ~~Rename "## Completed / Reaped" to "## Done"~~
-- ~~The queue item in this document `- 🚧 [#subagent:release_batch_prep3#3] release + publish: include issue 372 + sdk-demo.md issue + lazily.md issue` seems to be stale. If it is stale, fix agent-doc causes.~~
 - ~~`- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]~~
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
@@ -833,6 +826,7 @@ One limitation: a plugin older than 0.2.833 does not send the new field. Its rou
 - 🚧 [#subagent:cellretire#1] retire a queue row's subagent completion cell and report receipt on every strike path (preflight residue strike, orphan `queue consume --id`, controller completion), not only closeout `queue consume`, so a stale cell can never paint 🔄 on a later row with the same text (found by the fenced-marker fix, 2026-10-26)
 - 🚧 [#subagent:rowidentity#1] key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
 - ☑️ [#subagent:gh376#1] #gh-fix https://github.com/btakita/agent-doc/issues/376
+- The strikethrough in ``
 <!-- /agent:run -->
 
 ## Run: Issues

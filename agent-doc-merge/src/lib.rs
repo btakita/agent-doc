@@ -325,6 +325,32 @@ mod tests {
         assert!(matches!(out, MergeClassification::Clean { .. }), "{out:?}");
     }
 
+    /// Any-heading prefix: a CRDT merge of a document whose run opener shares
+    /// a non-matching heading (`## Queue: Main`) is Clean, keeps the opener on
+    /// its heading line, and lands both sides' queue edits.
+    #[test]
+    fn classified_merge_keeps_a_heading_prefixed_opener_clean() {
+        let opener = "## Queue: Main <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n";
+        let doc = |exchange: &str, items: &str| {
+            format!(
+                "<!-- agent:exchange -->\nQ.\n{exchange}<!-- /agent:exchange -->\n\n{opener}{items}<!-- /agent:run -->\n"
+            )
+        };
+        let base = doc("", "- first\n");
+        let bs = crate::crdt::CrdtDoc::from_text(&base).encode_state();
+        let ours = doc("\n### Re: Q\n\nA.\n", "- first\n");
+        let theirs = doc("", "- first\n- operator second\n");
+        match merge_contents_crdt_classified(Some(&bs), &ours, &theirs).unwrap() {
+            MergeClassification::Clean { text, .. } => {
+                assert_eq!(
+                    text,
+                    doc("\n### Re: Q\n\nA.\n", "- first\n- operator second\n")
+                );
+            }
+            other => panic!("heading-prefixed opener must merge clean: {other:?}"),
+        }
+    }
+
     #[test]
     fn classified_designates_repairable_marker_corruption() {
         // A document that already carries a DUPLICATE singleton exchange block

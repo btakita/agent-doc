@@ -5309,6 +5309,89 @@ fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
     assert_not_requeued("next preflight");
 }
 
+/// Any-heading prefix: the live 2026-10-26 `tasks/agent-doc/agent-doc-bugs.md`
+/// shape. The run component's opener shared a line with `## Queue: Main`, a
+/// heading whose text does not match `agent:run`; the editor's
+/// template-structure guard refused every save of it 363 times
+/// (`non_standalone_component_marker:agent:run:open:line836`). Any ATX heading
+/// now prefixes an opener, so the whole cycle (preflight, the template guard
+/// on write, the merge, the commit, and session-check) runs on that line
+/// unchanged.
+#[test]
+fn respond_closes_out_a_document_whose_run_opener_shares_a_nonmatching_heading() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let opener = "## Queue: Main <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push\" priority go -->";
+    let with_queue = session_stream_doc_content().replace(
+        "<!-- agent:backlog -->",
+        &format!(
+            "{opener}\n- operator head left for a later cycle\n<!-- /agent:run -->\n\n<!-- agent:backlog -->"
+        ),
+    );
+    let committed = with_queue.replace("❯ Please reply\n", "");
+    fs::write(&doc, &committed).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    fs::write(snapshot_path(tmp.path(), &doc), &committed).unwrap();
+    fs::write(&doc, &with_queue).unwrap();
+
+    let read = agent_doc()
+        .current_dir(tmp.path())
+        .args(["read", doc.to_str().unwrap(), "--component", "queue"])
+        .output()
+        .unwrap();
+    assert!(
+        read.status.success(),
+        "read --component queue: {}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    let queue_body = String::from_utf8_lossy(&read.stdout);
+    assert!(
+        queue_body.contains("operator head left for a later cycle")
+            && !queue_body.contains("Queue: Main"),
+        "the heading text is outside the component body:\n{queue_body}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "1")
+        .args(["respond", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin("<!-- patch:exchange -->\n### Re: reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "respond must close out a heading-prefixed opener:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("non_standalone_component_marker"),
+        "the template-structure guard must accept the opener:\n{stderr}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(head.contains("Replied."), "{head}");
+    assert!(
+        head.contains(&format!("{opener}\n")),
+        "the heading-prefixed opener is committed unchanged:\n{head}"
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap().matches(opener).count(),
+        1,
+        "the opener is neither duplicated nor split"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
 /// GH #275: the strict closeout commits BEFORE its terminal session check. When
 /// that check interrupts deterministically on the committed bytes (here a
 /// drifted open backlog row parked in an HTML comment, the shadow-backlog guard

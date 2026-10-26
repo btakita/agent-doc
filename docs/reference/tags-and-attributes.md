@@ -18,9 +18,11 @@ The opening marker is `<!-- agent:NAME [ATTRIBUTES] -->`; the closing marker
 is `<!-- /agent:NAME -->`. A name must match
 `[a-zA-Z0-9][a-zA-Z0-9-]*`. The close name must match the open name.
 Components may nest, but the markers must be balanced and properly nested.
-An opening marker may follow its matching ATX heading on the same line, such as
-`## Run <!-- agent:run priority subagents -->`; the heading text must match the
-tag name. Closing markers remain standalone.
+An opening marker may follow any ATX heading on the same line, such as
+`## Run <!-- agent:run priority subagents -->` or
+`## Queue: Main <!-- agent:run id="main" -->`; the heading text need not match
+the tag name and is not part of the component body. Nothing but whitespace may
+follow the marker, and closing markers remain standalone.
 
 Opening attributes are separated by whitespace. A value without spaces may be
 unquoted; use matching single or double quotes for a value containing spaces:

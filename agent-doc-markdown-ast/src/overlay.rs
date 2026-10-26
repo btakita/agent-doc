@@ -218,6 +218,11 @@ impl ComponentMarkerScan {
 /// Parse `<!-- agent:name -->` open markers, returning `(name, attrs)`.
 fn parse_open_marker(trimmed: &str) -> Option<(String, String)> {
     let inner = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
+    if inner.contains("-->") {
+        // `<!-- agent:x --> trailing -->`: the marker ends at the first `-->`,
+        // so the rest is welded text, exactly as the structural gate sees it.
+        return None;
+    }
     let rest = inner.strip_prefix("agent:")?;
     if rest.starts_with('/') {
         return None; // close marker
@@ -234,15 +239,16 @@ fn parse_open_marker(trimmed: &str) -> Option<(String, String)> {
 /// Parse a component opener line, returning `(name, attrs)`.
 ///
 /// `line` is one source line without its terminator. The opener either stands
-/// alone on the line (surrounding whitespace allowed) or follows the ATX
-/// heading whose text matches its exact tag name, e.g.
-/// `## Run <!-- agent:run priority subagents -->` (GH #374). The heading rule
+/// alone on the line (surrounding whitespace allowed) or follows an ATX
+/// heading with any heading text, e.g.
+/// `## Queue: Main <!-- agent:run id="main" subagents -->` (GH #374). The heading rule
 /// is owned by [`agent_doc_element::element::component_heading_prefix_matches_tag`],
 /// the same predicate the element parser and structural gate use, so the
 /// overlay that `respond`/queue mutations resolve components through cannot
 /// disagree with `read --component`, `patch`, or `lint` about whether a
-/// heading-anchored opener exists. Text after the marker, or a heading whose
-/// text is not the tag name, is not an opener.
+/// heading-anchored opener exists. Text after the marker, prose that is not an
+/// ATX heading, or a closing tag after a heading is not an opener. The heading
+/// text is never part of the component body.
 pub fn parse_open_marker_line(line: &str) -> Option<(String, String)> {
     let trimmed = line.trim();
     if trimmed.starts_with("<!--") {
@@ -1227,19 +1233,26 @@ trailing residue
         assert_eq!(parsed[2].items[0].id, "alpha");
     }
 
-    /// The heading anchor stays fail-closed: prose that is not the exact tag
-    /// name, text after the marker, a closing tag after a heading, and a
-    /// marker inside inline code never open a component.
+    /// The heading anchor stays fail-closed: prose that is not an ATX heading,
+    /// text after the marker, a closing tag after a heading, another comment
+    /// in the heading, and a marker inside inline code or an open quote never
+    /// open a component.
     #[test]
-    fn non_matching_heading_prefixes_do_not_open_components() {
+    fn non_heading_prefixes_do_not_open_components() {
         for line in [
-            "## Notes about runs <!-- agent:run -->",
             "## Run <!-- agent:run --> trailing",
+            "## Run <!-- agent:run --> -->",
             "Run <!-- agent:run -->",
+            "- ## Run <!-- agent:run -->",
             "####### Run <!-- agent:run -->",
+            "##Run <!-- agent:run -->",
             "    ## Run <!-- agent:run -->",
+            "\t## Run <!-- agent:run -->",
             "## Run `<!-- agent:run -->`",
             "## Run <!-- /agent:run -->",
+            "## Queue: Main <!-- /agent:run -->",
+            "## Note <!-- aside --> <!-- agent:run -->",
+            "## Say \"hi <!-- agent:run -->",
         ] {
             assert_eq!(parse_open_marker_line(line), None, "{line}");
         }
@@ -1250,6 +1263,89 @@ trailing residue
         assert_eq!(
             parse_open_marker_line("  <!-- agent:queue go -->  "),
             Some(("queue".to_string(), "go".to_string()))
+        );
+    }
+
+    /// Any-heading prefix: any ATX heading may label an opener on its own
+    /// line, whatever the heading text, for every component kind. The live
+    /// 2026-10-26 line `## Queue: Main <!-- agent:run id="main" ... -->` was
+    /// refused 363 times by the editor's template-structure guard before this.
+    #[test]
+    fn any_heading_text_may_prefix_an_opener() {
+        for (line, name) in [
+            (
+                "## Queue: Main <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push\" priority go -->",
+                "run",
+            ),
+            ("## Notes about runs <!-- agent:run -->", "run"),
+            (
+                "# Backlog (later) <!-- agent:backlog priority -->",
+                "backlog",
+            ),
+            ("###### `status` view <!-- agent:status -->", "status"),
+            ("## Say \"hi\" <!-- agent:todo -->", "todo"),
+            ("## <!-- agent:loop interval=5m -->", "loop"),
+            ("   #\tTabbed <!-- agent:notes -->\t", "notes"),
+        ] {
+            assert_eq!(
+                parse_open_marker_line(line).map(|(n, _)| n),
+                Some(name.to_string()),
+                "{line}"
+            );
+        }
+    }
+
+    /// The overlay, the element parser, and the structural gate agree on a
+    /// document whose queue opener shares a non-matching heading, and on a
+    /// fenced copy of that line (content, never an opener).
+    #[test]
+    fn non_matching_heading_opener_parses_like_the_element_parser() {
+        let doc = concat!(
+            "# Session\n\n",
+            "## Queue: Main <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n",
+            "- ship it\n",
+            "- report:\n",
+            "\n",
+            "```markdown\n",
+            "## Queue: Main <!-- agent:run id=\"main\" -->\n",
+            "<!-- /agent:run -->\n",
+            "```\n",
+            "<!-- /agent:run -->\n\n",
+            "## Later items <!-- agent:backlog priority -->\n",
+            "1. [ ] [#alpha] first task\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let element = agent_doc_element::element::parse(doc).expect("element parser accepts");
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(doc),
+            None
+        );
+        let parsed = components(doc);
+        assert_eq!(
+            parsed.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            element.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            parsed.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec!["queue", "backlog"]
+        );
+        let run = &parsed[0];
+        assert!(run.attrs.contains("id=\"main\""), "{}", run.attrs);
+        assert_eq!(run.items[0].text, "ship it");
+        assert!(
+            run.items
+                .iter()
+                .all(|item| !item.text.contains("Queue: Main")),
+            "heading text is never a queue item: {:?}",
+            run.items
+        );
+        assert!(doc[run.start_byte..].starts_with("## Queue: Main <!-- agent:run"));
+        assert!(doc[..run.end_byte].ends_with("```\n<!-- /agent:run -->\n"));
+        assert!(
+            !element[0]
+                .content(doc)
+                .contains("## Queue: Main <!-- agent:run id=\"main\" subagents"),
+            "the heading text is outside the component body"
         );
     }
 

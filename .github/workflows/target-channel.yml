@@ -30,6 +30,7 @@ permissions:
 concurrency:
   group: target-stable-channel-${{ github.repository }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   promote:

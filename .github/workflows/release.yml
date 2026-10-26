@@ -461,6 +461,7 @@ jobs:
     concurrency:
       group: target-stable-channel-${{ github.repository }}
       cancel-in-progress: false
+      queue: max
     steps:
       - uses: actions/checkout@v4
 

@@ -15051,6 +15051,7 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
     for required in [
         "if: ${{ always() && needs.plugins.result == 'success' }}",
         "group: target-stable-channel-${{ github.repository }}",
+        "queue: max",
         "python3 scripts/target-stable-channel.py",
         "--editor-manifest promotion/editor/EDITOR-PACKAGES.sha256",
         "gh release upload \"$CHANNEL_TAG\" \"promotion/out/stable-$target.json\" --clobber",
@@ -15075,11 +15076,12 @@ fn test_release_platform_assets_publish_independently_and_retry_idempotently() {
     assert!(
         rollback.contains("args+=(--allow-rollback)")
             && rollback.contains("group: target-stable-channel-${{ github.repository }}")
+            && rollback.contains("queue: max")
             && rollback.contains("--pattern EDITOR-PACKAGES.sha256")
             && rollback.contains("type: boolean")
             && rollback.contains("default: false")
             && rollback.contains("if [ \"$ALLOW_ROLLBACK\" = true ]"),
-        "operator rollback must share the promotion lock and re-verify archive/editor evidence"
+        "every promotion path must share a non-evicting queue and re-verify archive/editor evidence"
     );
 
     let finalize = job("finalize-release");

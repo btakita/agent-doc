@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: ef7e9a9a-cca8-4166-a012-fd43b3cb483b
+  claude: 8eea85e7-65c9-4fbb-a8b4-f9bc53d90ea0
   codex: 01a17616-9ddc-7ee0-86df-a42c74605356
 agent: claude
 claude_model: opus
@@ -1043,6 +1043,76 @@ Yes, you can clear it. This replaces the 13:51 handoff.
 - The two command names above.
 - Whether a backlog strike should also close claimed free-text rows.
 - `#jb263-feed-verify`: your 2026.3 check.
+
+### Re: queue integration batch and subagent dispatch — opus-5 · 2026-10-26T15:45-04:00
+
+> **Queue prompt:** end a Reported queue claim on every strike path (orphan-id strike, controller projection, preflight done-id and backlog strikes), not only at the next closeout prune, so a later identical row can never pick up ☑️ from the claim ledger (found by the completion-cell retirement fix, 2026-10-26)
+
+On main as `2ebf740bcc` (`#strikeretires`), and installed. Every strike path now ends the struck row's Reported/Lost claim attempt, so a later identical row starts at 📥.
+
+> **Queue prompt:** We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
+
+Integrated as `0e5c3249bb`. The README now opens with a tested **Getting started** path (install, `agent-doc init`, first turn from an editor, a harness, or a terminal). The commit also fixes four first-run failures the pass found. Sanat can start from the README's Getting started section.
+
+> **Queue prompt:** `agent-doc doctor` reports outcome=blocked (queue_continuation) on a brand-new document with no queue; it should report healthy (found by the onboarding pass, 2026-10-26)
+
+Integrated as `9258237699`: a fresh document with no queue now reports healthy. The exit-code follow-up was dispatched this cycle (see below).
+
+> **Queue prompt:** `agent-doc start` types its command into a new tmux pane before the shell is ready (zsh with no ~/.zshrc lost the leading `/`); wait for shell readiness (found by the onboarding pass, 2026-10-26)
+
+Integrated as `44a20db27c`: the re-exec'd `start` now runs as the pane's own process, so a slow shell can no longer swallow the leading `/`. The route-owned and fan-out panes are the dispatched follow-up.
+
+> **Queue prompt:** What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document.
+
+Integrated as `338b8b3805`. `🔄` means **needs reconcile**: the row has finished-work evidence but no current claim, and it is not dispatched again. One generated legend (`agent_doc_queue_icons::legend`) now feeds `agent-doc queue --help`, `agent-doc queue legend`, the book page `docs/guide/queue-markers.md`, the README's Queue markers table, and a one-line legend at the end of each document's `agent:status` (`queue-legend=off` hides it). A marker without a legend entry does not compile.
+
+> **Queue prompt:** an already-running controller that receives an operator edit removing a component marker still restores the last valid canonical and pushes it back into the editor, reverting operator text; keep the editor text, refuse adoption, and show the ⚠ agent-doc marker diagnostic instead (gap 2 of the todo-collapse fix d8794daf9a, 2026-10-26)
+
+On main as `655eacb624` and installed. A live marker-removing edit is fenced: the editor text stays, the last valid canonical is never pushed back, and the ⚠ marker diagnostic shows.
+
+> **Queue prompt:** Idea error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+
+On main as `f155fe0076` and installed (`INSTALL_EXIT=0`). A canonical that only lags the buffer, or only adds a claim projection, now re-attaches without the ambiguity hold. Restart the IDE to load JetBrains 0.2.838: the live IDE still runs the superseded 0.2.835 jar, and only a restart can swap it.
+
+> **Queue prompt:** I deleted a queue item in docs.md and added some of the deleted queue item prompt into an existing queue item: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged
+
+Same cause and fix as the item above: `f155fe0076`, installed. Your edit made the buffer lead the canonical, which the old attach treated as ambiguous. The fixed attach re-attaches it. It needs the IDE restart for the 0.2.838 plugin.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** this release waits until the seven subagent fixes dispatched below land. It is the same request as the release row at the end of the queue, and both will be answered by one release. The 🔄 marker is the leftover completion cell from the v0.35.551 release handback.
+
+> **Queue prompt:** release + publish: Include fixes for Issue 378-379 and the current 📥 items.
+
+**Deferred:** this waits for the seven 📥 fixes below, which are now 🚧 running. GH #378 is already on main as `ce2eeb0fae`. GH #379 had no code change: its reporter has the upgrade steps. Once the workers report, I integrate them in one batch, run one `make check`, and cut the release from the coordinator. Subagents are not allowed to release, so this row is not dispatched to one.
+
+> **Queue prompt:** one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
+
+**Deferred:** the branch `feat/repair-stale-completion-evidence` (`66325a2db1`) is ready and adds `agent-doc queue repair-stale-completion`. It waits only for your decision on the command name.
+
+> **Queue prompt:** In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
+
+**Deferred:** the branch `feat/skill-no-arg-pane-document` (`81c3de55d5`) is ready and adds `agent-doc resolve-pane-document`. It waits only for your decision on the command name.
+
+**Integrated this cycle.** I cherry-picked the four ready branches onto `f155fe0076`. README and SPEC conflicted only in prose. I kept the onboarding Getting started layout plus the legend's Queue markers section, and kept HEAD's newer `#strikeretires` sentence plus the new `#queuemarkerlegend` bullet. Then `make check-fast` passed (`CHECK_EXIT=0`), the batch was pushed as `f155fe0076..44a20db27c`, and `make install` finished (`INSTALL_EXIT=0`). CI for `f155fe0076` and `2ebf740bcc` was still running at closeout, and I did not wait for it.
+
+**Dispatched this cycle** (each claimed at generation 1, 🚧 running in its own worktree under `~/work/btakita/agent-doc-wt/`):
+
+| Worker | Branch | Base |
+|---|---|---|
+| `doctorexit` | `fix/doctor-exit-nonzero` | doctor-healthy `9f0ebc1e16` |
+| `routelaunch` | `fix/route-fanout-launch-as-pane-process` | start-shell `9317ccc50c` |
+| `retainedflake` | `fix/retained-capture-welded-close-flake` | `f155fe0076` |
+| `jbmarkercheck` | `fix/jb-detached-op-marker-check` | `f155fe0076` |
+| `coldstartfence` | `fix/cold-start-marker-fence` | `f155fe0076` |
+| `attachsimworld` | `test/attach-relayhub-simworld` | `f155fe0076` |
+| `attachrowmerge` | `fix/attach-row-aware-merge` | `f155fe0076` |
+
+**Review gate.** You checked `#layoutunprovenliveverify`, so this closeout resolves that gate.
+
+**Decisions for you:** the two command names above, and whether a backlog strike should also close claimed free-text rows. Separately, restart IntelliJ IDEA 2026.3 so it loads plugin 0.2.838.
+
+The exchange is 1011 lines. Compacting it would help, but only when you ask, because the queue is still draining.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -1050,23 +1120,23 @@ Yes, you can clear it. This replaces the 13:51 handoff.
 -->
 
 ## Queue: Main <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🔄 release + publish
+- ~~release + publish~~
 - ☑️ [#subagent:reportedend#1] end a Reported queue claim on every strike path (orphan-id strike, controller projection, preflight done-id and backlog strikes), not only at the next closeout prune, so a later identical row can never pick up ☑️ from the claim ledger (found by the completion-cell retirement fix, 2026-10-26)
 - ☑️ [#subagent:cellrepair#1] one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
 - ☑️ [#subagent:onboarding#1] We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
 - ☑️ [#subagent:doctorblocked#1] `agent-doc doctor` reports outcome=blocked (queue_continuation) on a brand-new document with no queue; it should report healthy (found by the onboarding pass, 2026-10-26)
-- 📥 `agent-doc doctor` exits 0 even when its outcome is blocked or recoverable; exit non-zero so scripts and CI can act on it (found by the doctor fresh-document fix, 2026-10-26)
+- 🚧 [#subagent:doctorexit#1] `agent-doc doctor` exits 0 even when its outcome is blocked or recoverable; exit non-zero so scripts and CI can act on it (found by the doctor fresh-document fix, 2026-10-26)
 - ☑️ [#subagent:startshellready#1] `agent-doc start` types its command into a new tmux pane before the shell is ready (zsh with no ~/.zshrc lost the leading `/`); wait for shell readiness (found by the onboarding pass, 2026-10-26)
-- 📥 route-owned auto-start (agent-doc-route-io/src/startup.rs route.auto_start) and parallel fan-out panes (src/parallel.rs) still type their commands into a just-split pane; launch them as the pane process via agent_doc_tmux_io::launch_command_in_pane, checking route_owned_start_enter input logging and the fan-out $(passage ...) env prefix (found by the start shell-readiness fix, 2026-10-26)
+- 🚧 [#subagent:routelaunch#1] route-owned auto-start (agent-doc-route-io/src/startup.rs route.auto_start) and parallel fan-out panes (src/parallel.rs) still type their commands into a just-split pane; launch them as the pane process via agent_doc_tmux_io::launch_command_in_pane, checking route_owned_start_enter input logging and the fan-out $(passage ...) env prefix (found by the start shell-readiness fix, 2026-10-26)
 - ☑️ [#subagent:markerdocs#1] What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
-- 📥 fix nondeterministic agent-doc-document-realtime-io tests::retained_capture_repairs_legacy_welded_queue_close_before_validation — waits on a background delivery thread and failed under check-fast load once (2026-10-26, any-heading worker); find what it races, do not rerun to green
+- 🚧 [#subagent:retainedflake#1] fix nondeterministic agent-doc-document-realtime-io tests::retained_capture_repairs_legacy_welded_queue_close_before_validation — waits on a background delivery thread and failed under check-fast load once (2026-10-26, any-heading worker); find what it races, do not rerun to green
 - ☑️ [#subagent:noargskill#1] In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
 - ☑️ [#subagent:norevert#1] an already-running controller that receives an operator edit removing a component marker still restores the last valid canonical and pushes it back into the editor, reverting operator text; keep the editor text, refuse adoption, and show the ⚠ agent-doc marker diagnostic instead (gap 2 of the todo-collapse fix d8794daf9a, 2026-10-26)
-- 📥 JetBrains plugin: run the component-marker check on the buffer before recording a detached-editor op, so an edit that deletes a component open/close marker warns the operator at edit time (the detached op path carries only offsets and lengths) (gap 1 of the todo-collapse fix, 2026-10-26)
-- 📥 cold controller start with no editor handover loads the document from disk even when disk has broken component markers; fence it against the last snapshot or HEAD and show the marker diagnostic (gap 3 of the todo-collapse fix, 2026-10-26)
+- 🚧 [#subagent:jbmarkercheck#1] JetBrains plugin: run the component-marker check on the buffer before recording a detached-editor op, so an edit that deletes a component open/close marker warns the operator at edit time (the detached op path carries only offsets and lengths) (gap 1 of the todo-collapse fix, 2026-10-26)
+- 🚧 [#subagent:coldstartfence#1] cold controller start with no editor handover loads the document from disk even when disk has broken component markers; fence it against the last snapshot or HEAD and show the marker diagnostic (gap 3 of the todo-collapse fix, 2026-10-26)
 - ☑️ [#subagent:ideaattach#1] Idea error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
-- 📥 relay-hub / SimWorld coverage for editor attach: the structure-quarantine-with-durable-ingest canonical lag and the library-reload-then-refused-swap re-registration sequence (found by the ambiguous-retained-projection attach fix 369da0c3e0, 2026-10-26)
-- 📥 editor attach still holds when canonical both lags the buffer and has a real controller addition the buffer lacks (e.g. a claim marker plus a response); add a row-aware attach merge (found by the ambiguous-retained-projection attach fix, 2026-10-26)
+- 🚧 [#subagent:attachsimworld#1] relay-hub / SimWorld coverage for editor attach: the structure-quarantine-with-durable-ingest canonical lag and the library-reload-then-refused-swap re-registration sequence (found by the ambiguous-retained-projection attach fix 369da0c3e0, 2026-10-26)
+- 🚧 [#subagent:attachrowmerge#1] editor attach still holds when canonical both lags the buffer and has a real controller addition the buffer lacks (e.g. a claim marker plus a response); add a row-aware attach merge (found by the ambiguous-retained-projection attach fix, 2026-10-26)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/378~~
 - 📥 I deleted a queue item in docs.md and added some of the deleted queue item prompt into an existing queue item: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/379~~
@@ -1077,9 +1147,7 @@ Yes, you can clear it. This replaces the 13:51 handoff.
 - 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
-## Todo
-
-<!-- agent:todo priority -->
+## Todo <!-- agent:todo priority -->
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
@@ -1092,7 +1160,6 @@ Yes, you can clear it. This replaces the 13:51 handoff.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->
-- [/] [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [/] [#jetbrainsmarketplaceprofile] [marketplace-approval] [agent-doc] Plugin 35436 is hidden and under initial JetBrains moderation; after approval, replace the basic description with polished copy, add Getting Started, Documentation, and Bugtracker URLs, then verify the public listing.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.

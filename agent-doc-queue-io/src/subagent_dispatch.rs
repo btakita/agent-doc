@@ -176,15 +176,16 @@ pub fn pending_subagent_dispatch_or_warn(file: &Path, content: &str) -> Vec<Stri
 
 /// Queue heads owned outside the in-session drain loop.
 ///
-/// This single derived projection combines active worker claims with both
+/// This single derived projection combines in-flight worker claims with both
 /// dispatchable and concurrency-held queue-level subagent heads. Reported
-/// worker results are deliberately absent: after report release they return to
-/// the ordinary queue lifecycle.
+/// worker results are deliberately absent whether the attempt remains claimed
+/// or has a report-release receipt: the worker is finished and the coordinator
+/// must select the row for integration/writeback (`#reportedwritebackdebt`).
 pub fn out_of_loop_items_for_content(
     file: &Path,
     content: &str,
 ) -> agent_doc_queue::queue_claim::ClaimedQueueItems {
-    let claimed = crate::queue_claim::claimed_items_for_content(file, content);
+    let claimed = crate::queue_claim::in_flight_claimed_items_for_content(file, content);
     let dispatch = pending_subagent_dispatch_or_warn(file, content);
     let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
     let held = queue_attr_subagent_plan(file, content)

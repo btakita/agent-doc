@@ -1493,7 +1493,7 @@ pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> Claime
             ClaimedQueueItems::none()
         }
     };
-    claimed_items_with_non_ledger_holds(file, content, in_flight)
+    claimed_items_with_queue_holds(file, content, in_flight)
 }
 
 fn claimed_items_with_non_ledger_holds(
@@ -1502,6 +1502,18 @@ fn claimed_items_with_non_ledger_holds(
     claimed: ClaimedQueueItems,
 ) -> ClaimedQueueItems {
     let claimed = claimed.with_heads(&completion_evidence_head_texts(content));
+    claimed_items_with_queue_holds(file, content, claimed)
+}
+
+/// Add structural queue holds that remain out of the in-session loop regardless
+/// of worker lifecycle. Completion evidence is intentionally not added here:
+/// it proves a worker reported and therefore creates coordinator writeback debt,
+/// not in-flight worker ownership (`#reportedwritebackdebt`).
+fn claimed_items_with_queue_holds(
+    file: &Path,
+    content: &str,
+    claimed: ClaimedQueueItems,
+) -> ClaimedQueueItems {
     // The queue-level subagents attribute holds heads back (cap full, or an
     // `after=` predecessor still queued). A held head is out of the in-session
     // loop exactly like a claimed one: never drained inline, never counted.

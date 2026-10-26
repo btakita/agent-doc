@@ -10919,6 +10919,12 @@ pub struct LaunchClaim {
 impl LaunchClaim {
     /// Non-blocking acquire: fails immediately if another launch owns the
     /// process-lifetime bootstrap endpoint.
+    ///
+    /// It also fails just after a release while any child forked during the
+    /// hold is still between fork and exec: that fork image carries a copy of
+    /// the endpoint's descriptor (close-on-exec, not close-on-fork), so the
+    /// name stays bound until it execs. Callers that can race a release use
+    /// [`Self::acquire_blocking`].
     pub fn acquire(project_root: &Path) -> Result<Self> {
         Self::acquire_inner(project_root, None)
     }
@@ -16640,14 +16646,139 @@ mod tests {
         assert_eq!(loaded, vec!["tasks/current.md"]);
         assert!(!dir.path().join(".agent-doc/last_layout.json").exists());
     }
+    const LAUNCH_CLAIM_CHILD_TEST: &str = "project_controller::tests::launch_claim_child_probe";
+    const LAUNCH_CLAIM_CHILD_ROOT_ENV: &str = "AGENT_DOC_LAUNCH_CLAIM_CHILD_ROOT";
+    const LAUNCH_CLAIM_CHILD_SCENARIO_ENV: &str = "AGENT_DOC_LAUNCH_CLAIM_CHILD_SCENARIO";
+    const LAUNCH_CLAIM_CHILD_DONE: &str = "LAUNCH_CLAIM_CHILD_PROBE_DONE=";
+
+    /// A dropped [`LaunchClaim`] frees its abstract socket name only when the
+    /// LAST descriptor for it closes, and every child any thread of this
+    /// process forks while the claim is held carries a copy until it execs
+    /// (the socket is `SOCK_CLOEXEC`; Linux has no close-on-fork).
+    /// In the shared `cargo test` process, sibling tests spawn `sh`, `git`, and
+    /// controller children constantly, so "drop, then re-acquire immediately"
+    /// failed whenever one of those children was between fork and exec (9% of
+    /// cycles under a spawning sibling thread, 0% without one). Scenarios that
+    /// assert *immediate* re-acquisition therefore run in a fresh process whose
+    /// descriptor table is theirs alone; nothing else in it forks.
+    fn run_launch_claim_child_probe(scenario: &str) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                LAUNCH_CLAIM_CHILD_TEST,
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(LAUNCH_CLAIM_CHILD_SCENARIO_ENV, scenario)
+            .env(LAUNCH_CLAIM_CHILD_ROOT_ENV, dir.path())
+            .output()
+            .expect("spawn launch claim child probe");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "launch claim probe {scenario} failed: stdout={stdout} stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // Assert from what the child DID: a filter typo or a missing env var
+        // would otherwise pass with zero assertions executed. libtest prints the
+        // marker after its own `test <name> ... ` prefix on the same line.
+        assert!(
+            stdout.lines().any(|line| {
+                line.split_once(LAUNCH_CLAIM_CHILD_DONE)
+                    .is_some_and(|(_, done)| done.trim() == scenario)
+            }),
+            "launch claim probe {scenario} never ran its assertions: {stdout}"
+        );
+    }
+
     #[test]
     fn singleton_launch_claim_rejects_concurrent_holder() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let first = LaunchClaim::acquire(dir.path()).unwrap();
-        let second = LaunchClaim::acquire(dir.path());
-        assert!(second.is_err());
-        drop(first);
-        assert!(LaunchClaim::acquire(dir.path()).is_ok());
+        run_launch_claim_child_probe("singleton");
+    }
+
+    /// The release contract itself: a release is not observable while a child
+    /// forked during the hold has not exec'd yet, and becomes observable the
+    /// moment it does. Deterministic: the fork image is parked in `pre_exec`
+    /// on a pipe the probe controls, so no timing is involved.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn launch_claim_release_waits_for_in_flight_fork_images_to_exec() {
+        run_launch_claim_child_probe("fork_image");
+    }
+
+    #[test]
+    #[ignore = "child-process probe; driven by the launch claim release tests"]
+    fn launch_claim_child_probe() {
+        let (Some(scenario), Some(root)) = (
+            std::env::var(LAUNCH_CLAIM_CHILD_SCENARIO_ENV).ok(),
+            std::env::var_os(LAUNCH_CLAIM_CHILD_ROOT_ENV),
+        ) else {
+            return;
+        };
+        let root = Path::new(&root);
+        let contended = |result: Result<LaunchClaim>| match result {
+            Ok(_) => panic!("a second launch claim must be refused while one is held"),
+            Err(err) => {
+                let kind = err
+                    .downcast_ref::<std::io::Error>()
+                    .map(std::io::Error::kind);
+                assert_eq!(kind, Some(std::io::ErrorKind::AddrInUse), "{err:#}");
+            }
+        };
+        match scenario.as_str() {
+            "singleton" => {
+                let first = LaunchClaim::acquire(root).unwrap();
+                contended(LaunchClaim::acquire(root));
+                drop(first);
+                let reacquired = LaunchClaim::acquire(root);
+                assert!(reacquired.is_ok(), "{:#}", reacquired.err().unwrap());
+            }
+            // Linux only: elsewhere a namespaced name is a `/tmp` socket path
+            // that the drop unlinks, so a fork image cannot keep it bound.
+            #[cfg(target_os = "linux")]
+            "fork_image" => {
+                use std::io::{Read, Write};
+                use std::os::fd::AsRawFd;
+                use std::os::unix::process::CommandExt;
+                // `std::io::pipe` ends are close-on-exec, so `true` inherits
+                // neither; the fork image uses them only before it execs.
+                let (mut forked_r, forked_w) = std::io::pipe().unwrap();
+                let (go_r, mut go_w) = std::io::pipe().unwrap();
+                let (forked_w_fd, go_r_fd) = (forked_w.as_raw_fd(), go_r.as_raw_fd());
+                let first = LaunchClaim::acquire(root).unwrap();
+                let mut command = std::process::Command::new("true");
+                // Runs in the fork image, which already holds a copy of the
+                // claim's descriptor: report the fork, then park until released.
+                // Raw `write`/`read` only: this runs between fork and exec.
+                unsafe {
+                    command.pre_exec(move || {
+                        let byte = 1u8;
+                        libc::write(forked_w_fd, (&byte as *const u8).cast(), 1);
+                        let mut go = 0u8;
+                        libc::read(go_r_fd, (&mut go as *mut u8).cast(), 1);
+                        Ok(())
+                    });
+                }
+                // `status` returns only after the child execs, so it cannot run
+                // on this thread while the probe still has to release the child.
+                let spawner = std::thread::spawn(move || command.status());
+                let mut forked = [0u8; 1];
+                forked_r.read_exact(&mut forked).unwrap();
+                drop(first);
+                // Released by this process, still bound by the fork image.
+                contended(LaunchClaim::acquire(root));
+                go_w.write_all(&[1]).unwrap();
+                assert!(spawner.join().unwrap().unwrap().success());
+                // The exec closed the fork image's copy: free immediately.
+                let reacquired = LaunchClaim::acquire(root);
+                assert!(reacquired.is_ok(), "{:#}", reacquired.err().unwrap());
+                drop((forked_w, go_r));
+            }
+            other => panic!("unknown launch claim probe scenario {other}"),
+        }
+        println!("{LAUNCH_CLAIM_CHILD_DONE}{scenario}");
     }
     #[test]
     fn launch_claim_rejects_empty_or_missing_project_roots_before_namespacing() {

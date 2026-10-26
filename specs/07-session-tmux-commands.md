@@ -1581,6 +1581,18 @@ authority used by route/start/sync:
   from the canonical project root
 - bootstrap state: `.agent-doc/state.db` `controller_bootstrap` row
 
+On Linux, where the claim lives in the abstract socket namespace, releasing it
+frees its name only when the last descriptor for the endpoint closes (other
+Unix platforms map it to a `/tmp` socket path that the release unlinks). A
+child that any thread of the holding process forks while the claim is held
+carries a copy until it execs (the endpoint is close-on-exec; there is no
+close-on-fork), so a release becomes observable to the next
+acquirer only after every such in-flight fork image has exec'd or exited. A
+caller that may re-acquire right after another release must use the bounded
+blocking acquire; an immediate non-blocking re-acquire is guaranteed only in a
+process where nothing else forks. Tests that assert immediate re-acquisition run
+in a dedicated child process for that reason.
+
 Lazy startup must connect first, acquire the kernel-owned bootstrap claim only
 when needed,
 verify that the active controller was started from the same agent-doc binary

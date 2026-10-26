@@ -525,7 +525,7 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
 /// harness admitting through MCP): an absent or blank `file` admits the
 /// document `pane` claims, through the same
 /// [`agent_doc_session_registry_io::pane_document::resolve_pane_document`] the
-/// Claude Code / Codex hooks and `agent-doc resolve-pane-document` use. An
+/// Claude Code / Codex hooks and `agent-doc document` use. An
 /// explicit `file` always wins. A pane that does not resolve to exactly one
 /// claimed document is a named error, so nothing is admitted and no document is
 /// guessed.

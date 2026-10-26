@@ -4,7 +4,7 @@
 //! and OpenCode, plain `agent-doc` in Codex — runs the normal cycle on the
 //! document the current pane claimed with `agent-doc claim`. This is the one
 //! binary-owned answer to "which document is that?", shared by the
-//! `agent-doc resolve-pane-document` command and the `UserPromptSubmit` hooks,
+//! `agent-doc document` command and the `UserPromptSubmit` hooks,
 //! so the sealed cycle contract and a shell lookup can never disagree.
 //!
 //! It fails closed. Outside tmux, with no project root, with no claim, with a

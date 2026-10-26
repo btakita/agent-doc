@@ -1,4 +1,4 @@
-//! `agent-doc resolve-pane-document`.
+//! `agent-doc document`.
 //!
 //! Prints the session document the current tmux pane claims: the FILE the
 //! no-argument harness entrypoint runs on. Harnesses whose admission is not a

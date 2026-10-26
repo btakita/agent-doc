@@ -19,7 +19,7 @@ Interactive document session — respond to user edits in a markdown document.
 /agent-doc compact exchange <FILE>
 ```
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, run `agent-doc resolve-pane-document` first and use the path it prints as FILE for the whole cycle. If it exits nonzero (not in tmux, no claim, several claims), report its reason and stop; never guess a document.
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, run `agent-doc document` first and use the path it prints as FILE for the whole cycle. If it exits nonzero (not in tmux, no claim, several claims), report its reason and stop; never guess a document.
 
 **Note:** Slash commands (`/agent-doc`) are installed as an OpenCode command via `agent-doc skill install --harness opencode`. Other harnesses receive the document path directly.
 ## Required cycle

@@ -93,7 +93,7 @@ const OPENCODE_INVOCATION_SECTION: &str = r#"## Invocation
 /agent-doc compact exchange <FILE>
 ```
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, run `agent-doc resolve-pane-document` first and use the path it prints as FILE for the whole cycle. If it exits nonzero (not in tmux, no claim, several claims), report its reason and stop; never guess a document.
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, run `agent-doc document` first and use the path it prints as FILE for the whole cycle. If it exits nonzero (not in tmux, no claim, several claims), report its reason and stop; never guess a document.
 
 **Note:** Slash commands (`/agent-doc`) are installed as an OpenCode command via `agent-doc skill install --harness opencode`. Other harnesses receive the document path directly.
 "#;
@@ -106,7 +106,7 @@ Use the harness-native `agent-doc` entrypoint for the environment you are in:
 - Codex: `agent-doc <FILE>`, `agent-doc claim <FILE>`, `agent-doc compact <FILE>`, `agent-doc compact exchange <FILE>`
 - OpenCode: `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, `/agent-doc compact exchange <FILE>`
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE (`/agent-doc`, or `agent-doc` in Codex), the cycle runs on the document this tmux pane claims. Claude Code and Codex hooks resolve it and name it in the admitted context; connected admission (`agent_doc_admit` without `file`) returns it as `file`; other harnesses run `agent-doc resolve-pane-document` and use the printed path. A refusal is reported, never guessed.
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE (`/agent-doc`, or `agent-doc` in Codex), the cycle runs on the document this tmux pane claims. Claude Code and Codex hooks resolve it and name it in the admitted context; connected admission (`agent_doc_admit` without `file`) returns it as `file`; other harnesses run `agent-doc document` and use the printed path. A refusal is reported, never guessed.
 
 **Note:** Codex does not support project-defined slash commands. If this root file disagrees with the installed harness-specific instructions, treat the installed harness file as authoritative for the current turn.
 "#;
@@ -3844,7 +3844,7 @@ mod tests {
         let opencode = super::content_for_env(Environment::OpenCode);
         assert!(opencode.contains("\n/agent-doc\n"), "{opencode}");
         assert!(
-            opencode.contains("agent-doc resolve-pane-document"),
+            opencode.contains("run `agent-doc document` first"),
             "{opencode}"
         );
 

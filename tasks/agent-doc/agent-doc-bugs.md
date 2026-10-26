@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 11 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 12 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -967,7 +967,7 @@ Three gaps it left are queued, including one where a running controller can stil
 - ☑️ [#subagent:doctorblocked#1] `agent-doc doctor` reports outcome=blocked (queue_continuation) on a brand-new document with no queue; it should report healthy (found by the onboarding pass, 2026-10-26)
 - 📥 `agent-doc doctor` exits 0 even when its outcome is blocked or recoverable; exit non-zero so scripts and CI can act on it (found by the doctor fresh-document fix, 2026-10-26)
 - ☑️ [#subagent:startshellready#1] `agent-doc start` types its command into a new tmux pane before the shell is ready (zsh with no ~/.zshrc lost the leading `/`); wait for shell readiness (found by the onboarding pass, 2026-10-26)
-- route-owned auto-start (agent-doc-route-io/src/startup.rs route.auto_start) and parallel fan-out panes (src/parallel.rs) still type their commands into a just-split pane; launch them as the pane process via agent_doc_tmux_io::launch_command_in_pane, checking route_owned_start_enter input logging and the fan-out $(passage ...) env prefix (found by the start shell-readiness fix, 2026-10-26)
+- 📥 route-owned auto-start (agent-doc-route-io/src/startup.rs route.auto_start) and parallel fan-out panes (src/parallel.rs) still type their commands into a just-split pane; launch them as the pane process via agent_doc_tmux_io::launch_command_in_pane, checking route_owned_start_enter input logging and the fan-out $(passage ...) env prefix (found by the start shell-readiness fix, 2026-10-26)
 - ☑️ [#subagent:markerdocs#1] What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
 - ☑️ [#subagent:sameheading#1] agent-doc should support the header being on the same line as the open tag: e.g. `## Queue: Main ` as a prefix to the `agent:run` open tag.
 - 📥 fix nondeterministic agent-doc-document-realtime-io tests::retained_capture_repairs_legacy_welded_queue_close_before_validation — waits on a background delivery thread and failed under check-fast load once (2026-10-26, any-heading worker); find what it races, do not rerun to green
@@ -975,13 +975,13 @@ Three gaps it left are queued, including one where a running controller can stil
 - ☑️ [#subagent:noargskill#1] In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
 - ☑️ [#subagent:gh377#1] #gh-fix https://github.com/btakita/agent-doc/issues/377
 - 📥 `agent:loop` in this document should only have `- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.`. agent-doc is treating `agent:loop` as the kitchen sink which is wrong. The items belong in `agent:run`.
-- an already-running controller that receives an operator edit removing a component marker still restores the last valid canonical and pushes it back into the editor, reverting operator text; keep the editor text, refuse adoption, and show the ⚠ agent-doc marker diagnostic instead (gap 2 of the todo-collapse fix d8794daf9a, 2026-10-26)
-- JetBrains plugin: run the component-marker check on the buffer before recording a detached-editor op, so an edit that deletes a component open/close marker warns the operator at edit time (the detached op path carries only offsets and lengths) (gap 1 of the todo-collapse fix, 2026-10-26)
-- cold controller start with no editor handover loads the document from disk even when disk has broken component markers; fence it against the last snapshot or HEAD and show the marker diagnostic (gap 3 of the todo-collapse fix, 2026-10-26)
+- 🚧 [#subagent:norevert#1] an already-running controller that receives an operator edit removing a component marker still restores the last valid canonical and pushes it back into the editor, reverting operator text; keep the editor text, refuse adoption, and show the ⚠ agent-doc marker diagnostic instead (gap 2 of the todo-collapse fix d8794daf9a, 2026-10-26)
+- 📥 JetBrains plugin: run the component-marker check on the buffer before recording a detached-editor op, so an edit that deletes a component open/close marker warns the operator at edit time (the detached op path carries only offsets and lengths) (gap 1 of the todo-collapse fix, 2026-10-26)
+- 📥 cold controller start with no editor handover loads the document from disk even when disk has broken component markers; fence it against the last snapshot or HEAD and show the marker diagnostic (gap 3 of the todo-collapse fix, 2026-10-26)
 - 📥 [#jb263-feed-verify]: done?
 - 📥 [#layoutunprovenliveverify]: [#autosync-restart-verify]: The tmux panes are syncing.
 - 📥 Idea error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
-- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/378
+- 🟡 [#subagent:gh378#1] #gh-fix https://github.com/btakita/agent-doc/issues/378
 <!-- /agent:run -->
 
 ## Loop: Issues <!-- agent:loop id="issues" interval="1h" priority -->

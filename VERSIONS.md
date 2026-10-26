@@ -2,6 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.554
+
+- **Queue claims stay on their own rows and show the same state in every queue.** A reported claim no longer moves
+  onto a restored row with the same text when `⟦effect:N⟧` annotations are added. Claim, report, release, and strike
+  markers are now painted onto every `agent:run`/`agent:loop`/`agent:queue` that shows the item, not only the queue
+  preflight selected. A claimed row is no longer read as an operator delete and tombstoned, because its done id is
+  now read after the lifecycle and owner markers are stripped.
+- **Heading-anchored `agent:run` markers work end to end (GH #374).** `respond`, queue consumption, and node-keyed
+  mutations resolve `## Run <!-- agent:run ... -->`. The document-cell merge no longer empties `agent:run` bodies,
+  and it pairs components by `id=` and order of appearance instead of taking the first one with the same name.
+- **Remote Dev routing and popups recover (GH #373, GH #375).** A Run Agent Doc route with no detected columns
+  dispatches to the document's live pane instead of exiting, and the backend Agent Doc Actions popup no longer adds
+  the frontend-only update-channel action as null.
+- **Release publication tolerates a retained plugin generation.** Marketplace's duplicate-version refusal for an
+  unchanged JetBrains version counts as already uploaded, so it no longer blocks editor packages and stable-channel
+  promotion.
+- **Controller tests are deterministic.** Each blocking-effect test gate is keyed to its own fixture's document.
+- **Editor packages.** JetBrains classic, 2026.2, and 2026.3 are 0.2.828, 0.2.829, and 0.2.830; VS Code remains
+  0.2.83. Modular IDEs still require a restart to load the replaced plugin.
+
 ## 0.35.553
 
 - **Release promotion no longer drops the aggregate channel update.** The release aggregate and per-target promotion

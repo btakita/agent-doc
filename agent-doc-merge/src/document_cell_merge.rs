@@ -1708,6 +1708,16 @@ mod tests {
             ("<!-- agent:run -->", "<!-- /agent:run -->"),
             ("## Run <!-- agent:run priority -->", "<!-- /agent:run -->"),
             ("## Queue <!-- agent:queue -->", "<!-- /agent:queue -->"),
+            // Any-heading prefix: the live 2026-10-26 opener, whose heading
+            // text does not match its tag.
+            (
+                "## Queue: Main <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push\" priority go -->",
+                "<!-- /agent:run -->",
+            ),
+            (
+                "### Later <!-- agent:loop interval=5m -->",
+                "<!-- /agent:loop -->",
+            ),
         ] {
             let doc = |items: &str| format!("# T\n\n{open}\n{items}{close}\n");
             let base = doc("- do [#a] task\n");

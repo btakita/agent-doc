@@ -5756,6 +5756,48 @@ mod tests {
         unsafe { agent_doc_free_string(result.error) };
     }
 
+    /// Any-heading prefix: the JetBrains template-structure guard
+    /// (`CrdtReplicaManager.templateStructureState` -> `NativePatching.inspectTemplateStructure`)
+    /// is this FFI call. It refused the live `## Queue: Main <!-- agent:run ... -->`
+    /// line 363 times on 2026-10-26; it must now pass it through unchanged, and
+    /// still refuse a closing tag after a heading with the exact tag and line.
+    #[test]
+    fn normalize_template_structure_ffi_accepts_any_heading_prefixed_opener() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "prompt\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue: Main <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n",
+            "- ship it\n",
+            "<!-- /agent:run -->\n\n",
+            "## Later <!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let c_doc = CString::new(doc).unwrap();
+        let result = unsafe { agent_doc_normalize_template_structure(c_doc.as_ptr()) };
+        assert!(result.error.is_null(), "{}", unsafe {
+            CStr::from_ptr(result.error).to_string_lossy()
+        });
+        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
+        assert_eq!(text, doc, "the guard must report the projection Exact");
+        unsafe { agent_doc_free_string(result.text) };
+
+        let close_after_heading = doc.replace(
+            "- ship it\n<!-- /agent:run -->\n",
+            "- ship it\n## Done <!-- /agent:run -->\n",
+        );
+        let c_doc = CString::new(close_after_heading).unwrap();
+        let result = unsafe { agent_doc_normalize_template_structure(c_doc.as_ptr()) };
+        assert!(result.text.is_null());
+        let error = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
+        assert!(
+            error.contains("non_standalone_component_marker:/agent:run:close:line7"),
+            "unexpected error: {error}"
+        );
+        unsafe { agent_doc_free_string(result.error) };
+    }
+
     #[test]
     fn normalize_template_structure_ffi_rejects_truncated_agent_comment() {
         let doc = concat!(

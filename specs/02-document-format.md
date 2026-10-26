@@ -75,16 +75,44 @@ content here
 
 Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (close). Names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`. Components are patched via `agent-doc patch`.
 
-An opening marker may share a line with a matching ATX heading, for example
-`## Run <!-- agent:run priority subagents -->`. The heading text must match the
-exact source tag name case-insensitively; closing markers remain on their own
-line. Other prose welded before or after a marker remains structural corruption.
+An opening marker may share a line with any ATX heading, for example
+`## Run <!-- agent:run priority subagents -->` or
+`## Queue: Main <!-- agent:run id="main" subagents priority go -->`.
+This holds for every component kind, and the heading
+text need not match the tag name. The rule stays strict:
+
+- The prefix is an ATX heading and nothing else: up to three spaces of
+  indentation (no tabs), one to six `#`, a space or tab, then any heading text,
+  which may be empty (`## <!-- agent:run -->`). `##Queue`, `####### Queue`,
+  list items, blockquotes, and other prose before a marker are not headings.
+- The heading text holds no other HTML comment (`<!--` or `-->`) and leaves no
+  inline code span or double-quoted span open at the marker. An open span would
+  make the element parser treat the marker as prose while a line scanner still
+  saw an opener, so such a prefix is refused for all of them.
+- Only whitespace may follow the marker on its line.
+- Only opening markers qualify. A closing marker after a heading
+  (`## Done <!-- /agent:run -->`) is `non_standalone_component_marker:/agent:run:close:lineN`.
+- A marker line inside fenced or indented code is content, heading or not
+  (`#fencedmarkerscan`).
+- The heading text is never part of the component body: the body starts after
+  the opener, and the heading stays verbatim on its line through parse, the
+  template-structure guard, merge, and commit.
+
+Through 0.35.554 the heading text had to equal the tag name (`## Run` with
+`agent:run`). On 2026-10-26 the JetBrains template-structure guard refused every
+save of a document carrying `## Queue: Main <!-- agent:run id="main" ... -->`
+363 times as `non_standalone_component_marker:agent:run:open:line836`, so the
+editor and disk diverged until the operator split the line. Other prose welded
+before or after a marker remains structural corruption.
 One predicate owns this heading-anchor rule
 (`agent_doc_element::element::component_heading_prefix_matches_tag`), and
 every opener scanner calls it: the element parser, the structural-corruption
 gate, the markdown-AST overlay (`agent_doc_markdown_ast::overlay::parse_open_marker_line`)
 that `respond`, queue consumption, and node-keyed mutations resolve
-components through, and the document-cell merge body scan. A heading-anchored
+components through, the document-cell merge body scan, and the CRDT relay's
+marker-line removal guard (`#markerlineedit`). The JetBrains plugins'
+template-structure guard calls the same Rust rule through the
+`agent_doc_normalize_template_structure` FFI, so it keeps no Kotlin copy. A heading-anchored
 opener therefore exists for all of them or for none: `respond` must never
 report ``component `queue` was not found`` for a document whose
 `read --component`, `patch`, and `lint` accept that component (GH #374).

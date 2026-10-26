@@ -3427,9 +3427,28 @@ const MARKER_EDIT_DIFF_DEADLINE: std::time::Duration = std::time::Duration::from
 /// coincidence, not a surviving line.
 const MARKER_EDIT_ANCHOR_CHARS: usize = 4;
 
-/// Whether `line` (already trimmed) is a component marker line.
+/// Whether `line` (already trimmed) is a component marker line: a standalone
+/// marker, or an opener prefixed by an ATX heading on its own line
+/// (`## Queue: Main <!-- agent:run id="main" -->`) under
+/// the shared [`agent_doc_element::element::component_heading_prefix_matches_tag`]
+/// rule, so a stale buffer tombstoning a heading-prefixed opener reads as a
+/// marker removal too.
 fn is_component_marker_line(line: &str) -> bool {
-    (line.starts_with("<!-- agent:") || line.starts_with("<!-- /agent:")) && line.ends_with("-->")
+    if !line.ends_with("-->") {
+        return false;
+    }
+    if line.starts_with("<!-- agent:") || line.starts_with("<!-- /agent:") {
+        return true;
+    }
+    let Some(start) = line.find("<!--") else {
+        return false;
+    };
+    line[start + 4..]
+        .split_whitespace()
+        .next()
+        .is_some_and(|tag| {
+            agent_doc_element::element::component_heading_prefix_matches_tag(&line[..start], tag)
+        })
 }
 
 /// `#typingfencerevert` / `#markerlineedit` (GH #239): whether merging an editor
@@ -11700,6 +11719,37 @@ mod tests {
         assert!(!update_removed_component_marker(
             before,
             &before.replace("intro text\n", "intro text\n```\n"),
+        ));
+    }
+
+    /// Any-heading prefix: a heading-prefixed opener line is a marker line for
+    /// the `#markerlineedit` discriminator, so deleting it reads as a removal
+    /// while retyping its heading text stays an in-place operator edit.
+    #[test]
+    fn update_removed_component_marker_counts_heading_prefixed_openers() {
+        let before = concat!(
+            "intro text\n",
+            "## Queue: Main <!-- agent:run id=\"main\" subagents priority go -->\n",
+            "- ship it\n",
+            "<!-- /agent:run -->\n",
+        );
+        assert!(is_component_marker_line(
+            "## Queue: Main <!-- agent:run id=\"main\" subagents priority go -->"
+        ));
+        assert!(!is_component_marker_line("Queue: Main <!-- agent:run -->"));
+        assert!(!is_component_marker_line(
+            "## Queue: Main <!-- /agent:run -->"
+        ));
+        assert!(!update_removed_component_marker(
+            before,
+            &before.replace("Queue: Main", "Queue: Mains"),
+        ));
+        assert!(update_removed_component_marker(
+            before,
+            &before.replace(
+                "## Queue: Main <!-- agent:run id=\"main\" subagents priority go -->\n",
+                ""
+            ),
         ));
     }
 

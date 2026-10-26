@@ -22,9 +22,10 @@
 //! - Opening markers may carry space-separated `key=value` inline attributes
 //!   (e.g., `patch=append`). `patch=` takes precedence over the legacy `mode=` alias;
 //!   `patch_mode()` encapsulates this lookup.
-//! - An opening marker may share a line with an ATX heading whose text matches
-//!   the exact tag name, e.g. `## Run <!-- agent:run priority subagents -->`.
-//!   Closing markers and all other opening-marker shapes remain standalone.
+//! - An opening marker may share a line with any ATX heading (`#`..`######`, any
+//!   heading text), e.g. `## Queue: Main <!-- agent:run id="main" -->`. Closing
+//!   markers and all other opening-marker shapes remain standalone; see
+//!   [`component_heading_prefix_matches_tag`].
 //! - Tag-related parse and structural errors preserve the exact source spelling
 //!   (`agent:run`, not the internal `queue` projection) and report its line in
 //!   the document target being validated.
@@ -1246,7 +1247,7 @@ pub struct StructuralMarkerOccurrence {
     /// 1-based line number.
     pub line: usize,
     /// Whether the marker has a valid structural anchor: either it leads its
-    /// own line, or an opening tag follows an ATX heading with the same name.
+    /// own line, or an opening tag follows an ATX heading on the same line.
     ///
     /// The field keeps its historical name for API compatibility.
     pub line_anchored: bool,
@@ -1262,37 +1263,58 @@ fn component_marker_tag(doc: &str, marker_start: usize, marker_end: usize) -> Op
     (tag.starts_with("agent:") || tag.starts_with("/agent:")).then_some(tag)
 }
 
-/// A component opener may share a line with the ATX heading that labels it,
-/// for example `## Run <!-- agent:run priority subagents -->`.
+/// A component opener may share a line with any ATX heading, for example
+/// `## Run <!-- agent:run priority subagents -->` or
+/// `## Queue: Main <!-- agent:run id="main" subagents -->`.
 ///
-/// Requiring the heading text to equal the exact source tag name keeps prose
-/// such as `## Notes about queues <!-- agent:run -->` fail-closed. Closing tags
-/// remain standalone.
+/// The heading prefix is strict: optional indentation of at most three spaces
+/// (no tabs), one to six `#`, a space or tab, then any heading text (including
+/// none) that carries no other HTML comment (`<!--` / `-->`) and leaves no
+/// code span or double-quoted span open at the marker. An open span would
+/// make the element parser mask the marker as prose while a line scanner still
+/// saw an opener. Only opening tags qualify: closing tags remain standalone,
+/// and callers still require nothing but whitespace after the marker. The
+/// heading text is outside the component: the body starts after the opener.
 ///
 /// `prefix` is the raw line text before `<!--` (indentation included) and
 /// `tag` is the exact opening tag token (`agent:run`). This is the single
 /// owner of the heading-anchor rule: the element parser, the structural gate,
 /// and the markdown-AST overlay that respond/queue mutations resolve
 /// components through all call it, so no scanner can accept a heading-anchored
-/// opener that another rejects (GH #374).
+/// opener that another rejects (GH #374). Fenced code is excluded by each
+/// caller's code mask, never by this predicate. The function keeps its
+/// historical name for API compatibility; the heading text no longer has to
+/// match the tag name.
 pub fn component_heading_prefix_matches_tag(prefix: &str, tag: &str) -> bool {
     let Some(name) = tag.strip_prefix("agent:") else {
         return false;
     };
+    if name.is_empty() || name.starts_with('/') {
+        return false;
+    }
+    if prefix.contains(['\n', '\r']) || prefix.contains("<!--") || prefix.contains("-->") {
+        return false;
+    }
     let indent_len = prefix.len() - prefix.trim_start_matches([' ', '\t']).len();
     if indent_len > 3 || prefix[..indent_len].contains('\t') {
         return false;
     }
-    let heading = prefix[indent_len..].trim_end();
+    let heading = &prefix[indent_len..];
     let hash_count = heading.bytes().take_while(|byte| *byte == b'#').count();
     if !(1..=6).contains(&hash_count) {
         return false;
     }
-    let rest = &heading[hash_count..];
-    if !rest.starts_with(char::is_whitespace) {
+    if !heading[hash_count..].starts_with([' ', '\t']) {
         return false;
     }
-    rest.trim().eq_ignore_ascii_case(name)
+    // The marker must not sit inside a span the element parser masks as
+    // prose: probe the byte where `<!--` would start.
+    let probe = format!("{prefix}<!-- {tag} -->");
+    let marker_at = prefix.len();
+    !find_code_ranges(&probe)
+        .iter()
+        .chain(find_quoted_ranges(&probe).iter())
+        .any(|&(start, end)| marker_at >= start && marker_at < end)
 }
 
 /// Every `<!-- agent:` / `<!-- /agent:` occurrence outside code and quoted
@@ -2452,8 +2474,8 @@ pub fn structural_corruption_reason(doc: &str) -> Option<String> {
         }
 
         // Component markers are binary-owned scaffolding. They normally occupy
-        // their own line; an opening tag may instead follow its matching ATX
-        // heading (`## Run <!-- agent:run ... -->`). The parser intentionally
+        // their own line; an opening tag may instead follow an ATX heading
+        // (`## Queue: Main <!-- agent:run ... -->`). The parser intentionally
         // accepts a balanced marker wherever it occurs, but that made
         // `operator text<!-- /agent:queue -->` look structurally valid after a
         // stale component merge welded the closing marker onto a progressively
@@ -2655,20 +2677,146 @@ mod tests {
         );
     }
 
+    /// Any-heading prefix: the live 2026-10-26 line. Any ATX heading text may
+    /// prefix an opening tag, for every component kind; the editor's
+    /// template-structure guard refused this exact line 363 times as
+    /// `non_standalone_component_marker:agent:run:open:line836`.
     #[test]
-    fn nonmatching_heading_refusal_names_the_exact_tag_and_merged_target_line() {
+    fn any_heading_may_share_the_opening_tag_line() {
+        let doc = concat!(
+            "## Queue: Main <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n",
+            "- ship it\n",
+            "<!-- /agent:run -->\n\n",
+            "# Later <!-- agent:backlog priority -->\n",
+            "- [ ] [#next] next\n",
+            "<!-- /agent:backlog -->\n\n",
+            "###### `notes` and \"quotes\" <!-- agent:notes -->\n",
+            "scratch\n",
+            "<!-- /agent:notes -->\n",
+        );
+
+        let components = parse(doc).expect("heading-prefixed opening tags must parse");
+        assert_eq!(
+            components
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![QUEUE_COMPONENT, "backlog", "notes"]
+        );
+        assert_eq!(components[0].content(doc), "- ship it\n");
+        assert_eq!(
+            components[0].attrs.get("id").map(String::as_str),
+            Some("main")
+        );
+        assert_eq!(
+            &doc[..components[0].open_start],
+            "## Queue: Main ",
+            "the heading text is outside the component"
+        );
+        assert_eq!(structural_corruption_reason(doc), None);
+        assert!(
+            structural_marker_occurrences(doc)
+                .iter()
+                .all(|occurrence| occurrence.line_anchored),
+            "any heading anchors an opening marker"
+        );
+    }
+
+    #[test]
+    fn heading_prefix_predicate_is_strict() {
+        for (prefix, tag) in [
+            ("## Queue: Main ", "agent:run"),
+            ("## ", "agent:run"),
+            ("   ###\tRun ", "agent:loop"),
+            ("# a `code` span ", "agent:status"),
+            ("# a \"closed\" quote ", "agent:status"),
+            // A lone backtick opens no code span in a single-line heading, so
+            // the element parser sees the marker too.
+            ("## an `unpaired backtick ", "agent:run"),
+        ] {
+            assert!(
+                component_heading_prefix_matches_tag(prefix, tag),
+                "{prefix:?} {tag}"
+            );
+        }
+        for (prefix, tag) in [
+            ("## Queue: Main ", "/agent:run"),
+            ("## Queue: Main ", "agent:/run"),
+            ("## Queue: Main ", "agent:"),
+            ("Queue: Main ", "agent:run"),
+            ("- ## Queue ", "agent:run"),
+            ("##Queue ", "agent:run"),
+            ("####### Queue ", "agent:run"),
+            ("    ## Queue ", "agent:run"),
+            ("\t## Queue ", "agent:run"),
+            ("## a <!-- note --> ", "agent:run"),
+            ("## a --> ", "agent:run"),
+            ("## an \"open quote ", "agent:run"),
+        ] {
+            assert!(
+                !component_heading_prefix_matches_tag(prefix, tag),
+                "{prefix:?} {tag}"
+            );
+        }
+    }
+
+    /// Strictness survives the wider rule: a closing tag after a heading, text
+    /// before a marker that is not a heading, and text after a heading-prefixed
+    /// opener all fail closed with the exact tag and line.
+    #[test]
+    fn non_heading_and_close_marker_refusals_name_the_exact_tag_and_line() {
         let mut doc = "filler\n".repeat(184);
-        doc.push_str("## Work <!-- agent:run priority subagents -->\n");
+        doc.push_str("Work <!-- agent:run priority subagents -->\n");
         doc.push_str("- ship it\n<!-- /agent:run -->\n");
         // Put another component heading at line 229: the diagnostic must not
         // borrow that later line or the internal canonical name `queue`.
         doc.push_str(&"filler\n".repeat(41));
         doc.push_str("## Backlog <!-- agent:backlog -->\n<!-- /agent:backlog -->\n");
-
         assert_eq!(
             structural_corruption_reason(&doc).as_deref(),
             Some("non_standalone_component_marker:agent:run:open:line185")
         );
+
+        let close_after_heading = concat!(
+            "<!-- agent:run id=\"main\" -->\n",
+            "- ship it\n",
+            "## Queue: Main <!-- /agent:run -->\n",
+        );
+        assert!(parse(close_after_heading).is_ok());
+        assert_eq!(
+            structural_corruption_reason(close_after_heading).as_deref(),
+            Some("non_standalone_component_marker:/agent:run:close:line3")
+        );
+
+        let trailing = "## Queue: Main <!-- agent:run --> go\n- a\n<!-- /agent:run -->\n";
+        assert_eq!(
+            structural_corruption_reason(trailing).as_deref(),
+            Some("non_standalone_component_marker:agent:run:open:line1")
+        );
+    }
+
+    /// A fenced copy of a heading-prefixed opener is content: it neither opens
+    /// a component nor trips the structural gate.
+    #[test]
+    fn fenced_heading_prefixed_opener_is_content() {
+        let doc = concat!(
+            "<!-- agent:notes -->\n",
+            "```markdown\n",
+            "## Queue: Main <!-- agent:run id=\"main\" -->\n",
+            "## Queue: Main <!-- /agent:run -->\n",
+            "```\n",
+            "<!-- /agent:notes -->\n",
+        );
+        let components = parse(doc).expect("fenced markers are content");
+        assert_eq!(
+            components
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["notes"]
+        );
+        assert_eq!(structural_corruption_reason(doc), None);
+        assert!(structural_marker_occurrences(doc).len() == 2);
     }
 
     #[test]

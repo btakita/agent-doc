@@ -244,6 +244,7 @@ fn queue_continuation_invariant() -> WorkflowInvariant {
             fact(FactSourceKind::PreflightJson, "queue_continuation_required"),
             fact(FactSourceKind::PreflightJson, "queue_drainable_head_count"),
             fact(FactSourceKind::QueueState, "active_head.id"),
+            fact(FactSourceKind::QueueState, "document.queue_component_count"),
             fact(
                 FactSourceKind::OpsLog,
                 "idle_queue_watch_drain|drain_claim|go_queue_skip_undrainable",
@@ -594,6 +595,7 @@ fn generation_redirect_invariant() -> WorkflowInvariant {
         severity: InvariantSeverity::High,
         fact_sources: vec![
             fact(FactSourceKind::ActorState, "generation"),
+            fact(FactSourceKind::ActorState, "record_present"),
             fact(FactSourceKind::CycleState, "active cycle generation"),
             fact(
                 FactSourceKind::OpsLog,

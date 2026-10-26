@@ -333,6 +333,24 @@ Each invariant reports one typed outcome: `ok`, `recoverable`, `operator`, or
 sources are `blocked` with the command needed to gather the evidence; detected
 safe repairs are `recoverable`.
 
+Every invariant must be well-defined for a brand-new session document: after
+`agent-doc init`, a document with no `agent:queue` component, no snapshot, no
+cycle state, and no registered controller actor reports `outcome=ok`, not
+`blocked` for evidence that cannot exist yet.
+
+- `queue_continuation`: doctor parses the document's own queue topology. With
+  no preflight capture, zero `agent:queue` components is `ok` — no queue means
+  no continuation obligation. Any queue component (even an empty one) still
+  requires the preflight facts and stays `blocked` without them, and an
+  unparseable queue topology is unknown evidence, never proof of an absent
+  queue. A supplied preflight capture outranks the document projection.
+- `closeout_commit`: `NoSnapshot` together with absent cycle state means no
+  cycle has run, so a passing session-check is `ok` with no repair command. A
+  missing snapshot beside existing cycle state stays `recoverable`.
+- `generation_redirect`: an available controller inspection that returns no
+  actor record for the document is `ok` (no generation exists to supersede);
+  an unavailable inspection stays `blocked`.
+
 `agent-doc autofix <FILE>` consumes the doctor report and catalog remediation
 classes to build an invariant-keyed repair plan. The command records
 `workflow_autofix:<invariant>:<hash>` proof rows in the append-only proof ledger

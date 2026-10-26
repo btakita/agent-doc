@@ -236,6 +236,11 @@ body and queue attributes and implies an unbounded loop. `loop=N` keeps the
 finite-pass form. Legacy `agent:queue loop` and `agent:run loop` markers remain
 accepted and are not rewritten solely to migrate their spelling.
 
+Cross-document route dispatch appends transient prompts only to a non-repeating
+`agent:run` (or legacy `agent:queue` without `loop`). It never appends them to
+`agent:loop` or another queue carrying `loop`; if no immediate run exists, the
+router creates `agent:run` and leaves every repeating queue byte-identical.
+
 ### Syntax
 
 - Single-line prompts use flush-left `- ` list items.

@@ -230,3 +230,39 @@ fn brief_does_not_grant_a_preset_quoted_in_inline_code() {
     assert!(!preamble.contains("Operator authorization, item preset `#upgrade`"));
     assert!(!preamble.contains("> Upgrade agent-doc."));
 }
+
+/// `#idlessqueueidentity`: the live session document after the operator
+/// deleted `id=` from its one `agent:run` and one `agent:loop`. `queue brief`
+/// used to fail with "no live queue head matches ...; live heads: (none)";
+/// it now resolves the unclaimed free-text row and names its origin queue
+/// `run`, the kind id `queue follow-up --id` accepts.
+#[test]
+fn brief_resolves_a_free_text_row_of_an_idless_run_beside_an_idless_loop() {
+    let item = "Why have the ☑️ run items not completed?";
+    let content = format!(
+        "---\nagent_doc_session: brief\nagent_doc_format: template\nqueue: go\n{PRESETS}---\n\n\
+## Run <!-- agent:run subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n\
+- 🚧 [#subagent:noargparity#1] `/agent-doc` without arguments\n\
+- {item}\n\
+<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop interval=\"1h\" priority -->\n\
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues.\n\
+<!-- /agent:loop -->\n\n\
+## Backlog <!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n"
+    );
+    let (_dir, doc) = write_doc(&content);
+    let output = cargo_bin_cmd!("agent-doc")
+        .args(["queue", "brief"])
+        .arg(&doc)
+        .args(["--item", item, "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["item"], item, "{json}");
+    assert_eq!(json["queue_id"], "run", "{json}");
+    assert_eq!(json["status"], "resolved", "{json}");
+    let preamble = json["subagent_prompt_preamble"].as_str().unwrap();
+    assert!(preamble.contains("Origin queue id (dispatch-time provenance):\n> run"));
+    assert!(preamble.contains("--id run --after <origin>"));
+}

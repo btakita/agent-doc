@@ -714,13 +714,6 @@ fn find_item<'a>(comp: Option<&'a Component>, id: &str) -> Option<&'a Item> {
     comp?.items.iter().find(|i| i.id == id)
 }
 
-/// The queue id a lone unkeyed runnable component carries: the legacy
-/// singleton identity (`agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID`, which
-/// this crate cannot depend on). Queue maintenance rewrites
-/// `<!-- agent:run -->` to `<!-- agent:run id=default -->` when a second queue
-/// is created, so the two spellings name one component.
-const DEFAULT_QUEUE_ID: &str = "default";
-
 /// The identity a component is paired by across `base`, `ours`, and `theirs`.
 ///
 /// A component is the same component on two sides when its projected overlay
@@ -732,7 +725,9 @@ const DEFAULT_QUEUE_ID: &str = "default";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ComponentIdentity {
     name: String,
-    /// Explicit `id=`; `default` for a lone unkeyed queue; `None` otherwise.
+    /// Explicit `id=`; for a queue, its canonical queue id (`default` for a
+    /// lone unkeyed queue, `run` / `loop` for a kind-unique id-less one);
+    /// `None` otherwise.
     id: Option<String>,
     /// Zero-based index among this side's components sharing `name` and `id`:
     /// document order for unkeyed components, and a deterministic tiebreak for
@@ -748,17 +743,63 @@ fn explicit_component_id(component: &Component) -> Option<String> {
     (!id.is_empty() && id != "true").then(|| id.to_string())
 }
 
+/// The canonical queue id of every runnable (`queue`-projected) component,
+/// index-aligned with `comps` (`None` for other components and for a
+/// kind-ambiguous id-less queue).
+///
+/// This is the queue graph's own rule
+/// ([`agent_doc_element_queue::queue_identity`], `#idlessqueueidentity`): an
+/// explicit `id=`, else `default` for a lone queue, else the kind (`run` /
+/// `loop`) when it is unique. Queue maintenance rewrites
+/// `<!-- agent:run -->` to `<!-- agent:run id=default -->` when a second queue
+/// is created, so those two spellings name one component; an id-less
+/// `agent:run` beside an id-less `agent:loop` pairs by kind, so reordering the
+/// two never merges one queue's items into the other.
+fn queue_identity_ids(comps: &[Component]) -> Vec<Option<String>> {
+    use agent_doc_element_queue::queue_identity::{
+        QueueIdentityInput, QueueKind, resolve_queue_ids,
+    };
+    let queue_attrs = comps
+        .iter()
+        .filter(|c| c.name == "queue")
+        .map(|c| agent_doc_element::element::parse_attrs(&c.attrs))
+        .collect::<Vec<_>>();
+    let inputs = queue_attrs
+        .iter()
+        .map(|attrs| QueueIdentityInput {
+            explicit_id: attrs.get("id").map(String::as_str),
+            kind: QueueKind::from_loop_flag(attrs.contains_key("loop")),
+        })
+        .collect::<Vec<_>>();
+    let mut resolved = resolve_queue_ids(&inputs).into_iter();
+    comps
+        .iter()
+        .map(|c| {
+            if c.name == "queue" {
+                resolved
+                    .next()
+                    .and_then(|identity| identity.id().map(str::to_string))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Every component's [`ComponentIdentity`], index-aligned with `comps`.
 fn component_identities(comps: &[Component]) -> Vec<ComponentIdentity> {
-    let queue_count = comps.iter().filter(|c| c.name == "queue").count();
+    let queue_ids = queue_identity_ids(comps);
     let mut seen: std::collections::HashMap<(String, Option<String>), usize> =
         std::collections::HashMap::new();
     comps
         .iter()
-        .map(|c| {
-            let id = explicit_component_id(c).or_else(|| {
-                (c.name == "queue" && queue_count == 1).then(|| DEFAULT_QUEUE_ID.to_string())
-            });
+        .zip(queue_ids)
+        .map(|(c, queue_id)| {
+            let id = if c.name == "queue" {
+                queue_id
+            } else {
+                explicit_component_id(c)
+            };
             let slot = seen.entry((c.name.clone(), id.clone())).or_insert(0);
             let occurrence = *slot;
             *slot += 1;
@@ -1836,6 +1877,40 @@ mod tests {
             m.merged_doc,
             "# T\n\n<!-- agent:loop id=issues -->\n- do [#i] issue\n- do [#j] new issue\n<!-- /agent:loop -->\n\n\
              <!-- agent:run id=\"main\" -->\n- ~~do [#m] main~~\n<!-- /agent:run -->\n",
+        );
+        assert!(
+            m.conflict_advisories.is_empty(),
+            "{:?}",
+            m.conflict_advisories
+        );
+    }
+
+    /// `#idlessqueueidentity`: an id-less `agent:run` and an id-less
+    /// `agent:loop` are named by their kind (`run` / `loop`), so they pair
+    /// across an operator reorder exactly like id-keyed queues instead of by
+    /// document-order occurrence (which merged the loop against the run).
+    #[test]
+    fn idless_run_and_loop_pair_by_kind_across_an_operator_reorder() {
+        let ordered = |main: &str, issues: &str| {
+            format!(
+                "# T\n\n## Run <!-- agent:run -->\n{main}<!-- /agent:run -->\n\n\
+                 ## Loop <!-- agent:loop interval=1h -->\n{issues}<!-- /agent:loop -->\n"
+            )
+        };
+        let base = ordered("- do [#m] main\n", "- do [#i] issue\n");
+        let ours = ordered(
+            "- ~~do [#m] main~~\n",
+            "- do [#i] issue\n- do [#j] new issue\n",
+        );
+        let theirs = "# T\n\n## Loop <!-- agent:loop interval=1h -->\n- do [#i] issue\n<!-- /agent:loop -->\n\n\
+                      ## Run <!-- agent:run -->\n- do [#m] main\n<!-- /agent:run -->\n";
+
+        let m = document_cell_merge(&base, &ours, theirs);
+
+        assert_eq!(
+            m.merged_doc,
+            "# T\n\n## Loop <!-- agent:loop interval=1h -->\n- do [#i] issue\n- do [#j] new issue\n<!-- /agent:loop -->\n\n\
+             ## Run <!-- agent:run -->\n- ~~do [#m] main~~\n<!-- /agent:run -->\n",
         );
         assert!(
             m.conflict_advisories.is_empty(),

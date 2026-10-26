@@ -1,8 +1,12 @@
 //! Identified multi-queue parsing and dependency-aware scheduling.
 //!
-//! Queue blocks are independent scheduling nodes. The legacy single unkeyed
-//! block is retained as the `default` queue; preflight gives omitted ids in a
-//! multi-queue document stable persisted surrogates before this graph is read.
+//! Queue blocks are independent scheduling nodes. Every block's id comes from
+//! the one shared rule in [`agent_doc_element_queue::queue_identity`]
+//! (`#idlessqueueidentity`): an explicit `id=` wins; the legacy single unkeyed
+//! block is the `default` queue; in a multi-queue document an id-less block
+//! that is the document's one `agent:run` or one `agent:loop` is named by its
+//! kind (`run` / `loop`). Only kind-ambiguous omissions (two id-less runs) get
+//! preflight's persisted `queue-N` surrogates before this graph is read.
 //! Identified blocks may wait for all predecessors with `after=a,b`.
 
 use std::collections::{HashMap, HashSet};
@@ -11,8 +15,11 @@ use agent_doc_element::element::{self, Component};
 use anyhow::Result;
 
 use crate::document_queue::{self, QueueEntry};
+use agent_doc_element_queue::queue_identity::{
+    AmbiguousQueueId, QueueIdentityInput, QueueKind, ResolvedQueueId, resolve_queue_ids,
+};
 
-pub const DEFAULT_QUEUE_ID: &str = "default";
+pub const DEFAULT_QUEUE_ID: &str = agent_doc_element_queue::queue_identity::LEGACY_SINGLE_QUEUE_ID;
 pub const SURROGATE_QUEUE_ID_PREFIX: &str = "queue";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -44,23 +51,86 @@ impl AsRef<str> for QueueId {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueueGraphError {
-    MissingId { occurrence: usize },
-    InvalidId { value: String },
-    DuplicateId { id: String, occurrences: Vec<usize> },
-    EmptyAfter { id: String },
-    SelfEdge { id: String },
-    MissingPredecessor { id: String, predecessor: String },
-    Cycle { path: Vec<String> },
-    InvalidBody { id: String, message: String },
+    /// A queue component whose canonical id cannot be resolved
+    /// (`#idlessqueueidentity`): see
+    /// [`agent_doc_element_queue::queue_identity`].
+    MissingId {
+        occurrence: usize,
+        /// The component's kind spelling (`run` / `loop`).
+        kind: &'static str,
+        /// 1-based line of the component's opening marker.
+        line: usize,
+        reason: MissingIdReason,
+    },
+    InvalidId {
+        value: String,
+    },
+    DuplicateId {
+        id: String,
+        occurrences: Vec<usize>,
+    },
+    EmptyAfter {
+        id: String,
+    },
+    SelfEdge {
+        id: String,
+    },
+    MissingPredecessor {
+        id: String,
+        predecessor: String,
+    },
+    Cycle {
+        path: Vec<String>,
+    },
+    InvalidBody {
+        id: String,
+        message: String,
+    },
+}
+
+/// Why [`QueueGraphError::MissingId`] could not resolve a queue id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MissingIdReason {
+    /// A bare `id`, `id=`, or `id=true` in a multi-queue document.
+    MalformedId,
+    /// Several queues share the kind (1-based marker lines of all of them).
+    SharedKind { lines: Vec<usize> },
+    /// The kind id is an explicit `id=` of the queue at `owner_line`.
+    KindIdTaken { owner_line: usize },
 }
 
 impl std::fmt::Display for QueueGraphError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingId { occurrence } => write!(
-                formatter,
-                "agent:queue occurrence {occurrence} requires a nonempty explicit `id=` because the document contains multiple queue components"
-            ),
+            Self::MissingId {
+                occurrence,
+                kind,
+                line,
+                reason,
+            } => match reason {
+                MissingIdReason::MalformedId => write!(
+                    formatter,
+                    "agent:{kind} queue (occurrence {occurrence}, line {line}) has a bare or empty `id`; \
+                     write a nonempty `id=<name>`, or delete the attribute so the queue is named by its kind"
+                ),
+                MissingIdReason::SharedKind { lines } => write!(
+                    formatter,
+                    "agent:{kind} queue (occurrence {occurrence}, line {line}) has no `id=`, and the document has {} `{kind}` queues (lines {}), so `{kind}` cannot name it. \
+                     Give each `{kind}` queue a distinct `id=` (for example `<!-- agent:{kind} id=release -->`); \
+                     an id-less queue is named by its kind only when it is the document's one `agent:run` or one `agent:loop`",
+                    lines.len(),
+                    lines
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                MissingIdReason::KindIdTaken { owner_line } => write!(
+                    formatter,
+                    "agent:{kind} queue (occurrence {occurrence}, line {line}) has no `id=`, and its kind id `{kind}` is already the explicit `id={kind}` of the queue at line {owner_line}. \
+                     Give this queue its own `id=`, or rename the other queue's id"
+                ),
+            },
             Self::InvalidId { value } => write!(
                 formatter,
                 "invalid agent:queue id `{value}`; use an ASCII letter/digit followed by letters, digits, `.`, `_`, or `-`"
@@ -192,15 +262,20 @@ impl<'a> QueueGraph<'a> {
             .iter()
             .filter(|component| component.name == "queue")
             .collect::<Vec<_>>();
-        let requires_ids = queue_components.len() > 1;
+        let resolved = resolve_component_queue_ids(&queue_components);
         let mut blocks: Vec<QueueBlock<'a>> = Vec::new();
         let mut by_id = HashMap::new();
-        for (occurrence, component) in queue_components.into_iter().enumerate() {
-            let explicit_id = component.attrs.get("id").map(|value| value.trim());
-            let id = match explicit_id {
-                Some(value) if !value.is_empty() && value != "true" => value.to_string(),
-                _ if requires_ids => return Err(QueueGraphError::MissingId { occurrence }),
-                _ => DEFAULT_QUEUE_ID.to_string(),
+        for (occurrence, component) in queue_components.iter().copied().enumerate() {
+            let id = match resolved[occurrence].id() {
+                Some(id) => id.to_string(),
+                None => {
+                    return Err(missing_id_error(
+                        content,
+                        &queue_components,
+                        occurrence,
+                        &resolved[occurrence],
+                    ));
+                }
             };
             validate_id(&id)?;
             if let Some(first) = by_id.insert(id.clone(), blocks.len()) {
@@ -365,8 +440,70 @@ impl<'a> QueueGraph<'a> {
     }
 }
 
+/// What a queue component is (`#idlessqueueidentity`): a repeating
+/// `agent:loop` (or legacy `agent:run loop` / `agent:queue loop`), else a
+/// one-shot `agent:run`.
+pub fn queue_kind(component: &Component) -> QueueKind {
+    QueueKind::from_loop_flag(is_loop_queue(component))
+}
+
+/// Every queue component's canonical identity, index-aligned with
+/// `queue_components`. The single resolver every queue-id reader shares.
+fn resolve_component_queue_ids(queue_components: &[&Component]) -> Vec<ResolvedQueueId> {
+    let inputs = queue_components
+        .iter()
+        .map(|component| QueueIdentityInput {
+            explicit_id: component.attrs.get("id").map(String::as_str),
+            kind: queue_kind(component),
+        })
+        .collect::<Vec<_>>();
+    resolve_queue_ids(&inputs)
+}
+
+/// 1-based line of `component`'s opening marker.
+fn marker_line(content: &str, component: &Component) -> usize {
+    content
+        .get(..component.open_start)
+        .map_or(0, |prefix| prefix.matches('\n').count())
+        + 1
+}
+
+fn missing_id_error(
+    content: &str,
+    queue_components: &[&Component],
+    occurrence: usize,
+    resolved: &ResolvedQueueId,
+) -> QueueGraphError {
+    let component = queue_components[occurrence];
+    let reason = match resolved {
+        ResolvedQueueId::Ambiguous(AmbiguousQueueId::SharedKind { siblings }) => {
+            MissingIdReason::SharedKind {
+                lines: siblings
+                    .iter()
+                    .map(|index| marker_line(content, queue_components[*index]))
+                    .collect(),
+            }
+        }
+        ResolvedQueueId::Ambiguous(AmbiguousQueueId::KindIdTaken { owner }) => {
+            MissingIdReason::KindIdTaken {
+                owner_line: marker_line(content, queue_components[*owner]),
+            }
+        }
+        _ => MissingIdReason::MalformedId,
+    };
+    QueueGraphError::MissingId {
+        occurrence,
+        kind: queue_kind(component).as_str(),
+        line: marker_line(content, component),
+        reason,
+    }
+}
+
 /// Backfill omitted queue ids before a multi-queue document enters the queue
-/// graph. A lone omitted id remains the legacy `default` queue.
+/// graph. A lone omitted id remains the legacy `default` queue, and an omitted
+/// id whose component is the document's one `run` or one `loop` is named by
+/// its kind and left id-free (`#idlessqueueidentity`); only the remaining,
+/// kind-ambiguous omissions get surrogates.
 ///
 /// Surrogates are based on one-based document order (`queue-1`, `queue-2`, …).
 /// If that name is already explicit or was generated earlier in the same pass,
@@ -390,11 +527,20 @@ pub fn backfill_missing_queue_ids(
         return Ok(None);
     }
 
+    let resolved = resolve_component_queue_ids(&queue_components);
     let mut used = HashMap::<String, usize>::new();
     let mut missing = Vec::new();
     for (occurrence, component) in queue_components.iter().enumerate() {
         let Some(raw_id) = component.attrs.get("id") else {
-            missing.push((occurrence, *component));
+            match &resolved[occurrence] {
+                // `#idlessqueueidentity`: a queue that is its document's one
+                // `run` or one `loop` is named by its kind and keeps its
+                // id-free marker. Only kind-ambiguous omissions get surrogates.
+                ResolvedQueueId::Derived(kind) => {
+                    used.insert(kind.as_str().to_string(), occurrence);
+                }
+                _ => missing.push((occurrence, *component)),
+            }
             continue;
         };
         let id = raw_id.trim();
@@ -1008,7 +1154,7 @@ mod tests {
             let components = element::parse(doc).unwrap();
             assert!(matches!(
                 QueueGraph::parse(doc, &components),
-                Err(QueueGraphError::MissingId { occurrence: 1 })
+                Err(QueueGraphError::MissingId { occurrence: 1, .. })
             ));
         }
     }
@@ -1337,5 +1483,223 @@ mod tests {
             invalid,
             QueueAppendError::InvalidProposedGraph(QueueGraphError::MissingPredecessor { .. })
         ));
+    }
+
+    /// The `tasks/agent-doc/agent-doc-bugs.md` shape after the operator
+    /// deleted both `id=` attributes and renamed the headings
+    /// (`#idlessqueueidentity`). `ids` restores the old `main` / `issues` ids.
+    pub(crate) fn idless_session_fixture(ids: bool) -> String {
+        let (run_id, loop_id) = if ids {
+            ("id=\"main\" ", "id=\"issues\" ")
+        } else {
+            ("", "")
+        };
+        format!(
+            "---\nagent_doc_session: idless\nagent_doc_format: template\nqueue: go\n---\n\n\
+## Exchange <!-- agent:exchange patch=append subagents -->\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run {run_id}subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n\
+- ☑️ [#subagent:autoupgrade#1] do [#fixautoupgrade]: keep restart-only + prompt\n\
+- 🚧 [#subagent:noargparity#1] `/agent-doc` without arguments matches `/agent-doc <document-path>`\n\
+- Why have the ☑️ run items not completed?\n\
+- I removed id from run + loop. Ensure these items are distinct and have semantic meaning.\n\
+<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop {loop_id}interval=\"1h\" priority -->\n\
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues.\n\
+<!-- /agent:loop -->\n\n\
+## Todo <!-- agent:todo priority -->\n<!-- /agent:todo -->\n\n\
+## Backlog <!-- agent:backlog priority queue -->\n- [ ] [#fixautoupgrade] Fix the auto-upgrade.\n<!-- /agent:backlog -->\n\n\
+## Review <!-- agent:review -->\n<!-- /agent:review -->\n\n\
+## Icebox <!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n\
+## Done <!-- agent:done -->\n<!-- /agent:done -->\n"
+        )
+    }
+
+    fn block_ids(doc: &str) -> Vec<String> {
+        let components = element::parse(doc).unwrap();
+        QueueGraph::parse(doc, &components)
+            .unwrap()
+            .blocks()
+            .iter()
+            .map(|block| block.id.clone())
+            .collect()
+    }
+
+    #[test]
+    fn idless_run_and_loop_are_distinct_queues_named_by_their_kind() {
+        let doc = idless_session_fixture(false);
+        let components = element::parse(&doc).unwrap();
+        let graph = QueueGraph::parse(&doc, &components).expect("id-less run + loop must parse");
+        assert_eq!(block_ids(&doc), vec!["run", "loop"]);
+        let run = graph.block("run").unwrap();
+        let looped = graph.block("loop").unwrap();
+        assert!(!is_loop_queue(run.component));
+        assert!(is_loop_queue(looped.component));
+        assert_eq!(queue_kind(run.component), QueueKind::Run);
+        assert_eq!(queue_kind(looped.component), QueueKind::Loop);
+        assert_eq!(graph.selected().unwrap().id, "run");
+        assert_eq!(
+            insertion_queue_id(&doc, &components).unwrap().as_deref(),
+            Some("run")
+        );
+        assert_eq!(
+            backfill_missing_queue_ids(&doc, &components).unwrap(),
+            None,
+            "a kind-named queue keeps the operator's id-free marker"
+        );
+
+        // The identity is what the queue is, not where it sits.
+        let run_start = doc.find("## Run").unwrap();
+        let loop_start = doc.find("## Loop").unwrap();
+        let todo_start = doc.find("## Todo").unwrap();
+        let reordered = format!(
+            "{}{}{}{}",
+            &doc[..run_start],
+            &doc[loop_start..todo_start],
+            &doc[run_start..loop_start],
+            &doc[todo_start..]
+        );
+        assert_eq!(block_ids(&reordered), vec!["loop", "run"]);
+    }
+
+    #[test]
+    fn explicit_ids_keep_winning_in_the_same_document() {
+        assert_eq!(
+            block_ids(&idless_session_fixture(true)),
+            vec!["main", "issues"]
+        );
+        let half = idless_session_fixture(true).replace("id=\"issues\" ", "");
+        assert_eq!(block_ids(&half), vec!["main", "loop"]);
+    }
+
+    #[test]
+    fn two_idless_runs_fail_closed_with_an_actionable_message() {
+        let doc = concat!(
+            "## A <!-- agent:run -->\n- a\n<!-- /agent:run -->\n",
+            "## B <!-- agent:run -->\n- b\n<!-- /agent:run -->\n",
+            "## L <!-- agent:loop interval=1h -->\n- l\n<!-- /agent:loop -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let error = QueueGraph::parse(doc, &components).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                QueueGraphError::MissingId {
+                    occurrence: 0,
+                    kind: "run",
+                    line: 1,
+                    reason: MissingIdReason::SharedKind { lines },
+                } if lines == &vec![1, 4]
+            ),
+            "{error:?}"
+        );
+        let message = error.to_string();
+        for needle in [
+            "agent:run queue (occurrence 0, line 1) has no `id=`",
+            "2 `run` queues (lines 1, 4)",
+            "Give each `run` queue a distinct `id=`",
+            "one `agent:run` or one `agent:loop`",
+        ] {
+            assert!(
+                message.contains(needle),
+                "{needle:?} missing from: {message}"
+            );
+        }
+
+        // Preflight's backfill names only the ambiguous runs; the lone loop
+        // keeps its id-free marker and its kind id.
+        let normalized = backfill_missing_queue_ids(doc, &components)
+            .unwrap()
+            .expect("ambiguous runs get surrogates");
+        assert!(normalized.contains("<!-- agent:run id=queue-1 -->"));
+        assert!(normalized.contains("<!-- agent:run id=queue-2 -->"));
+        assert!(normalized.contains("<!-- agent:loop interval=1h -->"));
+        assert_eq!(block_ids(&normalized), vec!["queue-1", "queue-2", "loop"]);
+    }
+
+    #[test]
+    fn idless_queue_whose_kind_id_is_taken_fails_closed() {
+        let doc = concat!(
+            "<!-- agent:loop id=run interval=1h -->\n- l\n<!-- /agent:loop -->\n",
+            "<!-- agent:run -->\n- a\n<!-- /agent:run -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let message = QueueGraph::parse(doc, &components).unwrap_err().to_string();
+        assert!(
+            message.contains(
+                "its kind id `run` is already the explicit `id=run` of the queue at line 1"
+            ),
+            "{message}"
+        );
+    }
+
+    /// `#idlessqueueidentity`: every queue command resolves the id-less run
+    /// and loop through the same kind-named ids, and the old explicit ids
+    /// keep resolving exactly as before.
+    #[test]
+    fn idless_queue_commands_resolve_run_and_loop_without_explicit_ids() {
+        for (ids, run_id, loop_id) in [(false, "run", "loop"), (true, "main", "issues")] {
+            let doc = idless_session_fixture(ids);
+
+            // `queue schedule`: only the loop declares a cadence.
+            let schedules = crate::queue_schedule::identified_queue_schedules(&doc).unwrap();
+            assert_eq!(
+                schedules
+                    .iter()
+                    .map(|schedule| schedule.queue_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![loop_id]
+            );
+            assert_eq!(
+                crate::queue_schedule::live_heads_for_queue(&doc, loop_id).unwrap(),
+                vec!["📥 Watch https://github.com/btakita/agent-doc/issues for new issues."]
+            );
+
+            // `queue claim` / `queue brief`: the unclaimed free-text rows are
+            // live heads again.
+            let heads = crate::queue_continuation::live_queue_head_texts(&doc)
+                .expect("the run must parse as the selected queue");
+            let free_text = "Why have the ☑️ run items not completed?";
+            assert_eq!(
+                crate::queue_claim::resolve_claim_target(free_text, &heads).unwrap(),
+                free_text
+            );
+
+            // The dispatch brief names the origin queue by its canonical id.
+            let components = element::parse(&doc).unwrap();
+            let auth = crate::subagent_brief::subagent_authorization("session.md", &doc, free_text);
+            assert_eq!(auth.queue_id.as_deref(), Some(run_id), "ids={ids}");
+            assert!(
+                auth.subagent_prompt_preamble.contains(&format!(
+                    "agent-doc queue follow-up session.md --id {run_id} --after <origin>"
+                )),
+                "{}",
+                auth.subagent_prompt_preamble
+            );
+
+            // `queue follow-up --id <that id>` lands right after the origin.
+            let updated = crate::queue_inbound::plan_queue_followups(
+                &doc,
+                run_id,
+                free_text,
+                &["follow up on the stale ☑️ rows".to_string()],
+            )
+            .unwrap();
+            assert!(
+                updated.contains(&format!(
+                    "- {free_text}\n- follow up on the stale ☑️ rows\n- I removed id"
+                )),
+                "{updated}"
+            );
+            assert_eq!(
+                component_for_id(&doc, &components, loop_id)
+                    .unwrap()
+                    .map(|c| c.open_start),
+                QueueGraph::parse(&doc, &components)
+                    .unwrap()
+                    .blocks()
+                    .get(1)
+                    .map(|b| b.component.open_start)
+            );
+        }
     }
 }

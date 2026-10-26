@@ -7,6 +7,8 @@ use agent_doc_element::{
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
+pub mod queue_identity;
+
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     name: "run",
     aliases: &["queue", "loop"],

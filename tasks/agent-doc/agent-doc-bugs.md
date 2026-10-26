@@ -890,6 +890,61 @@ You reported that the tmux panes are syncing. If that covers `#layoutunprovenliv
 **Rule for the two queues.** `agent:loop` holds only the hourly Watch row. Everything else goes at the bottom of `## Queue: Main`.
 
 Queue dispatch for this document is still paused (receipt 7), and I resume it after this closeout lands.
+
+### Re: v0.35.555 published; closing integrated rows — opus-5 · 2026-10-26T14:34-04:00
+
+> **Chat prompt (#chatprompt:e5c924aa461d):** Is 555 ready for Coder to install?
+
+**Yes.** v0.35.555 is the published Latest release, PyPI serves 0.35.555, and release run `40368074628` succeeded. On Coder:
+
+1. Run `agent-doc upgrade`.
+2. Run `agent-doc plugin install jetbrains` on the backend.
+3. Make sure the JetBrains Client and the backend both have 2026.3 plugin 0.2.835, then restart both.
+
+GH #377 is closed. Queue dispatch is resumed (receipt 8).
+
+> **Queue prompt:** release + publish
+
+> **Queue prompt:** release + publish: Issue 376 fix
+
+> **Queue prompt:** The strikethrough in the first current queue item is malformed.
+
+> **Queue prompt:** fix nondeterministic agent-doc-controller-io rpc::tests plugin_publications_project_into_the_publishing_clients_navigation_lane — await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO) returned false in 1 of 5 full lib runs (rpc.rs:43910), found during the exit-watcher root-scope fix, 2026-10-26
+
+> **Queue prompt:** retire a queue row's subagent completion cell and report receipt on every strike path (preflight residue strike, orphan `queue consume --id`, controller completion), not only closeout `queue consume`, so a stale cell can never paint 🔄 on a later row with the same text (found by the fenced-marker fix, 2026-10-26)
+
+> **Queue prompt:** key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
+
+> **Queue prompt:** agent-doc should support the header being on the same line as the open tag: e.g. `## Queue: Main ` as a prefix to the `agent:run` open tag.
+
+> **Queue prompt:** Items are being added by this agent + agent-doc into `agent:loop` in error. The items should go into `agent:run`.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/377
+
+> **Queue prompt:** `agent:loop` in this document should only have `- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.`. agent-doc is treating `agent:loop` as the kitchen sink which is wrong. The items belong in `agent:run`.
+
+> **Queue prompt:** [#jb263-feed-verify]: done?
+
+> **Queue prompt:** [#layoutunprovenliveverify]: [#autosync-restart-verify]: The tmux panes are syncing.
+
+The rows quoted above are closed:
+
+- **Releases:** v0.35.555 satisfies both `release + publish` rows.
+- **Integrated on main:** strike format `0e796855c4`, lane flake `c210b89833`, cell retirement `187d7821f8`, row identity `1323f54c87`, any-heading prefix `568aa7102e`, and loop misroute `ddd960d632`. The loop now holds only the Watch row.
+- **GH #377:** closed.
+- **`#layoutunprovenliveverify` and `#autosync-restart-verify`:** your confirmation that the tmux panes sync closes both todos.
+
+**`[#jb263-feed-verify]: done?`:** that is your IntelliJ 2026.3 check, and only you can confirm it. If the "Cannot update plugin" warning has cleared on 2026.3 at 0.2.835, check that todo off.
+
+**The todo collapse was an editor action.** A single 4,596-byte delete at 17:54:52Z, logged right after JetBrains `[Next Edit] Document was changed`, removed the todo region. agent-doc's fault was adopting that broken buffer as canonical after the install recycle. The fix is `d8794daf9a`, pushed and installing:
+
+- It never adopts a buffer with broken markers, and it shows an `⚠ agent-doc:` diagnostic that names the broken markers and how to repair them.
+- Merge refuses documents that do not parse.
+- A component ends only at its own close tag.
+
+Three gaps it left are queued, including one where a running controller can still revert your text.
+
+**Still to integrate:** onboarding `3f33ab1f96`, marker legend `bd0847efca`, doctor fresh-doc `9f0ebc1e16`, and start shell-readiness `9317ccc50c`. The no-arg skill (`resolve-pane-document`) is held for your naming decision.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -905,13 +960,14 @@ Queue dispatch for this document is still paused (receipt 7), and I resume it af
 - 📥 end a Reported queue claim on every strike path (orphan-id strike, controller projection, preflight done-id and backlog strikes), not only at the next closeout prune, so a later identical row can never pick up ☑️ from the claim ledger (found by the completion-cell retirement fix, 2026-10-26)
 - 📥 one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
 - ☑️ [#subagent:rowidentity#1] key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
-- 🚧 [#subagent:strikeformat#1] The strikethrough in the first current queue item is malformed.
+- ⚠️ [#subagent:strikeformat#1] The strikethrough in the first current queue item is malformed.
 - 📥 release + publish: Issue 376 fix
 - ☑️ [#subagent:onboarding#1] We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
-- 🟡 [#subagent:mktpublish#1] publish the agent-doc VS Code extension to the VS Code Marketplace and update the stale Open VSX listing (0.2.1); check why JetBrains Marketplace lists nothing for com.github.btakita.agent-doc despite recorded uploads (likely the hidden listing under moderation, see #jetbrainsmarketplaceprofile) (found by the onboarding pass, 2026-10-26)
+- ~~publish the agent-doc VS Code extension to the VS Code Marketplace and update the stale Open VSX listing (0.2.1); check why JetBrains Marketplace lists nothing for com.github.btakita.agent-doc despite recorded uploads (likely the hidden listing under moderation, see #jetbrainsmarketplaceprofile) (found by the onboarding pass, 2026-10-26)~~
 - ☑️ [#subagent:doctorblocked#1] `agent-doc doctor` reports outcome=blocked (queue_continuation) on a brand-new document with no queue; it should report healthy (found by the onboarding pass, 2026-10-26)
 - 📥 `agent-doc doctor` exits 0 even when its outcome is blocked or recoverable; exit non-zero so scripts and CI can act on it (found by the doctor fresh-document fix, 2026-10-26)
-- 🚧 [#subagent:startshellready#1] `agent-doc start` types its command into a new tmux pane before the shell is ready (zsh with no ~/.zshrc lost the leading `/`); wait for shell readiness (found by the onboarding pass, 2026-10-26)
+- ☑️ [#subagent:startshellready#1] `agent-doc start` types its command into a new tmux pane before the shell is ready (zsh with no ~/.zshrc lost the leading `/`); wait for shell readiness (found by the onboarding pass, 2026-10-26)
+- route-owned auto-start (agent-doc-route-io/src/startup.rs route.auto_start) and parallel fan-out panes (src/parallel.rs) still type their commands into a just-split pane; launch them as the pane process via agent_doc_tmux_io::launch_command_in_pane, checking route_owned_start_enter input logging and the fan-out $(passage ...) env prefix (found by the start shell-readiness fix, 2026-10-26)
 - ☑️ [#subagent:markerdocs#1] What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
 - ☑️ [#subagent:sameheading#1] agent-doc should support the header being on the same line as the open tag: e.g. `## Queue: Main ` as a prefix to the `agent:run` open tag.
 - 📥 fix nondeterministic agent-doc-document-realtime-io tests::retained_capture_repairs_legacy_welded_queue_close_before_validation — waits on a background delivery thread and failed under check-fast load once (2026-10-26, any-heading worker); find what it races, do not rerun to green
@@ -919,9 +975,13 @@ Queue dispatch for this document is still paused (receipt 7), and I resume it af
 - ☑️ [#subagent:noargskill#1] In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
 - ☑️ [#subagent:gh377#1] #gh-fix https://github.com/btakita/agent-doc/issues/377
 - 📥 `agent:loop` in this document should only have `- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.`. agent-doc is treating `agent:loop` as the kitchen sink which is wrong. The items belong in `agent:run`.
-- [#jb263-feed-verify]: done?
-- [#layoutunprovenliveverify]: [#autosync-restart-verify]: The tmux panes are syncing.
-- Idea error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- an already-running controller that receives an operator edit removing a component marker still restores the last valid canonical and pushes it back into the editor, reverting operator text; keep the editor text, refuse adoption, and show the ⚠ agent-doc marker diagnostic instead (gap 2 of the todo-collapse fix d8794daf9a, 2026-10-26)
+- JetBrains plugin: run the component-marker check on the buffer before recording a detached-editor op, so an edit that deletes a component open/close marker warns the operator at edit time (the detached op path carries only offsets and lengths) (gap 1 of the todo-collapse fix, 2026-10-26)
+- cold controller start with no editor handover loads the document from disk even when disk has broken component markers; fence it against the last snapshot or HEAD and show the marker diagnostic (gap 3 of the todo-collapse fix, 2026-10-26)
+- 📥 [#jb263-feed-verify]: done?
+- 📥 [#layoutunprovenliveverify]: [#autosync-restart-verify]: The tmux panes are syncing.
+- 📥 Idea error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
+- 📥 #gh-fix https://github.com/btakita/agent-doc/issues/378
 <!-- /agent:run -->
 
 ## Loop: Issues <!-- agent:loop id="issues" interval="1h" priority -->
@@ -935,8 +995,8 @@ Queue dispatch for this document is still paused (receipt 7), and I resume it af
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
 - [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
-- [ ] [#layoutunprovenliveverify] In the IDE, open the cross-root sdk-demo.md and agent-doc-bugs.md together, run Sync Tmux Layout, and confirm it recreates the stale sdk-demo pane and converges to two panes without focusing an ownership-unproven pane; restart the IDE first so JetBrains 0.2.828+ is loaded. (source: agent:review [#layoutunprovenliveverify])
-- [ ] [#autosync-restart-verify] Restart IntelliJ IDEA 2026.3 and Rider 2026.2 so JetBrains 0.2.832/0.2.831 load, then switch editor tabs: tmux should follow within about a second with no install or Run Agent Doc in between (idea.log shows `[layout-sync] selection file=`).
+- [x] [#layoutunprovenliveverify] In the IDE, open the cross-root sdk-demo.md and agent-doc-bugs.md together, run Sync Tmux Layout, and confirm it recreates the stale sdk-demo pane and converges to two panes without focusing an ownership-unproven pane; restart the IDE first so JetBrains 0.2.828+ is loaded. (source: agent:review [#layoutunprovenliveverify])
+- [x] [#autosync-restart-verify] Restart IntelliJ IDEA 2026.3 and Rider 2026.2 so JetBrains 0.2.832/0.2.831 load, then switch editor tabs: tmux should follow within about a second with no install or Run Agent Doc in between (idea.log shows `[layout-sync] selection file=`).
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

@@ -52607,6 +52607,140 @@ mod tests {
         ));
     }
 
+    /// Deterministic controller world for the cross-root Sync Tmux Layout
+    /// regression. The outer document already owns one physical pane. The
+    /// nested document still has a Ready actor row, but that row points at a
+    /// pane whose process ownership is unproven and which is no longer in the
+    /// window. The model drives the same candidate and recovery predicates as
+    /// `handle_focus_document_pane_with_policy`, while making pane creation and
+    /// focus attempts explicit effects that the test can assert.
+    #[derive(Clone)]
+    struct CrossRootSyncLayoutSimWorld {
+        documents: [&'static str; 2],
+        nested_actor_state: agent_doc_controller::actor::ActorState,
+        nested_actor_pane: &'static str,
+        panes: Vec<(&'static str, &'static str)>,
+        provisioned: Vec<(&'static str, &'static str)>,
+        focused: Vec<&'static str>,
+    }
+
+    impl CrossRootSyncLayoutSimWorld {
+        const OUTER_DOCUMENT: &'static str = "/work/agent-loop/tasks/agent-doc/agent-doc-bugs.md";
+        const NESTED_DOCUMENT: &'static str = "/work/agent-loop/src/haiven-dev/tasks/contracts.md";
+        const STALE_NESTED_PANE: &'static str = "%dead-or-unproven";
+        const REPLACEMENT_NESTED_PANE: &'static str = "%replacement";
+
+        fn new() -> Self {
+            Self {
+                documents: [Self::OUTER_DOCUMENT, Self::NESTED_DOCUMENT],
+                nested_actor_state: agent_doc_controller::actor::ActorState::Ready,
+                nested_actor_pane: Self::STALE_NESTED_PANE,
+                panes: vec![(Self::OUTER_DOCUMENT, "%outer")],
+                provisioned: Vec::new(),
+                focused: Vec::new(),
+            }
+        }
+
+        fn sync(&mut self, policy: MissingFocusPanePolicy) {
+            let decision = decide_focus_pane_candidate(
+                Some(FocusActorCandidate {
+                    pane_id: self.nested_actor_pane,
+                    focusable: !matches!(
+                        self.nested_actor_state,
+                        agent_doc_controller::actor::ActorState::Blocked
+                            | agent_doc_controller::actor::ActorState::Closed
+                    ),
+                    // The actor row says Ready/focusable, but current process
+                    // ownership does not prove that this pane owns the doc.
+                    still_owns_document: false,
+                }),
+                None,
+                None,
+            );
+
+            match decision {
+                FocusPaneCandidateDecision::Candidate { pane_id, .. } => {
+                    self.focused.push(pane_id);
+                }
+                FocusPaneCandidateDecision::Reject { reason, .. }
+                    if rejected_focus_should_resume_latest(policy, reason, Some("contracts")) =>
+                {
+                    self.nested_actor_pane = Self::REPLACEMENT_NESTED_PANE;
+                    self.panes
+                        .push((Self::NESTED_DOCUMENT, Self::REPLACEMENT_NESTED_PANE));
+                    self.provisioned
+                        .push((Self::NESTED_DOCUMENT, Self::REPLACEMENT_NESTED_PANE));
+                }
+                FocusPaneCandidateDecision::Reject { .. } => {}
+            }
+        }
+
+        fn converged(&self) -> bool {
+            self.panes.len() == self.documents.len()
+                && self
+                    .documents
+                    .iter()
+                    .all(|document| self.panes.iter().any(|(bound, _)| bound == document))
+        }
+    }
+
+    /// `#sync-cross-root-stale-binding`: Sync Tmux Layout is structural and
+    /// must replace a stale Ready actor binding for the nested document. The
+    /// passive observe-only path remains effect-free and must never select or
+    /// reuse the pane whose document ownership was not proven.
+    #[test]
+    fn cross_root_sync_layout_replaces_unproven_binding_only_when_provisioning() {
+        let initial = CrossRootSyncLayoutSimWorld::new();
+        assert_eq!(
+            initial.nested_actor_state,
+            agent_doc_controller::actor::ActorState::Ready
+        );
+
+        let mut observe_only = initial.clone();
+        observe_only.sync(MissingFocusPanePolicy::ObserveOnly);
+        assert_eq!(observe_only.panes.len(), 1, "observe-only preserves layout");
+        assert!(observe_only.provisioned.is_empty());
+        assert!(
+            observe_only.focused.is_empty(),
+            "observe-only must never focus or reuse an ownership-unproven pane"
+        );
+        assert_eq!(
+            observe_only.nested_actor_pane,
+            CrossRootSyncLayoutSimWorld::STALE_NESTED_PANE
+        );
+        assert!(!observe_only.converged());
+
+        let mut provision = initial;
+        provision.sync(MissingFocusPanePolicy::ProvisionForLayout);
+        assert_eq!(
+            provision.provisioned,
+            vec![(
+                CrossRootSyncLayoutSimWorld::NESTED_DOCUMENT,
+                CrossRootSyncLayoutSimWorld::REPLACEMENT_NESTED_PANE,
+            )]
+        );
+        assert_eq!(
+            provision.nested_actor_pane,
+            CrossRootSyncLayoutSimWorld::REPLACEMENT_NESTED_PANE,
+            "the stale cross-root actor binding is replaced"
+        );
+        assert_eq!(provision.panes.len(), 2);
+        assert!(
+            provision.converged(),
+            "the exact two-document layout converges"
+        );
+        assert!(
+            provision.focused.is_empty(),
+            "layout provisioning defers focus to the structural layout effect"
+        );
+        assert!(
+            provision
+                .panes
+                .iter()
+                .all(|(_, pane)| *pane != CrossRootSyncLayoutSimWorld::STALE_NESTED_PANE)
+        );
+    }
+
     #[test]
     fn layout_policy_reprovisions_unproven_actor_without_weakening_observe_only() {
         assert!(rejected_focus_should_resume_latest(

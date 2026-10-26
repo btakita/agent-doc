@@ -25,7 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 19 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 32 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -402,6 +402,20 @@ Verification:
 - GitHub Actions run 40263702209 for `2490d2496e` is currently in progress.
 
 The exchange remains large, but the active queue continues, so I did not compact it.
+
+### Re: Integrate completed work, then release + publish — gpt-6.1-sol · 2026-10-26T03:25:40-04:00
+
+> **Queue prompt:** Wait for all 🚧 items to complete. Then integrate. Then release + publish
+
+Released and published `agent-doc v0.35.552` from commit `880d0adf2d`.
+
+The stable latest GitHub release contains all six native platform archives and checksums, VS Code `0.2.83`, JetBrains classic `0.2.825`, JetBrains 262 `0.2.826`, JetBrains 263 `0.2.827`, their update feeds, Marketplace upload receipts, and `SHA256SUMS`. All platform, plugin, target-channel, Homebrew, and PyPI publication jobs succeeded; PyPI run `40285228122` is green.
+
+The authoritative integration gates passed: 11,506 Rust tests (177 skipped), 204 VS Code tests, 1 cross-editor test, 8 Python tests, all three JetBrains builds/verifiers with zero internal/override findings, 153 TLA checks, and the full live tmux CI suite. During the release gate I fixed a reconciler regression that let tmux auto-renaming pull a displaced protected open-cycle pane back out of stash; the strengthened regression and related sync tests pass.
+
+The current packages are installed locally. Direct evidence closes `#hj2r` and `#helpregisterjetbrains`. Live restart/operator proof remains open for IntelliJ 2026.3 under `#jb263-feed-verify` and for the two-sided Coder Remote Dev path under `#coder-remote-install-02805`.
+
+The initial release workflow's aggregate promotion job was cancelled by a concurrency race with the per-target fan-out. Its isolated rerun succeeded and the release is fully green; `#release-promotion-concurrency` now tracks removing that manual recovery path.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -410,7 +424,7 @@ The exchange remains large, but the active queue continues, so I did not compact
 
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:layout_liveverify#1] do [#layoutunprovenliveverify]
+- ⚠️ [#subagent:layout_liveverify#1] do [#layoutunprovenliveverify]
 - ☑️ [#subagent:gh372#1] #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
 - ☑️ [#subagent:grok_queue_ui#1] In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
 - ☑️ [#subagent:lazily_block_reason#1] On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
@@ -503,6 +517,20 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:release_publish_patch#3] release + publish
 - ☑️ [#subagent:pane_sync_retry#1] There is still only 1 tmux pane with 2 agent-doc documents open in the editor. Sync still fails. How can we ensure this issue won't happen again?
 - ☑️ [#subagent:cross_root_sync_regression#1] Add a deterministic controller/SimWorld regression and routing-spec clause for cross-root Sync Tmux Layout with two editor-visible documents where the second has a ready actor bound to a dead or ownership-unproven pane; assert ProvisionForLayout replaces the stale binding and converges to two panes while ObserveOnly never focuses/reuses the unproven pane.
+- ☑️ [#subagent:loop_routing#1] The agent:loop is getting items sent to it, but the items should have been sent into `agent:run`.
+- ☑️ [#subagent:queue_completion_audit#1] The queue is full of items with ☑️. Are there complete? Why are they not struck?
+- ☑️ [#subagent:auto_sync_project#1] tmux pane auto-sync not working in this agent-doc project instance
+- ☑️ [#subagent:todo_hj2r_verify#1] [#hj2r]: verified
+- ☑️ [#subagent:helpregisterjetbrains#1] do [#helpregisterjetbrains]: Use chromium-bridge
+- ☑️ [#subagent:coder_remote_install#1] do [#coder-remote-install-02805]
+- ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
+- ☑️ [#subagent:integrate_reported_items#1] Integrate all ☑️ items.
+- ☑️ [#subagent:release_after_claims#1] Wait for all 🚧 items to complete. Then integrate. Then release + publish
+- ☑️ [#subagent:backlog_queue_sync#1] The backlog items are marked with 🚧 and is out of sync. The work has been completed in the queue.
+- ☑️ [#subagent:tracked_work_todo_backlinks#1] backlog/queue/icebox items should always backlink to todo items so the todo items can be cleared once complete. This may mean the todo item(s) block the queue/backlog/icebox item(s).
+- ☑️ [#subagent:jetbrains_submission_feedback#1] Read the feedback from the JetBrains agent-doc plugin submission. Fix any issues.
+- ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
+- do [#release-promotion-concurrency]
 <!-- /agent:run -->
 
 ## Run: Issues
@@ -518,8 +546,8 @@ force-write the file, and do not delete the queue items.                        
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
-- [ ] [#helpregisterjetbrains] Complete [#helpregisterjetbrains]: create the JetBrains Marketplace vendor/listing with a hidden bootstrap upload, create a permanent token, and add it to btakita/agent-doc as JETBRAINS_MARKETPLACE_TOKEN. (source: agent:review [#helpregisterjetbrains])
-- [ ] [#hj2r] Restart IntelliJ IDEA 2026.2, then verify Agent Doc formatting and its Tools/context-menu commands are available.
+- [x] [#helpregisterjetbrains] Complete [#helpregisterjetbrains]: create the JetBrains Marketplace vendor/listing with a hidden bootstrap upload, create a permanent token, and add it to btakita/agent-doc as JETBRAINS_MARKETPLACE_TOKEN. (source: agent:review [#helpregisterjetbrains])
+- [x] [#hj2r] Restart IntelliJ IDEA 2026.2, then verify Agent Doc formatting and its Tools/context-menu commands are available.
 - [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
 <!-- /agent:todo -->
 
@@ -527,12 +555,12 @@ force-write the file, and do not delete the queue items.                        
 <!-- agent:backlog priority queue -->
 - [ ] 🚧 [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [ ] 🚧 [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
+- [ ] [#release-promotion-concurrency] Make release.yml aggregate promote-target-channels concurrency-safe with its per-target fan-out so a successful release does not require manually rerunning a cancelled aggregate promotion job.
 <!-- /agent:backlog -->
 
 ## Review
 <!-- agent:review -->
 - [/] [#jetbrainsmarketplaceprofile] [marketplace-approval] [agent-doc] Plugin 35436 is hidden and under initial JetBrains moderation; after approval, replace the basic description with polished copy, add Getting Started, Documentation, and Bugtracker URLs, then verify the public listing.
-- [/] [#helpregisterjetbrains] [operator-verify] Complete the first manual JetBrains Marketplace upload and add JETBRAINS_MARKETPLACE_TOKEN; then rerun v0.35.548 Release and verify the three compatibility-ranged updates.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.

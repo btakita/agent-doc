@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-write-command-io"
-version = "0.35.555"
+version = "0.35.556"
 edition = "2024"
 description = "Write command request types for agent-doc"
 license = "Apache-2.0"
@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_write_command_io"
 
 [dependencies]
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.555" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.556" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

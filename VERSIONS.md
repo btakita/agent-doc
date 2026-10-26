@@ -2,6 +2,33 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.556
+
+- **Getting started is documented and tested.** The README opens with a Getting started path: install, `agent-doc
+  init`, and a first turn from an editor plugin, a harness, or a terminal. Four first-run failures it found are fixed.
+- **Queue markers are explained everywhere.** One legend now feeds `agent-doc queue --help`, `agent-doc queue legend`,
+  the book, the README, and a one-line legend at the end of each document's `agent:status` (`queue-legend=off` hides
+  it). `🔄` means needs reconcile: the row has finished-work evidence but no current claim.
+- **Broken component markers never revert or replace operator text.** A buffer whose markers do not pair is never
+  adopted, and a live edit that removes a marker is fenced instead of reverted. A cold controller start no longer
+  adopts broken disk text. The JetBrains plugin warns with the `⚠ agent-doc:` diagnostic at edit time, as soon as an
+  edit deletes a component open or close marker.
+- **Editor attach no longer holds in common lag cases.** An editor whose buffer is ahead of the controller re-attaches
+  instead of failing with `ambiguous-retained-projection`, including when the controller also added a claim marker or
+  a response. Every buffer byte is kept, and a true same-row conflict still holds.
+- **Queue strikes are reliable.** Echoed `agent:run` rows strike even when an `agent:loop` follows the exchange, a
+  `**Deferred:**` head is never consumed by a `--done`/`--review-resolve` closeout, and every strike path ends the
+  struck row's finished claim. Loops never receive inserted items or bring back removed rows, and `--backlog-add`
+  mirrors into `agent:run` beside a sibling `agent:loop` (GH #378).
+- **Any heading may prefix a component opener**, for example `## Queue: Main <!-- agent:run id="main" -->`.
+- **`agent-doc doctor` and `agent-doc autofix` exit with their outcome:** 0 ok, 3 recoverable, 4 operator action, 5
+  blocked, and 1 when the command itself fails. A fresh document with no queue reports healthy.
+- **Panes launch commands as their own process.** `agent-doc start`, route-owned auto-start, and parallel fan-out
+  panes no longer type into a shell that may not be ready, so a slow shell cannot drop the leading `/`. Fan-out
+  `$(passage ...)` values are expanded only inside the pane.
+- **Editor packages.** JetBrains classic, 2026.2, and 2026.3 are 0.2.839, 0.2.841, and 0.2.840. Modular IDEs still
+  require a restart to load the replaced plugin.
+
 ## 0.35.555
 
 This release replaces the cancelled 0.35.554 and includes all of its changes.

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-project-root-io"
-version = "0.35.555"
+version = "0.35.556"
 edition = "2024"
 description = "Project-root resolution adapters for agent-doc"
 license = "Apache-2.0"
@@ -11,8 +11,8 @@ publish = false
 name = "agent_doc_project_root_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.555" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.555" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.556" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.556" }
 anyhow = "1"
 
 [dev-dependencies]

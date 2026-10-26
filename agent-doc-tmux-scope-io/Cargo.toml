@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-tmux-scope-io"
-version = "0.35.555"
+version = "0.35.556"
 edition = "2024"
 description = "tmux-spawn systemd scope stewardship for agent-doc"
 license = "MIT"

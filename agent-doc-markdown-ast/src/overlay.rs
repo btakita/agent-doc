@@ -1068,8 +1068,14 @@ pub fn components(source: &str) -> Vec<Component> {
                     out.push(comp);
                     continue;
                 }
-                // Mismatched close — restore and fall through.
-                open = Some(comp);
+                // `#componentownclose`: a close that names a different
+                // component never ends this one, and this one never extends
+                // past it either. Finish it dangling (its `end_byte` stays at
+                // the opener line) so rows after a sibling's close are never
+                // absorbed into it as items.
+                project_runnable_component(&mut comp);
+                include_queue_multiline_items(source, &mut comp, line_start, &ranges);
+                out.push(comp);
             }
             continue;
         }
@@ -1370,6 +1376,63 @@ trailing residue
 
         let mismatched = "<!-- agent:loop -->\n- first\n<!-- /agent:run -->\n";
         assert_ne!(components(mismatched)[0].end_byte, mismatched.len());
+    }
+
+    /// `#componentownclose`: the overlay never lets a loop absorb its sibling
+    /// todo's rows, nor rows that follow a foreign close, across the
+    /// incident's edit sequence and both opener spellings.
+    #[test]
+    fn componentownclose_loop_never_absorbs_the_sibling_todo() {
+        use agent_doc_element::sibling_span_fixture as fx;
+        let todo_texts: Vec<&str> = fx::TODO_ITEMS.lines().collect();
+        for style in fx::ALL_STYLES {
+            for edit in fx::ALL_EDITS {
+                let doc = fx::document(style, edit);
+                let parsed = components(&doc);
+                let looped = parsed
+                    .iter()
+                    .find(|c| c.attrs.contains("issues"))
+                    .unwrap_or_else(|| panic!("{style:?}/{edit:?}: loop"));
+                for item in &looped.items {
+                    let line = &doc[item.start_byte..item.end_byte];
+                    assert!(
+                        !todo_texts
+                            .iter()
+                            .any(|todo| line.contains(todo.trim_start_matches("- "))),
+                        "{style:?}/{edit:?}: loop absorbed a todo row: {line}"
+                    );
+                    assert!(
+                        !line.contains("[/] [#layoutunprovenliveverify]"),
+                        "{style:?}/{edit:?}"
+                    );
+                }
+                if fx::edit_keeps_todo(edit) {
+                    let todo = parsed
+                        .iter()
+                        .find(|c| c.name == "todo")
+                        .unwrap_or_else(|| panic!("{style:?}/{edit:?}: todo"));
+                    let rows: Vec<&str> = todo
+                        .items
+                        .iter()
+                        .map(|item| doc[item.start_byte..item.end_byte].trim_end_matches('\n'))
+                        .collect();
+                    assert_eq!(rows, todo_texts, "{style:?}/{edit:?}");
+                }
+                let review = parsed.iter().find(|c| c.name == "review").expect("review");
+                assert_eq!(review.items.len(), 1, "{style:?}/{edit:?}");
+            }
+        }
+    }
+
+    /// Rows after a foreign close belong to no component: the dangling loop
+    /// stops at `/agent:todo` instead of collecting them.
+    #[test]
+    fn componentownclose_dangling_component_stops_at_a_foreign_close() {
+        let doc = "<!-- agent:loop id=issues -->\n- 📥 Watch\n<!-- /agent:todo -->\n- [ ] [#ahfe] orphaned todo row\n";
+        let parsed = components(doc);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].items.len(), 1, "{:?}", parsed[0].items);
+        assert_eq!(parsed[0].items[0].text, "📥 Watch");
     }
 
     #[test]

@@ -121,6 +121,59 @@ overlay map the raw name through `overlay::projected_component_name` first
 (`run` and `loop` project to `queue`), so an `agent:run` component merges by
 node identity exactly like `agent:queue` instead of being dropped.
 
+**A component ends only at its own close (`#componentownclose`).** Each
+`<!-- agent:NAME ... -->` opener's span ends at the next unmatched
+`<!-- /agent:NAME -->` with the same raw name. A close that names a different
+component never ends the open one, and the open one never extends past it into
+a sibling. An opener with no close, a close that names another component
+(`opened 'agent:loop' but closed '/agent:todo'`), and a close with no opener
+are all component parse failures
+(`agent_doc_element::element::component_parse_failure`). Every path that
+rewrites, merges, or adopts a document fails closed on a parse failure. It never
+guesses a span:
+
+- The strict element parser returns the error with both marker lines. Every
+  span rewrite built on it (the loop restore, queue writes, `patch`) refuses.
+- The markdown-AST overlay finishes a component left open by a foreign close as
+  dangling at that close. Rows after a sibling's close are never collected as
+  its items.
+- `agent_doc_merge::merge` refuses when the operator side, the agent side, or
+  the engine's result has a parse failure (`MergePlan::structure_refusal`). It
+  then sets `fell_back` and hands back the operator text unchanged. The span
+  merge would otherwise pair the opener with end-of-document, buffer every
+  following component as its body, and re-emit a sibling after them.
+  Preflight admission logs `component_structure_refused` and proceeds on the
+  authority.
+- Document authority never moves to a structurally invalid buffer. A fresh
+  controller's retained editor reseed (after a recycle) stays behind its
+  reseed fence while the reseeded text has a parse failure. The text is not
+  readable as current text and does not pass the commit barrier, so retained
+  persistence, snapshots, and commits cannot adopt it. The hub keeps absorbing
+  the editor's ops, so the reseed
+  completes on the first op after the operator repairs the markers. A live
+  update that removes a marker and breaks the pairing keeps the last valid
+  canonical (`#replica-structure-guard`).
+- Each refusal is surfaced to the operator at ingest, with the markers, lines,
+  and repair: `crdt_replica_reseed_structural_refused` or
+  `crdt_replica_update_component_markers_removed` in ops.log. The binary also
+  writes `.agent-doc/state/editor-route-errors/<doc>.txt`, which the JetBrains
+  plugin shows as the editor's `⚠ agent-doc:` status. Promotion clears it.
+  agent-doc never reverts the operator's text to repair it. The editor buffer
+  stays authoritative, and the guidance points to the marker lines or to
+  `git show HEAD:./<doc>`.
+
+On 2026-10-26 one editor transaction in `agent-doc-bugs.md` deleted 4,596
+bytes. The span ran from just after the loop's Watch row up to
+`<!-- /agent:todo -->`, and it took `<!-- /agent:loop -->`, `## Todo`,
+`<!-- agent:todo -->`, and six todo items. The IDE autosaved the result. An
+install recycle then started a fresh controller, and the re-registered editor's
+reseed promoted that buffer to canonical (`retained_persistence_applied ...
+proof=exact_disk`). The reseed happened even though the durable ingest was
+`StructuralQuarantined`. The regression fixture
+`agent_doc_element::sibling_span_fixture` replays that shape in both opener
+spellings for the parser, overlay, merge, loop restore, preflight admission,
+relay hub, and the recycle and re-registration sequence.
+
 The document-cell merge pairs each component across base, agent, and operator
 by **component identity**, never by name alone: the projected name, the
 effective `id=`, and the occurrence among that side's components with the same

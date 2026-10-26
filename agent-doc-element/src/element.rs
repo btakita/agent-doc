@@ -320,6 +320,38 @@ impl fmt::Display for ComponentParseError {
 
 impl std::error::Error for ComponentParseError {}
 
+/// `#componentownclose`: the component parse failure in `doc` — an unclosed
+/// opener, a close that names a different component, a close with no opener,
+/// or an invalid tag name — rendered with the marker lines, or `None` when
+/// every component ends at its own matching close tag.
+///
+/// A component's span ends only at its OWN close. A missing or mismatched close
+/// is a structural failure, never a reason to extend the component to the
+/// next close marker or to a sibling's close. Every binary write, merge, and
+/// authority adoption that would rewrite or adopt a document must fail closed
+/// on `Some(..)` instead of guessing a span.
+pub fn component_parse_failure(doc: &str) -> Option<String> {
+    parse(doc).err().map(|error| format!("{error:#}"))
+}
+
+/// Operator-facing repair guidance for a [`component_parse_failure`] reason:
+/// which document, which markers and lines, and how to recover without
+/// agent-doc rewriting operator text on its own.
+pub fn component_structure_repair_guidance(file: &str, reason: &str) -> String {
+    let (dir, name) = match file.rsplit_once('/') {
+        Some((dir, name)) if !dir.is_empty() => (dir, name),
+        _ => (".", file),
+    };
+    format!(
+        "{file} has broken component markers ({reason}). agent-doc will not adopt, \
+         snapshot, commit, or rewrite this text until every `<!-- agent:NAME -->` \
+         opener has its own `<!-- /agent:NAME -->` close. Fix the markers at the lines \
+         named above in the editor (restore the deleted close or opener line), or copy \
+         the lost component back from the last committed revision: \
+         `git -C {dir} show HEAD:./{name}`."
+    )
+}
+
 /// Return the component name when an error chain contains an unmatched close.
 pub fn unmatched_component_close_name(error: &anyhow::Error) -> Option<&str> {
     error.chain().find_map(|cause| {
@@ -5196,5 +5228,64 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
         let doc = "<!-- agent:queue -->\n- a\n";
         let reason = structural_corruption_reason(doc).expect("unclosed marker must be flagged");
         assert!(reason.starts_with("parse_error"), "reason was: {reason}");
+    }
+
+    /// `#componentownclose`: a component span ends only at its OWN close tag.
+    /// Across the incident's edit sequence (loop followed by todo; delete loop
+    /// rows, then the loop close, then through the todo body) and both opener
+    /// spellings, the strict parser either keeps the todo span byte-for-byte or
+    /// refuses the document. It never returns a loop span that reaches into or
+    /// past the todo.
+    #[test]
+    fn componentownclose_loop_never_ends_at_a_sibling_close() {
+        use crate::sibling_span_fixture::{self as fx, LoopEdit};
+        for style in fx::ALL_STYLES {
+            for edit in fx::ALL_EDITS {
+                let doc = fx::document(style, edit);
+                let parsed = parse(&doc);
+                if fx::edit_is_structurally_valid(edit) {
+                    let comps = parsed.unwrap_or_else(|e| panic!("{style:?}/{edit:?}: {e:#}"));
+                    let todo = comps.iter().find(|c| c.name == "todo").expect("todo");
+                    let looped = comps
+                        .iter()
+                        .find(|c| c.attrs.get("id").map(String::as_str) == Some("issues"))
+                        .expect("loop");
+                    assert!(looped.close_end <= todo.open_start, "{style:?}/{edit:?}");
+                    let region = fx::todo_region(style);
+                    let start = doc.find(&region).expect("todo region present");
+                    assert!(start <= todo.open_start && todo.close_end <= start + region.len());
+                    assert!(component_parse_failure(&doc).is_none());
+                } else {
+                    let error = parsed.expect_err("a missing or mismatched close must fail closed");
+                    let reason = component_parse_failure(&doc).expect("failure reason");
+                    assert_eq!(reason, format!("{error:#}"));
+                    match edit {
+                        LoopEdit::DeleteThroughTodoBody => assert!(
+                            reason.contains("opened 'agent:loop' but closed '/agent:todo'"),
+                            "{reason}"
+                        ),
+                        LoopEdit::DeleteRowsAndLoopClose => assert!(
+                            reason.contains("agent:loop") && reason.contains("line"),
+                            "{reason}"
+                        ),
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn componentownclose_repair_guidance_names_markers_and_last_commit() {
+        let doc = crate::sibling_span_fixture::document(
+            crate::sibling_span_fixture::OpenerStyle::HeadingPrefixed,
+            crate::sibling_span_fixture::LoopEdit::DeleteThroughTodoBody,
+        );
+        let reason = component_parse_failure(&doc).unwrap();
+        let guidance =
+            component_structure_repair_guidance("/root/tasks/agent-doc/bugs.md", &reason);
+        assert!(guidance.contains("opened 'agent:loop' but closed '/agent:todo'"));
+        assert!(guidance.contains("opening marker at line"));
+        assert!(guidance.contains("git -C /root/tasks/agent-doc show HEAD:./bugs.md"));
     }
 }

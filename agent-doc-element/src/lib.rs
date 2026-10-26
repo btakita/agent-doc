@@ -15,6 +15,8 @@ pub mod baseline_attribution;
 pub mod component_scope;
 pub mod element;
 pub mod id;
+#[doc(hidden)]
+pub mod sibling_span_fixture;
 pub mod todo;
 
 pub use component_scope::{ComponentWriteScope, ScopedComponent};

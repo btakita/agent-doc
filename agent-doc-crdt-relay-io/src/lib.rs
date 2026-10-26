@@ -3685,6 +3685,7 @@ pub fn relay_replica_update_for_file(
     // Reattach the live member but quarantine that unproven update. The normal
     // controller-to-editor canonical projection repairs the consumer; the stale
     // editor baseline is never adopted as whole-document authority.
+    let mut reseed_structure = RetainedReseedStructure::Unchanged;
     let (
         packet,
         reattached,
@@ -3797,6 +3798,7 @@ pub fn relay_replica_update_for_file(
         // the just-materialized canonical before any consumer can observe the
         // handoff as complete. This is intentionally limited to the one
         // pending->settled edge, not every editor keystroke.
+        reseed_structure = RetainedReseedStructure::observe(retained_reseed_was_pending, hub);
         let queue_attempt_projection =
             if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {
                 reconcile_durable_queue_attempts_on_hub(file, hub)?
@@ -3867,6 +3869,7 @@ pub fn relay_replica_update_for_file(
             })?,
         }));
     }
+    reseed_structure.surface(file, "replica_update");
     if isolation_regions_restored {
         agent_doc_ops_log_io::log_op(
             file,
@@ -3888,6 +3891,16 @@ pub fn relay_replica_update_for_file(
         );
     }
     if let Some(reason) = corruption_restored {
+        // `#componentownclose`: the operator's edit removed a component marker
+        // and broke the pairing. Say so in the editor right away, naming the
+        // markers, before any later path can act on the buffer.
+        surface_component_structure_refusal(
+            file,
+            "crdt_replica_update_component_markers_removed",
+            "replica_update",
+            reason.strip_prefix("parse_error: ").unwrap_or(&reason),
+            "action=canonical_kept_at_last_valid_revision",
+        );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -5619,9 +5632,11 @@ pub fn apply_document_op_delta_for_file_in_lineage(
     lineage: Option<&str>,
     delta: &[u8],
 ) -> Result<Option<DocumentOpDeltaOutcome>> {
+    let mut reseed_structure = RetainedReseedStructure::Unchanged;
     let Some(result) = with_existing_hub(file, |hub| -> Result<_> {
         let retained_reseed_was_pending = hub.retained_replica_reseed_pending();
         let outcome = hub.apply_document_op_delta_in_lineage(lineage, delta)?;
+        reseed_structure = RetainedReseedStructure::observe(retained_reseed_was_pending, hub);
         let queue_attempt_projection =
             if retained_reseed_was_pending && !hub.retained_replica_reseed_pending() {
                 reconcile_durable_queue_attempts_on_hub(file, hub)?
@@ -5652,6 +5667,7 @@ pub fn apply_document_op_delta_for_file_in_lineage(
         return Ok(None);
     };
     let (outcome, fence, queue_attempt_projection) = result?;
+    reseed_structure.surface(file, "document_op");
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -5696,6 +5712,120 @@ pub fn apply_document_op_delta_for_file_in_lineage(
         );
     }
     Ok(Some(outcome))
+}
+
+/// `#componentownclose`: what one relay ingest did to a pending retained
+/// editor reseed's structural fence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RetainedReseedStructure {
+    /// No reseed was pending, or it is still pending on an empty / valid cut.
+    Unchanged,
+    /// The reseeded text has a component parse failure, so the hub keeps the
+    /// fence up: nothing is adopted as canonical, snapshot, or commit.
+    Refused(String),
+    /// A pending reseed completed on structurally valid text.
+    Promoted,
+}
+
+/// First line of the binary-written editor diagnostic. The JetBrains plugin
+/// renders `.agent-doc/state/editor-route-errors/<doc>.txt` as the editor's
+/// `⚠ agent-doc:` status label, so the refusal is visible without opening a
+/// log. The marker lets promotion clear only this diagnostic, never a route
+/// failure the plugin itself saved.
+pub const RESEED_STRUCTURE_REFUSAL_HEADER: &str =
+    "Error: agent-doc refused to adopt the editor buffer as this document's canonical text: ";
+
+impl RetainedReseedStructure {
+    fn observe(was_pending: bool, hub: &RelayHub) -> Self {
+        if !was_pending {
+            return Self::Unchanged;
+        }
+        if !hub.retained_replica_reseed_pending() {
+            return Self::Promoted;
+        }
+        hub.retained_replica_reseed_structural_refusal()
+            .map_or(Self::Unchanged, Self::Refused)
+    }
+
+    fn surface(&self, file: &Path, source: &str) {
+        match self {
+            Self::Unchanged => {}
+            Self::Refused(reason) => surface_component_structure_refusal(
+                file,
+                "crdt_replica_reseed_structural_refused",
+                source,
+                reason,
+                "action=keep_reseed_fence canonical=not_adopted",
+            ),
+            Self::Promoted => clear_reseed_structure_refusal(file, source),
+        }
+    }
+}
+
+/// The diagnostic text written for the editor status label.
+pub fn reseed_structure_refusal_diagnostic(file: &Path, reason: &str) -> String {
+    format!(
+        "{RESEED_STRUCTURE_REFUSAL_HEADER}{reason}\n\n{}\n",
+        agent_doc_element::element::component_structure_repair_guidance(
+            &file.display().to_string(),
+            reason,
+        )
+    )
+}
+
+fn surface_component_structure_refusal(
+    file: &Path,
+    event: &str,
+    source: &str,
+    reason: &str,
+    action: &str,
+) {
+    let diagnostic = reseed_structure_refusal_diagnostic(file, reason);
+    let Some(path) =
+        agent_doc_controller::editor_route_error::editor_route_error_path_for_file(file)
+    else {
+        return;
+    };
+    // One receipt per distinct refusal, not one per keystroke while the
+    // operator is still repairing the markers.
+    if std::fs::read_to_string(&path).is_ok_and(|saved| saved == diagnostic) {
+        return;
+    }
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&path, &diagnostic));
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{event} file={} source={source} reason={} {action} operator_action=repair_component_markers_or_restore_from_last_commit diagnostic={} #componentownclose",
+            file.display(),
+            reason.split_whitespace().collect::<Vec<_>>().join("_"),
+            match written {
+                Ok(()) => path.display().to_string(),
+                Err(err) => format!("write_failed:{err}"),
+            },
+        ),
+    );
+}
+
+fn clear_reseed_structure_refusal(file: &Path, source: &str) {
+    let Some(path) =
+        agent_doc_controller::editor_route_error::editor_route_error_path_for_file(file)
+    else {
+        return;
+    };
+    let ours = std::fs::read_to_string(&path)
+        .is_ok_and(|saved| saved.starts_with(RESEED_STRUCTURE_REFUSAL_HEADER));
+    if ours && std::fs::remove_file(&path).is_ok() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_reseed_structural_cleared file={} source={source} action=reseed_promoted #componentownclose",
+                file.display(),
+            ),
+        );
+    }
 }
 
 /// Current canonical lineage returned to a newly registered editor.
@@ -9676,6 +9806,200 @@ mod tests {
         .unwrap();
     }
 
+    /// Test-only controller recycle: drop this process's relay hub and its
+    /// retained in-memory projection, as a replacement controller starts with
+    /// neither.
+    fn forget_controller_relay_state_for_test(file: &std::path::Path) {
+        let hash = agent_doc_fs::document_state_hash(file).unwrap();
+        hub_registry().lock().remove(&hash);
+        let projections = retained_canonical_projections();
+        projections.values.remove(&projections.ctx, &hash);
+    }
+
+    /// One contiguous char-span edit turning `from` into `to` on `replica`.
+    fn apply_text_change(replica: &agent_doc_merge::crdt_sync::ReplicaState, from: &str, to: &str) {
+        let a: Vec<char> = from.chars().collect();
+        let b: Vec<char> = to.chars().collect();
+        let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+        let max_suffix = a.len().min(b.len()) - prefix;
+        let suffix = a
+            .iter()
+            .rev()
+            .zip(b.iter().rev())
+            .take(max_suffix)
+            .take_while(|(x, y)| x == y)
+            .count();
+        let insert: String = b[prefix..b.len() - suffix].iter().collect();
+        replica.apply_local_edit(prefix as u32, (a.len() - suffix - prefix) as u32, &insert);
+        assert_eq!(replica.text(), to);
+    }
+
+    /// `#componentownclose` (2026-10-26 `agent-doc-bugs.md` incident): the
+    /// operator's editor deleted from the loop's Watch row through the todo
+    /// body, leaving `agent:loop` closed by `/agent:todo`. The IDE saved it to
+    /// disk. An install recycle then started a fresh controller, the editor
+    /// re-registered with its retained frontier, and the reseed promoted that
+    /// buffer to canonical (`retained_persistence_applied ... proof=exact_disk`).
+    /// A structurally invalid buffer must never become canonical on that path.
+    /// The fence stays up, the operator sees a diagnostic naming the markers
+    /// and the repair, operator text is not reverted, and the operator's repair
+    /// promotes the reseed.
+    #[test]
+    fn componentownclose_recycle_reregistration_never_adopts_a_mismatched_buffer() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit, OpenerStyle};
+        let (_dir, doc) = temp_doc("todocollapse.md");
+        std::fs::write(
+            &doc,
+            fx::document(OpenerStyle::HeadingPrefixed, LoopEdit::None),
+        )
+        .unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+
+        // The old controller and the editor share the valid revision.
+        let identity = "intellij:todocollapse";
+        let (client_id, bootstrap) = register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("editor registers with the old controller");
+        let editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        // The controller may repaint stale queue cells on attach, so derive
+        // each step from the text the editor actually holds.
+        let valid = editor.text();
+        assert!(agent_doc_element::element::component_parse_failure(&valid).is_none());
+        let watch_end = valid.find(fx::WATCH_ROW).unwrap() + fx::WATCH_ROW.len();
+        let todo_close = valid.find("<!-- /agent:todo -->").unwrap();
+        let todo_heading = valid.find("## Todo").unwrap();
+        let broken = format!("{}{}", &valid[..watch_end], &valid[todo_close..]);
+        let repaired = format!(
+            "{}<!-- /agent:loop -->\n\n{}",
+            &valid[..watch_end],
+            &valid[todo_heading..]
+        );
+        assert_eq!(
+            repaired
+                .matches(&fx::todo_region(OpenerStyle::HeadingPrefixed))
+                .count(),
+            1
+        );
+
+        // One operator transaction in the editor; the IDE autosaves it.
+        apply_text_change(&editor, &valid, &broken);
+        std::fs::write(&doc, &broken).unwrap();
+
+        // Install recycle: a fresh controller, then re-registration with the
+        // retained frontier.
+        forget_controller_relay_state_for_test(&doc);
+        let reregistered = "intellij:todocollapse:refresh-1";
+        let registration =
+            register_replica_for_file_incremental(&doc, reregistered, Some(&editor.state_vector()))
+                .unwrap()
+                .expect("the retained editor attaches to the fresh controller");
+        assert!(registration.retained_replica_reseed_pending);
+        let reseed = editor.diff(&registration.canonical_state_vector).unwrap();
+        relay_replica_update_for_file(&doc, reregistered, &reseed)
+            .unwrap()
+            .expect("the retained delta reaches the fresh controller");
+
+        // Nothing adopted: no readable, committable canonical.
+        with_hub(&doc, |hub| {
+            assert!(
+                hub.retained_replica_reseed_pending(),
+                "the reseed fence must hold"
+            );
+            assert!(!hub.commit_barrier_ready().unwrap());
+        })
+        .unwrap();
+        assert_eq!(
+            current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+            CurrentText::EditorSyncPending,
+        );
+        assert_eq!(
+            current_revision_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+            CurrentRevision::EditorAttachedMissingReplica,
+        );
+        // Operator text is not reverted: the editor and disk keep the buffer.
+        assert_eq!(editor.text(), broken);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), broken);
+
+        // The diagnostic fires: ops.log receipt and the editor status file.
+        let ops = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let refused: Vec<&str> = ops
+            .lines()
+            .filter(|line| line.contains("crdt_replica_reseed_structural_refused"))
+            .collect();
+        assert_eq!(refused.len(), 1, "{ops}");
+        assert!(
+            refused[0].contains("opened_'agent:loop'_but_closed_'/agent:todo'"),
+            "{}",
+            refused[0]
+        );
+        assert!(
+            refused[0].contains("canonical=not_adopted"),
+            "{}",
+            refused[0]
+        );
+        assert!(
+            !ops.contains("crdt_handoff_queue_attempt_projection_degraded"),
+            "the handoff must not treat the broken cut as settled:\n{ops}"
+        );
+        let status =
+            agent_doc_controller::editor_route_error::editor_route_error_path_for_file(&doc)
+                .unwrap();
+        let diagnostic = std::fs::read_to_string(&status).unwrap();
+        assert!(
+            diagnostic.starts_with(RESEED_STRUCTURE_REFUSAL_HEADER),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("opening marker at line"),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("show HEAD:./todocollapse.md"),
+            "{diagnostic}"
+        );
+
+        // Further typing while still broken does not repeat the receipt.
+        let before = editor.state_vector();
+        let typed = broken.replace("# agent-doc bugs\n", "# agent-doc bugs!\n");
+        apply_text_change(&editor, &broken, &typed);
+        relay_replica_update_for_file(&doc, reregistered, &editor.diff(&before).unwrap())
+            .unwrap()
+            .unwrap();
+        let ops = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(
+            ops.matches("crdt_replica_reseed_structural_refused")
+                .count(),
+            1
+        );
+        with_hub(&doc, |hub| assert!(hub.retained_replica_reseed_pending())).unwrap();
+
+        // The operator repairs the markers: the next op promotes the reseed
+        // and clears the diagnostic.
+        let before = editor.state_vector();
+        let repaired_typed = repaired.replace("# agent-doc bugs\n", "# agent-doc bugs!\n");
+        apply_text_change(&editor, &typed, &repaired_typed);
+        relay_replica_update_for_file(&doc, reregistered, &editor.diff(&before).unwrap())
+            .unwrap()
+            .unwrap();
+        with_hub(&doc, |hub| {
+            assert!(!hub.retained_replica_reseed_pending());
+            assert_eq!(hub.canonical_text(), repaired_typed);
+            assert!(hub.commit_barrier_ready().unwrap());
+        })
+        .unwrap();
+        assert!(
+            !status.exists(),
+            "the refusal diagnostic is cleared on promotion"
+        );
+        let ops = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("crdt_replica_reseed_structural_cleared"),
+            "{ops}"
+        );
+    }
+
     #[test]
     fn retained_replica_handoff_cannot_regress_a_running_queue_attempt_to_bare() {
         let (dir, doc) = temp_doc("retained-reseed-running-claim.md");
@@ -11346,6 +11670,21 @@ mod tests {
             ops_log.contains("crdt_replica_update_corruption_rejected"),
             "ops.log must audit the rejected corruption:\n{ops_log}"
         );
+        // `#componentownclose`: and the operator is told at ingest, in the
+        // editor status diagnostic, which markers the edit broke.
+        assert!(
+            ops_log.contains("crdt_replica_update_component_markers_removed"),
+            "{ops_log}"
+        );
+        let status =
+            agent_doc_controller::editor_route_error::editor_route_error_path_for_file(&doc)
+                .unwrap();
+        let diagnostic = std::fs::read_to_string(&status).unwrap();
+        assert!(
+            diagnostic.starts_with(RESEED_STRUCTURE_REFUSAL_HEADER),
+            "{diagnostic}"
+        );
+        assert!(!diagnostic.contains("parse_error: "), "{diagnostic}");
     }
 
     /// `#typingfencerevert`: an operator typing an opening code fence inside

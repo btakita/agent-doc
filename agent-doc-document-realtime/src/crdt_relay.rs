@@ -1827,10 +1827,32 @@ impl RelayHub {
     }
 
     fn complete_retained_replica_reseed(&self) {
-        if self.retained_replica_reseed_pending() {
-            self.ctx.set(&self.retained_replica_reseed_pending, false);
-            self.bump_delivery_epoch();
+        if !self.retained_replica_reseed_pending() {
+            return;
         }
+        // `#componentownclose`: a retained editor reseed transfers document
+        // authority to the editor's buffer, and an empty fresh-controller hub
+        // has no pre-update canonical for the live parse guard to restore.
+        // A buffer whose component markers do not pair (an opener closed by a
+        // sibling's close, or an opener with no close) must never become the
+        // readable, committable, persistable canonical. Keep the fence up: the
+        // hub keeps absorbing the editor's ops, so the reseed completes on the
+        // first update after the operator repairs the markers.
+        if self.retained_replica_reseed_structural_refusal().is_some() {
+            return;
+        }
+        self.ctx.set(&self.retained_replica_reseed_pending, false);
+        self.bump_delivery_epoch();
+    }
+
+    /// `#componentownclose`: why a pending retained reseed stays fenced, i.e.
+    /// the component parse failure of the text the editor reseeded. `None`
+    /// when no reseed is pending or the reseeded text pairs every marker.
+    pub fn retained_replica_reseed_structural_refusal(&self) -> Option<String> {
+        if !self.retained_replica_reseed_pending() {
+            return None;
+        }
+        element::component_parse_failure(&self.canonical.text())
     }
 
     /// Whether additive updates from `client_id` must remain quarantined until
@@ -6282,6 +6304,63 @@ mod tests {
             "the durable native frontier is the same promotion proof as a direct replica update"
         );
         assert!(recovered.commit_barrier_ready().unwrap());
+    }
+
+    /// `#componentownclose`: a retained editor frontier whose markers do not
+    /// pair (the incident: `agent:loop` closed by `/agent:todo`) never promotes
+    /// the fresh hub to readable/committable authority; the operator's repair
+    /// of the markers promotes it on the next op.
+    #[test]
+    fn componentownclose_structurally_invalid_reseed_stays_fenced_until_repaired() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit, OpenerStyle};
+        let broken = fx::document(
+            OpenerStyle::HeadingPrefixed,
+            LoopEdit::DeleteThroughTodoBody,
+        );
+        let source = RelayHub::from_text(1, &broken);
+        let mut recovered = RelayHub::new(2);
+        recovered.begin_retained_replica_reseed();
+        let lineage = recovered.lineage().to_string();
+        let outcome = recovered
+            .apply_document_op_delta_in_lineage(Some(&lineage), &source.canonical_encoded_state())
+            .unwrap();
+        // The durable path already refuses to fold a structural break into a
+        // clean (empty) canonical.
+        assert_eq!(outcome, DocumentOpDeltaOutcome::StructuralQuarantined);
+        assert!(recovered.retained_replica_reseed_pending());
+
+        // The direct replica path folds the same frontier in, but the fence holds.
+        let mut hub = RelayHub::new(3);
+        hub.begin_retained_replica_reseed();
+        let member = 44;
+        hub.register(member).unwrap();
+        hub.relay_update(member, &source.canonical_encoded_state())
+            .unwrap();
+        assert_eq!(hub.canonical_text(), broken);
+        assert!(hub.retained_replica_reseed_pending());
+        assert!(!hub.commit_barrier_ready().unwrap());
+        assert!(!hub.commit_barrier().unwrap());
+        let reason = hub.retained_replica_reseed_structural_refusal().unwrap();
+        assert!(
+            reason.contains("opened 'agent:loop' but closed '/agent:todo'"),
+            "{reason}"
+        );
+
+        // The operator restores the close line and the todo: the next op
+        // promotes the reseed.
+        let editor = ReplicaState::from_encoded(member, &hub.canonical_encoded_state()).unwrap();
+        let before = editor.state_vector();
+        let repaired = fx::document(OpenerStyle::HeadingPrefixed, LoopEdit::DeleteRowsKeepClose);
+        for (offset, delete_len, insert) in minimal_char_span_edits(&broken, &repaired).unwrap() {
+            editor.apply_local_edit(offset, delete_len, &insert);
+        }
+        assert_eq!(editor.text(), repaired);
+        hub.relay_update(member, &editor.diff(&before).unwrap())
+            .unwrap();
+        assert_eq!(hub.canonical_text(), repaired);
+        assert!(!hub.retained_replica_reseed_pending());
+        assert!(hub.retained_replica_reseed_structural_refusal().is_none());
+        assert!(hub.commit_barrier_ready().unwrap());
     }
 
     #[test]

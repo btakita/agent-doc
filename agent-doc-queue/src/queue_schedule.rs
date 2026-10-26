@@ -2142,4 +2142,52 @@ mod tests {
 <!-- /agent:loop -->\n"
         );
     }
+
+    /// `#componentownclose`: the loop restore rewrites only the loop body that
+    /// ends at the loop's OWN close. In the incident shape (loop followed by
+    /// todo), it keeps the todo and every other byte outside the loop body
+    /// byte-for-byte when the markers pair, and fails closed when the operator
+    /// deleted the loop close or deleted through the todo body.
+    #[test]
+    fn componentownclose_loop_restore_never_rewrites_a_sibling_todo() {
+        use agent_doc_element::sibling_span_fixture::{self as fx};
+        const STRUCK: &str = "- ~~do [#oncepass]~~\n";
+        for style in fx::ALL_STYLES {
+            for edit in fx::ALL_EDITS {
+                let doc = fx::document(style, edit).replacen(
+                    fx::WATCH_ROW,
+                    &format!("{}{STRUCK}", fx::WATCH_ROW),
+                    1,
+                );
+                let roster = heads(&["do [#oncepass]"]);
+                let label = format!("{style:?}/{edit:?}");
+                let planned = plan_loop_restore_for_queue(&doc, "issues", &roster);
+                if !fx::edit_is_structurally_valid(edit) {
+                    let error = planned.expect_err("a broken loop close must refuse the restore");
+                    assert!(
+                        format!("{error:#}").contains("agent:loop"),
+                        "{label}: {error:#}"
+                    );
+                    continue;
+                }
+                let restored = planned
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{label}: no restore"));
+                assert!(!restored.contains(STRUCK), "{label}");
+                assert!(
+                    restored.contains("- do [#oncepass]\n<!-- /agent:loop -->\n"),
+                    "{label}:\n{restored}"
+                );
+                let todo = fx::todo_region(style);
+                assert_eq!(restored.matches(&todo).count(), 1, "{label}");
+                assert!(restored.ends_with(fx::tail_region()), "{label}");
+                let close = "<!-- /agent:loop -->\n";
+                assert_eq!(
+                    &restored[restored.find(close).unwrap()..],
+                    &doc[doc.find(close).unwrap()..],
+                    "{label}: every byte after the loop close is untouched"
+                );
+            }
+        }
+    }
 }

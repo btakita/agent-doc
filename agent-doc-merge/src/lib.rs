@@ -107,6 +107,13 @@ pub struct MergePlan {
     pub merged_agent: String,
     /// Agent-side item occurrences removed as revision twins.
     pub revision_twins_collapsed: usize,
+    /// `#componentownclose`: why the merge refused to rewrite component spans.
+    /// Set when the operator side, the agent side, or the engine's result has a
+    /// component parse failure (an unclosed opener or a close that names a
+    /// different component). `fell_back` is then `true` and `merged_doc` is the
+    /// operator text unchanged: no component may be ended at a sibling's close,
+    /// and no sibling's markers or body may be absorbed or dropped.
+    pub structure_refusal: Option<String>,
 }
 
 /// Merge three document revisions without side effects.
@@ -143,6 +150,25 @@ pub fn merge(request: MergeRequest<'_>) -> MergePlan {
             )
         }
     };
+    // `#componentownclose`: a span-based engine pairs each opener with the
+    // next close it meets. On a side whose markers do not pair, that span runs
+    // into (or past) a sibling component, and rewriting it deletes or absorbs
+    // the sibling. Refuse instead: the caller must pick a character-level
+    // strategy or keep the operator text, which stays editor-authoritative.
+    let structure_refusal = [
+        ("operator", request.operator),
+        ("agent", agent),
+        ("merged", merged_doc.as_str()),
+    ]
+    .into_iter()
+    .find_map(|(side, text)| {
+        agent_doc_element::element::component_parse_failure(text)
+            .map(|reason| format!("{side}: {reason}"))
+    });
+    let (merged_doc, fell_back) = match &structure_refusal {
+        Some(_) => (request.operator.to_string(), true),
+        None => (merged_doc, fell_back),
+    };
     MergePlan {
         merged_doc,
         conflict_advisories,
@@ -151,6 +177,7 @@ pub fn merge(request: MergeRequest<'_>) -> MergePlan {
         fell_back,
         revision_twins_collapsed: projection.collapsed,
         merged_agent: projection.agent_text,
+        structure_refusal,
     }
 }
 
@@ -566,6 +593,82 @@ mod tests {
             assert!(
                 !manifest.contains(forbidden),
                 "agent-doc-merge must stay pure; found forbidden dependency {forbidden}"
+            );
+        }
+    }
+
+    /// `#componentownclose`: the incident shape (loop followed by todo) merged
+    /// with an agent-side loop repaint while the operator deletes loop rows,
+    /// then the loop close, then through the todo body. With every component
+    /// closed by its own tag the todo survives byte-for-byte; with a missing or
+    /// mismatched close both engines refuse and hand back the operator text.
+    #[test]
+    fn componentownclose_merge_never_absorbs_or_drops_the_sibling_todo() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit};
+        for style in fx::ALL_STYLES {
+            let base = fx::document(style, LoopEdit::None);
+            let agent = base.replacen("- 🔄 release + publish\n", "- 📥 release + publish\n", 1);
+            assert_ne!(agent, base);
+            let todo = fx::todo_region(style);
+            for edit in fx::ALL_EDITS {
+                let operator = fx::document(style, edit);
+                for request in [
+                    MergeRequest::semantic(&base, &agent, &operator),
+                    MergeRequest::cell(&base, &agent, &operator),
+                ] {
+                    let engine = request.engine;
+                    let plan = merge(request);
+                    let label = format!("{style:?}/{edit:?}/{engine:?}");
+                    if fx::edit_is_structurally_valid(edit) {
+                        assert!(plan.structure_refusal.is_none(), "{label}");
+                        if !plan.fell_back {
+                            assert_eq!(
+                                plan.merged_doc.matches(&todo).count(),
+                                1,
+                                "{label}:\n{}",
+                                plan.merged_doc
+                            );
+                            assert!(plan.merged_doc.ends_with(fx::tail_region()), "{label}");
+                            assert!(
+                                agent_doc_element::element::parse(&plan.merged_doc).is_ok(),
+                                "{label}"
+                            );
+                        }
+                    } else {
+                        let refusal = plan
+                            .structure_refusal
+                            .as_deref()
+                            .unwrap_or_else(|| panic!("{label}: must refuse"));
+                        assert!(refusal.starts_with("operator: "), "{label}: {refusal}");
+                        assert!(plan.fell_back, "{label}");
+                        assert_eq!(plan.merged_doc, operator, "{label}");
+                        if fx::edit_keeps_todo(edit) {
+                            assert_eq!(plan.merged_doc.matches(&todo).count(), 1, "{label}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Precondition for the gate above: without it, the raw span engine pairs
+    /// the incident's loop opener with end-of-document. It buffers Backlog and
+    /// Review as the loop's body and re-emits a todo after them, producing
+    /// a structurally invalid document. If this stops reproducing, the gate
+    /// test proves nothing.
+    #[test]
+    fn componentownclose_raw_span_engine_runs_past_a_foreign_close() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit};
+        for style in fx::ALL_STYLES {
+            let base = fx::document(style, LoopEdit::None);
+            let agent = base.replacen("- 🔄 release + publish\n", "- 📥 release + publish\n", 1);
+            let operator = fx::document(style, LoopEdit::DeleteThroughTodoBody);
+            let raw = crate::document_cell_merge::document_cell_merge(&base, &agent, &operator)
+                .merged_doc;
+            assert_ne!(raw, operator, "{style:?}");
+            assert!(
+                agent_doc_element::element::parse(&raw).is_err(),
+                "{style:?}:\n{raw}"
             );
         }
     }

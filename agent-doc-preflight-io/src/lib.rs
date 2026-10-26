@@ -4122,7 +4122,11 @@ fn merge_admission_three_way_split(
             twins_logged = true;
         }
         let durable_merged = durable(&plan.merged_doc);
-        let outcome = if plan.fell_back {
+        let outcome = if plan.structure_refusal.is_some() {
+            // `#componentownclose`: an input's component markers do not pair, so
+            // no span-based merge may rewrite it; proceed on the authority.
+            "component_structure_refused"
+        } else if plan.fell_back {
             // The per-cell engine declined; its contract requires the next strategy.
             "engine_fell_back"
         } else if let Err(err) = agent_doc_element::element::parse(&plan.merged_doc) {
@@ -12121,6 +12125,60 @@ mod tests {
             "the projection must be what kept the authority:\n{log}"
         );
         assert!(log.contains("outcome=proceed_on_authority"), "{log}");
+    }
+
+    /// `#componentownclose`: preflight admission over the incident shape. The
+    /// operator's editor deleted loop rows (valid), then the loop close, then
+    /// through the todo body, while disk carries the agent's loop repaint.
+    /// Admission never adopts a merge that ends the loop at a sibling's close:
+    /// for broken markers every rung refuses and the authority (operator text)
+    /// is kept as-is; for valid markers the todo survives byte-for-byte.
+    #[test]
+    fn componentownclose_admission_never_absorbs_the_sibling_todo() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit};
+        for style in fx::ALL_STYLES {
+            for edit in [
+                LoopEdit::DeleteRowsKeepClose,
+                LoopEdit::DeleteRowsAndLoopClose,
+                LoopEdit::DeleteThroughTodoBody,
+            ] {
+                let dir = setup_project();
+                let doc = dir.path().join("bugs.md");
+                let baseline = fx::document(style, LoopEdit::None);
+                let disk =
+                    baseline.replacen("- 🔄 release + publish\n", "- 📥 release + publish\n", 1);
+                let authority = fx::document(style, edit);
+                std::fs::write(&doc, &disk).unwrap();
+                let merged = merge_admission_three_way_split(
+                    &doc, &baseline, &authority, &disk, &authority, None,
+                )
+                .unwrap();
+                let label = format!("{style:?}/{edit:?}");
+                let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                    .unwrap_or_default();
+                if fx::edit_is_structurally_valid(edit) {
+                    let kept = merged.unwrap_or_else(|| authority.clone());
+                    assert_eq!(
+                        kept.matches(&fx::todo_region(style)).count(),
+                        1,
+                        "{label}:\n{kept}"
+                    );
+                    assert!(agent_doc_element::element::parse(&kept).is_ok(), "{label}");
+                } else {
+                    assert_eq!(
+                        merged, None,
+                        "{label}: nothing is adopted over broken markers"
+                    );
+                    assert!(
+                        log.contains(
+                            "Cell=component_structure_refused Semantic=component_structure_refused"
+                        ),
+                        "{label}:\n{log}"
+                    );
+                    assert!(log.contains("outcome=proceed_on_authority"), "{label}");
+                }
+            }
+        }
     }
 
     /// `#queuecutexclusive` fail-closed guard, independent of the projection:

@@ -163,8 +163,12 @@ impl QueueIconSet {
         Ok(resolved)
     }
 
-    fn validate(&self) -> Result<()> {
-        let entries = [
+    /// Every configured prefix with its `[queue_icons]` key, in legend order.
+    /// Validation and the marker legend both read this one list, so a palette
+    /// field cannot be validated without also being documented
+    /// (`#queuemarkerlegend`).
+    pub fn entries(&self) -> [(&'static str, &str); 12] {
+        [
             ("pending", self.pending.as_str()),
             ("claimed", self.claimed.as_str()),
             ("running", self.running.as_str()),
@@ -177,7 +181,11 @@ impl QueueIconSet {
             ("operator_action", self.operator_action.as_str()),
             ("prioritized", self.prioritized.as_str()),
             ("agent_prioritized", self.agent_prioritized.as_str()),
-        ];
+        ]
+    }
+
+    fn validate(&self) -> Result<()> {
+        let entries = self.entries();
         let mut seen = HashSet::new();
         for (name, value) in entries {
             if value.is_empty() || value.trim() != value || value.contains(['\n', '\r']) {
@@ -216,6 +224,14 @@ impl QueueIconSet {
 }
 
 static QUEUE_ICONS: OnceLock<QueueIconSet> = OnceLock::new();
+
+mod legend;
+pub use legend::{
+    ALL_QUEUE_MARKERS, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
+    QUEUE_MARKER_LEGEND_LINE_PREFIX, QUEUE_MARKER_LEGEND_URL, QueueMarker, QueueMarkerAnnotation,
+    is_queue_marker_legend_line, queue_marker_legend_help, queue_marker_legend_help_for,
+    queue_marker_legend_line, queue_marker_legend_line_for, queue_marker_legend_markdown_table,
+};
 
 /// Install a validated palette before parsing or rendering queue rows.
 pub fn install_queue_icon_config(config: &QueueIconConfig) -> Result<()> {

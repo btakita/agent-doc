@@ -288,8 +288,12 @@ pub struct StreamConfig {
 }
 
 pub use agent_doc_queue_icons::{
-    ALL_LIFECYCLE_STATES, QueueIconConfig, QueueIconSet, QueueLifecycleMarker,
-    install_queue_icon_config, queue_icons,
+    ALL_LIFECYCLE_STATES, ALL_QUEUE_MARKERS, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
+    QUEUE_MARKER_LEGEND_LINE_PREFIX, QUEUE_MARKER_LEGEND_URL, QueueIconConfig, QueueIconSet,
+    QueueLifecycleMarker, QueueMarker, QueueMarkerAnnotation, install_queue_icon_config,
+    is_queue_marker_legend_line, queue_icons, queue_marker_legend_help,
+    queue_marker_legend_help_for, queue_marker_legend_line, queue_marker_legend_line_for,
+    queue_marker_legend_markdown_table,
 };
 
 /// Live finalize-pipeline state tracker (`#fm-run-id-step`, Phase 5 of

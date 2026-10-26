@@ -1710,6 +1710,44 @@ impl QueueClaimLedger {
         pruned
     }
 
+    /// End the finished attempts of rows a strike closed (`#strikeretires`),
+    /// at the strike's own successor rather than at the next closeout prune.
+    ///
+    /// A claim is dropped when its identity is in `struck`, has no live row
+    /// in `live` (a mirror copy or duplicate keeps its attempt), and its
+    /// expiry-adjusted state agrees with the strike: `Reported` or `Lost`
+    /// ([`struck_row_reopened_by_claim`] is false). An attempt that is still
+    /// dispatching or running contradicts the strike and stays, so its worker
+    /// keeps its fence and the struck row reopens as `❔`. Without this, a
+    /// `Reported` attempt outlived every non-closeout strike and projected
+    /// `☑️` onto a later row with the same text. Returns the dropped claims,
+    /// with their expiry-adjusted state.
+    pub fn retire_struck(
+        &mut self,
+        now_secs: u64,
+        struck: &HashSet<QueueItemIdentity>,
+        live: &HashSet<QueueItemIdentity>,
+    ) -> Vec<QueueClaim> {
+        let mut retired = Vec::new();
+        let mut kept = Vec::with_capacity(self.claims.len());
+        for claim in std::mem::take(&mut self.claims) {
+            let mut adjusted = claim.clone();
+            if adjusted.is_expired(now_secs) {
+                adjusted.state = QueueClaimState::Lost;
+            }
+            if struck.contains(&claim.identity)
+                && !live.contains(&claim.identity)
+                && !struck_row_reopened_by_claim(Some(&adjusted))
+            {
+                retired.push(adjusted);
+            } else {
+                kept.push(claim);
+            }
+        }
+        self.claims = kept;
+        retired
+    }
+
     /// The claimed identities a drainability computation must skip.
     pub fn claimed_items(
         &self,
@@ -2721,6 +2759,82 @@ mod tests {
         assert_eq!(ledger.claims.len(), 1);
         assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
         assert_eq!(ledger.claims[0].item_text, "do [#a]");
+    }
+
+    /// `#strikeretires`: a strike ends the struck row's finished attempt
+    /// (`Reported`, or `Lost` by expiry) at once; a still-dispatching or
+    /// running attempt, and an attempt whose identity keeps a live row, stay.
+    #[test]
+    fn retire_struck_ends_only_finished_attempts_without_a_live_row() {
+        let mut ledger = reported_release_ledger(100);
+        ledger.claim("running item", "subagent:run", 100, 3600);
+        let generation = ledger.claims[1].generation;
+        ledger
+            .start(
+                "running item",
+                "subagent:run",
+                "worker:run",
+                100,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        ledger.claim("dispatching item", "subagent:dispatch", 100, 3600);
+        ledger.claim("expired item", "subagent:expired", 100, 10);
+        ledger.claim("mirrored item", "subagent:mirror", 100, 3600);
+        let generation = ledger.claims[4].generation;
+        ledger
+            .start(
+                "mirrored item",
+                "subagent:mirror",
+                "worker:mirror",
+                100,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        ledger.report("mirrored item", Some(generation)).unwrap();
+        ledger.claim("unstruck item", "subagent:other", 100, 10);
+
+        let struck: HashSet<_> = [
+            "release + publish",
+            "running item",
+            "dispatching item",
+            "expired item",
+            "mirrored item",
+        ]
+        .into_iter()
+        .map(claim_identity)
+        .collect();
+        let live: HashSet<_> = [claim_identity("mirrored item")].into_iter().collect();
+        let retired = ledger.retire_struck(200, &struck, &live);
+
+        let retired_states: Vec<_> = retired
+            .iter()
+            .map(|claim| (claim.item_text.as_str(), claim.state))
+            .collect();
+        assert_eq!(
+            retired_states,
+            vec![
+                ("release + publish", QueueClaimState::Reported),
+                ("expired item", QueueClaimState::Lost),
+            ]
+        );
+        let kept: Vec<_> = ledger
+            .claims
+            .iter()
+            .map(|claim| claim.item_text.as_str())
+            .collect();
+        assert_eq!(
+            kept,
+            vec![
+                "running item",
+                "dispatching item",
+                "mirrored item",
+                "unstruck item"
+            ],
+            "a live attempt, a mirrored identity, and an unstruck row keep their claims"
+        );
     }
 
     #[test]

@@ -5523,6 +5523,165 @@ mod core_tests {
         );
     }
 
+    /// Claim `item` for `owner`, bind a worker, and report it without
+    /// releasing: the `report-complete` state, where the `Reported` attempt
+    /// stays in the claim ledger for integration (no release receipt).
+    fn reported_claim_kept_for_integration(doc: &Path, item: &str, owner: &str) {
+        let (_, claimed) = crate::queue_claim::claim(doc, item, owner, 600).unwrap();
+        let running =
+            crate::queue_claim::start_attempt(doc, item, owner, "/root/w", 600, claimed.generation)
+                .unwrap();
+        crate::queue_claim::report_attempt(doc, item, Some(running.generation)).unwrap();
+        let ledger = crate::queue_claim::load_ledger(doc).unwrap();
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(
+            ledger.claims[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert!(
+            crate::claim_release_receipt::load(doc)
+                .unwrap()
+                .receipts
+                .is_empty()
+        );
+    }
+
+    /// `readded` projects `item` as pending `📥`, never `☑️` or `🔄`.
+    fn assert_readded_row_projects_pending(doc: &Path, readded: &str, item: &str) {
+        let projection =
+            crate::queue_cmd::derive_claim_runtime_projection(doc, readded, None).unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 📥 {item}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection.target_content.contains("🔄")
+                && !projection.target_content.contains("- ☑️"),
+            "{}",
+            projection.target_content
+        );
+    }
+
+    /// `#strikeretires` (found by the completion-cell retirement fix,
+    /// 2026-10-26): a `Reported` attempt kept in the claim ledger for
+    /// integration outlived the orphan `queue consume --id` strike until the
+    /// next closeout prune, so an operator re-add of the same `[#id]` before
+    /// then projected `☑️` from the claim. The strike now ends the attempt.
+    #[test]
+    fn orphan_id_strike_ends_a_reported_claim_so_a_readded_row_is_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("s.md");
+        let item = "do [#orphanreported]";
+        let owner = "subagent:orphanreported";
+        let shell = |queue: &str| {
+            format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n### Re: prior — opus\n\nDone.\n<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue go -->\n{queue}<!-- /agent:queue -->\n\n",
+                    "<!-- agent:backlog -->\n- [ ] [#liveone] still open\n<!-- /agent:backlog -->\n",
+                ),
+                queue = queue,
+            )
+        };
+        std::fs::write(&doc, shell(&format!("- {item}\n- do [#liveone]\n"))).unwrap();
+        reported_claim_kept_for_integration(&doc, item, owner);
+        let content = shell(&format!("- ☑️ [#{owner}#1] {item}\n- do [#liveone]\n"));
+        std::fs::write(&doc, &content).unwrap();
+
+        assert!(strike_orphan_id_backed_queue_head(&doc, "orphanreported").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains(&format!("~~{item}~~")), "{result}");
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty(),
+            "the strike ends the reported claim"
+        );
+        let readded = result.replace("- do [#liveone]\n", &format!("- {item}\n- do [#liveone]\n"));
+        assert_readded_row_projects_pending(&doc, &readded, item);
+    }
+
+    /// `#strikeretires`: the controller's answered-head projection ends the
+    /// struck row's `Reported` attempt once its target is accepted, so a
+    /// later row with the same text projects `📥`, not `☑️`. A running attempt
+    /// on another row is untouched.
+    #[test]
+    fn controller_answered_strike_ends_a_reported_claim_so_a_readded_row_is_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("s.md");
+        let item = "release + publish";
+        let owner = "subagent:release_publish_patch";
+        let shell = |queue: &str| {
+            format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue go -->\n{queue}<!-- /agent:queue -->\n",
+                ),
+                queue = queue,
+            )
+        };
+        std::fs::write(&doc, shell(&format!("- {item}\n- later work\n"))).unwrap();
+        reported_claim_kept_for_integration(&doc, item, owner);
+        let (_, later) =
+            crate::queue_claim::claim(&doc, "later work", "subagent:later", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            "later work",
+            "subagent:later",
+            "/root/later",
+            600,
+            later.generation,
+        )
+        .unwrap();
+        let content = shell(&format!("- ☑️ [#{owner}#1] {item}\n- later work\n"));
+        std::fs::write(&doc, &content).unwrap();
+        let response = format!(
+            "### Re: release — opus\n\n> **Queue prompt:** {item}\n\nReleased and verified.\n"
+        );
+
+        let projected = agent_doc_queue::queue_consume::project_answered_free_text_strike(
+            &content,
+            &response,
+            Some(&content),
+        )
+        .unwrap()
+        .expect("the answered row projects a strike target");
+        std::fs::write(&doc, &projected.target_content).unwrap();
+        crate::claim_release_receipt::retire_struck_by_successor_or_warn(
+            &doc,
+            &content,
+            &projected.target_content,
+            "answered_free_text_projection",
+        );
+        let claims = crate::queue_claim::load_ledger(&doc).unwrap().claims;
+        assert_eq!(
+            claims
+                .iter()
+                .map(|claim| claim.item_text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["later work"],
+            "only the struck row's reported claim ends"
+        );
+        assert_eq!(
+            claims[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+
+        let readded = projected
+            .target_content
+            .replace("- later work\n", &format!("- later work\n- {item}\n"));
+        assert_readded_row_projects_pending(&doc, &readded, item);
+    }
+
     /// The orphan `queue consume --id` strike of a claimed row with no
     /// completion cell to retire strikes only the work text: the lifecycle
     /// marker and exact-attempt owner annotation never land inside the strike.

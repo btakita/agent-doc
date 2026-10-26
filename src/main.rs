@@ -490,8 +490,9 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                             );
                         }
                         // `#strikeretires`: the target already retired the
-                        // struck rows' completion cells; their reported-release
-                        // receipts end at this same boundary.
+                        // struck rows' completion cells; their reported/terminal
+                        // claim attempts and reported-release receipts end at
+                        // this same boundary.
                         agent_doc_queue_io::claim_release_receipt::retire_struck_by_successor_or_warn(
                             &file,
                             &invocation.expected_content,

@@ -107,6 +107,14 @@ fn queue_rows(content: &str) -> Vec<(bool, String)> {
             _ => None,
         })
         .map(|(struck, text)| {
+            // A strike that bakes its note inside the strikethrough
+            // (`~~<work> — auto-struck: <reason>~~`, `#qftbklgstrike`) still
+            // struck `<work>`; the note is never part of the work identity.
+            let text = if struck {
+                struck_text_without_annotation(&text)
+            } else {
+                text.as_str()
+            };
             (
                 struck,
                 strip_in_progress_marker(&strip_priority_markers(text.trim()))
@@ -116,6 +124,19 @@ fn queue_rows(content: &str) -> Vec<(bool, String)> {
         })
         .filter(|(_, text)| !text.is_empty())
         .collect()
+}
+
+/// A struck row's work text without a trailing auto-struck note
+/// ([`STRUCK_ANNOTATION_SEPARATOR`]). The outside-the-wrapper note shape is
+/// already dropped by the queue parser; this covers the note baked inside
+/// the wrapper.
+///
+/// [`STRUCK_ANNOTATION_SEPARATOR`]: agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
+fn struck_text_without_annotation(text: &str) -> &str {
+    match text.split_once(agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR) {
+        Some((work, _)) if !work.trim().is_empty() => work,
+        _ => text,
+    }
 }
 
 fn live_identities(rows: &[(bool, String)]) -> HashSet<agent_doc_element_queue::QueueItemIdentity> {
@@ -4118,6 +4139,32 @@ Old.
         // A row already struck before the successor is not this strike's.
         let already = strike_retirement_doc(&exchange, &format!("- ~~{item}~~\n"));
         assert!(heads_struck_by_successor(&already, &already).is_empty());
+    }
+
+    /// `#strikeretires`: an annotated strike struck the same work. The
+    /// backlog/done strike (`#qftbklgstrike`) bakes its note inside the
+    /// strikethrough and the answered strike (`#qstrikenote`) appends it
+    /// after; either way the struck row is the work text, so its evidence
+    /// retires. Before, the baked-in note made the struck identity differ from
+    /// the live row's, and the strike closed nothing.
+    #[test]
+    fn annotated_strikes_strike_the_work_text() {
+        let item = "Fix JB File Cache Conflict dialogs on every save";
+        let before = strike_retirement_doc(
+            "",
+            &format!("- ☑️ [#subagent:jbcache#1] {item}\n- do [#stillopen]\n"),
+        );
+        for struck in [
+            format!("- ~~{item} — auto-struck: completed by #jbcache (#qftbklgstrike)~~\n"),
+            format!("- ~~{item}~~ — auto-struck: answered this cycle (#ftstrike)\n"),
+        ] {
+            let after = strike_retirement_doc("", &format!("{struck}- do [#stillopen]\n"));
+            assert_eq!(
+                heads_struck_by_successor(&before, &after),
+                vec![item.to_string()],
+                "{struck}"
+            );
+        }
     }
 
     /// A preflight-selected head can join the live queue after the response

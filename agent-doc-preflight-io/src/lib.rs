@@ -6388,7 +6388,8 @@ pub fn run_queue_maintenance_with_coin_gate(
     // drain clear can remove the struck rows that identify them; otherwise a
     // cell keyed only by work text outlives its row and projects `🔄` onto a
     // later row with the same text. The snapshot drops the same cells, and
-    // the reported-release receipts end once the successor persists.
+    // the reported/terminal claim attempts and reported-release receipts end
+    // once the successor persists (`retire_struck_or_warn`).
     let struck_retirement = agent_doc_queue::queue_consume::retire_struck_rows_completion_feedback(
         &authority_baseline,
         &current_content,
@@ -19697,6 +19698,167 @@ mod tests {
             "{}",
             projection.target_content
         );
+    }
+
+    /// The re-added row `item` in `readded` projects `📥`, never `☑️`/`🔄`.
+    fn assert_readded_row_projects_pending(doc: &std::path::Path, readded: &str, item: &str) {
+        let projection =
+            agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(doc, readded, None)
+                .unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 📥 {item}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection.target_content.contains("🔄")
+                && !projection.target_content.contains("- ☑️"),
+            "{}",
+            projection.target_content
+        );
+    }
+
+    fn claim_texts(doc: &std::path::Path) -> Vec<String> {
+        agent_doc_queue_io::queue_claim::load_ledger(doc)
+            .unwrap()
+            .claims
+            .into_iter()
+            .map(|claim| claim.item_text)
+            .collect()
+    }
+
+    /// `#strikeretires` (found by the completion-cell retirement fix,
+    /// 2026-10-26): the done-id strike (`#qdonestrike`) closed a reported
+    /// `do [#alpha]` row, but its `Reported` attempt stayed in the claim
+    /// ledger until the next closeout prune, so a re-added identical row
+    /// projected `☑️`. The strike's maintenance successor now ends it.
+    #[test]
+    fn done_id_strike_ends_a_reported_claim_so_a_readded_row_is_pending() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let item = "do [#alpha]";
+        let owner = "subagent:alpha";
+        let shell = |queue: &str| {
+            format!(
+                concat!(
+                    "---\n",
+                    "agent_doc_session: test\n",
+                    "agent_doc_format: template\n",
+                    "agent_doc_write: crdt\n",
+                    "queue_active: true\n",
+                    "---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "### Re: prior — gpt-5\n\nDone.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue auto -->\n",
+                    "{queue}",
+                    "<!-- /agent:queue -->\n\n",
+                    "<!-- agent:done -->\n",
+                    "- [x] [#alpha] First done.\n",
+                    "<!-- /agent:done -->\n",
+                ),
+                queue = queue,
+            )
+        };
+        std::fs::write(&doc, shell(&format!("- {item}\n- do [#beta]\n"))).unwrap();
+        let _cell = reported_attempt_with_cell(&doc, item, owner);
+        let content = shell(&format!("- ☑️ [#{owner}#1] {item}\n- do [#beta]\n"));
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert_eq!(claim_texts(&doc), vec![item.to_string()]);
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(&format!("- ~~{item}~~")),
+            "the done strike closes the reported row:\n{updated}"
+        );
+        assert!(
+            claim_texts(&doc).is_empty(),
+            "the strike ends the reported claim"
+        );
+        let readded = updated.replace("- 🚧 do [#beta]\n", &format!("- 🚧 do [#beta]\n- {item}\n"));
+        assert_ne!(readded, updated, "{updated}");
+        assert_readded_row_projects_pending(&doc, &readded, item);
+    }
+
+    /// `#strikeretires`: the backlog/done strike (`#qftbklgstrike`) bakes its
+    /// note inside the strikethrough. Before, that note made the struck row's
+    /// identity differ from the live row's, so the strike retired nothing and
+    /// the row's `Reported` attempt outlived it. It now ends with the strike,
+    /// and a re-added identical row projects `📥`. (The row is not yet
+    /// lifecycle-projected: the semantic scorer reads a projected
+    /// `[#owner#N]` annotation as an id and leaves the row to the id paths.)
+    #[test]
+    fn backlog_strike_ends_a_reported_claim_so_a_readded_row_is_pending() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join("tasks.done.md"),
+            "- 2026-06-07 [#jbcache] Fix JB File Cache Conflict dialogs on every save\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let item = "Fix JB File Cache Conflict dialogs on every save";
+        let owner = "subagent:jbcache";
+        let shell = |queue: &str| {
+            format!(
+                concat!(
+                    "---\n",
+                    "agent_doc_session: test\n",
+                    "agent_doc_format: template\n",
+                    "agent_doc_write: crdt\n",
+                    "queue: start\n",
+                    "---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "### Re: unrelated — opus-4-8\n\nAn answer about a different topic.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue priority go -->\n",
+                    "{queue}",
+                    "<!-- /agent:queue -->\n\n",
+                    "<!-- agent:backlog priority queue -->\n",
+                    "- [ ] [#stillopen] unrelated open work item\n",
+                    "<!-- /agent:backlog -->\n\n",
+                    "<!-- agent:done archive=tasks.done.md -->\n",
+                    "<!-- /agent:done -->\n",
+                ),
+                queue = queue,
+            )
+        };
+        std::fs::write(&doc, shell(&format!("- {item}\n- do [#stillopen]\n"))).unwrap();
+        let _cell = reported_attempt_with_cell(&doc, item, owner);
+        let content = shell(&format!("- {item}\n- do [#stillopen]\n"));
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert_eq!(claim_texts(&doc), vec![item.to_string()]);
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let struck =
+            format!("- ~~{item} — auto-struck: completed by #jbcache (#qftbklgstrike)~~\n");
+        assert!(
+            updated.contains(&struck),
+            "the backlog/done strike closes the reported row:\n{updated}"
+        );
+        assert!(
+            claim_texts(&doc).is_empty(),
+            "the strike ends the reported claim"
+        );
+        let readded = updated.replace(&struck, &format!("{struck}- {item}\n"));
+        assert_readded_row_projects_pending(&doc, &readded, item);
     }
 
     #[test]

@@ -434,6 +434,14 @@ Completed `#release-promotion-concurrency`.
 The release aggregate and per-target promotion workflows shared one repository-wide concurrency group. GitHub's default single pending slot allowed the six rapid target dispatches to replace the pending aggregate job even with `cancel-in-progress: false`. Both participants now set `queue: max`, preserving serialized stable-channel writes while preventing pending promotion eviction.
 
 The worker commit `7759804dff` was integrated as `42bd3810a8` and pushed to `origin/main`. The spec and regression test were updated. Coordinator verification passed the exact regression, `make check-fast` with 1,975 tests, clippy, docs/release self-tests, and a local install. The installed CLI remains `0.35.552`; JetBrains generations remain `0.2.825`, `0.2.826`, and `0.2.827` because editor sources were unchanged.
+
+### Re: Release and publish handoff — gpt-6.1-sol · 2026-10-26T08:21-04:00
+
+Dispatched `do [#layoutunprovenliveverify]` to `subagent:layout_liveverify` as generation 2, bound to worker `/root/layout_liveverify`.
+
+The exact `release + publish` instruction is restored immediately after that live-verification head. Its durable claim points to an old v0.35.551 report, so that historical handback is not fresh completion evidence for this request. The coordinator will run a fresh release only after the current layout fix is integrated and live-verified.
+
+The exchange is large, but the active queue remains in progress, so I did not compact it.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -442,7 +450,8 @@ The worker commit `7759804dff` was integrated as `42bd3810a8` and pushed to `ori
 
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⚠️ [#subagent:layout_liveverify#1] do [#layoutunprovenliveverify]
+- 🚧 [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]
+- release + publish
 - ☑️ [#subagent:gh372#1] #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
 - ☑️ [#subagent:grok_queue_ui#1] In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
 - ☑️ [#subagent:lazily_block_reason#1] On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
@@ -483,6 +492,7 @@ A lint of the current document is clean. The bad marker is in that merged reconn
 capture is what has to land before a new cycle can admit. The binary allows only another agent-doc
 session-check on that file.
 ```
+---
 ---
 ☑️ [#subagent:sdk_demo_live_recovery#1] Run Agent Doc on sdk-demo.md still wedged even after I corrected the issue on the ran agent-doc version:
 ```
@@ -530,20 +540,19 @@ After the tab shows the marker on its own line, ask again and I will run session
 force-write the file, and do not delete the queue items.                                                         █
 ```
 ---
+---
 ☑️ [#subagent:sdk_demo_route_recovery#1] Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
 ---
 - ☑️ [#subagent:release_publish_patch#3] release + publish
-- ☑️ [#subagent:pane_sync_retry#1] There is still only 1 tmux pane with 2 agent-doc documents open in the editor. Sync still fails. How can we ensure this issue won't happen again?
-- ☑️ [#subagent:cross_root_sync_regression#1] Add a deterministic controller/SimWorld regression and routing-spec clause for cross-root Sync Tmux Layout with two editor-visible documents where the second has a ready actor bound to a dead or ownership-unproven pane; assert ProvisionForLayout replaces the stale binding and converges to two panes while ObserveOnly never focuses/reuses the unproven pane.
+- ~~There is still only 1 tmux pane with 2 agent-doc documents open in the editor. Sync still fails. How can we ensure this issue won't happen again?~~
+- ~~Add a deterministic controller/SimWorld regression and routing-spec clause for cross-root Sync Tmux Layout with two editor-visible documents where the second has a ready actor bound to a dead or ownership-unproven pane; assert ProvisionForLayout replaces the stale binding and converges to two panes while ObserveOnly never focuses/reuses the unproven pane.~~
 - ☑️ [#subagent:loop_routing#1] The agent:loop is getting items sent to it, but the items should have been sent into `agent:run`.
 - ☑️ [#subagent:queue_completion_audit#1] The queue is full of items with ☑️. Are there complete? Why are they not struck?
 - ☑️ [#subagent:auto_sync_project#1] tmux pane auto-sync not working in this agent-doc project instance
 - ☑️ [#subagent:todo_hj2r_verify#1] [#hj2r]: verified
-- ☑️ [#subagent:helpregisterjetbrains#1] do [#helpregisterjetbrains]: Use chromium-bridge
-- ☑️ [#subagent:coder_remote_install#1] do [#coder-remote-install-02805]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:integrate_reported_items#1] Integrate all ☑️ items.
-- ☑️ [#subagent:release_after_claims#1] Wait for all 🚧 items to complete. Then integrate. Then release + publish
+- ~~Wait for all 🚧 items to complete. Then integrate. Then release + publish~~
 - ☑️ [#subagent:backlog_queue_sync#1] The backlog items are marked with 🚧 and is out of sync. The work has been completed in the queue.
 - ☑️ [#subagent:tracked_work_todo_backlinks#1] backlog/queue/icebox items should always backlink to todo items so the todo items can be cleared once complete. This may mean the todo item(s) block the queue/backlog/icebox item(s).
 - ☑️ [#subagent:jetbrains_submission_feedback#1] Read the feedback from the JetBrains agent-doc plugin submission. Fix any issues.
@@ -571,8 +580,8 @@ force-write the file, and do not delete the queue items.                        
 
 ## Backlog
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
-- [ ] 🚧 [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
+- [ ] ⚠️ [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
+- [ ] ☑️ [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
 <!-- /agent:backlog -->
 
 ## Review

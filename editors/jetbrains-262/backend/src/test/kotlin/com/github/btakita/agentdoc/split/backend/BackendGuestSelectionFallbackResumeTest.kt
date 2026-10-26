@@ -82,4 +82,20 @@ class BackendGuestSelectionFallbackResumeTest {
             diagnostic,
         )
     }
+
+    @Test
+    fun connectedFrontendWithoutAcceptedPublicationIsExplicitlyBlocked() {
+        val diagnostic = frontendAuthorityUnavailableDiagnostic(
+            "client-1",
+            ClientType.CONTROLLER,
+            FRONTEND_AUTHORITY_CONNECTED_WITHOUT_PUBLICATION,
+        )
+
+        assertTrue(diagnostic.contains("readiness=blocked"), diagnostic)
+        assertTrue(
+            diagnostic.contains("readiness_reason=frontend_connected_without_accepted_publication"),
+            diagnostic,
+        )
+        assertTrue(diagnostic.contains("structural_routing=blocked fallback=focus_only"), diagnostic)
+    }
 }

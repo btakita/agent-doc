@@ -28,7 +28,7 @@ import kotlinx.coroutines.sync.withLock
 internal class AuthenticatedSurfaceIngressService(project: Project) : Disposable {
     private val layoutForwarder = ControllerRemoteClientLayoutForwarder(project)
     private val state = AuthenticatedSurfaceIngressState(
-        ControllerSurfaceSnapshotPublisher(project),
+        ControllerSurfaceSnapshotPublisher(),
         layoutForwarder,
     )
 
@@ -41,6 +41,9 @@ internal class AuthenticatedSurfaceIngressService(project: Project) : Disposable
 
     /** True only when an authenticated *remote* lease owns measured pane-layout authority. */
     val layoutAuthorityActive: StateFlow<Boolean> = state.layoutAuthorityActive
+
+    /** Readiness stays blocked until every connected remote layout lease publishes successfully. */
+    val layoutPublicationReadiness: StateFlow<LayoutPublicationReadiness> = state.layoutPublicationReadiness
 
     suspend fun open(authenticatedClientId: String, frontendInstanceId: String): SurfaceIngressLease =
         state.open(authenticatedClientId, frontendInstanceId)
@@ -65,6 +68,12 @@ internal class AuthenticatedSurfaceIngressService(project: Project) : Disposable
     }
 }
 
+internal enum class LayoutPublicationReadiness {
+    INACTIVE,
+    CONNECTED_BLOCKED,
+    ACCEPTED,
+}
+
 internal class AuthenticatedSurfaceIngressState(
     private val publisher: SurfaceSnapshotPublisher,
     private val layoutForwarder: RemoteClientLayoutForwarder = RemoteClientLayoutForwarder.Disabled,
@@ -76,6 +85,9 @@ internal class AuthenticatedSurfaceIngressState(
     val frontendAuthorityActive: StateFlow<Boolean> = mutableFrontendAuthorityActive.asStateFlow()
     private val mutableLayoutAuthorityActive = MutableStateFlow(false)
     val layoutAuthorityActive: StateFlow<Boolean> = mutableLayoutAuthorityActive.asStateFlow()
+    private val mutableLayoutPublicationReadiness = MutableStateFlow(LayoutPublicationReadiness.INACTIVE)
+    val layoutPublicationReadiness: StateFlow<LayoutPublicationReadiness> =
+        mutableLayoutPublicationReadiness.asStateFlow()
 
     suspend fun open(
         authenticatedClientId: String,
@@ -140,6 +152,7 @@ internal class AuthenticatedSurfaceIngressState(
             acceptedSequence = snapshot.sequence,
             acceptedSurfaces = snapshot.surfaces.associate { it.paneId to it.surfaceGeneration },
         )
+        refreshFrontendAuthority()
         // GH #320 option B: the controller policy has now seen the complete snapshot, so its
         // measured main-window geometry may drive pane layout. The pane-layout surface fences
         // its own generation/sequence; the policy's projection status (frozen without terminal
@@ -209,6 +222,12 @@ internal class AuthenticatedSurfaceIngressState(
     private fun refreshFrontendAuthority() {
         mutableFrontendAuthorityActive.value = connections.isNotEmpty()
         mutableLayoutAuthorityActive.value = connections.values.any { it.layoutAuthority }
+        val layoutConnections = connections.values.filter { it.layoutAuthority }
+        mutableLayoutPublicationReadiness.value = when {
+            layoutConnections.isEmpty() -> LayoutPublicationReadiness.INACTIVE
+            layoutConnections.any { it.acceptedSequence == 0L } -> LayoutPublicationReadiness.CONNECTED_BLOCKED
+            else -> LayoutPublicationReadiness.ACCEPTED
+        }
     }
 
     private fun rejected(

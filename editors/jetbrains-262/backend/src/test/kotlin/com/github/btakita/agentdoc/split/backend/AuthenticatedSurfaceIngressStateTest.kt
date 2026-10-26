@@ -75,16 +75,29 @@ class AuthenticatedSurfaceIngressStateTest {
 
         assertTrue(state.frontendAuthorityActive.value, "the debounce/schema/transport window is fenced")
         assertTrue(state.layoutAuthorityActive.value, "a remote lease owns measured layout immediately")
+        assertEquals(LayoutPublicationReadiness.CONNECTED_BLOCKED, state.layoutPublicationReadiness.value)
         publisher.deliver = false
         assertEquals(
             SurfaceIngressStatus.DELIVERY_FAILED,
             state.publish("client-a", lease, snapshot("frontend-a", 1)).status,
         )
         assertTrue(state.frontendAuthorityActive.value, "transport failure cannot revive backend guessing")
+        assertEquals(
+            LayoutPublicationReadiness.CONNECTED_BLOCKED,
+            state.layoutPublicationReadiness.value,
+            "a connected frontend without an accepted controller publication is explicitly blocked",
+        )
+        publisher.deliver = true
+        assertEquals(
+            SurfaceIngressStatus.ACCEPTED,
+            state.publish("client-a", lease, snapshot("frontend-a", 2)).status,
+        )
+        assertEquals(LayoutPublicationReadiness.ACCEPTED, state.layoutPublicationReadiness.value)
 
         state.retire("client-a", lease)
         assertFalse(state.frontendAuthorityActive.value)
         assertFalse(state.layoutAuthorityActive.value)
+        assertEquals(LayoutPublicationReadiness.INACTIVE, state.layoutPublicationReadiness.value)
     }
 
     @Test

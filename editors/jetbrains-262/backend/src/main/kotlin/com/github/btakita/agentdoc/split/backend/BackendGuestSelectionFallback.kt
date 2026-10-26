@@ -32,15 +32,21 @@ import kotlinx.coroutines.launch
 internal const val FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS = 5_000L
 internal const val FRONTEND_AUTHORITY_UNAVAILABLE_READINESS =
     "frontend_authority_absent_or_generation_mismatched"
+internal const val FRONTEND_AUTHORITY_CONNECTED_WITHOUT_PUBLICATION =
+    "frontend_connected_without_accepted_publication"
 internal const val FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY =
     "install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, " +
         "verify both sides report that exact plugin version, restart both (including the JetBrains Client/Gateway " +
         "process; restarting only the Remote Dev backend cannot replace its already-loaded frontend module), " +
         "then retry Run Agent Doc"
 
-internal fun frontendAuthorityUnavailableDiagnostic(clientId: String, type: ClientType): String =
+internal fun frontendAuthorityUnavailableDiagnostic(
+    clientId: String,
+    type: ClientType,
+    readinessReason: String = FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
+): String =
     "[layout-sync] frontend layout publisher unavailable client=$clientId type=$type " +
-        "readiness=blocked readiness_reason=$FRONTEND_AUTHORITY_UNAVAILABLE_READINESS " +
+        "readiness=blocked readiness_reason=$readinessReason " +
         "geometry_reason=flat_evidence_has_no_column_geometry " +
         "structural_routing=blocked fallback=focus_only remedy=$FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY"
 
@@ -73,7 +79,10 @@ internal object BackendGuestSelectionFallback {
             ingress.layoutAuthorityActive
                 .filter { it }
                 .collect {
-                    log.info("[layout-sync] frontend surface authority accepted; retiring backend fallback")
+                    log.info(
+                        "[layout-sync] frontend surface authority connected; " +
+                            "retiring backend structural fallback pending accepted publication",
+                    )
                     listener.retireControllerProjection()
                 }
         }
@@ -90,8 +99,18 @@ internal object BackendGuestSelectionFallback {
                     // remedy instead of suggesting another backend-only IDE restart (GH #352).
                     launch {
                         delay(FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS)
-                        if (!ingress.layoutAuthorityActive.value) {
-                            log.warn(frontendAuthorityUnavailableDiagnostic(sessionId, session.type))
+                        when (ingress.layoutPublicationReadiness.value) {
+                            LayoutPublicationReadiness.ACCEPTED -> Unit
+                            LayoutPublicationReadiness.CONNECTED_BLOCKED -> log.warn(
+                                frontendAuthorityUnavailableDiagnostic(
+                                    sessionId,
+                                    session.type,
+                                    FRONTEND_AUTHORITY_CONNECTED_WITHOUT_PUBLICATION,
+                                ),
+                            )
+                            LayoutPublicationReadiness.INACTIVE -> log.warn(
+                                frontendAuthorityUnavailableDiagnostic(sessionId, session.type),
+                            )
                         }
                     }
                     val manager = try {

@@ -533,6 +533,11 @@ target's rolling `agent-doc-target-stable-v1` pointer. Each pointer
 is a strict JSON manifest plus a `.sha256` sidecar and binds the versioned archive
 digest and the digest of the same release's complete editor-package manifest.
 Promotion is serialized across tags; an older rerun cannot roll a pointer back.
+Every participant in that shared concurrency group opts into the maximum pending
+queue. `cancel-in-progress: false` alone leaves GitHub's default single pending
+slot in place, where a later per-target request can evict the release's final
+fan-in before it starts; queued promotion requests must wait instead of cancelling
+one another.
 The two rolling assets are uploaded JSON-first, so the unavoidable intermediate
 state is checksum-mismatched and clients fail closed until the sidecar lands.
 The manual `Promote or roll back target stable channel` workflow re-verifies both artifact

@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.AgentDocSessionFiles
 import com.github.btakita.agentdoc.CpRouteClient
+import com.github.btakita.agentdoc.TerminalUtil
 import com.github.btakita.agentdoc.controllerFailureMessageUtil
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationKind
@@ -15,7 +16,6 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.Channels
@@ -55,28 +55,62 @@ internal interface SurfaceSnapshotPublisher {
  * mutate main before the detached/main policy sees the whole fact.  Controllers without the new
  * atomic command reject it, so this path fails closed until the policy bridge is deployed.
  */
-internal class ControllerSurfaceSnapshotPublisher(private val project: Project) : SurfaceSnapshotPublisher {
+internal class ControllerSurfaceSnapshotPublisher : SurfaceSnapshotPublisher {
+    /**
+     * Controller roots touched by an authenticated connection. Access is serialized by
+     * [AuthenticatedSurfaceIngressState], whose mutex owns every publisher call.
+     */
+    private val controllerRoots = mutableMapOf<ConnectionKey, Set<String>>()
+
     override suspend fun publish(
         clientId: String,
         generation: Long,
         snapshot: FrontendSurfaceSnapshot,
     ): SurfaceDeliveryResult {
-        val projectRoot = project.basePath
-            ?: return SurfaceDeliveryResult(false, "backend project has no base path")
+        val key = ConnectionKey(clientId, generation)
+        val previousRoots = controllerRoots[key].orEmpty()
+        val snapshotRoots = ControllerSurfaceSnapshotRoutes.resolve(
+            snapshot,
+            ::isSessionDocument,
+            TerminalUtil::nearestAgentDocProjectRoot,
+        )
+        val deliveryRoots = if (snapshotRoots.isEmpty()) previousRoots else snapshotRoots
+        if (deliveryRoots.isEmpty()) {
+            return SurfaceDeliveryResult(
+                false,
+                "frontend snapshot has no session document with an agent-doc controller root",
+            )
+        }
+        // Retain attempted roots before transport. A partial fan-out must still be retired if the
+        // connection closes before its next publication.
+        controllerRoots[key] = previousRoots + deliveryRoots
         val wireClientId = wireClientId(clientId)
         return try {
-            val response = send(
-                projectRoot,
-                ControllerSurfaceSnapshotWire.snapshotRequest(
-                    wireClientId,
-                    generation,
-                    snapshot,
-                    ::isSessionDocument,
-                ),
-            )
+            val presentations = deliveryRoots.map { projectRoot ->
+                send(
+                    projectRoot,
+                    ControllerSurfaceSnapshotWire.snapshotRequest(
+                        wireClientId,
+                        generation,
+                        snapshot,
+                    ) { path ->
+                        isSessionDocument(path) &&
+                            TerminalUtil.nearestAgentDocProjectRoot(path) == projectRoot
+                    },
+                ).let(ControllerSurfaceSnapshotWire::presentationProjection)
+            }
+            if (snapshotRoots.isNotEmpty()) {
+                (previousRoots - snapshotRoots).forEach { retiredRoot ->
+                    send(
+                        retiredRoot,
+                        ControllerSurfaceSnapshotWire.retirementRequest(wireClientId, generation),
+                    )
+                }
+                controllerRoots[key] = snapshotRoots
+            }
             SurfaceDeliveryResult(
                 accepted = true,
-                presentation = ControllerSurfaceSnapshotWire.presentationProjection(response),
+                presentation = ControllerSurfaceSnapshotRoutes.mergePresentations(presentations),
             )
         } catch (failure: Exception) {
             LOG.warn("[split-surface] controller delivery failed", failure)
@@ -89,17 +123,23 @@ internal class ControllerSurfaceSnapshotPublisher(private val project: Project) 
         generation: Long,
         receipt: FrontendPresentationReceipt,
     ): SurfaceDeliveryResult {
-        val projectRoot = project.basePath
-            ?: return SurfaceDeliveryResult(false, "backend project has no base path")
+        val knownRoots = controllerRoots[ConnectionKey(clientId, generation)].orEmpty()
+        val receiptRoot = receipt.document?.let(TerminalUtil::nearestAgentDocProjectRoot)
+        val deliveryRoots = receiptRoot?.let(::setOf) ?: knownRoots
+        if (deliveryRoots.isEmpty()) {
+            return SurfaceDeliveryResult(false, "presentation receipt has no session document controller root")
+        }
         return try {
-            send(
-                projectRoot,
-                ControllerSurfaceSnapshotWire.presentationReceiptRequest(
-                    wireClientId(clientId),
-                    generation,
-                    receipt,
-                ),
-            )
+            deliveryRoots.forEach { projectRoot ->
+                send(
+                    projectRoot,
+                    ControllerSurfaceSnapshotWire.presentationReceiptRequest(
+                        wireClientId(clientId),
+                        generation,
+                        receipt,
+                    ),
+                )
+            }
             SurfaceDeliveryResult(true)
         } catch (failure: Exception) {
             LOG.warn("[split-surface] presentation receipt delivery failed", failure)
@@ -108,17 +148,19 @@ internal class ControllerSurfaceSnapshotPublisher(private val project: Project) 
     }
 
     override suspend fun retire(clientId: String, generation: Long) {
-        val projectRoot = project.basePath ?: return
-        try {
-            send(
-                projectRoot,
-                ControllerSurfaceSnapshotWire.retirementRequest(wireClientId(clientId), generation),
-            )
-        } catch (failure: Exception) {
-            // The retained backend connection is already retired even when the controller is
-            // unavailable. Its generation can never publish again; a later complete snapshot is
-            // required before a replacement generation can affect layout.
-            LOG.warn("[split-surface] controller retirement unavailable", failure)
+        val roots = controllerRoots.remove(ConnectionKey(clientId, generation)).orEmpty()
+        roots.forEach { projectRoot ->
+            try {
+                send(
+                    projectRoot,
+                    ControllerSurfaceSnapshotWire.retirementRequest(wireClientId(clientId), generation),
+                )
+            } catch (failure: Exception) {
+                // The retained backend connection is already retired even when one controller is
+                // unavailable. Its generation can never publish again; a later complete snapshot
+                // is required before a replacement generation can affect layout.
+                LOG.warn("[split-surface] controller retirement unavailable root=$projectRoot", failure)
+            }
         }
     }
 
@@ -151,9 +193,54 @@ internal class ControllerSurfaceSnapshotPublisher(private val project: Project) 
     private fun wireClientId(authenticatedClientId: String): String =
         "jetbrains-rd:$authenticatedClientId"
 
+    private data class ConnectionKey(val clientId: String, val generation: Long)
+
     companion object {
         private const val SOCKET_TIMEOUT_MS = 2_000L
         private val LOG = Logger.getInstance(ControllerSurfaceSnapshotPublisher::class.java)
+    }
+}
+
+/** Pure routing policy for the controller side of an authenticated frontend snapshot. */
+internal object ControllerSurfaceSnapshotRoutes {
+    fun resolve(
+        snapshot: FrontendSurfaceSnapshot,
+        isSessionDocument: (String) -> Boolean,
+        controllerRoot: (String) -> String?,
+    ): Set<String> = buildSet {
+        snapshot.surfaces.forEach { surface ->
+            val paths = buildList {
+                surface.focusedEditorPath?.let(::add)
+                surface.layoutColumns?.forEach { column -> addAll(column.paths) }
+                surface.windows.forEach { window ->
+                    window.selectedPath?.let(::add)
+                    addAll(window.visiblePaths)
+                    addAll(window.openPaths)
+                }
+            }
+            paths.asSequence()
+                .filter(isSessionDocument)
+                .mapNotNull(controllerRoot)
+                .forEach(::add)
+        }
+    }
+
+    fun mergePresentations(
+        projections: List<FrontendPresentationProjection>,
+    ): FrontendPresentationProjection {
+        require(projections.isNotEmpty()) { "at least one controller projection is required" }
+        val revision = projections.maxOf { it.revision }
+        val status = when {
+            projections.any { it.status == FrontendProjectionStatus.FROZEN } -> FrontendProjectionStatus.FROZEN
+            projections.any { it.status == FrontendProjectionStatus.STALE } -> FrontendProjectionStatus.STALE
+            else -> FrontendProjectionStatus.APPLIED
+        }
+        return FrontendPresentationProjection(
+            status = status,
+            revision = revision,
+            retrySuggested = projections.any { it.retrySuggested },
+            presentations = projections.flatMap { it.presentations }.distinctBy { it.identity },
+        )
     }
 }
 

@@ -731,6 +731,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   (`clientId:type`) or `observing=none`, plus the skipped ones, so a filtered-out install is
   distinguishable from a fallback that never installed. The fallback is disabled reactively as soon as frontend
   authority appears and resumes when that authority retires; it never races the pane-tagged source.
+  A connected remote frontend without an accepted controller publication remains the pane-layout
+  authority fence (the backend never guesses geometry), but exposes readiness as blocked with
+  `frontend_connected_without_accepted_publication`. The backend routes the complete snapshot to
+  the controller root resolved from every classified session-document path, never to an unrelated
+  IDE `Project.basePath`; delivery failure therefore names a real controller boundary rather than
+  silently disabling both the frontend publication and the fallback.
   This preserves main-layout tab switching, but cannot invent detached-window identities or
   frontend presentation capability. An empty backend `EditorWindow` collection in this topology is
   unknown liveness evidence, not an authoritative empty surface set: publishing

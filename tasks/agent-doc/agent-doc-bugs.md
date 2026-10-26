@@ -25,7 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -807,6 +807,26 @@ Plugin generations are classic 0.2.833, 2026.2 0.2.834, and 2026.3 0.2.835.
 All three new controller regressions fail with the fix disabled. One covers this report's order, with the route sent first and the measurement after it. After the rebase, the editor-surface and controller crates passed 991 tests, and `make check-fast` passed.
 
 One limitation: a plugin older than 0.2.833 does not send the new field. Its route still uses a measurement that has already arrived, but it will not wait for one in flight. Update the plugin on the Remote Dev backend.
+
+### Re: exit watcher scoped to its own root — opus-5 · 2026-10-26T12:00-04:00
+
+> **Queue prompt:** isolate the controller exit watcher from other tests' editor pids: every in-process test controller reaps dead pids registered by other tests' documents in the process-wide liveness state and writes their exit records into its own root's state.db (found by the socket-unlink flake fix, 2026-10-26)
+
+The fix is integrated as `b2ffc4e907` and installed. The controller exit watcher now reaps a dead editor pid only when one of that pid's registered documents has the controller's root as its nearest project root. It also records exits only into that root's own `state.db`.
+
+The same cross-root write was in three places:
+
+- the poll tick
+- exit-record retention
+- startup hydration, which now recovers only dead pids opened by its own journal
+
+The spec clause is `#exitwatcherrootscope`.
+
+In practice only tests were affected. A production process runs one controller for one root, and both editor plugins send a document registration with every open.
+
+There are two new regressions. In the first, controller B's tick runs while A's dead pid is still listed, and B never creates a `state.db`. The second covers hydration. With the filters removed, both fail. After the rebase, the controller-io lib passed 834 tests twice, and `make check-fast` passed.
+
+The worker hit an unrelated flake once in 5 lib runs, `plugin_publications_project_into_the_publishing_clients_navigation_lane`. It is queued and running as `subagent:laneplaneflake`. Your strikethrough report is running as `subagent:strikeformat`. The row body starts with an inline-code backtick and holds unbalanced code spans, so the `~~…~~` delimiters collide with them.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -818,15 +838,16 @@ One limitation: a plugin older than 0.2.833 does not send the new field. Its rou
 - ~~`- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]~~
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
-- ☑️ [#subagent:ghostflake#1] fix nondeterministic agent-doc-controller-io rpc::tests recording_an_editor_exit_reaps_the_relay_ghost_member — failed 6 of 60 full parallel crate runs in the singleton-flake baseline (2026-10-26), panic "a live editor registers a replica"
-- ☑️ [#subagent:socketexitflake#1] fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)
-- 🚧 [#subagent:exitwatcheriso#1] isolate the controller exit watcher from other tests' editor pids: every in-process test controller reaps dead pids registered by other tests' documents in the process-wide liveness state and writes their exit records into its own root's state.db (found by the socket-unlink flake fix, 2026-10-26)
+- ~~fix nondeterministic agent-doc-controller-io rpc::tests recording_an_editor_exit_reaps_the_relay_ghost_member — failed 6 of 60 full parallel crate runs in the singleton-flake baseline (2026-10-26), panic "a live editor registers a replica"~~
+- ~~fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)~~
+- ☑️ [#subagent:exitwatcheriso#1] isolate the controller exit watcher from other tests' editor pids: every in-process test controller reaps dead pids registered by other tests' documents in the process-wide liveness state and writes their exit records into its own root's state.db (found by the socket-unlink flake fix, 2026-10-26)
+- 🚧 [#subagent:laneplaneflake#1] fix nondeterministic agent-doc-controller-io rpc::tests plugin_publications_project_into_the_publishing_clients_navigation_lane — await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO) returned false in 1 of 5 full lib runs (rpc.rs:43910), found during the exit-watcher root-scope fix, 2026-10-26
 - 🔄 release + publish
-- ☑️ [#subagent:fencedmarker#1] The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.
+- ~~The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.~~
 - 🚧 [#subagent:cellretire#1] retire a queue row's subagent completion cell and report receipt on every strike path (preflight residue strike, orphan `queue consume --id`, controller completion), not only closeout `queue consume`, so a stale cell can never paint 🔄 on a later row with the same text (found by the fenced-marker fix, 2026-10-26)
 - 🚧 [#subagent:rowidentity#1] key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
-- ☑️ [#subagent:gh376#1] #gh-fix https://github.com/btakita/agent-doc/issues/376
-- The strikethrough in ``
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/376~~
+- 🚧 [#subagent:strikeformat#1] The strikethrough in the first current queue item is malformed.
 <!-- /agent:run -->
 
 ## Run: Issues

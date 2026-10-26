@@ -6,6 +6,17 @@ use crate::document_queue::{
     render, resolve_activation, set_control_in_tag, strip_auto_from_tag, time_gate_at_head,
 };
 
+fn route_run_component(
+    components: &[agent_doc_element::element::Component],
+) -> Option<&agent_doc_element::element::Component> {
+    components.iter().find(|component| {
+        component.name == "queue"
+            && !component
+                .attrs
+                .contains_key(crate::queue_schedule::QUEUE_LOOP_ATTR)
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteDispatchQueueUpdate {
     pub content: String,
@@ -51,10 +62,7 @@ pub fn active_auto_route_queue_prompt_texts(content: &str) -> Result<Vec<String>
     }
 
     let components = agent_doc_element::element::parse(body)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Some(queue_component) = route_run_component(&components) else {
         return Ok(Vec::new());
     };
     if !has_auto_attr(&queue_component.attrs) {
@@ -84,10 +92,17 @@ pub fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
         result.push('\n');
     }
     if let Ok(components) = agent_doc_element::element::parse(&result) {
-        for component in components.iter().rev() {
-            if component.name == "queue" {
-                result.replace_range(component.open_start..component.close_end, "");
-            }
+        for component in components
+            .iter()
+            .filter(|component| {
+                component.name == "queue"
+                    && !component
+                        .attrs
+                        .contains_key(crate::queue_schedule::QUEUE_LOOP_ATTR)
+            })
+            .rev()
+        {
+            result.replace_range(component.open_start..component.close_end, "");
         }
     }
     agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&result)
@@ -156,11 +171,7 @@ pub fn prepare_route_dispatch_queue_update(
     let mut superseded = false;
     let mut unparseable_queue_error = None;
 
-    if let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-        .cloned()
-    {
+    if let Some(queue_component) = route_run_component(&components).cloned() {
         let body = &content[queue_component.open_end..queue_component.close_start];
         match parse(body) {
             Ok(mut entries) => {
@@ -262,10 +273,7 @@ pub fn inactive_route_queue_head(
         return Ok(RouteInactiveQueueHead::None);
     }
     let components = agent_doc_element::element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Some(queue_component) = route_run_component(&components) else {
         return Ok(RouteInactiveQueueHead::None);
     };
     let marker_control = marker_control(&queue_component.attrs);
@@ -316,10 +324,7 @@ pub fn committed_snapshot_backs_queue_head(
         Ok(components) => components,
         Err(_) => return true,
     };
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Some(queue_component) = route_run_component(&components) else {
         return false;
     };
     let body = &snapshot[queue_component.open_end..queue_component.close_start];
@@ -339,10 +344,7 @@ fn activate_route_queue_tag(tag: &str) -> String {
 
 fn activate_queue_component_marker(content: &str) -> Result<String> {
     let components = agent_doc_element::element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Some(queue_component) = route_run_component(&components) else {
         return Ok(content.to_string());
     };
     let open_tag = &content[queue_component.open_start..queue_component.open_end];
@@ -608,6 +610,80 @@ mod tests {
         assert!(!update.content.contains("- old"));
         assert!(update.content.contains("<!-- agent:queue go -->"));
         assert!(!update.content.contains("agent:queue auto"));
+    }
+
+    #[test]
+    fn route_dispatch_update_targets_run_without_mutating_loop() {
+        let original = concat!(
+            "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:loop id=scheduled interval=1h -->\n",
+            "- poll upstream\n",
+            "<!-- /agent:loop -->\n\n",
+            "<!-- agent:run id=immediate go -->\n",
+            "- existing\n",
+            "<!-- /agent:run -->\n"
+        );
+
+        let update = prepare_route_dispatch_queue_update(original, "routed item", false).unwrap();
+
+        assert!(update.appended);
+        assert!(!update.component_created);
+        assert!(update.content.contains(concat!(
+            "<!-- agent:loop id=scheduled interval=1h -->\n",
+            "- poll upstream\n",
+            "<!-- /agent:loop -->"
+        )));
+        assert!(update.content.contains(concat!(
+            "<!-- agent:run id=immediate go -->\n",
+            "- existing\n",
+            "- routed item\n",
+            "<!-- /agent:run -->"
+        )));
+    }
+
+    #[test]
+    fn route_dispatch_update_creates_run_when_only_loop_exists() {
+        let original = concat!(
+            "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:loop id=scheduled interval=1h -->\n",
+            "- poll upstream\n",
+            "<!-- /agent:loop -->\n"
+        );
+
+        let update = prepare_route_dispatch_queue_update(original, "routed item", false).unwrap();
+
+        assert!(update.appended);
+        assert!(update.component_created);
+        assert!(update.content.contains(concat!(
+            "<!-- agent:loop id=scheduled interval=1h -->\n",
+            "- poll upstream\n",
+            "<!-- /agent:loop -->"
+        )));
+        assert!(update.content.contains(concat!(
+            "<!-- agent:run go -->\n",
+            "- routed item\n",
+            "<!-- /agent:run -->"
+        )));
+    }
+
+    #[test]
+    fn route_boundary_normalization_preserves_loop_content() {
+        let content = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:loop id=scheduled interval=1h -->\n",
+            "- poll upstream\n",
+            "<!-- /agent:loop -->\n\n",
+            "<!-- agent:run go -->\n",
+            "- routed item\n",
+            "<!-- /agent:run -->\n"
+        );
+
+        let stripped = strip_route_queue_state_for_boundary_compare(content);
+
+        assert!(stripped.contains("agent:loop id=scheduled interval=1h"));
+        assert!(stripped.contains("- poll upstream"));
+        assert!(!stripped.contains("agent:run"));
+        assert!(!stripped.contains("- routed item"));
     }
 
     #[test]

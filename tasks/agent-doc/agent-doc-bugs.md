@@ -1189,7 +1189,7 @@ IntelliJ IDEA 2026.3 still runs the old plugin 0.2.835. Restart it to load 0.2.8
 ## Queue: Main <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ☑️ [#subagent:cellrepair#1] one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
 - ☑️ [#subagent:noargskill#1] In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
-- Fix the auto-upgrade not working...the IDE needed to be restarted. 
+- 🚧 [#subagent:autoupgrade#1] Fix the auto-upgrade not working...the IDE needed to be restarted. 
 <!-- /agent:run -->
 
 ## Loop: Issues <!-- agent:loop id="issues" interval="1h" priority -->

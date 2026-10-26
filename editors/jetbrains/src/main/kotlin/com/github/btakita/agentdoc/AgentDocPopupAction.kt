@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.ui.popup.JBPopupFactory
 
@@ -59,18 +60,55 @@ class AgentDocPopupAction : AnAction(), DumbAware {
             // `editoractionmenu`: which plugin/CLI/native library is running.
             "AgentDoc.About",
         )
+
+        /**
+         * Popup ids that the modular (exact-262/exact-263) distribution registers only in
+         * `agent.doc.frontend`. Under Remote Dev the backend builds this popup from its own
+         * `ActionManager`, where these ids are not registered (GH #375): they are omitted from
+         * the backend popup and stay reachable from the JetBrains Client's own menus. A
+         * single-process IDE loads the frontend module into the same `ActionManager`, so they
+         * still resolve there.
+         */
+        internal val CLIENT_ONLY_ACTION_IDS = setOf(
+            // UpdateSettings is process-local; see editors/jetbrains/SPEC.md "Distribution".
+            "AgentDoc.UpdateChannel",
+        )
+
+        private val LOG = Logger.getInstance(AgentDocPopupAction::class.java)
+
+        /**
+         * Resolves popup ids to registered actions, in order. An unregistered id is never
+         * passed to `DefaultActionGroup.add` (it rejects null). A known client-only id is
+         * dropped quietly; any other unregistered id is reported through [onUnexpectedMissing]
+         * and dropped, so one missing registration cannot take the whole popup down.
+         */
+        internal fun resolveActions(
+            ids: List<String>,
+            lookup: (String) -> AnAction?,
+            onUnexpectedMissing: (String) -> Unit = {},
+        ): List<AnAction> = ids.mapNotNull { id ->
+            lookup(id) ?: run {
+                if (id !in CLIENT_ONLY_ACTION_IDS) onUnexpectedMissing(id)
+                null
+            }
+        }
     }
 
     override fun actionPerformed(e: AnActionEvent) {
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         val actionManager = ActionManager.getInstance()
+        val resolve = { ids: List<String> ->
+            resolveActions(ids, actionManager::getAction) { id ->
+                LOG.warn("Agent Doc popup omits unregistered action $id")
+            }
+        }
 
         val group = DumbAwareGroup().apply {
-            PRIMARY_ACTION_IDS.forEach { add(actionManager.getAction(it)) }
+            resolve(PRIMARY_ACTION_IDS).forEach { add(it) }
             addSeparator()
             add(
                 DumbAwareGroup("More Actions", true).apply {
-                    OVERFLOW_ACTION_IDS.forEach { add(actionManager.getAction(it)) }
+                    resolve(OVERFLOW_ACTION_IDS).forEach { add(it) }
                 }
             )
         }

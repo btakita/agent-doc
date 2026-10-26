@@ -1,5 +1,7 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -58,6 +60,46 @@ class AgentDocPopupActionTest {
             ),
             AgentDocPopupAction.OVERFLOW_ACTION_IDS,
         )
+    }
+
+    private class StubAction(val id: String) : AnAction() {
+        override fun actionPerformed(e: AnActionEvent) = Unit
+    }
+
+    @Test
+    fun `popup omits a client-only action the backend did not register`() {
+        // GH #375: under Remote Dev the backend builds the popup from its own ActionManager,
+        // where the frontend-only AgentDoc.UpdateChannel is not registered. It returned null
+        // and DefaultActionGroup.add threw, so the popup never opened.
+        val registered = AgentDocPopupAction.OVERFLOW_ACTION_IDS
+            .filter { it !in AgentDocPopupAction.CLIENT_ONLY_ACTION_IDS }
+            .associateWith(::StubAction)
+        val unexpected = mutableListOf<String>()
+        val resolved = AgentDocPopupAction.resolveActions(
+            AgentDocPopupAction.OVERFLOW_ACTION_IDS,
+            registered::get,
+        ) { unexpected += it }
+        assertEquals(registered.keys.toList(), resolved.map { (it as StubAction).id })
+        assertEquals("client-only omission is expected, not reported", emptyList<String>(), unexpected)
+    }
+
+    @Test
+    fun `popup reports and skips any other unregistered action instead of adding null`() {
+        val ids = listOf("AgentDoc.Submit", "AgentDoc.Missing", "AgentDoc.About")
+        val registered = mapOf("AgentDoc.Submit" to StubAction("AgentDoc.Submit"), "AgentDoc.About" to StubAction("AgentDoc.About"))
+        val unexpected = mutableListOf<String>()
+        val resolved = AgentDocPopupAction.resolveActions(ids, registered::get) { unexpected += it }
+        assertEquals(listOf("AgentDoc.Submit", "AgentDoc.About"), resolved.map { (it as StubAction).id })
+        assertEquals(listOf("AgentDoc.Missing"), unexpected)
+    }
+
+    @Test
+    fun `single-process popup keeps the client-only action when it is registered`() {
+        val all = (AgentDocPopupAction.PRIMARY_ACTION_IDS + AgentDocPopupAction.OVERFLOW_ACTION_IDS)
+            .associateWith(::StubAction)
+        val resolved = AgentDocPopupAction.resolveActions(AgentDocPopupAction.OVERFLOW_ACTION_IDS, all::get)
+        assertEquals(AgentDocPopupAction.OVERFLOW_ACTION_IDS, resolved.map { (it as StubAction).id })
+        assertTrue(AgentDocPopupAction.CLIENT_ONLY_ACTION_IDS.all { it in AgentDocPopupAction.OVERFLOW_ACTION_IDS })
     }
 
     private val pluginXml = File("src/main/resources/META-INF/plugin.xml")

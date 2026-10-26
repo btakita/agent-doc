@@ -56864,6 +56864,59 @@ mod tests {
         std::fs::symlink_metadata(path).unwrap().ino()
     }
 
+    /// What `remove_dir_all` finished before its `rmdir` failed: every file
+    /// directly under `state_dir` is gone, the directories remain.
+    ///
+    /// The controller is live while this runs, so one of its writers can
+    /// remove a file (its rollback journal on commit) between the listing and
+    /// the unlink. Such a file is gone, which is the end state being replayed.
+    #[cfg(unix)]
+    fn unlink_every_file_directly_under(state_dir: &Path) {
+        for entry in std::fs::read_dir(state_dir).unwrap().flatten() {
+            if entry.file_type().unwrap().is_dir() {
+                continue;
+            }
+            match std::fs::remove_file(entry.path()) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => panic!("unlink {}: {err}", entry.path().display()),
+            }
+        }
+    }
+
+    /// The concurrent writer: an exit-watcher reap recreates the ledger at
+    /// `<root>/.agent-doc/state.db` (`#detachedexitci`).
+    ///
+    /// The ledger is written off to the side and renamed into place. Opening a
+    /// SQLite connection at the live path instead raced the live controller's
+    /// own writers there (in the failing run, its exit watcher reaping a
+    /// sibling test's dead editor pid). A writer that opened `state.db` before
+    /// the unlink commits on that unlinked inode and deletes `state.db-journal`
+    /// by path. By then that name is the fixture's journal for the new file,
+    /// and POSIX locks on two inodes cannot order the two, so the fixture's
+    /// commit failed with `SQLITE_IOERR_DELETE_NOENT` (5898). A rename
+    /// publishes the new file without any connection at that path.
+    #[cfg(unix)]
+    fn recreate_state_ledger_by_rename(project_root: &Path) {
+        let staging = tempfile::Builder::new()
+            .prefix("detachedexitci-ledger-")
+            .tempdir_in(project_root.parent().unwrap())
+            .unwrap();
+        let staged = staging.path().join("state.db");
+        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+            &staged,
+            "controller-alive:4100001",
+            1,
+            "[]",
+        )
+        .unwrap();
+        std::fs::rename(
+            &staged,
+            agent_doc_sqlite::state_store::state_db_path(project_root),
+        )
+        .unwrap();
+    }
+
     /// `#detachedexitci`: CI run 38837770714. The test's `TempDir` removal raced
     /// a controller-side writer: `remove_dir_all` unlinked the socket and the
     /// ledger, the writer recreated `.agent-doc/state.db`, and the final `rmdir`
@@ -56880,21 +56933,8 @@ mod tests {
         let state_dir = project_root.join(".agent-doc");
         let (root_inode, state_dir_inode) = (inode(&project_root), inode(&state_dir));
 
-        // What `remove_dir_all` finished before its `rmdir` failed: every file
-        // directly under `.agent-doc` is gone, the directories remain.
-        for entry in std::fs::read_dir(&state_dir).unwrap().flatten() {
-            if !entry.file_type().unwrap().is_dir() {
-                std::fs::remove_file(entry.path()).unwrap();
-            }
-        }
-        // The concurrent writer: an exit-watcher reap recreates the ledger.
-        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
-            &agent_doc_sqlite::state_store::state_db_path(&project_root),
-            "controller-alive:4100001",
-            1,
-            "[]",
-        )
-        .unwrap();
+        unlink_every_file_directly_under(&state_dir);
+        recreate_state_ledger_by_rename(&project_root);
         assert_eq!(
             (inode(&project_root), inode(&state_dir)),
             (root_inode, state_dir_inode),

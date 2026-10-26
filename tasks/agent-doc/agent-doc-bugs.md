@@ -783,6 +783,30 @@ This is integrated as `1e4156719f`. The test deletes its controller's `.agent-do
 The fixture now builds the ledger in a staging directory and renames it into place. A targeted probe went from 846 failures in 2,000 runs to 0 in 2,000. The cross-test exit-watcher writes are their own follow-up, `subagent:exitwatcheriso`.
 
 GH #376 is fixed in `d67ad7d6ac`, which is now going through `check-fast` and install. A zero-column Run Agent Doc now uses, or waits for, the JetBrains Client's measured layout.
+
+### Re: GH #376 measured-layout route — opus-5 · 2026-10-26T11:51-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/376
+
+[GH #376](https://github.com/btakita/agent-doc/issues/376) is fixed in `82d790fe1d`, installed, and closed.
+
+The reported error message came from a controller that started at 09:28, before the #373 fix. That reporter ran 0.35.553 with plugin 0.2.827 on a Remote Dev backend.
+
+A real defect was still on main. On a modular Remote Dev backend, the JetBrains Client measures the layout, and that measurement wins. So Run Agent Doc sends a zero-column route, and the measured columns reach the controller separately, sometimes about a second later. The route never used that measurement, even when it was already there. Without a live pane, the route refused with a "frontend plugin missing" remedy, which was wrong.
+
+What the fix does:
+
+- **Uses the measurement.** Before the #373 fallback, a zero-column route takes the newest measured layout from the same IDE install.
+- **Waits only for a measurement that is still coming.** The wait wakes when the measurement lands, and the route's existing `--wait-for-ready` budget bounds it. It adds no polling and no new timeout.
+- **Skips the wait for a live pane.** That route just focuses the pane.
+- **Never guesses.** A measurement from another IDE install is never used. If nothing arrives in time, the #373 path runs unchanged.
+- **The plugin now says when to wait.** It sends `layout_authority = "frontend_measured"` so the controller knows a measurement is coming.
+
+Plugin generations are classic 0.2.833, 2026.2 0.2.834, and 2026.3 0.2.835.
+
+All three new controller regressions fail with the fix disabled. One covers this report's order, with the route sent first and the measurement after it. After the rebase, the editor-surface and controller crates passed 991 tests, and `make check-fast` passed.
+
+One limitation: a plugin older than 0.2.833 does not send the new field. Its route still uses a measurement that has already arrived, but it will not wait for one in flight. Update the plugin on the Remote Dev backend.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -798,97 +822,13 @@ GH #376 is fixed in `d67ad7d6ac`, which is now going through `check-fast` and in
 - ~~In the Claim for Tmux Pane template, make each `##` header on the same line as the open tag such as: `## Run <!-- agent:run priority subagents -->`. This is to reduce extra spaces in the document to allow for more information to be added in the view pane. `## Queue` should be renamed to `## Run`.~~
 - ~~Rename "## Completed / Reaped" to "## Done"~~
 - ~~The queue item in this document `- 🚧 [#subagent:release_batch_prep3#3] release + publish: include issue 372 + sdk-demo.md issue + lazily.md issue` seems to be stale. If it is stale, fix agent-doc causes.~~
-- ~~Two errors popped up in Idea: ![img_8.png](img_8.png)~~
 - ~~`- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]~~
-- ~~Run Agent Doc on sdk-demo.md is wedged after I started a new session via `/clear`. Fix agent-doc causes. Fix any issue you see at multiple levels of the dataflow.: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib~~
-~~~done
-Run Agent Doc on sdk-demo.md (Grok): We should be able to support `## Run <!-- agent:run priority subagents -->`. Also the error message should mention the tag `agent:run`, not Queue, to more easily identify where and what the issue is in the document. Do this for all error messages mentioning tags. Also, line 229 is not the correct line. The agent:run was on line 185...it is now on 186 due to me placing `## Run` on a separate line in attempt to make the turn run.
-```
-❯ agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md                   3:17 AM
-
-
-◆ Thought for 0.8s
-
-The session is live again. I will read the agent-doc skill and admit before I touch the document.      3:18 AM
-
-◈ Explored 11 files, 16 searches, called 3 tools, ran 11 commands
-
-This turn did not start. Admission was refused, and the queue was left untouched.                      3:21 AM
-
-agent_doc_admit for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md failed
-because the retained delivery 1792824957388507072-1-
-43b8cfaaaa6ff55a766f0e2e7fbb94a491fa16a0c5f80c22d00b24200277e659 still owns the commit-push subagent
-response. Two session-checks returned the same interruption: editor reconnect refuses the merged
-document because the queue open marker at line 229 is not alone on its line
-(non_standalone_component_marker:queue:open:line229). The current editor text is unchanged. No
-second closeout was sent, and the file was not force-written.
-
-The JetBrains tab is open, and the controller currently has no live replica for it (live_editors=0).
-A lint of the current document is clean. The bad marker is in that merged reconnect target. The same
-capture is what has to land before a new cycle can admit. The binary allows only another agent-doc
-session-check on that file.
-```
-~~~
-~~~done
-Run Agent Doc on sdk-demo.md still wedged even after I corrected the issue on the ran agent-doc version:
-```
-❯ What do I need to do to repair the document?                                                         3:29 AM
-
-
-◆ Thought for 9.0s
-
-The hold is a document-structure refusal, not a missing code change. I am checking the exact marker    3:29 AM
-the controller rejects so the repair steps match that line.
-
-◈ Explored 4 files, 8 searches, ran 5 commands
-
-The disk copy of sdk-demo.md is already repaired. The controller is still holding the old one-line     3:31 AM
-queue marker, and the JetBrains plugin is not connected, so that repair never becomes the document
-it will project.
-
-In /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md on disk, the Run section
-is:
-
-## Run
-<!-- agent:run priority subagents -->
-◇ markdown   [Copy]
-
-The marker is alone on its line, and <!-- /agent:run --> is alone on its line. The controller's copy
-still has this instead:
-
-## Run <!-- agent:run priority subagents -->
-◇ markdown   [Copy]
-
-Session-check refuses the merged projection because that open marker is not alone on its line
-(non_standalone_component_marker:queue:open:line229). The tab is open, and the controller reports
-live_editors=0, so it keeps that old copy and will not adopt the file on disk.
-
-In the open sdk-demo.md tab:
-
-1. If the Run heading and <!-- agent:run priority subagents --> are still on one line, put the
-comment on its own line, with nothing before or after it. Leave the queue items as they are.
-2. If the tab already shows the two-line form, reload the file from disk and choose Load FS changes.
-Do not choose Keep memory changes while the memory copy still has the one-line marker.
-3. Leave the tab open long enough for the Agent Doc plugin to reconnect. A connected tab is what                 █
-lets the retained commit-push response project.                                                                  █
-																																																								█
-After the tab shows the marker on its own line, ask again and I will run session-check. Do not                   █
-force-write the file, and do not delete the queue items.                                                         █
-```
-~~~
-~~~done
-Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
-~~~
----
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
-- ~~do [#release-promotion-concurrency]~~
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:ghostflake#1] fix nondeterministic agent-doc-controller-io rpc::tests recording_an_editor_exit_reaps_the_relay_ghost_member — failed 6 of 60 full parallel crate runs in the singleton-flake baseline (2026-10-26), panic "a live editor registers a replica"
 - ☑️ [#subagent:socketexitflake#1] fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)
 - 🚧 [#subagent:exitwatcheriso#1] isolate the controller exit watcher from other tests' editor pids: every in-process test controller reaps dead pids registered by other tests' documents in the process-wide liveness state and writes their exit records into its own root's state.db (found by the socket-unlink flake fix, 2026-10-26)
-- ~~document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence~~
 - 🔄 release + publish
-- ~~tmux pane auto-sync has a large delay. Is this due to the upgrade being installed? Either way, this should be fixed.~~
 - ☑️ [#subagent:fencedmarker#1] The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.
 - 🚧 [#subagent:cellretire#1] retire a queue row's subagent completion cell and report receipt on every strike path (preflight residue strike, orphan `queue consume --id`, controller completion), not only closeout `queue consume`, so a stale cell can never paint 🔄 on a later row with the same text (found by the fenced-marker fix, 2026-10-26)
 - 🚧 [#subagent:rowidentity#1] key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
@@ -910,7 +850,6 @@ Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
 - [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
-- [x] [#claimrowmigrate] After #claimrowmigrate ships, confirm a duplicated queue row keeps its own claim marker when agent-doc adds ⟦effect:N⟧ annotations. (source: agent:backlog [#claimrowmigrate])
 - [ ] [#layoutunprovenliveverify] In the IDE, open the cross-root sdk-demo.md and agent-doc-bugs.md together, run Sync Tmux Layout, and confirm it recreates the stale sdk-demo pane and converges to two panes without focusing an ownership-unproven pane; restart the IDE first so JetBrains 0.2.828+ is loaded. (source: agent:review [#layoutunprovenliveverify])
 - [ ] [#autosync-restart-verify] Restart IntelliJ IDEA 2026.3 and Rider 2026.2 so JetBrains 0.2.832/0.2.831 load, then switch editor tabs: tmux should follow within about a second with no install or Run Agent Doc in between (idea.log shows `[layout-sync] selection file=`).
 <!-- /agent:todo -->

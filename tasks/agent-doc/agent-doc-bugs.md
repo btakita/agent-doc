@@ -25,7 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -747,6 +747,42 @@ No, the installs are not the cause. They are what eventually synced the panes. O
 **Verification:** The worker's run passed 71 modular-plugin tests plus `make jetbrains-262-check` and `make jetbrains-263-check`. I bumped the package generations to JetBrains 2026.2 0.2.831 and 2026.3 0.2.832, and the coordinator's `make check-fast` passed.
 
 Until you restart, Sync Tmux Panes or Run Agent Doc syncs immediately. After restarting, run the `#autosync-restart-verify` check.
+
+### Re: fenced-marker regression, ghost and socket flakes — opus-5 · 2026-10-26T11:47-04:00
+
+> **Queue prompt:** The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.
+
+The cause was not the fenced block, and it did not come from today's commits. A rule added on 2026-10-22 (`059dda5846`) made any marker-projection pass reopen a struck row if a report receipt or a "Subagent completed" cell for it still existed. The 11:03 cleanup strikes did land. Preflight struck 24 rows at 15:06:35Z, and the next projection reopened every one that still had a cell (`🔄`) or a receipt (`☑️`). The 🔄 rows lined up with the fence only because the cells still in the exchange belong to the rows above it.
+
+The fix is integrated as `6439b1d93d` and installed:
+
+- **Strikes stay struck.** A receipt, a completion cell, or a reported or lost attempt no longer reopens a struck row. Only a worker that is still dispatching or running does. All three projection paths now use one predicate.
+- **Fenced markers are now plain content everywhere.** The document-cell merge was the one component scanner that did not skip fenced code. A fenced `<!-- /agent:run -->` ended the queue early, and pasted multi-line items were emitted twice. There is now one shared fence-aware scan.
+
+Six regressions cover this document's exact shape, and the affected crates ran 2,533 tests with 0 failures.
+
+On Main versus Issues: a strike in `agent:run` deliberately never strikes the `agent:loop` copy, because loop rows close only through their own pass (GH #361/#364). Once Main's claims ended, the loop copies correctly repainted as `📥`. The `🔄 release + publish` in both queues is a stale completion cell from the old v0.35.551 release.
+
+Two follow-ups are dispatched:
+
+- `subagent:cellretire`: retire completion cells and receipts on every strike path.
+- `subagent:rowidentity`: key queue-row identity by the work text instead of the owner tag.
+
+Next I re-strike the finished rows. Their echoes already exist, so preflight's residue strike picks them up, and the orphaned `release-promotion-concurrency` row goes through `queue consume --id` again.
+
+> **Queue prompt:** fix nondeterministic agent-doc-controller-io rpc::tests recording_an_editor_exit_reaps_the_relay_ghost_member — failed 6 of 60 full parallel crate runs in the singleton-flake baseline (2026-10-26), panic "a live editor registers a replica"
+
+This is integrated as `5bc4f16446`. The test used the test binary's own pid as its editor. Sibling exit tests mark that pid as exited in the shared liveness record, so registering a replica was refused. The test now starts its own child editor process and reaps it only after the shared record is cleared.
+
+The natural flake did not reproduce, with 0 failures in 342 runs. A deterministic control (marking the pid exited first) panics every time on the old code and passes with the fix. After the rebase, the controller crate passed: 827 passed, 0 failed.
+
+> **Queue prompt:** fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)
+
+This is integrated as `1e4156719f`. The test deletes its controller's `.agent-doc` and recreates `state.db`. A controller writer from another test, its exit watcher, was still committing on the deleted file. It deleted the new file's `state.db-journal` by name, which raised SQLITE_IOERR_DELETE_NOENT (5898).
+
+The fixture now builds the ledger in a staging directory and renames it into place. A targeted probe went from 846 failures in 2,000 runs to 0 in 2,000. The cross-test exit-watcher writes are their own follow-up, `subagent:exitwatcheriso`.
+
+GH #376 is fixed in `d67ad7d6ac`, which is now going through `check-fast` and install. A zero-column Run Agent Doc now uses, or waits for, the JetBrains Client's measured layout.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -755,18 +791,18 @@ Until you restart, Sync Tmux Panes or Run Agent Doc syncs immediately. After res
 
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🔄 In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
-- 🔄 On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
-- 🔄 release + publish: include issue 372 + sdk-demo.md issue + lazily.md issue
-- 🔄 tmux pane auto sync is not working. Sync Tmux Panes works.
-- 🔄 In the Claim for Tmux Pane template, make each `##` header on the same line as the open tag such as: `## Run <!-- agent:run priority subagents -->`. This is to reduce extra spaces in the document to allow for more information to be added in the view pane. `## Queue` should be renamed to `## Run`.
-- 🔄 Rename "## Completed / Reaped" to "## Done"
-- 🔄 The queue item in this document `- 🚧 [#subagent:release_batch_prep3#3] release + publish: include issue 372 + sdk-demo.md issue + lazily.md issue` seems to be stale. If it is stale, fix agent-doc causes.
-- 🔄 Two errors popped up in Idea: ![img_8.png](img_8.png)
-- 🔄 `- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]
-- 🔄 Run Agent Doc on sdk-demo.md is wedged after I started a new session via `/clear`. Fix agent-doc causes. Fix any issue you see at multiple levels of the dataflow.: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
----
-🔄 Run Agent Doc on sdk-demo.md (Grok): We should be able to support `## Run <!-- agent:run priority subagents -->`. Also the error message should mention the tag `agent:run`, not Queue, to more easily identify where and what the issue is in the document. Do this for all error messages mentioning tags. Also, line 229 is not the correct line. The agent:run was on line 185...it is now on 186 due to me placing `## Run` on a separate line in attempt to make the turn run.
+- ~~In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`~~
+- ~~On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.~~
+- ~~release + publish: include issue 372 + sdk-demo.md issue + lazily.md issue~~
+- ~~tmux pane auto sync is not working. Sync Tmux Panes works.~~
+- ~~In the Claim for Tmux Pane template, make each `##` header on the same line as the open tag such as: `## Run <!-- agent:run priority subagents -->`. This is to reduce extra spaces in the document to allow for more information to be added in the view pane. `## Queue` should be renamed to `## Run`.~~
+- ~~Rename "## Completed / Reaped" to "## Done"~~
+- ~~The queue item in this document `- 🚧 [#subagent:release_batch_prep3#3] release + publish: include issue 372 + sdk-demo.md issue + lazily.md issue` seems to be stale. If it is stale, fix agent-doc causes.~~
+- ~~Two errors popped up in Idea: ![img_8.png](img_8.png)~~
+- ~~`- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]~~
+- ~~Run Agent Doc on sdk-demo.md is wedged after I started a new session via `/clear`. Fix agent-doc causes. Fix any issue you see at multiple levels of the dataflow.: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib~~
+~~~done
+Run Agent Doc on sdk-demo.md (Grok): We should be able to support `## Run <!-- agent:run priority subagents -->`. Also the error message should mention the tag `agent:run`, not Queue, to more easily identify where and what the issue is in the document. Do this for all error messages mentioning tags. Also, line 229 is not the correct line. The agent:run was on line 185...it is now on 186 due to me placing `## Run` on a separate line in attempt to make the turn run.
 ```
 ❯ agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md                   3:17 AM
 
@@ -792,9 +828,9 @@ A lint of the current document is clean. The bad marker is in that merged reconn
 capture is what has to land before a new cycle can admit. The binary allows only another agent-doc
 session-check on that file.
 ```
----
----
-🔄 Run Agent Doc on sdk-demo.md still wedged even after I corrected the issue on the ran agent-doc version:
+~~~
+~~~done
+Run Agent Doc on sdk-demo.md still wedged even after I corrected the issue on the ran agent-doc version:
 ```
 ❯ What do I need to do to repair the document?                                                         3:29 AM
 
@@ -839,22 +875,24 @@ lets the retained commit-push response project.                                 
 After the tab shows the marker on its own line, ask again and I will run session-check. Do not                   █
 force-write the file, and do not delete the queue items.                                                         █
 ```
----
----
-🔄 Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
----
+~~~
+~~~done
+Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
+~~~
 ---
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
-- ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
+- ~~do [#release-promotion-concurrency]~~
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:ghostflake#1] fix nondeterministic agent-doc-controller-io rpc::tests recording_an_editor_exit_reaps_the_relay_ghost_member — failed 6 of 60 full parallel crate runs in the singleton-flake baseline (2026-10-26), panic "a live editor registers a replica"
 - ☑️ [#subagent:socketexitflake#1] fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)
 - 🚧 [#subagent:exitwatcheriso#1] isolate the controller exit watcher from other tests' editor pids: every in-process test controller reaps dead pids registered by other tests' documents in the process-wide liveness state and writes their exit records into its own root's state.db (found by the socket-unlink flake fix, 2026-10-26)
-- 🔄 document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence
+- ~~document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence~~
 - 🔄 release + publish
-- ☑️ [#subagent:autosyncdelay#1] tmux pane auto-sync has a large delay. Is this due to the upgrade being installed? Either way, this should be fixed.
+- ~~tmux pane auto-sync has a large delay. Is this due to the upgrade being installed? Either way, this should be fixed.~~
 - ☑️ [#subagent:fencedmarker#1] The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.
-- 🚧 [#subagent:gh376#1] #gh-fix https://github.com/btakita/agent-doc/issues/376
+- 🚧 [#subagent:cellretire#1] retire a queue row's subagent completion cell and report receipt on every strike path (preflight residue strike, orphan `queue consume --id`, controller completion), not only closeout `queue consume`, so a stale cell can never paint 🔄 on a later row with the same text (found by the fenced-marker fix, 2026-10-26)
+- 🚧 [#subagent:rowidentity#1] key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
+- ☑️ [#subagent:gh376#1] #gh-fix https://github.com/btakita/agent-doc/issues/376
 <!-- /agent:run -->
 
 ## Run: Issues

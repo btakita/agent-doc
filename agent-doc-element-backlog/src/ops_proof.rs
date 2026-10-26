@@ -244,6 +244,7 @@ mod tests {
             state,
             gate_type: None,
             in_progress: false,
+            lifecycle_marker: None,
             text: text.to_string(),
             continuation: String::new(),
         }

@@ -20,8 +20,9 @@
 //! - Mutation ops (`op_add/done/edit/clear/reorder`) return a new body string, never mutate in place.
 
 use agent_doc_element::element;
+use agent_doc_frontmatter::frontmatter::{QueueLifecycleMarker, queue_icons};
 use anyhow::{Context, Result, anyhow, bail};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub const IN_PROGRESS_MARKER: &str = "🚧";
 
@@ -159,6 +160,10 @@ pub struct PendingItem {
     /// Visible, ephemeral marker for the item currently being worked from an
     /// active queue head. Renders immediately after the checkbox.
     pub in_progress: bool,
+    /// Typed queue lifecycle projection for this tracked item. `in_progress`
+    /// remains the compatibility view of `Running`; this field preserves the
+    /// other runtime states instead of collapsing them all to `🚧`.
+    pub lifecycle_marker: Option<QueueLifecycleMarker>,
     /// Bullet text after the hash prefix.
     pub text: String,
     /// Raw indented continuation lines that belong to this item (for nested
@@ -178,11 +183,12 @@ impl PendingItem {
             (PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
             _ => format!("[{}]", self.state.box_char()),
         };
-        let in_progress = if self.in_progress {
-            format!(
-                " {}",
-                agent_doc_frontmatter::frontmatter::queue_icons().running
-            )
+        let lifecycle_marker = self.lifecycle_marker.or_else(|| {
+            self.in_progress
+                .then_some(QueueLifecycleMarker::Running)
+        });
+        let in_progress = if let Some(marker) = lifecycle_marker {
+            format!(" {}", marker.prefix())
         } else {
             String::new()
         };
@@ -727,8 +733,8 @@ pub fn parse_items(body: &str) -> (String, Vec<PendingItem>, String) {
     (prelude, items, postlude)
 }
 
-/// Stable semantic signature for tracked-work content, excluding the ephemeral
-/// `in_progress` projection marker.
+/// Stable semantic signature for tracked-work content, excluding ephemeral
+/// queue lifecycle projection markers.
 ///
 /// Recognized pending items are encoded field-by-field so task identity, state,
 /// text, continuations, list shape, and surrounding prose remain significant.
@@ -1027,7 +1033,8 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         (PendingState::Open, None, rest)
     };
 
-    let (in_progress, after_box) = consume_in_progress_marker(after_box);
+    let (lifecycle_marker, after_box) = consume_lifecycle_marker(after_box);
+    let in_progress = lifecycle_marker == Some(QueueLifecycleMarker::Running);
 
     // Hash id?
     let (id, text) = if let Some(after_hash) = after_box.strip_prefix("[#") {
@@ -1067,25 +1074,57 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         state,
         gate_type,
         in_progress,
+        lifecycle_marker,
         text: text.trim_end().to_string(),
         continuation: String::new(),
     })
 }
 
-fn consume_in_progress_marker(text: &str) -> (bool, &str) {
+fn consume_lifecycle_marker(text: &str) -> (Option<QueueLifecycleMarker>, &str) {
     let mut rest = text.trim_start();
-    let mut seen = false;
+    let mut seen = None;
     loop {
-        let configured = &agent_doc_frontmatter::frontmatter::queue_icons().running;
-        let Some(after_marker) = [configured.as_str(), IN_PROGRESS_MARKER]
+        let icons = queue_icons();
+        let candidates = [
+            (QueueLifecycleMarker::Pending, icons.pending.as_str()),
+            (QueueLifecycleMarker::Claimed, icons.claimed.as_str()),
+            (QueueLifecycleMarker::Running, icons.running.as_str()),
+            (QueueLifecycleMarker::Reported, icons.reported.as_str()),
+            (QueueLifecycleMarker::Lost, icons.lost.as_str()),
+            (
+                QueueLifecycleMarker::Reconciling,
+                icons.reconciling.as_str(),
+            ),
+            (QueueLifecycleMarker::Unknown, icons.unknown.as_str()),
+            (QueueLifecycleMarker::Skipped, icons.skipped.as_str()),
+            (
+                QueueLifecycleMarker::AwaitingOperator,
+                icons.awaiting_operator.as_str(),
+            ),
+            (QueueLifecycleMarker::Pending, "📥"),
+            (QueueLifecycleMarker::Claimed, "🟡"),
+            (QueueLifecycleMarker::Running, IN_PROGRESS_MARKER),
+            (QueueLifecycleMarker::Reported, "☑️"),
+            (QueueLifecycleMarker::Reported, "📫"),
+            (QueueLifecycleMarker::Reported, "📤"),
+            (QueueLifecycleMarker::Lost, "⚠️"),
+            (QueueLifecycleMarker::Reconciling, "🔄"),
+            (QueueLifecycleMarker::Unknown, "❔"),
+            (QueueLifecycleMarker::Skipped, "⏭️"),
+            (QueueLifecycleMarker::AwaitingOperator, "⏳"),
+        ];
+        let Some((state, after_marker)) = candidates
             .into_iter()
-            .filter_map(|marker| rest.strip_prefix(marker).map(|tail| (marker.len(), tail)))
-            .max_by_key(|(len, _)| *len)
-            .map(|(_, tail)| tail)
+            .filter_map(|(state, marker)| {
+                rest.strip_prefix(marker)
+                    .map(|tail| (state, marker.len(), tail))
+            })
+            .max_by_key(|(_, len, _)| *len)
+            .map(|(state, _, tail)| (state, tail))
         else {
             break;
         };
-        seen = true;
+        seen = Some(state);
         rest = after_marker.trim_start();
     }
     (seen, rest)
@@ -2888,19 +2927,36 @@ pub fn active_item_ids(body: &str) -> Vec<String> {
 /// Set the ephemeral in-progress marker on exactly the requested tracked item ids,
 /// clearing stale markers from every other parsed item in the body.
 pub fn set_in_progress_item_ids(body: &str, ids: &HashSet<String>) -> (String, bool) {
-    let normalized_ids: HashSet<String> = ids
+    let markers = ids
         .iter()
-        .map(|id| normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
+        .map(|id| (id.clone(), QueueLifecycleMarker::Running))
+        .collect();
+    set_lifecycle_item_markers(body, &markers)
+}
+
+/// Project the exact queue lifecycle state onto linked tracked-work rows,
+/// clearing stale markers from rows with no current runtime state.
+pub fn set_lifecycle_item_markers(
+    body: &str,
+    markers: &HashMap<String, QueueLifecycleMarker>,
+) -> (String, bool) {
+    let normalized_markers: HashMap<String, QueueLifecycleMarker> = markers
+        .iter()
+        .filter_map(|(id, marker)| {
+            let id = normalize_pending_id(id);
+            (!id.is_empty()).then_some((id, *marker))
+        })
         .collect();
     let mut changed = false;
     let rewritten = PendingLayout::parse(body).replace_items(|item| {
         let mut next = item.clone();
-        let should_mark = !next.id.is_empty()
-            && !matches!(next.state, PendingState::Done)
-            && normalized_ids.contains(&next.id.to_ascii_lowercase());
-        if next.in_progress != should_mark {
-            next.in_progress = should_mark;
+        let marker = (!next.id.is_empty() && !matches!(next.state, PendingState::Done))
+            .then(|| normalized_markers.get(&next.id.to_ascii_lowercase()).copied())
+            .flatten();
+        let in_progress = marker == Some(QueueLifecycleMarker::Running);
+        if next.lifecycle_marker != marker || next.in_progress != in_progress {
+            next.lifecycle_marker = marker;
+            next.in_progress = in_progress;
             changed = true;
         }
         Some(next)
@@ -4393,6 +4449,7 @@ pub fn op_add_at_with_outcome_reserved(
         },
         gate_type: None,
         in_progress: false,
+        lifecycle_marker: None,
         text,
         continuation,
     };
@@ -4999,7 +5056,35 @@ mod tests {
     }
 
     #[test]
-    fn content_signature_ignores_only_in_progress_projection() {
+    fn typed_lifecycle_markers_round_trip_and_replace_stale_running_state() {
+        let body = concat!(
+            "- [ ] 🚧 [#reported] worker was running\n",
+            "- [ ] 🚧 [#lost] worker disappeared\n",
+            "- [ ] 🚧 [#stale] no longer active\n",
+        );
+        let markers = HashMap::from([
+            ("reported".to_string(), QueueLifecycleMarker::Reported),
+            ("lost".to_string(), QueueLifecycleMarker::Lost),
+        ]);
+
+        let (updated, changed) = set_lifecycle_item_markers(body, &markers);
+
+        assert!(changed);
+        assert!(updated.contains("- [ ] ☑️ [#reported] worker was running"));
+        assert!(updated.contains("- [ ] ⚠️ [#lost] worker disappeared"));
+        assert!(updated.contains("- [ ] [#stale] no longer active"));
+        let (_, items, _) = parse_items(&updated);
+        assert_eq!(
+            items[0].lifecycle_marker,
+            Some(QueueLifecycleMarker::Reported)
+        );
+        assert_eq!(items[1].lifecycle_marker, Some(QueueLifecycleMarker::Lost));
+        assert!(!items.iter().any(|item| item.in_progress));
+        assert_eq!(render_items("", &items, ""), updated);
+    }
+
+    #[test]
+    fn content_signature_ignores_queue_lifecycle_projection() {
         let body = concat!(
             "### Active\n",
             "- [ ] [#first] one\n",
@@ -5007,8 +5092,8 @@ mod tests {
             "- [/] [#gated] blocked\n",
         );
         let marked = body
-            .replace("[ ] [#first]", "[ ] 🚧 [#first]")
-            .replace("[/] [#gated]", "[/] 🚧 [#gated]");
+            .replace("[ ] [#first]", "[ ] ☑️ [#first]")
+            .replace("[/] [#gated]", "[/] ⚠️ [#gated]");
 
         assert_eq!(
             content_signature_without_in_progress(body),
@@ -5678,6 +5763,7 @@ mod tests {
             state: PendingState::Gated,
             gate_type: None,
             in_progress: false,
+            lifecycle_marker: None,
             text: "CommitLock".to_string(),
             continuation: String::new(),
         };
@@ -6314,6 +6400,7 @@ mod tests {
                 state: PendingState::Open,
                 gate_type: None,
                 in_progress: false,
+                lifecycle_marker: None,
                 text: "first appended task".to_string(),
                 continuation: String::new(),
             },
@@ -6323,6 +6410,7 @@ mod tests {
                 state: PendingState::Gated,
                 gate_type: Some("release".to_string()),
                 in_progress: false,
+                lifecycle_marker: None,
                 text: "second appended task".to_string(),
                 continuation: String::new(),
             },
@@ -7797,6 +7885,7 @@ mod tests {
             state: PendingState::Gated,
             gate_type: Some("release".to_string()),
             in_progress: false,
+            lifecycle_marker: None,
             text: "Release v0.32.4".to_string(),
             continuation: String::new(),
         };

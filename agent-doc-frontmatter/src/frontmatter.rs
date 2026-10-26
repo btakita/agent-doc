@@ -288,7 +288,8 @@ pub struct StreamConfig {
 }
 
 pub use agent_doc_queue_icons::{
-    QueueIconConfig, QueueIconSet, install_queue_icon_config, queue_icons,
+    ALL_LIFECYCLE_STATES, QueueIconConfig, QueueIconSet, QueueLifecycleMarker,
+    install_queue_icon_config, queue_icons,
 };
 
 /// Live finalize-pipeline state tracker (`#fm-run-id-step`, Phase 5 of

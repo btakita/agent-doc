@@ -8,7 +8,7 @@ pub mod sweep;
 pub mod warnings;
 
 use agent_doc_document::queue_projection::{
-    set_in_progress_work_item_markers, strip_in_progress_marker, strip_priority_markers,
+    set_work_item_lifecycle_markers, strip_in_progress_marker, strip_priority_markers,
     sync_in_progress_marker_regions,
 };
 use agent_doc_element::element::{
@@ -7016,10 +7016,6 @@ pub fn run_queue_maintenance_with_coin_gate(
     {
         eprintln!("[preflight] queue: failed to persist projected in-progress heads ({err:#})");
     }
-    let current_head_ids = in_progress_queue_prompt_texts
-        .iter()
-        .filter_map(|text| agent_doc_queue::queue_response::queue_prompt_done_id(text))
-        .collect::<std::collections::HashSet<_>>();
     let marker_components = agent_doc_element::element::parse(&current_content)?;
     let marker_body = agent_doc_queue::queue_set::component_for_id(
         &current_content,
@@ -7111,6 +7107,26 @@ pub fn run_queue_maintenance_with_coin_gate(
             })
         })
         .collect::<Vec<_>>();
+    let tracked_work_lifecycle = lifecycle_targets
+        .iter()
+        .filter(|target| {
+            matches!(
+                target.marker,
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Claimed
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Running
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+            )
+        })
+        .filter_map(|target| {
+            match agent_doc_queue::queue_claim::claim_identity(&target.text) {
+                agent_doc_element_queue::QueueItemIdentity::Id(id) => Some((id, target.marker)),
+                agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
+            }
+        })
+        .collect::<std::collections::HashMap<_, _>>();
     if let Some((new_body, marked_entries)) =
         agent_doc_queue::document_queue::project_prompt_runtime_projections(
             &marker_body,
@@ -7156,7 +7172,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         in_progress_markers_changed = true;
     }
     let (marked_content, pending_markers_changed) =
-        set_in_progress_work_item_markers(&current_content, &current_head_ids)?;
+        set_work_item_lifecycle_markers(&current_content, &tracked_work_lifecycle)?;
     if pending_markers_changed {
         current_content = marked_content;
         mutated = true;
@@ -14883,11 +14899,11 @@ mod tests {
         assert!(projection.queue.worklist_queue_hash.is_some());
     }
 
-    /// `#claimmarker`: every live worker claim is visibly in progress even
-    /// though claimed heads remain outside the inline selection/drain path.
-    /// Release and expiry clear only the corresponding transient markers.
+    /// `#claimmarker`: every live worker claim mirrors its exact lifecycle in
+    /// both the queue and tracked-work row. Release clears the projection;
+    /// expiry retains the typed lost state rather than stale `🚧`.
     #[test]
-    fn run_queue_maintenance_marks_all_claimed_heads_and_clears_ended_claims() {
+    fn run_queue_maintenance_syncs_claim_lifecycle_into_tracked_work() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -14918,7 +14934,17 @@ mod tests {
         )
         .unwrap();
         agent_doc_queue_io::queue_claim::claim(&doc, "#b", "subagent:b", 3600).unwrap();
-        agent_doc_queue_io::queue_claim::claim(&doc, "#c", "subagent:c", 3600).unwrap();
+        let (_, c_claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "#c", "subagent:c", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#c",
+            "subagent:c",
+            "worker:c",
+            3600,
+            c_claim.generation,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -14926,28 +14952,52 @@ mod tests {
         assert_eq!(state.queue_drainable_head_count, 2);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#a]\n- 🟡 [#subagent:b#1] do [#b]\n- 🟡 [#subagent:c#1] do [#c]\n- 📥 do [#d]"),
-            "selected and all claimed queue heads must be marked:\n{updated}"
+            updated.contains("- 🚧 do [#a]\n- 🟡 [#subagent:b#1] do [#b]\n- 🚧 [#subagent:c#1] do [#c]\n- 📥 do [#d]"),
+            "selected, claimed, and running queue heads must carry typed state:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#a] inline work"));
-        assert!(updated.contains("- [ ] 🚧 [#b] worker one"));
+        assert!(updated.contains("- [ ] 🟡 [#b] worker one"));
         assert!(updated.contains("- [ ] 🚧 [#c] worker two"));
         assert!(updated.contains("- [ ] [#d] later work"));
+
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "#c", Some(c_claim.generation))
+            .unwrap();
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- ☑️ [#subagent:c#1] do [#c]"));
+        assert!(
+            updated.contains("- [ ] ☑️ [#c] worker two"),
+            "reported work must replace stale running state in backlog:\n{updated}"
+        );
+        assert!(!updated.contains("- [ ] 🚧 [#c] worker two"));
 
         agent_doc_queue_io::queue_claim::release(&doc, "#b").unwrap();
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- 🟡 [#subagent:c#1] do [#c]\n- 📥 do [#d]"));
+        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- 📥 do [#d]"));
         assert!(updated.contains("- [ ] [#b] worker one"));
-        assert!(updated.contains("- [ ] 🚧 [#c] worker two"));
+        assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
 
+        let (_, d_claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "#d", "subagent:d", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#d",
+            "subagent:d",
+            "worker:d",
+            3600,
+            d_claim.generation,
+        )
+        .unwrap();
         expire_queue_claims(dir.path(), &doc);
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ⚠️ [#subagent:c#1] do [#c]\n- 📥 do [#d]"));
-        assert!(updated.contains("- [ ] [#c] worker two"));
+        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- ⚠️ [#subagent:d#1] do [#d]"));
+        assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
+        assert!(updated.contains("- [ ] ⚠️ [#d] later work"));
     }
 
     #[test]

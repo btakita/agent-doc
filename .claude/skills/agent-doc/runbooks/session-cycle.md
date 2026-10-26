@@ -15,7 +15,8 @@ only the compact routing table that survives context compaction.
 - **No FILE means this pane's claim.** A bare `/agent-doc`
   or Codex `agent-doc` runs on the document this tmux pane claims. Claude Code
   and Codex hooks name it first in the admitted context (`no FILE argument:
-  this turn's FILE is ...`); hookless harnesses run
+  this turn's FILE is ...`); Grok Build calls connected `agent_doc_admit`
+  without `file` and uses the `file` it returns; OpenCode runs
   `agent-doc resolve-pane-document`. Use that path as FILE; on a refusal,
   report it and stop without guessing.
 - **Document is the UI.** User edits are the prompt. A chat-only prompt is also

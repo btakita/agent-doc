@@ -19889,6 +19889,128 @@ mod tests {
         assert_readded_row_projects_pending(&doc, &readded, item);
     }
 
+    /// `#qftbklgclaimed` (#decisionbacklogstrike): the backlog/done strike
+    /// (`#qftbklgstrike`) leaves a free-text row that already shows a claim
+    /// projection (`🟡`/`🚧`/`☑️ [#owner#N]`) alone, even when a done item
+    /// restates it. That row's work closes through coordinator integration
+    /// and closeout, not through a lexical match: striking a `☑️` row here
+    /// would retire its completion cell (the worker's only in-document
+    /// report) and its `Reported` claim before anyone integrated it, and a
+    /// `Claimed`/`Running` row would reopen as `❔` (`#strikeisterminal`).
+    /// Whether this strike should close claimed rows is an open operator
+    /// decision; this pins today's behaviour so a change to it is deliberate.
+    #[test]
+    fn backlog_strike_leaves_claim_projected_free_text_rows_and_their_evidence() {
+        for (marker, report) in [("🟡", None), ("🚧", Some(false)), ("☑️", Some(true))] {
+            let dir = setup_project();
+            std::fs::write(
+                dir.path().join("tasks.done.md"),
+                "- 2026-06-07 [#jbcache] Fix JB File Cache Conflict dialogs on every save\n",
+            )
+            .unwrap();
+            let doc = dir.path().join("session.md");
+            let item = "Fix JB File Cache Conflict dialogs on every save";
+            let owner = "subagent:jbcache";
+            let shell = |exchange_extra: &str, queue: &str| {
+                format!(
+                    concat!(
+                        "---\n",
+                        "agent_doc_session: test\n",
+                        "agent_doc_format: template\n",
+                        "agent_doc_write: crdt\n",
+                        "queue: start\n",
+                        "---\n\n",
+                        "<!-- agent:exchange patch=append -->\n",
+                        "### Re: unrelated — opus-4-8\n\nAn answer about a different topic.\n",
+                        "{exchange_extra}",
+                        "<!-- /agent:exchange -->\n\n",
+                        "<!-- agent:queue priority go -->\n",
+                        "{queue}",
+                        "<!-- /agent:queue -->\n\n",
+                        "<!-- agent:backlog priority queue -->\n",
+                        "- [ ] [#stillopen] unrelated open work item\n",
+                        "<!-- /agent:backlog -->\n\n",
+                        "<!-- agent:done archive=tasks.done.md -->\n",
+                        "<!-- /agent:done -->\n",
+                    ),
+                    exchange_extra = exchange_extra,
+                    queue = queue,
+                )
+            };
+            std::fs::write(&doc, shell("", &format!("- {item}\n- do [#stillopen]\n"))).unwrap();
+            let (_, claimed) =
+                agent_doc_queue_io::queue_claim::claim(&doc, item, owner, 3600).unwrap();
+            let mut cell = String::new();
+            if let Some(reported) = report {
+                let running = agent_doc_queue_io::queue_claim::start_attempt(
+                    &doc,
+                    item,
+                    owner,
+                    &format!("worker:{owner}"),
+                    3600,
+                    claimed.generation,
+                )
+                .unwrap();
+                if reported {
+                    cell = agent_doc_document::subagent_completion::cell_with_response(
+                        &running.owner,
+                        &running.item_text,
+                        &agent_doc_queue_io::queue_claim::completion_feedback_key(&running)
+                            .unwrap(),
+                        "Implemented and pushed; tests pass.",
+                    )
+                    .unwrap();
+                    agent_doc_queue_io::queue_claim::report_attempt(
+                        &doc,
+                        item,
+                        Some(running.generation),
+                    )
+                    .unwrap();
+                }
+            }
+            let exchange_extra = if cell.is_empty() {
+                String::new()
+            } else {
+                format!("\n{cell}\n")
+            };
+            let content = shell(
+                &exchange_extra,
+                &format!("- {marker} [#{owner}#1] {item}\n- do [#stillopen]\n"),
+            );
+            std::fs::write(&doc, &content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            assert_eq!(claim_texts(&doc), vec![item.to_string()], "{marker}");
+
+            let _ = run_queue_maintenance(&doc, None).unwrap();
+
+            let updated = std::fs::read_to_string(&doc).unwrap();
+            assert!(
+                !updated.contains("#qftbklgstrike") && !updated.contains(&format!("~~{item}")),
+                "{marker}: a claim-projected row is not struck by the backlog/done strike:\n{updated}"
+            );
+            assert!(
+                updated.contains(&format!("[#{owner}#1] {item}\n")),
+                "{marker}: the claimed row stays live with its owner:\n{updated}"
+            );
+            assert_eq!(
+                claim_texts(&doc),
+                vec![item.to_string()],
+                "{marker}: the claim survives"
+            );
+            if !cell.is_empty() {
+                assert!(
+                    updated.contains("Implemented and pushed; tests pass."),
+                    "{marker}: the unintegrated worker report survives:\n{updated}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn run_queue_maintenance_keeps_reported_head_when_only_worker_echoes_it() {
         let dir = setup_project();

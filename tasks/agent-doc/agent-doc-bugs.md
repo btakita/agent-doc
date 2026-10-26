@@ -25,11 +25,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-agent-doc v0.35.553 (`a0a525fb65`) is the stable latest release: GitHub Latest, PyPI, and all six target stable channels. v0.35.554 (`2909bbfa04`) was cancelled mid-publish after a regression was found (a fenced `<!-- agent:run -->` line inside a queue breaks strikes and resurrects finished rows). It stays a GitHub pre-release; PyPI, Homebrew and Latest never moved; its two promoted Linux gnu channels were rolled back to 0.35.553; JetBrains 0.2.828/0.2.829/0.2.830 had already reached Marketplace. A fix is in progress and will ship as v0.35.555. Local install is 0.35.554 from `main` `1a6bfb4fa7`.
+agent-doc v0.35.553 (`a0a525fb65`) is the stable latest release: GitHub Latest, PyPI, and all six target stable channels. v0.35.554 was cancelled mid-publish (it stays a pre-release; its two promoted Linux gnu channels were rolled back to 0.35.553). `origin/main` is `6439b1d93d` and installed locally: it fixes the struck-row resurrection (`6439b1d93d`), modular JetBrains tab-switch auto-sync (0.2.831/0.2.832), and three controller test flakes; GH #376 (measured-layout route) is integrating. v0.35.555 ships after the in-flight completion-cell, row-identity and exit-watcher fixes land.
 <!-- /status:sync -->
 <!-- /agent:status -->
  

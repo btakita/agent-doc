@@ -182,7 +182,7 @@ on the status marker hides it; `queue-legend` also accepts `on`, `true`/`false`,
 
 | Attribute | Values and behavior |
 |---|---|
-| `id` | Unique queue ID. It begins with an ASCII letter or digit and continues with letters, digits, `.`, `_`, or `-`. A single unkeyed queue is `default`; multi-queue documents are assigned stable IDs by maintenance. |
+| `id` | Unique queue ID. It begins with an ASCII letter or digit and continues with letters, digits, `.`, `_`, or `-`. An explicit `id=` always wins. A single unkeyed queue is `default`. Without ids, a document's one `agent:run` and one `agent:loop` are the queues `run` and `loop` (named by kind, never by heading, and never written back). Two id-less queues of one kind are ambiguous: commands refuse them with the lines to fix, and maintenance assigns them stable `queue-N` IDs. |
 | `after` | Comma-separated predecessor queue IDs. All predecessors must drain before this queue becomes ready. Missing IDs, self-dependencies, empty entries, and cycles fail closed. |
 | `start`, `go` | Bare, one-shot activation controls. `go` is the normal continuous-drain spelling; `start` is its start-trigger alias. |
 | `pause` | Bare operator hold. The legacy marker spelling `stop` is read as `pause`. |

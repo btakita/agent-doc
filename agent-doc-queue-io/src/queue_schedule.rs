@@ -741,4 +741,37 @@ mod tests {
             "false"
         );
     }
+
+    /// `#idlessqueueidentity`: `agent-doc queue schedule` on the session
+    /// shape whose operator deleted the `id=` attributes from one `agent:run`
+    /// and one `agent:loop` used to fail with "occurrence 0 requires a
+    /// nonempty explicit `id=`". The loop now reports as `loop`, and the old
+    /// ids keep reporting as before.
+    #[test]
+    fn schedule_status_names_an_idless_loop_by_its_kind() {
+        for (ids, loop_id) in [(false, "loop"), (true, "issues")] {
+            let (run_id, loop_attr) = if ids {
+                ("id=\"main\" ", "id=\"issues\" ")
+            } else {
+                ("", "")
+            };
+            let content = format!(
+                "---\nagent_doc_session: idless\nqueue: go\n---\n\n\
+## Run <!-- agent:run {run_id}subagents priority go -->\n\
+- Why have the ☑️ run items not completed?\n\
+<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop {loop_attr}interval=\"1h\" priority -->\n\
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues.\n\
+<!-- /agent:loop -->\n\n\
+## Backlog <!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n"
+            );
+            let (_dir, file) = project(&content);
+            let report =
+                schedule_status(&file, &content).unwrap_or_else(|err| panic!("ids={ids}: {err:#}"));
+            let json = serde_json::to_value(&report).unwrap();
+            assert_eq!(json["scheduled"], "true", "{json}");
+            assert_eq!(json["queues"].as_array().unwrap().len(), 1, "{json}");
+            assert_eq!(json["queues"][0]["queue_id"], loop_id, "{json}");
+        }
+    }
 }

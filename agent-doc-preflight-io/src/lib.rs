@@ -10916,6 +10916,69 @@ mod tests {
         );
     }
 
+    /// `#idlessqueueidentity`: with `id=` deleted from the document's one
+    /// `agent:run` and one `agent:loop`, preflight's dispatch listing offers
+    /// the run's unclaimed free-text rows again (it offered nothing while the
+    /// queue graph refused the document), and each entry names its origin
+    /// queue `run` with a usable `queue follow-up --id run` command. The same
+    /// document with its old ids keeps naming `main`.
+    #[test]
+    fn queue_subagent_dispatch_lists_idless_run_rows_with_their_kind_queue_id() {
+        for (ids, run_id) in [(false, "run"), (true, "main")] {
+            let dir = setup_project();
+            let doc = dir.path().join("session.md");
+            let (run_attr, loop_attr) = if ids {
+                ("id=\"main\" ", "id=\"issues\" ")
+            } else {
+                ("", "")
+            };
+            let content = format!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: go\n\
+prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tests. commit + push\"\n---\n\n\
+## Exchange <!-- agent:exchange patch=append subagents -->\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run {run_attr}subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n\
+- Why have the ☑️ run items not completed?\n\
+- I removed id from run + loop. Ensure these items are distinct and have semantic meaning.\n\
+<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop {loop_attr}interval=\"1h\" priority -->\n\
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues.\n\
+<!-- /agent:loop -->\n\n\
+## Backlog <!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n"
+            );
+            std::fs::write(&doc, &content).unwrap();
+            let items =
+                agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                    &doc, &content,
+                )
+                .unwrap();
+            assert_eq!(
+                items,
+                vec![
+                    "Why have the ☑️ run items not completed?".to_string(),
+                    "I removed id from run + loop. Ensure these items are distinct and have semantic meaning."
+                        .to_string(),
+                ],
+                "ids={ids}"
+            );
+            let entries = queue_subagent_dispatch_entries(&doc, &content, &items).unwrap();
+            for entry in &entries {
+                assert_eq!(
+                    entry.authorization.queue_id.as_deref(),
+                    Some(run_id),
+                    "ids={ids}: {entry:?}"
+                );
+                assert!(
+                    entry
+                        .authorization
+                        .subagent_prompt_preamble
+                        .contains(&format!("--id {run_id} --after <origin>")),
+                    "{}",
+                    entry.authorization.subagent_prompt_preamble
+                );
+            }
+        }
+    }
+
     #[test]
     fn queue_subagent_dispatch_emits_resolved_launch_policy() {
         let dir = setup_project();

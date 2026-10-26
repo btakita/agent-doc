@@ -2069,6 +2069,48 @@ mod tests {
         assert!(!pid_alive(0));
     }
 
+    /// `#idlessqueueidentity`: once the operator deletes `id=` from the
+    /// document's one `agent:run` and one `agent:loop`, `queue claim` must
+    /// still find the run's unclaimed free-text rows (it used to report
+    /// "live heads: (none)"), and a claim taken while the ids were present is
+    /// still found afterwards: claims are keyed by work identity, never by
+    /// queue id.
+    #[test]
+    fn claims_resolve_after_the_run_and_loop_ids_are_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        let render = |run_id: &str, loop_id: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\nqueue: go\n---\n\n\
+## Run <!-- agent:run {run_id}subagents priority go -->\n\
+- `/agent-doc` without arguments matches `/agent-doc <document-path>`\n\
+- Why have the ☑️ run items not completed?\n\
+<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop {loop_id}interval=\"1h\" priority -->\n\
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues.\n\
+<!-- /agent:loop -->\n"
+            )
+        };
+        std::fs::write(&doc, render("id=\"main\" ", "id=\"issues\" ")).unwrap();
+        let earlier = "`/agent-doc` without arguments matches `/agent-doc <document-path>`";
+        let (outcome, _) = claim(&doc, earlier, "subagent:noargparity", 600).unwrap();
+        assert_eq!(outcome, ClaimOutcome::Created);
+
+        let idless = render("", "");
+        std::fs::write(&doc, &idless).unwrap();
+        assert!(
+            claimed_items_for_content(&doc, &idless).claims(earlier),
+            "a claim taken under `id=main` must survive the id deletion"
+        );
+        let free_text = "Why have the ☑️ run items not completed?";
+        let (outcome, stored) = claim(&doc, free_text, "subagent:whyrun", 600)
+            .unwrap_or_else(|err| panic!("id-less run head must be claimable: {err:#}"));
+        assert_eq!(outcome, ClaimOutcome::Created);
+        assert_eq!(stored.owner, "subagent:whyrun");
+        assert!(claimed_items_for_content(&doc, &idless).claims(free_text));
+    }
+
     #[test]
     fn claim_release_and_closure_round_trip_through_state_db() {
         let dir = tempfile::tempdir().unwrap();

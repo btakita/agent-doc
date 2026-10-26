@@ -249,6 +249,69 @@ fn migrate_legacy_state(file: &Path, queue_id: &str, now: u64, queue_count: usiz
     }
 }
 
+/// Move the durable row of queue `from` (no longer declared) to queue `to`
+/// (newly declared, no row yet) when it holds the same cadence: the
+/// document's queue id changed, not its schedule (`#idlessqueueidentity`).
+/// Returns whether the row moved. The legacy document-global row is
+/// [`migrate_legacy_state`]'s, never adopted here.
+fn adopt_renamed_state(
+    file: &Path,
+    from: &str,
+    to: &str,
+    spec: &agent_doc_queue::queue_schedule::QueueScheduleSpec,
+    now: u64,
+) -> Result<bool> {
+    if from == to || from == agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID {
+        return Ok(false);
+    }
+    let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
+        return Ok(false);
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .context("begin queue schedule rename")?;
+    let result = (|| {
+        if load_from_conn(&conn, &document_hash, to)?.is_some() {
+            return Ok(false);
+        }
+        let Some(mut state) = load_from_conn(&conn, &document_hash, from)? else {
+            return Ok(false);
+        };
+        if state.cadence != spec.cadence_fingerprint() {
+            return Ok(false);
+        }
+        state.owner_queue_id = Some(to.to_string());
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: document_hash.clone(),
+                state_kind: state_kind(to),
+                canonical_path,
+                payload_json: serde_json::to_string(&state)
+                    .context("serialize renamed queue schedule state")?,
+                updated_at_secs: now,
+            },
+        )?;
+        agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+            &conn,
+            &document_hash,
+            &state_kind(from),
+        )?;
+        Ok(true)
+    })();
+    match result {
+        Ok(moved) => {
+            conn.execute_batch("COMMIT")
+                .context("commit queue schedule rename")?;
+            Ok(moved)
+        }
+        Err(err) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(err)
+        }
+    }
+}
+
 /// Bind a row to its keyed queue. A pre-provenance row in a multi-queue
 /// document is ambiguous: releases before the owner field could have copied
 /// document-global counters or an open roster into the first scheduled queue.
@@ -444,6 +507,32 @@ impl QueueScheduleWorker {
             {
                 known.insert(document.queue_id);
             }
+        }
+        // `#idlessqueueidentity`: deleting a queue's `id=` renames the queue
+        // (`issues` becomes its kind id `loop`) without changing what it is.
+        // One vanished row plus one newly declared schedule with the same
+        // cadence is that rename: carry the row (anchor, pass count, open
+        // window, pending restore) across instead of restarting the cadence.
+        let orphaned = known.difference(&declared).cloned().collect::<Vec<_>>();
+        let fresh = schedules
+            .iter()
+            .filter(|schedule| schedule.is_valid() && !known.contains(&schedule.queue_id))
+            .collect::<Vec<_>>();
+        if let ([from], [to]) = (orphaned.as_slice(), fresh.as_slice())
+            && let Some(spec) = to.spec.as_ref()
+            && adopt_renamed_state(file, from, &to.queue_id, spec, now)?
+        {
+            let old_key = schedule_key(file, from)?;
+            self.graph.set_document(&old_key, None);
+            self.graph.set_state(&old_key, None);
+            known.remove(from);
+            self.io.log(
+                file,
+                &format!(
+                    "queue_schedule_renamed from={from} to={} reason=queue_id_changed",
+                    to.queue_id
+                ),
+            );
         }
         for queue_id in known.difference(&declared) {
             let key = schedule_key(file, queue_id)?;
@@ -1465,6 +1554,82 @@ mod tests {
                 .owner_queue_id
                 .as_deref(),
             Some("issues")
+        );
+    }
+
+    /// `#idlessqueueidentity`: deleting `id="issues"` from the document's one
+    /// `agent:loop` renames the queue to its kind id `loop`. The durable row
+    /// (anchor, pass count) moves with it instead of restarting the cadence;
+    /// a different cadence is a different schedule and starts fresh.
+    #[test]
+    fn deleting_a_loop_id_carries_its_schedule_row_to_the_kind_id() {
+        let render = |run_attr: &str, loop_attr: &str| {
+            format!(
+                "# Bugs\n\n## Run <!-- agent:run {run_attr}subagents priority go -->\n- ship now\n<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop {loop_attr} priority -->\n- poll issues\n<!-- /agent:loop -->\n"
+            )
+        };
+        let with_ids = render("id=\"main\" ", "id=\"issues\" interval=\"1h\"");
+        let (_dir, file) = project(&with_ids);
+        let io = FakeIo::new(&with_ids);
+        worker(&io).refresh(&file);
+        let admitted = load_schedule_state_for_queue(&file, "issues")
+            .unwrap()
+            .expect("the loop's schedule is admitted under `issues`");
+        mutate_schedule_state(&file, "issues", 1_000, |state| {
+            let mut state = state.unwrap();
+            state.passes_completed = 5;
+            (Some(state), ())
+        })
+        .unwrap();
+
+        let idless = render("", "interval=\"1h\"");
+        *io.text.lock() = idless;
+        worker(&io).refresh(&file);
+        assert!(
+            load_schedule_state_for_queue(&file, "issues")
+                .unwrap()
+                .is_none()
+        );
+        let renamed = load_schedule_state_for_queue(&file, "loop")
+            .unwrap()
+            .expect("the row moved to the kind id");
+        assert_eq!(renamed.passes_completed, 5);
+        assert_eq!(renamed.anchor_secs, admitted.anchor_secs);
+        assert_eq!(renamed.owner_queue_id.as_deref(), Some("loop"));
+        assert!(
+            io.logs
+                .lock()
+                .iter()
+                .any(|line| line.contains("queue_schedule_renamed from=issues to=loop")),
+            "{:?}",
+            io.logs.lock()
+        );
+
+        // A changed cadence is not a rename: the old row is dropped and the
+        // new queue is admitted from scratch.
+        let (_dir2, file2) = project(&with_ids);
+        let io2 = FakeIo::new(&with_ids);
+        worker(&io2).refresh(&file2);
+        mutate_schedule_state(&file2, "issues", 1_000, |state| {
+            let mut state = state.unwrap();
+            state.passes_completed = 5;
+            (Some(state), ())
+        })
+        .unwrap();
+        *io2.text.lock() = render("", "interval=\"10m\"");
+        worker(&io2).refresh(&file2);
+        assert!(
+            load_schedule_state_for_queue(&file2, "issues")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            load_schedule_state_for_queue(&file2, "loop")
+                .unwrap()
+                .unwrap()
+                .passes_completed,
+            0
         );
     }
 

@@ -25,17 +25,15 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 17 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 19 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
 ✅ Release v0.35.551 was published from 03433d0494 and verified end to end. The stable, non-draft GitHub release has 24 assets; all 12 release jobs passed, and the PyPI wheel is public.
 
-Remote main includes the issue #372, sdk-demo queue/UI recovery, lazily blocked-reason diagnostics, deferred-continuation, claim-freshness, editor alert deduplication, and template fixes shipped in v0.35.551. The authoritative suite passed 11,494 Rust tests, 204 VS Code tests, cross-editor SimWorld, all JetBrains variants, bootstrap/docs/parity, tmux CI, and state-machine checks.
+Post-release remote main is now at 2490d2496e. It includes cb2f9068e3, which allows explicit ResumeLatest/ProvisionForLayout recovery to replace an ownership-unproven stale actor while preserving ObserveOnly's fail-closed safety boundary, plus the deterministic cross-root two-document SimWorld regression and routing-spec invariant. The coordinator authoritative make check passed, current main was installed locally, native reload reached the editor endpoint, and supervisors/controllers are scheduled for safe idle-boundary recycle. Live acceptance—replacing sdk-demo's dead %58 binding, converging to two panes, and clearing unresolved cross-root diagnostics—remains tracked by #layoutunprovenliveverify.
 
-This host reports agent-doc CLI 0.35.551. Installed editor packages are JetBrains classic 0.2.822, 262 0.2.823, 263 0.2.824, and VS Code/VSCodium 0.2.83; ordinary local editor synchronization is converged.
-
-Coder Remote Dev synchronization is not yet verified and remains blocked on operator proof. The operator completed the two-sided install and restart, but reachable IDEA evidence shows connected ingress followed by DELIVERY_FAILED: No such file or directory, with the session under agent-loop while the IDE base path is IdeaHome; no accepted jetbrains-rd remote-client publication is present. Todo #coder-remote-install-02805 now tracks correct-project-root recovery, same-version verification on both peers, exact diagnostics, and the controller-root/state-machine regression if delivery still fails. Todo #jb263-feed-verify separately tracks the 263 update-feed warning.
+Coder Remote Dev synchronization is still not verified and remains blocked on operator proof. Todo #coder-remote-install-02805 tracks correct-project-root recovery, same-version verification on both peers, exact diagnostics, and the controller-root/state-machine regression if delivery still fails. Todo #jb263-feed-verify separately tracks the 263 update-feed warning.
 <!-- /status:sync -->
 <!-- /agent:status -->
  

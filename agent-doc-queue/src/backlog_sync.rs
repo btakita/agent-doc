@@ -1026,7 +1026,12 @@ pub fn requeue_open_ids_in_content(
 /// into: the first non-repeating `agent:run` in document order. An
 /// `agent:loop` is never a mirror target, so a backlog id never becomes a
 /// recurring loop row that every later pass restores.
-fn mirror_queue_component(components: &[element::Component]) -> Option<&element::Component> {
+///
+/// GH #378: this is the single owner of the mirror target. A caller that gates
+/// or verifies a mirror (go-mode, the pre/post id diff) must read the same
+/// component through this function rather than the first `queue` component,
+/// which is a sibling `agent:loop` whenever one precedes the run.
+pub fn mirror_queue_component(components: &[element::Component]) -> Option<&element::Component> {
     components.iter().find(|component| {
         component.name == "queue" && !crate::queue_graph::is_loop_queue(component)
     })
@@ -1758,6 +1763,53 @@ mod tests {
             .unwrap(),
             MirrorOutcome::Refused(MirrorRefusal::NoQueueComponent)
         );
+    }
+
+    /// GH #378: the backlog mirror resolves a heading-anchored `agent:run`
+    /// whose heading text does not name the tag (`## Work items <!-- agent:run
+    /// ... -->`), with no `agent:queue` line in the document and a
+    /// heading-anchored `agent:loop` above it. The mirrored id lands in the
+    /// run; the loop stays byte-identical.
+    #[test]
+    fn backlog_mirror_targets_heading_anchored_run_beside_heading_anchored_loop() {
+        let loop_block = concat!(
+            "## Issues <!-- agent:loop id=issues interval=1h -->\n",
+            "- poll issues\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let content = format!(
+            concat!(
+                "{}\n",
+                "## Work items <!-- agent:run priority subagents clear go -->\n",
+                "- ~~☑️ do [#done]~~\n",
+                "<!-- /agent:run -->\n\n",
+                "## Backlog <!-- agent:backlog priority queue -->\n",
+                "- [ ] [#fresh] record the follow-up\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            loop_block
+        );
+        for placement in [
+            FollowUpQueuePlacement::Prepend,
+            FollowUpQueuePlacement::Append,
+        ] {
+            let mirrored =
+                enqueue_actionable_ids_in_content(&content, &["fresh".into()], placement)
+                    .unwrap()
+                    .expect("the fresh id must enqueue into the heading-anchored run");
+            assert!(
+                mirrored.starts_with(loop_block),
+                "{placement:?}: {mirrored}"
+            );
+            let run_start = mirrored
+                .find("## Work items <!-- agent:run")
+                .expect("run opener survives");
+            let run_end = mirrored.find("<!-- /agent:run -->").unwrap();
+            assert!(
+                mirrored[run_start..run_end].contains("- do [#fresh]\n"),
+                "{placement:?}: the mirrored id must land in `agent:run`:\n{mirrored}"
+            );
+        }
     }
 
     /// `#queueingressorder`: the priority graph is active at ingress, derived

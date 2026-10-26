@@ -120,6 +120,19 @@ Line scanners that match raw tag names and then look a component up in the
 overlay map the raw name through `overlay::projected_component_name` first
 (`run` and `loop` project to `queue`), so an `agent:run` component merges by
 node identity exactly like `agent:queue` instead of being dropped.
+The same holds for `--backlog-add` (GH #378). Its same-cycle backlog→queue
+mirror has one target, `agent_doc_queue::backlog_sync::mirror_queue_component`
+(the first non-repeating `agent:run`, never an `agent:loop`), and every step of
+that mirror reads that same component: the `go`-mode gate, the pre/post id diff,
+and the recovery-baseline adoption that the closeout commits from. Reading the
+first `queue` component instead picks a sibling `agent:loop` above the run,
+which silently dropped the mirror (or committed the backlog row without its
+queue row) whether or not the openers are heading-anchored. The controller's
+queue-completion projection, which every `commit_document` derives, resolves
+components through the overlay, so a heading-anchored `agent:run` whose
+heading text does not name the tag is found there too, and a document with no
+runnable component projects no completed queue heads rather than failing the
+commit with ``component `queue` was not found``.
 
 **A component ends only at its own close (`#componentownclose`).** Each
 `<!-- agent:NAME ... -->` opener's span ends at the next unmatched

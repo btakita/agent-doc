@@ -41,4 +41,5 @@ pub mod queue_schedule_runtime;
 pub mod queue_set;
 pub mod route_dispatch;
 pub mod subagent_brief;
+pub mod stale_completion_evidence;
 pub mod subagent_intent;

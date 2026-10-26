@@ -69,15 +69,22 @@ pub const RESPONSE_DIGEST_PREFIX: &str = "<!-- agent-doc-subagent-response sha25
 /// stays one code span.
 pub fn heading(owner: &str, item: &str) -> String {
     let owner = owner.replace('`', "'").replace('—', "-");
-    let item = item
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .replace(['“', '”'], "'")
-        .replace('—', "-");
+    let item = heading_item_text(item);
     format!(
         "{HEADING_PREFIX}`{owner}` returned work for queue item “{item}”{HEADING_ATTRIBUTION_SUFFIX}"
     )
+}
+
+/// The one-line item text a completion heading records for queue item
+/// `item`: whitespace collapsed, curly quotes and em dashes neutralized. A
+/// cell's [`CompletionEvidence::item`] is this form of its row's text, so a
+/// reader matching a cell to a row must compare both forms of the row.
+pub fn heading_item_text(item: &str) -> String {
+    item.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(['“', '”'], "'")
+        .replace('—', "-")
 }
 
 /// The keyed marker line for a completion `key`.

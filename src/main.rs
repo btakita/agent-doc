@@ -4622,6 +4622,42 @@ enum QueueAction {
         /// Path to the session document
         file: PathBuf,
     },
+    /// One-time repair (`#stalecompletionrepair`): retire subagent completion
+    /// cells (`### Re: Subagent completed` in `agent:exchange`) and
+    /// reported-release receipts left behind by strikes made before every
+    /// strike retired them, or by strikes made by hand in the editor. Such
+    /// leftovers repaint `🔄` / `☑️` onto a later row with the same text.
+    ///
+    /// Evidence is stale when its work has NO live (non-struck) row in any
+    /// queue of the document and no active claim attempt. A live or claimed
+    /// row's evidence, operator-authored exchange text, and heading-shaped
+    /// prose are never touched. A cell whose work HAS a live row but whose
+    /// attempt no claim or receipt tracks any more (an old attempt's cell
+    /// painting `🔄` onto a new same-text row, or the only evidence the row's
+    /// work finished) is listed as untracked and retired only when named with
+    /// `--key`. Dry run by default: lists exactly what `--apply` would retire
+    /// and changes nothing. `--apply` writes through
+    /// the editor/CRDT authority (never disk behind an attached editor),
+    /// retires the same cells from the snapshot, then drops the receipts.
+    /// Idempotent: a rerun finds nothing.
+    #[command(name = "repair-stale-completion")]
+    RepairStaleCompletion {
+        /// Path to the session document
+        #[arg(required_unless_present = "project_root")]
+        file: Option<PathBuf>,
+        /// Retire what the dry run lists (default: dry run, no change)
+        #[arg(long, conflicts_with = "project_root")]
+        apply: bool,
+        /// Also retire the untracked live-row cell with this key (printed by
+        /// the dry run). Repeatable. Refused when a claim or receipt still
+        /// tracks the key or an active claim owns the row.
+        #[arg(long = "key", value_name = "KEY", conflicts_with = "project_root")]
+        keys: Vec<String>,
+        /// Report-only scan: list every session document under this project
+        /// root that carries stale evidence (read from disk; never writes)
+        #[arg(long, value_name = "DIR", conflicts_with = "file")]
+        project_root: Option<PathBuf>,
+    },
     /// Reconcile durable queue-claim state into visible queue markers without
     /// releasing a claim or changing queue work. A retained editor write must
     /// receive a safe delivery/save receipt before this reports success.
@@ -8316,6 +8352,23 @@ fn try_main() -> anyhow::Result<()> {
                     outcome.repaired,
                     if outcome.repaired == 1 { "" } else { "s" },
                 );
+                Ok(())
+            }
+            QueueAction::RepairStaleCompletion {
+                file,
+                apply,
+                keys,
+                project_root,
+            } => {
+                if let Some(root) = project_root {
+                    queue_completion_feedback::print_stale_completion_scan(&root);
+                    return Ok(());
+                }
+                let file = file.context("a FILE or --project-root is required")?;
+                let keys = keys.into_iter().collect();
+                let report =
+                    queue_completion_feedback::repair_stale_completion(&file, apply, &keys)?;
+                queue_completion_feedback::print_stale_completion_report(&report);
                 Ok(())
             }
             QueueAction::RepairProjection { file } => {

@@ -76,10 +76,9 @@ fn report_complete_with_lock_wait(
     // fresh editor cut before composing another report: blindly preferring the
     // retained whole-document target would attribute later operator edits to
     // this completion write (or drop them).
-    let current = agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
-        file, &resolved,
-    )?
-    .unwrap_or(resolved);
+    let current =
+        agent_doc_document_realtime_io::deferred_document_write_reconnect_content(file, &resolved)?
+            .unwrap_or(resolved);
     let Some(claim) = observed_claim(file, item, &current)? else {
         return Ok(None);
     };
@@ -277,6 +276,131 @@ pub(crate) fn repair_legacy_completion_feedback(
         repaired,
         accepted: true,
     })
+}
+
+/// `#stalecompletionrepair`: serialize with `report-complete` (whose cells
+/// this edits) and refuse while a retained editor write is still unsettled, so
+/// the successor is never composed over a cut the editor has not materialized.
+pub(crate) fn repair_stale_completion(
+    file: &Path,
+    apply: bool,
+    keys: &std::collections::HashSet<String>,
+) -> Result<agent_doc_queue_io::stale_completion_repair::StaleCompletionRepairReport> {
+    if !apply {
+        return agent_doc_queue_io::stale_completion_repair::repair(
+            file,
+            false,
+            keys,
+            &crate::CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        );
+    }
+    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
+    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
+    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
+        bail!(
+            "timed out after {}ms waiting to repair stale completion evidence for {}; no document mutation was attempted",
+            COMPLETION_LOCK_WAIT.as_millis(),
+            file.display(),
+        );
+    };
+    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
+        bail!(
+            "{} has a retained editor write (intent {}) that has not landed; open it in the active editor/project and run `agent-doc queue repair-projection {:?}`, then rerun; nothing was changed",
+            file.display(),
+            pending.intent_id,
+            file,
+        );
+    }
+    agent_doc_queue_io::stale_completion_repair::repair(
+        file,
+        true,
+        keys,
+        &crate::CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+    )
+}
+
+pub(crate) fn print_stale_completion_report(
+    report: &agent_doc_queue_io::stale_completion_repair::StaleCompletionRepairReport,
+) {
+    use agent_doc_queue_io::stale_completion_repair::one_line;
+    let verb = if report.applied {
+        "retired"
+    } else {
+        "would retire"
+    };
+    for cell in &report.stale_cells {
+        println!(
+            "{verb} completion cell key={} owner={} item=\"{}\"",
+            cell.key,
+            cell.owner,
+            one_line(&cell.item, 100)
+        );
+    }
+    for receipt in &report.stale_receipts {
+        println!(
+            "{verb} release receipt owner={} generation={} item=\"{}\"",
+            receipt.owner,
+            receipt.generation,
+            one_line(&receipt.item_text, 100)
+        );
+    }
+    for cell in &report.untracked_live_cells {
+        println!(
+            "kept untracked live-row completion cell key={} owner={} item=\"{}\" (its row is live but no claim or receipt tracks this attempt; if the row is a NEW request, retire it with --key {})",
+            cell.key,
+            cell.owner,
+            one_line(&cell.item, 100),
+            cell.key
+        );
+    }
+    for key in &report.missing_keys {
+        println!("--key {key}: no completion cell carries it (already retired?)");
+    }
+    eprintln!(
+        "[queue] {}: {} stale completion cell(s), {} stale receipt(s) {}; kept {} live-row cell(s), {} untracked live-row cell(s), {} claimed cell(s){}",
+        report.file.display(),
+        report.stale_cells.len(),
+        report.stale_receipts.len(),
+        if report.applied {
+            "retired"
+        } else if report.is_clean() {
+            "found"
+        } else {
+            "found (dry run; rerun with --apply to retire)"
+        },
+        report.kept_live_cells,
+        report.untracked_live_cells.len(),
+        report.kept_claimed_cells,
+        if report.applied {
+            format!("; snapshot cells retired {}", report.snapshot_cells_retired)
+        } else {
+            String::new()
+        },
+    );
+}
+
+pub(crate) fn print_stale_completion_scan(root: &Path) {
+    let scan = agent_doc_queue_io::stale_completion_repair::scan_project(root);
+    let mut stale_documents = 0;
+    for (file, report) in &scan {
+        match report {
+            Ok(report) if report.is_clean() => {}
+            Ok(report) => {
+                stale_documents += 1;
+                println!(
+                    "{}: {} stale completion cell(s), {} stale receipt(s)",
+                    file.display(),
+                    report.stale_cells.len(),
+                    report.stale_receipts.len()
+                );
+            }
+            Err(err) => println!("{}: not judged: {err:#}", file.display()),
+        }
+    }
+    eprintln!(
+        "[queue] {stale_documents} session document(s) under {} carry stale completion evidence (read from disk; nothing changed). Repair each with `agent-doc queue repair-stale-completion <FILE> --apply`.",
+        root.display()
+    );
 }
 
 fn publish_exchange_update(
@@ -659,8 +783,7 @@ mod tests {
             ),
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::claim(&doc, "finish sdk", "subagent:sdk", 600)
-            .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "finish sdk", "subagent:sdk", 600).unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(
             &doc,
             "finish sdk",
@@ -888,10 +1011,8 @@ mod tests {
             ("second worker", "subagent:second", "worker:second"),
         ] {
             agent_doc_queue_io::queue_claim::claim(&doc, item, owner, 600).unwrap();
-            agent_doc_queue_io::queue_claim::start_attempt(
-                &doc, item, owner, worker, 600, 1,
-            )
-            .unwrap();
+            agent_doc_queue_io::queue_claim::start_attempt(&doc, item, owner, worker, 600, 1)
+                .unwrap();
         }
 
         let canonical = doc.canonicalize().unwrap();
@@ -960,8 +1081,16 @@ mod tests {
                 .count(),
             2,
         );
-        assert!(pending.target_content.contains("- ☑️ [#subagent:first#1] first worker"));
-        assert!(pending.target_content.contains("- ☑️ [#subagent:second#1] second worker"));
+        assert!(
+            pending
+                .target_content
+                .contains("- ☑️ [#subagent:first#1] first worker")
+        );
+        assert!(
+            pending
+                .target_content
+                .contains("- ☑️ [#subagent:second#1] second worker")
+        );
 
         agent_doc_crdt_relay_io::deregister_replica_for_file(
             &doc,

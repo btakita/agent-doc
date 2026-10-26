@@ -462,6 +462,34 @@ pub fn retire_struck_by_successor_or_warn(file: &Path, before: &str, after: &str
     retire_struck_or_warn(file, &struck_heads, after, source);
 }
 
+/// Durably drop every receipt whose work has no live row and no active claim
+/// (`#stalecompletionrepair`): the one-time repair of receipts left behind by
+/// strikes made before `#strikeretires` or by hand. Uses the strike path's own
+/// ledger retirement. Call only after the document successor (if any) was
+/// accepted. Returns the dropped receipts.
+pub fn retire_without_live_work(
+    file: &Path,
+    kept: &agent_doc_queue::stale_completion_evidence::KeptWork,
+    source: &str,
+) -> Result<Vec<ClaimReleaseReceipt>> {
+    if load(file)?.receipts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let retired = mutate(file, |ledger| {
+        agent_doc_queue::stale_completion_evidence::retire_stale_receipts(ledger, kept)
+    })?;
+    if !retired.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_release_receipt_retired_stale retired={} source={source} (#stalecompletionrepair)",
+                retired.len()
+            ),
+        );
+    }
+    Ok(retired)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

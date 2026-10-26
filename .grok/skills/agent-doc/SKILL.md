@@ -1,7 +1,7 @@
 ---
-description: "Interactive markdown session. TRIGGER: agent-doc <file>. Requires binary admission and committed closeout."
+description: "Interactive markdown session. TRIGGER: agent-doc <file>, or a bare `agent-doc` (the file this tmux pane claims). Requires binary admission and committed closeout."
 user-invocable: true
-argument-hint: "<file>"
+argument-hint: "[file]"
 agent-doc-version: "0.35.554"
 ---
 
@@ -11,7 +11,7 @@ Interactive document session — respond to user edits in a markdown document.
 
 ## Invocation
 
-Submit `agent-doc <FILE>` in Grok Build. Read this skill, call connected `agent_doc_admit` for FILE, then read the document and run `agent-doc plan <FILE>`. Never recursively launch `agent-doc <FILE>` from a shell.
+Submit `agent-doc <FILE>` in Grok Build. With no FILE (`agent-doc` or `/agent-doc` alone), run `agent-doc resolve-pane-document` first and use the path it prints as FILE for the whole cycle; if it exits nonzero (not in tmux, no claim, several claims), report its reason and stop, never guess a document. Read this skill, call connected `agent_doc_admit` for FILE, then read the document and run `agent-doc plan <FILE>`. Never recursively launch `agent-doc <FILE>` from a shell.
 
 Grok lifecycle hooks are notifications: stdout cannot inject admission context or continue the turn. Successful MCP admission is the required checkpoint. Use connected `agent_doc_finalize` for closeout. If MCP tools are absent, install with `agent-doc skill install --harness grok`, then enable/trust the project MCP server in Grok. Never bypass refused admission.
 

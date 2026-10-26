@@ -204,6 +204,64 @@ pub fn remove_stale_pane_bindings(
     stale_keys
 }
 
+/// What a tmux pane's registry bindings say it claims.
+///
+/// The no-argument harness entrypoint (`/agent-doc`, Codex `agent-doc`) runs
+/// the cycle on "the document this pane claimed". That is only well defined
+/// when the registry binds the pane to exactly one document, so the projection
+/// keeps the other two cases distinct instead of picking one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneDocumentClaim {
+    /// No registry entry binds this pane to a document.
+    Unclaimed,
+    /// Exactly one document is bound to the pane. `file` is the entry's
+    /// recorded path, as stored (usually relative to the registry root).
+    Claimed { file: String },
+    /// Several distinct documents are bound to the pane, sorted by their
+    /// recorded path. Choosing one would be a guess.
+    Ambiguous { files: Vec<String> },
+}
+
+/// Project the documents `pane_id` claims from a registry snapshot.
+///
+/// Entries are compared by canonical document key, so two entries that name
+/// the same document by different spellings still count as one claim. An
+/// entry with an empty `file` names no document and is ignored.
+pub fn pane_document_claim(
+    base_dir: &Path,
+    registry: &Registry,
+    pane_id: &str,
+) -> PaneDocumentClaim {
+    let pane_id = pane_id.trim();
+    if pane_id.is_empty() {
+        return PaneDocumentClaim::Unclaimed;
+    }
+    let mut by_key: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for entry in registry.values() {
+        if entry.pane != pane_id || entry.file.trim().is_empty() {
+            continue;
+        }
+        let key = canonical_registry_key_in(base_dir, &entry.file);
+        by_key
+            .entry(key)
+            .and_modify(|kept| {
+                if entry.file < *kept {
+                    *kept = entry.file.clone();
+                }
+            })
+            .or_insert_with(|| entry.file.clone());
+    }
+    let mut files: Vec<String> = by_key.into_values().collect();
+    files.sort();
+    match files.len() {
+        0 => PaneDocumentClaim::Unclaimed,
+        1 => PaneDocumentClaim::Claimed {
+            file: files.remove(0),
+        },
+        _ => PaneDocumentClaim::Ambiguous { files },
+    }
+}
+
 pub fn registry_entry(fields: RegistryEntryFields<'_>) -> RegistryEntry {
     RegistryEntry {
         pane: fields.pane_id.to_string(),
@@ -476,5 +534,63 @@ mod tests {
         assert_eq!(inserted.session_id, "new-session");
         assert_eq!(inserted.pane, "%9");
         assert_eq!(inserted.supervisor_instance_id, "sup-1");
+    }
+
+    /// The no-argument entrypoint resolves only a pane bound
+    /// to exactly one document; every other shape stays distinguishable.
+    #[test]
+    fn pane_document_claim_resolves_only_a_single_bound_document() {
+        let base = Path::new("/work/project");
+        let mut registry = Registry::new();
+        registry.insert("a".to_string(), entry("session-a", "%1", "tasks/a.md"));
+        registry.insert("b".to_string(), entry("session-b", "%2", "tasks/b.md"));
+        registry.insert("c".to_string(), entry("session-c", "%2", "tasks/c.md"));
+        registry.insert("blank".to_string(), entry("session-d", "%4", ""));
+
+        assert_eq!(
+            pane_document_claim(base, &registry, "%1"),
+            PaneDocumentClaim::Claimed {
+                file: "tasks/a.md".to_string()
+            }
+        );
+        assert_eq!(
+            pane_document_claim(base, &registry, "%2"),
+            PaneDocumentClaim::Ambiguous {
+                files: vec!["tasks/b.md".to_string(), "tasks/c.md".to_string()]
+            },
+            "two documents on one pane must never be resolved by picking one"
+        );
+        assert_eq!(
+            pane_document_claim(base, &registry, "%3"),
+            PaneDocumentClaim::Unclaimed
+        );
+        assert_eq!(
+            pane_document_claim(base, &registry, "%4"),
+            PaneDocumentClaim::Unclaimed,
+            "an entry with no file names no document"
+        );
+        assert_eq!(
+            pane_document_claim(base, &registry, ""),
+            PaneDocumentClaim::Unclaimed
+        );
+    }
+
+    #[test]
+    fn pane_document_claim_counts_two_spellings_of_one_document_once() {
+        let base = Path::new("/work/project");
+        let mut registry = Registry::new();
+        registry.insert("rel".to_string(), entry("session-a", "%1", "tasks/a.md"));
+        registry.insert(
+            "abs".to_string(),
+            entry("session-a2", "%1", "/work/project/tasks/a.md"),
+        );
+
+        assert!(
+            matches!(
+                pane_document_claim(base, &registry, "%1"),
+                PaneDocumentClaim::Claimed { .. }
+            ),
+            "the same document recorded twice is one claim, not an ambiguity"
+        );
     }
 }

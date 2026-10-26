@@ -41,11 +41,11 @@ pub mod grok;
 /// The shared SKILL.md source bundled at build time.
 const SKILL_TEMPLATE: &str = include_str!("../SKILL.md");
 
-const CLAUDE_DESCRIPTION: &str = "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle.";
+const CLAUDE_DESCRIPTION: &str = "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>, or a bare `/agent-doc` (the file this tmux pane claims). Requires a markdown session document, installed CLI, and write+commit every cycle.";
 
-const CODEX_DESCRIPTION: &str = "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc.";
+const CODEX_DESCRIPTION: &str = "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> (or a bare `agent-doc`, for the file this tmux pane claims) as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc.";
 
-const OPENCODE_DESCRIPTION: &str = "Interactive markdown session for OpenCode. TRIGGER: user invokes /agent-doc <file> command. Requires a markdown session document, installed CLI, and write+commit every cycle.";
+const OPENCODE_DESCRIPTION: &str = "Interactive markdown session for OpenCode. TRIGGER: user invokes /agent-doc <file> command, or a bare `/agent-doc` (the file this tmux pane claims). Requires a markdown session document, installed CLI, and write+commit every cycle.";
 
 const GENERIC_DESCRIPTION: &str = "Interactive markdown session. TRIGGER: user invokes the harness-native agent-doc entrypoint. Requires a markdown session document, installed CLI, and write+commit every cycle.";
 
@@ -53,12 +53,13 @@ const CLAUDE_INVOCATION_SECTION: &str = r#"## Invocation
 
 ```
 /agent-doc <FILE>
+/agent-doc
 /agent-doc claim <FILE>
 /agent-doc compact <FILE>
 /agent-doc compact exchange <FILE>
 ```
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, `/agent-doc` runs on the document this tmux pane claims; the hook resolves it and the admitted context names it (`no FILE argument: this turn's FILE is ...`). Use that path as FILE. A refusal (not in tmux, no claim, several claims) is reported, never guessed.
 
 **Note:** Slash commands (`/agent-doc`) are Claude Code-specific. Other harnesses receive the document path directly.
 "#;
@@ -71,12 +72,13 @@ In Codex, invoke agent-doc by writing one of these as a normal message:
 
 ```
 agent-doc <FILE>
+agent-doc
 agent-doc claim <FILE>
 agent-doc compact <FILE>
 agent-doc compact exchange <FILE>
 ```
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, `agent-doc` runs on the document this tmux pane claims; the hook resolves it and the admitted context names it (`no FILE argument: this turn's FILE is ...`). Use that path as FILE. A refusal (not in tmux, no claim, several claims) is reported, never guessed.
 
 Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
 "#;
@@ -85,12 +87,13 @@ const OPENCODE_INVOCATION_SECTION: &str = r#"## Invocation
 
 ```
 /agent-doc <FILE>
+/agent-doc
 /agent-doc claim <FILE>
 /agent-doc compact <FILE>
 /agent-doc compact exchange <FILE>
 ```
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, run `agent-doc resolve-pane-document` first and use the path it prints as FILE for the whole cycle. If it exits nonzero (not in tmux, no claim, several claims), report its reason and stop; never guess a document.
 
 **Note:** Slash commands (`/agent-doc`) are installed as an OpenCode command via `agent-doc skill install --harness opencode`. Other harnesses receive the document path directly.
 "#;
@@ -103,7 +106,7 @@ Use the harness-native `agent-doc` entrypoint for the environment you are in:
 - Codex: `agent-doc <FILE>`, `agent-doc claim <FILE>`, `agent-doc compact <FILE>`, `agent-doc compact exchange <FILE>`
 - OpenCode: `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, `/agent-doc compact exchange <FILE>`
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE (`/agent-doc`, or `agent-doc` in Codex), the cycle runs on the document this tmux pane claims. Claude Code and Codex hooks resolve it and name it in the admitted context; other harnesses run `agent-doc resolve-pane-document` and use the printed path. A refusal is reported, never guessed.
 
 **Note:** Codex does not support project-defined slash commands. If this root file disagrees with the installed harness-specific instructions, treat the installed harness file as authoritative for the current turn.
 "#;

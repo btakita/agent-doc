@@ -15,6 +15,7 @@ pub use agent_doc_session_registry::{
 };
 
 pub mod dispatch_registry;
+pub mod pane_document;
 pub mod registration;
 pub mod tmux_server;
 

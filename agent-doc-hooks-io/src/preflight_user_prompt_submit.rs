@@ -132,6 +132,63 @@ pub fn invoked_document(prompt: &str) -> Option<String> {
     invoked_agent_doc(prompt).map(|invocation| invocation.document)
 }
 
+/// A no-argument session trigger: the first line is exactly
+/// `/agent-doc` (Claude Code, Grok Build, OpenCode) or `agent-doc` (Codex).
+///
+/// The document is the one the current tmux pane claimed; resolving it is an
+/// effect (registry read), so this leaf only recognizes the shape and
+/// [`with_resolved_document`] rewrites it into the ordinary `<FILE>` trigger.
+/// Every downstream parser, session binding, and same-turn repeat check then
+/// sees one canonical prompt naming the resolved document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BareAgentDocTrigger {
+    /// `true` for the slash spelling, so the rewrite keeps the harness form.
+    pub slash: bool,
+    /// Lines follow the trigger line (a trigger plus prompt body, or a paste).
+    pub multi_line: bool,
+}
+
+/// Recognize the no-argument trigger. Deliberately as strict as
+/// [`invoked_agent_doc`]: only the first line counts, and it must be the bare
+/// command with nothing else on it. A `/loop` wrapper is not accepted; the
+/// queue auto-loop re-enters with the resolved `<FILE>` the contract named.
+pub fn bare_agent_doc_trigger(prompt: &str) -> Option<BareAgentDocTrigger> {
+    let trimmed = prompt.trim();
+    let mut lines = trimmed.lines();
+    let first_line = lines.next()?.trim();
+    let slash = match first_line {
+        "/agent-doc" => true,
+        "agent-doc" => false,
+        _ => return None,
+    };
+    Some(BareAgentDocTrigger {
+        slash,
+        multi_line: lines.next().is_some(),
+    })
+}
+
+/// Rewrite a bare trigger into the `<FILE>` trigger for `document`, keeping
+/// the harness spelling and any following prompt body verbatim.
+///
+/// Returns `None` when the prompt is not a bare trigger, or when `document`
+/// cannot round-trip through [`invoked_document`] (for example a path with
+/// whitespace), so the caller refuses instead of admitting a different file.
+pub fn with_resolved_document(prompt: &str, document: &str) -> Option<String> {
+    let trigger = bare_agent_doc_trigger(prompt)?;
+    let command = if trigger.slash {
+        "/agent-doc"
+    } else {
+        "agent-doc"
+    };
+    let trimmed = prompt.trim_start();
+    let rest = match trimmed.find('\n') {
+        Some(index) => &trimmed[index..],
+        None => "",
+    };
+    let rewritten = format!("{command} {document}{rest}");
+    (invoked_document(&rewritten).as_deref() == Some(document)).then_some(rewritten)
+}
+
 /// A `/loop` interval token: `<digits><s|m|h|d>`, per the `loop` skill's own
 /// leading-token rule.
 fn is_loop_interval(word: &str) -> bool {
@@ -312,6 +369,66 @@ mod tests {
             "an extra argument means some other invocation"
         );
         assert_eq!(invoked_document("other-tool tasks/plan.md"), None);
+    }
+
+    /// The bare entrypoint is recognized in both harness
+    /// spellings and nothing looser.
+    #[test]
+    fn the_bare_entrypoint_is_recognized_in_both_spellings() {
+        assert_eq!(
+            bare_agent_doc_trigger("/agent-doc"),
+            Some(BareAgentDocTrigger {
+                slash: true,
+                multi_line: false
+            })
+        );
+        assert_eq!(
+            bare_agent_doc_trigger("  agent-doc  \n"),
+            Some(BareAgentDocTrigger {
+                slash: false,
+                multi_line: false
+            })
+        );
+        assert_eq!(
+            bare_agent_doc_trigger("agent-doc\ndo #fix now"),
+            Some(BareAgentDocTrigger {
+                slash: false,
+                multi_line: true
+            })
+        );
+        for not_bare in [
+            "",
+            "agent-doc tasks/plan.md",
+            "/agent-doc claim tasks/plan.md",
+            "/loop agent-doc",
+            "agent-docx",
+            "run agent-doc",
+            "Here is the log:\nagent-doc",
+        ] {
+            assert_eq!(bare_agent_doc_trigger(not_bare), None, "{not_bare:?}");
+        }
+    }
+
+    #[test]
+    fn a_bare_trigger_rewrites_into_the_file_trigger_for_every_parser() {
+        let slash = with_resolved_document("/agent-doc", "tasks/plan.md").unwrap();
+        assert_eq!(slash, "/agent-doc tasks/plan.md");
+        assert_eq!(invoked_document(&slash), Some("tasks/plan.md".to_string()));
+
+        let codex = with_resolved_document("agent-doc\ndo #fix now", "tasks/plan.md").unwrap();
+        assert_eq!(codex, "agent-doc tasks/plan.md\ndo #fix now");
+        assert_eq!(invoked_document(&codex), Some("tasks/plan.md".to_string()));
+
+        assert_eq!(
+            with_resolved_document("agent-doc", "tasks/my plan.md"),
+            None,
+            "a path that cannot round-trip must refuse, not admit another file"
+        );
+        assert_eq!(
+            with_resolved_document("agent-doc tasks/plan.md", "tasks/other.md"),
+            None,
+            "only a bare trigger is rewritten"
+        );
     }
 
     #[test]

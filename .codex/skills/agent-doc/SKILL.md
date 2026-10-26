@@ -1,7 +1,7 @@
 ---
-description: "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc."
+description: "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> (or a bare `agent-doc`, for the file this tmux pane claims) as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc."
 user-invocable: true
-argument-hint: "<file>"
+argument-hint: "[file]"
 agent-doc-version: "0.35.554"
 ---
 
@@ -17,12 +17,13 @@ In Codex, invoke agent-doc by writing one of these as a normal message:
 
 ```
 agent-doc <FILE>
+agent-doc
 agent-doc claim <FILE>
 agent-doc compact <FILE>
 agent-doc compact exchange <FILE>
 ```
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, `agent-doc` runs on the document this tmux pane claims; the hook resolves it and the admitted context names it (`no FILE argument: this turn's FILE is ...`). Use that path as FILE. A refusal (not in tmux, no claim, several claims) is reported, never guessed.
 
 Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
 ## Required cycle

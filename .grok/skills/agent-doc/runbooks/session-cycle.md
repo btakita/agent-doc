@@ -12,6 +12,12 @@ only the compact routing table that survives context compaction.
   into the document. The binary resolves and commits the turn through
   `agent-doc respond <FILE>` (`finalize` is its compatibility alias) or the
   repair path `agent-doc write --commit <FILE>`.
+- **No FILE means this pane's claim.** A bare `/agent-doc`
+  or Codex `agent-doc` runs on the document this tmux pane claims. Claude Code
+  and Codex hooks name it first in the admitted context (`no FILE argument:
+  this turn's FILE is ...`); hookless harnesses run
+  `agent-doc resolve-pane-document`. Use that path as FILE; on a refusal,
+  report it and stop without guessing.
 - **Document is the UI.** User edits are the prompt. A chat-only prompt is also
   a session turn (`#chatprompt`, GH #125; `#chatprompt`, GH #140): begin the response with
   the exact hook-issued `> **Chat prompt (#chatprompt:<id>):** <verbatim prompt>`

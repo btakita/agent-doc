@@ -1,7 +1,7 @@
 ---
-description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
+description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>, or a bare `/agent-doc` (the file this tmux pane claims). Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
-argument-hint: "<file>"
+argument-hint: "[file]"
 agent-doc-version: "0.35.554"
 ---
 
@@ -16,6 +16,8 @@ Use the harness-native entrypoint:
 - Claude Code: `/agent-doc <FILE>`
 - Codex: `agent-doc <FILE>` as a normal message (never a project slash command)
 - OpenCode: `/agent-doc <FILE>`
+
+With no FILE, the cycle runs on the document this tmux pane claims: Claude Code and Codex hooks resolve it and name it in the admitted context; other harnesses run `agent-doc resolve-pane-document` and use the printed path. A refusal is reported, never guessed.
 
 Subcommands are `claim <FILE>`, `compact <FILE>`, and `compact exchange <FILE>`.
 

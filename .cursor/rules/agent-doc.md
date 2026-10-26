@@ -1,7 +1,7 @@
 ---
-description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
+description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>, or a bare `/agent-doc` (the file this tmux pane claims). Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
-argument-hint: "<file>"
+argument-hint: "[file]"
 agent-doc-version: "0.35.554"
 ---
 
@@ -13,12 +13,13 @@ Interactive document session — respond to user edits in a markdown document.
 
 ```
 /agent-doc <FILE>
+/agent-doc
 /agent-doc claim <FILE>
 /agent-doc compact <FILE>
 /agent-doc compact exchange <FILE>
 ```
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, `/agent-doc` runs on the document this tmux pane claims; the hook resolves it and the admitted context names it (`no FILE argument: this turn's FILE is ...`). Use that path as FILE. A refusal (not in tmux, no claim, several claims) is reported, never guessed.
 
 **Note:** Slash commands (`/agent-doc`) are Claude Code-specific. Other harnesses receive the document path directly.
 ## Required cycle

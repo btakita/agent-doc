@@ -11,7 +11,8 @@
 use std::path::{Path, PathBuf};
 
 use agent_doc_hooks_io::preflight_user_prompt_submit::{
-    AgentDocInvocation, invoked_agent_doc, invoked_document, resolve_document,
+    AgentDocInvocation, bare_agent_doc_trigger, invoked_agent_doc, invoked_document,
+    resolve_document, with_resolved_document,
 };
 
 /// Printed after the injected contract has been produced successfully.
@@ -289,6 +290,98 @@ fn admission_failure_payload(target: &str, reason: &str) -> String {
     )
 }
 
+/// How a prompt arriving at a `UserPromptSubmit` hook is
+/// read once a bare `/agent-doc` / `agent-doc` trigger has been considered.
+#[derive(Debug, Clone)]
+enum PaneTriggerExpansion {
+    /// Not a bare trigger, or a multi-line paste whose pane did not resolve:
+    /// the prompt is handled exactly as before.
+    Unchanged,
+    /// The pane's claim resolved. `input.prompt` is now the ordinary
+    /// `<FILE>` trigger, and `notice` tells the agent which FILE this turn has.
+    Resolved {
+        input: agent_doc_codex_hook_io::UserPromptSubmitInput,
+        notice: String,
+    },
+    /// A single-line bare trigger whose pane claim did not resolve. Admission
+    /// is refused by name; no document is guessed.
+    Refused { reason: String },
+}
+
+/// Resolve a bare trigger against the claim of `pane` (`$TMUX_PANE`).
+///
+/// Runs before session tracking, so the session binding, the admitted cycle,
+/// the sealed contract, and a later same-turn repeat all name the resolved
+/// document through one canonical prompt. The decision is the shared
+/// [`agent_doc_session_registry_io::pane_document::resolve_pane_document`],
+/// the same one `agent-doc resolve-pane-document` prints.
+fn expand_pane_document_trigger(
+    input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
+    pane: Option<&str>,
+) -> PaneTriggerExpansion {
+    let Some(trigger) = bare_agent_doc_trigger(&input.prompt) else {
+        return PaneTriggerExpansion::Unchanged;
+    };
+    let cwd = PathBuf::from(&input.cwd);
+    let refuse = |reason: String| {
+        if trigger.multi_line {
+            // `#pastetriggeradmit`: a multi-line prompt that merely begins with
+            // the bare command is operator content unless it resolves.
+            eprintln!(
+                "[agent-doc] preflight hook: multi-line prompt begins with a bare `agent-doc` \
+                 line but no pane document resolved ({reason}); treating it as pasted content, \
+                 not a trigger"
+            );
+            PaneTriggerExpansion::Unchanged
+        } else {
+            PaneTriggerExpansion::Refused { reason }
+        }
+    };
+    let file = match agent_doc_session_registry_io::pane_document::resolve_pane_document(&cwd, pane)
+    {
+        Ok(file) => file,
+        Err(refusal) => return refuse(refusal.to_string()),
+    };
+    let document = display_document(&cwd, &file);
+    let Some(prompt) = with_resolved_document(&input.prompt, &document) else {
+        return refuse(format!(
+            "pane {}'s claimed document `{document}` cannot be named as a `<FILE>` trigger \
+             argument (it must be a single `.md` path without whitespace). Invoke the \
+             entrypoint with the document instead.",
+            pane.unwrap_or_default()
+        ));
+    };
+    let mut input = input.clone();
+    input.prompt = prompt;
+    PaneTriggerExpansion::Resolved {
+        input,
+        notice: format!(
+            "[agent-doc] no FILE argument: this turn's FILE is `{document}`, the document tmux \
+             pane {} claims. Use `{document}` wherever the workflow says <FILE>.",
+            pane.unwrap_or_default()
+        ),
+    }
+}
+
+/// The refusal payload for a bare trigger whose pane claim did not resolve.
+///
+/// Same marker and `document:`/`reason:` lines as every refusal, so the
+/// agent's three-state read is unchanged. There is no document to run
+/// `session-check` against, so the remedy is to ask for an explicit FILE.
+fn pane_document_refusal_payload(reason: &str) -> String {
+    format!(
+        "{ADMISSION_FAILURE_MARKER}\n\
+         document: (none: no FILE argument and no single pane claim)\n\
+         reason: {reason}\n\
+         remedy: no cycle was admitted because the no-argument entrypoint runs only on the one \
+         document this tmux pane claims, and that did not resolve. Do NOT guess \
+         a document, do NOT shell `agent-doc preflight` or `agent-doc <FILE>`, do NOT run \
+         `agent-doc claim` yourself, and do not write any document. Report the reason to the \
+         operator and stop: they can re-send the entrypoint with an explicit FILE, or claim the \
+         document in this pane first."
+    )
+}
+
 /// Outcome of a hook admission attempt.
 ///
 /// Returned rather than propagated because every branch is already fully
@@ -309,6 +402,7 @@ enum HookAdmission {
 fn run_preflight_for_prompt(
     prompt: &str,
     cwd: &Path,
+    pane_notice: Option<&str>,
     admitted_directive: Option<&str>,
     preflight_invocation: agent_doc_preflight_command_io::PreflightInvocation,
     tracked_input: Option<&agent_doc_codex_hook_io::UserPromptSubmitInput>,
@@ -415,21 +509,17 @@ fn run_preflight_for_prompt(
             // appear on any error path because the skill treats its absence as
             // failed admission. A chat-prompt notice goes BEFORE the contract so
             // the marker stays its seal.
-            let mut context = String::new();
-            if let Some(notice) = chat_notice.as_deref() {
-                context.push_str(notice);
-                context.push('\n');
-            }
-            context.push_str(&format!("{}\n{CONTRACT_MARKER}", contract.trim_end()));
+            let context = admitted_context(
+                pane_notice,
+                chat_notice.as_deref(),
+                &contract,
+                admitted_directive,
+            );
             if chat_notice.is_some()
                 && let Some(input) = tracked_input
                 && let Err(err) = agent_doc_codex_hook_io::clear_chat_prompt_ledger(input, &file)
             {
                 eprintln!("[agent-doc] chat prompt ledger clear failed: {err:#}");
-            }
-            if let Some(directive) = admitted_directive {
-                context.push('\n');
-                context.push_str(directive);
             }
             emit_user_prompt_submit_context(&context);
             HookAdmission::Admitted
@@ -443,6 +533,30 @@ fn run_preflight_for_prompt(
             HookAdmission::Failed
         }
     }
+}
+
+/// The injected context for an admitted contract.
+///
+/// Notices (the resolved pane FILE, then the `#chatprompt` notice)
+/// go BEFORE the contract so [`CONTRACT_MARKER`] stays its seal; only the
+/// harness directive follows the marker.
+fn admitted_context(
+    pane_notice: Option<&str>,
+    chat_notice: Option<&str>,
+    contract: &str,
+    admitted_directive: Option<&str>,
+) -> String {
+    let mut context = String::new();
+    for notice in [pane_notice, chat_notice].into_iter().flatten() {
+        context.push_str(notice);
+        context.push('\n');
+    }
+    context.push_str(&format!("{}\n{CONTRACT_MARKER}", contract.trim_end()));
+    if let Some(directive) = admitted_directive {
+        context.push('\n');
+        context.push_str(directive);
+    }
+    context
 }
 
 /// Document path as the operator would type it: relative to the hook cwd when
@@ -894,6 +1008,28 @@ fn report_deadline_refusal(
     agent_doc_ops_log_io::log_op(file, &line);
 }
 
+/// Apply [`expand_pane_document_trigger`] at a hook entry point, using this
+/// hook process's `$TMUX_PANE` (inherited from the harness running in the pane).
+///
+/// `None` means a refusal was already emitted and the hook must stop.
+fn pane_resolved_input(
+    input: agent_doc_codex_hook_io::UserPromptSubmitInput,
+) -> Option<(
+    agent_doc_codex_hook_io::UserPromptSubmitInput,
+    Option<String>,
+)> {
+    let pane = agent_doc_tmux_io::current_pane_id_from_env();
+    match expand_pane_document_trigger(&input, pane.as_deref()) {
+        PaneTriggerExpansion::Unchanged => Some((input, None)),
+        PaneTriggerExpansion::Resolved { input, notice } => Some((input, Some(notice))),
+        PaneTriggerExpansion::Refused { reason } => {
+            eprintln!("[agent-doc] preflight hook refused a no-FILE trigger: {reason}");
+            emit_user_prompt_submit_context(&pane_document_refusal_payload(&reason));
+            None
+        }
+    }
+}
+
 /// Claude Code `UserPromptSubmit` hook entry point.
 ///
 /// Reads the hook payload from stdin. When the prompt is an `agent-doc <FILE>`
@@ -921,6 +1057,9 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
                 return Ok(());
             }
         };
+    let Some((input, pane_notice)) = pane_resolved_input(input) else {
+        return Ok(());
+    };
     let cwd = PathBuf::from(&input.cwd);
 
     // Claude's Stop hook needs the same exact-session document binding as
@@ -944,6 +1083,7 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
     let admission = run_preflight_for_prompt(
         &input.prompt,
         &cwd,
+        pane_notice.as_deref(),
         None,
         agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
         Some(&input),
@@ -1034,6 +1174,11 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
                 return Ok(());
             }
         };
+    // Before the same-turn check, so a repeated bare trigger compares as the
+    // same canonical `<FILE>` prompt its first admission recorded.
+    let Some((input, pane_notice)) = pane_resolved_input(input) else {
+        return Ok(());
+    };
 
     // Codex may deliver a second identical trigger as real-time steering into
     // the turn whose hook already admitted this document. Preserve that
@@ -1063,6 +1208,7 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
     let admission = run_preflight_for_prompt(
         &input.prompt,
         Path::new(&input.cwd),
+        pane_notice.as_deref(),
         Some(CODEX_IN_PANE_ADMISSION_DIRECTIVE),
         agent_doc_preflight_command_io::PreflightInvocation::CodexHook,
         Some(&input),
@@ -1349,6 +1495,7 @@ mod tests {
                 "/loop agent-doc tasks/missing.md",
                 dir.path(),
                 None,
+                None,
                 agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
                 None,
             ),
@@ -1363,6 +1510,7 @@ mod tests {
                 "what does this function do?",
                 dir.path(),
                 None,
+                None,
                 agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
                 None,
             ),
@@ -1372,6 +1520,7 @@ mod tests {
             run_preflight_for_prompt(
                 "/loop check the deploy",
                 dir.path(),
+                None,
                 None,
                 agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
                 None,
@@ -1810,4 +1959,123 @@ mod tests {
 
     const HOOK_ADMISSION_BUDGET_SECS_DURATION: std::time::Duration =
         std::time::Duration::from_secs(HOOK_ADMISSION_BUDGET_SECS);
+
+    /// Test fixture: a project whose registry binds
+    /// `(pane, file)` pairs, with every named file present on disk.
+    fn pane_claim_project(claims: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let mut registry = tmux_router::Registry::new();
+        for (index, (pane, file)) in claims.iter().enumerate() {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "# Session\n").unwrap();
+            let session = format!("session-{index}");
+            agent_doc_session_registry::insert_registry_entry(
+                root,
+                &mut registry,
+                agent_doc_session_registry::RegistryEntryFields {
+                    session_id: &session,
+                    pane_id: pane,
+                    file,
+                    pid: 1,
+                    cwd: &root.display().to_string(),
+                    started: "2026-10-26T00:00:00Z",
+                    window: "@1",
+                    supervisor_instance_id: "",
+                },
+            );
+        }
+        agent_doc_session_registry_io::save_in(root, &registry).unwrap();
+        dir
+    }
+
+    fn prompt_input(cwd: &Path, prompt: &str) -> agent_doc_codex_hook_io::UserPromptSubmitInput {
+        agent_doc_codex_hook_io::UserPromptSubmitInput {
+            session_id: "pane-doc-session".to_string(),
+            turn_id: String::new(),
+            cwd: cwd.display().to_string(),
+            prompt: prompt.to_string(),
+        }
+    }
+
+    /// The bare entrypoint in either spelling becomes the ordinary `<FILE>`
+    /// trigger for the pane's claimed document, so admission, session binding
+    /// and the sealed contract all name that file.
+    #[test]
+    fn a_bare_trigger_in_a_claimed_pane_admits_the_claimed_document() {
+        let dir = pane_claim_project(&[("%7", "tasks/plan.md"), ("%8", "tasks/other.md")]);
+        for (prompt, expected) in [
+            ("/agent-doc", "/agent-doc tasks/plan.md"),
+            ("agent-doc", "agent-doc tasks/plan.md"),
+            ("agent-doc\ndo #fix", "agent-doc tasks/plan.md\ndo #fix"),
+        ] {
+            let input = prompt_input(dir.path(), prompt);
+            let PaneTriggerExpansion::Resolved { input, notice } =
+                expand_pane_document_trigger(&input, Some("%7"))
+            else {
+                panic!("a claimed pane must resolve {prompt:?}");
+            };
+            assert_eq!(input.prompt, expected);
+            assert!(notice.contains("`tasks/plan.md`"), "{notice}");
+            assert!(notice.contains("pane %7"), "{notice}");
+            let invocation = invoked_agent_doc(&input.prompt).expect("a FILE trigger");
+            assert_eq!(
+                resolve_document(dir.path(), &invocation.document),
+                Some(dir.path().join("tasks/plan.md")),
+                "admission must open the cycle on the claimed document"
+            );
+            assert_eq!(
+                agent_doc_codex_hook_io::resolve_agent_doc_path(&input.prompt, dir.path()),
+                Some(dir.path().join("tasks/plan.md")),
+                "session tracking must bind the same document the contract names"
+            );
+
+            let context = admitted_context(Some(&notice), None, "{\"ok\":true}\n", None);
+            assert!(context.starts_with(&notice), "{context}");
+            assert!(
+                context.ends_with(CONTRACT_MARKER),
+                "the contract marker must stay the seal: {context}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_trigger_without_a_single_claim_refuses_by_name() {
+        let dir = pane_claim_project(&[("%5", "tasks/a.md"), ("%5", "tasks/b.md")]);
+        let input = prompt_input(dir.path(), "/agent-doc");
+
+        for (pane, needle) in [
+            (None, "$TMUX_PANE"),
+            (Some("%3"), "claims no document"),
+            (Some("%5"), "refusing to guess"),
+        ] {
+            let PaneTriggerExpansion::Refused { reason } =
+                expand_pane_document_trigger(&input, pane)
+            else {
+                panic!("{pane:?} must refuse");
+            };
+            assert!(reason.contains(needle), "{pane:?}: {reason}");
+            let payload = pane_document_refusal_payload(&reason);
+            assert!(payload.starts_with(ADMISSION_FAILURE_MARKER), "{payload}");
+            assert!(!payload.contains(CONTRACT_MARKER), "{payload}");
+            assert!(payload.contains("Do NOT guess"), "{payload}");
+        }
+    }
+
+    #[test]
+    fn an_unresolved_multi_line_paste_and_a_file_trigger_are_left_alone() {
+        let dir = pane_claim_project(&[("%7", "tasks/plan.md")]);
+        let paste = prompt_input(dir.path(), "agent-doc\nsome pasted log");
+        assert!(matches!(
+            expand_pane_document_trigger(&paste, None),
+            PaneTriggerExpansion::Unchanged
+        ));
+        let explicit = prompt_input(dir.path(), "/agent-doc tasks/plan.md");
+        assert!(matches!(
+            expand_pane_document_trigger(&explicit, Some("%9")),
+            PaneTriggerExpansion::Unchanged
+        ));
+    }
 }

@@ -2,6 +2,9 @@ package com.github.btakita.agentdoc
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.editor.event.DocumentEvent
@@ -10,6 +13,7 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import io.github.lazily.DebounceCore
@@ -146,6 +150,49 @@ internal fun classifyBurstAgainstSnapshotUtil(
         lastSeq > snapshotEventSeq -> BurstSnapshotRelation.OUTRAN_BY_LATER_EVENT
         else -> BurstSnapshotRelation.SNAPSHOT_AHEAD_WITHOUT_PENDING_EVENT
     }
+}
+
+/**
+ * `#componentownclose`: native's verdict on one captured burst
+ * (`agent_doc_check_editor_ops_component_markers`). The rule lives in native; this is
+ * only its return code.
+ */
+internal enum class EditorOpMarkerCheck(val changesDiagnostic: Boolean) {
+    UNCHANGED(false),
+    MARKERS_REMOVED(true),
+    MARKERS_REPAIRED(true),
+    UNAVAILABLE(false),
+    ;
+
+    companion object {
+        fun fromCode(code: Int): EditorOpMarkerCheck =
+            when (code) {
+                0 -> UNCHANGED
+                1 -> MARKERS_REMOVED
+                2 -> MARKERS_REPAIRED
+                else -> UNAVAILABLE
+            }
+    }
+}
+
+/**
+ * One Event Log warning per marker break per document: a burst that removes a marker
+ * warns once, typing on in the broken buffer does not warn again, and the burst that
+ * repairs the markers re-arms it.
+ */
+internal class EditorOpMarkerWarnings {
+    private val warned = ConcurrentHashMap.newKeySet<String>()
+
+    /** Whether [check] for [filePath] should raise a new warning. */
+    fun observe(filePath: String, check: EditorOpMarkerCheck): Boolean =
+        when (check) {
+            EditorOpMarkerCheck.MARKERS_REMOVED -> warned.add(filePath)
+            EditorOpMarkerCheck.MARKERS_REPAIRED -> {
+                warned.remove(filePath)
+                false
+            }
+            EditorOpMarkerCheck.UNCHANGED, EditorOpMarkerCheck.UNAVAILABLE -> false
+        }
 }
 
 /** Stable `reason=` tokens for `editor_op_capture_refused` receipts. */
@@ -565,6 +612,75 @@ object TypingTracker : DocumentListener {
             // older cdylib without the proof-receipt ABI; capture still proceeds
         } catch (e: Throwable) {
             LOG.debug("[op-capture] proof receipt skipped: ${e.message}")
+        }
+    }
+
+    private val editorOpMarkerWarnings = EditorOpMarkerWarnings()
+
+    /**
+     * `#componentownclose` (gap 1 of the todo-collapse fix): ask native whether
+     * this burst removed (or repaired) a component marker. Native owns the rule and
+     * writes the same `⚠ agent-doc:` marker diagnostic as the live relay fence; this
+     * only re-renders the status label and raises one Event Log warning per break.
+     * The editor text is never changed.
+     */
+    private fun checkEditorOpComponentMarkers(
+        lib: AgentDocLib,
+        filePath: String,
+        lineage: EditorOpLineageBurst,
+    ) {
+        val check =
+            try {
+                EditorOpMarkerCheck.fromCode(
+                    lib.agent_doc_check_editor_ops_component_markers(
+                        filePath,
+                        lineage.preText,
+                        lineage.postText,
+                    ),
+                )
+            } catch (_: UnsatisfiedLinkError) {
+                return // older cdylib without the marker-check ABI
+            } catch (_: NoSuchMethodError) {
+                return // older cdylib without the marker-check ABI
+            } catch (e: Throwable) {
+                LOG.debug("[op-capture] component marker check skipped: ${e.message}")
+                return
+            }
+        if (!check.changesDiagnostic) return
+        val warn = editorOpMarkerWarnings.observe(filePath, check)
+        ApplicationManager.getApplication().invokeLater {
+            for (project in ProjectManager.getInstance().openProjects) {
+                if (project.isDisposed) continue
+                TurnStateBannerRefresher.getInstance(project)
+                    .reapplyLastAuthority(filePath, "editor-op-marker-check")
+                if (warn && project.basePath?.let { filePath.startsWith("$it/") } == true) {
+                    notifyComponentMarkersRemoved(project, filePath)
+                }
+            }
+        }
+    }
+
+    private fun notifyComponentMarkersRemoved(project: Project, filePath: String) {
+        val diagnostic =
+            try {
+                TurnStateBridge.routeFailureDiagnosticsFileForFile(filePath)
+                    ?.takeIf { it.isFile }
+                    ?.readText()
+                    ?.trim()
+            } catch (_: Exception) {
+                null
+            } ?: return
+        try {
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(
+                    "Component marker removed in ${java.io.File(filePath).name}",
+                    TerminalUtil.notificationHtml(diagnostic),
+                    NotificationType.WARNING,
+                )
+                .notify(project)
+        } catch (e: Throwable) {
+            LOG.debug("[op-capture] component marker warning skipped: ${e.message}")
         }
     }
 
@@ -992,6 +1108,10 @@ object TypingTracker : DocumentListener {
             )
             return
         }
+        // `#componentownclose`: the recorded ops are offsets and lengths only, so
+        // nothing downstream can see that a deleted range held a component marker.
+        // Check the buffer itself first and warn now; the burst is still recorded.
+        checkEditorOpComponentMarkers(lib, filePath, lineage)
         val outcome =
             reportEditorOps(lib, filePath, lineage, operatorOps, drainedOps.size - operatorOps)
         if (outcome == ReportOutcome.RETRYABLE) {

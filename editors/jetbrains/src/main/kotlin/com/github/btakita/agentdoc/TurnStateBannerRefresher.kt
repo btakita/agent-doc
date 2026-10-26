@@ -156,6 +156,10 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
             close = CpTurnAuthoritySubscription::close,
         )
     private val presentations = ConcurrentHashMap<String, TurnStateBridge.TurnStatePresentation>()
+    // `#componentownclose`: the last controller frame per document, so a diagnostic the
+    // binary wrote between frames (the marker check at edit time) renders without waiting
+    // for the next frame.
+    private val lastAuthority = ConcurrentHashMap<String, String>()
     private val transientStatuses = TransientDocumentStatus()
     private val inputRequiredNotifications =
         InputRequiredNotifications<Notification> { it.expire() }
@@ -248,11 +252,27 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         }
     }
 
+    /**
+     * Re-render [filePath] from its last controller frame. The status label reads the binary's
+     * `editor-route-errors` diagnostic only while rendering a frame, so a diagnostic written
+     * between frames (`#componentownclose`) needs this to show at edit time. No-op until the
+     * first frame arrives or once the document is released.
+     */
+    fun reapplyLastAuthority(filePath: String, reason: String) {
+        if (project.isDisposed || !tracking.isDisplayed(filePath)) return
+        ApplicationManager.getApplication().executeOnPooledThread {
+            if (project.isDisposed) return@executeOnPooledThread
+            val authorityJson = lastAuthority[filePath] ?: return@executeOnPooledThread
+            applyPresentation(filePath, authorityJson, reason, record = false)
+        }
+    }
+
     private fun release(filePath: String) {
         if (tracking.release(filePath)) {
             LOG.info("[turn-state] released $filePath: closed in every client")
         }
         presentations.remove(filePath)
+        lastAuthority.remove(filePath)
         transientStatuses.clear(filePath)
         inputRequiredNotifications.clear(filePath)
         deferredClearSupersededNotices.forget(filePath)
@@ -298,9 +318,32 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                 notifyDeferredClearSuperseded(filePath, dropped)
             }
         }
-        val next = TurnStateBridge.presentationFromDocumentAuthority(filePath, authorityJson) ?: return
-        val previous = presentations.put(filePath, next)
-        if (previous != next) {
+        applyPresentation(filePath, authorityJson, reason, record = true)
+    }
+
+    /**
+     * Render one controller frame into the cached presentation. [record] stores it as the
+     * document's last frame; a re-render ([reapplyLastAuthority]) passes false and is dropped if a
+     * newer frame landed meanwhile, so it can never paint an older phase over a newer one.
+     */
+    private fun applyPresentation(
+        filePath: String,
+        authorityJson: String,
+        reason: String,
+        record: Boolean,
+    ) {
+        val next = TurnStateBridge.presentationFromDocumentAuthority(filePath, authorityJson)
+        val previous =
+            synchronized(lastAuthority) {
+                if (record) {
+                    lastAuthority[filePath] = authorityJson
+                } else if (lastAuthority[filePath] !== authorityJson) {
+                    return
+                }
+                next ?: return
+                presentations.put(filePath, next)
+            }
+        if (next != null && previous != next) {
             // GH #323: INFO, once per change per document, so a missing banner can be matched
             // against the controller's `turn_in_flight` for that document.
             LOG.info(
@@ -417,6 +460,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     override fun dispose() {
         tracking.clear()
         presentations.clear()
+        lastAuthority.clear()
         transientStatuses.clearAll()
         inputRequiredNotifications.clearAll()
         deferredClearSupersededNotices.clearAll()

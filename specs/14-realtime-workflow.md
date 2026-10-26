@@ -1041,7 +1041,9 @@ canonical is not current text and does not pass the commit barrier, so the last
 valid revision stays the persisted and committed one. The relay logs
 `crdt_replica_update_component_structure_fenced` and shows the `⚠ agent-doc:`
 marker diagnostic. The first update that pairs the markers again releases the
-fence. The fence is engaged only when the update introduced a `parse_error:`
+fence. The editor-op path runs the same predicate on the buffer before a
+captured op burst is recorded, so a marker deletion is warned about at edit
+time even while the replica is detached. The fence is engaged only when the update introduced a `parse_error:`
 into a canonical that had none **and deleted a marker line**.
 An unparseable result alone is not evidence: operator typing passes through
 unparseable states. A half-typed code fence hides markers without deleting any

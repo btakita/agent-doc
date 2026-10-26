@@ -899,6 +899,19 @@ interface AgentDocLib : Library {
     ): Int
 
     /**
+     * Run the component-marker check on the buffer before a captured burst is recorded
+     * (`#componentownclose`). [preText] is the text the burst was typed into and [postText] the
+     * buffer it produced. Native writes (or clears) the `⚠ agent-doc:` marker diagnostic; the editor
+     * text is never changed. Returns 0 unchanged, 1 a component marker was removed, 2 the markers
+     * were repaired, -1 on bad input.
+     */
+    fun agent_doc_check_editor_ops_component_markers(
+        filePath: String,
+        preText: String,
+        postText: String,
+    ): Int
+
+    /**
      * End the current operator-op epoch before a remote/agent projection changes the editor
      * frontier. This prevents later local edits from being appended to operations captured against
      * the pre-projection merge base.

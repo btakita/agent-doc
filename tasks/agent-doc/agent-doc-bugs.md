@@ -838,16 +838,18 @@ The worker hit an unrelated flake once in 5 lib runs, `plugin_publications_proje
 - ~~`- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]~~
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
-- ~~fix nondeterministic agent-doc-controller-io rpc::tests recording_an_editor_exit_reaps_the_relay_ghost_member — failed 6 of 60 full parallel crate runs in the singleton-flake baseline (2026-10-26), panic "a live editor registers a replica"~~
-- ~~fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)~~
-- ☑️ [#subagent:exitwatcheriso#1] isolate the controller exit watcher from other tests' editor pids: every in-process test controller reaps dead pids registered by other tests' documents in the process-wide liveness state and writes their exit records into its own root's state.db (found by the socket-unlink flake fix, 2026-10-26)
-- 🚧 [#subagent:laneplaneflake#1] fix nondeterministic agent-doc-controller-io rpc::tests plugin_publications_project_into_the_publishing_clients_navigation_lane — await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO) returned false in 1 of 5 full lib runs (rpc.rs:43910), found during the exit-watcher root-scope fix, 2026-10-26
+- ☑️ [#subagent:laneplaneflake#1] fix nondeterministic agent-doc-controller-io rpc::tests plugin_publications_project_into_the_publishing_clients_navigation_lane — await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO) returned false in 1 of 5 full lib runs (rpc.rs:43910), found during the exit-watcher root-scope fix, 2026-10-26
 - 🔄 release + publish
-- ~~The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.~~
-- 🚧 [#subagent:cellretire#1] retire a queue row's subagent completion cell and report receipt on every strike path (preflight residue strike, orphan `queue consume --id`, controller completion), not only closeout `queue consume`, so a stale cell can never paint 🔄 on a later row with the same text (found by the fenced-marker fix, 2026-10-26)
-- 🚧 [#subagent:rowidentity#1] key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/376~~
+- ☑️ [#subagent:cellretire#1] retire a queue row's subagent completion cell and report receipt on every strike path (preflight residue strike, orphan `queue consume --id`, controller completion), not only closeout `queue consume`, so a stale cell can never paint 🔄 on a later row with the same text (found by the fenced-marker fix, 2026-10-26)
+- 📥 end a Reported queue claim on every strike path (orphan-id strike, controller projection, preflight done-id and backlog strikes), not only at the next closeout prune, so a later identical row can never pick up ☑️ from the claim ledger (found by the completion-cell retirement fix, 2026-10-26)
+- 📥 one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
+- ☑️ [#subagent:rowidentity#1] key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
 - 🚧 [#subagent:strikeformat#1] The strikethrough in the first current queue item is malformed.
+- 📥 release + publish: Issue 376 fix
+- 🚧 [#subagent:onboarding#1] We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
+- 🚧 [#subagent:markerdocs#1] What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
+- 🚧 [#subagent:sameheading#1] agent-doc should support the header being on the same line as the open tag: e.g. `## Queue: Main ` as a prefix to the `agent:run` open tag.
+- 🚧 [#subagent:loopmisroute#1] Items are being added by this agent + agent-doc into `agent:loop` in error. The items should go into `agent:run`.
 <!-- /agent:run -->
 
 ## Run: Issues

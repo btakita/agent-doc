@@ -3,7 +3,10 @@
 //! ## Spec
 //! - `check_prereqs()`: resolves the exact tmux client, reports its version, and
 //!   verifies a live-server protocol handshake; also checks `claude` in the caller PATH.
-//!   Never fails — warnings only.
+//!   Never fails — warnings only. A handshake that fails only because no tmux
+//!   server is running yet ("no server running" / "error connecting to ... (No
+//!   such file or directory)") is reported `ok`: a fresh machine has no server
+//!   and agent-doc starts one on first use. Any other handshake failure is `BROKEN`.
 //! - `run(editor, skip_prereqs, skip_plugins)`: orchestrates the full install workflow.
 //!   - Runs `check_prereqs()` unless `skip_prereqs` is set.
 //!   - Skips plugin installation when `skip_plugins` is set.
@@ -23,6 +26,8 @@
 //!   `--editor`.
 //!
 //! ## Evals
+//! - fresh_machine_without_a_tmux_server_is_not_reported_broken: absent-server errors → `ok`
+//! - a_failed_handshake_with_a_live_server_is_still_broken: other handshake errors → `BROKEN` + `tmux_bin` hint
 //! - check_prereqs_runs_without_panic: calling `check_prereqs()` on any system completes without panic
 //! - run_skip_plugins: `skip_plugins=true` → no `plugin::install` called, returns Ok
 //! - run_explicit_editor: `editor=Some("jetbrains")` → only JetBrains plugin install attempted
@@ -39,43 +44,66 @@ fn which(bin: &str) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// Check prerequisites and print status. Does not fail — only warns.
-pub fn check_prereqs() {
-    let tmux = crate::env_cmd::probe_tmux();
+/// True when a tmux server handshake failed only because no server is running
+/// yet. That is the normal state on a fresh machine (agent-doc starts its own
+/// server on first use), so it must not be reported as a broken install.
+pub(crate) fn tmux_server_not_running(error: &str) -> bool {
+    error.contains("no server running")
+        || (error.contains("error connecting to") && error.contains("No such file or directory"))
+}
+
+/// The prerequisite report lines for one tmux probe.
+pub(crate) fn tmux_prereq_lines(tmux: &crate::env_cmd::TmuxProbe) -> Vec<String> {
     match (&tmux.version, tmux.server_handshake) {
-        (Some(version), true) => eprintln!(
+        (Some(version), true) => vec![format!(
             "[install] tmux ... ok (binary={} client={} server={})",
             tmux.binary,
             version,
             tmux.server_version.as_deref().unwrap_or("unknown")
-        ),
-        (Some(version), false) => {
-            eprintln!(
+        )],
+        (Some(version), false)
+            if tmux
+                .server_error
+                .as_deref()
+                .is_some_and(tmux_server_not_running) =>
+        {
+            vec![format!(
+                "[install] tmux ... ok (binary={} client={}; no server running yet, agent-doc starts one when needed)",
+                tmux.binary, version
+            )]
+        }
+        (Some(version), false) => vec![
+            format!(
                 "[install] tmux ... BROKEN (binary={} client={})",
                 tmux.binary, version
-            );
-            eprintln!(
+            ),
+            format!(
                 "[install]   cause: {}",
                 tmux.server_error
                     .as_deref()
                     .unwrap_or("server handshake failed")
-            );
-            eprintln!(
-                "[install]   hint: set tmux_bin in .agent-doc/config.toml or ~/.config/agent-doc/config.toml to the client that owns the running server"
-            );
-        }
-        (None, _) => {
-            eprintln!("[install] tmux ... MISSING (binary={})", tmux.binary);
-            eprintln!(
+            ),
+            "[install]   hint: set tmux_bin in .agent-doc/config.toml or ~/.config/agent-doc/config.toml to the client that owns the running server".to_string(),
+        ],
+        (None, _) => vec![
+            format!("[install] tmux ... MISSING (binary={})", tmux.binary),
+            format!(
                 "[install]   cause: {}",
                 tmux.version_error
                     .as_deref()
                     .unwrap_or("version probe failed")
-            );
-            eprintln!(
-                "[install]   hint: Install tmux: https://github.com/tmux/tmux/wiki/Installing"
-            );
-        }
+            ),
+            "[install]   hint: Install tmux: https://github.com/tmux/tmux/wiki/Installing"
+                .to_string(),
+        ],
+    }
+}
+
+/// Check prerequisites and print status. Does not fail — only warns.
+pub fn check_prereqs() {
+    let tmux = crate::env_cmd::probe_tmux();
+    for line in tmux_prereq_lines(&tmux) {
+        eprintln!("{line}");
     }
 
     if which("claude") {
@@ -176,4 +204,60 @@ pub fn run(editor: Option<&str>, skip_prereqs: bool, skip_plugins: bool) -> Resu
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{tmux_prereq_lines, tmux_server_not_running};
+    use crate::env_cmd::TmuxProbe;
+
+    fn probe(server_error: Option<&str>) -> TmuxProbe {
+        TmuxProbe {
+            binary: "/usr/bin/tmux".to_string(),
+            source: "path".to_string(),
+            version: Some("tmux 3.5".to_string()),
+            version_error: None,
+            server_handshake: false,
+            server_version: None,
+            server_error: server_error.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn fresh_machine_without_a_tmux_server_is_not_reported_broken() {
+        // Both shapes tmux prints when no server has been started yet. A new
+        // user's first `agent-doc init` used to answer them with "BROKEN" and
+        // advice to change `tmux_bin`, which is wrong for a clean machine.
+        for error in [
+            "/usr/bin/tmux server handshake exited Some(1): no server running on /tmp/tmux-1000/default",
+            "/usr/bin/tmux server handshake exited Some(1): error connecting to /tmp/tmux-1000/default (No such file or directory)",
+        ] {
+            assert!(tmux_server_not_running(error), "{error}");
+            let lines = tmux_prereq_lines(&probe(Some(error)));
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].starts_with("[install] tmux ... ok"), "{lines:?}");
+            assert!(lines[0].contains("no server running yet"), "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn a_failed_handshake_with_a_live_server_is_still_broken() {
+        let error = "/usr/bin/tmux server handshake exited Some(1): protocol version mismatch (client 8, server 7)";
+        assert!(!tmux_server_not_running(error));
+        let lines = tmux_prereq_lines(&probe(Some(error)));
+        assert!(lines[0].contains("BROKEN"), "{lines:?}");
+        assert!(
+            lines.iter().any(|line| line.contains("tmux_bin")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn missing_tmux_is_reported_missing() {
+        let mut missing = probe(None);
+        missing.version = None;
+        missing.version_error = Some("failed to spawn tmux".to_string());
+        let lines = tmux_prereq_lines(&missing);
+        assert!(lines[0].contains("MISSING"), "{lines:?}");
+    }
 }

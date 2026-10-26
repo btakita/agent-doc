@@ -477,14 +477,35 @@ fn fetch_release_for_asset(prefix: &str, ext: &str) -> Result<Value> {
     find_release_with_asset(prefix, ext, fetch_releases_page)
 }
 
-fn download_to_temp(url: &str) -> Result<tempfile::NamedTempFile> {
+/// A temp file whose name keeps the release asset's extension.
+///
+/// `code --install-extension <path>` only treats its argument as a package
+/// when the path ends in `.vsix`; an extensionless temp name such as
+/// `/tmp/.tmpAbC123` is parsed as a marketplace extension ID and fails with
+/// "Extension '/tmp/.tmpAbC123' not found", so every first-time
+/// `agent-doc plugin install vscode` failed after a verified download.
+fn temp_file_for_asset(asset_name: &str) -> Result<tempfile::NamedTempFile> {
+    let suffix = Path::new(asset_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| format!(".{ext}"))
+        .unwrap_or_default();
+    tempfile::Builder::new()
+        .prefix("agent-doc-")
+        .suffix(&suffix)
+        .tempfile()
+        .context("Failed to create temp file")
+}
+
+fn download_to_temp(asset: &ReleaseAsset<'_>) -> Result<tempfile::NamedTempFile> {
+    let url = asset.url;
     eprintln!("Downloading {url}");
     let mut resp = build_agent()
         .get(url)
         .header("User-Agent", "agent-doc")
         .call()
         .context("Download failed")?;
-    let mut tmp = tempfile::NamedTempFile::new().context("Failed to create temp file")?;
+    let mut tmp = temp_file_for_asset(asset.name)?;
     let mut bytes = Vec::new();
     resp.body_mut()
         .as_reader()
@@ -760,7 +781,7 @@ fn install_jetbrains_into(
     eprintln!("Found asset: {}", asset.name);
     fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
 
-    let tmp = download_to_temp(asset.url)?;
+    let tmp = download_to_temp(&asset)?;
     verify_editor_package(release, &asset, tmp.path())?;
 
     let expected_version = jetbrains_zip_plugin_version(tmp.path())?;
@@ -932,7 +953,7 @@ fn install_vscode(release: &Value) -> Result<()> {
 fn install_vscode_with_cmd(release: &Value, code: &str) -> Result<()> {
     let asset = find_asset(release, "agent-doc", "vsix")?;
     eprintln!("Found asset: {}", asset.name);
-    let tmp = download_to_temp(asset.url)?;
+    let tmp = download_to_temp(&asset)?;
     verify_editor_package(release, &asset, tmp.path())?;
 
     let status = std::process::Command::new(code)
@@ -3770,6 +3791,22 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
+    #[test]
+    fn plugin_download_temp_file_keeps_the_asset_extension() {
+        // `code --install-extension` needs a `.vsix` path; without the suffix
+        // it reads the temp path as an extension ID and the install fails.
+        let vsix = super::temp_file_for_asset("agent-doc-0.2.83.vsix").unwrap();
+        let name = vsix.path().file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with("agent-doc-"), "{name}");
+        assert!(name.ends_with(".vsix"), "{name}");
+
+        let zip = super::temp_file_for_asset("agent-doc-jetbrains-262-0.2.826.zip").unwrap();
+        assert_eq!(zip.path().extension().and_then(|e| e.to_str()), Some("zip"));
+
+        let bare = super::temp_file_for_asset("agent-doc").unwrap();
+        assert!(bare.path().extension().is_none());
+    }
+
     use super::{
         EDITOR_PACKAGE_MANIFEST, compare_digest, editor_package_manifest_digest,
         editor_package_manifest_url, format_rate_limit_reset_at, missing_code_cli_message,

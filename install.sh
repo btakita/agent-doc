@@ -243,6 +243,20 @@ fi
 mv "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_PATH}"
 chmod +x "${INSTALL_PATH}"
 
+# Install the native library beside the binary. The editor plugins load it
+# through `agent-doc lib-path`, which resolves it as a sibling of the
+# executable; without it they fall back to the degraded file-based IPC mode
+# (GH #52 put it in the archive, but this script used to discard it). Copy to a
+# temp name in the install directory, then rename, so an IDE that has the
+# previous library mapped keeps its old inode.
+for LIB_NAME in libagent_doc.so libagent_doc.dylib agent_doc.dll; do
+  if [ -f "${TMP_DIR}/${LIB_NAME}" ]; then
+    cp "${TMP_DIR}/${LIB_NAME}" "${INSTALL_DIR}/.${LIB_NAME}.tmp"
+    mv -f "${INSTALL_DIR}/.${LIB_NAME}.tmp" "${INSTALL_DIR}/${LIB_NAME}"
+    echo "Installed native library: ${INSTALL_DIR}/${LIB_NAME}"
+  fi
+done
+
 # ---------------------------------------------------------------------------
 # Verify installation
 # ---------------------------------------------------------------------------
@@ -275,3 +289,15 @@ case ":${PATH}:" in
     echo "      Add to ~/.bashrc or ~/.zshrc to make permanent."
     ;;
 esac
+
+# ---------------------------------------------------------------------------
+# Next steps
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "Next steps (Getting started: https://github.com/${REPO}#getting-started):"
+echo "  cd your-project                         # a git repository"
+echo "  agent-doc init                          # set up .agent-doc/ for the project"
+echo "  agent-doc skill install --harness claude  # or: codex, grok, opencode, --all"
+echo "  agent-doc plugin install jetbrains      # or: vscode (optional)"
+echo "  agent-doc init notes.md \"My Topic\"      # create your first session document"

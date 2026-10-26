@@ -6,10 +6,8 @@ Session documents are markdown files with YAML frontmatter:
 
 ```markdown
 ---
-session: 05304d74-90f1-46a1-8a79-55736341b193
+agent_doc_session: 05304d74-90f1-46a1-8a79-55736341b193
 agent: claude
-model: null
-branch: null
 ---
 
 # Session: Topic Name
@@ -33,7 +31,7 @@ Follow-up. You can also annotate inline:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `session` | no | (generated on first run) | Session ID for continuity |
+| `agent_doc_session` | no | (written by `agent-doc init`) | Session ID for continuity. The older spelling `session` is still read. |
 | `agent` | no | `claude` | Agent backend to use |
 | `model` | no | (agent default) | Model override |
 | `branch` | no | (none) | Git branch for session commits |

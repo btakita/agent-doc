@@ -5,11 +5,15 @@ material.
 
 ## Start Here
 
+New user: follow the [Quick Start](getting-started/quick-start.md) (install,
+project setup, first document, first turn, troubleshooting), or the shorter
+[Getting started](../README.md#getting-started) section of the README.
+
 - [README](../README.md) - short project overview: what agent-doc is,
-  supported editors and harnesses, install, first session, and security model.
+  supported editors and harnesses, getting started, and security model.
 - [Introduction](introduction.md) - concise user-facing introduction.
-- [Quick Start](getting-started/quick-start.md) - shortest path from a markdown
-  file to an agent-doc cycle.
+- [Quick Start](getting-started/quick-start.md) - clean machine to a working
+  session, with troubleshooting.
 - [Installation](getting-started/installation.md) - install paths for the CLI
   and editor integrations.
 - [Configuration](getting-started/configuration.md) - project and document

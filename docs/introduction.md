@@ -4,6 +4,9 @@
 
 agent-doc turns any markdown document into an interactive session with an AI agent. Edit the document, press a hotkey, and the tool diffs your changes, sends them to the agent, and writes the response back into the document. The document is the UI.
 
+New to agent-doc? Start with the [Quick Start](getting-started/quick-start.md):
+install, set up a project, create a document, and run the first turn.
+
 ## Why documents?
 
 Terminal prompts are ephemeral. You type, the agent responds, the context scrolls away. Documents are persistent — you can reorganize, delete noise, annotate inline, and curate the conversation as a living artifact. The agent sees your edits as diffs, so every change carries intent.

@@ -33673,6 +33673,213 @@ fn test_cli_init_no_file_runs_project_init() {
     assert!(tmp.path().join(".agent-doc").is_dir());
 }
 
+/// Words of one quickstart command line: whitespace separated, `"..."`
+/// groups, and an unquoted `#` starts a trailing comment.
+fn quickstart_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut quoted = false;
+    for ch in line.chars() {
+        match ch {
+            '"' => {
+                quoted = !quoted;
+                in_word = true;
+            }
+            '#' if !quoted && !in_word => break,
+            c if c.is_whitespace() && !quoted => {
+                if in_word {
+                    words.push(std::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            c => {
+                current.push(c);
+                in_word = true;
+            }
+        }
+    }
+    if in_word {
+        words.push(current);
+    }
+    words
+}
+
+/// Every `agent-doc ...` line inside the ```sh fences of `markdown`.
+fn quickstart_commands(markdown: &str) -> Vec<Vec<String>> {
+    let mut commands = Vec::new();
+    let mut in_sh = false;
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if let Some(info) = trimmed.strip_prefix("```") {
+            in_sh = !in_sh && info.trim() == "sh";
+            continue;
+        }
+        if in_sh && trimmed.starts_with("agent-doc ") {
+            commands.push(quickstart_words(trimmed));
+        }
+    }
+    commands
+}
+
+fn readme_getting_started_section(readme: &str) -> &str {
+    let start = readme
+        .find("\n## Getting started\n")
+        .expect("README must keep a `## Getting started` section (the `#getting-started` anchor that init, install.sh, and --help link to)");
+    let body = &readme[start + 1..];
+    let end = body[3..].find("\n## ").map(|i| i + 3).unwrap_or(body.len());
+    &body[..end]
+}
+
+/// Run a quickstart's commands, in order, the way a new user would on a clean
+/// project. Commands that need the network or a live agent (`plugin`, `start`,
+/// `run`) are parse-checked with `--help`; every other command really runs.
+fn run_quickstart_commands_in_clean_project(source: &str, commands: &[Vec<String>]) {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let project = tmp.path().join("your-project");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    let git = ProcessCommand::new("git")
+        .args(["init", "-q"])
+        .current_dir(&project)
+        .status()
+        .unwrap();
+    assert!(git.success());
+
+    for words in commands {
+        assert_eq!(words[0], "agent-doc", "{source}: {words:?}");
+        let mut args: Vec<String> = words[1..].to_vec();
+        let side_effecting = matches!(
+            args.first().map(String::as_str),
+            Some("plugin" | "start" | "run")
+        );
+        if side_effecting {
+            args.push("--help".to_string());
+        }
+        let mut cmd = agent_doc_cmd();
+        cmd.current_dir(&project)
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_CACHE_HOME", home.join(".cache"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("XDG_STATE_HOME", home.join(".local/state"))
+            .env(
+                "AGENT_DOC_TMUX_SOCKET",
+                format!("agent-doc-quickstart-test-{}", std::process::id()),
+            )
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .args(&args);
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{source}: `agent-doc {}` failed on a clean project\nstdout: {}\nstderr: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    assert!(
+        project.join(".agent-doc").is_dir(),
+        "{source}: init must create .agent-doc/"
+    );
+    let notes = fs::read_to_string(project.join("notes.md"))
+        .unwrap_or_else(|e| panic!("{source}: the quickstart must create notes.md: {e}"));
+    assert!(notes.contains("agent_doc_session:"), "{source}: {notes}");
+    assert!(
+        project.join(".claude/skills/agent-doc/SKILL.md").is_file(),
+        "{source}: `skill install --harness claude` must install the Claude Code skill"
+    );
+}
+
+#[test]
+fn readme_getting_started_commands_run_on_a_clean_project() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("README.md")).unwrap();
+    let section = readme_getting_started_section(&readme);
+    let commands = quickstart_commands(section);
+    let joined: Vec<String> = commands.iter().map(|w| w.join(" ")).collect();
+    for step in [
+        "agent-doc --version",
+        "agent-doc init",
+        "agent-doc skill install --harness claude",
+        "agent-doc plugin install jetbrains",
+        "agent-doc init notes.md My Topic",
+    ] {
+        assert!(
+            joined.iter().any(|c| c == step),
+            "README Getting started lost the `{step}` step: {joined:?}"
+        );
+    }
+    run_quickstart_commands_in_clean_project("README.md#getting-started", &commands);
+}
+
+#[test]
+fn book_quick_start_commands_run_on_a_clean_project() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let quick_start = fs::read_to_string(root.join("docs/getting-started/quick-start.md")).unwrap();
+    let commands = quickstart_commands(&quick_start);
+    let joined: Vec<String> = commands.iter().map(|w| w.join(" ")).collect();
+    for step in [
+        "agent-doc init",
+        "agent-doc skill install --harness claude",
+        "agent-doc init notes.md My Topic",
+        "agent-doc run notes.md",
+    ] {
+        assert!(
+            joined.iter().any(|c| c == step),
+            "Quick Start lost the `{step}` step: {joined:?}"
+        );
+    }
+    run_quickstart_commands_in_clean_project("docs/getting-started/quick-start.md", &commands);
+}
+
+#[test]
+fn top_level_help_points_new_users_at_getting_started() {
+    let output = agent_doc_cmd().arg("--help").output().unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(help.contains("Getting started:"), "{help}");
+    assert!(
+        help.contains("https://github.com/btakita/agent-doc#getting-started"),
+        "{help}"
+    );
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("README.md")).unwrap();
+    let section = readme_getting_started_section(&readme);
+    // The help block and the README section must teach the same commands.
+    for step in [
+        "agent-doc init",
+        "agent-doc skill install --harness claude",
+        "agent-doc plugin install jetbrains",
+        "agent-doc init notes.md \"My Topic\"",
+        "agent-doc run notes.md",
+    ] {
+        assert!(
+            help.contains(step),
+            "--help Getting started lost `{step}`: {help}"
+        );
+        assert!(
+            section.contains(step),
+            "README Getting started lost `{step}`"
+        );
+    }
+}
+
+#[test]
+fn quickstart_words_split_like_a_shell_for_simple_lines() {
+    assert_eq!(
+        quickstart_words(r#"agent-doc init notes.md "My Topic"   # make a doc"#),
+        ["agent-doc", "init", "notes.md", "My Topic"]
+    );
+    assert_eq!(
+        quickstart_words("agent-doc skill install --harness claude   # or: codex"),
+        ["agent-doc", "skill", "install", "--harness", "claude"]
+    );
+}
+
 #[test]
 fn test_cli_start_defaults_to_agent_doc_markdown() {
     let tmp = tempfile::TempDir::new().unwrap();

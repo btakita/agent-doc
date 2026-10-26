@@ -753,6 +753,17 @@ fn frontmatter_value<'a>(content: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
+/// True when no agent harness can be detected from the calling shell, so a
+/// bare install falls back to the generic `.agent/skills/` target that no
+/// harness reads automatically. `agent-doc init` uses it to tell a new user to
+/// name their harness explicitly.
+pub(crate) fn install_env_is_generic() -> bool {
+    matches!(
+        detect_install_env(),
+        agent_kit::detect::Environment::Generic
+    )
+}
+
 fn detect_install_env() -> agent_kit::detect::Environment {
     use agent_kit::detect::Environment;
 

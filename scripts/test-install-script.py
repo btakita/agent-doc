@@ -99,6 +99,11 @@ def run_installer(
         )
         requests = request_log.read_text().splitlines() if request_log.exists() else []
         installed = (install_dir / "agent-doc").is_file()
+        # The editor plugins resolve the native library as a sibling of the
+        # binary; an install that drops it leaves them in degraded IPC mode.
+        if installed:
+            assert (install_dir / "libagent_doc.so").read_bytes() == b"test library", result.stdout
+            assert not list(install_dir.glob(".*.tmp")), list(install_dir.iterdir())
         return result, requests, installed
 
 
@@ -109,6 +114,8 @@ def main() -> None:
     assert requests[-1].endswith("agent-doc-x86_64-unknown-linux-gnu.tar.gz.sha256"), requests
     assert installed
     assert "Checksum verified" in gnu.stdout
+    assert "Installed native library" in gnu.stdout
+    assert "Next steps" in gnu.stdout
 
     musl, requests, _ = run_installer(libc="musl")
     assert musl.returncode == 0, musl.stdout

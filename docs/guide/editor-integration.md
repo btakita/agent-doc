@@ -25,7 +25,20 @@ prove its platform build. Builds 242–261 receive the classic package; build 26
 receives the separately ranged modular package. An unprovable or unsupported
 target is refused instead of guessing an artifact.
 
-Or install from JetBrains Marketplace. Configure an External Tool: Program=`agent-doc`, Args=`run $FilePath$`, Working dir=`$ProjectFileDir$`. Assign a keyboard shortcut.
+Without the CLI, add the plugin's custom repository in the IDE instead:
+**Settings → Plugins → ⚙ → Manage Plugin Repositories**, add the listing that
+matches your IDE build from
+[JetBrains plugin distribution](../reference/jetbrains-distribution.md#production-repository-urls),
+then install **Agent Doc** from the Marketplace tab. Releases are also uploaded
+to JetBrains Marketplace; if a search there does not find **Agent Doc** yet,
+use the CLI or the custom repository.
+
+If `agent-doc plugin install jetbrains` reports that no plugins directory was
+found, start the IDE once so it creates its data directory, then retry.
+
+Restart the IDE if it asks you to. The plugin loads agent-doc's native library
+(`agent-doc lib-path` prints where it is); the shell installer, PyPI, and
+Homebrew installs put it beside the binary.
 
 ### VS Code
 
@@ -33,7 +46,12 @@ Or install from JetBrains Marketplace. Configure an External Tool: Program=`agen
 agent-doc plugin install vscode
 ```
 
-Or install from the VS Code Marketplace. Add a task with `"command": "agent-doc run ${file}"` and bind it to a keybinding.
+The command downloads the `.vsix` from the matching GitHub Release, verifies
+it, and installs it with the first of `cursor`, `codium`, or `code` found on
+`PATH`. To install by hand, download `agent-doc-<version>.vsix` from
+[GitHub Releases](https://github.com/btakita/agent-doc/releases) and run
+**Extensions: Install from VSIX...** in the editor. The extension is not
+published to the VS Code Marketplace.
 
 ### Zed
 
@@ -98,4 +116,4 @@ The `:e<CR>` reloads the file after the response is written.
 
 - **Don't edit during run** — the merge-safe flow handles it, but it's simpler to wait for the progress indicator to finish.
 - **Auto-reload** — JetBrains and VS Code auto-reload files changed on disk. Vim needs the `:e` reload.
-- **Diff gutters** — after run, your editor shows diff gutters for everything the agent added (because agent responses are left uncommitted).
+- **Diff gutters** — agent-doc commits your edits before each turn, so while a turn is in progress the agent's new text shows as a diff against that commit. The turn's closeout then commits the response too; use `agent-doc log <file>` or `git log` to review past turns.

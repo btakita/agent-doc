@@ -408,12 +408,25 @@ jobs:
               echo "Marketplace already accepted ${artifact##*/}; retaining $marker"
               continue
             fi
-            curl --fail-with-body --silent --show-error \
+            # `release-version` retains a byte-identical plugin generation across
+            # releases (`#marketplaceretainedversion`), so the Marketplace may
+            # already hold this exact version from an earlier tag. Only that
+            # exact duplicate-version refusal counts as accepted.
+            plugin_version=${artifact%.zip}
+            plugin_version=${plugin_version##*-}
+            if response=$(curl --fail-with-body --silent --show-error \
               --header "Authorization: Bearer $PUBLISH_TOKEN" \
               --form "xmlId=com.github.btakita.agent-doc" \
               --form "file=@$artifact" \
               --form "containsAds=false" \
-              https://plugins.jetbrains.com/api/updates/upload
+              https://plugins.jetbrains.com/api/updates/upload 2>&1); then
+              echo "$response"
+            elif grep -Fq "already contains version $plugin_version in channel" <<<"$response"; then
+              echo "Marketplace already holds ${artifact##*/} (version $plugin_version) from an earlier release; recording $marker"
+            else
+              echo "$response" >&2
+              exit 1
+            fi
             printf '%s  %s\n' "$GITHUB_SHA" "${artifact##*/}" > "marketplace-state/$marker"
             gh release upload "$GITHUB_REF_NAME" "marketplace-state/$marker" --clobber
           done

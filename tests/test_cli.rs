@@ -14944,6 +14944,23 @@ fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_confi
         !publish.contains("--retry-all-errors"),
         "the non-idempotent Marketplace POST must not be retried inside curl; release markers own retries",
     );
+    // `#marketplaceretainedversion`: v0.35.553 retained the v0.35.552 plugin
+    // generations and its release failed on Marketplace's duplicate-version 400.
+    let duplicate = publish
+        .find("grep -Fq \"already contains version $plugin_version in channel\" <<<\"$response\"")
+        .expect("a retained plugin version must count as already accepted");
+    let fail_closed = publish
+        .find("echo \"$response\" >&2\n              exit 1")
+        .expect("every other Marketplace refusal must still fail the job");
+    assert!(
+        upload < duplicate && duplicate < fail_closed,
+        "only the exact duplicate-version refusal for this artifact's version may record a marker",
+    );
+    assert!(
+        publish.contains("plugin_version=${artifact%.zip}")
+            && publish.contains("plugin_version=${plugin_version##*-}"),
+        "the accepted duplicate must name the artifact's own plugin version",
+    );
     assert_eq!(
         publish
             .matches("https://plugins.jetbrains.com/api/updates/upload")

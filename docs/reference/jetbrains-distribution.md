@@ -71,6 +71,13 @@ same ZIP manually on both sides. A release marker is written to the GitHub
 release after each accepted upload, so retrying a failed tag workflow resumes
 at the first update that Marketplace did not accept.
 
+`make release-version` keeps a plugin generation unchanged when its sources are
+byte-identical to the previous release (`#marketplaceretainedversion`), so
+Marketplace may already hold that exact version from an earlier tag. Its
+duplicate-version refusal (`already contains version <version> in channel`) for
+the artifact's own version counts as accepted and records the marker; every
+other upload refusal still fails the job.
+
 #### Marketplace onboarding
 
 The repository owner may complete these one-time external steps independently

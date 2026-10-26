@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a1545a-f42c-7aa1-b9a0-aeafeba96910
+  codex: 01a16c3d-3d49-7cf0-b01f-4162cae1bd7d
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -275,7 +275,37 @@ Action required:
 4. Do not restart, reload, reset, or rerun sdk-demo; it needs no further action.
 
 The remaining untagged/noise queue heads are assigned to the supervisor’s automatic clear-and-continue path—not an operator blocker.
-<!-- agent:boundary:00b621d9 -->
+> **Queue prompt:** [#coder-remote-install-02805]: done: but still not syncing
+
+### Re: [#coder-remote-install-02805]: done: but still not syncing — gpt-6.1-sol · 2026-10-25T21:00:21-04:00
+
+The installation step is done, but synchronization is not. I am keeping the Todo open.
+
+The failure is now concrete:
+
+- This workstation has Agent Doc CLI 0.35.551 and JetBrains 263 plugin 0.2.824 installed. Its ordinary local editor replica is converged.
+- This workstation is not the Coder backend, so it cannot prove that both Coder peers loaded the package.
+- The current IDEA log first reports frontend/backend ingress connected and schema 4 with measured geometry, but every snapshot is then rejected with DELIVERY_FAILED: No such file or directory.
+- The failing IDEA project is rooted at /home/brian/IdeaProjects/IdeaHome while the session document is under /home/brian/work/btakita/agent-loop. ControllerSurfaceSnapshotPublisher derives its controller socket from the IDEA project basePath, so it targets the wrong project controller.
+- The controller log contains only a local jetbrains@... surface. It has no accepted jetbrains-rd@... / remote-client:... publication for this session.
+
+Yes, the state machines could have identified this. Version 0.35.551 intentionally keeps the frontend authority fence active after a delivery failure, but it does not separately expose connected-without-any-accepted-publication as unhealthy. The missing state is:
+
+connected lease + negotiated schema + zero accepted snapshots + DELIVERY_FAILED = blocked, with the controller-root mismatch as the actionable reason.
+
+Actionable recovery and acceptance:
+
+1. In Coder Remote Dev, open /home/brian/work/btakita/agent-loop as the backend IDE project, not merely this file from an unrelated project.
+2. Confirm both Client/Gateway and backend show Agent Doc 0.2.824, then restart both peers.
+3. In the backend terminal, run:
+   - agent-doc env --json
+   - agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json
+   - agent-doc session status tasks/agent-doc/agent-doc-bugs.md
+4. Do not call it synchronized until the client log shows snapshot schema negotiated with geometry=measured, the backend has no DELIVERY_FAILED, and ops.log shows controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor.
+5. If No such file or directory remains, the code fix is to route ControllerSurfaceSnapshotPublisher by each session document's workspace root instead of project.basePath, add the blocked delivery state, and cover the mismatched IDE-root case with a regression test.
+
+The Todo now carries those exact recovery steps and proof conditions.
+<!-- agent:boundary:bd80f254 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -377,8 +407,9 @@ force-write the file, and do not delete the queue items.                        
 
 ## Run: Issues
 <!-- agent:loop id=issues interval=1h priority -->
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 [#coder-remote-install-02805]: done: but still not syncing
+- ☑️ [#subagent:grokqueuesubagents_closeout#1] do [#grokqueuesubagents]
+- ❔ [#subagent:release_publish_patch#3] release + publish
+- ~~[#coder-remote-install-02805]: done: but still not syncing~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:loop -->
 
 ## Todo
@@ -393,7 +424,7 @@ force-write the file, and do not delete the queue items.                        
 
 ## Backlog
 <!-- agent:backlog priority queue -->
-- [ ] [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
+- [ ] 🚧 [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
 <!-- /agent:backlog -->
 
 ## Review

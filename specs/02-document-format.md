@@ -132,6 +132,42 @@ unstruck copy of the row, were passed through again; a fenced
 `<!-- agent:queue -->` example in prose opened a component that swallowed the
 real queue after it; and a multiline queue prompt was emitted twice.
 
+**A queue row's node id is its work identity (`#queuerowworkidentity`).**
+The Markdown-AST overlay derives an item's id from the row's work text:
+`agent_doc_element_queue::strip_attempt_projection_prefix` first removes the
+leading binary-owned attempt projection (lifecycle markers such as `☑️`,
+`🔄`, `📥`, `❔`, pins, the `[#<owner>#<generation>]` owner annotation and
+its legacy `⟦…⟧` spellings, and the bare `🙋` glyph), and the id is the first
+`[#id]` of the remainder, else the content hash of the remainder. That helper
+and `strip_priority_markers` share one projection-token grammar. So a claimed
+`☑️ [#subagent:x#1] do [#foo]`, each lifecycle re-projection of it, and its
+bare or struck `~~do [#foo]~~` copy are one node `foo`, and a claimed
+free-text row has the same content id as its bare text and is not an
+explicit id. `Item::text`, `raw`, `kind`, and the strike/pin flags are
+unchanged; only the identity moved. Before, the first `[#...]` token of a
+claimed row was its owner tag, so the claimed row and its struck copy were
+different nodes in the document-cell merge, and an editor copy carrying
+another marker survived beside the struck row or replaced it. The merge then
+treats the projection as binary-owned, not operator-authored: an operator copy
+that differs from base only in the projection (same work text, strike, and
+pin flags) leaves the node unchanged, so the agent's strike, removal, or newer
+projection stands. An unstruck operator copy that still carries a projection
+and names the same work as a struck row is a stale pre-strike projection, so
+the struck row (or the agent's drop of it) stands. An operator who un-strikes
+a row writes the bare work text, and an edit of the work text is an operator
+edit; both still win.
+
+Compatibility: overlay ids are a pure function of the current text. Every
+merge, node-keyed mutation, and event diff recomputes them on all sides with
+one binary, and the persisted overlay projection stores markdown, not ids. A
+row without a leading projection keys exactly as before. A row with one now
+keys as its bare and struck forms already did, so the claim and strike phases
+no longer change a node's key. The per-cell CRDT's `list_item_key` already
+skipped owner annotations and stripped lifecycle markers, so persisted cell
+keys (`queue:0:id:<id>`, `queue:0:txt:<work text>`) do not change and
+replicas need no migration. A node patch addressed to an old owner-tag key
+fails closed with `NodeNotFound`.
+
 `agent:run` is the canonical runnable-work component. The former
 `agent:queue` spelling remains a backward-compatible alias with identical queue
 semantics, attributes, node identity, and mutation behavior. Agent Doc accepts

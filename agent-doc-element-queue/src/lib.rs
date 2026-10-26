@@ -323,6 +323,133 @@ fn trailing_operator_action_annotation(text: &str) -> Option<(&str, &str, usize)
     None
 }
 
+/// Strip the bare operator-action glyph (`🙋`, or its configured spelling)
+/// from the front of `trimmed`, leaving whatever follows it untouched.
+fn strip_operator_action_glyph(trimmed: &str) -> Option<&str> {
+    let icons = agent_doc_queue_icons::queue_icons();
+    [icons.operator_action.as_str(), "🙋"]
+        .into_iter()
+        .filter(|marker| !marker.is_empty())
+        .filter_map(|marker| {
+            trimmed
+                .strip_prefix(marker)
+                .map(|rest| (marker.len(), rest))
+        })
+        .max_by_key(|(len, _)| *len)
+        .map(|(_, rest)| rest)
+}
+
+/// Strip ONE leading binary-owned projection token from `trimmed`: a
+/// lifecycle/priority marker (configured or default spelling) or an
+/// exact-attempt owner annotation (`[#<owner>#<generation>]`, or the legacy
+/// `⟦<owner>#<generation>⟧` / `⟦owner=<owner>;generation=<generation>⟧`
+/// spellings). This is the single grammar both [`strip_priority_markers`] and
+/// [`strip_attempt_projection_prefix`] consume.
+fn strip_projection_token(trimmed: &str) -> Option<&str> {
+    let icons = agent_doc_queue_icons::queue_icons();
+    let configured = [
+        icons.prioritized.as_str(),
+        icons.agent_prioritized.as_str(),
+        icons.claimed.as_str(),
+        icons.running.as_str(),
+        icons.pending.as_str(),
+        icons.reported.as_str(),
+        icons.lost.as_str(),
+        icons.reconciling.as_str(),
+        icons.unknown.as_str(),
+        icons.skipped.as_str(),
+        icons.awaiting_operator.as_str(),
+    ];
+    let defaults = [
+        "**prioritized**",
+        "__prioritized__",
+        "**pin**",
+        "__pin__",
+        ":pushpin:",
+        ":pin:",
+        "📌",
+        "*prioritized*",
+        "_prioritized_",
+        "*pin*",
+        "_pin_",
+        ":round_pushpin:",
+        "📍",
+        // Fenced subagent-attempt lifecycle projections.
+        "🟡",
+        "🚧",
+        "📥",
+        "☑️",
+        // Former reported/outbox spellings; accepted for compatibility.
+        "📫",
+        "📤",
+        "⚠️",
+        "🔄",
+        "❔",
+        "⏭\u{fe0f}",
+        // `#queueawaitop`: awaiting-operator lifecycle projection.
+        "⏳",
+    ];
+    configured
+        .iter()
+        .chain(defaults.iter())
+        // An empty configured spelling would match every line and never
+        // advance the caller's strip loop.
+        .filter(|marker| !marker.is_empty())
+        .filter_map(|marker| {
+            trimmed
+                .strip_prefix(marker)
+                .map(|rest| (marker.len(), rest))
+        })
+        .max_by_key(|(len, _)| *len)
+        .map(|(_, rest)| rest)
+        .or_else(|| {
+            let (payload, after, legacy_delimiters) = if let Some(rest) = trimmed.strip_prefix("[#")
+            {
+                let (payload, after) = rest.split_once(']')?;
+                (payload, after, false)
+            } else {
+                let rest = trimmed.strip_prefix('⟦')?;
+                let (payload, after) = rest.split_once('⟧')?;
+                (payload, after, true)
+            };
+            let (owner, generation) = if legacy_delimiters {
+                if let Some(legacy) = payload.strip_prefix("owner=") {
+                    legacy.rsplit_once(";generation=")?
+                } else {
+                    payload.rsplit_once('#')?
+                }
+            } else {
+                payload.rsplit_once('#')?
+            };
+            (!owner.is_empty()
+                && !owner.chars().any(|ch| ch == '\n' || ch == '\r')
+                && generation.parse::<u64>().is_ok())
+            .then_some(after)
+        })
+}
+
+/// `text` with every leading binary-owned *attempt projection* token removed:
+/// lifecycle/priority markers (`☑️`, `🔄`, `📥`, `📌`, …), exact-attempt owner
+/// annotations (`[#subagent:x#1]`, legacy `⟦…⟧`), and the bare operator-action
+/// glyph `🙋` (`#queuerowworkidentity`).
+///
+/// It returns a suffix of `text`, so callers that need the row's work
+/// identity can key on it without re-rendering the line. Unlike
+/// [`strip_priority_markers`] it keeps everything after the projection prefix
+/// verbatim: a `[#id]` following `🙋` is the row's own id (the canonical
+/// `🙋 [#subagent-operator-request-x]: answer` row, or the legacy
+/// `🙋 [#id] <work>` prefix), and trailing operator-request annotations stay.
+/// The Markdown-AST overlay keys queue rows on this remainder, so a claimed
+/// `☑️ [#subagent:x#1] do [#foo]`, its `📥`/`🔄` re-projections, and its struck
+/// `~~do [#foo]~~` copy are one node.
+pub fn strip_attempt_projection_prefix(text: &str) -> &str {
+    let mut t = text.trim_start();
+    while let Some(rest) = strip_operator_action_glyph(t).or_else(|| strip_projection_token(t)) {
+        t = rest.trim_start();
+    }
+    t
+}
+
 /// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🟡`/`🚧`/`📥`/`☑️`/`⚠️`/`⏭️`/`⏳`
 /// and the `**pin**`/`**prioritized**` word forms) from a queue head so a
 /// marker-decorated line keys to the same durable identity as the bare line.
@@ -333,17 +460,7 @@ pub fn strip_priority_markers(text: &str) -> String {
     let mut canonical_operator_action = false;
     loop {
         let trimmed = t.trim_start();
-        let icons = agent_doc_queue_icons::queue_icons();
-        if let Some(after_marker) = [icons.operator_action.as_str(), "🙋"]
-            .into_iter()
-            .filter_map(|marker| {
-                trimmed
-                    .strip_prefix(marker)
-                    .map(|rest| (marker.len(), rest))
-            })
-            .max_by_key(|(len, _)| *len)
-            .map(|(_, rest)| rest)
-        {
+        if let Some(after_marker) = strip_operator_action_glyph(trimmed) {
             let after_marker = after_marker.trim_start();
             if let Some(after_open) = after_marker.strip_prefix("[#")
                 && let Some((_, after)) = after_open.split_once(']')
@@ -357,83 +474,7 @@ pub fn strip_priority_markers(text: &str) -> String {
             }
             continue;
         }
-        let configured = [
-            icons.prioritized.as_str(),
-            icons.agent_prioritized.as_str(),
-            icons.claimed.as_str(),
-            icons.running.as_str(),
-            icons.pending.as_str(),
-            icons.reported.as_str(),
-            icons.lost.as_str(),
-            icons.reconciling.as_str(),
-            icons.unknown.as_str(),
-            icons.skipped.as_str(),
-            icons.awaiting_operator.as_str(),
-        ];
-        let defaults = [
-            "**prioritized**",
-            "__prioritized__",
-            "**pin**",
-            "__pin__",
-            ":pushpin:",
-            ":pin:",
-            "📌",
-            "*prioritized*",
-            "_prioritized_",
-            "*pin*",
-            "_pin_",
-            ":round_pushpin:",
-            "📍",
-            // Fenced subagent-attempt lifecycle projections.
-            "🟡",
-            "🚧",
-            "📥",
-            "☑️",
-            // Former reported/outbox spellings; accepted for compatibility.
-            "📫",
-            "📤",
-            "⚠️",
-            "🔄",
-            "❔",
-            "⏭\u{fe0f}",
-            // `#queueawaitop`: awaiting-operator lifecycle projection.
-            "⏳",
-        ];
-        let stripped = configured
-            .iter()
-            .chain(defaults.iter())
-            .filter_map(|marker| {
-                trimmed
-                    .strip_prefix(marker)
-                    .map(|rest| (marker.len(), rest))
-            })
-            .max_by_key(|(len, _)| *len)
-            .map(|(_, rest)| rest)
-            .or_else(|| {
-                let (payload, after, legacy_delimiters) =
-                    if let Some(rest) = trimmed.strip_prefix("[#") {
-                        let (payload, after) = rest.split_once(']')?;
-                        (payload, after, false)
-                    } else {
-                        let rest = trimmed.strip_prefix('⟦')?;
-                        let (payload, after) = rest.split_once('⟧')?;
-                        (payload, after, true)
-                    };
-                let (owner, generation) = if legacy_delimiters {
-                    if let Some(legacy) = payload.strip_prefix("owner=") {
-                        legacy.rsplit_once(";generation=")?
-                    } else {
-                        payload.rsplit_once('#')?
-                    }
-                } else {
-                    payload.rsplit_once('#')?
-                };
-                (!owner.is_empty()
-                    && !owner.chars().any(|ch| ch == '\n' || ch == '\r')
-                    && generation.parse::<u64>().is_ok())
-                .then_some(after)
-            });
-        match stripped {
+        match strip_projection_token(trimmed) {
             Some(rest) => t = rest.trim_start(),
             None => break,
         }

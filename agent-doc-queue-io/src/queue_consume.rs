@@ -2080,6 +2080,16 @@ enum ConsumedPromptEcho {
 /// projection, the captured-finalize resume re-baselined without the echo, and
 /// the live response carried nine `do [#id]` echo lines its committed copy did
 /// not; commit-time live-prompt-drift recovery then re-appended the response.
+///
+/// `#trackedworkftbudget`: the projection has **no free-text budget**. A
+/// tracked-work id proves nothing about a free-text head (`#qftnodoneeat`), so
+/// when none of `done_ids` heads the queue the plan is `None` instead of
+/// falling through to the leading free-text row. With a budget of 1 a
+/// `--review-resolve` closeout whose id was not in the queue consumed the
+/// leading `release + publish` head even though the response quoted it with a
+/// `**Deferred:**` paragraph (`#deferstrike`; agent-doc-bugs.md
+/// cycle-1793042953867, 2026-10-26). Answered free-text heads are struck by
+/// the proof-bearing `#ftstrike` projection, which honours deferrals.
 pub fn plan_queue_completion_strike_projection(
     file: &Path,
     content: &str,
@@ -2090,7 +2100,7 @@ pub fn plan_queue_completion_strike_projection(
         content,
         None,
         done_ids,
-        1,
+        0,
         ConsumedPromptEcho::StrikeOnly,
     )
 }
@@ -2497,10 +2507,14 @@ fn plan_queue_prompt_consumption_inner(
         && let Some(response_body) =
             projected_capture_response_body(file).filter(|body| !body.trim().is_empty())
     {
+        // `#deferstrike`: a quoted head followed by a deferral is not proven.
         let proven = consumed_texts
             .iter()
             .take_while(|text| {
                 agent_doc_queue::queue_response::free_text_head_answered_by_response(
+                    &response_body,
+                    text,
+                ) && !agent_doc_queue::queue_response::response_defers_free_text_head(
                     &response_body,
                     text,
                 )
@@ -3963,6 +3977,147 @@ mod core_tests {
                 .contains("> **Queue prompt:**\n>\n> do [#alpha]"),
             "the cycle's own consumption keeps #queue-prompt-echo-in-response:\n{}",
             consumed.new_document
+        );
+    }
+
+    /// `#trackedworkftbudget` live shape (agent-doc-bugs.md
+    /// cycle-1793042953867, 2026-10-26): the leading `🔄 release + publish`
+    /// head, a later `📥 release + publish: …` row sharing its prefix, and a
+    /// `--review-resolve` id that is not in the queue at all.
+    const DEFERRED_RELEASE_DOC: &str = concat!(
+        "---\nqueue_active: true\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: integration batch — opus\n\n",
+        "> **Queue prompt:** release + publish\n\n",
+        "**Deferred:** this release waits until the dispatched fixes land.\n\n",
+        "> **Queue prompt:** release + publish: Include fixes for Issue 378-379 and the current 📥 items.\n\n",
+        "**Deferred:** this waits for the dispatched fixes below.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue go -->\n",
+        "- 🔄 release + publish\n",
+        "- ☑️ [#subagent:onboarding#1] We need to work on making agent-doc easy to onboard.\n",
+        "- 📥 release + publish: Include fixes for Issue 378-379 and the current 📥 items.\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    const DEFERRED_RELEASE_RESPONSE: &str = concat!(
+        "### Re: integration batch — opus\n\n",
+        "> **Queue prompt:** release + publish\n\n",
+        "**Deferred:** this release waits until the dispatched fixes land.\n\n",
+        "> **Queue prompt:** release + publish: Include fixes for Issue 378-379 and the current 📥 items.\n\n",
+        "**Deferred:** this waits for the dispatched fixes below.\n",
+    );
+
+    fn record_captured_response(doc: &Path, content: &str, response: &str) {
+        agent_doc_cycle_state_io::start_preflight(doc, Some(content), Some(content)).unwrap();
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(doc)
+            .unwrap()
+            .unwrap();
+        let sha = agent_doc_hash::content_hash(response);
+        agent_doc_cycle_state_io::append_response_captured_body(
+            doc,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &state.cycle_id,
+                capture_id: &state.cycle_id,
+                response_sha256: &sha,
+                response_body: response,
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            doc,
+            "test_capture",
+            Some(content),
+            Some(content),
+            &sha,
+            Some(&state.cycle_id),
+        )
+        .unwrap();
+    }
+
+    /// A tracked-work strike whose id is not in the queue proves nothing about
+    /// the leading free-text head, and must never consume one the response
+    /// quoted with a `**Deferred:**` paragraph (`#deferstrike`).
+    #[test]
+    fn tracked_work_strike_never_consumes_a_deferred_leading_free_text_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("bugs.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(&doc, DEFERRED_RELEASE_DOC).unwrap();
+        let review = ["layoutunprovenliveverify".to_string()];
+
+        // Without a captured response nothing proves the head either.
+        let plan =
+            plan_queue_completion_strike_projection(&doc, DEFERRED_RELEASE_DOC, &review).unwrap();
+        assert!(
+            plan.is_none(),
+            "an id outside the queue consumed a free-text head: {:?}",
+            plan.as_ref().map(|plan| &plan.consumed_texts)
+        );
+
+        record_captured_response(&doc, DEFERRED_RELEASE_DOC, DEFERRED_RELEASE_RESPONSE);
+        let plan =
+            plan_queue_completion_strike_projection(&doc, DEFERRED_RELEASE_DOC, &review).unwrap();
+        assert!(
+            plan.is_none(),
+            "the deferred leading head was consumed: {:?}",
+            plan.as_ref().map(|plan| &plan.consumed_texts)
+        );
+    }
+
+    /// `#fpecapturedresponse` + `#deferstrike`: a done-id closeout with a
+    /// free-text budget (the skip-visible-guard closeout) may consume only
+    /// heads its captured response answered, and a quote followed by a
+    /// deferral is not an answer.
+    #[test]
+    fn count_consume_fence_keeps_a_quoted_and_deferred_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("bugs.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(&doc, DEFERRED_RELEASE_DOC).unwrap();
+        record_captured_response(&doc, DEFERRED_RELEASE_DOC, DEFERRED_RELEASE_RESPONSE);
+        let plan = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            DEFERRED_RELEASE_DOC,
+            None,
+            &["layoutunprovenliveverify".to_string()],
+            1,
+        )
+        .unwrap();
+        assert!(
+            plan.is_none(),
+            "the deferred leading head was consumed: {:?}",
+            plan.as_ref().map(|plan| &plan.consumed_texts)
+        );
+
+        // The same head quoted and answered is still consumable.
+        let answered = DEFERRED_RELEASE_RESPONSE.replace(
+            "**Deferred:** this release waits until the dispatched fixes land.",
+            "Released as v1.2.3 and published.",
+        );
+        record_captured_response(&doc, DEFERRED_RELEASE_DOC, &answered);
+        let plan = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            DEFERRED_RELEASE_DOC,
+            None,
+            &["layoutunprovenliveverify".to_string()],
+            1,
+        )
+        .unwrap()
+        .expect("an answered quote still proves the head");
+        assert_eq!(plan.consumed_texts.len(), 1, "{:?}", plan.consumed_texts);
+        assert!(
+            plan.new_document.contains("~~release + publish~~")
+                && plan
+                    .new_document
+                    .contains("- 📥 release + publish: Include fixes"),
+            "only the answered head strikes, never its prefix-sharing sibling:\n{}",
+            plan.new_document
         );
     }
 

@@ -157,9 +157,16 @@ gate the test holds closed, and the test requires that the gate has not been
 passed when the call under test returns (a call that waited on the effect could
 only return after the gate opened), after first waiting for the effect to reach
 the gate so the check is not vacuous. The gate opens itself at a hang ceiling,
-so the regression fails instead of hanging the suite. "Admitted without waiting"
-is proven by counting observations, and "refused before the backstop" by the
-refusal's type (the backstop's overrun is untyped).
+so the regression fails instead of hanging the suite. The gate belongs to the
+test that closed it: it is armed for that test's own document (its
+`document_hash` or canonical path) and returns a test-owned handle whose
+counters see only that document's effect, and dropping the handle opens and
+disarms it. A process-global open flag and counter shared by every test that
+uses the fixture is a cross-test race under the parallel crate suite: one
+test's open released another's parked effect (the queued stale target then
+applied before retirement), and one test's close reset another's counts.
+"Admitted without waiting" is proven by counting observations, and "refused
+before the backstop" by the refusal's type (the backstop's overrun is untyped).
 
 A lock-order property is proven by an order checker, not by a race
 (`#stateplanesubscriber`). When the two locks do not form a cycle under the

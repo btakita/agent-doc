@@ -3585,7 +3585,8 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             // holding the Lazily context while the adapter is blocked. The
             // adapter blocks on a gate the test holds closed (`#loadbudgettests`),
             // not on a 750ms sleep the test raced against a 250ms bound.
-            blocking_effect_gate::STRIKE_ADAPTER.pass();
+            blocking_effect_gate::STRIKE_ADAPTER
+                .pass(&blocking_effect_gate::path_key(&invocation.file));
         }
         let current = std::fs::read_to_string(&invocation.file)
             .context("project controller test free-text strike: failed to read document")?;
@@ -3609,14 +3610,26 @@ static TEST_RUNTIME_EFFECTS: TestProjectControllerRuntimeEffects =
 /// adapter" is proven by ordering, not elapsed time. A test closes the gate,
 /// publishes, and then requires that the adapter has NOT passed the gate: a
 /// publish that waited on the adapter could only have returned after the gate
-/// opened. [`blocking_effect_gate::Gate::wait_entered`] proves the adapter is
+/// opened. [`blocking_effect_gate::Closed::wait_entered`] proves the adapter is
 /// really in flight (blocked at the gate) when the test reads, so the
 /// assertion is never vacuous. A gate opens itself after
 /// [`blocking_effect_gate::HANG_CEILING`], so that regression fails the
-/// assertion instead of hanging the suite. An open gate (the default) passes
-/// at once, so a fixture is inert in every test that does not close it.
+/// assertion instead of hanging the suite.
+///
+/// Per-test ownership: each gate is a registry keyed by the fixture's OWN
+/// document (its `document_hash`, or its canonical path for the strike
+/// adapter). [`blocking_effect_gate::Gate::close`] arms a gate for one key and
+/// returns the test-owned [`blocking_effect_gate::Closed`] handle whose counters
+/// see only that document's adapter. A process-global open flag and counter
+/// were shared by every test in the binary that used the same fixture: one
+/// test's `open()`/`close()` released or reset another's adapter mid-assertion
+/// under the parallel crate suite. An adapter whose key no test armed passes at
+/// once, so a fixture is inert in every test that does not close it for its
+/// own document.
 #[cfg(test)]
 mod blocking_effect_gate {
+    use std::collections::HashMap;
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     pub(super) const HANG_CEILING: Duration = Duration::from_secs(30);
@@ -3627,53 +3640,18 @@ mod blocking_effect_gate {
         passed: usize,
     }
 
-    pub(super) struct Gate {
+    struct Slot {
         state: parking_lot::Mutex<State>,
         changed: parking_lot::Condvar,
     }
 
-    impl Gate {
-        const fn new() -> Self {
-            Self {
-                state: parking_lot::Mutex::new(State {
-                    open: true,
-                    entered: 0,
-                    passed: 0,
-                }),
-                changed: parking_lot::Condvar::new(),
-            }
-        }
-
-        pub(super) fn close(&self) {
-            let mut state = self.state.lock();
-            state.open = false;
-            state.entered = 0;
-            state.passed = 0;
-        }
-
-        pub(super) fn open(&self) {
+    impl Slot {
+        fn open(&self) {
             self.state.lock().open = true;
             self.changed.notify_all();
         }
 
-        pub(super) fn passed(&self) -> usize {
-            self.state.lock().passed
-        }
-
-        /// Wait (bounded by the hang ceiling) until an adapter has reached the
-        /// gate; returns how many have.
-        pub(super) fn wait_entered(&self) -> usize {
-            let deadline = Instant::now() + HANG_CEILING;
-            let mut state = self.state.lock();
-            while state.entered == 0 {
-                if self.changed.wait_until(&mut state, deadline).timed_out() {
-                    break;
-                }
-            }
-            state.entered
-        }
-
-        pub(super) fn pass(&self) {
+        fn pass(&self) {
             let deadline = Instant::now() + HANG_CEILING;
             let mut state = self.state.lock();
             state.entered += 1;
@@ -3687,12 +3665,152 @@ mod blocking_effect_gate {
         }
     }
 
-    /// `blocking-session.md` free-text strike adapter.
+    pub(super) struct Gate {
+        armed: parking_lot::Mutex<Option<HashMap<String, Arc<Slot>>>>,
+    }
+
+    impl Gate {
+        const fn new() -> Self {
+            Self {
+                armed: parking_lot::Mutex::new(None),
+            }
+        }
+
+        /// Arm this gate closed for `key` only. Panics if another live handle
+        /// already holds the same key: two owners of one document's gate would
+        /// reintroduce the shared-counter race this registry exists to remove.
+        pub(super) fn close(&'static self, key: impl Into<String>) -> Closed {
+            let key = key.into();
+            let slot = Arc::new(Slot {
+                state: parking_lot::Mutex::new(State {
+                    open: false,
+                    entered: 0,
+                    passed: 0,
+                }),
+                changed: parking_lot::Condvar::new(),
+            });
+            let previous = self
+                .armed
+                .lock()
+                .get_or_insert_with(HashMap::new)
+                .insert(key.clone(), Arc::clone(&slot));
+            assert!(
+                previous.is_none(),
+                "blocking_effect_gate already armed for {key}"
+            );
+            Closed {
+                gate: self,
+                key,
+                slot,
+            }
+        }
+
+        /// Adapter side: block only when a test armed this gate for `key`.
+        pub(super) fn pass(&self, key: &str) {
+            let slot = self
+                .armed
+                .lock()
+                .as_ref()
+                .and_then(|armed| armed.get(key).cloned());
+            if let Some(slot) = slot {
+                slot.pass();
+            }
+        }
+    }
+
+    /// Test-owned closed gate for one key. Dropping it opens the gate (so a
+    /// panicking test never strands its adapter until the hang ceiling) and
+    /// disarms the key.
+    pub(super) struct Closed {
+        gate: &'static Gate,
+        key: String,
+        slot: Arc<Slot>,
+    }
+
+    impl Closed {
+        pub(super) fn open(&self) {
+            self.slot.open();
+        }
+
+        pub(super) fn passed(&self) -> usize {
+            self.slot.state.lock().passed
+        }
+
+        /// Wait (bounded by the hang ceiling) until this key's adapter has
+        /// reached the gate; returns how many have.
+        pub(super) fn wait_entered(&self) -> usize {
+            let deadline = Instant::now() + HANG_CEILING;
+            let mut state = self.slot.state.lock();
+            while state.entered == 0 {
+                if self
+                    .slot
+                    .changed
+                    .wait_until(&mut state, deadline)
+                    .timed_out()
+                {
+                    break;
+                }
+            }
+            state.entered
+        }
+    }
+
+    impl Drop for Closed {
+        fn drop(&mut self) {
+            self.slot.open();
+            if let Some(armed) = self.gate.armed.lock().as_mut() {
+                armed.remove(&self.key);
+            }
+        }
+    }
+
+    /// `blocking-session.md` free-text strike adapter, keyed by canonical path.
     pub(super) static STRIKE_ADAPTER: Gate = Gate::new();
-    /// `blocking-document-effect` retained-write settlement effect.
+    /// `blocking-document-effect` retained-write settlement effect, keyed by
+    /// `document_hash`.
     pub(super) static DOCUMENT_EFFECT: Gate = Gate::new();
-    /// `blocking-retained-transition.md` retained projection adapter.
+    /// `blocking-retained-transition.md` retained projection adapter, keyed by
+    /// `document_hash`.
     pub(super) static RETAINED_TRANSITION: Gate = Gate::new();
+
+    /// Canonical key for a path-keyed gate.
+    pub(super) fn path_key(path: &std::path::Path) -> String {
+        path.canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Per-test ownership: one test's gate operations must be invisible to
+    /// another test's key. Proven by ordering: the `doc-a` adapter is parked on
+    /// its slot, so its `passed` count can only move if `doc-a` itself opens.
+    #[test]
+    fn a_gate_key_is_isolated_from_every_other_tests_key() {
+        static GATE: Gate = Gate::new();
+        let a = GATE.close("doc-a");
+        let b = GATE.close("doc-b");
+        let parked = std::thread::spawn(|| GATE.pass("doc-a"));
+        assert_eq!(a.wait_entered(), 1, "the doc-a adapter never parked");
+
+        // An unarmed key passes at once and touches no armed counter.
+        GATE.pass("doc-unarmed");
+        // Another test opening, then dropping, its own handle neither releases
+        // nor counts against doc-a.
+        b.open();
+        drop(b);
+        GATE.pass("doc-b");
+        assert_eq!(a.passed(), 0, "doc-b released or counted the doc-a adapter");
+        assert_eq!(a.wait_entered(), 1, "another key's adapter entered doc-a");
+
+        a.open();
+        parked.join().unwrap();
+        assert_eq!(a.passed(), 1);
+        drop(a);
+        // Dropping disarms: the same key can be armed again by a later test.
+        let again = GATE.close("doc-a");
+        GATE.pass("doc-other");
+        assert_eq!(again.passed(), 0);
+    }
 }
 
 /// `#orchver` — stamp the binary crate's `CARGO_PKG_VERSION` into controller identity.
@@ -5852,7 +5970,7 @@ impl RetainedWriteSettleSink {
         if intent_id == "blocking-document-effect" {
             // `#remainingwallclock`: blocks on a gate the test holds closed,
             // not a 750ms sleep raced against a 250ms bound.
-            blocking_effect_gate::DOCUMENT_EFFECT.pass();
+            blocking_effect_gate::DOCUMENT_EFFECT.pass(document_hash);
         }
         let Some(runtime) = self.runtime.upgrade() else {
             // The controller is shutting down; the intent stays retained and the
@@ -6193,7 +6311,7 @@ impl RetainedWriteSettleSink {
             // the reactive context that route/layout dispatch also needs.
             // `#remainingwallclock`: blocks on a gate the test holds closed,
             // not a 750ms sleep raced against a 250ms bound.
-            blocking_effect_gate::RETAINED_TRANSITION.pass();
+            blocking_effect_gate::RETAINED_TRANSITION.pass(document_hash);
         }
         let Some(runtime) = self.runtime.upgrade() else {
             return false;
@@ -22032,8 +22150,7 @@ agent:queue\n\
         // settle effect blocks on a gate the test holds closed; a verdict or
         // read that waited on it could only return after the gate opened at
         // its hang ceiling, so it would see the effect already passed.
-        let gate = &blocking_effect_gate::DOCUMENT_EFFECT;
-        gate.close();
+        let gate = blocking_effect_gate::DOCUMENT_EFFECT.close(document_hash.as_str());
         runtime.document_retained_write_verdict(
             &document_hash,
             &file,
@@ -24156,8 +24273,7 @@ revised operator request
         // retained adapter blocks on a gate the test holds closed; a publish or
         // read that waited on it could only return after the gate opened at its
         // hang ceiling, so it would see the adapter already passed.
-        let gate = &blocking_effect_gate::RETAINED_TRANSITION;
-        gate.close();
+        let gate = blocking_effect_gate::RETAINED_TRANSITION.close(document_hash.as_str());
         runtime
             .document_graphs
             .observe_retained_delivery_with_change(
@@ -24232,8 +24348,7 @@ revised operator request
         append_state_event(dir.path(), &deferred).unwrap();
         runtime.apply_state_event(&deferred).unwrap();
 
-        let gate = &blocking_effect_gate::RETAINED_TRANSITION;
-        gate.close();
+        let gate = blocking_effect_gate::RETAINED_TRANSITION.close(document_hash.as_str());
         runtime
             .document_graphs
             .observe_retained_delivery_with_change(
@@ -24836,11 +24951,12 @@ revised operator request
             .document_queue_authority_observe(&document_hash, &canonical, content.clone())
             .unwrap();
 
-        blocking_effect_gate::STRIKE_ADAPTER.close();
+        let gate =
+            blocking_effect_gate::STRIKE_ADAPTER.close(blocking_effect_gate::path_key(&canonical));
         append_state_event(dir.path(), &captured).unwrap();
         runtime.apply_state_event(&captured).unwrap();
         assert_eq!(
-            blocking_effect_gate::STRIKE_ADAPTER.passed(),
+            gate.passed(),
             0,
             "publishing ResponseCaptured must not wait for the actor/editor adapter"
         );
@@ -24866,7 +24982,11 @@ revised operator request
 
         // Release the adapter; the asynchronous worker now applies the strike.
         // The wait below is for that event, bounded only by a hang ceiling.
-        blocking_effect_gate::STRIKE_ADAPTER.open();
+        assert!(
+            gate.wait_entered() >= 1,
+            "the strike adapter never reached its gate for this document"
+        );
+        gate.open();
         let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         let projected = loop {
             let projected = std::fs::read_to_string(&canonical).unwrap();

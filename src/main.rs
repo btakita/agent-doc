@@ -489,6 +489,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                 file.display()
                             );
                         }
+                        // `#strikeretires`: the target already retired the
+                        // struck rows' completion cells; their reported-release
+                        // receipts end at this same boundary.
+                        agent_doc_queue_io::claim_release_receipt::retire_struck_by_successor_or_warn(
+                            &file,
+                            &invocation.expected_content,
+                            &invocation.target_content,
+                            "answered_free_text_projection",
+                        );
                         if let Err(error) =
                             agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(
                                 &file,

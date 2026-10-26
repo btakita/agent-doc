@@ -191,6 +191,23 @@ impl ClaimReleaseReceiptLedger {
         before - self.receipts.len()
     }
 
+    /// Drop the receipts of rows a strike closed (`#strikeretires`): every
+    /// receipt whose identity is in `struck` and has no live row in `live`.
+    /// A receipt for a still-live identity is work evidence for that row and
+    /// stays. Returns how many were dropped.
+    pub fn retire_struck(
+        &mut self,
+        struck: &HashSet<QueueItemIdentity>,
+        live: Option<&HashSet<QueueItemIdentity>>,
+    ) -> usize {
+        let before = self.receipts.len();
+        self.receipts.retain(|receipt| {
+            !struck.contains(&receipt.identity)
+                || live.is_some_and(|live| live.contains(&receipt.identity))
+        });
+        before - self.receipts.len()
+    }
+
     /// The receipt that governs the live line `text`: still queued and not
     /// superseded by a live claim on the same line.
     pub fn governing(
@@ -422,6 +439,25 @@ mod tests {
         record(&mut ledger, &claim("c line", "subagent:c"), 10, 50);
         assert!(ledger.forget("c line"));
         assert!(!ledger.forget("c line"));
+    }
+
+    /// `#strikeretires`: a strike drops the struck identity's receipt unless
+    /// a live row still carries that identity; other receipts are untouched.
+    #[test]
+    fn retire_struck_drops_only_struck_identities_without_a_live_row() {
+        let mut ledger = ClaimReleaseReceiptLedger::default();
+        record(&mut ledger, &claim("a line", "subagent:a"), 10, 50);
+        record(&mut ledger, &claim("b line", "subagent:b"), 10, 50);
+        record(&mut ledger, &claim("c line", "subagent:c"), 10, 50);
+
+        let struck = live(&["a line", "b line"]);
+        assert_eq!(ledger.retire_struck(&struck, Some(&live(&["b line"]))), 1);
+        let kept = ledger
+            .receipts
+            .iter()
+            .map(|receipt| receipt.item_text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(kept, ["b line", "c line"]);
     }
 
     #[test]

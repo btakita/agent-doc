@@ -252,6 +252,7 @@ tmux-ci:
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib isolated_test_server -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib pane_order -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib pane_launch_live -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io repair_layout_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib navigation_lane_guard_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-controller-io --lib navigation_lane_session_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \

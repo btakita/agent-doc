@@ -99,6 +99,57 @@ pub fn respawn_pane(target: &str, command: &str) -> TmuxCommand {
     TmuxCommand::new(["respawn-pane", "-k", "-t", target, command])
 }
 
+/// The interpreter a pane launch runs its handoff script under. It is named
+/// explicitly, as the pane's own argv, so the script never depends on the
+/// operator's `default-shell` (fish, nushell, ...) parsing POSIX syntax.
+pub const PANE_LAUNCH_INTERPRETER: &str = "/bin/sh";
+
+/// The POSIX script a launched pane runs as its own process: `command` first,
+/// then the operator's interactive shell in its place, so the pane keeps a
+/// shell after the command exits exactly as it did when the command was typed
+/// into one.
+///
+/// - `set -m` gives `command` its own foreground process group, so tmux's
+///   `#{pane_current_command}` names the command (for example `agent-doc`), not
+///   the wrapper `sh`, while it runs: foreground-command checks (the lane gc,
+///   idle-shell classification) see the same process they saw before.
+/// - `trap : INT` keeps the wrapper alive through a Ctrl-C the command
+///   receives, so the shell handoff still happens. A caught signal is reset to
+///   its default in the child, so `command` still sees SIGINT normally.
+/// - No interactive shell reads the terminal before `command` starts, so no rc
+///   prompt (zsh's `zsh-newuser-install`) can swallow its first bytes.
+pub fn pane_launch_script(command: &str) -> String {
+    format!("set -m 2>/dev/null; trap : INT; {command}; exec \"${{SHELL:-/bin/sh}}\"")
+}
+
+/// Replace `target`'s process with `command`, followed by the operator's
+/// shell. Unlike typing `command` into the pane's shell, there is no readiness
+/// race: tmux starts the pane process with the command already in its argv.
+/// `cwd` keeps the directory the pane's shell was in. No environment is passed
+/// in the argv (it is visible in the process list): a tmux client outside any
+/// session already hands its own `PATH` to the panes it spawns.
+pub fn respawn_pane_with_launch_script(
+    target: &str,
+    cwd: Option<&str>,
+    command: &str,
+) -> TmuxCommand {
+    let mut args = vec![
+        "respawn-pane".to_string(),
+        "-k".to_string(),
+        "-t".to_string(),
+        target.to_string(),
+    ];
+    if let Some(cwd) = cwd.filter(|cwd| !cwd.is_empty()) {
+        args.extend(["-c".to_string(), cwd.to_string()]);
+    }
+    args.extend([
+        PANE_LAUNCH_INTERPRETER.to_string(),
+        "-c".to_string(),
+        pane_launch_script(command),
+    ]);
+    TmuxCommand::new(args)
+}
+
 pub fn rename_window(target: &str, name: &str) -> TmuxCommand {
     TmuxCommand::new(["rename-window", "-t", target, name])
 }
@@ -964,6 +1015,54 @@ mod tests {
                 "-t",
                 "%4",
                 "exec agent-doc start file.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn pane_launch_script_runs_command_under_job_control_then_hands_off_to_the_shell() {
+        assert_eq!(
+            pane_launch_script("'/bin/agent-doc' start plan.md --fresh"),
+            "set -m 2>/dev/null; trap : INT; '/bin/agent-doc' start plan.md --fresh; exec \"${SHELL:-/bin/sh}\""
+        );
+    }
+
+    #[test]
+    fn respawn_pane_with_launch_script_passes_the_command_as_the_pane_argv() {
+        let command =
+            respawn_pane_with_launch_script("%4", Some("/repo"), "/bin/agent-doc start plan.md");
+
+        assert_eq!(
+            command.args(),
+            [
+                "respawn-pane",
+                "-k",
+                "-t",
+                "%4",
+                "-c",
+                "/repo",
+                "/bin/sh",
+                "-c",
+                "set -m 2>/dev/null; trap : INT; /bin/agent-doc start plan.md; exec \"${SHELL:-/bin/sh}\"",
+            ]
+        );
+        assert!(!command.is_read_only());
+    }
+
+    #[test]
+    fn respawn_pane_with_launch_script_omits_an_unknown_cwd() {
+        let command = respawn_pane_with_launch_script("%4", Some(""), "true");
+
+        assert_eq!(
+            command.args(),
+            [
+                "respawn-pane",
+                "-k",
+                "-t",
+                "%4",
+                "/bin/sh",
+                "-c",
+                "set -m 2>/dev/null; trap : INT; true; exec \"${SHELL:-/bin/sh}\"",
             ]
         );
     }

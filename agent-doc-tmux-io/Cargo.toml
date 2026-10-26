@@ -27,3 +27,4 @@ tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 
 [dev-dependencies]
 serde_json = "1"
+tempfile = "3"

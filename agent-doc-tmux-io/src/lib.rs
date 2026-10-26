@@ -9,6 +9,9 @@ pub mod isolated_test_server;
 pub mod observation_cache;
 pub mod pane_order;
 
+#[cfg(all(test, unix))]
+mod pane_launch_live_tests;
+
 pub use client_visibility::{
     AmbientSession, AmbientSessionResolution, AttachedTmuxClient, PANE_NOT_VISIBLE_MARKER,
     PaneNotVisibleReason, UnwatchedPane, ambient_current_session,
@@ -17,8 +20,12 @@ pub use client_visibility::{
 };
 
 pub use isolated_test_server::{
-    IsolatedTestTmux, isolated_test_tmux, isolated_tmux_socket_path, unique_isolated_tmux_socket,
+    IsolatedTestTmux, isolated_test_tmux, isolated_test_tmux_with_default_shell,
+    isolated_tmux_socket_path, unique_isolated_tmux_socket,
 };
+
+#[cfg(unix)]
+pub use isolated_test_server::write_terminal_reading_test_shell;
 
 pub use observation_cache::{
     ObservationScopeStats, TmuxObservationScope, begin_observation_scope, observation_scope_stats,
@@ -40,8 +47,9 @@ use agent_doc_tmux_commands::{
     list_windows as list_windows_command, list_windows_all as list_windows_all_command,
     new_window_in_cwd as new_window_in_cwd_command, rename_window as rename_window_command,
     resize_window_height as resize_window_height_command, respawn_pane as respawn_pane_command,
-    send_key as send_key_command, swap_window as swap_window_command, text_only_command,
-    text_submit_command, tmux_submit_profile_for_harness,
+    respawn_pane_with_launch_script, send_key as send_key_command,
+    swap_window as swap_window_command, text_only_command, text_submit_command,
+    tmux_submit_profile_for_harness,
 };
 
 static TMUX_BIN_RESOLUTION: OnceLock<agent_doc_project_config_io::TmuxBinResolution> =
@@ -548,6 +556,31 @@ pub fn respawn_pane(
 ) -> Result<(), TmuxIoError> {
     runner
         .run(&respawn_pane_command(target, command))
+        .map(|_| ())
+}
+
+/// Run `command` in a freshly provisioned pane as the pane's own process, then
+/// hand the pane to the operator's shell.
+///
+/// Never type a command into a pane whose shell was just spawned: nothing
+/// proves when an interactive shell starts reading its command line, and an rc
+/// step that reads the terminal first consumes the typed bytes. zsh with no
+/// `~/.zshrc` runs `zsh-newuser-install`, which ate the leading `/` of an
+/// absolute `agent-doc start` path, however long the caller waited. This
+/// replaces the pane's process instead, keeping its pane id and its working
+/// directory.
+pub fn launch_command_in_pane(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    target: &str,
+    command: &str,
+) -> Result<(), TmuxIoError> {
+    let cwd = pane_current_path(runner, target);
+    runner
+        .run(&respawn_pane_with_launch_script(
+            target,
+            cwd.as_deref().and_then(|cwd| cwd.to_str()),
+            command,
+        ))
         .map(|_| ())
 }
 
@@ -1359,6 +1392,39 @@ mod tests {
         kill_window(&runner, "@9").unwrap();
 
         assert_eq!(runner.commands(), vec![vec!["kill-window", "-t", "@9"]]);
+    }
+
+    #[test]
+    fn launch_command_in_pane_respawns_the_pane_in_its_directory_instead_of_typing() {
+        let runner = RecordingRunner {
+            commands: RefCell::new(Vec::new()),
+            response: "/repo\n".to_string(),
+        };
+
+        launch_command_in_pane(&runner, "%4", "/bin/agent-doc start plan.md").unwrap();
+
+        let commands = runner.commands();
+        assert_eq!(
+            commands,
+            vec![
+                vec!["display-message", "-p", "-t", "%4", "#{pane_current_path}"],
+                vec![
+                    "respawn-pane",
+                    "-k",
+                    "-t",
+                    "%4",
+                    "-c",
+                    "/repo",
+                    "/bin/sh",
+                    "-c",
+                    "set -m 2>/dev/null; trap : INT; /bin/agent-doc start plan.md; exec \"${SHELL:-/bin/sh}\"",
+                ],
+            ]
+        );
+        assert!(
+            commands.iter().all(|args| args[0] != "send-keys"),
+            "a launch never types into the pane: {commands:?}"
+        );
     }
 
     #[test]

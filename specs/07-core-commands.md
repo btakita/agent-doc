@@ -941,7 +941,8 @@ guidance.
   resolved host is `ide`, and perform no presentation for `external` or `none`.
 - `agent-doc start <FILE>` uses the same operation outside tmux, provisions a
   pane when necessary, and re-executes the original lifecycle flags inside that
-  pane. `agent-doc start <FILE> --client-id ID` (`#ideriderindependentnav` P6)
+  pane as the pane's own process, never typed into its shell
+  (`specs/07-session-tmux-commands.md` § start). `agent-doc start <FILE> --client-id ID` (`#ideriderindependentnav` P6)
   provisions that pane in the client's own navigation lane session under the
   same lane conditions as `--client-id` above; a document with a live pane
   anywhere reuses it where it lives. A host without tmux fails closed with workspace-image guidance from the

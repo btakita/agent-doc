@@ -71,6 +71,25 @@ may republish the retained intent, but remains subject to the same rule.
 - `--force` retires the live owner it bypasses (GH #243, GH #354), but controller admission is the authority edge: the replacement generation must be accepted before any destructive retirement of the prior owner. Before admission, the pane the non-force path would have refused is preflighted and retirement is permitted only when its process tree proves it is agent-doc's supervisor for this document **and** tmux/turn evidence proves that destructive retirement is safe: no active turn, no protected prompt input, and no attached client displaying the pane. A protected duplicate is reported with its pane, window, requested owner pane, and protection reason; the force-start is deferred without starting a second supervisor, and the operator retries after the protected pane becomes safe. Controller rejection or panic leaves the prior supervisor and pane untouched. After successful admission, retirement revalidates the same facts; a newly protected owner receives a durable pid/pane-targeted idle-retirement request while the accepted controller authority fences its writes. The same guard applies when a route finds non-authoritative duplicate supervisors: routing to the authoritative owner continues, while a protected duplicate receives that durable retirement request. Its own supervisor consumes the request through the existing idle watcher only after revalidating the authoritative owner and reaching an idle, input-free, unwatched boundary; it records an intentional exit, tears down its child, reports the closeout with duplicate pane/window/owner, and exits without relaunch. Immediate safe retirement SIGTERMs the supervisor (its handler records an intentional exit, so the controller watchdog does not respawn it), escalates to SIGKILL after a 5s grace, stops any descendant that outlived it, closes the pane, and prints/logs the closeout. A transient `agent-doc write|compact|session … <doc>`, bare harness session (`#bare-foreign-session-guard`), stale registry row, or idle shell is never ownership proof and is left alone.
 - When a fresh start falls back to a new session binding because the configured session is dead, `.agent-doc/config.toml` must be updated to the new live session.
 - Harness launches must auto-add writable roots for parent-repo patchback and nested submodule git metadata when needed.
+- Start pane launch: an outside-tmux `start` runs its re-exec'd
+  `agent-doc start` as the provisioned pane's own process and never types it into the
+  pane's freshly spawned shell. Nothing proves when an interactive shell starts reading
+  its command line, and an rc step that reads the terminal first swallows typed bytes:
+  zsh with no `~/.zshrc` runs `zsh-newuser-install`, which ate the leading `/` of the
+  absolute agent-doc path (onboarding pass, 2026-10-26). No readiness wait fixes that,
+  because that prompt itself waits for input. The launch (`agent_doc_tmux_io::launch_command_in_pane`)
+  is one `respawn-pane -k` on the provisioned pane, keeping its pane id and its working
+  directory, whose argv is `/bin/sh -c` with a POSIX script (`agent_doc_tmux_commands::pane_launch_script`),
+  so the operator's `default-shell` never parses it. The script turns on job control
+  (`set -m`) so tmux names the start, not the wrapper, as `#{pane_current_command}`;
+  traps SIGINT so the wrapper survives a Ctrl-C the start receives (the start itself keeps
+  the default disposition); runs the start; then `exec`s `$SHELL`, so the pane keeps the
+  operator's shell after the start exits exactly as a typed start left it. No environment
+  variable is passed in the tmux argv: a tmux client outside any session already hands its
+  own `PATH` to the panes it spawns. `make tmux-ci` covers it against a stand-in shell that
+  reads one terminal byte before its first command line (`pane_launch_live_*`, plus real
+  zsh with an empty `HOME` when installed), and `start_bootstrap_runs_the_start_whole_under_a_terminal_reading_shell`
+  drives `start`'s own provisioning and dispatch against it.
 - Navigation lanes (`#ideriderindependentnav` P6): `--client-id` names the requesting editor
   surface client. From outside tmux, with `editor_navigation = "per_installation"`, a
   `tmux_session` pin, and an installation-scoped client, the start pane is created in that

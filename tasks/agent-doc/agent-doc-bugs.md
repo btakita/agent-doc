@@ -489,6 +489,27 @@ You added `#gh-fix` issues #373, #374, and #375, and each is dispatched to its o
 Each worker leaves its issue open. The coordinator closes each one after integrating and installing the fix.
 
 CI for main commits `20a8311ffa` and `3cdcc5a31e` was still running at closeout.
+
+### Re: GH #375 Remote Dev popup null action — opus-5 · 2026-10-26T10:12-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/375
+
+Fixed, integrated, installed, and closed [GH #375](https://github.com/btakita/agent-doc/issues/375).
+
+Under Remote Dev, the backend builds `AgentDoc.Popup` from its own action manager. That manager only knows the backend module's actions. Since #372, `AgentDoc.UpdateChannel` is registered only in the frontend. The popup still listed it, so the lookup returned null, `DefaultActionGroup.add` threw, and the popup never opened.
+
+Popup ids now go through `AgentDocPopupAction.resolveActions`. The backend popup omits client-only ids such as `UpdateChannel`. That action stays in the JetBrains Client's Tools menu and in a single-process IDE's popup. Any other unregistered id is logged and skipped, so it can no longer break the popup.
+
+The worker's commit `a50a1e89eb` fast-forwarded `main`. Its verification:
+
+- **Classic plugin:** 947 tests passed, including the classic artifact verifier.
+- **2026.2 and 2026.3 builds:** `make jetbrains-262-check` and `make jetbrains-263-check` passed. That includes the new backend test, which checks every popup id against the generated `agent.doc.backend.xml`.
+- **Rust and docs:** `make check-fast` passed.
+- **Mutation check:** with the client-only set emptied, 2 of the 3 new backend tests failed.
+
+`make install` installed JetBrains classic 0.2.828, 2026.2 0.2.829, and 2026.3 0.2.830. The running IntelliJ 2026.3 and Rider 2026.2 must restart to load the new generation. VS Code packaging was skipped because `vsce` is not installed, and the extension source is unchanged. The fix ships in the next agent-doc release.
+
+The #373, #374, and queue mirror-sync workers are still running.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -604,7 +625,7 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - 🚧 [#subagent:gh373#1] #gh-fix https://github.com/btakita/agent-doc/issues/373
 - 🚧 [#subagent:gh374#1] #gh-fix https://github.com/btakita/agent-doc/issues/374
-- 🚧 [#subagent:gh375#1] #gh-fix https://github.com/btakita/agent-doc/issues/375
+- ☑️ [#subagent:gh375#1] #gh-fix https://github.com/btakita/agent-doc/issues/375
 <!-- /agent:run -->
 
 ##~ Run: Issues

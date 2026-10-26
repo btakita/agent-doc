@@ -380,6 +380,25 @@ whose catalog proof is present; destructive, shell-compound, git-commit,
 generation-reroute, queue-drain, and editor-conflict actions stay gated with an
 operator/manual command instead of being auto-run.
 
+`agent-doc autofix` exits with the status of the outcome that remains after
+plan/apply, using the doctor's table above (0 ok, 3 recoverable, 4 operator,
+5 blocked; 1 = autofix itself failed), so a script can tell a repaired
+workflow from one that still needs work without parsing the plan:
+
+- A plan that ran no repair command — no `--apply`, a `--dry-run` plan, or an
+  `--apply` whose steps were all duplicate, gated, blocked, or not whitelisted
+  for execution — reports the diagnosed outcome as it stands.
+- An `--apply` that ran a repair command (it executed or failed) diagnoses the
+  workflow again and reports that outcome, so a successful repair command that
+  left the invariant broken still exits non-zero. The re-diagnosis reuses the
+  supplied `--preflight-json` / `--session-check-json` captures.
+
+The report carries both: `doctor_outcome` (what the plan was built from) and
+`outcome` (what remains; autofix schema v2). The status reuses the doctor's
+mechanism — `WorkflowDoctorOutcome::exit_code` through the typed
+`WorkflowDoctorUnhealthy` result — rather than a second code table, and a
+non-`ok` outcome adds no `Error:` line or dogfood fix prompt.
+
 ## Document write and watch authority
 
 The store actor owns `.agent-doc/state.db` as the single durable-state writer.

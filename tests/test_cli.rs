@@ -2259,6 +2259,73 @@ fn test_cli_doctor_exit_status_reports_the_outcome() {
         .stdout(predicate::str::contains("5 blocked"));
 }
 
+/// `agent-doc autofix` exits with the status of the outcome that remains after
+/// plan/apply, through the doctor's mapping. A live queue with no preflight
+/// capture stays `blocked` whatever the live inspections say, and autofix has no
+/// repair to run for missing evidence, so even `--apply` must exit 5 instead of
+/// reporting success. The per-outcome statuses and the re-diagnosis after an
+/// executed repair are unit-tested in `agent-doc-workflow-io`.
+#[test]
+fn test_cli_autofix_exit_status_reports_the_remaining_outcome() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let doc = root.join("plan.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: autofix-exit\nagent: claude\n---\n\n# Session\n\n<!-- agent:queue -->\n- ship the fix\n<!-- /agent:queue -->\n",
+    )
+    .unwrap();
+    init_git_repo(root, &doc);
+
+    let blocked = agent_doc_cmd()
+        .current_dir(root)
+        .args(["autofix", doc.to_str().unwrap(), "--dry-run"])
+        .assert()
+        .code(5);
+    let output = blocked.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("outcome=blocked doctor_outcome=blocked"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "- queue_continuation action=gather_missing_facts status=blocked_missing_facts"
+        ),
+        "{stdout}"
+    );
+    assert!(
+        !stderr.contains("Error:"),
+        "a completed autofix is not a failure: {stderr}"
+    );
+
+    let applied = agent_doc_cmd()
+        .current_dir(root)
+        .args(["autofix", doc.to_str().unwrap(), "--apply", "--json"])
+        .assert()
+        .code(5);
+    let report: serde_json::Value = serde_json::from_slice(&applied.get_output().stdout).unwrap();
+    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["doctor_outcome"], "blocked");
+    assert_eq!(report["outcome"], "blocked");
+
+    // Autofix failing to run is exit 1, never an outcome status.
+    agent_doc_cmd()
+        .current_dir(root)
+        .args(["autofix", root.join("missing.md").to_str().unwrap()])
+        .assert()
+        .code(1);
+
+    agent_doc_cmd()
+        .args(["autofix", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0 ok, 3 recoverable"))
+        .stdout(predicate::str::contains("4 operator"))
+        .stdout(predicate::str::contains("5 blocked"));
+}
+
 #[test]
 fn choice_checkpoint_rejects_an_unstructured_native_prompt_record() {
     let dir = tempfile::TempDir::new().unwrap();

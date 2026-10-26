@@ -2978,6 +2978,12 @@ enum Commands {
         file: PathBuf,
     },
     /// Plan and optionally apply catalog-safe workflow invariant repairs
+    ///
+    /// Exit status reports the outcome that remains after plan/apply, with the
+    /// same statuses as `doctor`: 0 ok, 3 recoverable, 4 operator, 5 blocked.
+    /// A plan that ran no repair (no `--apply`, or nothing whitelisted to run)
+    /// reports the diagnosed outcome as it stands; an `--apply` that ran a
+    /// repair diagnoses again. 1 means autofix itself failed.
     Autofix {
         /// Path to the session document
         file: PathBuf,
@@ -5220,9 +5226,9 @@ fn main() -> ExitCode {
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            // A completed `doctor` diagnosis whose outcome is not `ok`. The
-            // report is already printed; the outcome is the exit status, with
-            // no `Error:` report and no dogfood fix prompt.
+            // A completed `doctor` diagnosis or `autofix` run whose outcome is
+            // not `ok`. The report is already printed; the outcome is the exit
+            // status, with no `Error:` report and no dogfood fix prompt.
             if let Some(status) = agent_doc_workflow_io::doctor::workflow_doctor_exit_status(&err) {
                 return ExitCode::from(status);
             }

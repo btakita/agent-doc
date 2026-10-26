@@ -5,21 +5,27 @@
 //! repeated symptoms can de-duplicate before they become duplicate queue or
 //! backlog work. `--apply` executes only the small v1 whitelist of repairs whose
 //! safety proof is available in the doctor result.
+//!
+//! The command exits with the status of the outcome that remains after
+//! plan/apply, using the doctor's mapping ([`WorkflowDoctorOutcome::exit_code`]):
+//! a plan that ran nothing reports the doctor outcome as it stands, and an
+//! `--apply` that ran a repair command diagnoses again.
 
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::doctor::{WorkflowDoctorEffects, WorkflowDoctorOptions, diagnose};
+use crate::doctor::{WorkflowDoctorEffects, WorkflowDoctorOptions, diagnose, outcome_result};
 use crate::proof_ledger::{
     OperationProofInput, OperationProofRecord, ProofEvidenceKind, ProofOperationKind, ProofOutcome,
     append_operation_proof, proof_ledger_path, read_operation_proofs,
 };
 use agent_doc_workflow::autofix::{
     WORKFLOW_AUTOFIX_SCHEMA_VERSION, WorkflowAutofixReport, WorkflowAutofixStep,
-    WorkflowAutofixStepStatus, plan_autofix_steps,
+    WorkflowAutofixStepStatus, autofix_ran_repairs, plan_autofix_steps,
 };
+use agent_doc_workflow::doctor::WorkflowDoctorOutcome;
 use agent_doc_workflow::invariants::workflow_invariant_catalog;
 
 const DEFAULT_OPS_LIMIT: usize = 200;
@@ -47,6 +53,10 @@ impl Default for WorkflowAutofixOptions {
     }
 }
 
+/// Print the report, then report the outcome that remains after plan/apply as
+/// the result, exactly as `agent-doc doctor` does: `Ok(())` only for `ok`,
+/// otherwise a [`crate::doctor::WorkflowDoctorUnhealthy`] error whose exit
+/// status is [`WorkflowDoctorOutcome::exit_code`].
 pub fn run(
     file: &Path,
     options: WorkflowAutofixOptions,
@@ -58,7 +68,7 @@ pub fn run(
     } else {
         print_text_report(&report);
     }
-    Ok(())
+    outcome_result(report.outcome)
 }
 
 pub fn autofix(
@@ -111,15 +121,37 @@ pub fn autofix(
             step.ledger_path = Some(path.display().to_string());
         }
     }
+    let outcome = remaining_outcome(doctor.outcome, &steps, || {
+        diagnose(file, &doctor_options, effects)
+            .map(|report| report.outcome)
+            .context("diagnose the workflow again after applying autofix repairs")
+    })?;
     Ok(WorkflowAutofixReport {
         schema_version: WORKFLOW_AUTOFIX_SCHEMA_VERSION,
         file: canonical.display().to_string(),
         apply: options.apply,
         dry_run: options.dry_run,
         doctor_outcome: doctor.outcome,
+        outcome,
         steps,
         warnings,
     })
+}
+
+/// The outcome that remains after plan/apply: the diagnosed outcome when no
+/// repair command ran, otherwise a fresh diagnosis of the repaired workflow.
+/// The fresh diagnosis re-gathers live facts but reuses the supplied
+/// `--preflight-json` / `--session-check-json` captures, exactly as given.
+fn remaining_outcome(
+    diagnosed: WorkflowDoctorOutcome,
+    steps: &[WorkflowAutofixStep],
+    rediagnose: impl FnOnce() -> Result<WorkflowDoctorOutcome>,
+) -> Result<WorkflowDoctorOutcome> {
+    if autofix_ran_repairs(steps) {
+        rediagnose()
+    } else {
+        Ok(diagnosed)
+    }
 }
 
 fn apply_step(step: &mut WorkflowAutofixStep, file: &Path) -> Result<()> {
@@ -224,8 +256,9 @@ fn now_millis() -> u64 {
 
 fn print_text_report(report: &WorkflowAutofixReport) {
     println!(
-        "workflow autofix: {} doctor_outcome={} apply={} dry_run={}",
+        "workflow autofix: {} outcome={} doctor_outcome={} apply={} dry_run={}",
         report.file,
+        report.outcome.as_str(),
         report.doctor_outcome.as_str(),
         report.apply,
         report.dry_run
@@ -254,5 +287,220 @@ fn print_text_report(report: &WorkflowAutofixReport) {
         if let Some(code) = step.exit_code {
             println!("  exit_code: {code}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::doctor::tests::{
+        DivergedEditorEffects, FRESH_DOCUMENT, FreshProjectEffects, QUEUED_DOCUMENT, fresh_project,
+    };
+    use crate::doctor::workflow_doctor_exit_status;
+    use agent_doc_workflow::doctor::{
+        WORKFLOW_DOCTOR_EXIT_BLOCKED, WORKFLOW_DOCTOR_EXIT_OPERATOR,
+        WORKFLOW_DOCTOR_EXIT_RECOVERABLE,
+    };
+    use agent_doc_workflow::invariants::WorkflowInvariantId;
+
+    fn json_options() -> WorkflowAutofixOptions {
+        WorkflowAutofixOptions {
+            json: true,
+            ..WorkflowAutofixOptions::default()
+        }
+    }
+
+    /// `run` resolves to the exit status the CLI returns.
+    fn run_exit_status(
+        file: &Path,
+        options: WorkflowAutofixOptions,
+        effects: &mut impl WorkflowDoctorEffects,
+    ) -> u8 {
+        match run(file, options, effects) {
+            Ok(()) => 0,
+            Err(err) => workflow_doctor_exit_status(&err)
+                .unwrap_or_else(|| panic!("a completed autofix is not a failure: {err:#}")),
+        }
+    }
+
+    fn step_with(status: WorkflowAutofixStepStatus) -> WorkflowAutofixStep {
+        WorkflowAutofixStep {
+            invariant_id: WorkflowInvariantId::StaleSupervisor,
+            action: "restart_supervisor_once".to_string(),
+            status,
+            command: Some("agent-doc admin recycle --all-projects --json".to_string()),
+            required_proof: Vec::new(),
+            proof_marker: "workflow_autofix:stale_supervisor:test".to_string(),
+            operation_id: "workflow_autofix:stale_supervisor".to_string(),
+            content_hash: "test".to_string(),
+            reason: String::new(),
+            ledger_path: None,
+            exit_code: None,
+            output: None,
+        }
+    }
+
+    #[test]
+    fn run_exits_zero_when_the_workflow_is_healthy() {
+        let (_dir, file) = fresh_project(FRESH_DOCUMENT);
+        let report = autofix(&file, &json_options(), &mut FreshProjectEffects).unwrap();
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Ok, "{report:?}");
+        assert!(report.steps.is_empty(), "{report:?}");
+        assert_eq!(
+            run_exit_status(&file, json_options(), &mut FreshProjectEffects),
+            0
+        );
+    }
+
+    #[test]
+    fn run_exits_recoverable_status_for_a_plan_that_was_not_applied() {
+        let (_dir, file) = fresh_project(FRESH_DOCUMENT);
+        let report = autofix(&file, &json_options(), &mut DivergedEditorEffects).unwrap();
+        assert_eq!(report.doctor_outcome, WorkflowDoctorOutcome::Recoverable);
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Recoverable);
+        assert_eq!(
+            run_exit_status(&file, json_options(), &mut DivergedEditorEffects),
+            WORKFLOW_DOCTOR_EXIT_RECOVERABLE
+        );
+    }
+
+    #[test]
+    fn a_dry_run_plan_reports_the_outcome_as_it_stands() {
+        let (_dir, file) = fresh_project(FRESH_DOCUMENT);
+        let options = WorkflowAutofixOptions {
+            dry_run: true,
+            ..json_options()
+        };
+        let report = autofix(&file, &options, &mut DivergedEditorEffects).unwrap();
+        assert!(
+            report.steps.iter().all(|step| step.ledger_path.is_none()),
+            "a dry run writes no proof markers: {report:?}"
+        );
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Recoverable);
+        assert_eq!(
+            run_exit_status(&file, options, &mut DivergedEditorEffects),
+            WORKFLOW_DOCTOR_EXIT_RECOVERABLE
+        );
+    }
+
+    #[test]
+    fn an_apply_that_ran_no_repair_keeps_the_recoverable_status() {
+        // The editor-convergence repair is catalog-safe but not in the automatic
+        // execution whitelist, so `--apply` runs nothing and the workflow stays
+        // recoverable: the command must not report success.
+        let (_dir, file) = fresh_project(FRESH_DOCUMENT);
+        let options = WorkflowAutofixOptions {
+            apply: true,
+            dry_run: true,
+            ..json_options()
+        };
+        let report = autofix(&file, &options, &mut DivergedEditorEffects).unwrap();
+        let step = report
+            .steps
+            .iter()
+            .find(|step| step.invariant_id == WorkflowInvariantId::EditorConvergence)
+            .expect("editor convergence step");
+        assert_eq!(step.status, WorkflowAutofixStepStatus::UnsafeCommand);
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Recoverable);
+        assert_eq!(
+            run_exit_status(&file, options, &mut DivergedEditorEffects),
+            WORKFLOW_DOCTOR_EXIT_RECOVERABLE
+        );
+    }
+
+    #[test]
+    fn run_exits_operator_status_when_a_person_must_act() {
+        let (dir, file) = fresh_project(FRESH_DOCUMENT);
+        let logs = dir.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("ops.log"), "File Cache Conflict\n").unwrap();
+        let options = WorkflowAutofixOptions {
+            apply: true,
+            ..json_options()
+        };
+        let report = autofix(&file, &options, &mut FreshProjectEffects).unwrap();
+        assert_eq!(
+            report.outcome,
+            WorkflowDoctorOutcome::Operator,
+            "{report:?}"
+        );
+        assert_eq!(
+            run_exit_status(&file, options, &mut FreshProjectEffects),
+            WORKFLOW_DOCTOR_EXIT_OPERATOR
+        );
+    }
+
+    #[test]
+    fn run_exits_blocked_status_when_evidence_is_missing() {
+        let (_dir, file) = fresh_project(QUEUED_DOCUMENT);
+        let options = WorkflowAutofixOptions {
+            apply: true,
+            ..json_options()
+        };
+        let report = autofix(&file, &options, &mut FreshProjectEffects).unwrap();
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Blocked, "{report:?}");
+        assert_eq!(
+            run_exit_status(&file, options, &mut FreshProjectEffects),
+            WORKFLOW_DOCTOR_EXIT_BLOCKED
+        );
+    }
+
+    #[test]
+    fn an_autofix_that_failed_to_run_carries_no_outcome_status() {
+        let (dir, _file) = fresh_project(FRESH_DOCUMENT);
+        let err = run(
+            &dir.path().join("missing.md"),
+            json_options(),
+            &mut FreshProjectEffects,
+        )
+        .unwrap_err();
+        assert_eq!(workflow_doctor_exit_status(&err), None, "{err:#}");
+    }
+
+    #[test]
+    fn the_remaining_outcome_comes_from_a_fresh_diagnosis_only_after_a_repair_ran() {
+        let not_run = [
+            step_with(WorkflowAutofixStepStatus::Planned),
+            step_with(WorkflowAutofixStepStatus::UnsafeCommand),
+        ];
+        let outcome = remaining_outcome(WorkflowDoctorOutcome::Recoverable, &not_run, || {
+            panic!("nothing ran, so the diagnosed outcome stands")
+        })
+        .unwrap();
+        assert_eq!(outcome, WorkflowDoctorOutcome::Recoverable);
+
+        // A repair that succeeded is judged by what remains, not by its own exit.
+        let repaired = [step_with(WorkflowAutofixStepStatus::Executed)];
+        let outcome = remaining_outcome(WorkflowDoctorOutcome::Recoverable, &repaired, || {
+            Ok(WorkflowDoctorOutcome::Ok)
+        })
+        .unwrap();
+        assert_eq!(outcome, WorkflowDoctorOutcome::Ok);
+        let outcome = remaining_outcome(WorkflowDoctorOutcome::Recoverable, &repaired, || {
+            Ok(WorkflowDoctorOutcome::Operator)
+        })
+        .unwrap();
+        assert_eq!(outcome, WorkflowDoctorOutcome::Operator);
+
+        let failed = [step_with(WorkflowAutofixStepStatus::Failed)];
+        let outcome = remaining_outcome(WorkflowDoctorOutcome::Recoverable, &failed, || {
+            Ok(WorkflowDoctorOutcome::Recoverable)
+        })
+        .unwrap();
+        assert_eq!(outcome, WorkflowDoctorOutcome::Recoverable);
+        assert_eq!(
+            outcome_result(outcome)
+                .err()
+                .as_ref()
+                .and_then(workflow_doctor_exit_status),
+            Some(WORKFLOW_DOCTOR_EXIT_RECOVERABLE)
+        );
+
+        let rediagnosis_failed =
+            remaining_outcome(WorkflowDoctorOutcome::Recoverable, &failed, || {
+                Err(anyhow::anyhow!("document vanished"))
+            })
+            .unwrap_err();
+        assert_eq!(workflow_doctor_exit_status(&rediagnosis_failed), None);
     }
 }

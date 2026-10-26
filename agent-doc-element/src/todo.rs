@@ -96,9 +96,10 @@
 //!   unchecks an item.
 //! - [`todo_link_findings`] evaluates todos against the link index for the
 //!   preflight signals, and [`auto_complete_linked_todos`] checks off an OPEN
-//!   item whose OWN id is resolved tracked work. An item that only CITES
-//!   resolved work is surfaced, never auto-completed: its action may cover
-//!   more than the resolved item, which needs human judgement.
+//!   item whose OWN id is resolved tracked work or whose explicit tracked-work
+//!   backlinks are all resolved. A plain citation remains advisory: only the
+//!   canonical `(source: agent:<component> [#<id>])` locator or a tracked
+//!   item's `(todos: [#<todo-id>] ...)` metadata establishes a completion link.
 //!
 //! ## Agentic Contracts
 //! - All functions are pure: no file IO, no clock, no randomness.
@@ -396,6 +397,13 @@ pub struct TodoAddOutcome {
 pub struct TodoLinkIndex {
     open: std::collections::BTreeMap<String, String>,
     resolved: std::collections::BTreeSet<String>,
+    /// Todo ids that actually exist in the current document. Backlink metadata
+    /// naming an absent Todo is dangling and does not satisfy the invariant.
+    todo_ids: std::collections::BTreeSet<String>,
+    /// Durable reverse edges: tracked-work id -> todo own ids. The edge may be
+    /// carried by the tracked item or resolved from a Todo source locator.
+    todo_backlinks:
+        std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
 }
 
 fn normalize_link_id(id: &str) -> String {
@@ -441,6 +449,104 @@ impl TodoLinkIndex {
         self.open.keys().chain(self.resolved.iter())
     }
 
+    /// Record that tracked work `tracked_id` completes or unblocks `todo_id`.
+    pub fn mark_todo_backlink(&mut self, tracked_id: &str, todo_id: &str) {
+        let tracked_id = normalize_link_id(tracked_id);
+        let todo_id = normalize_link_id(todo_id);
+        if tracked_id.is_empty() || todo_id.is_empty() {
+            return;
+        }
+        self.todo_backlinks
+            .entry(tracked_id)
+            .or_default()
+            .insert(todo_id);
+    }
+
+    /// Read canonical `(todos: [#id] ...)` metadata from tracked-work text.
+    pub fn mark_todo_backlinks_from_text(&mut self, tracked_id: &str, text: &str) {
+        for todo_id in tracked_work_todo_ids(text) {
+            self.mark_todo_backlink(tracked_id, &todo_id);
+        }
+    }
+
+    /// Resolve backlinks from canonical Todo source locators and the legacy
+    /// same-id layering convention without rewriting source rows.
+    pub fn resolve_todo_backlinks_from_document(&mut self, content: &str) -> Result<()> {
+        let Some(todo) = find_todo_component(content)? else {
+            return Ok(());
+        };
+        let body = TodoBody::parse(todo.content(content));
+        for item in body.items {
+            let Some(todo_id) = item.own_id.as_deref() else {
+                continue;
+            };
+            self.todo_ids.insert(normalize_link_id(todo_id));
+            if self.knows(todo_id) {
+                self.mark_todo_backlink(todo_id, todo_id);
+            }
+            for tracked_id in canonical_source_ids(&item.action) {
+                if self.knows(&tracked_id) {
+                    self.mark_todo_backlink(&tracked_id, todo_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Todo ids linked from one tracked-work item.
+    pub fn todo_ids_for_tracked(&self, tracked_id: &str) -> Vec<String> {
+        self.todo_backlinks
+            .get(&normalize_link_id(tracked_id))
+            .map(|ids| ids.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Whether a Todo with `id` actually exists in the current document.
+    pub fn has_todo(&self, id: &str) -> bool {
+        self.todo_ids.contains(&normalize_link_id(id))
+    }
+
+    /// Open backlog/icebox sources whose reverse edges resolve to no actual
+    /// Todo. Review gates are excluded: they are operator-decision sources,
+    /// while queue/backlog/icebox own the mandatory tracked-work invariant.
+    fn missing_todo_backlinks(&self) -> Vec<(String, String)> {
+        self.open
+            .iter()
+            .filter(|(_, component)| {
+                matches!(component.as_str(), "backlog" | "pending" | "icebox")
+            })
+            .filter(|(tracked_id, _)| {
+                !self
+                    .todo_ids_for_tracked(tracked_id)
+                    .iter()
+                    .any(|todo_id| self.has_todo(todo_id))
+            })
+            .map(|(id, component)| (id.clone(), component.clone()))
+            .collect()
+    }
+
+    /// Source projections used by completion and prerequisite findings.
+    fn sources_for_todo(&self, todo_id: &str) -> Vec<(String, Option<String>, bool)> {
+        let todo_id = normalize_link_id(todo_id);
+        self.todo_backlinks
+            .iter()
+            .filter(|(_, todos)| todos.contains(&todo_id))
+            .map(|(tracked_id, _)| {
+                (
+                    tracked_id.clone(),
+                    self.open.get(tracked_id).cloned(),
+                    self.is_resolved(tracked_id),
+                )
+            })
+            .collect()
+    }
+
+    /// A non-empty backlink set completes only when every source is terminal.
+    fn linked_sources_resolved(&self, todo_id: &str) -> bool {
+        let sources = self.sources_for_todo(todo_id);
+        !sources.is_empty() && sources.iter().all(|(_, _, resolved)| *resolved)
+    }
+
     /// The component an OPEN `id` may be linked from by a todo: `review`,
     /// `backlog` (legacy `pending` counts as backlog), or `icebox`
     /// (`#todoidlayer`: a parked item can still need an operator decision —
@@ -450,6 +556,63 @@ impl TodoLinkIndex {
             matches!(*component, "review" | "backlog" | "pending" | "icebox")
         })
     }
+}
+
+/// Parse canonical source-side backlink metadata
+/// `(todos: [#todo-a] [#todo-b])`. Ordinary citations are ignored.
+pub fn tracked_work_todo_ids(text: &str) -> Vec<String> {
+    let Some(start) = text.rfind("(todos:") else {
+        return Vec::new();
+    };
+    let tail = &text[start + "(todos:".len()..];
+    let Some(end) = tail.find(')') else {
+        return Vec::new();
+    };
+    if !tail[end + 1..].trim().is_empty() {
+        return Vec::new();
+    }
+    let mut ids = Vec::new();
+    let mut rest = &tail[..end];
+    while let Some(open) = rest.find("[#") {
+        rest = &rest[open + 2..];
+        let Some(close) = rest.find(']') else {
+            return Vec::new();
+        };
+        let id = normalize_link_id(&rest[..close]);
+        if !is_valid_todo_id(&id) {
+            return Vec::new();
+        }
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+        rest = &rest[close + 1..];
+    }
+    ids
+}
+
+/// Tracked ids in canonical Todo-side source locators. Plain citations do not
+/// establish automatic-completion edges.
+fn canonical_source_ids(action: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut rest = action;
+    while let Some(start) = rest.find("(source: agent:") {
+        rest = &rest[start + "(source: agent:".len()..];
+        let Some(close) = rest.find(')') else {
+            break;
+        };
+        let locator = &rest[..close];
+        if let Some(id_start) = locator.find("[#") {
+            let after = &locator[id_start + 2..];
+            if let Some(id_end) = after.find(']') {
+                let id = normalize_link_id(&after[..id_end]);
+                if is_valid_todo_id(&id) && !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+        rest = &rest[close + 1..];
+    }
+    ids
 }
 
 /// Every valid todo-id token cited in `action`, lowercase, in first-seen order.
@@ -1757,6 +1920,9 @@ pub fn new_idless_todo_items(before: &str, after: &str) -> Vec<String> {
 /// What a todo's link to tracked work says should happen next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TodoLinkFindingKind {
+    /// An open backlog/icebox source has no reverse edge to an actual Todo.
+    /// Preflight flags both absent metadata and metadata naming missing Todos.
+    TrackedWorkMissingTodoBacklink,
     /// A legacy singly linked todo does not visibly qualify its tracked-work
     /// source with both component and id. Preflight maintenance migrates it.
     LegacySourceUnqualified,
@@ -1784,6 +1950,7 @@ impl TodoLinkFindingKind {
     /// Stable snake_case name for preflight JSON and ops.log.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::TrackedWorkMissingTodoBacklink => "tracked_work_missing_todo_backlink",
             Self::LegacySourceUnqualified => "legacy_source_unqualified",
             Self::OperatorDoneReviewOpen => "operator_done_review_open",
             Self::OperatorDoneBacklogOpen => "operator_done_backlog_open",
@@ -1811,14 +1978,16 @@ pub struct TodoLinkFinding {
 /// `#todoids`: evaluate every `agent:todo` item against `links`.
 ///
 /// Pure and deterministic: the same document and index always yield the same
-/// findings in item order. A document without `agent:todo` yields none; a
+/// findings in item order followed by missing-source findings in source-id
+/// order. A document without `agent:todo` can still report missing backlinks; a
 /// document whose components do not parse is an error (never "no findings"),
 /// so a caller can fail closed.
 pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<TodoLinkFinding>> {
-    let Some(todo) = find_todo_component(content)? else {
-        return Ok(Vec::new());
-    };
-    let body = TodoBody::parse(todo.content(content));
+    let mut links = links.clone();
+    links.resolve_todo_backlinks_from_document(content)?;
+    let body = find_todo_component(content)?
+        .map(|todo| TodoBody::parse(todo.content(content)))
+        .unwrap_or_else(|| TodoBody::parse(""));
     let mut out = Vec::new();
     for item in &body.items {
         let selector = item.own_id.clone().unwrap_or_else(|| item.action.clone());
@@ -1831,7 +2000,7 @@ pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<To
             label: label.clone(),
             component: None,
         };
-        if let Some((id, component)) = single_todo_source(own, &item.action, links) {
+        if let Some((id, component)) = single_todo_source(own, &item.action, &links) {
             let qualified = action_with_source_reference(&item.action, &id, Some(&component));
             if normalize_action_text(&qualified) != normalize_action_text(&item.action) {
                 out.push(TodoLinkFinding {
@@ -1844,27 +2013,50 @@ pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<To
             }
         }
         if !item.state.is_open() {
+            let mut open_sources: Vec<(String, String)> = own
+                .and_then(|id| links.open_component(id).map(|component| {
+                    (id.to_string(), component.to_string())
+                }))
+                .into_iter()
+                .collect();
             if let Some(own) = own {
-                match links.open_component(own) {
-                    Some("review") => {
-                        out.push(finding(TodoLinkFindingKind::OperatorDoneReviewOpen, vec![own.to_string()]))
+                for (id, component, _) in links.sources_for_todo(own) {
+                    let Some(component) = component else { continue };
+                    if !open_sources.iter().any(|(seen, _)| seen == &id) {
+                        open_sources.push((id, component));
                     }
-                    Some("backlog" | "pending") => {
-                        out.push(finding(TodoLinkFindingKind::OperatorDoneBacklogOpen, vec![own.to_string()]))
-                    }
-                    Some("icebox") => {
-                        out.push(finding(TodoLinkFindingKind::OperatorDoneIceboxOpen, vec![own.to_string()]))
-                    }
+                }
+            }
+            for (id, component) in open_sources {
+                match component.as_str() {
+                    "review" => out.push(finding(
+                        TodoLinkFindingKind::OperatorDoneReviewOpen,
+                        vec![id],
+                    )),
+                    "backlog" | "pending" => out.push(finding(
+                        TodoLinkFindingKind::OperatorDoneBacklogOpen,
+                        vec![id],
+                    )),
+                    "icebox" => out.push(finding(
+                        TodoLinkFindingKind::OperatorDoneIceboxOpen,
+                        vec![id],
+                    )),
                     _ => {}
                 }
             }
             continue;
         }
-        if let Some(own) = own
-            && links.is_resolved(own)
-        {
-            out.push(finding(TodoLinkFindingKind::LinkedWorkResolved, vec![own.to_string()]));
-            continue;
+        if let Some(own) = own {
+            if links.is_resolved(own) {
+                out.push(finding(TodoLinkFindingKind::LinkedWorkResolved, vec![own.to_string()]));
+                continue;
+            }
+            if links.linked_sources_resolved(own) {
+                let ids = links.sources_for_todo(own).into_iter()
+                    .map(|(id, _, _)| id).collect();
+                out.push(finding(TodoLinkFindingKind::LinkedWorkResolved, ids));
+                continue;
+            }
         }
         if own.is_some_and(|own| links.knows(own)) {
             // Linked to OPEN work: nothing to do until the operator acts.
@@ -1877,6 +2069,15 @@ pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<To
         if !cited.is_empty() && cited.iter().all(|id| links.is_resolved(id)) {
             out.push(finding(TodoLinkFindingKind::CitedWorkResolved, cited));
         }
+    }
+    for (id, component) in links.missing_todo_backlinks() {
+        out.push(TodoLinkFinding {
+            kind: TodoLinkFindingKind::TrackedWorkMissingTodoBacklink,
+            ids: vec![id.clone()],
+            selector: id.clone(),
+            label: format!("#{id}"),
+            component: Some(component),
+        });
     }
     Ok(out)
 }
@@ -1917,7 +2118,9 @@ pub fn auto_complete_linked_todos(
         let Some(own) = item.own_id.as_deref() else {
             continue;
         };
-        if item.state.is_open() && links.is_resolved(own) {
+        if item.state.is_open()
+            && (links.is_resolved(own) || links.linked_sources_resolved(own))
+        {
             body.rewrite_line(item.line, TodoState::Done, Some(own), &item.action);
             if !completed.iter().any(|seen: &String| seen == own) {
                 completed.push(own.to_string());
@@ -2853,7 +3056,10 @@ mod tests {
                 ("legacy_source_unqualified", vec!["open2".to_string()], "open2".to_string()),
             ]
         );
-        assert!(todo_link_findings("no components", &index).unwrap().is_empty());
+        let missing = todo_link_findings("no components", &index).unwrap();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].kind, TodoLinkFindingKind::TrackedWorkMissingTodoBacklink);
+        assert_eq!(missing[0].ids, vec!["work".to_string()]);
     }
 
     #[test]
@@ -2884,6 +3090,89 @@ mod tests {
         assert_eq!(again.content, outcome.content);
         let none = auto_complete_linked_todos(&content, &TodoLinkIndex::default()).unwrap();
         assert_eq!(none.content, content);
+    }
+
+    #[test]
+    fn tracked_work_todo_backlinks_are_explicit_trailing_metadata() {
+        assert_eq!(
+            tracked_work_todo_ids("Ship it (todos: [#Operator-A] [#todo-b] [#operator-a])"),
+            vec!["operator-a".to_string(), "todo-b".to_string()]
+        );
+        assert!(tracked_work_todo_ids("Ship it; see [#operator-a]").is_empty());
+        assert!(tracked_work_todo_ids("Ship it (todos: [#operator-a]) trailing").is_empty());
+        assert!(tracked_work_todo_ids("Ship it (todos: [#bad_id])").is_empty());
+    }
+
+    #[test]
+    fn open_backlog_and_icebox_require_a_backlink_to_an_existing_todo() {
+        let mut index = links(
+            &[("unlinked", "backlog"), ("dangling", "icebox"), ("gate", "review")],
+            &[],
+        );
+        index.mark_todo_backlink("dangling", "missing-todo");
+        let findings = todo_link_findings("no todo component", &index).unwrap();
+        let missing = findings
+            .iter()
+            .filter(|finding| {
+                finding.kind == TodoLinkFindingKind::TrackedWorkMissingTodoBacklink
+            })
+            .map(|finding| finding.ids[0].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(missing, vec!["dangling".to_string(), "unlinked".to_string()]);
+
+        let content = wrap(concat!(
+            "- [ ] [#approval] Approve (source: agent:backlog [#unlinked])\n",
+            "- [ ] [#missing-todo] Decide (source: agent:icebox [#dangling])\n",
+        ));
+        assert!(todo_link_findings(&content, &index)
+            .unwrap()
+            .iter()
+            .all(|finding| finding.kind != TodoLinkFindingKind::TrackedWorkMissingTodoBacklink));
+    }
+
+    #[test]
+    fn backlink_completion_waits_for_all_sources_and_closes_every_linked_todo() {
+        let content = wrap(concat!(
+            "- [ ] [#operator-a] Approve rollout\n",
+            "- [ ] [#operator-b] Confirm telemetry\n",
+            "- [ ] [#unlinked] Read the release note\n",
+        ));
+        let mut index = links(&[("work-b", "backlog")], &["work-a", "work-c"]);
+        index.mark_todo_backlink("work-a", "operator-a");
+        index.mark_todo_backlink("work-b", "operator-a");
+        index.mark_todo_backlink("work-c", "operator-b");
+        index.mark_todo_backlink("work-c", "operator-a");
+
+        let first = auto_complete_linked_todos(&content, &index).unwrap();
+        assert_eq!(first.completed, vec!["operator-b".to_string()]);
+        assert!(todo_body(&first.content).contains("- [ ] [#operator-a] Approve rollout"));
+        assert!(todo_body(&first.content).contains("- [x] [#operator-b] Confirm telemetry"));
+
+        let mut resolved = links(&[], &["work-a", "work-b", "work-c"]);
+        resolved.mark_todo_backlink("work-a", "operator-a");
+        resolved.mark_todo_backlink("work-b", "operator-a");
+        resolved.mark_todo_backlink("work-c", "operator-b");
+        resolved.mark_todo_backlink("work-c", "operator-a");
+        let final_outcome = auto_complete_linked_todos(&first.content, &resolved).unwrap();
+        assert_eq!(final_outcome.completed, vec!["operator-a".to_string()]);
+        assert!(todo_body(&final_outcome.content).contains("- [x] [#operator-a] Approve rollout"));
+        assert!(todo_body(&final_outcome.content).contains("- [ ] [#unlinked] Read the release note"));
+    }
+
+    #[test]
+    fn todo_source_locator_resolves_a_backlink_and_checked_todo_unblocks_source() {
+        let checked = wrap(
+            "- [x] [#approval] Approve rollout (source: agent:backlog [#ship])\n",
+        );
+        let mut index = links(&[("ship", "backlog")], &[]);
+        index.resolve_todo_backlinks_from_document(&checked).unwrap();
+        assert_eq!(index.todo_ids_for_tracked("ship"), vec!["approval".to_string()]);
+
+        let findings = todo_link_findings(&checked, &index).unwrap();
+        assert!(findings.iter().any(|finding| {
+            finding.kind == TodoLinkFindingKind::OperatorDoneBacklogOpen
+                && finding.ids == vec!["ship".to_string()]
+        }));
     }
 
     /// `#sdktododone`: the anonymized `tasks/sdk.md` todo shapes from

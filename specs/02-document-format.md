@@ -256,6 +256,38 @@ commit boundary (`#todoidcloseout`). Thus re-keying cannot duplicate a
 concurrent item, while a successful strict closeout never publishes a
 structurally complete todo row without an own id.
 
+**Tracked-work Todo backlinks (`#trackedworktodobacklinks`).** Every open
+backlog or icebox item MUST resolve a backlink to at least one Todo that
+actually exists. It may carry trailing `(todos: [#todo-a] [#todo-b])` metadata: a
+durable reverse edge from that tracked-work id to one or more Todo own ids.
+Ordinary `#id` prose is not a backlink. The binary also resolves the same edge
+without rewriting legacy rows when a Todo shares the tracked-work id or carries
+the canonical `(source: agent:<component> [#tracked-id])` locator. An id-backed
+queue head therefore resolves through its backlog/icebox source id; free-text
+queue work first joins the normal queue-to-backlog surrogate-id coining/mirror
+path. An id-backed head that directly names a Todo also satisfies the queue
+invariant. Any free-text head held from promotion, and any orphan id head, is
+reported rather than silently accepted.
+
+Preflight deterministically emits `tracked_work_missing_todo_backlink` for an
+open backlog/icebox source when neither source metadata, same-id layering, nor
+a canonical Todo source locator resolves to an existing Todo. Metadata naming
+only absent Todo ids is dangling and receives the same finding. It also emits
+that finding for an unpromoted free-text queue head or an orphan id head. This
+is the compatibility/migration policy: legacy same-id and canonical source
+locators remain valid without rewriting; pre-existing unlinked open rows are
+flagged, not auto-created or rejected, because the binary cannot safely invent
+the operator action. Authors repair them by adding/reusing a Todo and recording
+one of the canonical edges. Terminal legacy rows are not retroactively flagged.
+
+The relation is many-to-many. A source may clear several open Todos, while a
+Todo backed by several sources is checked only after ALL linked sources resolve.
+Done/archive text preserves `(todos: …)`, so same-closeout reap cannot lose the
+edge. A checked Todo with an open linked source emits the existing component
+operator-done signal (the prerequisite/unblock direction); the backlink never
+silently gates, ungates, moves, or completes source work. Plain Todo citations
+remain advisory and never become completion edges.
+
 **Source qualification migration (`#todocontextmigration`).** Every preflight
 (except `--probe`) audits legacy todo rows against current open review, backlog,
 and icebox ids. A row whose own id and action identify exactly one such source

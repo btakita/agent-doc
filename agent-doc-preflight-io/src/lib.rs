@@ -270,8 +270,8 @@ pub struct GateVerifyResult {
 /// preflight until the state changes (the check is idempotent, not an event).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TodoSignal {
-    /// `legacy_source_unqualified`, `operator_done_review_open`, `operator_done_backlog_open`,
-    /// `operator_done_icebox_open`,
+    /// `tracked_work_missing_todo_backlink`, `legacy_source_unqualified`,
+    /// `operator_done_review_open`, `operator_done_backlog_open`, `operator_done_icebox_open`,
     /// `linked_work_resolved`, or `cited_work_resolved`.
     pub kind: String,
     /// The `--todo-*` selector of the item (its own id, else its text).
@@ -297,6 +297,11 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
         finding.selector.clone()
     };
     let action = match finding.kind {
+        Kind::TrackedWorkMissingTodoBacklink => format!(
+            "Open agent:{component} item {ids} has no backlink to an existing Todo. Add or reuse an operator Todo, then put `(todos: [#todo-id])` on {ids} or put `(source: agent:{component} [#{id}])` on that Todo. Metadata naming a missing Todo does not satisfy the invariant.",
+            component = finding.component.as_deref().unwrap_or("tracked-work"),
+            id = finding.ids.first().map(String::as_str).unwrap_or_default(),
+        ),
         Kind::LegacySourceUnqualified => format!(
             "Legacy todo {label} has one tracked-work source ({component} {ids}) but no canonical visible locator. Preflight maintenance qualifies it as (source: agent:{component} [#{id}]); if it remains unqualified, wait for the operator typing gate to settle and rerun preflight.",
             label = finding.label,
@@ -532,10 +537,60 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
         }
     };
     match agent_doc_element::todo::todo_link_findings(content, &links) {
-        Ok(findings) => findings.iter().map(todo_signal_from_finding).collect(),
+        Ok(findings) => {
+            let mut signals = findings.iter().map(todo_signal_from_finding).collect::<Vec<_>>();
+            append_unlinked_queue_signals(content, &links, &mut signals);
+            signals
+        }
         Err(err) => {
             eprintln!("[preflight] todo: agent:todo unreadable ({err:#}); todo link checks skipped");
             Vec::new()
+        }
+    }
+}
+
+/// Queue heads normally inherit the Todo backlink of the tracked id they name.
+/// Active free-text heads are first promoted to stable backlog ids by queue
+/// maintenance. This audit catches any free-text head held from promotion (for
+/// example by pause/typing gates), plus orphan id heads, so no queue item can
+/// silently escape the backlink invariant.
+fn append_unlinked_queue_signals(
+    content: &str,
+    links: &agent_doc_element::todo::TodoLinkIndex,
+    signals: &mut Vec<TodoSignal>,
+) {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return;
+    };
+    for component in components.iter().filter(|component| component.name == "queue") {
+        let Ok(entries) = agent_doc_queue::document_queue::parse(component.content(content)) else {
+            continue;
+        };
+        for prompt in agent_doc_queue::document_queue::prompts(&entries) {
+            match agent_doc_element_queue::QueueItemIdentity::from_prompt(&prompt.text) {
+                agent_doc_element_queue::QueueItemIdentity::Id(id)
+                    if links.knows(&id) || links.has_todo(&id) => {}
+                agent_doc_element_queue::QueueItemIdentity::Id(id) => {
+                    signals.push(TodoSignal {
+                        kind: "tracked_work_missing_todo_backlink".to_string(),
+                        todo: id.clone(),
+                        ids: vec![id.clone()],
+                        action: format!(
+                            "Queue head #{id} names neither tracked work with an inherited Todo backlink nor an existing Todo. Add the backing backlog/icebox item and Todo backlink, or link the head to an existing Todo."
+                        ),
+                    });
+                }
+                agent_doc_element_queue::QueueItemIdentity::FreeText(text) => {
+                    signals.push(TodoSignal {
+                        kind: "tracked_work_missing_todo_backlink".to_string(),
+                        todo: text.clone(),
+                        ids: Vec::new(),
+                        action: format!(
+                            "Free-text queue head {text:?} has no stable Todo backlink. Let preflight promote it to a backlog surrogate id, then add/reuse a Todo and record `(todos: [#todo-id])`; if promotion is held, finish the edit or unpause and rerun preflight."
+                        ),
+                    });
+                }
+            }
         }
     }
 }

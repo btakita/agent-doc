@@ -91,8 +91,8 @@ class DocumentCloseDecisionTest {
         val decision = source("DocumentCloseDecision.kt")
         assertFalse(decision.contains("EditorTracker.getInstance"))
         assertFalse(decision.contains("EditorOpenFileSurface."))
-        assertTrue(decision.contains("ClientFileEditorManager::class.java, ClientKind.REMOTE"))
-        assertTrue(decision.contains("manager.getAllFiles()"))
+        assertTrue(decision.contains("MarketplacePlatformBridge.remoteFileEditorManagers(project)"))
+        assertTrue(decision.contains("MarketplacePlatformBridge.allFiles(manager)"))
         assertTrue(decision.contains("FileEditorManager.getInstance(project).isFileOpen(file)"))
     }
 

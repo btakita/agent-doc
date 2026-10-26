@@ -8,8 +8,6 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
-import com.intellij.openapi.client.ClientKind
-import com.intellij.openapi.fileEditor.ClientFileEditorManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
@@ -1267,7 +1265,7 @@ object LayoutDetector {
         project: com.intellij.openapi.project.Project,
         sessionDocumentPaths: Set<String>?,
     ): List<RemoteClientSessionEditors> {
-        val remoteManagers = project.getServices(ClientFileEditorManager::class.java, ClientKind.REMOTE)
+        val remoteManagers = MarketplacePlatformBridge.remoteFileEditorManagers(project)
         if (remoteManagers.isEmpty()) return emptyList()
         val isSession = { file: VirtualFile ->
             sessionDocumentPaths?.contains(file.path) ?: AgentDocSessionFiles.isSessionDocument(file)
@@ -1281,7 +1279,7 @@ object LayoutDetector {
         return remoteManagers
             .mapIndexed { index, manager ->
                 try {
-                    val visible = manager.getAllEditors()
+                    val visible = MarketplacePlatformBridge.allEditors(manager)
                         .filter { fileEditor ->
                             val editor = (fileEditor as? com.intellij.openapi.fileEditor.TextEditor)?.editor
                             editor != null && editor in activeEditors
@@ -1290,10 +1288,10 @@ object LayoutDetector {
                         .filter(isSession)
                         .map { TerminalUtil.relativePath(project, it) }
                         .distinct()
-                    val selected = manager.getSelectedFiles()
+                    val selected = MarketplacePlatformBridge.selectedFiles(manager)
                         .filter(isSession)
                         .map { TerminalUtil.relativePath(project, it) }
-                    val open = manager.getAllFiles()
+                    val open = MarketplacePlatformBridge.allFiles(manager)
                         .filter(isSession)
                         .map { TerminalUtil.relativePath(project, it) }
                     RemoteClientSessionEditors(visible = visible, selected = selected, open = open)

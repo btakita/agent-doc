@@ -2,15 +2,12 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.wm.RegisterToolWindowTask
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowAnchor
 import com.intellij.openapi.wm.ToolWindowManager
-import com.intellij.openapi.wm.impl.ToolWindowManagerImpl
 import com.intellij.ui.content.Content
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
-import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 
 internal const val IDE_HOSTED_TMUX_CAPABILITY = "ide_hosted_tmux_v1"
@@ -174,10 +171,18 @@ internal object IdeTerminalHost {
 
     private fun ensureAgentToolWindow(project: Project): ToolWindow {
         val manager = ToolWindowManager.getInstance(project)
-        return manager.getToolWindow(TOOL_WINDOW_ID)
-            ?: manager.registerToolWindow(
-                RegisterToolWindowTask.notClosable(TOOL_WINDOW_ID, ToolWindowAnchor.BOTTOM),
-            )
+        return manager.getToolWindow(TOOL_WINDOW_ID) ?: run {
+            val taskClass = Class.forName("com.intellij.openapi.wm.RegisterToolWindowTask")
+            val companion = taskClass.getField("Companion").get(null)
+            val task = companion.javaClass.methods.first {
+                it.name == "notClosable" && it.parameterCount == 2
+            }.invoke(companion, TOOL_WINDOW_ID, ToolWindowAnchor.BOTTOM)
+            val method = manager.javaClass.methods.first {
+                it.name == "registerToolWindow" && it.parameterCount == 1 &&
+                    it.parameterTypes[0].isInstance(task)
+            }
+            method.invoke(manager, task) as ToolWindow
+        }
     }
 
     private fun migrateStockTab(
@@ -224,10 +229,16 @@ internal object IdeTerminalHost {
      */
     private fun relocateAgentToolWindow(project: Project, paneId: String) {
         val toolWindow = agentToolWindow(project) ?: return
-        val manager = ToolWindowManager.getInstance(project) as? ToolWindowManagerImpl ?: return
+        val manager = ToolWindowManager.getInstance(project)
         try {
-            val method = paneRelocationMethod(manager) ?: return
-            method.invoke(manager, TOOL_WINDOW_ID, paneId, ToolWindowAnchor.BOTTOM, 0, false)
+            if (!MarketplacePlatformBridge.relocateToolWindow(
+                    manager,
+                    TOOL_WINDOW_ID,
+                    paneId,
+                    ToolWindowAnchor.BOTTOM,
+                    0,
+                    false,
+                )) return
             toolWindow.setAvailable(true)
             toolWindow.show(null)
         } catch (error: Throwable) {
@@ -237,15 +248,8 @@ internal object IdeTerminalHost {
     }
 
     private fun supportsPaneRelocation(project: Project): Boolean {
-        val manager = ToolWindowManager.getInstance(project) as? ToolWindowManagerImpl
-            ?: return false
-        return paneRelocationMethod(manager) != null
+        return MarketplacePlatformBridge.supportsToolWindowRelocation(ToolWindowManager.getInstance(project))
     }
-
-    private fun paneRelocationMethod(manager: ToolWindowManagerImpl): Method? =
-        manager.javaClass.methods.firstOrNull {
-            it.name.startsWith("setSideToolAndAnchor") && it.parameterCount == 5
-        }
 
     /**
      * The pure decision behind [focusExisting], so the outcome contract is

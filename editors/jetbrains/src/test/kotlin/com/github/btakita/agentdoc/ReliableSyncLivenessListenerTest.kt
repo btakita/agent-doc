@@ -49,8 +49,8 @@ class ReliableSyncLivenessListenerTest {
             .toFile().readText()
 
         assertTrue(source.contains("FileEditorManager.getInstance(project).openFiles"))
-        assertTrue(source.contains("ClientFileEditorManager::class.java, ClientKind.REMOTE"))
-        assertTrue(source.contains("manager.getAllFiles()"))
-        assertTrue(source.contains("EditorTracker.getInstance(project).activeEditors"))
+        assertTrue(source.contains("MarketplacePlatformBridge.remoteFileEditorManagers(project)"))
+        assertTrue(source.contains("MarketplacePlatformBridge.allFiles(manager)"))
+        assertTrue(source.contains("MarketplacePlatformBridge.activeEditors(project)"))
     }
 }

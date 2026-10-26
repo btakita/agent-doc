@@ -1,7 +1,5 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.client.ClientKind
-import com.intellij.openapi.fileEditor.ClientFileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -92,10 +90,10 @@ internal object DocumentCloseDecision {
             false
         }
         val clientOpenPaths = try {
-            project.getServices(ClientFileEditorManager::class.java, ClientKind.REMOTE)
+            MarketplacePlatformBridge.remoteFileEditorManagers(project)
                 .map { manager ->
                     try {
-                        manager.getAllFiles().map { it.path }
+                        MarketplacePlatformBridge.allFiles(manager).map { it.path }
                     } catch (_: Throwable) {
                         emptyList()
                     }

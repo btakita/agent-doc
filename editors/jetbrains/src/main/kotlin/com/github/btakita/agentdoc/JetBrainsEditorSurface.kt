@@ -5,8 +5,6 @@ import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
-import com.intellij.openapi.wm.impl.ToolWindowManagerImpl
-import com.intellij.toolWindow.ToolWindowPane
 import java.awt.KeyboardFocusManager
 import java.awt.Component
 import java.awt.Window
@@ -31,7 +29,7 @@ internal object JetBrainsEditorSurfaces {
         val frame = editorWindow?.let(::frameOf)
         val activeFrame = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
         val pane = toolWindowPanes(project).firstOrNull { paneFrame(it) === frame }
-        val paneId = pane?.paneId
+        val paneId = pane?.let(MarketplacePlatformBridge::paneId)
         return JetBrainsEditorSurface(
             surfaceId = paneId ?: fallbackSurfaceId(frame),
             toolWindowPaneId = paneId,
@@ -46,8 +44,8 @@ internal object JetBrainsEditorSurfaces {
         val pane = toolWindowPanes(project).firstOrNull { paneFrame(it) === activeFrame }
             ?: return null
         return JetBrainsEditorSurface(
-            surfaceId = pane.paneId,
-            toolWindowPaneId = pane.paneId,
+            surfaceId = MarketplacePlatformBridge.paneId(pane) ?: return null,
+            toolWindowPaneId = MarketplacePlatformBridge.paneId(pane),
             frame = activeFrame,
             active = true,
         )
@@ -121,31 +119,10 @@ internal object JetBrainsEditorSurfaces {
             "frame-${System.identityHashCode(frame).toUInt().toString(16)}"
         }
 
-    private fun toolWindowPanes(project: Project): List<ToolWindowPane> {
-        val manager = ToolWindowManager.getInstance(project) as? ToolWindowManagerImpl
-            ?: return emptyList()
-        return try {
-            val method = manager.javaClass.methods.firstOrNull {
-                it.name.startsWith("getToolWindowPanes") && it.parameterCount == 0
-            } ?: return emptyList()
-            @Suppress("UNCHECKED_CAST")
-            (method.invoke(manager) as? List<*>)?.filterIsInstance<ToolWindowPane>().orEmpty()
-        } catch (error: Throwable) {
-            LOG.debug("[surface] ToolWindowPane enumeration unavailable", error)
-            emptyList()
-        }
-    }
+    private fun toolWindowPanes(project: Project): List<Any> =
+        MarketplacePlatformBridge.toolWindowPanes(project)
 
-    private fun paneFrame(pane: ToolWindowPane): Window? =
-        try {
-            val method = pane.javaClass.methods.firstOrNull {
-                it.name.startsWith("getFrame") && it.parameterCount == 0
-            } ?: return null
-            method.invoke(pane) as? Window
-        } catch (error: Throwable) {
-            LOG.debug("[surface] ToolWindowPane frame lookup unavailable", error)
-            null
-        }
+    private fun paneFrame(pane: Any): Window? = MarketplacePlatformBridge.paneFrame(pane)
 }
 
 internal enum class TerminalSurfaceDecisionKind {

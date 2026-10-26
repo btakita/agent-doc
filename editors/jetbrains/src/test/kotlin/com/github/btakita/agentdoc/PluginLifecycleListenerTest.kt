@@ -128,7 +128,7 @@ class PluginLifecycleListenerTest {
         assertTrue(source.contains("?.endInitialization()"))
         assertTrue(upgradeAction.contains("documents="))
         // GH #80: the unload shape comes from DynamicPlugins' own signatures.
-        assertTrue(upgradeAction.contains("resolveUpdateUnload(DynamicPlugins.class"))
+        assertTrue(upgradeAction.contains("resolveUpdateUnload(dynamicPlugins"))
         val retirementPolicy = upgradeAction.indexOf("dynamicUpgradeBlockerReason(")
         val unloadProbe = upgradeAction.indexOf("checkCanUnloadWithoutRestart")
         assertTrue("classloader retirement policy must run before any unload probe", retirementPolicy >= 0)
@@ -137,8 +137,8 @@ class PluginLifecycleListenerTest {
         assertTrue(upgradeAction.contains("\"withDisable\", boolean.class).invoke(value, false)"))
         assertTrue(upgradeAction.contains("\"withUpdate\", boolean.class).invoke(value, true)"))
         assertFalse(upgradeAction.contains("unloadPlugin(current)"))
-        assertTrue(upgradeAction.contains("actual == current"))
-        assertTrue(upgradeAction.contains("actual.getPluginClassLoader() == current.getPluginClassLoader()"))
+        assertTrue(upgradeAction.contains("actualDescriptor == current"))
+        assertTrue(upgradeAction.contains("actualDescriptor.getPluginClassLoader() == current.getPluginClassLoader()"))
 
         val replicaManager = Files.readString(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt")

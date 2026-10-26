@@ -93,15 +93,16 @@ intellijPlatform {
     pluginInstallationTarget = SplitModeAware.PluginInstallationTarget.BOTH
 
     pluginVerification {
-        // The integrated classic backend intentionally preserves its existing implementation and
-        // verifier warnings. Keep compatibility, dependency, structure, and validity failures as
-        // hard gates while reporting (but not reclassifying) inherited internal/override warnings.
+        // Marketplace review rejects private platform linkage. Keep those findings as hard gates
+        // for every exact split build so a rejected API cannot return unnoticed.
         failureLevel.set(
             EnumSet.of(
                 VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,
                 VerifyPluginTask.FailureLevel.MISSING_DEPENDENCIES,
                 VerifyPluginTask.FailureLevel.INVALID_PLUGIN,
                 VerifyPluginTask.FailureLevel.PLUGIN_STRUCTURE_WARNINGS,
+                VerifyPluginTask.FailureLevel.INTERNAL_API_USAGES,
+                VerifyPluginTask.FailureLevel.OVERRIDE_ONLY_API_USAGES,
             ),
         )
         ides {
@@ -136,6 +137,21 @@ tasks {
                 .toList()
             check(internalImports.all { (path, _) -> path.endsWith("Exact262DetachedPresentationAdapter.kt") }) {
                 "build-line-specific internal UI imports escaped the designated adapter: $internalImports"
+            }
+            val rejectedImports = projectDir.walkTopDown()
+                .filter { it.isFile && it.extension == "kt" && "/src/main/" in it.invariantSeparatorsPath }
+                .flatMap { source ->
+                    source.readLines().asSequence()
+                        .filter { line ->
+                            line.startsWith("import com.intellij.openapi.client.") ||
+                                line.startsWith("import com.intellij.openapi.fileEditor.ClientFileEditorManager") ||
+                                line.startsWith("import com.jetbrains.rdserver.core.RemoteClientSessionListener") ||
+                                line.startsWith("import com.intellij.openapi.fileEditor.impl.FileEditorOpenOptions")
+                        }
+                        .map { source.relativeTo(projectDir).invariantSeparatorsPath to it }
+                }.toList()
+            check(rejectedImports.isEmpty()) {
+                "Marketplace-rejected private split API imports reappeared: $rejectedImports"
             }
             val zip = layout.buildDirectory.dir("distributions").get().asFile
                 .listFiles()

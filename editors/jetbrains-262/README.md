@@ -98,11 +98,9 @@ authority; the frontend retries that normal empty completion with bounded
 1–30 second backoff. The client and backend logs then pair
 `frontend/backend ingress completed` with either `ingress deferred` or
 `ingress accepted`, so a transport/module fault is distinguishable from the
-transient project-registration race. The backend still
-observes remote-client selection changes (Remote Dev `CONTROLLER` and Code With Me
-`GUEST` sessions; GH #262) while no frontend snapshot has been accepted, so
-focus for an already-live main-layout document continues for diagnostic/local
-installs. Structural routing remains blocked and retains the existing tmux layout.
+transient project-registration race. The backend does not observe client-session
+selection while no frontend snapshot has been accepted: that flow has no supported
+Marketplace API. Structural routing remains blocked and retains the existing tmux layout.
 Detached-window identity and frontend presentation remain unavailable until the
 matching frontend module connects; accepted frontend authority automatically
 suppresses the fallback.

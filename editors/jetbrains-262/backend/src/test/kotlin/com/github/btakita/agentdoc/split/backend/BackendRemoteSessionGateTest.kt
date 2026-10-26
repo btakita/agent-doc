@@ -1,6 +1,5 @@
 package com.github.btakita.agentdoc.split.backend
 
-import com.intellij.openapi.client.ClientType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -10,33 +9,33 @@ import kotlin.test.assertTrue
 class BackendRemoteSessionGateTest {
     @Test
     fun remoteDevControllerSessionIsObserved() {
-        assertTrue(BackendRemoteSessionGate.observes(ClientType.CONTROLLER))
+        assertTrue(BackendRemoteSessionGate.observes("CONTROLLER"))
     }
 
     @Test
     fun codeWithMeGuestSessionIsStillObserved() {
-        assertTrue(BackendRemoteSessionGate.observes(ClientType.GUEST))
+        assertTrue(BackendRemoteSessionGate.observes("GUEST"))
     }
 
     @Test
     fun onlyRemoteDevControllerSelectionProvesFocus() {
-        assertTrue(BackendRemoteSessionGate.selectionProvesFocus(ClientType.CONTROLLER))
-        assertFalse(BackendRemoteSessionGate.selectionProvesFocus(ClientType.GUEST))
-        assertFalse(BackendRemoteSessionGate.selectionProvesFocus(ClientType.LOCAL))
-        assertFalse(BackendRemoteSessionGate.selectionProvesFocus(ClientType.FRONTEND))
+        assertTrue(BackendRemoteSessionGate.selectionProvesFocus("CONTROLLER"))
+        assertFalse(BackendRemoteSessionGate.selectionProvesFocus("GUEST"))
+        assertFalse(BackendRemoteSessionGate.selectionProvesFocus("LOCAL"))
+        assertFalse(BackendRemoteSessionGate.selectionProvesFocus("FRONTEND"))
     }
 
     @Test
     fun localAndFrontendSessionsAreNotObserved() {
-        assertFalse(BackendRemoteSessionGate.observes(ClientType.LOCAL))
-        assertFalse(BackendRemoteSessionGate.observes(ClientType.FRONTEND))
+        assertFalse(BackendRemoteSessionGate.observes("LOCAL"))
+        assertFalse(BackendRemoteSessionGate.observes("FRONTEND"))
     }
 
     @Test
     fun authenticatedLocalFrontendDoesNotOwnRemotePaneLayout() {
         val sessions = listOf(
-            "Host" to ClientType.LOCAL,
-            "remote-1" to ClientType.CONTROLLER,
+            "Host" to "LOCAL",
+            "remote-1" to "CONTROLLER",
         )
 
         assertFalse(BackendRemoteSessionGate.ownsLayout("Host", sessions))
@@ -49,12 +48,13 @@ class BackendRemoteSessionGateTest {
         // A new platform ClientType must be classified here deliberately, not inherited silently.
         assertEquals(
             mapOf(
-                ClientType.LOCAL to false,
-                ClientType.FRONTEND to false,
-                ClientType.CONTROLLER to true,
-                ClientType.GUEST to true,
+                "LOCAL" to false,
+                "FRONTEND" to false,
+                "CONTROLLER" to true,
+                "GUEST" to true,
             ),
-            ClientType.entries.associateWith(BackendRemoteSessionGate::observes),
+            listOf("LOCAL", "FRONTEND", "CONTROLLER", "GUEST")
+                .associateWith(BackendRemoteSessionGate::observes),
         )
     }
 
@@ -64,7 +64,7 @@ class BackendRemoteSessionGateTest {
         assertEquals(
             "[ClientId(a):CONTROLLER,ClientId(b):GUEST]",
             BackendRemoteSessionGate.describe(
-                listOf("ClientId(a)" to ClientType.CONTROLLER, "ClientId(b)" to ClientType.GUEST),
+                listOf("ClientId(a)" to "CONTROLLER", "ClientId(b)" to "GUEST"),
             ),
         )
     }

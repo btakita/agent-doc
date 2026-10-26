@@ -18,8 +18,6 @@ import com.github.btakita.agentdoc.split.FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_
 import com.github.btakita.agentdoc.split.FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceRole
-import com.intellij.openapi.client.ClientKind
-import com.intellij.openapi.client.ClientSessionsManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -462,9 +460,7 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     private fun isRemoteClient(clientId: String): Boolean =
         BackendRemoteSessionGate.ownsLayout(
             clientId,
-            ClientSessionsManager.getProjectSessions(project, ClientKind.ALL).map { session ->
-                session.clientId.value to session.type
-            },
+            marketplaceRemoteSessions(project),
         )
 
     private fun isSessionDocument(path: String): Boolean {
@@ -476,3 +472,24 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
         private val LOG = Logger.getInstance(ControllerRemoteClientLayoutForwarder::class.java)
     }
 }
+
+private fun marketplaceRemoteSessions(project: Project): List<Pair<String, String>> = runCatching {
+    val managerClass = Class.forName("com.intellij.openapi.client.ClientSessionsManager")
+    val kindClass = Class.forName("com.intellij.openapi.client.ClientKind")
+    val all = kindClass.getField("ALL").get(null)
+    val companion = managerClass.getField("Companion").get(null)
+    val sessions = companion.javaClass.methods.firstOrNull {
+        it.name == "getProjectSessions" && it.parameterCount == 2
+    }?.invoke(companion, project, all) as? Iterable<*> ?: return emptyList()
+    sessions.mapNotNull { session ->
+        session ?: return@mapNotNull null
+        val clientId = session.javaClass.methods.first { it.name == "getClientId" && it.parameterCount == 0 }
+            .invoke(session)
+        val id = clientId.javaClass.methods.firstOrNull {
+            it.name == "getValue" && it.parameterCount == 0
+        }?.invoke(clientId)?.toString() ?: clientId.toString()
+        val type = session.javaClass.methods.first { it.name == "getType" && it.parameterCount == 0 }
+            .invoke(session).toString()
+        id to type
+    }
+}.getOrDefault(emptyList())

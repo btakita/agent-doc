@@ -1,5 +1,8 @@
+import java.util.EnumSet
 import java.util.jar.JarInputStream
 import java.util.zip.ZipFile
+import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 
 plugins {
     id("java")
@@ -78,6 +81,21 @@ intellijPlatform {
     // versioned 263 package. The exact-262 split package remains isolated in
     // editors/jetbrains-262 because it uses build-line-specific internal APIs.
     projectName = packageName
+    pluginVerification {
+        failureLevel.set(
+            EnumSet.of(
+                VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,
+                VerifyPluginTask.FailureLevel.MISSING_DEPENDENCIES,
+                VerifyPluginTask.FailureLevel.INVALID_PLUGIN,
+                VerifyPluginTask.FailureLevel.PLUGIN_STRUCTURE_WARNINGS,
+                VerifyPluginTask.FailureLevel.INTERNAL_API_USAGES,
+                VerifyPluginTask.FailureLevel.OVERRIDE_ONLY_API_USAGES,
+            ),
+        )
+        ides {
+            create(IntelliJPlatformType.IntellijIdeaCommunity, providers.gradleProperty("platformVersion"))
+        }
+    }
 }
 
 tasks {
@@ -150,6 +168,26 @@ tasks {
         description = "Verify the selected classic-source compatibility-ranged ZIP"
         dependsOn("buildPlugin")
         doLast {
+            val forbiddenImports = projectDir.resolve("src/main").walkTopDown()
+                .filter { it.isFile && (it.extension == "kt" || it.extension == "java") }
+                .flatMap { source ->
+                    source.readLines().asSequence()
+                        .filter { line ->
+                            line.startsWith("import com.intellij.codeInsight.daemon.impl.EditorTracker") ||
+                                line.startsWith("import com.intellij.openapi.client.ClientKind") ||
+                                line.startsWith("import com.intellij.openapi.fileEditor.ClientFileEditorManager") ||
+                                line.startsWith("import com.intellij.openapi.wm.RegisterToolWindowTask") ||
+                                line.startsWith("import com.intellij.openapi.wm.impl.ToolWindowManagerImpl") ||
+                                line.startsWith("import com.intellij.toolWindow.ToolWindowPane") ||
+                                line.startsWith("import com.intellij.ide.plugins.DynamicPlugins") ||
+                                line.startsWith("import com.intellij.ide.plugins.IdeaPluginDescriptorImpl") ||
+                                line.startsWith("import com.intellij.ide.plugins.PluginInstaller")
+                        }
+                        .map { source.relativeTo(projectDir).invariantSeparatorsPath to it }
+                }.toList()
+            check(forbiddenImports.isEmpty()) {
+                "Marketplace-rejected private IntelliJ API imports reappeared: $forbiddenImports"
+            }
             val zip = layout.buildDirectory.dir("distributions").get().asFile
                 .listFiles()
                 .orEmpty()

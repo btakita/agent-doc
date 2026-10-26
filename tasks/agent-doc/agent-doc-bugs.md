@@ -847,12 +847,13 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
-- 🚧 [#subagent:ghostflake#1] fix nondeterministic agent-doc-controller-io rpc::tests recording_an_editor_exit_reaps_the_relay_ghost_member — failed 6 of 60 full parallel crate runs in the singleton-flake baseline (2026-10-26), panic "a live editor registers a replica"
-- 🚧 [#subagent:socketexitflake#1] fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)
+- ☑️ [#subagent:ghostflake#1] fix nondeterministic agent-doc-controller-io rpc::tests recording_an_editor_exit_reaps_the_relay_ghost_member — failed 6 of 60 full parallel crate runs in the singleton-flake baseline (2026-10-26), panic "a live editor registers a replica"
+- ☑️ [#subagent:socketexitflake#1] fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)
+- 🚧 [#subagent:exitwatcheriso#1] isolate the controller exit watcher from other tests' editor pids: every in-process test controller reaps dead pids registered by other tests' documents in the process-wide liveness state and writes their exit records into its own root's state.db (found by the socket-unlink flake fix, 2026-10-26)
 - 🔄 document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence
 - 🔄 release + publish
 - ☑️ [#subagent:autosyncdelay#1] tmux pane auto-sync has a large delay. Is this due to the upgrade being installed? Either way, this should be fixed.
-- 🚧 [#subagent:fencedmarker#1] The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.
+- ☑️ [#subagent:fencedmarker#1] The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.
 - 🚧 [#subagent:gh376#1] #gh-fix https://github.com/btakita/agent-doc/issues/376
 <!-- /agent:run -->
 

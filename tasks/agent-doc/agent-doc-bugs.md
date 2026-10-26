@@ -854,6 +854,42 @@ v0.35.554 was never published. It stays a pre-release, and 0.35.555 replaces it.
   - the route-owned and fan-out panes, which still type their commands like `start` used to (suggested by the start-shell-readiness worker)
 - **Released back to pending:** the Marketplace publishing item. It needs your accounts.
 - **Your live check:** `#layoutunprovenliveverify`.
+
+### Re: restoring agent:todo — opus-5 · 2026-10-26T14:08-04:00
+
+> **Chat prompt (#chatprompt:56b1e180781c):** Can I clear the agent:loop?
+
+> **Chat prompt (#chatprompt:c49c7d43312f):** I'm getting confused and am adding things into it.
+
+> **Chat prompt (#chatprompt:28d31809a03b):** I thought agent-doc supports the header prefix
+
+> **Chat prompt (#chatprompt:1099dfb245f8):** Can we fix this already. I've requested it to be fixed 3 times
+
+> **Chat prompt (#chatprompt:c1c9bca05b51):** Do this in a subagent if work is needed
+
+> **Chat prompt (#chatprompt:3571ab3b7b93):** fixed
+
+> **Chat prompt (#chatprompt:7069dee140c9):** actually, my todo items were deleted
+
+> **Chat prompt (#chatprompt:735ee16cdb34):** I think agent-doc collapsed agent:todo into agent:loop
+
+> **Chat prompt (#chatprompt:68197c136733):** Please restore agent:todo
+
+> **Chat prompt (#chatprompt:a768ac89a291):** with the items that were in agent:todo
+
+> **Chat prompt (#chatprompt:ecce9f51e753):** and fix the agent-doc causes in a subagent
+
+This closeout restores the `agent:todo` component with all six items from the last commit, `48796d91bd`, each under its original id and text. They are `#ahfe`, `#ctg7`, `#coder-remote-install-02805`, `#jb263-feed-verify`, `#layoutunprovenliveverify`, and `#autosync-restart-verify`. All six are restored unchecked, as they were.
+
+You reported that the tmux panes are syncing. If that covers `#layoutunprovenliveverify` and `#autosync-restart-verify`, check those two off.
+
+**The header prefix is supported.** `568aa7102e` was installed at about 13:55, and `## Queue: Main <!-- agent:run … -->` parses. The parse error was a separate problem. The loop opener was being closed by `<!-- /agent:todo -->`, so the Todo opener, its items, and the loop's own close marker had all disappeared.
+
+**Cause:** A background subagent on `fix/todo-collapsed-into-loop` is finding which actor removed the Todo region, your editor buffer or a binary write, and which code path did it. It will fix agent-doc so that rewriting one component can never absorb or delete another component's markers or body. A component must end only at its own close tag, and a mismatched close must fail closed.
+
+**Rule for the two queues.** `agent:loop` holds only the hourly Watch row. Everything else goes at the bottom of `## Queue: Main`.
+
+Queue dispatch for this document is still paused (receipt 7), and I resume it after this closeout lands.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -891,6 +927,17 @@ v0.35.554 was never published. It stays a pre-release, and 0.35.555 replaces it.
 ## Loop: Issues <!-- agent:loop id="issues" interval="1h" priority -->
 - 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
+
+## Todo
+
+<!-- agent:todo priority -->
+- [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
+- [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
+- [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
+- [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
+- [ ] [#layoutunprovenliveverify] In the IDE, open the cross-root sdk-demo.md and agent-doc-bugs.md together, run Sync Tmux Layout, and confirm it recreates the stale sdk-demo pane and converges to two panes without focusing an ownership-unproven pane; restart the IDE first so JetBrains 0.2.828+ is loaded. (source: agent:review [#layoutunprovenliveverify])
+- [ ] [#autosync-restart-verify] Restart IntelliJ IDEA 2026.3 and Rider 2026.2 so JetBrains 0.2.832/0.2.831 load, then switch editor tabs: tmux should follow within about a second with no install or Run Agent Doc in between (idea.log shows `[layout-sync] selection file=`).
+<!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->

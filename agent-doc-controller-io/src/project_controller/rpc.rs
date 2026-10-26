@@ -12129,6 +12129,33 @@ fn handle_editor_route_rpc_with_layout_delegate(
         ),
     );
 
+    let routed_document = canonical
+        .canonicalize()
+        .unwrap_or_else(|_| canonical.clone())
+        .to_string_lossy()
+        .to_string();
+    // GH #373: an editor that observed no visible document (Remote Dev backend
+    // `--col` fallback with flat selection evidence) names only the routed
+    // document, as an undetected single-document `ensure` observation.
+    let layout_args = match editor_route_undetected_layout_args(
+        &layout_args,
+        payload.layout_mode.as_deref(),
+        &routed_document,
+    )? {
+        Some(undetected) => {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_editor_route_layout_undetected file={} editor_layout_args={} editor_focus={} action=ensure_routed_document layout_mode=ensure (GH #373)",
+                    canonical.display(),
+                    layout_args.len(),
+                    editor_route_layout_focus_arg(&layout_args).unwrap_or("none"),
+                ),
+            );
+            undetected
+        }
+        None => layout_args,
+    };
     let mut layout_invocation =
         editor_route_layout_invocation(&bootstrap.project_root, &layout_args)?;
     layout_invocation.column_order = payload.column_order;
@@ -12150,11 +12177,6 @@ fn handle_editor_route_rpc_with_layout_delegate(
             ),
         );
     }
-    let routed_document = canonical
-        .canonicalize()
-        .unwrap_or_else(|_| canonical.clone())
-        .to_string_lossy()
-        .to_string();
     let main_layout_eligibility = runtime.main_layout_eligibility();
     anyhow::ensure!(
         document_is_main_layout_eligible(
@@ -14315,6 +14337,62 @@ fn validate_editor_route_layout_args(args: &[String]) -> Result<Vec<String>> {
         }
     }
     Ok(validated)
+}
+
+/// The `--focus` value of validated editor route layout args, if any.
+fn editor_route_layout_focus_arg(layout_args: &[String]) -> Option<&str> {
+    layout_args
+        .chunks(2)
+        .find(|pair| pair[0] == "--focus")
+        .and_then(|pair| pair.get(1))
+        .map(String::as_str)
+}
+
+/// GH #373: the layout args of an editor route that observed no visible
+/// document, or `None` when the editor's args stand as sent.
+///
+/// The JetBrains `--col` snapshot fallback on a Remote Dev backend reads no
+/// selected editor (`focused=[<none>]`, flat remote-client evidence without
+/// column geometry), so `sync_layout` answers one empty column and the route
+/// sends no `--col` at all. That is no observation of the visible layout, but
+/// the route itself is a positive observation that the operator invoked it on
+/// the routed document. Such a route is the GH #111 undetected fallback for
+/// that one document: one `ensure` column naming it, focused. The `ensure`
+/// merge, the GH #120 no-growth bound, and the GH #347 focus-only deferral
+/// then apply exactly as they do to a single-file route, so no structure is
+/// guessed. An editor `--focus` naming another document is dropped: the route
+/// retargets focus onto the routed document anyway.
+///
+/// It applies only when no `--col` names a document and the args do not
+/// carry a focus an empty placeholder could hold (that shape keeps its
+/// existing materialization). An explicit `exact` route asserts the whole
+/// visible layout, so an empty one stays refused by
+/// [`editor_route_layout_invocation`].
+fn editor_route_undetected_layout_args(
+    layout_args: &[String],
+    explicit_layout_mode: Option<&str>,
+    routed_document: &str,
+) -> Result<Option<Vec<String>>> {
+    let columns = layout_args
+        .chunks(2)
+        .filter(|pair| pair[0] == "--col")
+        .map(|pair| pair.get(1).map(String::as_str).unwrap_or_default())
+        .collect::<Vec<_>>();
+    let focus = editor_route_layout_focus_arg(layout_args);
+    let observed_no_document = columns.iter().all(|column| column.trim().is_empty())
+        && (columns.is_empty() || focus.is_none());
+    if !observed_no_document
+        || EditorRouteLayoutMode::resolve(explicit_layout_mode, columns.len())?
+            != EditorRouteLayoutMode::Ensure
+    {
+        return Ok(None);
+    }
+    Ok(Some(vec![
+        "--col".to_string(),
+        routed_document.to_string(),
+        "--focus".to_string(),
+        routed_document.to_string(),
+    ]))
 }
 
 fn editor_route_layout_invocation(
@@ -46957,6 +47035,80 @@ mod tests {
         assert!(editor_route_layout_invocation(Path::new("/"), &args).is_err());
     }
 
+    /// GH #373: the Remote Dev `--col` snapshot fallback sends no column
+    /// (`layout_args=0`). A non-exact route names the routed document as one
+    /// `ensure` column; an editor focus elsewhere is dropped.
+    #[test]
+    fn gh373_undetected_editor_route_names_the_routed_document() {
+        let routed = "/repo/a.md";
+        let expected = Some(vec![
+            "--col".to_string(),
+            routed.to_string(),
+            "--focus".to_string(),
+            routed.to_string(),
+        ]);
+        let none: Vec<String> = Vec::new();
+        assert_eq!(
+            editor_route_undetected_layout_args(&none, Some("ensure"), routed).unwrap(),
+            expected
+        );
+        assert_eq!(
+            editor_route_undetected_layout_args(&none, None, routed).unwrap(),
+            expected
+        );
+        let focus_only = vec!["--focus".to_string(), "/repo/b.md".to_string()];
+        assert_eq!(
+            editor_route_undetected_layout_args(&focus_only, Some("ensure"), routed).unwrap(),
+            expected
+        );
+        let placeholder_only = vec!["--col".to_string(), String::new()];
+        assert_eq!(
+            editor_route_undetected_layout_args(&placeholder_only, Some("ensure"), routed).unwrap(),
+            expected
+        );
+        let invocation =
+            editor_route_layout_invocation(Path::new("/"), expected.as_ref().unwrap()).unwrap();
+        assert_eq!(invocation.columns, vec![routed.to_string()]);
+        assert_eq!(invocation.focus.as_deref(), Some(routed));
+    }
+
+    /// GH #373: only a route that observed no document is substituted. An
+    /// `exact` route with no column still fails closed, and a placeholder
+    /// that can hold the editor focus keeps its materialization.
+    #[test]
+    fn gh373_exact_or_observed_editor_routes_are_left_as_sent() {
+        let routed = "/repo/a.md";
+        let none: Vec<String> = Vec::new();
+        assert_eq!(
+            editor_route_undetected_layout_args(&none, Some("exact"), routed).unwrap(),
+            None
+        );
+        let refused = editor_route_layout_invocation(Path::new("/"), &none).unwrap_err();
+        assert!(
+            refused
+                .to_string()
+                .contains("editor route requires the exact visible layout before dispatch"),
+            "{refused}"
+        );
+        let observed = vec!["--col".to_string(), "/repo/b.md".to_string()];
+        assert_eq!(
+            editor_route_undetected_layout_args(&observed, Some("ensure"), routed).unwrap(),
+            None
+        );
+        let placeholder_with_focus = vec![
+            "--col".to_string(),
+            String::new(),
+            "--focus".to_string(),
+            "/repo/b.md".to_string(),
+        ];
+        assert_eq!(
+            editor_route_undetected_layout_args(&placeholder_with_focus, Some("ensure"), routed)
+                .unwrap(),
+            None
+        );
+        assert!(editor_route_undetected_layout_args(&none, Some("bogus"), routed).is_err());
+    }
+
     #[test]
     fn editor_route_layout_canonicalizes_relative_editor_paths() {
         let args = vec![
@@ -48423,6 +48575,112 @@ mod tests {
             "{ops}"
         );
         assert!(!ops.contains("publish_live_tmux_replacement"), "{ops}");
+    }
+
+    /// GH #373 end to end: the measured Remote Dev payload (`layout_args=0`,
+    /// `layout_mode=ensure`, `column_order=unknown`) exited 1 with `editor
+    /// route requires the exact visible layout before dispatch`, before the
+    /// GH #347 focus-only path or the GH #360 remedy could answer. It now
+    /// takes exactly that path: focus-only dispatch into an existing live pane,
+    /// otherwise the frontend-readiness refusal with its remedy. An empty
+    /// `exact` route keeps the original refusal.
+    #[test]
+    fn gh373_zero_column_route_takes_the_unknown_geometry_focus_only_path() {
+        struct LiveLayoutGuard;
+        impl Drop for LiveLayoutGuard {
+            fn drop(&mut self) {
+                TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| *documents.borrow_mut() = None);
+            }
+        }
+        let _guard = LiveLayoutGuard;
+
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        let zero_column_route = |layout_mode: &str| {
+            let mut request = fixture.route_request("beta", &[], Some(layout_mode));
+            let mut payload: serde_json::Value = serde_json::from_str(
+                request
+                    .diagnostic_payload
+                    .as_deref()
+                    .expect("route diagnostic payload"),
+            )
+            .unwrap();
+            payload["layout_args"] = serde_json::json!([]);
+            payload["column_order"] = serde_json::json!("unknown");
+            request.diagnostic_payload = Some(payload.to_string());
+            request
+        };
+
+        // The routed document already has a live pane: focus-only dispatch.
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| {
+            *documents.borrow_mut() = Some(vec![fixture.id("alpha"), fixture.id("beta")]);
+        });
+        let successor = test_controller_runtime(&fixture.bootstrap);
+        let routed = handle_editor_route_rpc(
+            &fixture.bootstrap,
+            successor.as_ref(),
+            zero_column_route("ensure"),
+        )
+        .expect("a zero-column route to a live pane dispatches focus-only");
+        assert_eq!(routed.exit_code, 0, "{}", routed.output);
+        assert!(
+            successor.pane_layout_desired().is_none(),
+            "no structure is published from a route that observed no column"
+        );
+        let ops = fixture.ops_log();
+        assert!(
+            ops.contains("controller_editor_route_started")
+                && ops.contains("layout_args=0")
+                && ops.contains("controller_editor_route_layout_undetected file=")
+                && ops.contains(
+                    "editor_layout_args=0 editor_focus=none action=ensure_routed_document"
+                ),
+            "{ops}"
+        );
+        assert!(
+            ops.contains(
+                "reason=incomplete_frontend_layout_no_authoritative_snapshot action=dispatch_focus_only"
+            ),
+            "{ops}"
+        );
+
+        // No live pane: the GH #360 refusal names the remedy, not the bare
+        // exact-visible sentence.
+        TEST_LIVE_LAYOUT_DOCUMENTS
+            .with(|documents| *documents.borrow_mut() = Some(vec![fixture.id("alpha")]));
+        let without_beta = test_controller_runtime(&fixture.bootstrap);
+        let refusal = handle_editor_route_rpc(
+            &fixture.bootstrap,
+            without_beta.as_ref(),
+            zero_column_route("ensure"),
+        )
+        .expect_err("flat evidence must not place a document without a live pane");
+        let refusal = format!("{refusal:#}");
+        assert!(
+            refusal.contains("reason=flat_evidence_has_no_column_geometry")
+                && refusal.contains("remedy=install the same Agent Doc modular plugin ZIP"),
+            "{refusal}"
+        );
+        assert!(
+            !refusal.contains("editor route requires the exact visible layout before dispatch"),
+            "{refusal}"
+        );
+        assert!(without_beta.pane_layout_desired().is_none());
+
+        // An empty `exact` route asserts a whole visible layout it does not
+        // carry, and stays refused before publication.
+        let exact = test_controller_runtime(&fixture.bootstrap);
+        let refusal = handle_editor_route_rpc(
+            &fixture.bootstrap,
+            exact.as_ref(),
+            zero_column_route("exact"),
+        )
+        .expect_err("an empty exact route fails closed");
+        assert!(
+            format!("{refusal:#}")
+                .contains("editor route requires the exact visible layout before dispatch"),
+            "{refusal:#}"
+        );
+        assert!(exact.pane_layout_desired().is_none());
     }
 
     #[test]

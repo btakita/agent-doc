@@ -23,12 +23,14 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 9 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 10 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.555 from release commit `f11ad5932f`; tag `v0.35.555` is the stable latest release (GitHub Latest, PyPI 0.35.555, stable target channels), replacing the cancelled v0.35.554; JetBrains classic/262/263 0.2.833/0.2.834/0.2.835, VS Code 0.2.83; GH #377 and #378 closed. Post-release `origin/main` is `f155fe0076` (unreleased): loop no-resurrect/no-insert, single strike formatter, any-heading component prefixes, the fail-closed component-structure fix and live no-revert fence, GH #378, strikes ending finished claims, and the editor re-attach fix (JetBrains 0.2.836/0.2.837/0.2.838, local install in progress).
+Released and published agent-doc v0.35.556 from release commit `5cbfdbbc4c` (= `origin/main`); tag `v0.35.556` is the stable latest release (GitHub Latest, PyPI 0.35.556, stable target channels) and is installed locally. JetBrains classic/262/263 0.2.839/0.2.841/0.2.840, VS Code 0.2.83. It adds onboarding Getting started, the queue marker legend, the component-marker fences (live edit, cold start, JetBrains edit-time warning), row-aware editor attach, reliable echoed-head strikes beside a loop queue, doctor/autofix exit codes, and pane-process launches for start/route/fan-out. GH #378 closed; GH #379 awaits the reporter upgrading.
 <!-- /status:sync -->
+
+Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
 <!-- /agent:status -->
  
 
@@ -945,20 +947,6 @@ The rows quoted above are closed:
 Three gaps it left are queued, including one where a running controller can still revert your text.
 
 **Still to integrate:** onboarding `3f33ab1f96`, marker legend `bd0847efca`, doctor fresh-doc `9f0ebc1e16`, and start shell-readiness `9317ccc50c`. The no-arg skill (`resolve-pane-document`) is held for your naming decision.
-### Re: Subagent completed: `subagent:reportedend` returned work for queue item “end a Reported queue claim on every strike path (orphan-id strike, controller projection, preflight done-id and backlog strikes), not only at the next closeout prune, so a later identical row can never pick up ☑️ from the claim ledger (found by the completion-cell retirement fix, 2026-10-26)” — agent-doc
-<!-- agent-doc-subagent-response sha256=2f475d563812df991f8e9146fc978767290b0667209edae5aab4cebbe62144e1 -->
-> **Subagent response:**
->
-> Every strike path now ends the struck row's `Reported` claim when it strikes the row, so a re-added identical row shows `📥` instead of `☑️`. Committed and pushed; built and tested in the worktree only. Branch `fix/strike-ends-reported-claim`, commit `fb54c8f6ab`, on origin/main `655eacb624`; worktree `/home/brian/work/btakita/agent-doc-wt/reportedend`.
->
-> Changes: claim ledger — a new step drops a claim when its row was struck, no live row of that identity remains anywhere (mirror copies and duplicates keep theirs), and its state (counting expiry) is `Reported` or `Lost`; a claim whose worker is still dispatching or running keeps its claim and fence. Durable step — keys each struck row by its work text (`strip_attempt_projection_prefix`) and runs against the strike's result; added to `retire_struck_or_warn`, which every strike path already calls once its write is accepted, covering the orphan-id strike, the noise/orphan prune, the preflight done-id and backlog strikes, and the controller's answered-head projection without touching the `queue_consume.rs` call sites; ops log `queue_claim_retired_on_strike`. Second gap fixed — the backlog strike (`#qftbklgstrike`) puts its note inside the strikethrough (`~~<work> — auto-struck: …~~`), so the struck text didn't match the live row and that strike retired nothing (no cell, receipt or claim); `heads_struck_by_successor` now ignores that note. Spec: claim clause right after `#strikeretires` in specs/07-orchestration-commands.md, plus a line in SPEC.md.
->
-> Files: agent-doc-queue/src/queue_claim.rs; agent-doc-queue/src/queue_consume.rs; agent-doc-queue-io/src/queue_claim.rs; agent-doc-queue-io/src/claim_release_receipt.rs; agent-doc-queue-io/src/queue_consume.rs (tests); agent-doc-preflight-io/src/lib.rs (comment and tests); src/main.rs (comment); specs/07-orchestration-commands.md; SPEC.md.
->
-> Tests: unit tests `retire_struck_ends_only_finished_attempts_without_a_live_row` and `annotated_strikes_strike_the_work_text`; one regression per strike path checking the claim is gone and the re-added row shows `📥` — `orphan_id_strike_ends_a_reported_claim_so_a_readded_row_is_pending`, `controller_answered_strike_ends_a_reported_claim_so_a_readded_row_is_pending` (also checks an unrelated running claim survives), `done_id_strike_ends_a_reported_claim_so_a_readded_row_is_pending`, `backlog_strike_ends_a_reported_claim_so_a_readded_row_is_pending`; each fails with its fix removed. `cargo test -p agent-doc-queue -p agent-doc-queue-io -p agent-doc-preflight-io` 940, 246 and 292 passed, 0 failed; `make check-fast` passed (clippy -D warnings clean, 9715 passed, 177 skipped).
->
-> Possible follow-up (operator decision, not queued): the backlog strike never fires on a row that already shows `☑️ [#owner#N]` because the matcher reads `[#owner#N]` as a queue id and skips the row; fixing it would make the backlog strike also close claimed free-text rows, a behaviour change beyond this item.
-<!-- agent-doc-subagent-completion key=0e31404ac9bc17ec95a6a3b19fb43a7e10e101859ca5b29d67e311b6291ac24e -->
 
 ### Re: #378 fixed, #379 triaged, jb263 queue row — opus-5 · 2026-10-26T15:17-04:00
 
@@ -1113,6 +1101,70 @@ Same cause and fix as the item above: `f155fe0076`, installed. Your edit made th
 **Decisions for you:** the two command names above, and whether a backlog strike should also close claimed free-text rows. Separately, restart IntelliJ IDEA 2026.3 so it loads plugin 0.2.838.
 
 The exchange is 1011 lines. Compacting it would help, but only when you ask, because the queue is still draining.
+
+### Re: release v0.35.556 — opus-5 · 2026-10-26T17:13-04:00
+
+> **Queue prompt:** release + publish: Include fixes for Issue 378-379 and the current 📥 items.
+
+**v0.35.556 is released and published.** Release commit `5cbfdbbc4c`, tag `v0.35.556`, is `origin/main`. It is the GitHub Latest release, PyPI serves 0.35.556, the stable target channels were promoted, and `make release` finished its local `install-full` (`RELEASE_EXIT=0`). Full `make check` passed on the version-projected tree first. Editor packages: JetBrains classic, 2026.2, and 2026.3 are 0.2.839, 0.2.841, and 0.2.840; VS Code stays 0.2.83.
+
+- **GH #378** is in the release (`ce2eeb0fae`) and closed.
+- **GH #379** needed no code change. The reporter ran 0.35.553 with plugin 0.2.827; the fixes shipped in 0.35.554/0.35.555 and are in this release too. The issue stays open until they confirm after upgrading.
+- **Every 📥 item queued before the release is in it:** the seven dispatched fixes, the `autofix` follow-up, and the closeout-strike fix described below.
+
+Two release-gate notes: `make editor-generation-bump` skips the JetBrains 2026.2 package, so I bumped it with `check_plugin_versions.py --bump "JetBrains 262"`. The first `make check` stopped at the editor parity gate until I added the 0.35.556 row to `editors/release-parity.tsv`.
+
+> **Queue prompt:** `agent-doc doctor` exits 0 even when its outcome is blocked or recoverable; exit non-zero so scripts and CI can act on it (found by the doctor fresh-document fix, 2026-10-26)
+
+Released in v0.35.556 (`143e8bb106`). `agent-doc doctor` exits 0 ok, 3 recoverable, 4 operator action, 5 blocked, and 1 when doctor itself fails; the report still prints for every outcome.
+
+> **Queue prompt:** `agent-doc autofix` exits 0 even when invariants stay recoverable, operator or blocked after the plan/apply; give it the same exit status as `agent-doc doctor` (found by the doctor exit-status fix, 2026-10-26)
+
+Released in v0.35.556 (`fae26ad2d7`). `agent-doc autofix` uses the same codes. After an `--apply` that ran a repair it re-diagnoses and exits with what remains; the report schema is now 2, with `outcome` beside `doctor_outcome`.
+
+> **Queue prompt:** route-owned auto-start (agent-doc-route-io/src/startup.rs route.auto_start) and parallel fan-out panes (src/parallel.rs) still type their commands into a just-split pane; launch them as the pane process via agent_doc_tmux_io::launch_command_in_pane, checking route_owned_start_enter input logging and the fan-out $(passage ...) env prefix (found by the start shell-readiness fix, 2026-10-26)
+
+Released in v0.35.556 (`18509487ac`). Route-owned auto-start and parallel fan-out panes run their command as the pane process, and the fan-out `$(passage ...)` prefix is expanded only inside the pane. The old `route_owned_start_enter` event is now `route_owned_start_launch`. One difference: a launched command gets the tmux session environment plus the launcher's `PATH`, not your shell's rc.
+
+> **Queue prompt:** fix nondeterministic agent-doc-document-realtime-io tests::retained_capture_repairs_legacy_welded_queue_close_before_validation — waits on a background delivery thread and failed under check-fast load once (2026-10-26, any-heading worker); find what it races, do not rerun to green
+
+Released in v0.35.556 (`187067ef1a`). The race was in the test: it expected one settle call to succeed, which only happened if the simulated editor projected inside a window of about 20ms. The test now settles, runs the editor delivery to completion, and settles again. No production change.
+
+> **Queue prompt:** JetBrains plugin: run the component-marker check on the buffer before recording a detached-editor op, so an edit that deletes a component open/close marker warns the operator at edit time (the detached op path carries only offsets and lengths) (gap 1 of the todo-collapse fix, 2026-10-26)
+
+Released in v0.35.556 (`55bb175b0a`; JetBrains classic/262/263 0.2.839/0.2.841/0.2.840). Before recording an edit, the plugin runs the shared marker check, so deleting a component marker shows the `⚠ agent-doc:` warning at edit time. Your text is never changed. Restart the IDE to load it.
+
+> **Queue prompt:** cold controller start with no editor handover loads the document from disk even when disk has broken component markers; fence it against the last snapshot or HEAD and show the marker diagnostic (gap 3 of the todo-collapse fix, 2026-10-26)
+
+Released in v0.35.556 (`ef3a09a34f`). A cold controller start no longer adopts disk text whose markers broke since the snapshot or `HEAD`. It fences the text like a live edit: disk is never rewritten, commits are refused, the warning shows, and a repairing edit lifts the fence. The same fence covers an out-of-band rebuild at the commit barrier.
+
+> **Queue prompt:** relay-hub / SimWorld coverage for editor attach: the structure-quarantine-with-durable-ingest canonical lag and the library-reload-then-refused-swap re-registration sequence (found by the ambiguous-retained-projection attach fix 369da0c3e0, 2026-10-26)
+
+Released in v0.35.556 (`3a08e5095d`). Four relay-hub tests drive the reload-then-refused-swap and structure-quarantine lag sequences through the real hub. They found no new defect, and they still pass beside the row-aware merge below.
+
+> **Queue prompt:** editor attach still holds when canonical both lags the buffer and has a real controller addition the buffer lacks (e.g. a claim marker plus a response); add a row-aware attach merge (found by the ambiguous-retained-projection attach fix, 2026-10-26)
+
+Released in v0.35.556 (`6c19ec64db`). When the controller lags your buffer and also added a claim marker or a response, attach keeps every buffer byte and rolls the controller's additions onto it. It still holds on a true same-row conflict.
+
+**Closeout-strike fix (`2a8a3e6d25`, released).** My previous closeout quoted eight finished rows, and none was struck; it also consumed a `release + publish` row I had marked Deferred. Two causes. First, the loop-queue exclusion numbered components with a parser that skips the exchange's boundary marker, so after the boundary every `agent:run` Main row looked like a loop row and was never struck. Finalize, preflight, and the controller projection all shared that bug. Second, a `--review-resolve` closeout's strike had a free-text budget of 1, so it fell through to the leading free-text head without checking deferral. Both are fixed with regression tests, and this cycle's preflight on 0.35.556 struck the eight rows.
+
+> **Queue prompt:** one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
+
+**Deferred:** the branch `feat/repair-stale-completion-evidence` (`66325a2db1`) adds `agent-doc queue repair-stale-completion`. It waits only for your decision on the command name.
+
+> **Queue prompt:** In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
+
+**Deferred:** the branch `feat/skill-no-arg-pane-document` (`81c3de55d5`) adds `agent-doc resolve-pane-document`. It waits only for your decision on the command name.
+
+**Follow-ups the workers found** (not queued yet, so you can choose):
+
+- `agent-doc commit` refuses to commit a status update while a binary-owned subagent completion cell is in the exchange, so the status-sync step cannot finish between closeouts.
+- The controller projection and the session-check guard count only live claims for a reported `☑️` row, while finalize and preflight also count reported attempts. So a reported row can be struck by a mention instead of an exact echo.
+- The session-check residue guard may not exclude loop rows.
+- `cold_start_preserve_pane` in the controller's supervisor replacement still types its command into a pane you kept.
+- Row-aware attach: carry the claim marker forward in the claim-only case too, and pair free-text rows that have no `[#id]`.
+
+**Decisions for you:** the two command names above. Separately, restart IntelliJ IDEA 2026.3: it still runs plugin 0.2.835, and 0.2.840 is installed.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -1121,24 +1173,25 @@ The exchange is 1011 lines. Compacting it would help, but only when you ask, bec
 
 ## Queue: Main <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~release + publish~~
-- ☑️ [#subagent:reportedend#1] end a Reported queue claim on every strike path (orphan-id strike, controller projection, preflight done-id and backlog strikes), not only at the next closeout prune, so a later identical row can never pick up ☑️ from the claim ledger (found by the completion-cell retirement fix, 2026-10-26)
+- ~~end a Reported queue claim on every strike path (orphan-id strike, controller projection, preflight done-id and backlog strikes), not only at the next closeout prune, so a later identical row can never pick up ☑️ from the claim ledger (found by the completion-cell retirement fix, 2026-10-26)~~
 - ☑️ [#subagent:cellrepair#1] one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
-- ☑️ [#subagent:onboarding#1] We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
-- ☑️ [#subagent:doctorblocked#1] `agent-doc doctor` reports outcome=blocked (queue_continuation) on a brand-new document with no queue; it should report healthy (found by the onboarding pass, 2026-10-26)
-- 🚧 [#subagent:doctorexit#1] `agent-doc doctor` exits 0 even when its outcome is blocked or recoverable; exit non-zero so scripts and CI can act on it (found by the doctor fresh-document fix, 2026-10-26)
-- ☑️ [#subagent:startshellready#1] `agent-doc start` types its command into a new tmux pane before the shell is ready (zsh with no ~/.zshrc lost the leading `/`); wait for shell readiness (found by the onboarding pass, 2026-10-26)
-- 🚧 [#subagent:routelaunch#1] route-owned auto-start (agent-doc-route-io/src/startup.rs route.auto_start) and parallel fan-out panes (src/parallel.rs) still type their commands into a just-split pane; launch them as the pane process via agent_doc_tmux_io::launch_command_in_pane, checking route_owned_start_enter input logging and the fan-out $(passage ...) env prefix (found by the start shell-readiness fix, 2026-10-26)
-- ☑️ [#subagent:markerdocs#1] What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
-- 🚧 [#subagent:retainedflake#1] fix nondeterministic agent-doc-document-realtime-io tests::retained_capture_repairs_legacy_welded_queue_close_before_validation — waits on a background delivery thread and failed under check-fast load once (2026-10-26, any-heading worker); find what it races, do not rerun to green
+- ~~We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.~~
+- ~~`agent-doc doctor` reports outcome=blocked (queue_continuation) on a brand-new document with no queue; it should report healthy (found by the onboarding pass, 2026-10-26)~~
+- ☑️ [#subagent:doctorexit#1] `agent-doc doctor` exits 0 even when its outcome is blocked or recoverable; exit non-zero so scripts and CI can act on it (found by the doctor fresh-document fix, 2026-10-26)
+- ☑️ [#subagent:autofixexit#1] `agent-doc autofix` exits 0 even when invariants stay recoverable, operator or blocked after the plan/apply; give it the same exit status as `agent-doc doctor` (found by the doctor exit-status fix, 2026-10-26)
+- ~~`agent-doc start` types its command into a new tmux pane before the shell is ready (zsh with no ~/.zshrc lost the leading `/`); wait for shell readiness (found by the onboarding pass, 2026-10-26)~~
+- ☑️ [#subagent:routelaunch#1] route-owned auto-start (agent-doc-route-io/src/startup.rs route.auto_start) and parallel fan-out panes (src/parallel.rs) still type their commands into a just-split pane; launch them as the pane process via agent_doc_tmux_io::launch_command_in_pane, checking route_owned_start_enter input logging and the fan-out $(passage ...) env prefix (found by the start shell-readiness fix, 2026-10-26)
+- ~~What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document.~~
+- ☑️ [#subagent:retainedflake#1] fix nondeterministic agent-doc-document-realtime-io tests::retained_capture_repairs_legacy_welded_queue_close_before_validation — waits on a background delivery thread and failed under check-fast load once (2026-10-26, any-heading worker); find what it races, do not rerun to green
 - ☑️ [#subagent:noargskill#1] In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
-- ☑️ [#subagent:norevert#1] an already-running controller that receives an operator edit removing a component marker still restores the last valid canonical and pushes it back into the editor, reverting operator text; keep the editor text, refuse adoption, and show the ⚠ agent-doc marker diagnostic instead (gap 2 of the todo-collapse fix d8794daf9a, 2026-10-26)
-- 🚧 [#subagent:jbmarkercheck#1] JetBrains plugin: run the component-marker check on the buffer before recording a detached-editor op, so an edit that deletes a component open/close marker warns the operator at edit time (the detached op path carries only offsets and lengths) (gap 1 of the todo-collapse fix, 2026-10-26)
-- 🚧 [#subagent:coldstartfence#1] cold controller start with no editor handover loads the document from disk even when disk has broken component markers; fence it against the last snapshot or HEAD and show the marker diagnostic (gap 3 of the todo-collapse fix, 2026-10-26)
-- ☑️ [#subagent:ideaattach#1] Idea error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
-- 🚧 [#subagent:attachsimworld#1] relay-hub / SimWorld coverage for editor attach: the structure-quarantine-with-durable-ingest canonical lag and the library-reload-then-refused-swap re-registration sequence (found by the ambiguous-retained-projection attach fix 369da0c3e0, 2026-10-26)
-- 🚧 [#subagent:attachrowmerge#1] editor attach still holds when canonical both lags the buffer and has a real controller addition the buffer lacks (e.g. a claim marker plus a response); add a row-aware attach merge (found by the ambiguous-retained-projection attach fix, 2026-10-26)
+- ~~an already-running controller that receives an operator edit removing a component marker still restores the last valid canonical and pushes it back into the editor, reverting operator text; keep the editor text, refuse adoption, and show the ⚠ agent-doc marker diagnostic instead (gap 2 of the todo-collapse fix d8794daf9a, 2026-10-26)~~
+- ☑️ [#subagent:jbmarkercheck#1] JetBrains plugin: run the component-marker check on the buffer before recording a detached-editor op, so an edit that deletes a component open/close marker warns the operator at edit time (the detached op path carries only offsets and lengths) (gap 1 of the todo-collapse fix, 2026-10-26)
+- ☑️ [#subagent:coldstartfence#1] cold controller start with no editor handover loads the document from disk even when disk has broken component markers; fence it against the last snapshot or HEAD and show the marker diagnostic (gap 3 of the todo-collapse fix, 2026-10-26)
+- ~~Idea error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.~~
+- ☑️ [#subagent:attachsimworld#1] relay-hub / SimWorld coverage for editor attach: the structure-quarantine-with-durable-ingest canonical lag and the library-reload-then-refused-swap re-registration sequence (found by the ambiguous-retained-projection attach fix 369da0c3e0, 2026-10-26)
+- ☑️ [#subagent:attachrowmerge#1] editor attach still holds when canonical both lags the buffer and has a real controller addition the buffer lacks (e.g. a claim marker plus a response); add a row-aware attach merge (found by the ambiguous-retained-projection attach fix, 2026-10-26)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/378~~
-- 📥 I deleted a queue item in docs.md and added some of the deleted queue item prompt into an existing queue item: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged
+- ~~I deleted a queue item in docs.md and added some of the deleted queue item prompt into an existing queue item: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/379~~
 - 📥 release + publish: Include fixes for Issue 378-379 and the current 📥 items.
 <!-- /agent:run -->

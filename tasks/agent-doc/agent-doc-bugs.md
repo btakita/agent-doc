@@ -29,11 +29,11 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-✅ Release v0.35.551 was published from 03433d0494 and verified end to end. The stable, non-draft GitHub release has 24 assets; all 12 release jobs passed, and the PyPI wheel is public.
+Released and published agent-doc v0.35.552 from commit `880d0adf2d`; `origin/main` and tag `v0.35.552` are pushed, and GitHub marks it as the stable latest release. The release contains all six native archives and checksums, VS Code 0.2.83, JetBrains classic/262/263 versions 0.2.825/0.2.826/0.2.827, update feeds, Marketplace upload receipts, and aggregate checksums. All platform, plugin, target-channel, Homebrew, and PyPI publication jobs succeeded.
 
-Post-release remote main is now at 2490d2496e. It includes cb2f9068e3, which allows explicit ResumeLatest/ProvisionForLayout recovery to replace an ownership-unproven stale actor while preserving ObserveOnly's fail-closed safety boundary, plus the deterministic cross-root two-document SimWorld regression and routing-spec invariant. The coordinator authoritative make check passed, current main was installed locally, native reload reached the editor endpoint, and supervisors/controllers are scheduled for safe idle-boundary recycle. Live acceptance—replacing sdk-demo's dead %58 binding, converging to two panes, and clearing unresolved cross-root diagnostics—remains tracked by #layoutunprovenliveverify.
+The authoritative integration gate passed: 11,506 Rust tests (177 skipped), 204 VS Code tests, 1 cross-editor test, 8 Python tests, all three JetBrains builds/verifiers with zero internal/override findings, 153 TLA checks, and the full live tmux CI suite. A release-gate regression was fixed before publication so displaced protected open-cycle panes stay pinned as stash during post-sync doctor reconciliation.
 
-Coder Remote Dev synchronization is still not verified and remains blocked on operator proof. Todo #coder-remote-install-02805 tracks correct-project-root recovery, same-version verification on both peers, exact diagnostics, and the controller-root/state-machine regression if delivery still fails. Todo #jb263-feed-verify separately tracks the 263 update-feed warning.
+The current packages are installed locally. Operator verification closed #hj2r and #helpregisterjetbrains. Live restart proof remains open for IntelliJ 2026.3 under #jb263-feed-verify and for the two-sided Coder Remote Dev path under #coder-remote-install-02805. The next unclaimed implementation/verification queue head is #layoutunprovenliveverify. #release-promotion-concurrency tracks eliminating the aggregate release-job cancellation race that required a successful isolated rerun in this release.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -538,7 +538,7 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:tracked_work_todo_backlinks#1] backlog/queue/icebox items should always backlink to todo items so the todo items can be cleared once complete. This may mean the todo item(s) block the queue/backlog/icebox item(s).
 - ☑️ [#subagent:jetbrains_submission_feedback#1] Read the feedback from the JetBrains agent-doc plugin submission. Fix any issues.
 - ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
-- do [#release-promotion-concurrency]
+- 🚧 [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
 <!-- /agent:run -->
 
 ## Run: Issues

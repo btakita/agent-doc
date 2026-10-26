@@ -11,7 +11,8 @@ use std::path::Path;
 use crate::doctor::{WorkflowDoctorOutcome, WorkflowDoctorReport, WorkflowInvariantResult};
 use crate::invariants::{RemediationStep, WorkflowInvariantCatalog, WorkflowInvariantId};
 
-pub const WORKFLOW_AUTOFIX_SCHEMA_VERSION: u8 = 1;
+/// Version 2 added `outcome`, the outcome that remains after plan/apply.
+pub const WORKFLOW_AUTOFIX_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowAutofixReport {
@@ -19,7 +20,13 @@ pub struct WorkflowAutofixReport {
     pub file: String,
     pub apply: bool,
     pub dry_run: bool,
+    /// The doctor outcome the plan was built from.
     pub doctor_outcome: WorkflowDoctorOutcome,
+    /// The overall outcome that remains after plan/apply, and the source of the
+    /// command's exit status ([`WorkflowDoctorOutcome::exit_code`]). Equal to
+    /// `doctor_outcome` unless `--apply` ran a repair command, in which case it
+    /// comes from a fresh diagnosis ([`autofix_ran_repairs`]).
+    pub outcome: WorkflowDoctorOutcome,
     pub steps: Vec<WorkflowAutofixStep>,
     pub warnings: Vec<String>,
 }
@@ -70,6 +77,21 @@ impl WorkflowAutofixStep {
     pub fn operation_key(&self) -> String {
         format!("{}:{}", self.operation_id, self.content_hash)
     }
+}
+
+/// Whether applying the plan ran any repair command, so the doctor outcome the
+/// plan was built from may no longer hold and must be diagnosed again.
+///
+/// A step that executed (successfully or not) changed, or may have changed,
+/// workflow state. Planned, duplicate, gated, blocked, and unsafe steps ran
+/// nothing, so the outcome stands as diagnosed.
+pub fn autofix_ran_repairs(steps: &[WorkflowAutofixStep]) -> bool {
+    steps.iter().any(|step| {
+        matches!(
+            step.status,
+            WorkflowAutofixStepStatus::Executed | WorkflowAutofixStepStatus::Failed
+        )
+    })
 }
 
 pub fn plan_autofix_steps(
@@ -270,6 +292,7 @@ mod tests {
             apply: false,
             dry_run: true,
             doctor_outcome: doctor.outcome,
+            outcome: doctor.outcome,
             steps,
             warnings: vec![],
         }
@@ -344,5 +367,41 @@ mod tests {
             second_step.reason,
             "matching workflow_autofix proof marker already exists"
         );
+    }
+
+    #[test]
+    fn only_a_repair_command_that_ran_calls_for_a_fresh_diagnosis() {
+        let mut facts = quiet_ok_facts();
+        facts.actor.supervisor_fresh = Some(false);
+        let report = report_from_facts(facts, BTreeSet::new());
+        let planned = step_for(&report, WorkflowInvariantId::StaleSupervisor).clone();
+
+        assert!(!autofix_ran_repairs(&[]));
+        for status in [
+            WorkflowAutofixStepStatus::Planned,
+            WorkflowAutofixStepStatus::SkippedDuplicate,
+            WorkflowAutofixStepStatus::OperatorGated,
+            WorkflowAutofixStepStatus::BlockedMissingFacts,
+            WorkflowAutofixStepStatus::UnsafeCommand,
+        ] {
+            let step = WorkflowAutofixStep {
+                status,
+                ..planned.clone()
+            };
+            assert!(!autofix_ran_repairs(&[step]), "{status:?} ran nothing");
+        }
+        for status in [
+            WorkflowAutofixStepStatus::Executed,
+            WorkflowAutofixStepStatus::Failed,
+        ] {
+            let ran = WorkflowAutofixStep {
+                status,
+                ..planned.clone()
+            };
+            assert!(
+                autofix_ran_repairs(&[planned.clone(), ran]),
+                "{status:?} ran a repair command"
+            );
+        }
     }
 }

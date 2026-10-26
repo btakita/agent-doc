@@ -222,7 +222,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd(
         "/agent-doc autofix",
         "<FILE> [--preflight-json PATH] [--session-check-json PATH] [--limit N] [--apply] [--dry-run] [--json]",
-        "Plan invariant-driven repairs, record de-duplication proof markers, and optionally execute whitelisted safe repairs",
+        "Plan invariant-driven repairs, record de-duplication proof markers, and optionally execute whitelisted safe repairs; exits with the remaining outcome like doctor (0 ok, 3 recoverable, 4 operator, 5 blocked)",
     ));
     cmds.push(cmd(
         "/agent-doc template-info",

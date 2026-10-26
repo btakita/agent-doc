@@ -190,6 +190,16 @@ Diagnose the session document against the workflow invariant catalog (alias: `di
 | 5 | `blocked` | Required evidence is missing; gather it with the printed command (for example `--preflight-json` from `agent-doc preflight <FILE> --probe`). |
 | 1 | — | The doctor itself failed (unreadable document or capture). |
 
+## autofix
+
+```
+agent-doc autofix <FILE> [--preflight-json PATH] [--session-check-json PATH] [--limit N] [--apply] [--dry-run] [--json]
+```
+
+Plan invariant-keyed repairs from the `doctor` report and record `workflow_autofix:<invariant>:<hash>` proof markers so repeated symptoms de-duplicate. `--apply` executes only the whitelisted safe repairs; operator-gated and unsafe actions are reported, never run. `--dry-run` writes no proof markers.
+
+The exit status is the outcome that remains after plan/apply, with the same statuses as `doctor` (0 `ok`, 3 `recoverable`, 4 `operator`, 5 `blocked`; 1 means autofix itself failed). A plan that ran no repair command reports the diagnosed outcome as it stands; an `--apply` that ran a repair diagnoses again and reports what is left. The report's `doctor_outcome` is the outcome the plan started from and `outcome` is the one the exit status reports.
+
 ## compact
 
 ```

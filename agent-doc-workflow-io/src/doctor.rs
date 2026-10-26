@@ -130,7 +130,10 @@ pub fn run(
     outcome_result(report.outcome)
 }
 
-fn outcome_result(outcome: WorkflowDoctorOutcome) -> Result<()> {
+/// `Ok(())` for an `ok` outcome, otherwise a [`WorkflowDoctorUnhealthy`] error
+/// carrying it. Shared by `doctor` and `autofix` so both commands exit with the
+/// same status for the same outcome.
+pub(crate) fn outcome_result(outcome: WorkflowDoctorOutcome) -> Result<()> {
     match outcome {
         WorkflowDoctorOutcome::Ok => Ok(()),
         outcome => Err(WorkflowDoctorUnhealthy { outcome }.into()),
@@ -396,18 +399,18 @@ fn read_json(path: &Path) -> Result<Value> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use agent_doc_workflow::invariants::WorkflowInvariantId;
 
     /// Live effects for a healthy, freshly initialized project: session-check is
     /// ok, the controller answers with no actor for the document, and the editor
     /// projection is converged.
-    struct FreshProjectEffects;
+    pub(crate) struct FreshProjectEffects;
 
     /// [`FreshProjectEffects`] whose live editor authority is ahead of disk,
     /// which `editor_convergence` reports `recoverable`.
-    struct DivergedEditorEffects;
+    pub(crate) struct DivergedEditorEffects;
 
     impl WorkflowDoctorEffects for DivergedEditorEffects {
         fn inspect_session_check(&mut self, file: &Path) -> Result<Option<LiveSessionCheckFacts>> {
@@ -461,7 +464,7 @@ mod tests {
         }
     }
 
-    fn fresh_project(document: &str) -> (tempfile::TempDir, PathBuf) {
+    pub(crate) fn fresh_project(document: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
@@ -526,8 +529,8 @@ mod tests {
         assert_eq!(report.outcome, WorkflowDoctorOutcome::Blocked);
     }
 
-    const FRESH_DOCUMENT: &str = "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session: Untitled Session\n\n## User\n\n";
-    const QUEUED_DOCUMENT: &str = "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session\n\n<!-- agent:queue -->\n- ship the fix\n<!-- /agent:queue -->\n";
+    pub(crate) const FRESH_DOCUMENT: &str = "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session: Untitled Session\n\n## User\n\n";
+    pub(crate) const QUEUED_DOCUMENT: &str = "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session\n\n<!-- agent:queue -->\n- ship the fix\n<!-- /agent:queue -->\n";
 
     /// `run` resolves to the exit status the CLI returns.
     fn run_exit_status(file: &Path, effects: &mut impl WorkflowDoctorEffects) -> u8 {

@@ -603,6 +603,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-editor-surface",
  "agent-doc-editor-transport-health-io",
  "agent-doc-element",
  "agent-doc-fs",

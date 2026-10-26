@@ -189,4 +189,94 @@ mod tests {
             None
         );
     }
+
+    /// `#fencedmarkerscan`: the live 2026-10-26 `agent-doc-bugs.md` shape. A
+    /// pasted report's fence holds a bare `<!-- agent:run priority subagents -->`
+    /// line, a heading-anchored copy, and a bare `<!-- /agent:run -->` line.
+    /// The element parser, the Markdown-AST overlay (and through it the
+    /// document-cell merge scan), and the queue graph all see one `main`
+    /// queue holding the rows on both sides of the fence, and the
+    /// document-wide projection reaches both rows.
+    #[test]
+    fn fenced_run_markers_are_content_for_every_queue_scanner() {
+        let fenced = concat!(
+            "```\n",
+            "## Run\n",
+            "<!-- agent:run priority subagents -->\n",
+            "<!-- /agent:run -->\n",
+            "## Run <!-- agent:run priority subagents -->\n",
+            "```\n",
+        );
+        let content = doc(
+            &format!("- before the fence\n---\nPasted report:\n{fenced}---\n- after the fence\n"),
+            "- onboarding\n",
+        );
+        let components = element::parse(&content).unwrap();
+        assert_eq!(
+            components.iter().filter(|c| c.name == "queue").count(),
+            2,
+            "element parser: main + issues"
+        );
+        let overlay = agent_doc_markdown_ast::overlay::components(&content);
+        let overlay_queues = overlay.iter().filter(|c| c.name == "queue").collect::<Vec<_>>();
+        assert_eq!(overlay_queues.len(), 2, "overlay: main + issues");
+        let main_texts = overlay_queues[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert!(main_texts.contains(&"before the fence"), "{main_texts:?}");
+        assert!(main_texts.contains(&"after the fence"), "{main_texts:?}");
+        let scan = agent_doc_markdown_ast::overlay::ComponentMarkerScan::new(&content);
+        let mut offset = 0usize;
+        let mut openers = 0usize;
+        let mut closers = 0usize;
+        for line in content.split_inclusive('\n') {
+            let text = line.trim_end_matches('\n');
+            openers += usize::from(scan.open_at(offset, text).is_some());
+            closers += usize::from(scan.close_at(offset, text).is_some());
+            offset += line.len();
+        }
+        assert_eq!((openers, closers), (2, 2), "shared marker scan: fenced markers are content");
+
+        let graph = QueueGraph::parse(&content, &components).unwrap();
+        let main = graph
+            .blocks()
+            .iter()
+            .find(|block| block.id == "main")
+            .expect("main block");
+        let prompts = main
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) => Some(prompt.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(prompts.contains(&"before the fence"), "{prompts:?}");
+        assert!(prompts.contains(&"after the fence"), "{prompts:?}");
+
+        let projected = project_runtime_projections_across_queues(&content, None, |block| {
+            block
+                .entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    QueueEntry::Prompt(prompt) if prompt.text.ends_with("the fence") => {
+                        Some(QueueRowProjection {
+                            text: prompt.text.clone(),
+                            marker: QueueLifecycleMarker::Pending,
+                            owner: None,
+                            reopen_completed: false,
+                        })
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap()
+        .expect("both rows gain a pending marker");
+        assert!(projected.contains("- 📥 before the fence\n"), "{projected}");
+        assert!(projected.contains("- 📥 after the fence\n"), "{projected}");
+        assert!(projected.contains(fenced), "{projected}");
+    }
 }

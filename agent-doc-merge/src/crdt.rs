@@ -4368,6 +4368,10 @@ Second answer line three.
     /// checklist update. Keyed per item, each line merges once.
     #[test]
     fn merge_by_component_keys_todo_items_so_concurrent_edits_never_duplicate() {
+        // Runs on the default per-cell merge; serialize with the tests that
+        // flip the `AGENT_DOC_CELL_MERGE` kill-switch, or the legacy path can
+        // run here under a concurrent test's `0` and drop the operator check.
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         let doc = |todo: &str| {
             format!(
                 "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n\n## Todo\n\n<!-- agent:todo -->\n{todo}<!-- /agent:todo -->\n"
@@ -4409,6 +4413,10 @@ Second answer line three.
     /// leaves it untouched) must merge with the check kept, exactly once.
     #[test]
     fn merge_by_component_keeps_an_operator_todo_check_against_a_concurrent_agent_edit() {
+        // Runs on the default per-cell merge; serialize with the tests that
+        // flip the `AGENT_DOC_CELL_MERGE` kill-switch, or the legacy path can
+        // run here under a concurrent test's `0` and drop the operator check.
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         let doc = |todo: &str| {
             format!(
                 "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n\n## Todo\n\n<!-- agent:todo -->\n{todo}<!-- /agent:todo -->\n"

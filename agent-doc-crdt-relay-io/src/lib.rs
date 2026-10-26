@@ -1352,10 +1352,10 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
                     let claim = claim_states.get(&identity);
                     let receipt = receipts.get(&identity);
-                    let durable_on_struck = struck
-                        && (claim.is_some()
-                            || receipt.is_some()
-                            || completion_evidence.contains(&identity));
+                    // `#strikeisterminal`: only a live attempt reopens a struck
+                    // row; receipts and completion cells agree with the strike.
+                    let durable_on_struck =
+                        struck && agent_doc_queue::queue_claim::struck_row_reopened_by_claim(claim);
                     if struck && !durable_on_struck {
                         return None;
                     }
@@ -8545,6 +8545,47 @@ mod tests {
             durable_queue_attempt_projection(&doc, &projected).unwrap(),
             projected,
             "hydrating the same durable attempts twice must be idempotent"
+        );
+    }
+
+    /// `#strikeisterminal`: controller hydration reopens a struck row only
+    /// for a live (`Claimed`/`Running`) attempt. A reported attempt agrees
+    /// with the strike and stays struck.
+    #[test]
+    fn controller_hydration_keeps_a_struck_reported_row_struck() {
+        let (dir, doc) = temp_doc("struck-reported-hydration.md");
+        let struck = "<!-- agent:queue -->\n\
+- ~~reported item~~\n\
+- ~~running item~~\n\
+<!-- /agent:queue -->\n";
+        std::fs::write(&doc, struck).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        for (item, owner) in [
+            ("reported item", "subagent:reported"),
+            ("running item", "subagent:running"),
+        ] {
+            ledger.claim(item, owner, now, 3600);
+            ledger
+                .start(item, owner, &format!("worker-{owner}"), now, 3600, Some(1))
+                .unwrap();
+        }
+        ledger
+            .claims
+            .iter_mut()
+            .find(|claim| claim.item_text == "reported item")
+            .unwrap()
+            .state = agent_doc_queue::queue_claim::QueueClaimState::Reported;
+        persist_queue_claim_ledger(dir.path(), &doc, &ledger);
+
+        let projected = durable_queue_attempt_projection(&doc, struck).unwrap();
+        assert!(projected.contains("- ~~reported item~~\n"), "{projected}");
+        assert!(
+            projected.contains("- ❔ [#subagent:running#1] running item\n"),
+            "a live attempt still contradicts a strike: {projected}"
         );
     }
 

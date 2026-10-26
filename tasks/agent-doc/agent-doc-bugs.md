@@ -336,7 +336,35 @@ Session note: the exchange is large (265 lines across 17 response sections); the
 ### Re: subagent status — gpt-5 · 2026-10-25T21:38-04:00
 
 No. The live roster contains only the primary `/root` agent; no subagents are running.
-<!-- agent:boundary:b6886298 -->
+> **Chat prompt (#chatprompt:1a3a48c152a9):** The Sync failed issue is still occurring: Sync failed: {"applied":false,"reason":"superseded_by_newer_layout_state","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":16,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}
+
+> **Chat prompt (#chatprompt:ee9fedf9bc9c):** Use a subagent to fix the issue
+
+### Re: cross-root pane recovery fix — gpt-5 · 2026-10-25T21:58-04:00
+
+You were right: the prior notification-only change did not fix the underlying failure and had never been installed. I dispatched a subagent, and it traced the live generations 14–16 through the controller and tmux state.
+
+The apparent immediate supersession is legitimate sequencing: each receipt beside a new publication belongs to the previous click’s waiter and reports the newer current generation. The actual defect is structural convergence. The SDK controller retains stale actor pane `%58`, while tmux contains only `%2`; the owner returns `actor_ownership_unproven`. A prior safety change correctly made passive `ObserveOnly` focus refuse that stale pane, but accidentally made explicit `ProvisionForLayout` refuse too, preventing auto-start from recreating the missing cross-root pane.
+
+The subagent’s fix permits `ActorOwnershipUnproven` only for explicit `ResumeLatest` and `ProvisionForLayout` recovery when a known session exists. Passive `ObserveOnly` remains fail-closed and cannot focus a stale or wrong pane.
+
+Deliverables:
+
+- Commit: `cb2f9068e3e1ec068cc212910ce4dfd5a354558e` (`fix: recover unproven layout actor panes`)
+- Branch: `fix/layout-supersede-await`
+- Clean worktree: `/home/brian/worktrees/agent-doc-layout-supersede`
+- Changed source: `agent-doc-controller-io/src/project_controller/rpc.rs`
+- The exact controller patch is also applied to the shared checkout. The earlier JetBrains notification suppression was removed; genuine supersession remains visible instead of being hidden.
+
+Verification:
+
+- Focused policy regressions passed in both the isolated and shared checkouts.
+- `cargo test -p agent-doc-controller-io`: 820 unit and 12 integration tests passed; 10 ignored.
+- `make check`: passed, including 11,494 workspace tests, 204 VS Code tests, cross-editor simulation, classic and split JetBrains builds/tests, bootstrap, and TLA gates.
+- Diff checks passed; the isolated worktree is clean; the latest five base-branch GitHub Actions runs are green.
+
+Confidence is high (0.95). The running binary has not yet received the patch, so the live failure can continue until installation and idle-boundary recycle. Installing while this response cycle is open risks stranding the attached editor replica; the required install/recycle/live proof is therefore tracked as [#layoutunprovenliveverify] for the next clean cycle.
+<!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -344,6 +372,7 @@ No. The live roster contains only the primary `/root` agent; no subagents are ru
 
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#layoutunprovenliveverify]
 - ☑️ [#subagent:gh372#1] #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
 - ☑️ [#subagent:grok_queue_ui#1] In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
 - ☑️ [#subagent:lazily_block_reason#1] On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
@@ -455,6 +484,7 @@ force-write the file, and do not delete the queue items.                        
 
 ## Backlog
 <!-- agent:backlog priority queue -->
+- [ ] [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [ ] 🚧 [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
 <!-- /agent:backlog -->
 

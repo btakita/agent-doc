@@ -767,6 +767,130 @@ fn mcp_serve_admit_plan_read_finalize_uses_one_cycle() {
     assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 }
 
+/// Grok Build (and any harness admitting through MCP) has no `UserPromptSubmit`
+/// hook to rewrite a bare `/agent-doc`. Its admission checkpoint is
+/// `agent_doc_admit`, so an omitted `file` must admit the pane's claim there,
+/// through the same resolver the hooks use, and the rest of the connected cycle
+/// must close on that one admitted cycle exactly as the FILE form does.
+#[test]
+fn mcp_serve_admit_without_file_admits_the_pane_claim_through_one_cycle() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = template_doc(
+        "Session",
+        "❯ Please inspect\n<!-- agent:boundary:1234abcd -->\n",
+        "",
+        "",
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, &content);
+    let mut registry = agent_doc_session_registry_io::load_in(tmp.path()).unwrap_or_default();
+    agent_doc_session_registry::insert_registry_entry(
+        tmp.path(),
+        &mut registry,
+        agent_doc_session_registry::RegistryEntryFields {
+            session_id: "grok-pane-session",
+            pane_id: "%42",
+            file: "session.md",
+            pid: std::process::id(),
+            cwd: &tmp.path().display().to_string(),
+            started: "2026-10-26T00:00:00Z",
+            window: "@1",
+            supervisor_instance_id: "",
+        },
+    );
+    agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
+
+    let bare_admit = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": { "name": "agent_doc_admit", "arguments": {} }
+    });
+    let serve = |pane: Option<&str>, input: String| {
+        let mut command = agent_doc_cmd();
+        command
+            .current_dir(tmp.path())
+            .args(["mcp", "serve"])
+            .write_stdin(input);
+        match pane {
+            Some(pane) => command.env("TMUX_PANE", pane),
+            None => command.env_remove("TMUX_PANE"),
+        };
+        let assert = command.assert().success();
+        String::from_utf8(assert.get_output().stdout.clone())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>()
+    };
+
+    // A pane that does not resolve admits nothing and says why.
+    for (pane, needle) in [(None, "`$TMUX_PANE` is unset"), (Some("%99"), "unclaimed")] {
+        let responses = serve(pane, format!("{bare_admit}\n"));
+        assert_eq!(responses[0]["result"]["isError"], true, "{pane:?}");
+        let error = responses[0]["result"]["structuredContent"]["error"]
+            .as_str()
+            .unwrap();
+        assert!(error.contains("no FILE argument"), "{pane:?}: {error}");
+        assert!(error.contains(needle), "{pane:?}: {error}");
+        assert!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().is_none(),
+            "{pane:?}: a refused bare admission must not open a cycle"
+        );
+    }
+
+    let plan = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": { "name": "agent_doc_plan", "arguments": { "file": doc.display().to_string() } }
+    });
+    let finalize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_finalize",
+            "arguments": {
+                "file": doc.display().to_string(),
+                "response": "<!-- patch:exchange -->\n### Re: Connected closeout - grok\nbody\n<!-- /patch:exchange -->\n",
+                "no_followups": true
+            }
+        }
+    });
+    let responses = serve(Some("%42"), format!("{bare_admit}\n{plan}\n{finalize}\n"));
+    assert_eq!(responses.len(), 3);
+    let admitted = &responses[0]["result"]["structuredContent"];
+    assert_eq!(responses[0]["result"]["isError"], false, "{admitted:#}");
+    assert_eq!(
+        fs::canonicalize(admitted["file"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(&doc).unwrap(),
+        "the bare admission must name the pane's claimed document"
+    );
+    assert_eq!(admitted["resolved_from_pane"], "%42");
+    assert!(
+        admitted["notice"]
+            .as_str()
+            .is_some_and(|notice| notice.starts_with("[agent-doc] no FILE argument")),
+        "{admitted:#}"
+    );
+    assert_eq!(admitted["admission"]["source"], "admit");
+    let admitted_cycle_id = admitted["admission"]["cycle_id"].as_str().unwrap();
+    assert_eq!(responses[1]["result"]["isError"], false);
+    assert_eq!(
+        responses[2]["result"]["isError"], false,
+        "{:#}",
+        responses[2]
+    );
+    let state = agent_doc_cycle_state_io::load(&doc)
+        .unwrap()
+        .expect("finalize should leave terminal cycle state");
+    assert_eq!(state.cycle_id, admitted_cycle_id);
+    assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
+}
+
 #[test]
 fn mcp_serve_handles_preflight_probe_and_plan() {
     let tmp = tempfile::TempDir::new().unwrap();

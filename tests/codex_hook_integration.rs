@@ -2,6 +2,7 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use serde_json::json;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -1376,4 +1377,146 @@ fn resolve_pane_document_cli_prints_the_claim_and_fails_closed_otherwise() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("refusing to guess"));
+}
+
+/// Run one hook-admitted turn end to end for `prompt` in a fresh fixture whose
+/// pane `%42` claims `session.md`: UserPromptSubmit, the session binding, and
+/// the harness's Stop hook on an unanswered turn. Paths are normalised to
+/// `<ROOT>` so two fixtures can be compared.
+struct HookTurn {
+    contract_keys: BTreeSet<String>,
+    contract_fields: serde_json::Value,
+    context_after_notice: String,
+    preflight_admitted: Option<bool>,
+    bound_doc: PathBuf,
+    stop: String,
+}
+
+fn run_hook_turn(submit_hook: &str, stop_hook: &str, prompt: &str) -> HookTurn {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    claim_pane(tmp.path(), &doc, "%42");
+    let root = tmp.path().display().to_string();
+    let normalise = |text: &str| text.replace(&root, "<ROOT>");
+
+    let context = submit_with_pane(
+        tmp.path(),
+        submit_hook,
+        "parity-session",
+        prompt,
+        Some("%42"),
+    );
+    let contract = admitted_contract(&context);
+    let contract_keys = contract
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let contract_fields = json!({
+        "no_changes": contract["no_changes"],
+        "diff_type": contract["diff_type"],
+        "user_intent_prompt_changes": contract["user_intent_prompt_changes"],
+        "chat_prompts": contract.get("chat_prompts"),
+    });
+    let context_after_notice = context
+        .strip_prefix("[agent-doc] no FILE argument: ")
+        .map(|rest| rest.split_once('\n').unwrap().1.to_string())
+        .unwrap_or_else(|| context.clone());
+    // The contract body itself carries per-run ids and timestamps; what must
+    // match is everything around it: the seal and the harness directive.
+    let seal_onward = context_after_notice
+        .find("\n[agent-doc] cycle contract")
+        .map(|at| normalise(&context_after_notice[at..]))
+        .unwrap();
+
+    let state = agent_doc_codex_hook_io::load_state(tmp.path(), "parity-session")
+        .unwrap()
+        .expect("the turn must bind the session for its Stop hook");
+    let bound_doc = fs::canonicalize(&state.doc_path)
+        .unwrap()
+        .strip_prefix(fs::canonicalize(tmp.path()).unwrap())
+        .unwrap()
+        .to_path_buf();
+
+    let stop_payload = json!({
+        "session_id": "parity-session",
+        "turn_id": "turn-1",
+        "cwd": root,
+        "last_assistant_message": "Stopping without a response.",
+        "stop_hook_active": false,
+    });
+    let stop = agent_doc()
+        .current_dir(tmp.path())
+        .env("TMUX_PANE", "%42")
+        .args(["hook", stop_hook])
+        .write_stdin(stop_payload.to_string())
+        .assert()
+        .success();
+    let stop = normalise(&String::from_utf8_lossy(&stop.get_output().stdout));
+
+    HookTurn {
+        contract_keys,
+        contract_fields,
+        context_after_notice: seal_onward,
+        preflight_admitted: state.preflight_admitted,
+        bound_doc,
+        stop,
+    }
+}
+
+/// The operator requirement, per hook harness: the bare entrypoint behaves
+/// exactly like `<entrypoint> <FILE>`: same admitted contract shape, same seal
+/// and directive, same session binding, and the same Stop-hook decision on the
+/// turn.
+#[test]
+fn a_bare_trigger_matches_the_file_trigger_through_admission_and_stop() {
+    for (harness, submit_hook, stop_hook, bare, with_file) in [
+        (
+            "codex",
+            "codex-user-prompt-submit",
+            "codex-stop",
+            "agent-doc",
+            "agent-doc session.md",
+        ),
+        (
+            "claude",
+            "preflight-user-prompt-submit",
+            "claude-stop",
+            "/agent-doc",
+            "/agent-doc session.md",
+        ),
+    ] {
+        let bare_turn = run_hook_turn(submit_hook, stop_hook, bare);
+        let file_turn = run_hook_turn(submit_hook, stop_hook, with_file);
+        assert_eq!(
+            bare_turn.contract_keys, file_turn.contract_keys,
+            "{harness}"
+        );
+        assert_eq!(
+            bare_turn.contract_fields, file_turn.contract_fields,
+            "{harness}"
+        );
+        assert_eq!(
+            bare_turn.context_after_notice, file_turn.context_after_notice,
+            "{harness}: seal and directive must match"
+        );
+        if harness == "codex" {
+            assert_eq!(bare_turn.preflight_admitted, Some(true), "{harness}");
+        }
+        assert_eq!(
+            bare_turn.preflight_admitted, file_turn.preflight_admitted,
+            "{harness}"
+        );
+        assert_eq!(
+            bare_turn.bound_doc,
+            PathBuf::from("session.md"),
+            "{harness}"
+        );
+        assert_eq!(bare_turn.bound_doc, file_turn.bound_doc, "{harness}");
+        assert_eq!(
+            bare_turn.stop, file_turn.stop,
+            "{harness}: the Stop hook must decide the bare turn as it does the FILE turn"
+        );
+    }
 }

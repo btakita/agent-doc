@@ -106,7 +106,7 @@ Use the harness-native `agent-doc` entrypoint for the environment you are in:
 - Codex: `agent-doc <FILE>`, `agent-doc claim <FILE>`, `agent-doc compact <FILE>`, `agent-doc compact exchange <FILE>`
 - OpenCode: `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, `/agent-doc compact exchange <FILE>`
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE (`/agent-doc`, or `agent-doc` in Codex), the cycle runs on the document this tmux pane claims. Claude Code and Codex hooks resolve it and name it in the admitted context; other harnesses run `agent-doc resolve-pane-document` and use the printed path. A refusal is reported, never guessed.
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE (`/agent-doc`, or `agent-doc` in Codex), the cycle runs on the document this tmux pane claims. Claude Code and Codex hooks resolve it and name it in the admitted context; connected admission (`agent_doc_admit` without `file`) returns it as `file`; other harnesses run `agent-doc resolve-pane-document` and use the printed path. A refusal is reported, never guessed.
 
 **Note:** Codex does not support project-defined slash commands. If this root file disagrees with the installed harness-specific instructions, treat the installed harness file as authoritative for the current turn.
 "#;
@@ -3824,6 +3824,37 @@ mod tests {
         assert!(content.contains("runbooks/session-cycle.md"));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
         assert!(!content.contains("Codex CLI will reject it"));
+    }
+
+    /// The no-argument entrypoint is documented for every harness in the
+    /// spelling that harness uses, and each one names how FILE is found:
+    /// the hook for Claude Code / Codex, the resolver for OpenCode. Grok's
+    /// connected-admission text is pinned in `skill_grok`.
+    #[test]
+    fn every_harness_documents_the_no_argument_entrypoint() {
+        let claude = super::content_for_env(Environment::ClaudeCode);
+        assert!(claude.contains("argument-hint: \"[file]\""), "{claude}");
+        assert!(claude.contains("\n/agent-doc\n"), "{claude}");
+        assert!(claude.contains("the hook resolves it"), "{claude}");
+
+        let codex = super::content_for_env(Environment::Codex);
+        assert!(codex.contains("\nagent-doc\n"), "{codex}");
+        assert!(codex.contains("the hook resolves it"), "{codex}");
+
+        let opencode = super::content_for_env(Environment::OpenCode);
+        assert!(opencode.contains("\n/agent-doc\n"), "{opencode}");
+        assert!(
+            opencode.contains("agent-doc resolve-pane-document"),
+            "{opencode}"
+        );
+
+        for content in [&claude, &codex, &opencode] {
+            assert!(content.contains("never guess"), "{content}");
+        }
+        // A bare `/agent-doc` in OpenCode expands `$ARGUMENTS` to nothing, so
+        // the prompt the skill sees is a plain `agent-doc`.
+        let bare_prompt = super::OPENCODE_COMMAND_CONTENT.replace("$ARGUMENTS", "");
+        assert_eq!(bare_prompt.lines().last().map(str::trim), Some("agent-doc"));
     }
 
     #[test]

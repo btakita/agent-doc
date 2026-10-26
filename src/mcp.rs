@@ -379,13 +379,13 @@ fn tools_list_result() -> Value {
             {
                 "name": "agent_doc_admit",
                 "title": "Admit agent-doc response turn",
-                "description": "Open a lightweight response-cycle checkpoint for a live session prompt without running legacy preflight maintenance.",
+                "description": "Open a lightweight response-cycle checkpoint for a live session prompt without running legacy preflight maintenance. Omit `file` for the no-argument entrypoint: the binary admits the document this tmux pane claims and returns it as `file`, or refuses by name without guessing.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "file": { "type": "string", "description": "Path to the session document." }
+                        "file": { "type": "string", "description": "Path to the session document. Omit it to admit the document this tmux pane claims (the no-argument `/agent-doc` / `agent-doc` entrypoint)." }
                     },
-                    "required": ["file"]
+                    "required": []
                 }
             },
             {
@@ -492,22 +492,70 @@ fn tool_read(args: &Map<String, Value>) -> Result<Value> {
 
 fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
     ensure_mcp_binary_fresh_for_mutation()?;
-    let file = required_path_arg(args, "file")?;
+    let (file, resolved_from_pane) = admit_target(
+        args,
+        &std::env::current_dir().context("failed to resolve MCP server working directory")?,
+        agent_doc_tmux_io::current_pane_id_from_env().as_deref(),
+    )?;
     let admit = agent_doc_cycle_state_io::admit_with_current_resolver(
         &file,
         |file| Ok(agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content),
         agent_doc_snapshot_io::load_document_baseline,
         agent_doc_ops_log_io::log_op,
     )?;
-    let structured = json!({
+    let mut structured = json!({
         "ok": true,
         "file": file.display().to_string(),
         "admission": admit,
     });
+    if let Some(pane) = resolved_from_pane {
+        structured["resolved_from_pane"] = json!(pane);
+        structured["notice"] = json!(pane_document_notice(&file, &pane));
+    }
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
         structured,
     ))
+}
+
+/// The document `agent_doc_admit` opens a cycle on, and the pane it was
+/// resolved from when the caller named none.
+///
+/// The connected-tool form of the no-argument entrypoint (Grok Build, and any
+/// harness admitting through MCP): an absent or blank `file` admits the
+/// document `pane` claims, through the same
+/// [`agent_doc_session_registry_io::pane_document::resolve_pane_document`] the
+/// Claude Code / Codex hooks and `agent-doc resolve-pane-document` use. An
+/// explicit `file` always wins. A pane that does not resolve to exactly one
+/// claimed document is a named error, so nothing is admitted and no document is
+/// guessed.
+fn admit_target(
+    args: &Map<String, Value>,
+    cwd: &Path,
+    pane: Option<&str>,
+) -> Result<(PathBuf, Option<String>)> {
+    if let Some(file) = optional_string_arg(args, "file")?
+        && !file.trim().is_empty()
+    {
+        return Ok((PathBuf::from(file), None));
+    }
+    match agent_doc_session_registry_io::pane_document::resolve_pane_document(cwd, pane) {
+        Ok(file) => Ok((file, pane.map(str::to_string))),
+        Err(refusal) => bail!(
+            "no FILE argument and no single pane claim ({kind}): {refusal}. Nothing was \
+             admitted. Do not guess a document or run `agent-doc claim` yourself; report this \
+             reason to the operator and stop.",
+            kind = refusal.kind()
+        ),
+    }
+}
+
+fn pane_document_notice(file: &Path, pane: &str) -> String {
+    format!(
+        "[agent-doc] no FILE argument: this turn's FILE is `{}`, the document tmux pane {pane} \
+         claims. Use it wherever the workflow says <FILE>.",
+        file.display()
+    )
 }
 
 fn tool_preflight(args: &Map<String, Value>) -> Result<Value> {
@@ -1558,5 +1606,86 @@ Done.
         let message = format_tool_error(&error);
         assert!(message.contains("failed to apply tracked-work mutations"));
         assert!(message.contains("duplicate tracked-work id"));
+    }
+
+    /// A project whose pane `%7` claims `tasks/plan.md`.
+    fn pane_claim_project() -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(root.join("tasks/plan.md"), "# Session\n").unwrap();
+        let mut registry = tmux_router::Registry::new();
+        agent_doc_session_registry::insert_registry_entry(
+            root,
+            &mut registry,
+            agent_doc_session_registry::RegistryEntryFields {
+                session_id: "session-0",
+                pane_id: "%7",
+                file: "tasks/plan.md",
+                pid: 1,
+                cwd: &root.display().to_string(),
+                started: "2026-10-26T00:00:00Z",
+                window: "@1",
+                supervisor_instance_id: "",
+            },
+        );
+        agent_doc_session_registry_io::save_in(root, &registry).unwrap();
+        dir
+    }
+
+    #[test]
+    fn admit_without_a_file_admits_the_pane_claim_and_an_explicit_file_wins() {
+        let dir = pane_claim_project();
+        let claimed = dir.path().join("tasks/plan.md");
+        for args in [json!({}), json!({ "file": null }), json!({ "file": "  " })] {
+            let args = args.as_object().unwrap().clone();
+            let (file, pane) = admit_target(&args, dir.path(), Some("%7")).unwrap();
+            assert_eq!(
+                std::fs::canonicalize(&file).unwrap(),
+                std::fs::canonicalize(&claimed).unwrap(),
+                "{args:?}"
+            );
+            assert_eq!(pane.as_deref(), Some("%7"));
+        }
+
+        let args = json!({ "file": "other.md" }).as_object().unwrap().clone();
+        let (file, pane) = admit_target(&args, dir.path(), Some("%7")).unwrap();
+        assert_eq!(
+            file,
+            PathBuf::from("other.md"),
+            "an explicit FILE is never replaced"
+        );
+        assert_eq!(pane, None);
+    }
+
+    #[test]
+    fn admit_without_a_file_refuses_by_name_when_the_pane_does_not_resolve() {
+        let dir = pane_claim_project();
+        let args = Map::new();
+        for (pane, kind) in [(None, "not_in_tmux"), (Some("%3"), "unclaimed")] {
+            let message = format_tool_error(&admit_target(&args, dir.path(), pane).unwrap_err());
+            assert!(message.contains("no FILE argument"), "{message}");
+            assert!(message.contains(kind), "{pane:?}: {message}");
+            assert!(message.contains("Do not guess a document"), "{message}");
+        }
+    }
+
+    #[test]
+    fn admit_schema_does_not_require_a_file() {
+        let tools = tools_list_result();
+        let admit = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "agent_doc_admit")
+            .unwrap();
+        assert_eq!(admit["inputSchema"]["required"], json!([]));
+        assert!(
+            admit["description"]
+                .as_str()
+                .unwrap()
+                .contains("this tmux pane claims")
+        );
     }
 }

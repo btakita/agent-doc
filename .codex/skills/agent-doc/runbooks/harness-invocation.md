@@ -26,9 +26,10 @@ runbooks live in `.grok/skills/agent-doc/`; the project MCP server is registered
 in `.grok/config.toml`, preserving an existing entry. Enable/trust it in Grok
 when required by the host. Select `agent: grok` (`grok-build` is an alias).
 
-Submit `agent-doc <FILE>` as a normal prompt; with no FILE, run
-`agent-doc resolve-pane-document` and use its printed path as FILE (stop on a
-refusal). Grok's passive hooks cannot supply
+Submit `agent-doc <FILE>` as a normal prompt. With no FILE (`/agent-doc` or
+`agent-doc` alone), call connected `agent_doc_admit` without `file`: it admits
+the document this tmux pane claims and returns it as `file`; use that path as
+FILE for the whole cycle, and stop on a refusal. Grok's passive hooks cannot supply
 the Claude/Codex admission marker or block Stop. For Grok, call connected
 `agent_doc_admit` before reading/planning/answering and `agent_doc_finalize`
 for the terminal write/commit and queue continuation. This admission rule
@@ -73,7 +74,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 
 - A harness-native `agent-doc` invocation is an executable workflow entry, not a generic request to edit the markdown file by hand.
 - Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, OpenCode `/agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
-- **No FILE:** `/agent-doc` (Claude Code, Grok Build, OpenCode) or `agent-doc` (Codex) with no argument runs the same cycle on the document this tmux pane claims. The Claude Code and Codex hooks resolve it in the binary, rewrite the trigger, and begin the admitted context with `[agent-doc] no FILE argument: this turn's FILE is `<FILE>``; use that path wherever the workflow says `<FILE>`. Grok Build and OpenCode run `agent-doc resolve-pane-document` first and use its printed path. Outside tmux, with no claim, or with several claims on the pane, admission is refused by name: report the reason and stop. Never guess a document, and never run `agent-doc claim` on the operator's behalf to make it resolve.
+- **No FILE:** `/agent-doc` (Claude Code, Grok Build, OpenCode) or `agent-doc` (Codex) with no argument runs the same cycle on the document this tmux pane claims. The Claude Code and Codex hooks resolve it in the binary, rewrite the trigger, and begin the admitted context with `[agent-doc] no FILE argument: this turn's FILE is `<FILE>``; use that path wherever the workflow says `<FILE>`. Grok Build calls connected `agent_doc_admit` without `file`, which admits the pane's claim and returns it as `file`. OpenCode runs `agent-doc resolve-pane-document` first and uses its printed path. Outside tmux, with no claim, or with several claims on the pane, admission is refused by name: report the reason and stop. Never guess a document, and never run `agent-doc claim` on the operator's behalf to make it resolve.
 - Do **not** treat that turn as successful until the response crosses `agent-doc finalize <FILE>` for the normal path or `agent-doc write --commit <FILE>` for a repair path.
 - Do **not** end a normal harness-native `agent-doc` turn with "not committed" or equivalent wording unless the user explicitly asked to leave the response uncommitted.
 - MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish through connected `agent_doc_finalize`; its successful result is the terminal closeout report and includes queue continuation. Direct-exec paths still finish with `finalize` / `write --commit` plus `session-check`. The auth step is not the success boundary.

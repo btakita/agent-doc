@@ -1180,6 +1180,32 @@ Yes. I re-checked v0.35.556 just now:
 IntelliJ IDEA 2026.3 still runs the old plugin 0.2.835. Restart it to load 0.2.840.
 
 **A claim mismatch to resolve.** When you deleted the struck rows, one of them was `release + publish`. It still has durable claim evidence from the old v0.35.551 handback, owned by `subagent:release_publish_patch`. That is the stale completion cell the held `feat/repair-stale-completion-evidence` branch was written to retire. Your deletion is fine, and I left the claim and its evidence untouched. Once you pick the command name, that branch's `agent-doc queue repair-stale-completion` (dry run first) retires the cell. The two rows still open, `cellrepair` and `noargskill`, wait on the same naming decision.
+
+### Re: IDE auto-upgrade needs a decision — opus-5 · 2026-10-26T17:28-04:00
+
+> **Queue prompt:** Fix the auto-upgrade not working...the IDE needed to be restarted.
+
+**Deferred:** the worker found the cause and fixed half of it. The other half needs your decision in the packet below.
+
+**Why the IDE needed a restart.** The upgrade did not fail. For the 2026.3 package, the installer never tries a restart-free swap: `src/plugin.rs:1765-1775` refuses every 263 package by design. That follows GH #339, which closed with 263 as restart-only. ops.log shows both of today's installs, 0.2.838 at 19:29:04Z and 0.2.840 at 20:46:37Z, logged as `plugin_dynamic_upgrade outcome=restart_required declined_by=modular_package`. The real gap was that nothing told the running IDE an upgrade was waiting. The only signals were CLI output and an advisory appended to a later route.
+
+**Fixed on a branch, not yet integrated** (`fix/ide-auto-upgrade-without-restart`, `e6fdf1cb26`). A new `PluginRestartRequiredNotifier` compares the running plugin version with the jar on disk every 30 seconds. After two matching mismatches, it shows a sticky "Agent Doc Plugin Update" balloon with **Restart IDE** and **Later** buttons. It covers classic, 262, and 263. All three plugin checks pass, as does the full classic suite (959 tests). It has not been seen live yet; it first shows on the upgrade after the one that installs it. In Remote Dev split mode, **Restart IDE** is unverified.
+
+[#subagent-operator-request-autoupgrade-263-path] subagent operator request
+- *queue_item:* Fix the auto-upgrade not working...the IDE needed to be restarted.
+- *kind:* question
+- *blocking:* true
+- *request:* The exact-263 package is restart-only by spec (GH #339 closed with that contract; `#jb262dynlauncherrecommen` is the same open decision for 262). Which way should restart-free JetBrains upgrades go now that the in-IDE restart prompt (e6fdf1cb26) is done?
+- *context:* The 2026-10-26 installs declined with `declined_by=modular_package` (ops.log 19:29:04Z and 20:46:37Z). The installer did not attempt a swap. Its module-graph evidence comes from IU 263.7031.23; the live IDE is IU 263.7307.44, which has not been re-tested. Re-testing means attaching a probe to your running IDE, which this subagent may not do. Even if it passed, the second blocker remains: in Remote Dev the separate JetBrains Client process can't be updated in the same step, though that may not matter for a local single-process IDE. Each release that changes plugin Kotlin code currently costs one IDE restart.
+- *choices:*
+  - **Keep restart-only + prompt**: integrate e6fdf1cb26 and close this item; every Kotlin-changing release still needs a restart, but the IDE now asks for it with one click.
+  - **Re-qualify on 263.7307.44**: authorize the filtered DynamicPlugins attach probe against the live IDE (it may leave the plugin half-unloaded until a restart); if `unloadPlugin` now succeeds, follow with a restart-free path limited to a local (non-Remote-Dev) IDE.
+  - **Build the GH #339 architecture**: a thin plugin shell that rarely changes, plus a reloadable implementation with cross-process frontend/backend activation receipts; a multi-release project.
+  - **Shrink the restart count**: keep moving frequently changed logic (TerminalUtil, PatchWatcher, CrdtReplicaManager) behind the native library, which already reloads without a restart, so fewer releases change plugin Kotlin.
+
+My recommendation is **Keep restart-only + prompt** now, plus **Shrink the restart count** over time. The probe can leave your IDE half-unloaded and still would not cover Remote Dev, and the GH #339 shell is a multi-release project. Answer in the queue row or below this response.
+
+**Still waiting on you:** the claim left over from the deleted `release + publish` row (`subagent:release_publish_patch`) is still untouched, and the names for `queue repair-stale-completion` and `resolve-pane-document` are still open.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -1189,7 +1215,7 @@ IntelliJ IDEA 2026.3 still runs the old plugin 0.2.835. Restart it to load 0.2.8
 ## Queue: Main <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ☑️ [#subagent:cellrepair#1] one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
 - ☑️ [#subagent:noargskill#1] In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
-- 🚧 [#subagent:autoupgrade#1] Fix the auto-upgrade not working...the IDE needed to be restarted. 
+- ☑️ [#subagent:autoupgrade#1] Fix the auto-upgrade not working...the IDE needed to be restarted. 
 <!-- /agent:run -->
 
 ## Loop: Issues <!-- agent:loop id="issues" interval="1h" priority -->

@@ -127,27 +127,59 @@ fn log_queue_invariant_once(
     );
 }
 
+/// Which queues a claim runtime projection rewrites (`#queuemirrormarkers`).
+#[derive(Debug, Clone, Copy)]
+pub enum ClaimProjectionScope<'a> {
+    /// Every queue in the document. In-session `🚧` selection comes from the
+    /// persisted preflight cycle state. This is the claim command path.
+    Document,
+    /// Every queue except `projected_queue_id`, which the caller (preflight
+    /// maintenance) already projected with pass-local evidence.
+    /// `selected_heads` are that pass's in-session selected head texts, so a
+    /// sibling copy of a selected head shows the same `🚧` instead of
+    /// flip-flopping against the caller's own projection.
+    SiblingsOf {
+        projected_queue_id: &'a str,
+        selected_heads: &'a [String],
+    },
+}
+
 pub fn derive_claim_runtime_projection(
     file: &Path,
     current: &str,
     cleared_item: Option<&str>,
 ) -> Result<ClaimRuntimeProjection> {
+    derive_claim_runtime_projection_scoped(
+        file,
+        current,
+        cleared_item,
+        ClaimProjectionScope::Document,
+    )
+}
+
+/// Derive the visible lifecycle projection of the durable claim, report, and
+/// completion state for every queue row in `scope`.
+///
+/// Claims are keyed by work identity, not by queue id, so every queue that
+/// displays an identity shows the same authoritative state
+/// (`#queuemirrormarkers`). Only the scheduler-selected queue may reopen a
+/// struck row on durable live evidence; a sibling's struck row is its own
+/// terminal or pass-owned evidence and is never resurrected by another
+/// queue's claim.
+pub fn derive_claim_runtime_projection_scoped(
+    file: &Path,
+    current: &str,
+    cleared_item: Option<&str>,
+    scope: ClaimProjectionScope<'_>,
+) -> Result<ClaimRuntimeProjection> {
     let components = agent_doc_element::element::parse(current)?;
-    let selected = agent_doc_queue::queue_set::selected_component(current, &components)?;
-    let only_queue = || {
-        let mut queues = components.iter().filter(|component| component.name == "queue");
-        let first = queues.next()?;
-        queues.next().is_none().then_some(first)
-    };
-    let Some(queue_component) = selected.or_else(only_queue) else {
+    if !components.iter().any(|component| component.name == "queue") {
         return Ok(ClaimRuntimeProjection {
             target_content: current.to_string(),
             persisted_heads: Vec::new(),
             changed: false,
         });
-    };
-    let body = queue_component.content(current);
-    let entries = agent_doc_queue::document_queue::parse(body)?;
+    }
     let claim_ledger = crate::queue_claim::load_ledger_following(file, current);
     let receipt_ledger = crate::claim_release_receipt::load(file);
     let state_degraded = claim_ledger.is_err() || receipt_ledger.is_err();
@@ -199,118 +231,144 @@ pub fn derive_claim_runtime_projection(
         .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
         .collect::<std::collections::HashSet<_>>();
     let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
-    let selected = agent_doc_cycle_state_io::load(file)
-        .ok()
-        .flatten()
-        .filter(|state| {
-            state.queue_selection_authority
-                == agent_doc_cycle_state_io::QueueSelectionAuthority::Preflight
-                && !state.queue_selection_preempted
-        })
-        .map(|state| {
-            agent_doc_queue::queue_claim::ClaimedQueueItems::none()
-                .with_heads(&state.selected_free_text_queue_heads)
-        })
-        .unwrap_or_else(agent_doc_queue::queue_claim::ClaimedQueueItems::none);
+    let (skip_queue_id, selected) = match scope {
+        ClaimProjectionScope::Document => (
+            None,
+            agent_doc_cycle_state_io::load(file)
+                .ok()
+                .flatten()
+                .filter(|state| {
+                    state.queue_selection_authority
+                        == agent_doc_cycle_state_io::QueueSelectionAuthority::Preflight
+                        && !state.queue_selection_preempted
+                })
+                .map(|state| {
+                    agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+                        .with_heads(&state.selected_free_text_queue_heads)
+                })
+                .unwrap_or_else(agent_doc_queue::queue_claim::ClaimedQueueItems::none),
+        ),
+        ClaimProjectionScope::SiblingsOf {
+            projected_queue_id,
+            selected_heads,
+        } => (
+            Some(projected_queue_id),
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(selected_heads),
+        ),
+    };
 
     // Build one target per queue occurrence. This retains marker cardinality
     // for duplicate heads while avoiding a union that could mark an unrelated
     // duplicate twice.
-    let targets = entries
-        .iter()
-        .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
-                let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
-                let observed = agent_doc_document::queue_projection::lifecycle_marker(&prompt.text);
-                if let Some(claim) = claim_states.get(&identity)
-                    && let Some(diagnosis) = agent_doc_queue::queue_claim::diagnose_lifecycle(
-                        claim,
+    let mut persisted_heads = Vec::new();
+    let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<'_>| {
+        let targets = block
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+                    let struck = matches!(entry, QueueEntry::Completed(_));
+                    // `#queuemirrormarkers`: a sibling queue's struck row is its
+                    // own terminal (or `agent:loop` pass-owned) evidence.
+                    // Another queue's live claim never reopens it.
+                    if struck && !block.scheduler_selected {
+                        return None;
+                    }
+                    let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+                    let observed =
+                        agent_doc_document::queue_projection::lifecycle_marker(&prompt.text);
+                    if let Some(claim) = claim_states.get(&identity)
+                        && let Some(diagnosis) = agent_doc_queue::queue_claim::diagnose_lifecycle(
+                            claim,
+                            observed,
+                            crate::queue_claim::claim_clock_now_secs(),
+                            agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
+                        )
+                    {
+                        log_queue_invariant_once(file, claim, diagnosis);
+                    }
+                    let durable_on_struck = struck
+                        && (claim_states.contains_key(&identity)
+                            || receipts.contains_key(&identity)
+                            || completion_evidence.contains(&identity));
+                    if struck && !durable_on_struck {
+                        return None;
+                    }
+                    let claim = (cleared_identity.as_ref() != Some(&identity))
+                        .then(|| claim_states.get(&identity))
+                        .flatten();
+                    let receipt = (cleared_identity.as_ref() != Some(&identity) && claim.is_none())
+                        .then(|| receipts.get(&identity))
+                        .flatten();
+                    let marker = if state_degraded || durable_on_struck {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+                    } else if let Some(claim) = claim {
+                        claim.state.projection_marker()
+                    } else if receipt.is_some() {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                    } else if completion_evidence.contains(&identity) {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
+                    } else if selected.claims(&prompt.text) {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Running
+                    } else if matches!(
                         observed,
-                        crate::queue_claim::claim_clock_now_secs(),
-                        agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
-                    )
-                {
-                    log_queue_invariant_once(file, claim, diagnosis);
-                }
-                let durable_on_struck = matches!(entry, QueueEntry::Completed(_))
-                    && (claim_states.contains_key(&identity)
-                        || receipts.contains_key(&identity)
-                        || completion_evidence.contains(&identity));
-                if matches!(entry, QueueEntry::Completed(_)) && !durable_on_struck {
-                    return None;
-                }
-                let claim = (cleared_identity.as_ref() != Some(&identity))
-                    .then(|| claim_states.get(&identity))
-                    .flatten();
-                let receipt = (cleared_identity.as_ref() != Some(&identity) && claim.is_none())
-                    .then(|| receipts.get(&identity))
-                    .flatten();
-                let marker = if state_degraded || durable_on_struck {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
-                } else if let Some(claim) = claim {
-                    claim.state.projection_marker()
-                } else if receipt.is_some() {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-                } else if completion_evidence.contains(&identity) {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
-                } else if selected.claims(&prompt.text) {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Running
-                } else if matches!(
-                    observed,
-                    Some(
-                        agent_doc_document::queue_projection::QueueLifecycleMarker::Skipped
-                            | agent_doc_document::queue_projection::QueueLifecycleMarker::AwaitingOperator
-                    )
-                ) {
-                    observed.expect("matched Some lifecycle marker")
-                } else {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-                };
-                let owner = claim
-                    .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
-                        owner: claim.owner.clone(),
-                        generation: claim.generation,
-                    })
-                    .or_else(|| {
-                        receipt.map(|receipt| {
-                            agent_doc_document::queue_projection::QueueOwnerProjection {
-                                owner: receipt.owner.clone(),
-                                generation: receipt.generation,
-                            }
+                        Some(
+                            agent_doc_document::queue_projection::QueueLifecycleMarker::Skipped
+                                | agent_doc_document::queue_projection::QueueLifecycleMarker::AwaitingOperator
+                        )
+                    ) {
+                        observed.expect("matched Some lifecycle marker")
+                    } else {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    };
+                    let owner = claim
+                        .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
+                            owner: claim.owner.clone(),
+                            generation: claim.generation,
                         })
-                    });
-                Some(agent_doc_queue::document_queue::QueueRowProjection {
-                    text: agent_doc_document::queue_projection::strip_in_progress_marker(
-                        &prompt.text,
-                    ),
-                    marker,
-                    owner,
-                    reopen_completed: durable_on_struck,
+                        .or_else(|| {
+                            receipt.map(|receipt| {
+                                agent_doc_document::queue_projection::QueueOwnerProjection {
+                                    owner: receipt.owner.clone(),
+                                    generation: receipt.generation,
+                                }
+                            })
+                        });
+                    Some(agent_doc_queue::document_queue::QueueRowProjection {
+                        text: agent_doc_document::queue_projection::strip_in_progress_marker(
+                            &prompt.text,
+                        ),
+                        marker,
+                        owner,
+                        reopen_completed: durable_on_struck,
+                    })
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        persisted_heads.extend(
+            targets
+                .iter()
+                .filter(|target| {
+                    !matches!(
+                        target.marker,
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                            | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+                    )
                 })
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    let projection =
-        agent_doc_queue::document_queue::project_prompt_runtime_projections(body, &targets)?;
-    let target_content = projection
-        .as_ref()
-        .map(|(projected_body, _)| queue_component.replace_content(current, projected_body))
+                .map(|target| {
+                    agent_doc_document::queue_projection::strip_priority_markers(&target.text)
+                }),
+        );
+        targets
+    };
+    let target_content =
+        agent_doc_queue::queue_mirror_projection::project_runtime_projections_across_queues(
+            current,
+            skip_queue_id,
+            targets_for,
+        )?
         .unwrap_or_else(|| current.to_string());
-    let persisted_heads = targets
-        .iter()
-        .filter(|target| {
-            !matches!(
-                target.marker,
-                agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
-            )
-        })
-        .map(|target| {
-            agent_doc_document::queue_projection::strip_priority_markers(&target.text)
-        })
-        .collect::<Vec<_>>();
     Ok(ClaimRuntimeProjection {
         changed: target_content != current,
         target_content,
@@ -366,8 +424,9 @@ pub fn record_claim_runtime_projection(
 /// Claims live in `state.db`, but the queue marker is operator-facing runtime
 /// state. Waiting for the next preflight left every just-dispatched worker
 /// invisible for the duration of its run. This command-path projection reads
-/// the editor/CRDT authority, changes only the selected queue component, and
-/// converges that exact authoritative cut. Existing non-claim `🚧` markers are
+/// the editor/CRDT authority, changes only queue components (every queue that
+/// displays a claimed identity, `#queuemirrormarkers`), and converges that
+/// exact authoritative cut. Existing non-claim `🚧` markers are
 /// preserved; `cleared_item` identifies an abandoned/requeued claim whose
 /// marker must be removed. A reported release keeps its durable receipt visible
 /// as `☑️`, so callers must not clear it.
@@ -1170,6 +1229,168 @@ mod tests {
         )
         .unwrap();
         doc
+    }
+
+    /// The 2026-10-26 `tasks/agent-doc/agent-doc-bugs.md` shape: an immediate
+    /// `main` run queue followed by an hourly `issues` loop that displays
+    /// copies of the same work.
+    fn two_queue_doc(main: &str, issues: &str) -> String {
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             ## Queue: Main\n<!-- agent:run id=\"main\" subagents priority go -->\n{main}<!-- /agent:run -->\n\n\
+             ## Run: Issues\n<!-- agent:loop id=issues interval=1h priority -->\n{issues}<!-- /agent:loop -->\n"
+        )
+    }
+
+    fn write_two_queue_doc(root: &Path, main: &str, issues: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("mirror-markers.md");
+        let content = two_queue_doc(main, issues);
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    /// `#queuemirrormarkers` cases 1-3. A claim is keyed by work identity, so
+    /// every queue that displays the identity shows the ledger's authoritative
+    /// attempt; a copy with no claim, receipt, or completion cell is pending.
+    #[test]
+    fn claim_projection_reaches_every_queue_displaying_the_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let onboarding = "We need to work on making agent-doc easy to onboard.";
+        let doc = write_two_queue_doc(
+            dir.path(),
+            "- 📥 do [#layoutunprovenliveverify]\n\
+             - ~~release + publish ⟦effect:1⟧~~\n\
+             - 📥 release + publish ⟦effect:2⟧\n",
+            &format!(
+                "- 🚧 [#subagent:layout_liveverify#1] do [#layoutunprovenliveverify]\n\
+                 - ☑️ [#subagent:release_publish_patch#3] release + publish\n\
+                 - 🚧 {onboarding}\n"
+            ),
+        );
+        // Generation 1 expires; the coordinator re-dispatches generation 2 from
+        // the main queue.
+        {
+            let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(1_000);
+            crate::queue_claim::claim(
+                &doc,
+                "do [#layoutunprovenliveverify]",
+                "subagent:layout_liveverify",
+                60,
+            )
+            .unwrap();
+        }
+        let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(2_000);
+        let (outcome, claim) = crate::queue_claim::claim(
+            &doc,
+            "do [#layoutunprovenliveverify]",
+            "subagent:layout_liveverify",
+            3_600,
+        )
+        .unwrap();
+        assert_eq!(outcome, agent_doc_queue::queue_claim::ClaimOutcome::Reassigned);
+        assert_eq!(claim.generation, 2);
+
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
+        assert!(projection.changed);
+        assert_eq!(
+            projection.target_content,
+            two_queue_doc(
+                "- 🟡 [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]\n\
+                 - ~~release + publish ⟦effect:1⟧~~\n\
+                 - 📥 release + publish ⟦effect:2⟧\n",
+                &format!(
+                    // Case 1: the loop copy shows the live generation, not the
+                    // expired #1. Case 2: the released report's annotation
+                    // goes; no attempt governs the bare loop copy. Case 3: a
+                    // `🚧` with no worker binding and no in-session selection
+                    // is not a lifecycle state.
+                    "- 🟡 [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]\n\
+                     - 📥 release + publish\n\
+                     - 📥 {onboarding}\n"
+                ),
+            ),
+        );
+        let settled =
+            derive_claim_runtime_projection(&doc, &projection.target_content, None).unwrap();
+        assert!(!settled.changed, "the projection is idempotent");
+    }
+
+    /// `#queuemirrormarkers`: releasing or ending an attempt clears it from
+    /// every queue, and a sibling queue's struck row (an `agent:loop` keeps its
+    /// pass-owned struck rows for restore) is never reopened by another
+    /// queue's live claim.
+    #[test]
+    fn claim_release_clears_every_queue_and_never_reopens_a_sibling_struck_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_two_queue_doc(
+            dir.path(),
+            "- do [#jb263]\n",
+            "- do [#jb263]\n- ~~do [#jb263]~~\n",
+        );
+        crate::queue_claim::claim(&doc, "#jb263", "subagent:jb263_feed_verify", 3_600).unwrap();
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let claimed = derive_claim_runtime_projection(&doc, &current, None).unwrap();
+        assert_eq!(
+            claimed.target_content,
+            two_queue_doc(
+                "- 🟡 [#subagent:jb263_feed_verify#1] do [#jb263]\n",
+                "- 🟡 [#subagent:jb263_feed_verify#1] do [#jb263]\n- ~~do [#jb263]~~\n",
+            ),
+        );
+
+        crate::queue_claim::release(&doc, "#jb263").unwrap();
+        let released =
+            derive_claim_runtime_projection(&doc, &claimed.target_content, None).unwrap();
+        assert_eq!(
+            released.target_content,
+            two_queue_doc("- 📥 do [#jb263]\n", "- 📥 do [#jb263]\n- ~~do [#jb263]~~\n"),
+        );
+    }
+
+    /// Preflight projects its selected queue with pass-local evidence and asks
+    /// for the siblings only; the selected queue's bytes stay its own.
+    #[test]
+    fn sibling_scope_leaves_the_projected_queue_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_two_queue_doc(dir.path(), "- 🚧 do [#a]\n", "- 🚧 do [#a]\n");
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let selected = vec!["do [#a]".to_string()];
+        let projection = derive_claim_runtime_projection_scoped(
+            &doc,
+            &current,
+            None,
+            ClaimProjectionScope::SiblingsOf {
+                projected_queue_id: "main",
+                selected_heads: &selected,
+            },
+        )
+        .unwrap();
+        assert!(
+            !projection.changed,
+            "a sibling copy of the pass's selected head keeps the same 🚧"
+        );
+        let projection = derive_claim_runtime_projection_scoped(
+            &doc,
+            &current,
+            None,
+            ClaimProjectionScope::SiblingsOf {
+                projected_queue_id: "main",
+                selected_heads: &[],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            projection.target_content,
+            two_queue_doc("- 🚧 do [#a]\n", "- 📥 do [#a]\n")
+        );
     }
 
     #[test]

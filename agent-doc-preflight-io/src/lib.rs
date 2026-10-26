@@ -7226,6 +7226,35 @@ pub fn run_queue_maintenance_with_coin_gate(
         mutated = true;
         in_progress_markers_changed = true;
     }
+    // `#queuemirrormarkers`: claims, report receipts, and completion cells are
+    // keyed by work identity, not queue id, so every queue that displays an
+    // identity must show its durable attempt state. The passes above project
+    // only the selected queue; repaint every sibling queue's live rows from the
+    // same ledgers so a mirrored copy cannot keep an expired generation, a
+    // released report, or a `🚧` left by an earlier pass that selected its
+    // queue. A sibling's struck rows are never reopened.
+    match agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection_scoped(
+        file,
+        &current_content,
+        None,
+        agent_doc_queue_io::queue_cmd::ClaimProjectionScope::SiblingsOf {
+            projected_queue_id: &selected_queue_id,
+            selected_heads: &active_queue_prompt_texts,
+        },
+    ) {
+        Ok(projection) if projection.changed => {
+            current_content = projection.target_content;
+            mutated = true;
+            in_progress_markers_changed = true;
+            eprintln!(
+                "[preflight] queue: projected durable attempt state onto sibling queue rows (#queuemirrormarkers)"
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!("[preflight] queue: sibling queue marker projection skipped ({err:#})");
+        }
+    }
     let (marked_content, pending_markers_changed) =
         set_work_item_lifecycle_markers(&current_content, &tracked_work_lifecycle)?;
     if pending_markers_changed {
@@ -9938,6 +9967,148 @@ mod tests {
                     .lines()
                     .any(|l| l.contains("⏭\u{fe0f}") && l.contains("[#sy71]")),
             "the skipped #sy71 head must carry the ⏭️ marker:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_keeps_a_claimed_mirror_row_whose_snapshot_was_bare() {
+        // `#claimrowtombstone` (live 2026-10-26, tasks/agent-doc/agent-doc-bugs.md
+        // 13:09:26Z): the snapshot held the backlog-mirrored head bare
+        // (`📥 do [#claimrowmigrate]`); the claim then projected
+        // `[#subagent:claimrowmigrate#1]` onto the live row. Tombstone
+        // reconciliation read the live row's id as `subagent`, recorded
+        // `claimrowmigrate` as operator-deleted, and lifecycle convergence gave
+        // the tombstoned directive a multiplicity of zero, so queue
+        // maintenance removed the reported row with no closeout.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — test\n\nDispatched.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 📥 do [#claimrowmigrate]\n",
+            "- do [#plain]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#claimrowmigrate] keep a claim on its own row\n",
+            "- [ ] [#plain] a real open task\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "#claimrowmigrate",
+            "subagent:claimrowmigrate",
+            3600,
+        )
+        .unwrap();
+        let live = snapshot.replace(
+            "- 📥 do [#claimrowmigrate]\n",
+            "- 🟡 [#subagent:claimrowmigrate#1] do [#claimrowmigrate]\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+
+        for pass in 0..2 {
+            run_queue_maintenance(&doc, None).unwrap();
+            let updated = std::fs::read_to_string(&doc).unwrap();
+            assert_eq!(
+                queue_line(&updated, "claimrowmigrate"),
+                "- 🟡 [#subagent:claimrowmigrate#1] do [#claimrowmigrate]",
+                "pass {pass}: a claimed mirror row is live work, not an operator delete:\n{updated}"
+            );
+            assert!(
+                !agent_doc_queue_io::queue_tombstone::current_tombstones(&doc)
+                    .contains("claimrowmigrate"),
+                "pass {pass}: the attempt annotation must not tombstone the row's id"
+            );
+        }
+    }
+
+    #[test]
+    fn run_queue_maintenance_projects_claim_state_onto_sibling_queue_rows() {
+        // `#queuemirrormarkers` (live 2026-10-26): `main` holds the live
+        // generation-2 claim; the `issues` loop shows the expired generation 1
+        // copy and a `🚧` free-text row with no claim and no in-session
+        // selection. Maintenance runs on `main`, and its sibling pass repaints
+        // the loop from the same ledgers.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — test\n\nDispatched.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue: Main\n",
+            "<!-- agent:run id=\"main\" subagents go -->\n",
+            "- do [#layout]\n",
+            "- do [#plain]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Run: Issues\n",
+            "<!-- agent:loop id=issues interval=1h priority -->\n",
+            "- 🚧 [#subagent:layout_liveverify#1] do [#layout]\n",
+            "- 🚧 We need to work on making agent-doc easy to onboard.\n",
+            "<!-- /agent:loop -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        {
+            let _clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(1_000);
+            agent_doc_queue_io::queue_claim::claim(
+                &doc,
+                "#layout",
+                "subagent:layout_liveverify",
+                60,
+            )
+            .unwrap();
+        }
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "#layout",
+            "subagent:layout_liveverify",
+            3600,
+        )
+        .unwrap();
+        assert_eq!(claim.generation, 2);
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let issues = updated
+            .split("<!-- agent:loop id=issues interval=1h priority -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("<!-- /agent:loop -->").next())
+            .unwrap_or_else(|| panic!("issues loop missing:\n{updated}"));
+        assert_eq!(
+            issues,
+            "- 🟡 [#subagent:layout_liveverify#2] do [#layout]\n\
+             - 📥 We need to work on making agent-doc easy to onboard.\n",
+            "{updated}"
+        );
+        assert!(
+            updated.contains("- 🟡 [#subagent:layout_liveverify#2] do [#layout]\n- "),
+            "main shows the same attempt:\n{updated}"
         );
     }
 

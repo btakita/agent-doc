@@ -156,6 +156,51 @@ fn in_code(ranges: &[(usize, usize)], byte: usize) -> bool {
     ranges.iter().any(|&(s, e)| byte >= s && byte < e)
 }
 
+/// `#fencedmarkerscan`: the one fence-aware component-marker rule for every
+/// line scanner that walks a document's component markers.
+///
+/// A marker line that starts inside fenced or indented code is content, never
+/// an opener or a closer. [`components`] and the document-cell merge's body
+/// scan both classify marker lines through this type, so a pasted report whose
+/// fence holds a bare `<!-- agent:run ... -->` or `<!-- /agent:run -->` line
+/// cannot open a phantom component in one scanner while another keeps a single
+/// queue. Offsets are byte offsets into the `source` the scan was built from.
+#[derive(Debug, Clone)]
+pub struct ComponentMarkerScan {
+    code: Vec<(usize, usize)>,
+}
+
+impl ComponentMarkerScan {
+    pub fn new(source: &str) -> Self {
+        Self {
+            code: code_ranges(source),
+        }
+    }
+
+    /// Whether the line starting at `line_start` lies inside code.
+    pub fn in_code(&self, line_start: usize) -> bool {
+        in_code(&self.code, line_start)
+    }
+
+    /// The `(raw_name, attrs)` of a component opener on the line starting at
+    /// `line_start` (`line` without its terminator), unless the line is code.
+    pub fn open_at(&self, line_start: usize, line: &str) -> Option<(String, String)> {
+        if self.in_code(line_start) {
+            return None;
+        }
+        parse_open_marker_line(line.strip_suffix('\r').unwrap_or(line))
+    }
+
+    /// The raw name of a component closer (either spelling) on the line
+    /// starting at `line_start`, unless the line is code.
+    pub fn close_at(&self, line_start: usize, line: &str) -> Option<String> {
+        if self.in_code(line_start) {
+            return None;
+        }
+        parse_close_marker(line.trim())
+    }
+}
+
 /// Parse `<!-- agent:name -->` open markers, returning `(name, attrs)`.
 fn parse_open_marker(trimmed: &str) -> Option<(String, String)> {
     let inner = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
@@ -946,7 +991,8 @@ fn include_queue_multiline_items(
 /// Markers and list lines inside fenced/indented code are ignored. Queue
 /// multiline prompt fences are retained as one typed item spanning the block.
 pub fn components(source: &str) -> Vec<Component> {
-    let ranges = code_ranges(source);
+    let markers = ComponentMarkerScan::new(source);
+    let ranges = markers.code.clone();
     let mut out: Vec<Component> = Vec::new();
     let mut open: Option<Component> = None;
 
@@ -957,7 +1003,7 @@ pub fn components(source: &str) -> Vec<Component> {
     for line in source.split_inclusive('\n') {
         let line_start = offset;
         offset += line.len();
-        if in_code(&ranges, line_start) {
+        if markers.in_code(line_start) {
             continuable_item = None;
             continue;
         }
@@ -977,7 +1023,7 @@ pub fn components(source: &str) -> Vec<Component> {
             continuable_item = None;
         }
 
-        if let Some(name) = parse_close_marker(trimmed) {
+        if let Some(name) = markers.close_at(line_start, trimmed) {
             if let Some(mut comp) = open.take() {
                 if comp.name == name {
                     comp.end_byte = offset;
@@ -991,7 +1037,7 @@ pub fn components(source: &str) -> Vec<Component> {
             }
             continue;
         }
-        if let Some((name, attrs)) = parse_open_marker_line(content) {
+        if let Some((name, attrs)) = markers.open_at(line_start, content) {
             // A new open marker closes any dangling component implicitly.
             if let Some(mut comp) = open.take() {
                 project_runnable_component(&mut comp);

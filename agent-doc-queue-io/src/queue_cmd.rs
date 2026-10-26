@@ -287,10 +287,12 @@ pub fn derive_claim_runtime_projection_scoped(
                     {
                         log_queue_invariant_once(file, claim, diagnosis);
                     }
+                    // `#strikeisterminal`: only a live attempt reopens a struck
+                    // row; receipts and completion cells agree with the strike.
                     let durable_on_struck = struck
-                        && (claim_states.contains_key(&identity)
-                            || receipts.contains_key(&identity)
-                            || completion_evidence.contains(&identity));
+                        && agent_doc_queue::queue_claim::struck_row_reopened_by_claim(
+                            claim_states.get(&identity),
+                        );
                     if struck && !durable_on_struck {
                         return None;
                     }
@@ -1912,6 +1914,87 @@ mod tests {
                 )),
             "{}",
             terminal_projection.target_content
+        );
+    }
+
+    /// `#strikeisterminal`: finished-work evidence agrees with a strike. A
+    /// struck row whose worker reported (receipt) or whose completion cell is
+    /// still in the exchange stays struck; before, the claim projection
+    /// reopened it as `❔` and the next pass painted `☑️` / `🔄` (live
+    /// `release_promotion_concurrency` / `tmux_auto_sync`, 2026-10-26).
+    #[test]
+    fn struck_row_with_receipt_or_completion_cell_is_never_reopened() {
+        let dir = tempfile::tempdir().unwrap();
+        let receipted = "do [#release-promotion-concurrency]";
+        let celled = "tmux pane auto sync is not working. Sync Tmux Panes works.";
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            &format!("- 🚧 {receipted}\n- 🚧 {celled}\n"),
+        );
+        let mut cells = String::new();
+        for (item, owner) in [
+            (receipted, "subagent:release_promotion_concurrency"),
+            (celled, "subagent:tmux_auto_sync"),
+        ] {
+            let (_, claimed) = crate::queue_claim::claim(&doc, item, owner, 600).unwrap();
+            let running = crate::queue_claim::start_attempt(
+                &doc,
+                item,
+                owner,
+                &format!("/root/{owner}"),
+                600,
+                claimed.generation,
+            )
+            .unwrap();
+            cells.push_str(
+                &agent_doc_document::subagent_completion::cell_with_response(
+                    &running.owner,
+                    &running.item_text,
+                    &crate::queue_claim::completion_feedback_key(&running).unwrap(),
+                    "Done; tests pass.",
+                )
+                .unwrap(),
+            );
+            cells.push_str("\n\n");
+            crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+            crate::claim_release_receipt::release(
+                &doc,
+                item,
+                crate::claim_release_receipt::ReleaseKind::Reported,
+            )
+            .unwrap();
+        }
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        let struck = disk
+            .replace(
+                "<!-- agent:queue go -->\n",
+                &format!(
+                    "<!-- agent:exchange patch=append -->\n{cells}<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n"
+                ),
+            )
+            .replace(&format!("- 🚧 {receipted}\n"), &format!("- ~~{receipted}~~\n"))
+            .replace(&format!("- 🚧 {celled}\n"), &format!("- ~~{celled}~~\n"));
+        assert!(
+            agent_doc_document::subagent_completion::completion_evidence(&struck).len() == 2,
+            "fixture must carry both completion cells: {struck}"
+        );
+
+        let projection = derive_claim_runtime_projection(&doc, &struck, None).unwrap();
+        for head in [receipted, celled] {
+            assert!(
+                projection
+                    .target_content
+                    .contains(&format!("- ~~{head}~~\n")),
+                "{head:?} must stay struck: {}",
+                projection.target_content
+            );
+        }
+        assert!(
+            !projection.target_content.contains('❔')
+                && !projection.target_content.contains("🔄")
+                && !projection.target_content.contains("- ☑️"),
+            "{}",
+            projection.target_content
         );
     }
 

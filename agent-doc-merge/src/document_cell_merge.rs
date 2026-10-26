@@ -70,7 +70,9 @@
 //! scalars) — the core of the data-loss bug this fixes — is complete and exact.
 //! See the `prose_skeleton_is_operator` test.
 
-use agent_doc_markdown_ast::overlay::{Component, Item, components};
+use agent_doc_markdown_ast::overlay::{
+    Component, ComponentMarkerScan, Item, ItemSurface, components,
+};
 
 /// The classification of a single node's merge outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,17 +287,23 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
     let mut inside_exchange = false;
     let mut inner: Vec<String> = Vec::new();
     let mut injected = false;
+    // `#fencedmarkerscan`: fenced marker lines never open or close the exchange.
+    let markers = ComponentMarkerScan::new(&body);
+    let mut offset = 0usize;
     for line in body.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
         let content = line.trim_end_matches(['\n', '\r']);
-        let trimmed = content.trim();
         if !inside_exchange {
-            if open_marker_name(content).as_deref() == Some(EXCHANGE_COMPONENT) {
+            if markers.open_at(line_start, content).map(|(raw, _)| raw).as_deref()
+                == Some(EXCHANGE_COMPONENT)
+            {
                 inside_exchange = true;
             }
             out.push_str(line);
             continue;
         }
-        if close_marker_name(trimmed).as_deref() == Some(EXCHANGE_COMPONENT) {
+        if markers.close_at(line_start, content).as_deref() == Some(EXCHANGE_COMPONENT) {
             // Emit the buffered inner with the notes inserted before any trailing
             // boundary marker, then the close marker.
             let boundary_idx = inner
@@ -776,6 +784,11 @@ impl ComponentPairing {
 /// in `raw`; we still prefix `- ` only when `raw` does not already begin with a
 /// list/ordered bullet shape, to avoid double bullets.
 fn item_line(item: &Item) -> String {
+    // A multiline queue prompt (title + fenced block between `---` rules) is
+    // not a list item: its `raw` is the complete block, emitted verbatim.
+    if item.surface == ItemSurface::MultilinePrompt {
+        return item.raw.trim_end_matches(['\n', '\r']).to_string();
+    }
     let raw = item.raw.trim();
     format!("- {raw}")
 }
@@ -820,10 +833,28 @@ fn merge_component_items(
     outcomes: &mut Vec<NodeOutcome>,
     advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
+    merge_component_item_slots(name, base_comp, ours_comp, theirs_comp, outcomes, advisories)
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect()
+}
+
+/// [`merge_component_items`] with each merged line tagged by the index of the
+/// operator item it replaces (`None` for an agent-only add), so the body
+/// rebuild can put every merged node back at its operator position.
+#[allow(clippy::too_many_arguments)]
+fn merge_component_item_slots(
+    name: &str,
+    base_comp: Option<&Component>,
+    ours_comp: Option<&Component>,
+    theirs_comp: &Component,
+    outcomes: &mut Vec<NodeOutcome>,
+    advisories: &mut Vec<MergeConflictAdvisory>,
+) -> Vec<(Option<usize>, String)> {
+    let mut lines: Vec<(Option<usize>, String)> = Vec::new();
 
     // 1. Walk operator items in operator order — they are the layout skeleton.
-    for t_item in &theirs_comp.items {
+    for (t_index, t_item) in theirs_comp.items.iter().enumerate() {
         let id = &t_item.id;
         let b_item = find_item(base_comp, id);
         let o_item = find_item(ours_comp, id);
@@ -844,11 +875,11 @@ fn merge_component_items(
                         && o.agent_pinned == t_item.agent_pinned
                     {
                         // Convergent — both reached the same shape.
-                        lines.push(item_line(t_item));
+                        lines.push((Some(t_index), item_line(t_item)));
                         record(outcomes, name, id, OutcomeKind::Convergent);
                     } else {
                         // Same-node conflict — operator wins + advisory.
-                        lines.push(item_line(t_item));
+                        lines.push((Some(t_index), item_line(t_item)));
                         record(outcomes, name, id, OutcomeKind::OperatorWonConflict);
                         advisories.push(MergeConflictAdvisory {
                             component: name.to_string(),
@@ -866,15 +897,15 @@ fn merge_component_items(
                     // Agent edited, operator unchanged.
                     // Detect agent-delete-via-strike vs operator-edit handled below;
                     // here operator is unchanged so just apply the agent edit.
-                    lines.push(item_line(o));
+                    lines.push((Some(t_index), item_line(o)));
                     record(outcomes, name, id, OutcomeKind::AppliedAgentEdit);
                 } else if operator_changed {
                     // Operator edited, agent unchanged.
-                    lines.push(item_line(t_item));
+                    lines.push((Some(t_index), item_line(t_item)));
                     record(outcomes, name, id, OutcomeKind::AppliedOperatorEdit);
                 } else {
                     // Unchanged on both.
-                    lines.push(item_line(t_item));
+                    lines.push((Some(t_index), item_line(t_item)));
                     record(outcomes, name, id, OutcomeKind::Keep);
                 }
             }
@@ -883,7 +914,7 @@ fn merge_component_items(
                 if operator_changed {
                     // Agent deleted (absent), operator edited → operator revives.
                     let _ = b;
-                    lines.push(item_line(t_item));
+                    lines.push((Some(t_index), item_line(t_item)));
                     record(outcomes, name, id, OutcomeKind::OperatorRevived);
                     advisories.push(MergeConflictAdvisory {
                         component: name.to_string(),
@@ -903,11 +934,11 @@ fn merge_component_items(
             (None, Some(_o)) => {
                 // Added by both. Same id.
                 if find_item(ours_comp, id).map(|o| &o.text) == Some(&t_item.text) {
-                    lines.push(item_line(t_item));
+                    lines.push((Some(t_index), item_line(t_item)));
                     record(outcomes, name, id, OutcomeKind::AppliedBothAdd);
                 } else {
                     // Same id, different text → operator wins + advisory.
-                    lines.push(item_line(t_item));
+                    lines.push((Some(t_index), item_line(t_item)));
                     record(outcomes, name, id, OutcomeKind::OperatorWonConflict);
                     advisories.push(MergeConflictAdvisory {
                         component: name.to_string(),
@@ -927,7 +958,7 @@ fn merge_component_items(
             }
             // Absent in base, absent in agent → operator-only add.
             (None, None) => {
-                lines.push(item_line(t_item));
+                lines.push((Some(t_index), item_line(t_item)));
                 record(outcomes, name, id, OutcomeKind::AppliedOperatorAdd);
             }
         }
@@ -945,7 +976,7 @@ fn merge_component_items(
             match b_item {
                 None => {
                     // Absent in base & operator, present in agent → agent add.
-                    lines.push(item_line(o_item));
+                    lines.push((None, item_line(o_item)));
                     record(outcomes, name, id, OutcomeKind::AppliedAgentAdd);
                 }
                 Some(b) => {
@@ -1234,22 +1265,27 @@ fn is_boundary_marker(trimmed: &str) -> bool {
 /// This deliberately does not use the overlay's `Component` byte span: the
 /// overlay only parses bullet items into nodes, so an exchange component made of
 /// heading-prose turns (no items) records an unreliable `end_byte`. A line scan
-/// recovers the verbatim inner content the heading-block append needs. Markers
-/// inside fenced code are not a concern for the exchange (responses are prose),
-/// and the open/close grammar mirrors the overlay's marker recognizers.
+/// recovers the verbatim inner content the heading-block append needs. Marker
+/// lines are classified by the overlay's shared fence-aware
+/// [`ComponentMarkerScan`] (`#fencedmarkerscan`): a response that quotes a
+/// fenced `<!-- /agent:exchange -->` line does not end the exchange early.
 fn component_inner_lines(name: &str, source: &str) -> Vec<String> {
+    let markers = ComponentMarkerScan::new(source);
     let mut lines: Vec<String> = Vec::new();
     let mut inside = false;
+    let mut offset = 0usize;
     for line in source.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
         let content = line.trim_end_matches(['\n', '\r']);
-        let trimmed = content.trim();
         if !inside {
-            if open_marker_name(content).as_deref() == Some(name) {
+            if markers.open_at(line_start, content).map(|(raw, _)| raw).as_deref() == Some(name)
+            {
                 inside = true;
             }
             continue;
         }
-        if close_marker_name(trimmed).as_deref() == Some(name) {
+        if markers.close_at(line_start, content).as_deref() == Some(name) {
             break;
         }
         lines.push(line.to_string());
@@ -1265,45 +1301,6 @@ fn record(outcomes: &mut Vec<NodeOutcome>, comp: &str, id: &str, kind: OutcomeKi
     });
 }
 
-/// Recognize an `<!-- agent:name attrs -->` open marker line → raw name.
-///
-/// Delegates to [`agent_doc_markdown_ast::overlay::parse_open_marker_line`], so a
-/// heading-anchored opener (`## Run <!-- agent:run -->`) opens a component here
-/// exactly when the overlay and element parser accept it (GH #374). The merge
-/// still does its own line scan for the body (the overlay's `Component::end_byte`
-/// is only reliable for the `agent:/name` close spelling); only the opener
-/// grammar is shared. `line` is the source line without its terminator.
-fn open_marker_name(line: &str) -> Option<String> {
-    agent_doc_markdown_ast::overlay::parse_open_marker_line(line).map(|(name, _)| name)
-}
-
-/// Recognize a close marker line in either spelling (`<!-- /agent:name -->` or
-/// `<!-- agent:/name -->`) → name.
-fn close_marker_name(trimmed: &str) -> Option<String> {
-    let inner = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
-    let rest = inner
-        .strip_prefix("/agent:")
-        .or_else(|| inner.strip_prefix("agent:/"))?;
-    let name = rest.trim();
-    (!name.is_empty()).then(|| name.to_string())
-}
-
-/// Strip a leading list bullet (`- `, `* `, `N. `), returning the item content.
-fn strip_bullet(line: &str) -> Option<&str> {
-    let t = line.trim_start();
-    if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
-        return Some(rest);
-    }
-    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if !digits.is_empty() {
-        let after = &t[digits.len()..];
-        if let Some(rest) = after.strip_prefix(". ") {
-            return Some(rest);
-        }
-    }
-    None
-}
-
 /// Reconstruct a non-`exchange` component's inner body from its buffered operator
 /// lines (`inner`, each still carrying its trailing `\n`) and the merged item set.
 ///
@@ -1317,43 +1314,69 @@ fn strip_bullet(line: &str) -> Option<&str> {
 /// declined the merge on every cycle — leaving every IPC write stuck on the
 /// blocked `content_ours` carry-forward path.
 ///
-/// Preserve operator non-bullet lines (free text, fenced blocks, separators,
-/// blanks) verbatim, and place the merged bullet-item block at the position of the
-/// first bullet (the common shape: a free-text head followed by a contiguous run
-/// of `- ` items). Fenced code spans are tracked so a `- ` inside a fence is not
-/// mistaken for a list bullet. When the component has no operator bullet items
-/// (all free text, or items added only by the agent), the merged items are
-/// appended after the preserved prose.
-fn merge_nonexchange_inner(inner: &[String], merged_items: &[String]) -> String {
+/// Preserve operator non-item lines (free text, fenced blocks, separators,
+/// blanks) verbatim and replace each operator item node in place, at its own
+/// source span, with its merged line (`#fencedmarkerscan`). An operator item
+/// the merge deleted leaves nothing; agent-only adds follow the last operator
+/// item, or are appended when the operator component has no items.
+///
+/// `inner_start` is the operator-document byte offset of the first inner line,
+/// the same coordinate space as `theirs_items` spans. Splicing by span (rather
+/// than emitting every merged item at the first `- ` bullet and keeping all
+/// non-bullet lines) keeps a multiline queue prompt (a title plus a fenced
+/// block, an overlay item since `#multilineheadbullet`) from being emitted
+/// twice, and keeps rows on both sides of a pasted fence in their positions.
+fn merge_nonexchange_inner(
+    inner: &[String],
+    inner_start: usize,
+    theirs_items: &[Item],
+    slots: &[(Option<usize>, String)],
+) -> String {
+    let text = inner.concat();
+    let inner_end = inner_start + text.len();
+    let mut spans: Vec<(usize, usize, usize)> = theirs_items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item.start_byte >= inner_start && item.end_byte <= inner_end)
+        .map(|(index, item)| (index, item.start_byte - inner_start, item.end_byte - inner_start))
+        .collect();
+    spans.sort_by_key(|&(_, start, _)| start);
+    let push_line = |out: &mut String, line: &str| {
+        out.push_str(line);
+        out.push('\n');
+    };
     let mut out = String::new();
-    let mut emitted_items = false;
-    let mut in_fence = false;
-    for raw in inner {
-        let trimmed = raw.trim_start();
-        let is_fence_marker = trimmed.starts_with("```") || trimmed.starts_with("~~~");
-        let is_bullet =
-            !in_fence && !is_fence_marker && strip_bullet(raw.trim_end_matches('\n')).is_some();
-        if is_fence_marker {
-            in_fence = !in_fence;
-        }
-        if is_bullet {
-            if !emitted_items {
-                for ml in merged_items {
-                    out.push_str(ml);
-                    out.push('\n');
-                }
-                emitted_items = true;
-            }
-            // Drop the original bullet line — replaced by the merged item block.
+    let mut cursor = 0usize;
+    for (position, &(index, start, end)) in spans.iter().enumerate() {
+        if start < cursor {
             continue;
         }
-        // Operator non-bullet line — preserve verbatim (newline already included).
-        out.push_str(raw);
+        out.push_str(&text[cursor..start]);
+        let span = &text[start..end];
+        for (_, line) in slots.iter().filter(|(slot, _)| *slot == Some(index)) {
+            if span.ends_with('\n') {
+                push_line(&mut out, line);
+            } else {
+                out.push_str(line);
+            }
+        }
+        if position + 1 == spans.len() {
+            for (_, line) in slots.iter().filter(|(slot, _)| slot.is_none()) {
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                push_line(&mut out, line);
+            }
+        }
+        cursor = end;
     }
-    if !emitted_items {
-        for ml in merged_items {
-            out.push_str(ml);
-            out.push('\n');
+    out.push_str(&text[cursor..]);
+    if spans.is_empty() {
+        for (_, line) in slots {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            push_line(&mut out, line);
         }
     }
     out
@@ -1400,21 +1423,32 @@ fn merge_components_into_body(
     // At the close marker the buffer is rewritten — by [`merge_exchange_inner`] for
     // `exchange`, or [`merge_nonexchange_inner`] elsewhere.
     let mut component_inner: Vec<String> = Vec::new();
+    // Operator-document offset of the open component's first inner line.
+    let mut inner_start = theirs_body_offset;
     let mut offset = theirs_body_offset;
+    // `#fencedmarkerscan`: marker lines inside fenced/indented code are
+    // content. The scan is built over the body, so it is indexed by
+    // body-relative offsets; `theirs_comps` use whole-document offsets.
+    let markers = ComponentMarkerScan::new(theirs_body);
 
     for line in theirs_body.split_inclusive('\n') {
         let line_start = offset;
+        let body_line_start = offset - theirs_body_offset;
         offset += line.len();
         let content = line.trim_end_matches('\n');
-        let trimmed = content.trim();
 
         if let Some((name, theirs_idx)) = open.as_ref() {
             // Inside a component: look for its close marker.
-            if let Some(close) = close_marker_name(trimmed)
+            if let Some(close) = markers.close_at(body_line_start, content)
                 && &close == name
             {
-                let merged =
-                    sides.merge_component(*theirs_idx, &component_inner, outcomes, advisories);
+                let merged = sides.merge_component(
+                    *theirs_idx,
+                    &component_inner,
+                    inner_start,
+                    outcomes,
+                    advisories,
+                );
                 out.push_str(&merged);
                 component_inner.clear();
                 out.push_str(line); // close marker line, verbatim
@@ -1427,10 +1461,11 @@ fn merge_components_into_body(
         }
 
         // Not inside a component.
-        if let Some(name) = open_marker_name(content.trim_end_matches('\r')) {
+        if let Some((name, _)) = markers.open_at(body_line_start, content) {
             out.push_str(line); // open marker line, verbatim
             let theirs_idx = theirs_comps.iter().position(|c| c.start_byte == line_start);
             open = Some((name, theirs_idx));
+            inner_start = offset;
             continue;
         }
         // Plain prose line — pass through.
@@ -1439,7 +1474,13 @@ fn merge_components_into_body(
 
     // An unterminated operator component (no recognized close) — flush its items.
     if let Some((_, theirs_idx)) = open.take() {
-        let merged = sides.merge_component(theirs_idx, &component_inner, outcomes, advisories);
+        let merged = sides.merge_component(
+            theirs_idx,
+            &component_inner,
+            inner_start,
+            outcomes,
+            advisories,
+        );
         if !out.ends_with('\n') && !out.is_empty() {
             out.push('\n');
         }
@@ -1504,6 +1545,7 @@ impl MergeSides<'_> {
         &self,
         theirs_idx: Option<usize>,
         inner: &[String],
+        inner_start: usize,
         outcomes: &mut Vec<NodeOutcome>,
         advisories: &mut Vec<MergeConflictAdvisory>,
     ) -> String {
@@ -1538,9 +1580,10 @@ impl MergeSides<'_> {
             // silently lose a free-text queue head, trip the anti-data-loss
             // gate, and decline forever (the persistent `live_prompt_drift`
             // churn).
-            let merged =
-                merge_component_items(&tc.name, base_comp, ours_comp, tc, outcomes, advisories);
-            merge_nonexchange_inner(inner, &merged)
+            let slots = merge_component_item_slots(
+                &tc.name, base_comp, ours_comp, tc, outcomes, advisories,
+            );
+            merge_nonexchange_inner(inner, inner_start, &tc.items, &slots)
         }
     }
 }
@@ -2404,6 +2447,83 @@ Press Enter to restart, or 'q' to exit.
         assert!(m.merged_doc.contains("---"));
     }
 
+    /// `#fencedmarkerscan`: the live 2026-10-26 `agent-doc-bugs.md` queue
+    /// shape. A pasted report's fenced block holds a bare
+    /// `<!-- agent:run priority subagents -->` line, a heading-anchored copy,
+    /// and a bare `<!-- /agent:run -->` line. The overlay ignores all three;
+    /// the body scan must too. Before, the fenced close line ended the
+    /// operator's queue early: the merged item set (with the agent's strike)
+    /// was emitted there, and the operator's remaining lines (the fence tail,
+    /// the unstruck copy of the row, and the real close) were passed through
+    /// again, so the struck row came back live beside its strike.
+    #[test]
+    fn fenced_component_markers_never_open_or_close_the_merge_scan() {
+        let fenced = "\
+---
+Run Agent Doc on sdk-demo.md still wedged:
+```
+## Run
+<!-- agent:run priority subagents -->
+◇ markdown   [Copy]
+<!-- /agent:run -->
+## Run <!-- agent:run priority subagents -->
+```
+---
+";
+        let doc = |before: &str, after: &str| {
+            format!(
+                "# T\n\n## Queue: Main\n<!-- agent:run id=\"main\" subagents go -->\n\
+                 - {before}\n{fenced}- {after}\n- 📥 still pending\n<!-- /agent:run -->\n\n\
+                 ## Run: Issues\n<!-- agent:loop id=issues interval=1h -->\n- 📥 onboarding\n<!-- /agent:loop -->\n"
+            )
+        };
+        // Rows carry no lifecycle/owner prefix: the overlay keys a row by its
+        // first `[#...]` token, so an annotated row and its bare struck copy
+        // are different nodes (reported separately; out of scope here).
+        let base = doc(
+            "tmux pane auto sync is not working.",
+            "The agent:loop is getting items.",
+        );
+        // The agent struck the rows on both sides of the fence.
+        let ours = doc(
+            "~~tmux pane auto sync is not working.~~",
+            "~~The agent:loop is getting items.~~",
+        );
+        // The operator's editor still holds the base.
+        let theirs = base.clone();
+
+        let m = document_cell_merge(&base, &ours, &theirs);
+
+        assert_eq!(m.merged_doc, ours, "merged:\n{}", m.merged_doc);
+        assert_eq!(
+            components(&m.merged_doc)
+                .iter()
+                .filter(|c| c.name == "queue")
+                .count(),
+            2
+        );
+    }
+
+    /// `#fencedmarkerscan`: a fenced example of a component outside every
+    /// component (operator prose) never opens one in the merge scan, so it
+    /// cannot swallow the real queue that follows it.
+    #[test]
+    fn fenced_component_example_in_prose_does_not_swallow_the_next_component() {
+        let doc = |row: &str| {
+            format!(
+                "# T\n\nExample:\n\n```md\n<!-- agent:queue -->\n- example row\n```\n\n\
+                 <!-- agent:queue -->\n- {row}\n<!-- /agent:queue -->\n"
+            )
+        };
+        let base = doc("do [#a] task");
+        let ours = doc("~~do [#a] task~~");
+        let theirs = base.clone();
+
+        let m = document_cell_merge(&base, &ours, &theirs);
+
+        assert_eq!(m.merged_doc, ours, "merged:\n{}", m.merged_doc);
+    }
+
     // ----- exchange heading-prose turns (`#semmerge` real format) ----------
 
     #[test]
@@ -2954,7 +3074,7 @@ Steps:
     fn exchange_bare_ordered_list_without_heading_preserves_order() {
         // #4pdp / #ocreverselist: an OpenCode response that is a bare ordered list
         // (no `### Re:` heading) falls through the heading-turn path into the
-        // bullet-item merge, because `strip_bullet` treats `N. ` as a list item.
+        // bullet-item merge, because the overlay treats `N. ` as a list item.
         // The item-merge must keep the agent-added items in authored order (1,2,3),
         // not reversed.
         let base = "\

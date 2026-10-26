@@ -336,9 +336,40 @@ pub fn diagnose_lifecycle(
     None
 }
 
+/// `#strikeisterminal`: the one rule for whether durable state may reopen a
+/// struck (`~~...~~`) queue row. Every projection that can reopen a struck
+/// row (preflight lifecycle markers, the claim command projection, and the
+/// relay attempt projection) calls this instead of keeping its own copy.
+///
+/// `claim` is the row identity's expiry-adjusted claim attempt. A strike is
+/// the row's terminal presentation, and finished-work evidence agrees with
+/// it: a `Reported` or `Lost` attempt, a reported-release receipt, and a
+/// binary completion cell all say the worker is done, and striking reported
+/// work is exactly how integration closes it. None of them reopens the row.
+/// Only an attempt that is still dispatching or running (`Claimed` /
+/// `Running`) contradicts the strike, so only it reopens the row as `❔`.
+///
+/// Before this rule, receipts and completion cells also reopened struck
+/// rows. Neither is retired by every strike path (only closeout `queue
+/// consume` strips completion cells, and receipts are pruned at closeout
+/// reconciliation), so the preflight residue strike, the orphan-id strike,
+/// and the controller's completion projection were each undone by the next
+/// projection: the row came back as `❔`, then `☑️` (receipt) or `🔄`
+/// (completion cell), and a go-mode queue offered finished work for a new
+/// dispatch.
+pub fn struck_row_reopened_by_claim(claim: Option<&QueueClaim>) -> bool {
+    claim.is_some_and(|claim| claim.state.reopens_struck_row())
+}
+
 impl QueueClaimState {
     pub fn blocks_dispatch(self) -> bool {
         matches!(self, Self::Claimed | Self::Running | Self::Reported)
+    }
+
+    /// Whether this (expiry-adjusted) attempt state contradicts a strike on
+    /// its row. See [`struck_row_reopened_by_claim`].
+    pub fn reopens_struck_row(self) -> bool {
+        matches!(self, Self::Claimed | Self::Running)
     }
 
     pub fn projection_marker(self) -> agent_doc_document::queue_projection::QueueLifecycleMarker {

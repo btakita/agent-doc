@@ -112,6 +112,26 @@ queues, and an item id shared by both queues stays two independent nodes.
 Before, the merge took the first component of the projected name on every
 side, so the second queue was merged against the first one's items.
 
+**Fenced markers are content for every line scanner (`#fencedmarkerscan`).**
+A component marker line that starts inside fenced or indented code is
+content, never an opener or a closer. Line scanners that walk component
+markers (the Markdown-AST overlay's `components`, the document-cell merge's
+body scan, its exchange-note injector, and its exchange-turn scan) classify
+marker lines through one shared rule, `overlay::ComponentMarkerScan`, instead
+of keeping their own opener/closer recognizers. So a queue row followed by a
+pasted report whose fence holds a bare `<!-- agent:run priority subagents -->`,
+a heading-anchored `## Run <!-- agent:run ... -->`, or a bare
+`<!-- /agent:run -->` line stays in the one queue the element parser and
+overlay see, on both sides of the fence. The merge rebuilds a non-exchange
+component by splicing each operator item node at its own source span (a
+multiline queue prompt included) and keeping every other operator line
+verbatim. Before, a fenced `<!-- /agent:run -->` line ended the operator's
+queue early in the merge scan, so the merged item set (with the agent's
+strike) was emitted there and the operator's remaining lines, including the
+unstruck copy of the row, were passed through again; a fenced
+`<!-- agent:queue -->` example in prose opened a component that swallowed the
+real queue after it; and a multiline queue prompt was emitted twice.
+
 `agent:run` is the canonical runnable-work component. The former
 `agent:queue` spelling remains a backward-compatible alias with identical queue
 semantics, attributes, node identity, and mutation behavior. Agent Doc accepts

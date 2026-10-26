@@ -7115,12 +7115,13 @@ pub fn run_queue_maintenance_with_coin_gate(
             let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
             let claim = claim_by_identity.get(&identity).copied();
             let receipt = receipt_by_identity.get(&identity).copied();
+            // `#strikeisterminal`: only a live attempt reopens a struck row;
+            // a receipt or completion cell agrees with the strike, so the
+            // residue strike earlier in this pass is never undone here.
             let durable_on_struck = matches!(
                 entry,
                 agent_doc_queue::document_queue::QueueEntry::Completed(_)
-            ) && (claim.is_some()
-                || receipt.is_some()
-                || completion_identities.contains(&identity));
+            ) && agent_doc_queue::queue_claim::struck_row_reopened_by_claim(claim);
             if matches!(
                 entry,
                 agent_doc_queue::document_queue::QueueEntry::Completed(_)
@@ -19202,6 +19203,199 @@ mod tests {
             vec!["subagent:palette"],
             "the struck head's claim is released; the deferred head stays claimed"
         );
+    }
+
+    /// Claim, start, and report one worker attempt on `item`, returning its
+    /// binary completion cell (the `### Re: Subagent completed` exchange cell).
+    fn reported_attempt_with_cell(doc: &std::path::Path, item: &str, owner: &str) -> String {
+        let (_, claimed) =
+            agent_doc_queue_io::queue_claim::claim(doc, item, owner, 3600).unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            doc,
+            item,
+            owner,
+            &format!("worker:{owner}"),
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &agent_doc_queue_io::queue_claim::completion_feedback_key(&running).unwrap(),
+            "Implemented and pushed; tests pass.",
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(doc, item, Some(running.generation))
+            .unwrap();
+        cell
+    }
+
+    /// `#strikeisterminal` (live 2026-10-26 15:03-15:07Z,
+    /// tasks/agent-doc/agent-doc-bugs.md, cycle-1793026977143): the `main`
+    /// queue held reported free-text rows on both sides of a pasted fenced
+    /// block whose body has a bare `<!-- agent:run priority subagents -->`
+    /// line. The closeout quoted every row, and the preflight residue strike
+    /// struck all of them (`struck=24`, claims `closed_by_strike`). The same
+    /// pass's lifecycle projection then reopened every struck row that still
+    /// had a completion cell or a reported-release receipt as `❔`, and the
+    /// next claim projection painted those `🔄` (cell) or `☑️` (receipt), so
+    /// a go-mode queue offered finished work for fresh dispatch. The fenced
+    /// marker was not the cause: every component scanner keeps one queue
+    /// here. A strike stays struck across repeated passes.
+    #[test]
+    fn run_queue_maintenance_keeps_struck_reported_rows_struck_around_a_fenced_run_marker() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let before = "tmux pane auto sync is not working. Sync Tmux Panes works.";
+        let title = "Run Agent Doc on sdk-demo.md still wedged even after I corrected the issue:";
+        let after = "The agent:loop is getting items sent to it, but the items should have been sent into `agent:run`.";
+        let orphan = "Rename \"## Completed / Reaped\" to \"## Done\"";
+        let fenced = concat!(
+            "```\n",
+            "In sdk-demo.md on disk, the Run section is:\n",
+            "\n",
+            "## Run\n",
+            "<!-- agent:run priority subagents -->\n",
+            "◇ markdown   [Copy]\n",
+            "\n",
+            "The marker is alone on its line, and <!-- /agent:run --> is alone on its line.\n",
+            "\n",
+            "## Run <!-- agent:run priority subagents -->\n",
+            "```\n",
+        );
+        let shell = |exchange: &str, main: &str| {
+            format!(
+                concat!(
+                    "---\n",
+                    "agent_doc_session: test\n",
+                    "agent_doc_format: template\n",
+                    "agent_doc_write: crdt\n",
+                    "queue: start\n",
+                    "---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "{exchange}",
+                    "<!-- /agent:exchange -->\n\n",
+                    "## Queue: Main\n",
+                    "<!-- agent:run id=\"main\" subagents go -->\n",
+                    "{main}",
+                    "<!-- /agent:run -->\n\n",
+                    "## Run: Issues\n",
+                    "<!-- agent:loop id=issues interval=1h priority -->\n",
+                    "- 📥 We need to work on making agent-doc easy to onboard.\n",
+                    "<!-- /agent:loop -->\n",
+                ),
+                exchange = exchange,
+                main = main,
+            )
+        };
+        let bare_main = format!(
+            "- {before}\n- {orphan}\n---\n{title}\n{fenced}---\n- {after}\n- 📥 still pending work\n"
+        );
+        std::fs::write(&doc, shell("", &bare_main)).unwrap();
+
+        // Worker cells for both rows; `before`'s claim stays Reported (cell
+        // only) and `after`'s is released with a reported-release receipt,
+        // the `lazily_block_reason` / `release_promotion_concurrency` shape.
+        let before_cell = reported_attempt_with_cell(&doc, before, "subagent:tmux_auto_sync");
+        let after_cell = reported_attempt_with_cell(&doc, after, "subagent:loop_routing");
+        agent_doc_queue_io::claim_release_receipt::release(
+            &doc,
+            after,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap();
+        // `orphan` was struck by an earlier binary strike (closeout / `queue
+        // consume --id`) and still carries a reported-release receipt.
+        let _orphan_cell = reported_attempt_with_cell(&doc, orphan, "subagent:done_verify");
+        agent_doc_queue_io::claim_release_receipt::release(
+            &doc,
+            orphan,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap();
+
+        let exchange = format!(
+            concat!(
+                "{before_cell}\n\n{after_cell}\n\n",
+                "### Re: cleanup the agent:loop + agent:run items — opus\n\n",
+                "> **Queue prompt:** {before}\n\n",
+                "> **Queue prompt:** {after}\n\n",
+                "> **Queue prompt:** {orphan}\n\n",
+                "Integrated and verified every reported row.\n",
+            ),
+            before_cell = before_cell,
+            after_cell = after_cell,
+            before = before,
+            after = after,
+            orphan = orphan,
+        );
+        let main = format!(
+            concat!(
+                "- ☑️ [#subagent:tmux_auto_sync#1] {before}\n",
+                "- ~~{orphan}~~\n",
+                "---\n",
+                "{title}\n",
+                "{fenced}",
+                "---\n",
+                "- ☑️ [#subagent:loop_routing#1] {after}\n",
+                "- 📥 still pending work\n",
+            ),
+            before = before,
+            orphan = orphan,
+            title = title,
+            fenced = fenced,
+            after = after,
+        );
+        let content = shell(&exchange, &main);
+        // One queue scanner verdict: the fenced marker never opens a component.
+        let components = agent_doc_element::element::parse(&content).unwrap();
+        assert_eq!(
+            components.iter().filter(|c| c.name == "queue").count(),
+            2,
+            "main + issues only; the fenced `<!-- agent:run -->` is content"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        for pass in 0..3 {
+            let _ = run_queue_maintenance(&doc, None).unwrap();
+            let updated = std::fs::read_to_string(&doc).unwrap();
+            let main_body = {
+                let comps = agent_doc_element::element::parse(&updated).unwrap();
+                let main = agent_doc_queue::queue_set::component_for_id(&updated, &comps, "main")
+                    .unwrap()
+                    .expect("main queue");
+                main.content(&updated).to_string()
+            };
+            for head in [before, after, orphan] {
+                assert!(
+                    main_body.contains(&format!("- ~~{head}~~\n")),
+                    "pass {pass}: a struck reported row must stay struck: {head:?}\n{main_body}"
+                );
+                for resurrected in ["❔", "🔄", "☑️"] {
+                    assert!(
+                        !main_body
+                            .lines()
+                            .any(|line| line.contains(head) && line.contains(resurrected)),
+                        "pass {pass}: {head:?} came back as {resurrected}\n{main_body}"
+                    );
+                }
+            }
+            assert!(
+                main_body.contains(fenced),
+                "pass {pass}: the pasted fenced block is preserved byte-for-byte\n{main_body}"
+            );
+            assert!(
+                main_body.contains("still pending work"),
+                "pass {pass}: unanswered work stays queued\n{main_body}"
+            );
+        }
     }
 
     #[test]

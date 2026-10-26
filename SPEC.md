@@ -100,6 +100,25 @@
   dropped this way is re-projected from its own state. A canonical change the
   buffer lacks still holds. The hold remedy says that no direction was proven
   lossless, never that the buffer diverged.
+- `#lagcanonicalrowmerge`: when canonical both lags the buffer and carries a
+  real controller change the buffer lacks (for example a claim marker on the
+  queue row the operator is typing on, a prefix of that typing, and a response
+  appended to the exchange), the rebase merges row-aware instead of holding.
+  Canonical's whole-line changes since the settled shadow are split by whether
+  they overlap an operator change. An overlapping change whose leading or
+  trailing whole lines are controller rows beside the operator's row is split
+  so those rows become insertions at that change's own boundary. Every
+  remaining overlapping change must pass the `#lagcanonicalrollforward` dual
+  proof, so the buffer is the answer on those rows. The independent changes
+  then roll forward onto the buffer through the line merge, under the same
+  lost-receipt guard and whole-line anchoring as any merge. Last, a queue row's
+  attempt projection that canonical changed is moved onto the buffer's row
+  with the same explicit work id, when that id names exactly one row in each
+  text, the row is not struck, and the operator left the row's projection as
+  it was. Every operator byte of the buffer is kept. A canonical change to a
+  row's work text that the buffer does not carry (a rewrite, a strike, a close
+  marker), or a controller insertion at the same boundary as an operator
+  insertion, is a true conflict and still holds.
 - A selected-document focus that resolves a proven live-owner pane outside the
   active `agent-doc` window must surface that pane before selection. Promotion
   and selection share the editor focus-generation fence, and the controller

@@ -160,11 +160,292 @@ pub fn rebase(
                     edits: splices_between(&current, &captured_result),
                     resulting_text: batch.resulting_text.clone(),
                 })
+            } else if let Some(merged) =
+                row_aware_roll_forward(base, canonical, &batch.resulting_text)
+            {
+                // `#lagcanonicalrowmerge`: canonical both lags the cut and made
+                // a real change the cut lacks (a response, an appended row).
+                let target: Vec<char> = merged.chars().collect();
+                let edits = splices_between(&current, &target);
+                let mut replayed = current.clone();
+                for edit in &edits {
+                    apply(&mut replayed, edit)?;
+                }
+                ensure!(
+                    replayed == target,
+                    "row-aware roll-forward splices did not reproduce the merge"
+                );
+                Ok(CapturedSpliceBatch {
+                    edits,
+                    resulting_text: merged,
+                })
             } else {
                 Err(refusal)
             }
         }
     }
+}
+
+/// `#lagcanonicalrowmerge`: the attach merge for a canonical that both lags the
+/// captured cut and carries a real controller change the cut lacks. The live
+/// shape (found by the `#lagcanonicalrollforward` attach fix, 2026-10-26): the
+/// controller ingested a prefix of the operator's typing on a queue row,
+/// projected a claim marker onto that row, and appended a response to the
+/// exchange, while the operator kept typing on the row. The dual proof refuses
+/// (the response is not in the cut) and the line merge refuses (both sides
+/// changed the row), so registration held for good.
+///
+/// Canonical's whole-line changes since `base` are split by whether they
+/// overlap an operator change (the [`line_merge`] overlap rule):
+///
+/// 1. The overlapping changes must all be carried by the cut, by the same dual
+///    proof over operator text ([`cut_carries_every_canonical_operator_change`]):
+///    canonical holds an earlier state of the operator's own typing there, plus
+///    only binary-owned projection. One canonical change on an operator row that
+///    the cut does not carry (a rewrite, a close marker, a response inserted at
+///    the boundary the operator also typed at) is a true conflict: `None`, and
+///    the caller's refusal stands.
+/// 2. The independent changes roll forward onto the cut through
+///    [`merge_forward`]: the lost-receipt guard, the line-granular merge, and
+///    [`canonical_change_lost_its_anchor`] all apply as on the ordinary path.
+/// 3. Each queue row's attempt projection canonical changed rolls forward by
+///    row identity ([`with_canonical_row_projection`]), so the claim marker
+///    lands on the operator's row whatever the operator typed there.
+///
+/// The cut is the base: every operator byte stays, and nothing is resolved
+/// toward `base` (the settled shadow) at the cost of operator text.
+fn row_aware_roll_forward(base: &str, canonical: &str, captured: &str) -> Option<String> {
+    let base_lines: Vec<&str> = base.split_inclusive('\n').collect();
+    let ours = line_hunks(
+        &base_lines,
+        &captured.split_inclusive('\n').collect::<Vec<_>>(),
+    );
+    let mut pieces = Vec::new();
+    for hunk in line_hunks(
+        &base_lines,
+        &canonical.split_inclusive('\n').collect::<Vec<_>>(),
+    ) {
+        if ours.contains(&hunk) {
+            continue;
+        }
+        if ours
+            .iter()
+            .any(|mine| line_hunks_overlap(&mine.old, &hunk.old))
+        {
+            pieces.extend(peel_controller_rows(base, &base_lines, hunk, captured));
+        } else {
+            pieces.push(hunk);
+        }
+    }
+    let (overlapping, independent): (Vec<LineHunk>, Vec<LineHunk>) =
+        pieces.into_iter().partition(|hunk| {
+            ours.iter()
+                .any(|mine| line_hunks_overlap(&mine.old, &hunk.old))
+        });
+    // No overlap: the ordinary planners already answered. No independent
+    // change: the dual proof over the whole canonical already answered.
+    if overlapping.is_empty() || independent.is_empty() {
+        return None;
+    }
+    let carried = apply_line_hunks(&base_lines, &overlapping);
+    if !cut_carries_every_canonical_operator_change(base, &carried, captured) {
+        return None;
+    }
+    let rolled = apply_line_hunks(&base_lines, &independent);
+    let base_chars: Vec<char> = base.chars().collect();
+    let rolled_chars: Vec<char> = rolled.chars().collect();
+    let captured_chars: Vec<char> = captured.chars().collect();
+    let windows = captured_windows(
+        &base_chars,
+        &rolled_chars,
+        &char_diff(&base_chars, &rolled_chars),
+        &captured_chars,
+        &char_diff(&base_chars, &captured_chars),
+    );
+    let merged = merge_forward(&base_chars, &rolled_chars, &captured_chars, &windows)
+        .ok()?
+        .resulting_text;
+    if canonical_change_lost_its_anchor(base, &rolled, captured) {
+        return None;
+    }
+    let projected = with_canonical_row_projection(base, canonical, &merged);
+    // The projection step touches only attempt projection, never operator text.
+    (operator_projection_text(&projected) == operator_projection_text(&merged)).then_some(projected)
+}
+
+/// Canonical hunks larger than this many lines are never peeled.
+const ROW_PEEL_LIMIT: usize = 64;
+
+/// `#lagcanonicalrowmerge`: a canonical hunk that overlaps an operator change,
+/// split into the rows the cut carries and whole controller rows beside them.
+///
+/// Myers groups adjacent changed lines, so a row canonical claimed (and holds a
+/// lagging prefix of) and a row the controller appended right after it are one
+/// hunk, and the appended row then fails the dual proof with the claimed one.
+/// The smallest run of leading and trailing whole lines is peeled off so the
+/// remaining core is carried by the cut
+/// ([`cut_carries_every_canonical_operator_change`]); each peeled run becomes an
+/// insertion at the hunk's own start or end boundary, which the caller then
+/// merges or refuses like any other canonical insertion (an insertion strictly
+/// inside an operator change still overlaps). The core is never empty, so a
+/// canonical that replaced the operator's rows wholesale is not reread as an
+/// insertion. A hunk no split carries is returned unchanged and holds.
+fn peel_controller_rows(
+    base: &str,
+    base_lines: &[&str],
+    hunk: LineHunk,
+    captured: &str,
+) -> Vec<LineHunk> {
+    let n = hunk.lines.len();
+    if n == 0 || n > ROW_PEEL_LIMIT {
+        return vec![hunk];
+    }
+    for peeled in 0..n {
+        for head in 0..=peeled {
+            let tail = peeled - head;
+            let core = LineHunk {
+                old: hunk.old.clone(),
+                lines: hunk.lines[head..n - tail].to_vec(),
+                edits_line: hunk.edits_line && peeled == 0,
+            };
+            let carried = apply_line_hunks(base_lines, std::slice::from_ref(&core));
+            if !cut_carries_every_canonical_operator_change(base, &carried, captured) {
+                continue;
+            }
+            let at = |line: usize, lines: &[String]| LineHunk {
+                old: line..line,
+                lines: lines.to_vec(),
+                edits_line: false,
+            };
+            let mut out = Vec::with_capacity(3);
+            if head > 0 {
+                out.push(at(hunk.old.start, &hunk.lines[..head]));
+            }
+            out.push(core);
+            if tail > 0 {
+                out.push(at(hunk.old.end, &hunk.lines[n - tail..]));
+            }
+            return out;
+        }
+    }
+    vec![hunk]
+}
+
+/// [`line_merge`]'s overlap rule between two base line ranges: both changed
+/// one base line, an insertion falls strictly inside a run the other changed,
+/// or both inserted at one boundary.
+fn line_hunks_overlap(a: &Range<usize>, b: &Range<usize>) -> bool {
+    if a.is_empty() && b.is_empty() {
+        a.start == b.start
+    } else if a.is_empty() {
+        b.start < a.start && a.start < b.end
+    } else if b.is_empty() {
+        a.start < b.start && b.start < a.end
+    } else {
+        a.start < b.end && b.start < a.end
+    }
+}
+
+/// `base_lines` with the non-overlapping `hunks` of one side applied.
+fn apply_line_hunks(base_lines: &[&str], hunks: &[LineHunk]) -> String {
+    let mut ordered: Vec<&LineHunk> = hunks.iter().collect();
+    ordered.sort_by_key(|hunk| (hunk.old.start, !hunk.old.is_empty()));
+    let mut out = String::new();
+    let mut at = 0;
+    for hunk in ordered {
+        out.extend(base_lines[at..hunk.old.start].iter().copied());
+        out.extend(hunk.lines.iter().map(String::as_str));
+        at = hunk.old.end;
+    }
+    out.extend(base_lines[at..].iter().copied());
+    out
+}
+
+/// One list row split as `indent + bullet`, attempt projection, work text.
+struct ProjectedRow<'a> {
+    lead: &'a str,
+    projection: &'a str,
+    work: &'a str,
+}
+
+impl<'a> ProjectedRow<'a> {
+    fn parse(line: &'a str) -> Option<Self> {
+        let indent = line.len() - line.trim_start().len();
+        let rest = &line[indent..];
+        let body = rest
+            .strip_prefix("- ")
+            .or_else(|| rest.strip_prefix("* "))?;
+        let work = agent_doc_element_queue::strip_attempt_projection_prefix(body);
+        let lead_len = indent + 2;
+        Some(Self {
+            lead: &line[..lead_len],
+            projection: &body[..body.len() - work.len()],
+            work,
+        })
+    }
+
+    /// The row's explicit work id: the first `[#id]` of its work text. A
+    /// struck row is completed work and never takes a projection; a free-text
+    /// row has no identity here.
+    fn key(&self) -> Option<&'a str> {
+        if self.work.starts_with("~~") {
+            return None;
+        }
+        let start = self.work.find("[#")? + 2;
+        let end = start + self.work[start..].find(']')?;
+        let id = &self.work[start..end];
+        (!id.is_empty() && !id.contains(char::is_whitespace)).then_some(id)
+    }
+}
+
+/// Each keyed row's projection in `text`; `None` when the key names more than
+/// one row, so no row of it is matched by identity.
+fn row_projections(text: &str) -> std::collections::HashMap<&str, Option<&str>> {
+    let mut rows = std::collections::HashMap::new();
+    for line in text.split_inclusive('\n') {
+        if let Some(row) = ProjectedRow::parse(line)
+            && let Some(key) = row.key()
+        {
+            rows.entry(key)
+                .and_modify(|seen: &mut Option<&str>| *seen = None)
+                .or_insert(Some(row.projection));
+        }
+    }
+    rows
+}
+
+/// `#lagcanonicalrowmerge`: `merged` with each queue row's attempt projection
+/// (a claim marker such as `🟡 [#subagent:x#1] `, a lifecycle or pin marker)
+/// taken from canonical where canonical changed it since `base` and the merged
+/// row still carries `base`'s projection. Rows are matched by their explicit
+/// work id, which must name exactly one row in each text. Every other row, and
+/// every byte of a matched row's work text, stays as merged. Skipping a row is
+/// never lossy: the controller re-projects its own claim state
+/// (`ProjectionDrift` -> `ProjectExpectedMarker`).
+fn with_canonical_row_projection(base: &str, canonical: &str, merged: &str) -> String {
+    let base_rows = row_projections(base);
+    let canonical_rows = row_projections(canonical);
+    let merged_rows = row_projections(merged);
+    let mut out = String::with_capacity(merged.len());
+    for line in merged.split_inclusive('\n') {
+        let rolled = ProjectedRow::parse(line).and_then(|row| {
+            let key = row.key()?;
+            let theirs = canonical_rows.get(key).copied().flatten()?;
+            // The merged row must be the only row of its work id, too.
+            merged_rows.get(key).copied().flatten()?;
+            let before = match base_rows.get(key) {
+                Some(projection) => (*projection)?,
+                None => "",
+            };
+            (row.projection == before && theirs != before)
+                .then(|| format!("{}{theirs}{}", row.lead, row.work))
+        });
+        match rolled {
+            Some(line) => out.push_str(&line),
+            None => out.push_str(line),
+        }
+    }
+    out
 }
 
 /// `#lagcanonicalrollforward`: whether `captured` carries every net change
@@ -397,31 +678,13 @@ fn line_merge(base: &str, yours: &str, agent: &str) -> Option<String> {
         .collect();
     for LineHunk { old: a, .. } in &ours {
         for LineHunk { old: b, .. } in &theirs {
-            let overlap = if a.is_empty() && b.is_empty() {
-                a.start == b.start
-            } else if a.is_empty() {
-                b.start < a.start && a.start < b.end
-            } else if b.is_empty() {
-                a.start < b.start && b.start < a.end
-            } else {
-                a.start < b.end && b.start < a.end
-            };
-            if overlap {
+            if line_hunks_overlap(a, b) {
                 return None;
             }
         }
     }
-    let mut events: Vec<&LineHunk> = ours.iter().chain(&theirs).collect();
-    events.sort_by_key(|hunk| (hunk.old.start, !hunk.old.is_empty()));
-    let mut out = String::with_capacity(base.len().max(yours.len()));
-    let mut at = 0;
-    for hunk in events {
-        out.extend(base_lines[at..hunk.old.start].iter().copied());
-        out.extend(hunk.lines.iter().map(String::as_str));
-        at = hunk.old.end;
-    }
-    out.extend(base_lines[at..].iter().copied());
-    Some(out)
+    let events: Vec<LineHunk> = ours.into_iter().chain(theirs).collect();
+    Some(apply_line_hunks(&base_lines, &events))
 }
 
 /// One whole-line edit: replace `base_lines[old]` with `lines`.
@@ -2094,6 +2357,249 @@ mod tests {
         );
     }
 
+    /// The shadow of the `#lagcanonicalrowmerge` fixtures: an exchange the
+    /// controller answers into, and a queue the operator types in.
+    const ROW_MERGE_SHADOW: &str = concat!(
+        "## Exchange\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: earlier\n",
+        "done\n",
+        "<!-- agent:boundary:5d1f0a2c -->\n",
+        "<!-- /agent:exchange -->\n",
+        "## Queue\n",
+        "<!-- agent:queue subagents -->\n",
+        "- [#docsnav] fix the docs navigation\n",
+        "- [#docsapi] document the CLI flags for PR 65\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    /// `canonical` with a controller response appended before the boundary.
+    fn with_response(text: &str) -> String {
+        text.replacen(
+            "<!-- agent:boundary:5d1f0a2c -->\n",
+            "### Re: docs\nclaimed docsnav\n<!-- agent:boundary:5d1f0a2c -->\n",
+            1,
+        )
+    }
+
+    /// `#lagcanonicalrowmerge` (found by the `#lagcanonicalrollforward` attach
+    /// fix, 2026-10-26). Canonical lags the buffer (it ingested the first
+    /// keystrokes of the operator's rewrite of a queue row) and also has a real
+    /// controller addition the buffer lacks: a claim marker on that row and a
+    /// response in the exchange. Every planner refuses (both sides rewrote the
+    /// row, and canonical already carries operator text), and the dual proof
+    /// refuses because the response is not in the buffer, so attach held. The
+    /// row-aware merge keeps every operator byte of the buffer, rolls the
+    /// response forward onto it, and puts the claim marker on the operator's
+    /// row by its work id.
+    #[test]
+    fn a_lagging_claimed_row_beside_a_response_merges_row_aware() {
+        let shadow = ROW_MERGE_SHADOW;
+        let row = "- [#docsnav] fix the docs navigation\n";
+        let buffer = shadow.replacen(
+            row,
+            "- [#docsnav] rework the sidebar links and anchors\n",
+            1,
+        );
+        let canonical = with_response(&shadow.replacen(
+            row,
+            "- 🟡 [#subagent:docsnav#1] [#docsnav] rework the\n",
+            1,
+        ));
+        let expected = with_response(&buffer.replacen(
+            "- [#docsnav]",
+            "- 🟡 [#subagent:docsnav#1] [#docsnav]",
+            1,
+        ));
+        let whole = single(shadow, &buffer);
+
+        // Neither earlier exit answers this shape; the row-aware merge does.
+        assert!(line_merge(shadow, &buffer, &canonical).is_none());
+        assert!(!cut_carries_every_canonical_operator_change(
+            shadow, &canonical, &buffer
+        ));
+        assert_eq!(
+            row_aware_roll_forward(shadow, &canonical, &buffer).as_deref(),
+            Some(expected.as_str())
+        );
+
+        let answer =
+            rebase(shadow, &canonical, &whole).expect("row-aware merge answers the combined case");
+        assert_eq!(replays_on(&canonical, &answer), expected);
+        assert_eq!(answer.resulting_text.matches("rework the").count(), 1);
+        assert_eq!(answer.resulting_text.matches("### Re: docs").count(), 1);
+        assert_eq!(
+            operator_projection_text(&answer.resulting_text),
+            operator_projection_text(&with_response(&buffer)),
+            "every operator byte of the buffer is kept"
+        );
+
+        // The plugin's per-keystroke capture and the registration path agree.
+        let typed = rebase(shadow, &canonical, &captured_typing(shadow, &buffer))
+            .expect("the keystroke stream merges the same way");
+        assert_eq!(typed.resulting_text, expected);
+        let registration =
+            crate::captured_splice_request::registration_rebase(shadow, &buffer, &canonical)
+                .expect("registration merge answers the row-aware merge");
+        assert_eq!(registration.resulting_text, expected);
+
+        // Typing appended after the ingested prefix (no rewrite) is the exact
+        // planner's case; the answer is the same row-aware text.
+        let buffer = shadow.replacen(
+            row,
+            "- [#docsnav] fix the docs navigation and the sidebar links\n",
+            1,
+        );
+        let canonical = with_response(&shadow.replacen(
+            row,
+            "- 🟡 [#subagent:docsnav#1] [#docsnav] fix the docs navigation and the\n",
+            1,
+        ));
+        let expected = with_response(&buffer.replacen(
+            "- [#docsnav]",
+            "- 🟡 [#subagent:docsnav#1] [#docsnav]",
+            1,
+        ));
+        let answer = rebase(shadow, &canonical, &single(shadow, &buffer))
+            .expect("appended typing beside a response merges");
+        assert_eq!(replays_on(&canonical, &answer), expected);
+    }
+
+    /// `#lagcanonicalrowmerge` over the docs.md sequence of
+    /// `#lagcanonicalrollforward`: a row deleted and pasted into the row the
+    /// controller then claimed, the operator still typing there, and this time
+    /// a response and a controller-appended queue row the buffer lacks.
+    #[test]
+    fn a_deleted_row_pasted_into_a_claimed_row_beside_a_response_merges_row_aware() {
+        let shadow = ROW_MERGE_SHADOW;
+        let rows =
+            "- [#docsnav] fix the docs navigation\n- [#docsapi] document the CLI flags for PR 65\n";
+        let merged_row = "- [#docsnav] fix the docs navigation and document the CLI flags";
+        let pasted = shadow.replacen(rows, &format!("{merged_row}\n"), 1);
+        let buffer = pasted.replacen(merged_row, &format!("{merged_row} with examples"), 1);
+        let follow_up = "- [#docsfollow] link the flags page\n";
+        let canonical = with_response(
+            &pasted
+                .replacen("- [#docsnav]", "- 🟡 [#subagent:pr65cli#1] [#docsnav]", 1)
+                .replacen(
+                    "<!-- /agent:queue -->",
+                    &format!("{follow_up}<!-- /agent:queue -->"),
+                    1,
+                ),
+        );
+        let expected = with_response(
+            &buffer
+                .replacen("- [#docsnav]", "- 🟡 [#subagent:pr65cli#1] [#docsnav]", 1)
+                .replacen(
+                    "<!-- /agent:queue -->",
+                    &format!("{follow_up}<!-- /agent:queue -->"),
+                    1,
+                ),
+        );
+        let answer = rebase(shadow, &canonical, &single(shadow, &buffer))
+            .expect("row-aware merge answers the combined case");
+        assert_eq!(replays_on(&canonical, &answer), expected);
+        assert!(
+            !answer.resulting_text.contains("[#docsapi]"),
+            "the deleted row stays deleted"
+        );
+        assert_eq!(
+            answer
+                .resulting_text
+                .matches("document the CLI flags")
+                .count(),
+            1
+        );
+    }
+
+    /// `#lagcanonicalrowmerge` stays fail-closed on a true conflict. Each
+    /// canonical below also lags the buffer and adds a response, so the
+    /// response alone would merge; the row the operator edited decides.
+    #[test]
+    fn a_true_row_conflict_beside_a_response_still_holds() {
+        let shadow = ROW_MERGE_SHADOW;
+        let row = "- [#docsnav] fix the docs navigation\n";
+        let buffer = shadow.replacen(
+            row,
+            "- [#docsnav] fix the docs navigation and the sidebar links\n",
+            1,
+        );
+        let whole = single(shadow, &buffer);
+
+        // The controller changed the row's work text in a way the buffer does
+        // not carry: no direction keeps both, so the merge holds.
+        let rewritten = with_response(&shadow.replacen(
+            row,
+            "- 🟡 [#subagent:docsnav#1] [#docsnav] fix the docs navigation and the (blocked on PR 65)\n",
+            1,
+        ));
+        let refusal = rebase(shadow, &rewritten, &whole)
+            .expect_err("a canonical row rewrite the buffer lacks holds");
+        assert!(
+            format!("{refusal:#}").contains("merge-forward refused")
+                || format!("{refusal:#}").contains("canonical"),
+            "{refusal:#}"
+        );
+        assert!(
+            crate::captured_splice_request::registration_rebase(shadow, &buffer, &rewritten)
+                .is_err()
+        );
+
+        // The controller struck the row the operator is typing on.
+        let struck =
+            with_response(&shadow.replacen(row, "- ~~[#docsnav] fix the docs navigation~~\n", 1));
+        assert!(rebase(shadow, &struck, &whole).is_err());
+
+        // The operator inserted a row at the boundary where the controller
+        // inserted its own row: both sides insert at one boundary.
+        let buffer = buffer.replacen(
+            "<!-- /agent:queue -->",
+            "- [#docsops] my new row\n<!-- /agent:queue -->",
+            1,
+        );
+        let canonical = with_response(
+            &shadow
+                .replacen(
+                    row,
+                    "- 🟡 [#subagent:docsnav#1] [#docsnav] fix the docs navigation and the\n",
+                    1,
+                )
+                .replacen(
+                    "<!-- /agent:queue -->",
+                    "- [#docsctl] controller row\n<!-- /agent:queue -->",
+                    1,
+                ),
+        );
+        assert!(rebase(shadow, &canonical, &single(shadow, &buffer)).is_err());
+    }
+
+    /// `#lagcanonicalrowmerge`: a claim marker is rolled forward only by an
+    /// unambiguous work id, and never onto a row the operator struck.
+    #[test]
+    fn row_projection_rolls_forward_only_by_unambiguous_identity() {
+        let base = "- [#a] one\n- [#b] two\n";
+        let canonical = "- 🟡 [#subagent:a#1] [#a] one\n- [#b] two\n";
+        assert_eq!(
+            with_canonical_row_projection(base, canonical, "- [#a] one more\n- [#b] two\n"),
+            "- 🟡 [#subagent:a#1] [#a] one more\n- [#b] two\n"
+        );
+        // The operator struck the row: completed work takes no projection.
+        assert_eq!(
+            with_canonical_row_projection(base, canonical, "- ~~[#a] one~~\n- [#b] two\n"),
+            "- ~~[#a] one~~\n- [#b] two\n"
+        );
+        // The operator changed the row's projection: theirs stays.
+        assert_eq!(
+            with_canonical_row_projection(base, canonical, "- 📌 [#a] one\n- [#b] two\n"),
+            "- 📌 [#a] one\n- [#b] two\n"
+        );
+        // Two merged rows name the work id: neither is matched.
+        assert_eq!(
+            with_canonical_row_projection(base, canonical, "- [#a] one\n- [#a] copy\n"),
+            "- [#a] one\n- [#a] copy\n"
+        );
+    }
+
     /// The dual proof is exact: a canonical deletion counts as carried only
     /// when the cut deleted the same base range.
     #[test]
@@ -2132,13 +2638,17 @@ mod tests {
     /// replica applied an operator burst that rewrote a queue line, the durable
     /// push timed out, and the controller ingested the frame anyway. The plugin
     /// kept its shadow at the pre-burst text while the operator kept typing on
-    /// the same line, then the controller appended a response. Rebasing the
-    /// whole retained stream from the stale shadow must keep refusing: canonical
-    /// already carries part of the operator's text, and this planner cannot tell
-    /// a lost receipt from a duplicate. The plugin's exit is exact instead: the
-    /// containment proof settles the burst, and only the later typing rebases
-    /// from the burst's result onto canonical, keeping the response and every
-    /// operator character exactly once.
+    /// the same line, then the controller appended a response. The plugin's exit
+    /// is exact: the containment proof settles the burst, and only the later
+    /// typing rebases from the burst's result onto canonical, keeping the
+    /// response and every operator character exactly once.
+    ///
+    /// Rebasing the whole retained stream from the stale shadow used to refuse
+    /// (canonical already carries part of the operator's text, so the ordinary
+    /// planners cannot tell a lost receipt from a duplicate). Since
+    /// `#lagcanonicalrowmerge` it answers the same text: canonical's change on
+    /// the operator's line is carried by the cut, so the cut wins there and
+    /// nothing is inserted twice, and the response rolls forward beside it.
     #[test]
     fn settled_burst_rebases_only_later_typing_over_a_response() {
         let shadow = concat!(
@@ -2177,12 +2687,18 @@ mod tests {
             &format!("{response}<!-- /agent:exchange -->"),
         );
 
-        let refusal = rebase(shadow, &canonical, &whole)
-            .expect_err("the stale-shadow rebase of the whole stream refuses (the livelock)");
-        assert!(
-            format!("{refusal:#}").contains("canonical already carries captured operator text"),
-            "{refusal:#}"
+        // The ordinary planners and the dual proof alone still refuse.
+        assert!(line_merge(shadow, &visible, &canonical).is_none());
+        assert!(!cut_carries_every_canonical_operator_change(
+            shadow, &canonical, &visible
+        ));
+        let expected = visible.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{response}<!-- /agent:exchange -->"),
         );
+        let row_merged = rebase(shadow, &canonical, &whole)
+            .expect("the stale-shadow rebase of the whole stream merges row-aware");
+        assert_eq!(replays_on(&canonical, &row_merged), expected);
 
         assert!(
             canonical_contains_captured(shadow, &canonical, &burst).unwrap(),
@@ -2201,10 +2717,6 @@ mod tests {
 
         let out = rebase(&settled, &canonical, &later)
             .expect("only the later typing rebases from the settled baseline");
-        let expected = visible.replace(
-            "<!-- /agent:exchange -->",
-            &format!("{response}<!-- /agent:exchange -->"),
-        );
         assert_eq!(out.resulting_text, expected);
         assert_eq!(out.resulting_text.matches("root-cause the").count(), 1);
         assert_eq!(out.resulting_text.matches("### Re: wedge").count(), 1);

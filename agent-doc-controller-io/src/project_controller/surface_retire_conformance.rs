@@ -1249,7 +1249,7 @@ impl Paired {
     /// Observe through both; they must agree. Returns the code's verdict and
     /// its re-registration directive.
     fn observe(&mut self, client: &str, g: u64, s: u64) -> (ModelVerdict, Option<u64>) {
-        let (rejection, receipt, muted) = self.graph.observe_monitored(
+        let (rejection, receipt, muted, _) = self.graph.observe_monitored(
             &self.scope,
             Path::new("/project"),
             EditorSurfaceObservation {
@@ -1260,6 +1260,7 @@ impl Paired {
                 surface: observation_surface(),
             },
             None,
+            false,
         );
         if muted.is_some() {
             self.alerts.push(s);

@@ -311,7 +311,17 @@ that route, and the forward orders the layout through its own `Sync`. A route
 that gets no measurement within its budget logs
 `controller_editor_route_measured_layout_unavailable action=undetected_fallback`
 and takes the GH #373 path unchanged. No layout is guessed, and an editor
-without the field never waits.
+without the field never waits. The forward that answers the route also
+publishes its own surface `Sync` (`publisher=editor_surface`, focus
+preserved), so the two would otherwise race for the desired layout: a route
+woken first published its fresh intent and was then superseded by that
+older-information `Sync` as a newer generation, losing the route's focus and
+publisher. A measured endpoint is therefore not consumed until the accepted
+observation's own handler has run its consequence: a lookup, with or without
+the await, that sees one pending waits for it to settle within the same
+budget. The surface `Sync` always lands first and the route's fresh intent is
+the newer generation (`publisher=route`, focus on the routed document),
+whatever the thread scheduling.
 `controller_editor_route_layout_mode` logs the mode, whether it was explicit,
 the merge (`exact`, `seeded`, `focus_only`, `replaced:N`, `added:N+replaced:M`,
 `dropped:N+replaced:M`) and the route, retained

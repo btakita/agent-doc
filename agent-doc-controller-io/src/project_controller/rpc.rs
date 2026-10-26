@@ -118,6 +118,12 @@ struct ControllerEditorSurfaceRoot {
     state: EditorSurfaceState,
     consequence: lazily::Effect,
     outcome: Arc<Mutex<Option<Result<String, String>>>>,
+    /// GH #376: accepted observations, by `(generation, sequence)`, whose
+    /// handler has not yet run their own consequence (the surface `Sync`
+    /// publication). A measured editor route does not consume this endpoint
+    /// until its observation has published, so the route's fresh intent is
+    /// always ordered after the surface publication it answers from.
+    publications_in_flight: BTreeSet<(u64, u64)>,
 }
 
 #[cfg(test)]
@@ -181,10 +187,53 @@ pub(super) struct ControllerEditorSurfaceGraph {
     /// (`#ridernavp6gc`). Lock order: `roots` is released before publishing.
     lane_reconcile: Option<Arc<NavigationLaneReconcileGraph>>,
     run_intent: ControllerEditorSurfaceIntentRunner,
-    /// Signalled (paired with `roots`) after every accepted observation, so an
-    /// editor route that awaits the frontend-measured layout (GH #376) wakes on
-    /// the forward itself instead of polling.
+    /// Signalled (paired with `roots`) after every accepted observation, and
+    /// again when that observation's own publication settles, so an editor
+    /// route that awaits the frontend-measured layout (GH #376) wakes on the
+    /// forward itself instead of polling.
     observed: Condvar,
+}
+
+/// GH #376: an accepted observation whose own surface publication is still
+/// running. Dropping it settles the publication and wakes measured routes.
+pub(super) struct EditorSurfacePublicationGuard<'a> {
+    graph: &'a ControllerEditorSurfaceGraph,
+    key: (PathBuf, String, String),
+    observation: (u64, u64),
+}
+
+impl Drop for EditorSurfacePublicationGuard<'_> {
+    fn drop(&mut self) {
+        let mut roots = self.graph.roots.lock();
+        if let Some(entry) = roots.get_mut(&self.key) {
+            entry.publications_in_flight.remove(&self.observation);
+        }
+        drop(roots);
+        self.graph.observed.notify_all();
+    }
+}
+
+/// GH #376: what a measured-route lookup found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MeasuredRouteLookup {
+    /// A settled measured forward answers the route.
+    Found,
+    /// A measured endpoint of the installation accepted an observation whose
+    /// own publication has not settled; the route waits for it.
+    PublicationPending,
+    /// No measured forward answers the route.
+    Absent,
+}
+
+#[cfg(test)]
+type MeasuredRouteLookupHook = Box<dyn Fn(MeasuredRouteLookup)>;
+
+#[cfg(test)]
+thread_local! {
+    /// Test hook (GH #376 race): runs on the route thread, with `roots`
+    /// unlocked, after every measured-route lookup, naming what it found.
+    static TEST_MEASURED_ROUTE_LOOKUP: std::cell::RefCell<Option<MeasuredRouteLookupHook>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// GH #376: the measured Remote Dev layout a zero-column editor route uses.
@@ -782,8 +831,8 @@ impl ControllerEditorSurfaceGraph {
         Option<SurfaceObservationRejection>,
         SurfaceObservationReceipt,
     ) {
-        let (rejection, receipt, _) =
-            self.observe_monitored(scope, project_root, observation, tmux);
+        let (rejection, receipt, _, _) =
+            self.observe_monitored(scope, project_root, observation, tmux, false);
         (rejection, receipt)
     }
 
@@ -798,16 +847,25 @@ impl ControllerEditorSurfaceGraph {
     /// a still-live editor acts on (`#surfaceretireformal`). The third value is
     /// the runtime monitor's alert: this endpoint just reached
     /// [`RETIRED_ENDPOINT_MUTE_THRESHOLD`] consecutive retired rejections.
+    ///
+    /// `hold_publication` is set by the handler that runs the accepted
+    /// observation's own consequence. The returned guard then holds that
+    /// observation back from measured editor routes (GH #376) until the
+    /// handler drops it after publishing, so an awaiting route cannot publish
+    /// its fresh intent ahead of the surface `Sync` it answers from and then
+    /// be superseded by it.
     fn observe_monitored(
         &self,
         scope: &agent_doc_state_scope::ProcessScope,
         project_root: &Path,
         observation: EditorSurfaceObservation,
         tmux: Option<TmuxLayout>,
+        hold_publication: bool,
     ) -> (
         Option<SurfaceObservationRejection>,
         SurfaceObservationReceipt,
         Option<MutedLiveEndpoint>,
+        Option<EditorSurfacePublicationGuard<'_>>,
     ) {
         let key = (
             project_root.to_path_buf(),
@@ -842,6 +900,7 @@ impl ControllerEditorSurfaceGraph {
                     reregister_above_generation,
                 },
                 muted,
+                None,
             );
         }
 
@@ -876,6 +935,8 @@ impl ControllerEditorSurfaceGraph {
         let run_intent = Arc::clone(&self.run_intent);
         let authority = focus_owner.authority_for(&observation.client_id);
         let joined = !roots.contains_key(&key);
+        let publication_key = hold_publication.then(|| key.clone());
+        let observation_id = (observation.generation, observation.sequence);
         let entry = roots.entry(key).or_insert_with(|| {
             let state = EditorSurfaceState::new_in_with_authority(scope, authority);
             let outcome = Arc::new(Mutex::new(None));
@@ -895,6 +956,7 @@ impl ControllerEditorSurfaceGraph {
                 state,
                 consequence,
                 outcome,
+                publications_in_flight: BTreeSet::new(),
             }
         });
 
@@ -902,6 +964,9 @@ impl ControllerEditorSurfaceGraph {
         entry.sequence = observation.sequence;
         entry.retired_monitor.record(None);
         *entry.outcome.lock() = None;
+        if hold_publication {
+            entry.publications_in_flight.insert(observation_id);
+        }
         match tmux {
             Some(layout) => entry
                 .state
@@ -912,6 +977,12 @@ impl ControllerEditorSurfaceGraph {
         let deferred_to = entry.state.fold().deferred_to;
         let consequence = entry.outcome.lock().clone();
         drop(roots);
+        // Created after `roots` is released: its drop takes that lock.
+        let publication = publication_key.map(|key| EditorSurfacePublicationGuard {
+            graph: self,
+            key,
+            observation: observation_id,
+        });
         self.observed.notify_all();
         if joined {
             self.publish_installation_liveness(project_root);
@@ -940,6 +1011,7 @@ impl ControllerEditorSurfaceGraph {
                 reregister_above_generation: None,
             },
             None,
+            publication,
         )
     }
 
@@ -1025,13 +1097,19 @@ impl ControllerEditorSurfaceGraph {
 
     /// GH #376: the newest live measured forward of `installation` on
     /// `project_root` that shows the routed document, as that route's layout.
+    ///
+    /// An endpoint whose accepted observation is still publishing its own
+    /// surface `Sync` is not consumed yet: the lookup waits, until `deadline`
+    /// at most, for that publication to settle, so the route's fresh intent is
+    /// ordered after it rather than racing it for the desired layout.
     pub(super) fn measured_route_layout(
         &self,
         project_root: &Path,
         installation: &str,
         holds_routed: &dyn Fn(&str) -> bool,
+        deadline: Instant,
     ) -> Option<MeasuredEditorRouteLayout> {
-        Self::measured_route_layout_in(&self.roots.lock(), project_root, installation, holds_routed)
+        self.measured_route_layout_until(project_root, installation, holds_routed, deadline, false)
     }
 
     /// [`Self::measured_route_layout`], waiting for an accepted observation to
@@ -1044,12 +1122,33 @@ impl ControllerEditorSurfaceGraph {
         holds_routed: &dyn Fn(&str) -> bool,
         deadline: Instant,
     ) -> Option<MeasuredEditorRouteLayout> {
+        self.measured_route_layout_until(project_root, installation, holds_routed, deadline, true)
+    }
+
+    fn measured_route_layout_until(
+        &self,
+        project_root: &Path,
+        installation: &str,
+        holds_routed: &dyn Fn(&str) -> bool,
+        deadline: Instant,
+        await_absent: bool,
+    ) -> Option<MeasuredEditorRouteLayout> {
         let mut roots = self.roots.lock();
         loop {
-            if let Some(found) =
-                Self::measured_route_layout_in(&roots, project_root, installation, holds_routed)
-            {
-                return Some(found);
+            let (lookup, found) =
+                Self::measured_route_layout_in(&roots, project_root, installation, holds_routed);
+            #[cfg(test)]
+            parking_lot::MutexGuard::unlocked(&mut roots, || {
+                TEST_MEASURED_ROUTE_LOOKUP.with(|hook| {
+                    if let Some(hook) = hook.borrow().as_ref() {
+                        hook(lookup);
+                    }
+                });
+            });
+            match lookup {
+                MeasuredRouteLookup::Found => return found,
+                MeasuredRouteLookup::Absent if !await_absent => return None,
+                MeasuredRouteLookup::Absent | MeasuredRouteLookup::PublicationPending => {}
             }
             if self.observed.wait_until(&mut roots, deadline).timed_out() {
                 return Self::measured_route_layout_in(
@@ -1057,7 +1156,8 @@ impl ControllerEditorSurfaceGraph {
                     project_root,
                     installation,
                     holds_routed,
-                );
+                )
+                .1;
             }
         }
     }
@@ -1067,8 +1167,9 @@ impl ControllerEditorSurfaceGraph {
         project_root: &Path,
         installation: &str,
         holds_routed: &dyn Fn(&str) -> bool,
-    ) -> Option<MeasuredEditorRouteLayout> {
-        roots
+    ) -> (MeasuredRouteLookup, Option<MeasuredEditorRouteLayout>) {
+        let mut publication_pending = false;
+        let found = roots
             .iter()
             .filter(|((root, client_id, _), _)| {
                 root == project_root
@@ -1076,6 +1177,11 @@ impl ControllerEditorSurfaceGraph {
                         client_id,
                         installation,
                     )
+            })
+            .filter(|(_, entry)| {
+                let settled = entry.publications_in_flight.is_empty();
+                publication_pending |= !settled;
+                settled
             })
             .filter_map(|((_, client_id, surface_id), entry)| {
                 let retained = agent_doc_editor_surface::RetainedEditorSurface {
@@ -1093,7 +1199,15 @@ impl ControllerEditorSurfaceGraph {
                     },
                 )
             })
-            .max_by_key(|measured| measured.sequence)
+            .max_by_key(|measured| measured.sequence);
+        let lookup = if publication_pending {
+            MeasuredRouteLookup::PublicationPending
+        } else if found.is_some() {
+            MeasuredRouteLookup::Found
+        } else {
+            MeasuredRouteLookup::Absent
+        };
+        (lookup, found)
     }
 
     fn forget(&self, project_root: &Path, client_id: &str, generation: u64) -> bool {
@@ -14522,7 +14636,12 @@ fn resolve_editor_route_measured_layout(
         |file: &str| canonical_layout_document_id(project_root, file) == routed_document;
     let graph = &runtime.editor_surface_graph;
     let started = Instant::now();
-    let measured = match graph.measured_route_layout(project_root, installation, &holds_routed) {
+    let measured = match graph.measured_route_layout(
+        project_root,
+        installation,
+        &holds_routed,
+        route_deadline,
+    ) {
         Some(measured) => measured,
         None => {
             if payload.layout_authority.as_deref()
@@ -15001,6 +15120,16 @@ impl LiveLayoutDocumentsObservation {
             session_source,
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test hook (GH #376 race): runs on the observing thread after the
+    /// surface graph accepted an observation and woke its awaiting routes, and
+    /// before that observation publishes its own `Sync`. A test uses it to
+    /// order an awaiting route's publication before the surface's.
+    static TEST_BEFORE_EDITOR_SURFACE_SYNC_PUBLISH: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -29236,12 +29365,16 @@ fn handle_editor_surface_observe(
     // converge, so the editor socket request never blocks on a tmux survey.
     // Cold start (no retained observation) derives `Sync`, which schedules the
     // worker through the in-process publish below.
-    let (rejection, mut receipt, muted) = runtime.editor_surface_graph.observe_monitored(
-        &runtime._scope,
-        &bootstrap.project_root,
-        observation,
-        None,
-    );
+    // GH #376: `_publication` holds this observation back from a measured
+    // editor route until the handler has run its consequence below.
+    let (rejection, mut receipt, muted, _publication) =
+        runtime.editor_surface_graph.observe_monitored(
+            &runtime._scope,
+            &bootstrap.project_root,
+            observation,
+            None,
+            true,
+        );
     let accepted = rejection.is_none();
     // `#surfaceretireformal` runtime monitor of `LiveEndpointNeverMuted`: every
     // retired-endpoint rejection already carries the re-registration directive
@@ -29381,6 +29514,12 @@ fn handle_editor_surface_observe(
                     generation: projection_identity.2,
                     sequence: projection_identity.3,
                 };
+                #[cfg(test)]
+                TEST_BEFORE_EDITOR_SURFACE_SYNC_PUBLISH.with(|hook| {
+                    if let Some(hook) = hook.borrow().as_ref() {
+                        hook();
+                    }
+                });
                 let publish_result =
                     super::with_pane_layout_editor_publication(editor_order, || {
                         publish_pane_layout_desired_invocation_in_lane(
@@ -46853,12 +46992,14 @@ mod tests {
         let (scope, graph, _effects) = surface_retire_graph();
         let root = Path::new("/project");
         let observe = |generation: u64, sequence: u64| {
-            graph.observe_monitored(
+            let (rejection, receipt, muted, _) = graph.observe_monitored(
                 &scope,
                 root,
                 surface_retire_observation(generation, sequence, "/project/a.md"),
                 None,
-            )
+                false,
+            );
+            (rejection, receipt, muted)
         };
         assert_eq!(observe(5, 1).2, None);
         assert!(
@@ -49225,6 +49366,152 @@ mod tests {
             !ops.contains("editor route requires the exact visible layout before dispatch")
                 && !ops.contains("controller_editor_route_measured_layout_unavailable"),
             "{ops}"
+        );
+    }
+
+    /// Spawn the GH #376 zero-column route for `alpha` and return once it has
+    /// logged that it awaits the measurement. `on_lookup` runs on the route
+    /// thread after each of its measured-route lookups.
+    fn gh376_spawn_awaiting_route(
+        fixture: &RouteLayoutFixture,
+        on_lookup: impl Fn(MeasuredRouteLookup) + Send + 'static,
+    ) -> std::thread::JoinHandle<Result<ControllerEditorRouteResult>> {
+        let runtime = Arc::clone(&fixture.runtime);
+        let bootstrap = fixture.bootstrap.clone();
+        let request = gh376_zero_column_route_request(
+            fixture,
+            "alpha",
+            Some(agent_doc_editor_surface::ROUTE_LAYOUT_AUTHORITY_FRONTEND_MEASURED),
+            60,
+        );
+        let route = std::thread::spawn(move || {
+            TEST_MEASURED_ROUTE_LOOKUP.with(|hook| *hook.borrow_mut() = Some(Box::new(on_lookup)));
+            handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request)
+        });
+        let hang_guard = Instant::now() + Duration::from_secs(60);
+        while !fixture
+            .ops_log()
+            .contains("controller_editor_route_measured_layout_awaiting file=")
+        {
+            assert!(!route.is_finished(), "{}", fixture.ops_log());
+            assert!(Instant::now() < hang_guard, "{}", fixture.ops_log());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        route
+    }
+
+    /// GH #376 race, the interleaving a loaded `make check-fast` hit: the
+    /// awaiting route is woken by the measured forward and looks again BEFORE
+    /// the observing thread has published that observation's own surface
+    /// `Sync`. The route used to resolve and publish its fresh intent at once,
+    /// and the surface `Sync` (focus-preserving, `caller_kind=automatic`)
+    /// then superseded it as a newer generation, so the published layout lost
+    /// the route's focus and publisher. The observation is now held back from
+    /// the route until its publication settles: the route sees it pending,
+    /// the surface publishes, and only then does the route publish, last.
+    ///
+    /// The surface hook releases on whichever comes first, the route seeing
+    /// the observation pending or the route's own publication landing, so the
+    /// same test forces the old order on a build without the hold.
+    #[test]
+    fn gh376_route_woken_before_the_surface_sync_publishes_still_publishes_last() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        let saw_pending = Arc::new(AtomicBool::new(false));
+        let route = gh376_spawn_awaiting_route(&fixture, {
+            let saw_pending = Arc::clone(&saw_pending);
+            move |lookup| {
+                if lookup == MeasuredRouteLookup::PublicationPending {
+                    saw_pending.store(true, Ordering::SeqCst);
+                }
+            }
+        });
+        struct SurfaceHookGuard;
+        impl Drop for SurfaceHookGuard {
+            fn drop(&mut self) {
+                TEST_BEFORE_EDITOR_SURFACE_SYNC_PUBLISH.with(|hook| *hook.borrow_mut() = None);
+            }
+        }
+        let _surface_hook = SurfaceHookGuard;
+        let desired_before_surface_publish = Arc::new(Mutex::new(None));
+        TEST_BEFORE_EDITOR_SURFACE_SYNC_PUBLISH.with(|hook| {
+            let runtime = Arc::clone(&fixture.runtime);
+            let saw_pending = Arc::clone(&saw_pending);
+            let desired_before_surface_publish = Arc::clone(&desired_before_surface_publish);
+            *hook.borrow_mut() = Some(Box::new(move || {
+                let hang_guard = Instant::now() + Duration::from_secs(60);
+                while !saw_pending.load(Ordering::SeqCst) && runtime.pane_layout_desired().is_none()
+                {
+                    assert!(
+                        Instant::now() < hang_guard,
+                        "the woken route neither saw the pending observation nor published"
+                    );
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                *desired_before_surface_publish.lock() = Some(runtime.pane_layout_desired());
+            }));
+        });
+        gh376_forward_measured_columns(&fixture, fixture.runtime.as_ref());
+
+        let routed = route
+            .join()
+            .expect("route thread")
+            .expect("the measured layout answers the route");
+        assert_eq!(routed.exit_code, 0, "{}", routed.output);
+        gh376_assert_route_published_the_measured_layout(&fixture, fixture.runtime.as_ref());
+        assert!(
+            saw_pending.load(Ordering::SeqCst),
+            "the woken route looked while the observation's own publication was pending"
+        );
+        assert_eq!(
+            desired_before_surface_publish.lock().clone(),
+            Some(None),
+            "the route published nothing before the surface's own `Sync`"
+        );
+        let desired = fixture.runtime.pane_layout_desired().unwrap();
+        assert_eq!(
+            desired.invocation.focus.as_deref(),
+            Some(fixture.id("alpha").as_str())
+        );
+        assert_eq!(desired.invocation.caller_kind, "editor_route");
+    }
+
+    /// GH #376 race, the other order: when the route finds the measurement,
+    /// the observation's own surface `Sync` has already landed, so the
+    /// route's fresh intent is the newer generation.
+    #[test]
+    fn gh376_route_resolves_only_after_the_surface_sync_has_published() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        let desired_when_found = Arc::new(Mutex::new(Vec::new()));
+        let route = gh376_spawn_awaiting_route(&fixture, {
+            let runtime = Arc::clone(&fixture.runtime);
+            let desired_when_found = Arc::clone(&desired_when_found);
+            move |lookup| {
+                if lookup == MeasuredRouteLookup::Found {
+                    desired_when_found
+                        .lock()
+                        .push(runtime.pane_layout_desired());
+                }
+            }
+        });
+        gh376_forward_measured_columns(&fixture, fixture.runtime.as_ref());
+        let routed = route
+            .join()
+            .expect("route thread")
+            .expect("the measured layout answers the route");
+        assert_eq!(routed.exit_code, 0, "{}", routed.output);
+        let found = desired_when_found.lock().clone();
+        assert_eq!(found.len(), 1, "{found:?}");
+        let surface = found[0]
+            .as_ref()
+            .expect("the surface `Sync` landed before the route resolved");
+        assert_eq!(
+            surface.provenance.publisher,
+            PaneLayoutPublisher::EditorSurface
+        );
+        gh376_assert_route_published_the_measured_layout(&fixture, fixture.runtime.as_ref());
+        assert!(
+            fixture.runtime.pane_layout_desired().unwrap().generation > surface.generation,
+            "the route's intent is the newer generation"
         );
     }
 

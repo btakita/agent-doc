@@ -416,6 +416,14 @@ The authoritative integration gates passed: 11,506 Rust tests (177 skipped), 204
 The current packages are installed locally. Direct evidence closes `#hj2r` and `#helpregisterjetbrains`. Live restart/operator proof remains open for IntelliJ 2026.3 under `#jb263-feed-verify` and for the two-sided Coder Remote Dev path under `#coder-remote-install-02805`.
 
 The initial release workflow's aggregate promotion job was cancelled by a concurrency race with the per-target fan-out. Its isolated rerun succeeded and the release is fully green; `#release-promotion-concurrency` now tracks removing that manual recovery path.
+
+### Re: The queue is full of items. Are there complete? — gpt-6.1-sol · 2026-10-26T03:27:00-04:00
+
+> **Queue prompt:** The queue is full of items. Are there complete?
+
+Yes. The items marked ☑️ in the completed release batch reported successfully, were integrated and verified, and shipped in `v0.35.552`. Their retained completion notices are historical evidence, not unfinished implementation work.
+
+The queue is not globally empty: `do [#layoutunprovenliveverify]` is the next unclaimed implementation/verification item, and the live operator proofs for `#jb263-feed-verify` and `#coder-remote-install-02805` remain open. Those are separate from the completed release batch.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 

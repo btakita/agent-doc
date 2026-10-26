@@ -25,7 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 23 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -719,6 +719,34 @@ The fenced-marker investigation worker is finding the cause and fixing it. Its o
 **Corrections to earlier responses.** I referred to `#layoutliveverify-check` and `#claimrowmigrate-check`. agent-doc filed those todos under their backlog ids instead, `#layoutunprovenliveverify` and `#claimrowmigrate`. The 10:12 response heading also said 10:53 by mistake.
 
 Still running: the tmux auto-sync delay worker and the two controller-test flake workers.
+
+### Re: tmux pane auto-sync delay — opus-5 · 2026-10-26T11:52-04:00
+
+> **Queue prompt:** tmux pane auto-sync has a large delay. Is this due to the upgrade being installed? Either way, this should be fixed.
+
+No, the installs are not the cause. They are what eventually synced the panes. On IntelliJ 2026.3 and Rider 2026.2, switching tabs never triggered a tmux sync. A tab switch reached tmux only at the next install, Run Agent Doc, or split-layout change. This is now fixed in `9f7591405b`, which is installed. It takes effect after you restart both IDEs.
+
+**Evidence, all from logs:**
+
+- **The controller is fast.** Once it receives a layout, tmux matches it within about a second.
+- **Every automatic sync followed an install.** Today's syncs at 14:21:17Z, 14:26:42Z, and 15:02:37Z each landed exactly when the plugin finished reloading the native library after an install. The plugin re-sends the layout after every reload, so each install looked like the moment sync caught up.
+- **The real delays:**
+  - The 12:49Z switch to `monsterrodholders.md` reached tmux at 13:09Z, 20 minutes later, at the next install.
+  - The 15:05:50Z switch to `sdk-demo.md` arrived only when you ran Run Agent Doc at 15:06:19Z.
+- **The tab-switch handler never runs in the modular plugin.** `[layout-sync] selection file=` appears 39 times in the 2026.1 IDE log and 0 times in the 2026.2 and 2026.3 logs.
+
+**Cause:** The 2026.2 and 2026.3 builds use a modular plugin package. Since Oct 9, its build has generated a startup file that strips the tab-switch, split-focus, and activation hooks. The Oct 24 change `69e2426089` correctly kept the new local editor bridge from taking over layout, but it assumed those old hooks still covered a local IDE.
+
+**Fix:**
+
+- The generated startup file keeps those hooks, and the build fails if any of them goes missing.
+- A Remote Dev client that owns the layout still blocks this path, so Remote Dev behaves as before.
+- New test: `ModularLifecycleLocalSelectionIngressTest` fails 3/3 on the old build and passes with the fix.
+- Spec: `editors/SPEC.md` §4 now requires every package to keep a live automatic sync trigger. A re-sync that happens only as a side effect of an install or Run does not count.
+
+**Verification:** The worker's run passed 71 modular-plugin tests plus `make jetbrains-262-check` and `make jetbrains-263-check`. I bumped the package generations to JetBrains 2026.2 0.2.831 and 2026.3 0.2.832, and the coordinator's `make check-fast` passed.
+
+Until you restart, Sync Tmux Panes or Run Agent Doc syncs immediately. After restarting, run the `#autosync-restart-verify` check.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -728,7 +756,7 @@ Still running: the tmux auto-sync delay worker and the two controller-test flake
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🔄 In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
-- ☑️ [#subagent:lazily_block_reason#1] On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
+- 🔄 On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
 - 🔄 release + publish: include issue 372 + sdk-demo.md issue + lazily.md issue
 - 🔄 tmux pane auto sync is not working. Sync Tmux Panes works.
 - 🔄 In the Claim for Tmux Pane template, make each `##` header on the same line as the open tag such as: `## Run <!-- agent:run priority subagents -->`. This is to reduce extra spaces in the document to allow for more information to be added in the view pane. `## Queue` should be renamed to `## Run`.
@@ -812,7 +840,9 @@ After the tab shows the marker on its own line, ask again and I will run session
 force-write the file, and do not delete the queue items.                                                         █
 ```
 ---
+---
 🔄 Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
+---
 ---
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
@@ -821,8 +851,9 @@ force-write the file, and do not delete the queue items.                        
 - 🚧 [#subagent:socketexitflake#1] fix nondeterministic agent-doc-controller-io rpc::tests controller_exits_when_its_public_socket_is_unlinked_under_a_surviving_root — failed 1 of 30 full parallel crate runs (2026-10-26)
 - 🔄 document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence
 - 🔄 release + publish
-- 🚧 [#subagent:autosyncdelay#1] tmux pane auto-sync has a large delay. Is this due to the upgrade being installed? Either way, this should be fixed.
-- 🚧 [#subagent:fencedmarker#1] The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last relase.
+- ☑️ [#subagent:autosyncdelay#1] tmux pane auto-sync has a large delay. Is this due to the upgrade being installed? Either way, this should be fixed.
+- 🚧 [#subagent:fencedmarker#1] The agent:run + agent:loop in this document are still out of sync? There are many items in ☑️ state which have been around before our last release.
+- 🚧 [#subagent:gh376#1] #gh-fix https://github.com/btakita/agent-doc/issues/376
 <!-- /agent:run -->
 
 ## Run: Issues
@@ -831,6 +862,7 @@ force-write the file, and do not delete the queue items.                        
 - 📥 do [#grokqueuesubagents]
 - 🔄 release + publish
 - 📥 We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
+- 📥 What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
 <!-- /agent:loop -->
 
 ## Todo
@@ -841,6 +873,7 @@ force-write the file, and do not delete the queue items.                        
 - [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
 - [x] [#claimrowmigrate] After #claimrowmigrate ships, confirm a duplicated queue row keeps its own claim marker when agent-doc adds ⟦effect:N⟧ annotations. (source: agent:backlog [#claimrowmigrate])
 - [ ] [#layoutunprovenliveverify] In the IDE, open the cross-root sdk-demo.md and agent-doc-bugs.md together, run Sync Tmux Layout, and confirm it recreates the stale sdk-demo pane and converges to two panes without focusing an ownership-unproven pane; restart the IDE first so JetBrains 0.2.828+ is loaded. (source: agent:review [#layoutunprovenliveverify])
+- [ ] [#autosync-restart-verify] Restart IntelliJ IDEA 2026.3 and Rider 2026.2 so JetBrains 0.2.832/0.2.831 load, then switch editor tabs: tmux should follow within about a second with no install or Run Agent Doc in between (idea.log shows `[layout-sync] selection file=`).
 <!-- /agent:todo -->
 
 ## Backlog

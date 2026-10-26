@@ -25,17 +25,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 28 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 27 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.552 from release commit `880d0adf2d`; tag `v0.35.552` is the stable latest release. Post-release `origin/main` is now `42bd3810a8`. The release contains all six native archives and checksums, VS Code 0.2.83, JetBrains classic/262/263 versions 0.2.825/0.2.826/0.2.827, update feeds, Marketplace upload receipts, and aggregate checksums. All platform, plugin, target-channel, Homebrew, and PyPI publication jobs succeeded.
-
-The authoritative release integration gate passed: 11,506 Rust tests (177 skipped), 204 VS Code tests, 1 cross-editor test, 8 Python tests, all three JetBrains builds/verifiers with zero internal/override findings, 153 TLA checks, and the full live tmux CI suite. A release-gate regression was fixed before publication so displaced protected open-cycle panes stay pinned as stash during post-sync doctor reconciliation.
-
-Post-release commit `42bd3810a8` fixes the promotion concurrency race by applying `queue: max` to both workflows sharing the stable-channel concurrency group. Its exact regression, `make check-fast` (1,975 tests), clippy, docs/release self-tests, workspace build, local install, and main push passed.
-
-The current packages are installed locally. Operator verification closed #hj2r and #helpregisterjetbrains. Live restart proof remains open for IntelliJ 2026.3 under #jb263-feed-verify and for the two-sided Coder Remote Dev path under #coder-remote-install-02805. The next unclaimed implementation/verification queue head is #layoutunprovenliveverify.
+Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release, PyPI serves 0.35.553, all six native archives promoted to their stable target channels, and Homebrew is bumped. JetBrains classic/262/263 stay at 0.2.825/0.2.826/0.2.827 and VS Code at 0.2.83 (sources unchanged). Post-release `origin/main` is `3cdcc5a31e` and includes the `#claimrowmigrate` claim-row fix and the Marketplace retained-version fix; that mainline is installed locally.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -459,6 +453,42 @@ Once `layout_liveverify#2` reports back, the coordinator should integrate its re
 I also found a defect. When agent-doc added the ⟦effect⟧ annotations to the two identical `release + publish` rows, the stale `release_publish_patch#3` claim moved from its original row onto the freshly restored one. The original row became 📥. That is why the restored request looked complete. I filed it as `#claimrowmigrate`, with a matching check in the todo list.
 
 The other ☑️ rows in `Queue: Main` are completed handbacks that shipped in v0.35.552, as the 03:27 closeout recorded. They are not unfinished work. The exchange is now 400 lines, but the queue is still active, so I did not compact it.
+
+### Re: release + publish v0.35.553 — opus-5 · 2026-10-26T09:55-04:00
+
+> **Chat prompt (#chatprompt:5ef65fd9ea8b):** release + publish now
+
+> **Queue prompt:** release + publish ⟦effect:2⟧
+
+Released and published `agent-doc v0.35.553` from release commit `a0a525fb65`. Tag `v0.35.553` is the stable Latest release with all 24 assets: six native archives, the JetBrains and VS Code packages and feeds, and the checksums. PyPI serves 0.35.553. All six target channels are promoted, and the Homebrew formula is bumped. The release gate passed: `make check` ran 11,506 Rust tests with 177 skipped, and the editor parity audit passed. The release-profile build is installed locally.
+
+The JetBrains plugins stay at 0.2.825/0.2.826/0.2.827 and VS Code at 0.2.83, because their sources are byte-identical to 0.35.552.
+
+**The first run failed, and I repaired it.** Marketplace rejected the carried-over plugin versions: `400 ... already contains version 0.2.825 in channel`. The workflow looks for upload markers on the current tag only. The failed `plugins` job also skipped the editor-package upload and checksums, so every stable-channel promotion failed on the missing `EDITOR-PACKAGES.sha256`. I copied the three Marketplace markers from v0.35.552 to v0.35.553 and reran the failed job. Each marker still names `880d0adf2d`, the commit whose run actually uploaded that version. The whole run then succeeded.
+
+The fix for future releases is on main as `3cdcc5a31e`. Only Marketplace's exact duplicate-version refusal for the artifact's own version now counts as accepted. Every other refusal still fails the job. The workflow regression, a shell simulation of all three upload outcomes, and `make check-fast` (1,975 tests) all passed.
+
+**`#claimrowmigrate` is integrated and installed.** Commit `20a8311ffa` keeps a reported claim bound to its own row. A row with the same text, or a ⟦effect:N⟧ annotation, can no longer inherit it. The coordinator re-ran 1,155 queue-crate tests, and all passed. The fix fast-forwarded main and was installed with `make install`. Its todo stays open for the live check.
+
+> **Chat prompt (#chatprompt:b91827c8723c):** yes
+
+The `agent:run` and `agent:loop` claim-marker drift went to a background subagent on `fix/queue-mirror-marker-sync-20261026`. I found three mismatches:
+
+- **`#layoutunprovenliveverify`:** Run: Issues shows the expired generation `#1`. Queue: Main shows the live `#2`.
+- **`release + publish`:** Run: Issues still shows the ended `release_publish_patch#3` claim.
+- **Onboarding item:** Run: Issues shows 🚧 with no owner or claim.
+
+The same worker is also tracing two more problems. The `do [#claimrowmigrate]` row disappeared after the 09:09 commit, along with its claim. Queue: Main also has a duplicated `jb263_feed_verify#1` row.
+
+You added `#gh-fix` issues #373, #374, and #375, and each is dispatched to its own subagent worktree:
+
+- `subagent:gh373`: a deferred surface capture sends zero `--col` arguments.
+- `subagent:gh374`: `respond` cannot find the `queue` component when the `agent:run` marker is on the heading line.
+- `subagent:gh375`: the Remote Dev popup gets a null action from the frontend-only `UpdateChannel`.
+
+Each worker leaves its issue open. The coordinator closes each one after integrating and installing the fix.
+
+CI for main commits `20a8311ffa` and `3cdcc5a31e` was still running at closeout.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -468,7 +498,6 @@ The other ☑️ rows in `Queue: Main` are completed handbacks that shipped in v
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]
-- ~~release + publish ⟦effect:1⟧~~
 - ☑️ [#subagent:gh372#1] #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
 - ☑️ [#subagent:grok_queue_ui#1] In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
 - ☑️ [#subagent:lazily_block_reason#1] On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
@@ -561,25 +590,24 @@ force-write the file, and do not delete the queue items.                        
 ☑️ [#subagent:sdk_demo_route_recovery#1] Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
 ---
 - 📥 release + publish ⟦effect:2⟧
-- ~~There is still only 1 tmux pane with 2 agent-doc documents open in the editor. Sync still fails. How can we ensure this issue won't happen again?~~
-- ~~Add a deterministic controller/SimWorld regression and routing-spec clause for cross-root Sync Tmux Layout with two editor-visible documents where the second has a ready actor bound to a dead or ownership-unproven pane; assert ProvisionForLayout replaces the stale binding and converges to two panes while ObserveOnly never focuses/reuses the unproven pane.~~
 - ☑️ [#subagent:loop_routing#1] The agent:loop is getting items sent to it, but the items should have been sent into `agent:run`.
 - ☑️ [#subagent:queue_completion_audit#1] The queue is full of items with ☑️. Are there complete? Why are they not struck?
 - ☑️ [#subagent:auto_sync_project#1] tmux pane auto-sync not working in this agent-doc project instance
 - ☑️ [#subagent:todo_hj2r_verify#1] [#hj2r]: verified
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:integrate_reported_items#1] Integrate all ☑️ items.
-- ~~Wait for all 🚧 items to complete. Then integrate. Then release + publish~~
 - ☑️ [#subagent:backlog_queue_sync#1] The backlog items are marked with 🚧 and is out of sync. The work has been completed in the queue.
 - ☑️ [#subagent:tracked_work_todo_backlinks#1] backlog/queue/icebox items should always backlink to todo items so the todo items can be cleared once complete. This may mean the todo item(s) block the queue/backlog/icebox item(s).
 - ☑️ [#subagent:jetbrains_submission_feedback#1] Read the feedback from the JetBrains agent-doc plugin submission. Fix any issues.
 - ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
 - ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
-- ☑️ [#subagent:claimrowmigrate#1] do [#claimrowmigrate]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
+- 🚧 [#subagent:gh373#1] #gh-fix https://github.com/btakita/agent-doc/issues/373
+- 🚧 [#subagent:gh374#1] #gh-fix https://github.com/btakita/agent-doc/issues/374
+- 🚧 [#subagent:gh375#1] #gh-fix https://github.com/btakita/agent-doc/issues/375
 <!-- /agent:run -->
 
-## Run: Issues
+##~ Run: Issues
 <!-- agent:loop id=issues interval=1h priority -->
 - 🚧 [#subagent:layout_liveverify#1] do [#layoutunprovenliveverify]
 - ☑️ [#subagent:grokqueuesubagents_closeout#1] do [#grokqueuesubagents]
@@ -592,15 +620,12 @@ force-write the file, and do not delete the queue items.                        
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
-- [x] [#helpregisterjetbrains] Complete [#helpregisterjetbrains]: create the JetBrains Marketplace vendor/listing with a hidden bootstrap upload, create a permanent token, and add it to btakita/agent-doc as JETBRAINS_MARKETPLACE_TOKEN. (source: agent:review [#helpregisterjetbrains])
-- [x] [#hj2r] Restart IntelliJ IDEA 2026.2, then verify Agent Doc formatting and its Tools/context-menu commands are available.
 - [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
-- [ ] [#claimrowmigrate] After #claimrowmigrate ships, confirm a duplicated queue row keeps its own claim marker when agent-doc adds ⟦effect:N⟧ annotations. (source: agent:backlog [#claimrowmigrate])
+- [x] [#claimrowmigrate] After #claimrowmigrate ships, confirm a duplicated queue row keeps its own claim marker when agent-doc adds ⟦effect:N⟧ annotations. (source: agent:backlog [#claimrowmigrate])
 <!-- /agent:todo -->
 
 ## Backlog
 <!-- agent:backlog priority queue -->
-- [ ] [#claimrowmigrate] [agent-doc] On 2026-10-26, when the two identical `release + publish` queue rows were given ⟦effect:1⟧/⟦effect:2⟧ annotations, the 52h-old reported claim `subagent:release_publish_patch#3` (the v0.35.551 release handback) moved from its original row onto the freshly restored row, and the original row became 📥. A reported claim must stay bound to the row identity it was issued for; an annotation edit or text-identical sibling must never inherit it. Add a regression for duplicate-text queue rows plus an effect annotation edit. (todos: [#claimrowmigrate-check])
 - [ ] 🚧 [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [ ] ☑️ [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
 <!-- /agent:backlog -->

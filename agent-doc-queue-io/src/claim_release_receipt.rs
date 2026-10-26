@@ -397,6 +397,60 @@ pub fn prune_closed(file: &Path, content: &str) -> Result<usize> {
     Ok(pruned)
 }
 
+/// Durably drop the receipts of the rows a strike closed (`#strikeretires`),
+/// at the strike's own mutation boundary rather than at the next closeout.
+/// `after` is the struck successor: a struck identity that still has a live
+/// row there keeps its receipt for that row. Call this only after the strike
+/// successor was accepted, so a failed write never loses work evidence from a
+/// still-live row.
+pub fn retire_struck(
+    file: &Path,
+    struck_heads: &[String],
+    after: &str,
+    source: &str,
+) -> Result<usize> {
+    if struck_heads.is_empty() || load(file)?.receipts.is_empty() {
+        return Ok(0);
+    }
+    let struck = struck_heads
+        .iter()
+        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
+        .collect::<std::collections::HashSet<_>>();
+    let live = agent_doc_queue::queue_consume::live_work_identities(after);
+    let retired = mutate(file, |ledger| ledger.retire_struck(&struck, Some(&live)))?;
+    if retired > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_release_receipt_retired_on_strike retired={retired} source={source} (#strikeretires)"
+            ),
+        );
+    }
+    Ok(retired)
+}
+
+/// [`retire_struck`] for a caller that must not fail on it: a receipt the
+/// strike could not retire is pruned by the next closeout, so the failure is
+/// reported, never fatal.
+pub fn retire_struck_or_warn(file: &Path, struck_heads: &[String], after: &str, source: &str) {
+    if let Err(err) = retire_struck(file, struck_heads, after, source) {
+        eprintln!(
+            "[queue] WARNING: could not retire the release receipts of struck rows in {} ({source}): {err:#}",
+            file.display()
+        );
+    }
+}
+
+/// [`retire_struck_or_warn`] for a strike successor known only as the
+/// accepted `before -> after` pair (the controller's answered-head
+/// projection): the struck rows are [`heads_struck_by_successor`].
+///
+/// [`heads_struck_by_successor`]: agent_doc_queue::queue_consume::heads_struck_by_successor
+pub fn retire_struck_by_successor_or_warn(file: &Path, before: &str, after: &str, source: &str) {
+    let struck_heads = agent_doc_queue::queue_consume::heads_struck_by_successor(before, after);
+    retire_struck_or_warn(file, &struck_heads, after, source);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6362,6 +6362,32 @@ pub fn run_queue_maintenance_with_coin_gate(
         }
     }
 
+    // `#strikeretires`: every strike above (`#qdonestrike`, the `#qheadresidue`
+    // catch-up, `#qftbklgstrike`) closes finished work. Retire the struck rows'
+    // binary completion cells in this same maintenance successor, before a
+    // drain clear can remove the struck rows that identify them; otherwise a
+    // cell keyed only by work text outlives its row and projects `🔄` onto a
+    // later row with the same text. The snapshot drops the same cells, and
+    // the reported-release receipts end once the successor persists.
+    let struck_retirement = agent_doc_queue::queue_consume::retire_struck_rows_completion_feedback(
+        &authority_baseline,
+        &current_content,
+    );
+    if struck_retirement.content != current_content {
+        current_content = struck_retirement.content;
+        mutated = true;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_struck_completion_cells_retired file={} heads={} cells={} (#strikeretires)",
+                file.display(),
+                struck_retirement.struck_heads.len(),
+                struck_retirement.retired_keys.len(),
+            ),
+        );
+    }
+    let struck_heads_this_pass = struck_retirement.struck_heads;
+
     // Phase 3: halt detection — stop fences and item modification
     if activation.active {
         // Stop fence at head → halt the queue
@@ -6395,8 +6421,19 @@ pub fn run_queue_maintenance_with_coin_gate(
                 project_root.as_deref(),
                 "queue_halt",
             )?;
+            agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
+                file,
+                &struck_heads_this_pass,
+                &current_content,
+                "queue_halt",
+            );
             if let Ok(Some(snap)) = agent_doc_snapshot_io::load_document_baseline(file) {
-                let mut new_snap = snap.clone();
+                let mut new_snap =
+                    agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+                        &snap,
+                        &struck_heads_this_pass,
+                    )
+                    .0;
                 if let Ok(sc) = agent_doc_element::element::parse(&new_snap)
                     && let Ok(Some(sq)) = agent_doc_queue::queue_set::component_for_id(
                         &new_snap,
@@ -7286,6 +7323,12 @@ pub fn run_queue_maintenance_with_coin_gate(
             project_root.as_deref(),
             "queue_maintenance",
         )?;
+        agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
+            file,
+            &struck_heads_this_pass,
+            &current_content,
+            "queue_maintenance",
+        );
     }
 
     // Persist snapshot mutations. For newly activated queues, sync the queue
@@ -7296,7 +7339,11 @@ pub fn run_queue_maintenance_with_coin_gate(
         || need_sync_active_queue_future_state_snapshot)
         && let Ok(Some(snap_content)) = agent_doc_snapshot_io::load_document_baseline(file)
     {
-        let mut new_snap = snap_content.clone();
+        let mut new_snap = agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+            &snap_content,
+            &struck_heads_this_pass,
+        )
+        .0;
 
         if in_progress_markers_changed {
             new_snap = sync_in_progress_marker_regions(&new_snap, &current_content);
@@ -19396,6 +19443,126 @@ mod tests {
                 "pass {pass}: unanswered work stays queued\n{main_body}"
             );
         }
+    }
+
+    /// `#strikeretires` (live 2026-10-26: a 52h-old `release_publish_patch`
+    /// cell painted `🔄 release + publish` onto a new release request). The
+    /// preflight residue strike closes a reported row, but before only
+    /// closeout `queue consume` retired the row's completion cell and only
+    /// closeout pruned its reported-release receipt, so a later row with the
+    /// same text inherited `☑️` (receipt) or `🔄` (cell). The strike's own
+    /// maintenance successor now retires the cell in the document and the
+    /// snapshot, the receipt ends once it persists, and the re-added row
+    /// projects `📥`. Operator exchange text stays byte for byte.
+    #[test]
+    fn residue_strike_retires_cell_and_receipt_so_a_readded_row_is_pending() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let item = "release + publish";
+        let pending = "still pending work";
+        let shell = |exchange: &str, main: &str| {
+            format!(
+                concat!(
+                    "---\n",
+                    "agent_doc_session: test\n",
+                    "agent_doc_format: template\n",
+                    "agent_doc_write: crdt\n",
+                    "queue: start\n",
+                    "---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "{exchange}",
+                    "<!-- /agent:exchange -->\n\n",
+                    "## Queue: Main\n",
+                    "<!-- agent:run id=\"main\" subagents go -->\n",
+                    "{main}",
+                    "<!-- /agent:run -->\n",
+                ),
+                exchange = exchange,
+                main = main,
+            )
+        };
+        std::fs::write(&doc, shell("", &format!("- {item}\n- {pending}\n"))).unwrap();
+        let cell = reported_attempt_with_cell(&doc, item, "subagent:release_publish_patch");
+        agent_doc_queue_io::claim_release_receipt::release(
+            &doc,
+            item,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap();
+        let answer = format!(
+            "### Re: release — opus\n\n> **Queue prompt:** {item}\n\nReleased and verified.\n"
+        );
+        let content = shell(
+            &format!("{cell}\n\n{answer}"),
+            &format!("- ☑️ [#subagent:release_publish_patch#1] {item}\n- 📥 {pending}\n"),
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let receipts = || {
+            agent_doc_queue_io::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .len()
+        };
+        assert_eq!(receipts(), 1);
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(&format!("- ~~{item}~~\n")),
+            "the residue strike closes the answered row:\n{updated}"
+        );
+        assert!(
+            !updated.contains(&cell),
+            "the struck row's completion cell retires with the strike:\n{updated}"
+        );
+        assert!(
+            updated.contains(&answer),
+            "the integrated answer stays:\n{updated}"
+        );
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !snapshot.contains(&cell) && snapshot.contains(&answer),
+            "the snapshot retires the same cell:\n{snapshot}"
+        );
+        assert_eq!(
+            receipts(),
+            0,
+            "the strike retires the reported-release receipt"
+        );
+
+        // A later operator request with the same text is new work.
+        let readded = updated.replace(
+            &format!("- ~~{item}~~\n"),
+            &format!("- ~~{item}~~\n- {item}\n"),
+        );
+        assert!(
+            agent_doc_queue_io::queue_claim::completion_evidence_head_texts(&readded).is_empty()
+        );
+        let projection =
+            agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(&doc, &readded, None)
+                .unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 📥 {item}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection.target_content.contains("🔄")
+                && !projection.target_content.contains("- ☑️"),
+            "{}",
+            projection.target_content
+        );
     }
 
     #[test]

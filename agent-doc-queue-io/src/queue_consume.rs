@@ -1483,12 +1483,26 @@ pub fn prune_noise_queue_heads(
     if struck == 0 || new_document == content {
         return Ok(0);
     }
+    // `#strikeretires`: a struck orphan id-backed head closes its finished
+    // work; its completion cell retires in this successor and its
+    // reported-release receipt once the successor is accepted.
+    let retirement = agent_doc_queue::queue_consume::retire_struck_rows_completion_feedback(
+        &content,
+        &new_document,
+    );
+    let new_document = retirement.content;
+    let struck_heads = retirement.struck_heads;
 
     // Snapshot sync: clear the same noise heads in the snapshot (its own node keys /
     // spans, derived independently) so required closeouts prove both sides converge.
     let new_snapshot = match load_snapshot_recovery_only(file, "noise prune snapshot sync") {
         Some(snap) => match (|| -> Result<Option<String>> {
             let (new_snap, _) = strike_all_noise_queue_heads(&snap)?;
+            let new_snap = agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+                &new_snap,
+                &struck_heads,
+            )
+            .0;
             if new_snap == snap {
                 Ok(None)
             } else {
@@ -1507,6 +1521,12 @@ pub fn prune_noise_queue_heads(
     effects
         .converge_document_or_disk(file, &new_document, &content, "noise_prune")
         .context("noise prune: failed to write document")?;
+    crate::claim_release_receipt::retire_struck_or_warn(
+        file,
+        &struck_heads,
+        &new_document,
+        "noise_prune",
+    );
     // Publish the post-mutation authoritative frontier. The controller's
     // document-scoped queue projection owns terminal lifecycle persistence.
     observe_authoritative_queue_state(file, &new_document)?;
@@ -1590,6 +1610,12 @@ pub fn strike_orphan_id_backed_queue_head(
     if new_document == content {
         return Ok(false);
     }
+    // `#strikeretires`: the orphan strike closes the row's finished work like
+    // any other strike. Its completion cell (and, after the write, its
+    // reported-release receipt) ends with the strike, so a later operator
+    // re-add of the same `[#id]` cannot inherit `🔄` / `☑️` from this attempt.
+    let struck_heads =
+        agent_doc_queue::queue_consume::heads_struck_by_successor(&content, &new_document);
     // Snapshot sync: strike the same id-backed head in the snapshot by its own node
     // keys so required closeouts prove both sides converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "orphan id head snapshot sync") {
@@ -1598,7 +1624,13 @@ pub fn strike_orphan_id_backed_queue_head(
             if snap_keys.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(consume_queue_nodes_by_key(&snap, &snap_keys)?))
+                Ok(Some(
+                    agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+                        &consume_queue_nodes_by_key(&snap, &snap_keys)?,
+                        &struck_heads,
+                    )
+                    .0,
+                ))
             }
         })() {
             Ok(snapshot) => snapshot,
@@ -1619,12 +1651,44 @@ pub fn strike_orphan_id_backed_queue_head(
     if strike_ops.is_empty() {
         strike_ops = queue_consume_node_ops(&keys);
     }
-    effects
-        .converge_structural_ops(file, &strike_ops, &content, "orphan_id_head_strike")
+    let (target, mut retired_completion_keys) =
+        agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+            &new_document,
+            &struck_heads,
+        );
+    retired_completion_keys.extend(
+        effects
+            .retained_completion_feedback_keys_for_heads(file, &struck_heads)
+            .context("orphan strike: failed to inspect retained completion feedback")?,
+    );
+    if target == new_document && retired_completion_keys.is_empty() {
+        effects
+            .converge_structural_ops(file, &strike_ops, &content, "orphan_id_head_strike")
+            .context("orphan strike: failed to write document")?;
+    } else {
+        // The cell lives in `agent:exchange`, outside the queue node ops, so
+        // the strike and the retirement converge as one full-text document
+        // successor (the marker-free `new_document` plus the retirement); the
+        // landing fence also covers a cell held only by a retained target.
+        converge_awaiting_retained_delivery(
+            effects,
+            file,
+            &target,
+            &retired_completion_keys,
+            "orphan_id_head_strike",
+            || effects.converge_document_or_disk(file, &target, &content, "orphan_id_head_strike"),
+        )
         .context("orphan strike: failed to write document")?;
+    }
     if let Some(snap) = new_snapshot {
         save_snapshot_recovery_only(file, &snap, "orphan id head snapshot sync");
     }
+    crate::claim_release_receipt::retire_struck_or_warn(
+        file,
+        &struck_heads,
+        &target,
+        "orphan_id_head_strike",
+    );
     eprintln!(
         "[queue] struck orphaned id-backed head [#{target_id}] ({} node(s); #orphanqhead)",
         keys.len()
@@ -5242,6 +5306,223 @@ mod core_tests {
             .unwrap();
         assert_eq!(snap, result, "detached disk strike must update snapshot");
     }
+
+    /// `#strikeretires`: the orphan `queue consume --id` strike closes the
+    /// row's reported work. Before, only closeout `queue consume` retired the
+    /// completion cell and only closeout pruned the reported-release receipt,
+    /// so an operator re-add of the same `[#id]` inherited `☑️` (receipt) and,
+    /// once that was pruned, `🔄` (cell). The strike now retires both, in the
+    /// document and in the snapshot, and the re-added row projects `📥`.
+    #[test]
+    fn orphan_id_strike_retires_cell_and_receipt_so_a_readded_row_is_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("s.md");
+        let item = "do [#orphangone]";
+        let owner = "subagent:orphangone";
+        let shell = |exchange: &str, queue: &str| {
+            format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue go -->\n{queue}<!-- /agent:queue -->\n\n",
+                    "<!-- agent:backlog -->\n- [ ] [#liveone] still open\n<!-- /agent:backlog -->\n",
+                ),
+                exchange = exchange,
+                queue = queue,
+            )
+        };
+        std::fs::write(&doc, shell("", &format!("- {item}\n- do [#liveone]\n"))).unwrap();
+        let (_, claimed) = crate::queue_claim::claim(&doc, item, owner, 600).unwrap();
+        let running = crate::queue_claim::start_attempt(
+            &doc,
+            item,
+            owner,
+            "/root/orphangone",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &crate::queue_claim::completion_feedback_key(&running).unwrap(),
+            "Done; the backlog item was reaped.",
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+        crate::claim_release_receipt::release(
+            &doc,
+            item,
+            crate::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap();
+        let content = shell(
+            &format!("{cell}\n\n### Re: prior — opus\n\nDone.\n"),
+            &format!("- ☑️ [#{owner}#1] {item}\n- do [#liveone]\n"),
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .len(),
+            1
+        );
+
+        assert!(strike_orphan_id_backed_queue_head(&doc, "orphangone").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains(&format!("~~{item}~~")), "{result}");
+        assert!(
+            !result.contains(&cell),
+            "the struck row's cell retires:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: prior — opus\n\nDone.\n"),
+            "{result}"
+        );
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(snap, result, "the snapshot retires the same cell");
+        assert!(
+            crate::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .is_empty(),
+            "the strike retires the reported-release receipt"
+        );
+
+        let readded = result.replace("- do [#liveone]\n", &format!("- {item}\n- do [#liveone]\n"));
+        assert!(crate::queue_claim::completion_evidence_head_texts(&readded).is_empty());
+        let projection =
+            crate::queue_cmd::derive_claim_runtime_projection(&doc, &readded, None).unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 📥 {item}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection.target_content.contains("🔄")
+                && !projection.target_content.contains("- ☑️"),
+            "{}",
+            projection.target_content
+        );
+    }
+
+    /// `#strikeretires`: the controller's answered-head projection
+    /// (`answered_free_text_projection`) retires the struck row's completion
+    /// cell in its target, and the accepted target ends the row's
+    /// reported-release receipt (`retire_struck_by_successor_or_warn`, the
+    /// call the binary's projection adapter makes). Before, the receipt
+    /// survived until the next closeout and painted `☑️` onto a later row
+    /// with the same text.
+    #[test]
+    fn controller_answered_strike_retires_cell_and_receipt_so_a_readded_row_is_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("s.md");
+        let item = "release + publish";
+        let owner = "subagent:release_publish_patch";
+        let shell = |exchange: &str, queue: &str| {
+            format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue go -->\n{queue}<!-- /agent:queue -->\n",
+                ),
+                exchange = exchange,
+                queue = queue,
+            )
+        };
+        std::fs::write(&doc, shell("", &format!("- {item}\n- later work\n"))).unwrap();
+        let (_, claimed) = crate::queue_claim::claim(&doc, item, owner, 600).unwrap();
+        let running = crate::queue_claim::start_attempt(
+            &doc,
+            item,
+            owner,
+            "/root/release",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &crate::queue_claim::completion_feedback_key(&running).unwrap(),
+            "Released 0.35.500.",
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+        crate::claim_release_receipt::release(
+            &doc,
+            item,
+            crate::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap();
+        let content = shell(&format!("{cell}\n"), &format!("- {item}\n- later work\n"));
+        std::fs::write(&doc, &content).unwrap();
+        let response = format!(
+            "### Re: release — opus\n\n> **Queue prompt:** {item}\n\nReleased and verified.\n"
+        );
+
+        let projected = agent_doc_queue::queue_consume::project_answered_free_text_strike(
+            &content,
+            &response,
+            Some(&content),
+        )
+        .unwrap()
+        .expect("the answered row projects a strike target");
+        assert!(
+            !projected.target_content.contains(&cell),
+            "{}",
+            projected.target_content
+        );
+        std::fs::write(&doc, &projected.target_content).unwrap();
+        crate::claim_release_receipt::retire_struck_by_successor_or_warn(
+            &doc,
+            &content,
+            &projected.target_content,
+            "answered_free_text_projection",
+        );
+        assert!(
+            crate::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .is_empty(),
+            "the accepted strike target retires the reported-release receipt"
+        );
+
+        let readded = projected
+            .target_content
+            .replace("- later work\n", &format!("- later work\n- {item}\n"));
+        assert!(crate::queue_claim::completion_evidence_head_texts(&readded).is_empty());
+        let projection =
+            crate::queue_cmd::derive_claim_runtime_projection(&doc, &readded, None).unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 📥 {item}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection.target_content.contains("🔄")
+                && !projection.target_content.contains("- ☑️"),
+            "{}",
+            projection.target_content
+        );
+    }
+
     #[test]
     fn strike_orphan_id_backed_queue_head_refuses_open_backlog_item() {
         // The escape hatch must NOT desync live work: an id still naming an OPEN

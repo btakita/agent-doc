@@ -80,6 +80,109 @@ pub fn retire_consumed_completion_feedback(
     (retired, retired_keys)
 }
 
+/// The finished work a strike successor closes (`#strikeretires`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StruckRowRetirement {
+    /// `after` without the completion cells of the rows it struck.
+    pub content: String,
+    /// The struck rows' work texts (markers stripped), in document order.
+    pub struck_heads: Vec<String>,
+    /// Keys of the completion cells retired from `after`.
+    pub retired_keys: HashSet<String>,
+}
+
+fn queue_rows(content: &str) -> Vec<(bool, String)> {
+    let Ok(components) = element::parse(content) else {
+        return Vec::new();
+    };
+    components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .filter_map(|component| document_queue::parse(component.content(content)).ok())
+        .flatten()
+        .filter_map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => Some((false, prompt.text)),
+            QueueEntry::Completed(prompt) => Some((true, prompt.text)),
+            _ => None,
+        })
+        .map(|(struck, text)| {
+            (
+                struck,
+                strip_in_progress_marker(&strip_priority_markers(text.trim()))
+                    .trim()
+                    .to_string(),
+            )
+        })
+        .filter(|(_, text)| !text.is_empty())
+        .collect()
+}
+
+fn live_identities(rows: &[(bool, String)]) -> HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    rows.iter()
+        .filter(|(struck, _)| !struck)
+        .map(|(_, text)| crate::queue_claim::claim_identity(text))
+        .collect()
+}
+
+/// Identities of every live row in every queue component of `content`.
+pub fn live_work_identities(content: &str) -> HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    live_identities(&queue_rows(content))
+}
+
+/// Work rows that the successor `after` strikes relative to `before`
+/// (`#strikeretires`): a row whose identity is live in `before`, has no live
+/// row left in `after`, and is struck in `after`. A row the successor
+/// deleted is not here (removal is cancellation, `#queue-removal-cancels`),
+/// and a work identity that still has a live row anywhere (a sibling queue's
+/// mirror copy, a duplicate) keeps its evidence for that row. Identity is the
+/// marker-invariant claim identity, across every queue component.
+pub fn heads_struck_by_successor(before: &str, after: &str) -> Vec<String> {
+    let before_live = live_work_identities(before);
+    if before_live.is_empty() {
+        return Vec::new();
+    }
+    let after_rows = queue_rows(after);
+    let after_live = live_identities(&after_rows);
+    let mut seen = HashSet::new();
+    after_rows
+        .into_iter()
+        .filter(|(struck, _)| *struck)
+        .filter(|(_, text)| {
+            let identity = crate::queue_claim::claim_identity(text);
+            before_live.contains(&identity)
+                && !after_live.contains(&identity)
+                && seen.insert(identity)
+        })
+        .map(|(_, text)| text)
+        .collect()
+}
+
+/// Retire the completion cells of every row the successor `after` strikes
+/// relative to `before`, in that same successor (`#strikeretires`).
+///
+/// Every binary strike path (closeout echo, preflight residue/backlog/done
+/// strike, the orphan `queue consume --id` strike, the controller's
+/// answered-head projection) closes finished work. Its transient completion
+/// cell is keyed only by work identity, so a cell that outlives the strike
+/// would project `🔄` onto a later row with the same text. Only structurally
+/// attested cells are removed ([`retire_consumed_completion_feedback`]);
+/// operator text and heading-shaped prose are never touched.
+pub fn retire_struck_rows_completion_feedback(before: &str, after: &str) -> StruckRowRetirement {
+    let struck_heads = heads_struck_by_successor(before, after);
+    if struck_heads.is_empty() {
+        return StruckRowRetirement {
+            content: after.to_string(),
+            ..StruckRowRetirement::default()
+        };
+    }
+    let (content, retired_keys) = retire_consumed_completion_feedback(after, &struck_heads);
+    StruckRowRetirement {
+        content,
+        struck_heads,
+        retired_keys,
+    }
+}
+
 pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> Option<String> {
     let working_components = element::parse(working).ok()?;
     let head_components = element::parse(head).ok()?;
@@ -3850,6 +3953,107 @@ Old.
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].item, other_item);
         assert_eq!(evidence[0].key, "later-key");
+    }
+
+    fn strike_retirement_doc(exchange: &str, queue: &str) -> String {
+        format!(
+            concat!(
+                "---\nagent_doc_session: strike-retirement\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n",
+            ),
+            exchange = exchange,
+            queue = queue,
+        )
+    }
+
+    /// `#strikeretires` (live 2026-10-26: a 52h-old `release_publish_patch`
+    /// cell painted `🔄 release + publish` onto a new release request). A
+    /// strike successor retires the struck row's completion cell, so a later
+    /// row with the same text carries no completion evidence. Unrelated cells
+    /// and heading-shaped prose stay byte for byte.
+    #[test]
+    fn strike_successor_retires_the_struck_rows_completion_cell() {
+        let struck = "release + publish";
+        let other = "later worker result";
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:release_publish_patch",
+            struck,
+            "release-key",
+            "Released 0.35.500.",
+        )
+        .unwrap();
+        let other_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:later",
+            other,
+            "later-key",
+            "Still integrating.",
+        )
+        .unwrap();
+        let prose = format!(
+            "### Re: Subagent completed: `subagent:x` returned work for queue item “{struck}” — agent-doc\nOperator note, not a binary cell.\n"
+        );
+        let exchange = format!("{cell}\n\n{other_cell}\n\n{prose}");
+        let before = strike_retirement_doc(
+            &exchange,
+            &format!("- ☑️ [#subagent:release_publish_patch#3] {struck}\n- {other}\n"),
+        );
+        let after = strike_retirement_doc(&exchange, &format!("- ~~{struck}~~\n- {other}\n"));
+
+        let retirement = retire_struck_rows_completion_feedback(&before, &after);
+
+        assert_eq!(retirement.struck_heads, vec![struck.to_string()]);
+        assert_eq!(
+            retirement.retired_keys,
+            HashSet::from(["release-key".to_string()])
+        );
+        assert!(
+            !retirement.content.contains(&cell),
+            "{}",
+            retirement.content
+        );
+        assert!(retirement.content.contains(&other_cell));
+        assert!(
+            retirement.content.contains(&prose),
+            "operator prose is kept"
+        );
+        assert!(retirement.content.contains(&format!("- ~~{struck}~~\n")));
+
+        // A later operator row with the same text has no evidence to inherit.
+        let readded = retirement.content.replace(
+            &format!("- ~~{struck}~~\n"),
+            &format!("- ~~{struck}~~\n- {struck}\n"),
+        );
+        let evidence = agent_doc_document::subagent_completion::completion_evidence(&readded);
+        assert!(
+            evidence.iter().all(|evidence| evidence.item != struck),
+            "{evidence:?}"
+        );
+    }
+
+    /// A strike that leaves a live row with the same work identity (a sibling
+    /// queue's mirror copy, a duplicate) keeps the evidence for that row, and
+    /// a deleted row is cancellation (`#queue-removal-cancels`), not a strike.
+    #[test]
+    fn strike_retirement_keeps_evidence_of_live_or_deleted_rows() {
+        let item = "finish the sdk";
+        let cell = agent_doc_document::subagent_completion::cell("subagent:sdk", item, "sdk-key");
+        let exchange = format!("{cell}\n");
+        let before = strike_retirement_doc(&exchange, &format!("- {item}\n- {item}\n"));
+
+        let duplicate_live = strike_retirement_doc(&exchange, &format!("- ~~{item}~~\n- {item}\n"));
+        let retirement = retire_struck_rows_completion_feedback(&before, &duplicate_live);
+        assert!(retirement.struck_heads.is_empty());
+        assert_eq!(retirement.content, duplicate_live);
+
+        let deleted = strike_retirement_doc(&exchange, "");
+        let retirement = retire_struck_rows_completion_feedback(&before, &deleted);
+        assert!(retirement.struck_heads.is_empty());
+        assert_eq!(retirement.content, deleted);
+
+        // A row already struck before the successor is not this strike's.
+        let already = strike_retirement_doc(&exchange, &format!("- ~~{item}~~\n"));
+        assert!(heads_struck_by_successor(&already, &already).is_empty());
     }
 
     /// A preflight-selected head can join the live queue after the response

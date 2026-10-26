@@ -1170,3 +1170,210 @@ fn a_pure_chat_turn_records_its_prompt_through_respond_and_clears_the_ledger() {
     let contract = admitted_contract(&context);
     assert!(contract.get("chat_prompts").is_none(), "{contract:#}");
 }
+
+// ---------------------------------------------------------------------------
+// The no-argument entrypoint runs on the pane's claim.
+// ---------------------------------------------------------------------------
+
+/// Bind `pane` to `doc` in the project registry, as `agent-doc claim` does.
+fn claim_pane(root: &Path, doc: &Path, pane: &str) {
+    let mut registry = agent_doc_session_registry_io::load_in(root).unwrap_or_default();
+    let file = doc.strip_prefix(root).unwrap().display().to_string();
+    agent_doc_session_registry::insert_registry_entry(
+        root,
+        &mut registry,
+        agent_doc_session_registry::RegistryEntryFields {
+            session_id: "pane-claim-session",
+            pane_id: pane,
+            file: &file,
+            pid: std::process::id(),
+            cwd: &root.display().to_string(),
+            started: "2026-10-26T00:00:00Z",
+            window: "@1",
+            supervisor_instance_id: "",
+        },
+    );
+    agent_doc_session_registry_io::save_in(root, &registry).unwrap();
+}
+
+fn submit_with_pane(
+    root: &Path,
+    hook: &str,
+    session: &str,
+    prompt: &str,
+    pane: Option<&str>,
+) -> String {
+    let payload = json!({
+        "session_id": session,
+        "turn_id": "turn-1",
+        "cwd": root.display().to_string(),
+        "prompt": prompt,
+    });
+    let mut command = agent_doc();
+    command
+        .current_dir(root)
+        .args(["hook", hook])
+        .write_stdin(payload.to_string());
+    match pane {
+        Some(pane) => command.env("TMUX_PANE", pane),
+        None => command.env_remove("TMUX_PANE"),
+    };
+    let submit = command.assert().success();
+    let output: serde_json::Value = serde_json::from_slice(&submit.get_output().stdout)
+        .expect("UserPromptSubmit stdout must be exactly one valid JSON document");
+    output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("a bare trigger must never be answered with silence")
+        .to_string()
+}
+
+#[test]
+fn a_bare_codex_trigger_admits_and_seals_the_claimed_pane_document() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    claim_pane(tmp.path(), &doc, "%42");
+
+    let context = submit_with_pane(
+        tmp.path(),
+        "codex-user-prompt-submit",
+        "bare-codex-session",
+        "agent-doc",
+        Some("%42"),
+    );
+    assert!(
+        context.starts_with("[agent-doc] no FILE argument: this turn's FILE is `session.md`"),
+        "the resolved FILE must be named before the contract: {context}"
+    );
+    assert!(context.contains("pane %42"), "{context}");
+    admitted_contract(&context);
+    assert!(!context.contains("cycle contract UNAVAILABLE"), "{context}");
+
+    // The same hook opened the cycle on the claimed document and bound the
+    // session to it, so the Stop hook can find it again.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("INTERRUPTED"));
+    let state = agent_doc_codex_hook_io::load_state(tmp.path(), "bare-codex-session")
+        .unwrap()
+        .expect("the bare trigger must bind the session");
+    assert_eq!(
+        fs::canonicalize(&state.doc_path).unwrap(),
+        fs::canonicalize(&doc).unwrap()
+    );
+    assert_eq!(state.preflight_admitted, Some(true));
+}
+
+#[test]
+fn a_bare_claude_trigger_admits_the_claimed_pane_document() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    claim_pane(tmp.path(), &doc, "%43");
+
+    let context = submit_with_pane(
+        tmp.path(),
+        "preflight-user-prompt-submit",
+        "bare-claude-session",
+        "/agent-doc",
+        Some("%43"),
+    );
+    assert!(
+        context.starts_with("[agent-doc] no FILE argument: this turn's FILE is `session.md`"),
+        "{context}"
+    );
+    admitted_contract(&context);
+}
+
+#[test]
+fn a_bare_trigger_without_a_pane_claim_refuses_by_name_and_opens_nothing() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    claim_pane(tmp.path(), &doc, "%42");
+
+    for (pane, needle) in [
+        (None, "`$TMUX_PANE` is unset"),
+        (Some("%99"), "pane %99 claims no document"),
+    ] {
+        for (hook, prompt) in [
+            ("codex-user-prompt-submit", "agent-doc"),
+            ("preflight-user-prompt-submit", "/agent-doc"),
+        ] {
+            let context = submit_with_pane(tmp.path(), hook, "refused-session", prompt, pane);
+            assert!(
+                context.starts_with("[agent-doc] cycle contract UNAVAILABLE"),
+                "{hook} {pane:?}: {context}"
+            );
+            assert!(context.contains(needle), "{hook} {pane:?}: {context}");
+            assert!(
+                !context.contains("cycle contract (preflight already ran"),
+                "{hook} {pane:?}: a refusal must never carry the success seal"
+            );
+        }
+    }
+    assert!(
+        agent_doc_cycle_state_io::load(&doc).unwrap().is_none(),
+        "a refused bare trigger must not open a cycle on any document"
+    );
+}
+
+#[test]
+fn resolve_pane_document_cli_prints_the_claim_and_fails_closed_otherwise() {
+    let (tmp, doc) = setup_template_doc();
+    claim_pane(tmp.path(), &doc, "%42");
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("TMUX_PANE", "%42")
+        .arg("resolve-pane-document")
+        .assert()
+        .success()
+        .stdout("session.md\n");
+    agent_doc()
+        .current_dir(tmp.path())
+        .env_remove("TMUX_PANE")
+        .args(["resolve-pane-document", "--pane", "%42", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"document\":\"session.md\""));
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env_remove("TMUX_PANE")
+        .arg("resolve-pane-document")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("`$TMUX_PANE` is unset"));
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["resolve-pane-document", "--pane", "%99", "--json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"kind\":\"unclaimed\""));
+
+    let other = tmp.path().join("other.md");
+    fs::write(&other, template_doc_content()).unwrap();
+    let mut registry = agent_doc_session_registry_io::load_in(tmp.path()).unwrap();
+    agent_doc_session_registry::insert_registry_entry(
+        tmp.path(),
+        &mut registry,
+        agent_doc_session_registry::RegistryEntryFields {
+            session_id: "other-session",
+            pane_id: "%42",
+            file: "other.md",
+            pid: std::process::id(),
+            cwd: &tmp.path().display().to_string(),
+            started: "2026-10-26T00:00:01Z",
+            window: "@1",
+            supervisor_instance_id: "",
+        },
+    );
+    agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["resolve-pane-document", "--pane", "%42"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("refusing to guess"));
+}

@@ -1,7 +1,7 @@
 ---
-description: "Interactive markdown session for OpenCode. TRIGGER: user invokes /agent-doc <file> command. Requires a markdown session document, installed CLI, and write+commit every cycle."
+description: "Interactive markdown session for OpenCode. TRIGGER: user invokes /agent-doc <file> command, or a bare `/agent-doc` (the file this tmux pane claims). Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
-argument-hint: "<file>"
+argument-hint: "[file]"
 agent-doc-version: "0.35.556"
 ---
 
@@ -13,12 +13,13 @@ Interactive document session — respond to user edits in a markdown document.
 
 ```
 /agent-doc <FILE>
+/agent-doc
 /agent-doc claim <FILE>
 /agent-doc compact <FILE>
 /agent-doc compact exchange <FILE>
 ```
 
-Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FILE, run `agent-doc resolve-pane-document` first and use the path it prints as FILE for the whole cycle. If it exits nonzero (not in tmux, no claim, several claims), report its reason and stop; never guess a document.
 
 **Note:** Slash commands (`/agent-doc`) are installed as an OpenCode command via `agent-doc skill install --harness opencode`. Other harnesses receive the document path directly.
 ## Required cycle

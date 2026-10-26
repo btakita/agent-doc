@@ -268,6 +268,21 @@ the field is absent (editors that predate it), two or more columns infer
 before publication. The JetBrains plugin's `--col` fallback sends `exact` only for a detected
 multi-column layout and `ensure` for its undetected single-file fallback; a
 surface reference derives the same modes in the controller.
+**Zero-column route (GH #373):** a non-`exact` route whose `--col` arguments
+name no document (none at all, or only empty placeholders with no `--focus`)
+observed no visible layout; the JetBrains `--col` fallback on a Remote Dev
+backend sends that shape when it reads no selected editor
+(`focused=[<none>]`, flat remote-client evidence). The route itself still
+positively names its document, so the controller treats it as the undetected
+single-file fallback for that document: one `ensure` column holding the routed
+document, focused, logged as `controller_editor_route_layout_undetected
+editor_layout_args=N editor_focus=... action=ensure_routed_document`. An
+editor `--focus` naming another document is dropped. The route then takes the
+same `ensure` merge, GH #120 bound, and unknown-geometry rules below as any
+single-file route: focus-only dispatch into an existing live pane, otherwise
+the frontend-readiness refusal with its remedy. It never fails with the bare
+`editor route requires the exact visible layout before dispatch`, which stays
+the refusal of an `exact` route that carries no column.
 `controller_editor_route_layout_mode` logs the mode, whether it was explicit,
 the merge (`exact`, `seeded`, `focus_only`, `replaced:N`, `added:N+replaced:M`,
 `dropped:N+replaced:M`) and the route, retained

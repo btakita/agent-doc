@@ -1704,6 +1704,63 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
     Ok(pruned.len())
 }
 
+/// Durably end the finished attempts of the rows a strike closed
+/// (`#strikeretires`), at the strike's own mutation boundary rather than at
+/// the next closeout prune. `struck_heads` are the rows the strike successor
+/// `after` struck ([`heads_struck_by_successor`]); each is keyed by its work
+/// identity, the row text after its attempt projection prefix
+/// ([`strip_attempt_projection_prefix`]). A `Reported` or `Lost` attempt
+/// ends; a dispatching or running attempt, or one whose identity still has a
+/// live row in `after` (a mirror copy, a duplicate), stays. Lineage keeps the
+/// generation floor, so a re-added identical row still claims a fresh
+/// generation. Call this only after the strike successor was accepted, so a
+/// failed write never ends the claim of a still-live row.
+///
+/// [`heads_struck_by_successor`]: agent_doc_queue::queue_consume::heads_struck_by_successor
+/// [`strip_attempt_projection_prefix`]: agent_doc_element_queue::strip_attempt_projection_prefix
+pub fn retire_struck_claims(
+    file: &Path,
+    struck_heads: &[String],
+    after: &str,
+    source: &str,
+) -> Result<Vec<QueueClaim>> {
+    if struck_heads.is_empty() || load_ledger(file)?.claims.is_empty() {
+        return Ok(Vec::new());
+    }
+    let struck = struck_heads
+        .iter()
+        .map(|head| {
+            claim_identity(agent_doc_element_queue::strip_attempt_projection_prefix(
+                head,
+            ))
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let live = agent_doc_queue::queue_consume::live_work_identities(after);
+    let heads = live_queue_head_rows(after);
+    let now = now_secs();
+    let retired = mutate_ledger(file, |ledger| {
+        // Follow against the strike successor (the disk read inside
+        // `mutate_ledger` may lag it) before the struck rows are judged.
+        if let Some(heads) = &heads {
+            log_followed(file, &ledger.follow_edits(now, heads));
+        }
+        Ok(ledger.retire_struck(now, &struck, &live))
+    })?;
+    for claim in &retired {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_retired_on_strike owner={} generation={} state={:?} source={source} item_bytes={} (#strikeretires)",
+                claim.owner,
+                claim.generation,
+                claim.state,
+                claim.item_text.trim().len(),
+            ),
+        );
+    }
+    Ok(retired)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

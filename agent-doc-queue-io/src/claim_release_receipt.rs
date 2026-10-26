@@ -429,10 +429,21 @@ pub fn retire_struck(
     Ok(retired)
 }
 
-/// [`retire_struck`] for a caller that must not fail on it: a receipt the
-/// strike could not retire is pruned by the next closeout, so the failure is
+/// End the struck rows' durable finished-work evidence (`#strikeretires`):
+/// their `Reported` / terminal claim attempts
+/// ([`crate::queue_claim::retire_struck_claims`]) and their reported-release
+/// receipts ([`retire_struck`]). Every binary strike path calls this one step
+/// after its successor is accepted, so neither can project `☑️` onto a later
+/// row with the same text. A caller must not fail on it: a claim or receipt
+/// the strike could not end is pruned by the next closeout, so the failure is
 /// reported, never fatal.
 pub fn retire_struck_or_warn(file: &Path, struck_heads: &[String], after: &str, source: &str) {
+    if let Err(err) = crate::queue_claim::retire_struck_claims(file, struck_heads, after, source) {
+        eprintln!(
+            "[queue] WARNING: could not end the claims of struck rows in {} ({source}): {err:#}",
+            file.display()
+        );
+    }
     if let Err(err) = retire_struck(file, struck_heads, after, source) {
         eprintln!(
             "[queue] WARNING: could not retire the release receipts of struck rows in {} ({source}): {err:#}",

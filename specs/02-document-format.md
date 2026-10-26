@@ -177,12 +177,32 @@ guesses a span:
   text. The fence is carried across a controller handoff in the retained
   canonical projection. On 2026-10-26, after the reseed fix, an
   already-running controller still reverted the incident edit (gap 2).
+- A controller applies the same fence to disk text it adopts without an editor
+  update (gap 3). A cold controller start with no editor handover (no hub, no
+  retained projection, and no retained editor frontier) seeds the relay from
+  disk. It judges that text against the last valid revision: the durable
+  snapshot, else `HEAD:<doc>`. The first one whose markers pair is used.
+  An out-of-band disk rebuild at the commit barrier (`#staleinmem`) judges the
+  disk text against the pre-rebuild canonical instead. When the disk text fails
+  to parse and lost a marker line that the revision had (the same lost-marker
+  test as the live guard), the hub keeps the disk bytes and fences them. The
+  editor bootstraps exactly what it shows, and disk is never rewritten. The
+  fenced text is not current text and does not pass the commit barrier, so the
+  last valid revision stays the snapshotted and committed one. The editor op or
+  disk restore that pairs the markers again releases the fence. Disk text that
+  is as broken as every valid revision it could be judged against, or that
+  lost no marker line, is adopted as before and logged
+  `crdt_disk_seed_component_structure_unfenced`. A fence there would wedge a
+  document the operator did not break.
 - Each refusal is surfaced to the operator at ingest, with the markers, lines,
   and repair. ops.log gets `crdt_replica_reseed_structural_refused`, or
   `crdt_replica_update_component_structure_fenced` plus
-  `crdt_replica_update_component_markers_removed` for a live update. A repair
-  logs `crdt_replica_reseed_structural_cleared` or
-  `crdt_replica_update_component_markers_repaired`. The binary also
+  `crdt_replica_update_component_markers_removed` for a live update, or
+  `crdt_disk_seed_component_structure_fenced` (with `source=` and
+  `baseline=snapshot|head|pre_rebuild_canonical`) for adopted disk text. A
+  repair logs `crdt_replica_reseed_structural_cleared`,
+  `crdt_replica_update_component_markers_repaired`, or
+  `crdt_disk_component_markers_repaired`. The binary also
   writes `.agent-doc/state/editor-route-errors/<doc>.txt`, which the JetBrains
   plugin shows as the editor's `⚠ agent-doc:` status. Promotion clears it.
   agent-doc never reverts the operator's text to repair it. The editor buffer

@@ -1043,7 +1043,11 @@ valid revision stays the persisted and committed one. The relay logs
 marker diagnostic. The first update that pairs the markers again releases the
 fence. The editor-op path runs the same predicate on the buffer before a
 captured op burst is recorded, so a marker deletion is warned about at edit
-time even while the replica is detached. The fence is engaged only when the update introduced a `parse_error:`
+time even while the replica is detached. Disk text adopted without an editor update gets the same fence and the
+same lost-marker test. This covers a cold controller seed with no editor
+handover, judged against the snapshot or `HEAD`, and an out-of-band rebuild at
+the commit barrier, judged against the pre-rebuild canonical
+(`crdt_disk_seed_component_structure_fenced`). The fence is engaged only when the update introduced a `parse_error:`
 into a canonical that had none **and deleted a marker line**.
 An unparseable result alone is not evidence: operator typing passes through
 unparseable states. A half-typed code fence hides markers without deleting any

@@ -1702,8 +1702,12 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
                 file.display()
             )
         })?;
-        recovered.reconcile_canonical_against_baseline(&on_disk)?;
+        let (_, disk_fence) =
+            DiskStructureFence::reconcile_against_baseline(&mut recovered, &on_disk)?;
         reconcile_durable_queue_attempts_on_hub(file, &mut recovered)?;
+        if let Some(fence) = &disk_fence {
+            fence.surface(file, "retained_projection_disk_reconcile");
+        }
         let handle = hub_handle_or_insert_with(&hash, || recovered);
         let mut hub = handle.lock();
         let result = f(&mut hub);
@@ -1716,12 +1720,142 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
     let seed_text = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to seed relay hub from {}: {e}", file.display()))?;
     let mut seeded = RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text);
+    // `#componentownclose` gap 3: a cold controller with no editor handover
+    // has no pre-update canonical, so judge the disk text against the last
+    // valid revision (snapshot, then HEAD). Disk text whose markers no longer
+    // pair is kept byte-for-byte (the editor bootstraps exactly what it
+    // shows, and nothing is written to disk), but the hub is fenced: it is
+    // not current text and does not pass the commit barrier, so the last
+    // valid revision stays the committed one until the operator repairs it.
+    let cold_fence = DiskStructureFence::judge_cold_seed(file, &seed_text);
+    if let Some(fence) = &cold_fence {
+        seeded.fence_component_structure();
+        fence.surface(file, "cold_disk_seed");
+    }
     reconcile_durable_queue_attempts_on_hub(file, &mut seeded)?;
     let handle = hub_handle_or_insert_with(&hash, || seeded);
     let mut hub = handle.lock();
     let result = f(&mut hub);
     retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
     Ok(result)
+}
+
+/// ops.log event for disk text a controller refused to adopt because its
+/// component markers no longer pair (`#componentownclose` gap 3).
+pub const DISK_STRUCTURE_FENCED_EVENT: &str = "crdt_disk_seed_component_structure_fenced";
+
+/// `#componentownclose` gap 3: disk text that a controller is about to adopt
+/// without an editor update (a cold seed with no editor handover, or an
+/// out-of-band disk rebuild) lost a component marker line that the last valid
+/// revision had, and its markers no longer pair.
+///
+/// This is the disk-side twin of the live replica-structure guard: the same
+/// parse check, the same lost-marker-line test (so text typed mid-way through
+/// a code fence, which keeps every marker, is never fenced), and the same
+/// fence. The disk text is kept byte-for-byte in the canonical, so the editor
+/// is never reverted and disk is never rewritten, but the hub refuses it as
+/// current text and at the commit barrier until the markers pair again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiskStructureFence {
+    /// The disk text's component parse failure.
+    reason: String,
+    /// Which last valid revision the disk text was judged against.
+    baseline: &'static str,
+}
+
+impl DiskStructureFence {
+    /// Judge `disk` against a last valid revision `baseline_text`.
+    fn against(
+        reason: String,
+        baseline_text: &str,
+        baseline: &'static str,
+        disk: &str,
+    ) -> Option<Self> {
+        (agent_doc_element::element::component_parse_failure(baseline_text).is_none()
+            && update_removed_component_marker(baseline_text, disk))
+        .then_some(Self { reason, baseline })
+    }
+
+    /// Cold seed with no editor handover: the hub has no pre-update canonical,
+    /// so the last valid revision is the durable snapshot, else git HEAD.
+    /// Runs only when the disk text fails to parse, so a healthy cold start
+    /// pays one parse and no git/ledger read.
+    fn judge_cold_seed(file: &Path, disk: &str) -> Option<Self> {
+        let reason = agent_doc_element::element::component_parse_failure(disk)?;
+        let baseline = last_valid_revision(file);
+        let fence = baseline
+            .as_ref()
+            .and_then(|(text, source)| Self::against(reason.clone(), text, source, disk));
+        if fence.is_none() {
+            // The breakage is not new relative to any valid revision (or there
+            // is none to judge against), so fencing would wedge a document the
+            // operator never broke. Record why the disk text was adopted.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_disk_seed_component_structure_unfenced file={} reason={} baseline={} #componentownclose",
+                    file.display(),
+                    reason.split_whitespace().collect::<Vec<_>>().join("_"),
+                    baseline.map_or("none", |(_, source)| source),
+                ),
+            );
+        }
+        fence
+    }
+
+    /// Out-of-band disk rebuild of an existing canonical
+    /// ([`RelayHub::reconcile_canonical_against_baseline`]): the pre-rebuild
+    /// canonical is the last valid revision. Returns whether the canonical
+    /// was rebuilt, and the fence when that rebuild adopted disk text that
+    /// broke the markers (the hub is then fenced).
+    fn reconcile_against_baseline(
+        hub: &mut RelayHub,
+        on_disk: &str,
+    ) -> Result<(bool, Option<Self>)> {
+        // Parse only on a rebuild: this runs at every no-editor commit barrier.
+        let Some(before) = hub.reconcile_canonical_against_baseline_keeping_prior(on_disk)? else {
+            return Ok((false, None));
+        };
+        let fence = agent_doc_element::element::component_parse_failure(on_disk)
+            .and_then(|reason| Self::against(reason, &before, "pre_rebuild_canonical", on_disk));
+        if fence.is_some() {
+            hub.fence_component_structure();
+        }
+        Ok((true, fence))
+    }
+
+    fn surface(&self, file: &Path, source: &str) {
+        surface_component_structure_refusal(
+            file,
+            DISK_STRUCTURE_FENCED_EVENT,
+            source,
+            &self.reason,
+            &format!(
+                "action=disk_text_kept canonical=not_adopted commit=refused baseline={}",
+                self.baseline
+            ),
+        );
+    }
+}
+
+/// The newest revision of `file` whose component markers pair: the durable
+/// snapshot (merge baseline), else `HEAD:<file>`. Read failures count as
+/// absent; this only chooses what to judge broken disk text against.
+fn last_valid_revision(file: &Path) -> Option<(String, &'static str)> {
+    let parses =
+        |text: &String| agent_doc_element::element::component_parse_failure(text).is_none();
+    agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten()
+        .filter(parses)
+        .map(|text| (text, "snapshot"))
+        .or_else(|| {
+            agent_doc_git_io::status::is_in_git_repo(file)
+                .then(|| agent_doc_git_io::revision::show_head(file).ok().flatten())
+                .flatten()
+                .filter(parses)
+                .map(|text| (text, "head"))
+        })
 }
 
 /// Allocate the embedded Lazily relay from the current document projection.
@@ -5339,19 +5473,27 @@ fn commit_barrier_for_file_with_authority_and_delivery(
         // can quarantine the very keystrokes still arriving from the editor.
         // Flush the live replicas below instead; explicit controller writes use
         // the normal CRDT publication path.
+        let structure_was_fenced = hub.component_structure_fenced();
+        let mut disk_fence = None;
         if hub.live_count() == 0
             && let Ok(on_disk) = std::fs::read_to_string(file)
         {
-            match hub.reconcile_canonical_against_baseline(&on_disk) {
-                Ok(true) => agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "crdt_canonical_rebuilt_from_baseline file={} authority=multi_replica disk_len={}",
-                        file.display(),
-                        on_disk.len()
-                    ),
-                ),
-                Ok(false) => {}
+            // `#componentownclose` gap 3: an out-of-band disk text whose
+            // markers no longer pair is kept, but fenced, never committed.
+            match DiskStructureFence::reconcile_against_baseline(hub, &on_disk) {
+                Ok((rebuilt, fence)) => {
+                    if rebuilt {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "crdt_canonical_rebuilt_from_baseline file={} authority=multi_replica disk_len={}",
+                                file.display(),
+                                on_disk.len()
+                            ),
+                        );
+                    }
+                    disk_fence = fence;
+                }
                 Err(e) => agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -5362,10 +5504,34 @@ fn commit_barrier_for_file_with_authority_and_delivery(
                 ),
             }
         }
-        hub.commit_barrier_under_authority(authority)
-            .map(|ready| (ready, hub.visible_delivery_projected(), hub.live_count()))
+        let structure_released = structure_was_fenced && !hub.component_structure_fenced();
+        hub.commit_barrier_under_authority(authority).map(|ready| {
+            (
+                ready,
+                hub.visible_delivery_projected(),
+                hub.live_count(),
+                disk_fence,
+                structure_released,
+            )
+        })
     }) {
-        Ok(Some(Ok((ready, visible_delivery_projected, live_editors)))) => {
+        Ok(Some(Ok((
+            ready,
+            visible_delivery_projected,
+            live_editors,
+            disk_fence,
+            structure_released,
+        )))) => {
+            if let Some(fence) = disk_fence {
+                fence.surface(file, "commit_barrier_disk_reconcile");
+            } else if structure_released {
+                clear_component_structure_refusal(
+                    file,
+                    "crdt_disk_component_markers_repaired",
+                    "commit_barrier_disk_reconcile",
+                    "action=repaired_disk_adopted",
+                );
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -10341,6 +10507,355 @@ mod tests {
                 "{ops}"
             );
         }
+    }
+
+    /// Commit `text` as `doc` in a fresh git repository rooted at `dir`.
+    fn git_commit_document(dir: &Path, doc: &Path, text: &str) {
+        std::fs::write(doc, text).unwrap();
+        let name = doc.file_name().unwrap().to_str().unwrap();
+        for args in [
+            vec!["init", "-q"],
+            vec!["add", name],
+            vec![
+                "-c",
+                "user.name=agent-doc-test",
+                "-c",
+                "user.email=agent-doc-test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "valid revision",
+            ],
+        ] {
+            let status = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(&args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        }
+    }
+
+    fn ops_log(dir: &Path) -> String {
+        std::fs::read_to_string(dir.join(".agent-doc/logs/ops.log")).unwrap_or_default()
+    }
+
+    /// `#componentownclose` gap 3 (2026-10-26, after `655eacb624`): a cold
+    /// controller start with no editor handover (no hub, no retained
+    /// projection, and an editor that re-opens the document without a
+    /// retained frontier) seeds the relay from disk. Disk held the incident
+    /// buffer, whose `agent:loop` is closed by `/agent:todo`. Judged against
+    /// the last valid revision (the durable snapshot), it lost marker lines,
+    /// so it must not become current or committable text. The editor
+    /// bootstraps exactly the disk bytes (no revert), disk is never
+    /// rewritten, the `⚠ agent-doc:` marker diagnostic is shown, and the
+    /// operator's repair is adopted normally and clears it.
+    #[test]
+    fn componentownclose_cold_start_fences_broken_disk_against_the_snapshot() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit};
+        for style in fx::ALL_STYLES {
+            let (dir, doc) = temp_doc("todocollapse-cold.md");
+            std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+            let valid = fx::document(style, LoopEdit::None);
+            let broken = fx::document(style, LoopEdit::DeleteThroughTodoBody);
+            assert!(agent_doc_element::element::component_parse_failure(&valid).is_none());
+            agent_doc_snapshot_io::checkpoint_document_baseline(&doc, &valid, |_, _| {}).unwrap();
+            // The IDE autosaved the operator's edit before the recycle.
+            std::fs::write(&doc, &broken).unwrap();
+            drop_controller_state_for_test(&doc);
+
+            seed_live_reliable_sync_open(&doc.display().to_string());
+            let identity = "intellij:todocollapse-cold";
+            let (client_id, bootstrap) =
+                register_replica_for_file_with_liveness(&doc, identity, |_| true)
+                    .unwrap()
+                    .expect("the re-opened editor attaches to the cold controller");
+            let editor =
+                agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
+                    .unwrap();
+
+            // Operator text is kept everywhere: the editor bootstraps the disk
+            // bytes, the canonical mirrors them, and disk is untouched.
+            assert_eq!(editor.text(), broken, "the editor is never reverted");
+            assert_eq!(std::fs::read_to_string(&doc).unwrap(), broken);
+            with_hub(&doc, |hub| {
+                assert_eq!(hub.canonical_text(), broken);
+                assert!(hub.component_structure_fenced());
+                assert!(!hub.commit_barrier_ready().unwrap());
+                assert!(!hub.commit_barrier().unwrap());
+                let reason = hub.component_structure_refusal().unwrap();
+                assert!(
+                    reason.contains("opened 'agent:loop' but closed '/agent:todo'"),
+                    "{reason}"
+                );
+            })
+            .unwrap();
+            assert_eq!(
+                current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+                CurrentText::EditorSyncPending,
+                "broken disk text is never current text"
+            );
+            assert!(
+                !commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+                "broken disk text is never committed"
+            );
+            assert_eq!(std::fs::read_to_string(&doc).unwrap(), broken);
+            assert_eq!(
+                agent_doc_snapshot_io::load_document_baseline(&doc)
+                    .unwrap()
+                    .as_deref(),
+                Some(valid.as_str()),
+                "the last valid revision stays the snapshot"
+            );
+
+            // The same `⚠ agent-doc:` diagnostic, once.
+            let ops = ops_log(dir.path());
+            let fenced: Vec<&str> = ops
+                .lines()
+                .filter(|line| line.contains(DISK_STRUCTURE_FENCED_EVENT))
+                .collect();
+            assert_eq!(fenced.len(), 1, "{ops}");
+            for expected in [
+                "source=cold_disk_seed",
+                "baseline=snapshot",
+                "action=disk_text_kept",
+                "canonical=not_adopted",
+                "commit=refused",
+                "opened_'agent:loop'_but_closed_'/agent:todo'",
+            ] {
+                assert!(fenced[0].contains(expected), "{expected}: {}", fenced[0]);
+            }
+            let status =
+                agent_doc_controller::editor_route_error::editor_route_error_path_for_file(&doc)
+                    .unwrap();
+            let diagnostic = std::fs::read_to_string(&status).unwrap();
+            assert!(
+                diagnostic.starts_with(RESEED_STRUCTURE_REFUSAL_HEADER),
+                "{diagnostic}"
+            );
+            assert!(
+                diagnostic.contains("show HEAD:./todocollapse-cold.md"),
+                "{diagnostic}"
+            );
+
+            // Typing while still broken stays fenced without a second receipt.
+            let typed = broken.replace("# agent-doc bugs\n", "# agent-doc bugs!\n");
+            let frontier = editor.state_vector();
+            apply_text_change(&editor, &broken, &typed);
+            relay_replica_update_for_file(&doc, identity, &editor.diff(&frontier).unwrap())
+                .unwrap()
+                .unwrap();
+            with_hub(&doc, |hub| {
+                assert_eq!(hub.canonical_text(), typed);
+                assert!(!hub.commit_barrier_ready().unwrap());
+            })
+            .unwrap();
+            let ops = ops_log(dir.path());
+            assert_eq!(ops.matches(DISK_STRUCTURE_FENCED_EVENT).count(), 1, "{ops}");
+            assert!(
+                !ops.contains("crdt_replica_update_component_markers_removed"),
+                "the cold-seed receipt already names this refusal:\n{ops}"
+            );
+
+            // The operator's repair is adopted and clears the diagnostic.
+            let repaired = fx::document(style, LoopEdit::None)
+                .replace("# agent-doc bugs\n", "# agent-doc bugs!\n");
+            let frontier = editor.state_vector();
+            apply_text_change(&editor, &typed, &repaired);
+            relay_replica_update_for_file(&doc, identity, &editor.diff(&frontier).unwrap())
+                .unwrap()
+                .unwrap();
+            with_hub(&doc, |hub| {
+                assert_eq!(hub.canonical_text(), repaired);
+                assert!(!hub.component_structure_fenced());
+                assert!(hub.commit_barrier_ready().unwrap());
+            })
+            .unwrap();
+            match current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap() {
+                CurrentText::Current { text, .. } => assert_eq!(text, repaired),
+                other => panic!("the repaired buffer must be current text: {other:?}"),
+            }
+            assert!(!status.exists(), "the repair clears the diagnostic");
+            assert!(
+                ops_log(dir.path()).contains("crdt_replica_update_component_markers_repaired"),
+                "{}",
+                ops_log(dir.path())
+            );
+            drop_controller_state_for_test(&doc);
+        }
+    }
+
+    /// `#componentownclose` gap 3, HEAD rung: with no durable snapshot, the
+    /// cold seed judges broken disk text against `HEAD:<doc>`. An out-of-band
+    /// repair (the diagnostic's `git show HEAD:` restore, written to disk with
+    /// no live editor) is adopted at the next commit barrier, which releases
+    /// the fence and clears the diagnostic.
+    #[test]
+    fn componentownclose_cold_start_fences_broken_disk_against_head() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit, OpenerStyle};
+        let (dir, doc) = temp_doc("todocollapse-head.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let valid = fx::document(OpenerStyle::HeadingLine, LoopEdit::None);
+        let broken = fx::document(OpenerStyle::HeadingLine, LoopEdit::DeleteRowsAndLoopClose);
+        git_commit_document(dir.path(), &doc, &valid);
+        assert!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .is_none()
+        );
+        std::fs::write(&doc, &broken).unwrap();
+        drop_controller_state_for_test(&doc);
+
+        seed_embedded_relay_for_file(&doc).unwrap();
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), broken);
+            assert!(hub.component_structure_fenced());
+            assert!(hub.component_structure_refusal().is_some());
+            assert!(!hub.commit_barrier_ready().unwrap());
+        })
+        .unwrap();
+        assert!(!commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), broken);
+        let ops = ops_log(dir.path());
+        let fenced: Vec<&str> = ops
+            .lines()
+            .filter(|line| line.contains(DISK_STRUCTURE_FENCED_EVENT))
+            .collect();
+        assert_eq!(fenced.len(), 1, "{ops}");
+        assert!(fenced[0].contains("baseline=head"), "{}", fenced[0]);
+        let status =
+            agent_doc_controller::editor_route_error::editor_route_error_path_for_file(&doc)
+                .unwrap();
+        assert!(status.exists());
+
+        // The operator restores the committed revision on disk.
+        std::fs::write(&doc, &valid).unwrap();
+        assert!(commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), valid);
+            assert!(!hub.component_structure_fenced());
+        })
+        .unwrap();
+        assert!(!status.exists(), "the disk repair clears the diagnostic");
+        assert!(
+            ops_log(dir.path()).contains("crdt_disk_component_markers_repaired"),
+            "{}",
+            ops_log(dir.path())
+        );
+        drop_controller_state_for_test(&doc);
+    }
+
+    /// `#componentownclose` gap 3: only a NEW marker break is fenced. Disk
+    /// text that is already as broken as every revision it can be judged
+    /// against, or that keeps every marker line (an unclosed code fence typed
+    /// mid-way), is adopted as before, so the cold seed never wedges a
+    /// document the operator did not break.
+    #[test]
+    fn componentownclose_cold_start_adopts_disk_that_did_not_lose_a_marker() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit, OpenerStyle};
+        let valid = fx::document(OpenerStyle::HeadingPrefixed, LoopEdit::None);
+        let broken = fx::document(
+            OpenerStyle::HeadingPrefixed,
+            LoopEdit::DeleteThroughTodoBody,
+        );
+
+        // Already broken in HEAD, no snapshot: nothing valid to judge against.
+        let (dir, doc) = temp_doc("todocollapse-committed-broken.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        git_commit_document(dir.path(), &doc, &broken);
+        drop_controller_state_for_test(&doc);
+        seed_embedded_relay_for_file(&doc).unwrap();
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), broken);
+            assert!(!hub.component_structure_fenced());
+        })
+        .unwrap();
+        let ops = ops_log(dir.path());
+        assert!(!ops.contains(DISK_STRUCTURE_FENCED_EVENT), "{ops}");
+        assert!(
+            ops.contains("crdt_disk_seed_component_structure_unfenced")
+                && ops.contains("baseline=none"),
+            "{ops}"
+        );
+        drop_controller_state_for_test(&doc);
+
+        // An unclosed code fence typed before a close marker keeps every
+        // marker line, so it is in-progress text, not a lost marker.
+        let (dir, doc) = temp_doc("todocollapse-typing.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, &valid, |_, _| {}).unwrap();
+        let typing = valid.replacen("<!-- /agent:todo -->", "```\n<!-- /agent:todo -->", 1);
+        assert!(
+            agent_doc_element::element::component_parse_failure(&typing).is_some(),
+            "the fixture must fail to parse for this case to mean anything"
+        );
+        std::fs::write(&doc, &typing).unwrap();
+        drop_controller_state_for_test(&doc);
+        seed_embedded_relay_for_file(&doc).unwrap();
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), typing);
+            assert!(!hub.component_structure_fenced());
+        })
+        .unwrap();
+        let ops = ops_log(dir.path());
+        assert!(!ops.contains(DISK_STRUCTURE_FENCED_EVENT), "{ops}");
+        assert!(ops.contains("baseline=snapshot"), "{ops}");
+        drop_controller_state_for_test(&doc);
+    }
+
+    /// `#componentownclose` gap 3, out-of-band rebuild: a running hub with no
+    /// live editor rebuilds its canonical from disk at the commit barrier
+    /// (`#staleinmem`). Disk text that lost component markers is kept (disk
+    /// is not rewritten) but fenced, so the barrier refuses to commit it.
+    #[test]
+    fn componentownclose_commit_barrier_fences_an_out_of_band_marker_break() {
+        use agent_doc_element::sibling_span_fixture::{self as fx, LoopEdit, OpenerStyle};
+        let (dir, doc) = temp_doc("todocollapse-oob.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let valid = fx::document(OpenerStyle::HeadingPrefixed, LoopEdit::None);
+        let broken = fx::document(
+            OpenerStyle::HeadingPrefixed,
+            LoopEdit::DeleteThroughTodoBody,
+        );
+        std::fs::write(&doc, &valid).unwrap();
+        drop_controller_state_for_test(&doc);
+        seed_embedded_relay_for_file(&doc).unwrap();
+        assert!(commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+
+        std::fs::write(&doc, &broken).unwrap();
+        assert!(!commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), broken);
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), broken);
+            assert!(hub.component_structure_fenced());
+        })
+        .unwrap();
+        let ops = ops_log(dir.path());
+        let fenced: Vec<&str> = ops
+            .lines()
+            .filter(|line| line.contains(DISK_STRUCTURE_FENCED_EVENT))
+            .collect();
+        assert_eq!(fenced.len(), 1, "{ops}");
+        assert!(
+            fenced[0].contains("source=commit_barrier_disk_reconcile")
+                && fenced[0].contains("baseline=pre_rebuild_canonical"),
+            "{}",
+            fenced[0]
+        );
+        drop_controller_state_for_test(&doc);
     }
 
     #[test]

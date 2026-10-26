@@ -19,6 +19,7 @@ agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.555" }
 agent-doc-editor-transport-health-io = { path = "../agent-doc-editor-transport-health-io", version = "0.35.555" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.555" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.555" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.555" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.555" }
 agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.555" }

@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.555
+
+This release replaces the cancelled 0.35.554 and includes all of its changes.
+
+- **Struck queue rows stay struck.** A report receipt, a subagent completion cell, or a reported or lost attempt no
+  longer reopens a struck row. Every binary strike path now retires the struck row's completion cell and receipt, so a
+  stale cell cannot repaint `🔄` onto a later row with the same text. Queue rows are keyed by their work identity, not
+  the owner tag, so a stale editor copy with an older marker cannot bring a struck row back. Component markers inside
+  fenced code are always plain content.
+- **Remote Dev Run Agent Doc uses the client's measured layout (GH #376).** A zero-column route takes the JetBrains
+  Client's measured columns from the same IDE install, or waits for them within the route's existing budget, instead
+  of refusing with a misleading "frontend plugin missing" remedy.
+- **Tab switches sync tmux again on IntelliJ 2026.3 and Rider 2026.2.** The modular plugin package no longer strips
+  its tab-switch, split-focus and activation hooks, so tmux follows the editor without waiting for an install or Run.
+- **Everything from the cancelled 0.35.554:** claims keep their own rows and project onto every queue that shows the
+  item; heading-anchored `agent:run` markers work for respond and merge (GH #374), with components paired by `id=`;
+  zero-column routes dispatch to a live pane (GH #373); the Remote Dev popup no longer adds a null action (GH #375);
+  and Marketplace accepts a retained plugin version.
+- **Controller tests are deterministic.** Test gates, launch-claim re-acquire checks, the relay ghost-member and
+  socket-unlink fixtures, the navigation-lane catch-up, and exit-watcher reaping are each scoped to their own test.
+- **Editor packages.** JetBrains classic, 2026.2, and 2026.3 are 0.2.833, 0.2.834, and 0.2.835; VS Code remains
+  0.2.83. Modular IDEs still require a restart to load the replaced plugin.
+
 ## 0.35.554
 
 - **Queue claims stay on their own rows and show the same state in every queue.** A reported claim no longer moves

@@ -25,7 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 32 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 33 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -424,6 +424,14 @@ The initial release workflow's aggregate promotion job was cancelled by a concur
 Yes. The items marked ☑️ in the completed release batch reported successfully, were integrated and verified, and shipped in `v0.35.552`. Their retained completion notices are historical evidence, not unfinished implementation work.
 
 The queue is not globally empty: `do [#layoutunprovenliveverify]` is the next unclaimed implementation/verification item, and the live operator proofs for `#jb263-feed-verify` and `#coder-remote-install-02805` remain open. Those are separate from the completed release batch.
+
+### Re: Fix release promotion concurrency — gpt-6.1-sol · 2026-10-26T03:49:55-04:00
+
+Completed `#release-promotion-concurrency`.
+
+The release aggregate and per-target promotion workflows shared one repository-wide concurrency group. GitHub's default single pending slot allowed the six rapid target dispatches to replace the pending aggregate job even with `cancel-in-progress: false`. Both participants now set `queue: max`, preserving serialized stable-channel writes while preventing pending promotion eviction.
+
+The worker commit `7759804dff` was integrated as `42bd3810a8` and pushed to `origin/main`. The spec and regression test were updated. Coordinator verification passed the exact regression, `make check-fast` with 1,975 tests, clippy, docs/release self-tests, and a local install. The installed CLI remains `0.35.552`; JetBrains generations remain `0.2.825`, `0.2.826`, and `0.2.827` because editor sources were unchanged.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -538,7 +546,7 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:tracked_work_todo_backlinks#1] backlog/queue/icebox items should always backlink to todo items so the todo items can be cleared once complete. This may mean the todo item(s) block the queue/backlog/icebox item(s).
 - ☑️ [#subagent:jetbrains_submission_feedback#1] Read the feedback from the JetBrains agent-doc plugin submission. Fix any issues.
 - ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
-- 🚧 [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
+- ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
 <!-- /agent:run -->
 
 ## Run: Issues
@@ -563,7 +571,6 @@ force-write the file, and do not delete the queue items.                        
 <!-- agent:backlog priority queue -->
 - [ ] 🚧 [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [ ] 🚧 [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
-- [ ] [#release-promotion-concurrency] Make release.yml aggregate promote-target-channels concurrency-safe with its per-target fan-out so a successful release does not require manually rerunning a cancelled aggregate promotion job.
 <!-- /agent:backlog -->
 
 ## Review

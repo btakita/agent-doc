@@ -630,3 +630,4 @@
 - 2026-10-23 [#latestbetadownload] What is the latest beta download url?
 - 2026-10-23 [#upgradedidealatest] I upgraded Idea to the latest release version. Is this archiceture different from the Beta? Does this version have the frontend + backend? Or is that something to do with Toolbox + Coder?
 - 2026-10-26 [#helpregisterjetbrains] [operator-verify] Complete the first manual JetBrains Marketplace upload and add JETBRAINS_MARKETPLACE_TOKEN; then rerun v0.35.548 Release and verify the three compatibility-ranged updates.
+- 2026-10-26 [#release-promotion-concurrency] Make release.yml aggregate promote-target-channels concurrency-safe with its per-target fan-out so a successful release does not require manually rerunning a cancelled aggregate promotion job.

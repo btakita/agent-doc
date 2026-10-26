@@ -127,10 +127,16 @@ fn attach_failure_remedy(reason: &str) -> Option<&'static str> {
     } else if reason.contains("ambiguous-retained-projection")
         || reason.contains("ambiguous-reregister-projection")
     {
+        // `#lagcanonicalrollforward`: after the dual proof a hold means no
+        // direction is proven lossless, not that the buffer diverged: a buffer
+        // can equal its settled shadow while canonical's descent from it is
+        // unproven. The buffer is never touched while held, so the operator
+        // keeps whatever they copy.
         Some(
-            "The editor buffer and controller canonical have diverged from their last settled ancestor. \
-             Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, \
-             and reopen it.",
+            "Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or \
+             merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need \
+             to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, \
+             and paste back anything missing.",
         )
     } else if reason.contains("attach-timeout-pending") {
         Some(
@@ -263,8 +269,12 @@ mod tests {
         let message = answer.hold_message.unwrap();
         assert!(message.starts_with(
             "Agent Doc could not attach the open editor replica for plan.md. \
-             Cause: ambiguous-reregister-projection. The editor buffer"
+             Cause: ambiguous-reregister-projection. Agent Doc could not prove"
         ));
+        // `#lagcanonicalrollforward`: the remedy never claims the buffer
+        // diverged; a held buffer can equal its settled shadow.
+        assert!(!message.contains("diverged from their last settled ancestor"));
+        assert!(message.contains("paste back anything missing"));
         assert!(message.ends_with(" The editor buffer and disk were left unchanged."));
     }
 

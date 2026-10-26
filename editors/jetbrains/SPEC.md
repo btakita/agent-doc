@@ -388,6 +388,13 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   publication-edge rechecks, and the order of their effects stay in Kotlin. An
   action this plugin generation cannot execute takes the frozen floor, so a new
   action needs a plugin generation; a new hold reason does not.
+  The registration's clean-merge fact also answers true when native proves the
+  live buffer already carries every canonical change since the settled shadow
+  (`#lagcanonicalrollforward`, in `agent-doc-merge` `rebase`); the merge it then
+  publishes is the buffer itself. `forwarderFor` releases the retained native
+  resume state only at its two commit points
+  (`releaseRetainedResumeStateOnCommitUtil`, `#resumefrontierlostonfailedattach`),
+  and logs a swap refusal with whether that frontier was kept.
 - `attach_failure_diagnosis` (phase 5b): what a CRDT replica attach failure
   means for the operator. Evidence is the recorded failure reason and, for the
   operator notification, the document's file name. Native owns the one-line

@@ -77,6 +77,29 @@
   equals its settled projection only when coverage is explicitly true. False or
   unknown coverage remains an ambiguity hold, and retained editor state is never
   union-merged into a forced canonical bootstrap.
+- `#resumefrontierlostonfailedattach`: the editor releases a retained native
+  resume state (the frontier a native-library reload captured) only when the
+  registration that consumed it commits: its endpoint owns the document's
+  forwarder slot and its projection finalized. A registration that held, raced
+  the operator at the swap, or failed promotion keeps it, so the next
+  registration still supplies the state vector and the controller can answer
+  coverage as true. Releasing it earlier left every later registration with
+  unknown coverage, and a buffer equal to its settled shadow held forever.
+- `#lagcanonicalrollforward`: when every rebase planner refuses a registration's
+  clean merge (or a captured-splice rebase), the live buffer is still the
+  answer if it carries every change canonical made since the settled shadow:
+  compared as whole changed lines over operator text (binary-owned boundary and
+  `(HEAD)` markers and a queue row's attempt projection, such as a claim marker,
+  removed), each canonical change lies inside one buffer change over the same
+  base range, and canonical's inserted text reappears there in order with at most
+  one run of later typing and nothing removed. A whitespace-only canonical
+  insertion never counts. This covers a canonical that lagged the buffer only
+  because live updates were refused (a structure-quarantined relay whose durable
+  ops still landed), and a claim projection written onto the row the operator was
+  editing. The editor text is the base; binary-owned projection the controller
+  dropped this way is re-projected from its own state. A canonical change the
+  buffer lacks still holds. The hold remedy says that no direction was proven
+  lossless, never that the buffer diverged.
 - A selected-document focus that resolves a proven live-owner pane outside the
   active `agent-doc` window must surface that pane before selection. Promotion
   and selection share the editor focus-generation fence, and the controller

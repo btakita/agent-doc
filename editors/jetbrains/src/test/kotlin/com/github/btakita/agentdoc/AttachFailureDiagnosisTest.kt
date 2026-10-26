@@ -62,7 +62,9 @@ class AttachFailureDiagnosisTest {
                     JsonParser.parseString(gson.toJson(AttachFailureDiagnosis.evidence(reason, fileName))).asJsonObject,
                 )
             }
-            assertEquals(name, case.getAsJsonObject("expected"), wire(AttachFailureDiagnosis.frozen(reason, fileName)))
+            // A native rule that diverged on purpose keeps the frozen answer beside it.
+            val frozenExpected = case.getAsJsonObject("frozen_expected") ?: case.getAsJsonObject("expected")
+            assertEquals(name, frozenExpected, wire(AttachFailureDiagnosis.frozen(reason, fileName)))
         }
     }
 

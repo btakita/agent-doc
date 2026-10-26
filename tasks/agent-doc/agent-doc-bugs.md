@@ -575,7 +575,8 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:jetbrains_submission_feedback#1] Read the feedback from the JetBrains agent-doc plugin submission. Fix any issues.
 - ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
 - ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
-- 📥 do [#claimrowmigrate]
+- ☑️ [#subagent:claimrowmigrate#1] do [#claimrowmigrate]
+- ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 <!-- /agent:run -->
 
 ## Run: Issues

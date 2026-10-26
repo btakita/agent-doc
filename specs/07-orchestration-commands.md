@@ -241,6 +241,21 @@ Cross-document route dispatch appends transient prompts only to a non-repeating
 `agent:loop` or another queue carrying `loop`; if no immediate run exists, the
 router creates `agent:run` and leaves every repeating queue byte-identical.
 
+Every other binary-originated insertion follows the same rule
+(`#loopnoinsert`): `queue add`, worker follow-ups (`queue follow-up --id`), the
+backlog→queue mirror, `backlog reopen`, and `backlog requeue` write only into a
+non-repeating `agent:run`. The target is the selected queue when it is an
+`agent:run`, otherwise the first `agent:run` in document order; a loop is never
+the target even when preflight selected it because every `agent:run` head is
+claimed or drained. A follow-up whose origin is a loop row lands immediately
+after the origin's live copy in that `agent:run`, or at its end when there is no
+copy, and the ops log records `redirected_from_loop=<loop id>`. Preflight skips
+the backlog mirror for a selected loop; the ids mirror on the next pass that
+selects an `agent:run`. A document with only loops refuses the insertion instead
+of writing into a loop. Loop rows are operator-authored recurring work: every
+row a loop pass runs is restored on later passes, so an inserted one-off item
+would come back on every pass.
+
 ### Syntax
 
 - Single-line prompts use flush-left `- ` list items.

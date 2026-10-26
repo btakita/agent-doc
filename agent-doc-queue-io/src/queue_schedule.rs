@@ -617,21 +617,61 @@ mod tests {
 
     #[test]
     fn restore_writes_the_items_back_once() {
+        // `b` has neither a live nor a struck row: it was removed from the
+        // loop, so only `a` comes back (`#loopnoresurrect`).
         let content = doc("loop", "- ~~a~~\n");
         let (_dir, file) = project(&content);
         let roster = vec!["a".to_string(), "b".to_string()];
         assert_eq!(
             restore_loop_items_with_effects(&DiskEffects, &file, &roster).unwrap(),
-            2
+            1
         );
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
-            doc("loop", "- a\n- b\n")
+            doc("loop", "- a\n")
         );
         assert_eq!(
             restore_loop_items_with_effects(&DiskEffects, &file, &roster).unwrap(),
             0
         );
+    }
+
+    /// `#loopnoresurrect` on the 2026-10-26 `agent-doc-bugs.md` shape: the
+    /// retained 16-item `restore_pending` roster, applied after the operator
+    /// cut the loop's rows into `agent:run`, leaves the document byte-identical
+    /// (including the loop marker's unquoted attributes) and still succeeds, so
+    /// the scheduler clears `restore_pending` instead of retrying forever.
+    #[test]
+    fn stale_restore_roster_is_a_byte_identical_no_op_on_the_two_queue_doc() {
+        let content = concat!(
+            "# Bugs\n\n",
+            "## Queue: Main\n",
+            "<!-- agent:run id=\"main\" subagents priority go -->\n",
+            "- 📥 do [#layoutunprovenliveverify]\n",
+            "- 🔄 release + publish\n",
+            "<!-- /agent:run -->\n\n",
+            "## Run: Issues\n",
+            "<!-- agent:loop id=issues interval=1h priority -->\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let (_dir, file) = project(content);
+        let roster: Vec<String> = [
+            "Watch https://github.com/btakita/agent-doc/issues for new issues.",
+            "do [#gh363]",
+            "do [#upgradeideatest]",
+            "[#coder-remote-install-02805]: done: but still not syncing",
+            "📥 do [#layoutunprovenliveverify]",
+            "🔄 release + publish",
+        ]
+        .iter()
+        .map(|item| item.to_string())
+        .collect();
+        assert_eq!(
+            restore_loop_items_for_queue_with_effects(&DiskEffects, &file, "issues", &roster)
+                .unwrap(),
+            0
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
     }
 
     #[test]

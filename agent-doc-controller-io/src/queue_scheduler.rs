@@ -1674,12 +1674,14 @@ mod tests {
         assert_eq!(second.graph().earliest_wake(), Some(1_600));
     }
 
-    /// GH #327: both production drain shapes on a multi-queue document. Pass
-    /// 3's closeout consume claimed the head and then deleted the row; pass 4's
-    /// preflight struck it (the drain now keeps a `loop` queue's struck row).
-    /// Neither may complete the pass with `restore_items=0`.
+    /// GH #327 + `#loopnoresurrect` on a multi-queue document. Every binary
+    /// drain keeps a `loop` queue's struck row, so the pass-4 shape (struck,
+    /// never seen claimed) restores the item. A row that is claimed and then
+    /// erased with no struck copy was removed by the operator (deleted, or cut
+    /// into `agent:run`): the pass completes and restores nothing, and the
+    /// sibling queue's struck copy is never a restore source.
     #[test]
-    fn loop_pass_restores_an_item_the_drain_claimed_then_erased_or_struck() {
+    fn loop_pass_restores_a_struck_item_and_never_an_erased_one() {
         let queues = |issues_body: &str| {
             format!(
                 concat!(
@@ -1700,7 +1702,7 @@ mod tests {
         worker.refresh(&file);
         let due = due_for(&file, "issues");
 
-        // Pass 1 (the pass-3 shape): claimed, then the consume erases the row.
+        // Pass 1 (the pass-4 shape): struck without ever being seen claimed.
         worker.run_due(&due);
         assert!(
             load_schedule_state_for_queue(&file, "issues")
@@ -1708,9 +1710,7 @@ mod tests {
                 .unwrap()
                 .window_open()
         );
-        *io.text.lock() = queues("- 🚧 #upgrade\n");
-        worker.refresh(&file);
-        *io.text.lock() = queues("");
+        *io.text.lock() = queues("- ~~#upgrade~~\n");
         worker.refresh(&file);
         let state = load_schedule_state_for_queue(&file, "issues")
             .unwrap()
@@ -1720,19 +1720,26 @@ mod tests {
             io.restores.lock().last(),
             Some(&vec!["#upgrade".to_string()])
         );
-        assert_eq!(*io.text.lock(), content, "pass 1 restored the erased item");
+        assert_eq!(*io.text.lock(), content, "pass 1 restored the struck item");
 
-        // Pass 2 (the pass-4 shape): struck without ever being seen claimed.
+        // Pass 2: claimed, then the row is removed outright.
         *io.now.lock() = 1_000 + 3_600;
         worker.run_due(&due);
-        *io.text.lock() = queues("- ~~#upgrade~~\n");
+        *io.text.lock() = queues("- 🚧 #upgrade\n");
+        worker.refresh(&file);
+        *io.text.lock() = queues("");
         worker.refresh(&file);
         let state = load_schedule_state_for_queue(&file, "issues")
             .unwrap()
             .unwrap();
         assert_eq!(state.passes_completed, 2);
-        assert_eq!(*io.text.lock(), content, "pass 2 restored the struck item");
-        assert_eq!(io.restores.lock().len(), 2);
+        assert_eq!(state.restore_pending, None);
+        assert_eq!(
+            *io.text.lock(),
+            queues(""),
+            "pass 2 did not resurrect the removed row"
+        );
+        assert_eq!(io.restores.lock().len(), 1);
     }
 
     /// GH #335: if the one post-pass restore write was lost, the next due

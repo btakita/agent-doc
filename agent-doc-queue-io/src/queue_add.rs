@@ -200,17 +200,25 @@ pub fn add_followups_with_effects(
 ) -> Result<usize> {
     let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let current = effects.current_document_content(file, "queue_followup")?;
-    let updated = queue_inbound::plan_queue_followups(&current, queue_id, origin, followups)
+    let plan = queue_inbound::plan_queue_followups_targeted(&current, queue_id, origin, followups)
         .with_context(|| format!("queue follow-up: {}", file.display()))?;
-    effects.converge_document_or_disk(file, &updated, &current, "queue_followup")?;
+    effects.converge_document_or_disk(file, &plan.content, &current, "queue_followup")?;
+    let target_queue_id = plan.queue_id.as_str();
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_followup_write queue_id={queue_id} origin_hash={} count={}",
+            "queue_followup_write queue_id={target_queue_id} origin_hash={} count={} redirected_from_loop={} (#loopnoinsert)",
             agent_doc_hash::content_hash(origin),
-            followups.len()
+            followups.len(),
+            plan.redirected_from_loop.as_deref().unwrap_or("-"),
         ),
     );
+    if let Some(loop_id) = plan.redirected_from_loop.as_deref() {
+        eprintln!(
+            "[queue] follow-up origin is in agent:loop id `{loop_id}`; added {} follow-up(s) to agent:run id `{target_queue_id}` instead (loops never receive follow-ups)",
+            followups.len()
+        );
+    }
     // `#capturegatedispatched`: follow-up heads are tracked work, so they meet
     // this cycle's generic backlog-capture requirement. The heads already
     // landed; a failed mark only leaves the gate armed, so it must not fail

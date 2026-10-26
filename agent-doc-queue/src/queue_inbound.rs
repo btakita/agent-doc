@@ -45,6 +45,17 @@ pub enum InboundAppendPlan {
     Duplicate { existing: String },
 }
 
+/// Where [`plan_queue_followups_targeted`] put the follow-ups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueFollowupPlan {
+    pub content: String,
+    /// The queue that received the heads.
+    pub queue_id: String,
+    /// `Some(loop_id)` when the origin's queue was an `agent:loop` and the
+    /// heads were redirected to `queue_id` (`#loopnoinsert`).
+    pub redirected_from_loop: Option<String>,
+}
+
 /// Insert queue-local follow-up heads immediately after the head that produced
 /// them. Queue id and origin are both mandatory: a mirrored copy in another
 /// queue must never redirect the insertion to the document's selected queue.
@@ -54,13 +65,96 @@ pub fn plan_queue_followups(
     origin: &str,
     followups: &[String],
 ) -> Result<String> {
+    Ok(plan_queue_followups_targeted(content, queue_id, origin, followups)?.content)
+}
+
+/// [`plan_queue_followups`], reporting the queue that received the heads.
+///
+/// `#loopnoinsert`: when `queue_id` names an `agent:loop`, the follow-ups are
+/// one-off work, not recurring loop rows (a loop pass would restore them every
+/// pass). They go to the document's [`crate::queue_graph::insertion_component`]
+/// `agent:run` instead: right after the origin's mirrored copy there when one
+/// is live, else at the end of that queue. A document with only loops refuses.
+pub fn plan_queue_followups_targeted(
+    content: &str,
+    queue_id: &str,
+    origin: &str,
+    followups: &[String],
+) -> Result<QueueFollowupPlan> {
     if followups.is_empty() {
         bail!("queue follow-up needs at least one --item");
     }
     let components = agent_doc_element::element::parse(content)?;
-    let queue = crate::queue_graph::component_for_id(content, &components, queue_id)?
+    let named = crate::queue_graph::component_for_id(content, &components, queue_id)?
         .ok_or_else(|| anyhow::anyhow!("agent:queue id `{queue_id}` not found"))?;
-    let body = queue.content(content);
+    if crate::queue_graph::is_loop_queue(named) {
+        let target_id = crate::queue_graph::insertion_queue_id(content, &components)?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "queue follow-up origin is in `agent:loop` id `{queue_id}`, and the document has no `agent:run` to receive the follow-ups; add `<!-- agent:run -->` ... `<!-- /agent:run -->` (follow-ups never join a loop)"
+                )
+            })?;
+        let target = crate::queue_graph::component_for_id(content, &components, &target_id)?
+            .ok_or_else(|| anyhow::anyhow!("agent:queue id `{target_id}` not found"))?;
+        let insertion_at = match live_origin_line_ends(target.content(content), origin).as_slice() {
+            [offset] => target.open_end + offset,
+            _ => {
+                let body = target.content(content);
+                if body.is_empty() || body.ends_with('\n') {
+                    target.close_start
+                } else {
+                    // Keep the closing marker on its own line.
+                    return Ok(QueueFollowupPlan {
+                        content: splice_followups(content, target.close_start, "\n", followups)?,
+                        queue_id: target_id,
+                        redirected_from_loop: Some(queue_id.to_string()),
+                    });
+                }
+            }
+        };
+        return Ok(QueueFollowupPlan {
+            content: splice_followups(content, insertion_at, "", followups)?,
+            queue_id: target_id,
+            redirected_from_loop: Some(queue_id.to_string()),
+        });
+    }
+    let queue = named;
+    let matches = live_origin_line_ends(queue.content(content), origin);
+    let insertion_at = match matches.as_slice() {
+        [offset] => queue.open_end + offset,
+        [] => bail!("queue follow-up origin {origin:?} not found in queue id `{queue_id}`"),
+        _ => bail!("queue follow-up origin {origin:?} is ambiguous in queue id `{queue_id}`"),
+    };
+    Ok(QueueFollowupPlan {
+        content: splice_followups(content, insertion_at, "", followups)?,
+        queue_id: queue_id.to_string(),
+        redirected_from_loop: None,
+    })
+}
+
+fn splice_followups(
+    content: &str,
+    insertion_at: usize,
+    lead: &str,
+    followups: &[String],
+) -> Result<String> {
+    let mut insertion = String::from(lead);
+    for item in followups {
+        let item = normalize_inbound_text(item)?;
+        insertion.push_str("- ");
+        insertion.push_str(&item);
+        insertion.push('\n');
+    }
+    let mut updated = String::with_capacity(content.len() + insertion.len());
+    updated.push_str(&content[..insertion_at]);
+    updated.push_str(&insertion);
+    updated.push_str(&content[insertion_at..]);
+    Ok(updated)
+}
+
+/// Body-relative end offsets of every live (unstruck) line whose head text is
+/// `origin`.
+fn live_origin_line_ends(body: &str, origin: &str) -> Vec<usize> {
     let wanted = crate::queue_head_alignment::normalize_queue_head_text(origin);
     let mut matches = Vec::new();
     let mut offset = 0usize;
@@ -79,23 +173,7 @@ pub fn plan_queue_followups(
         }
         offset += line.len();
     }
-    let insertion_at = match matches.as_slice() {
-        [offset] => queue.open_end + offset,
-        [] => bail!("queue follow-up origin {origin:?} not found in queue id `{queue_id}`"),
-        _ => bail!("queue follow-up origin {origin:?} is ambiguous in queue id `{queue_id}`"),
-    };
-    let mut insertion = String::new();
-    for item in followups {
-        let item = normalize_inbound_text(item)?;
-        insertion.push_str("- ");
-        insertion.push_str(&item);
-        insertion.push('\n');
-    }
-    let mut updated = String::with_capacity(content.len() + insertion.len());
-    updated.push_str(&content[..insertion_at]);
-    updated.push_str(&insertion);
-    updated.push_str(&content[insertion_at..]);
-    Ok(updated)
+    matches
 }
 
 fn valid_token_char(ch: char) -> bool {
@@ -204,11 +282,13 @@ pub fn plan_inbound_append(
     key: Option<&str>,
 ) -> Result<InboundAppendPlan> {
     let components = agent_doc_element::element::parse(content)?;
-    // The same selected queue block preflight reads (`queue_graph`), so the
-    // head lands where the next preflight looks for queue work.
-    let Some(queue) = crate::queue_graph::selected_component(content, &components)? else {
+    // The selected queue block preflight reads (`queue_graph`) when it is an
+    // `agent:run`, so the head lands where the next preflight looks for queue
+    // work. A selected `agent:loop` is never the target (`#loopnoinsert`): the
+    // head goes to the first `agent:run` instead.
+    let Some(queue) = crate::queue_graph::insertion_component(content, &components)? else {
         bail!(
-            "no agent:run component found. Add `<!-- agent:run -->` ... `<!-- /agent:run -->` to the document. (`agent:queue` remains a supported compatibility alias.)"
+            "no agent:run component found. Add `<!-- agent:run -->` ... `<!-- /agent:run -->` to the document; items are never added to an `agent:loop`. (`agent:queue` remains a supported compatibility alias.)"
         );
     };
     let body = &content[queue.open_end..queue.close_start];
@@ -312,10 +392,15 @@ mod tests {
     }
 
     #[test]
-    fn followups_stay_after_origin_in_exact_queue_when_head_is_mirrored() {
+    fn followups_from_a_loop_origin_land_after_its_run_copy_never_in_the_loop() {
+        // `#loopnoinsert`: the worker ran `do [#httpsgithubcom]` from the
+        // `issues` loop. Its one-off follow-ups belong in `agent:run`, right
+        // after the mirrored copy there; the loop stays byte-identical so no
+        // later pass restores them as recurring rows.
         let doc = concat!(
             "<!-- agent:queue id=main subagents -->\n",
             "- do [#httpsgithubcom]\n",
+            "- other work\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:queue id=issues loop interval=1h -->\n",
             "- do [#httpsgithubcom]\n",
@@ -324,26 +409,112 @@ mod tests {
         );
         let followups = vec![
             "#gh-fix https://github.com/btakita/agent-doc/issues/303".to_string(),
-            "#gh-fix https://github.com/btakita/agent-doc/issues/304".to_string(),
-            "#gh-fix https://github.com/btakita/agent-doc/issues/305".to_string(),
             "release + publish".to_string(),
         ];
-        let updated =
-            plan_queue_followups(doc, "issues", "do [#httpsgithubcom]", &followups).unwrap();
+        let plan = plan_queue_followups_targeted(doc, "issues", "do [#httpsgithubcom]", &followups)
+            .unwrap();
+        assert_eq!(plan.queue_id, "main");
+        assert_eq!(plan.redirected_from_loop.as_deref(), Some("issues"));
         assert_eq!(
-            updated,
+            plan.content,
             concat!(
                 "<!-- agent:queue id=main subagents -->\n",
                 "- do [#httpsgithubcom]\n",
+                "- #gh-fix https://github.com/btakita/agent-doc/issues/303\n",
+                "- release + publish\n",
+                "- other work\n",
                 "<!-- /agent:queue -->\n\n",
                 "<!-- agent:queue id=issues loop interval=1h -->\n",
                 "- do [#httpsgithubcom]\n",
-                "- #gh-fix https://github.com/btakita/agent-doc/issues/303\n",
-                "- #gh-fix https://github.com/btakita/agent-doc/issues/304\n",
-                "- #gh-fix https://github.com/btakita/agent-doc/issues/305\n",
-                "- release + publish\n",
                 "- existing tail\n",
                 "<!-- /agent:queue -->\n",
+            )
+        );
+    }
+
+    /// `#loopnoinsert` on this repository's `agent-doc-bugs.md` shape: the
+    /// loop's "Watch …/issues" row has no copy in `agent:run id="main"`, so the
+    /// follow-ups append to the end of `main`.
+    #[test]
+    fn followups_from_a_loop_only_origin_append_to_agent_run() {
+        let doc = concat!(
+            "## Queue: Main\n",
+            "<!-- agent:run id=\"main\" subagents priority go -->\n",
+            "- 🚧 [#subagent:strikeformat#1] The strikethrough is malformed.\n",
+            "<!-- /agent:run -->\n\n",
+            "## Run: Issues\n",
+            "<!-- agent:loop id=issues interval=1h priority -->\n",
+            "- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues.\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let updated = plan_queue_followups(
+            doc,
+            "issues",
+            "Watch https://github.com/btakita/agent-doc/issues for new issues.",
+            &["do [#gh363]".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            updated,
+            concat!(
+                "## Queue: Main\n",
+                "<!-- agent:run id=\"main\" subagents priority go -->\n",
+                "- 🚧 [#subagent:strikeformat#1] The strikethrough is malformed.\n",
+                "- do [#gh363]\n",
+                "<!-- /agent:run -->\n\n",
+                "## Run: Issues\n",
+                "<!-- agent:loop id=issues interval=1h priority -->\n",
+                "- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues.\n",
+                "<!-- /agent:loop -->\n",
+            )
+        );
+    }
+
+    #[test]
+    fn followups_from_a_loop_refuse_when_the_document_has_no_agent_run() {
+        let doc = concat!(
+            "<!-- agent:loop id=issues interval=1h -->\n",
+            "- poll issues\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let err = plan_queue_followups(doc, "issues", "poll issues", &["do [#x]".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no `agent:run`"), "{err}");
+    }
+
+    /// `#loopnoinsert`: `queue add` targets the selected queue only when it is
+    /// an `agent:run`. With `main` drained the loop is the selected queue, but
+    /// the inbound head still lands in `main`.
+    #[test]
+    fn inbound_append_never_targets_a_selected_loop() {
+        let doc = concat!(
+            "<!-- agent:run id=main go -->\n",
+            "- ~~done earlier~~\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:loop id=issues interval=1h -->\n",
+            "- poll issues\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let head = render_inbound_head("ci", None, "build failed", &[]);
+        let InboundAppendPlan::Append { content, .. } =
+            plan_inbound_append(doc, &head, "ci", None).unwrap()
+        else {
+            panic!("expected append");
+        };
+        assert_eq!(
+            content,
+            format!(
+                concat!(
+                    "<!-- agent:run id=main go -->\n",
+                    "- ~~done earlier~~\n",
+                    "- {}\n",
+                    "<!-- /agent:run -->\n",
+                    "<!-- agent:loop id=issues interval=1h -->\n",
+                    "- poll issues\n",
+                    "<!-- /agent:loop -->\n",
+                ),
+                head
             )
         );
     }

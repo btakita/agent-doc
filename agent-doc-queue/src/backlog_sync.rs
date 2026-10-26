@@ -505,7 +505,7 @@ impl MirrorRefusal {
                 "the `agent:backlog` marker carries no `queue` attribute, so backlog adds                  cannot mirror into `agent:queue` — run `agent-doc backlog <FILE> set-attr queue`                  (`#bkqattrcli`) and re-run the capture, or file the queue heads explicitly"
             }
             Self::NoQueueComponent => {
-                "the document has no `agent:queue` component to mirror into"
+                "the document has no `agent:run` component to mirror into (an `agent:loop` never receives mirrored ids)"
             }
             Self::NoQueueableIds => {
                 "none of the ids is an open `agent:backlog` item (deduped, iceboxed, or done)"
@@ -548,7 +548,7 @@ pub fn enqueue_actionable_ids_reporting(
         return Ok(MirrorOutcome::Refused(MirrorRefusal::BacklogNotOptedIn));
     }
 
-    let Some(queue_comp) = components.iter().find(|comp| comp.name == "queue") else {
+    let Some(queue_comp) = mirror_queue_component(&components) else {
         return Ok(MirrorOutcome::Refused(MirrorRefusal::NoQueueComponent));
     };
 
@@ -712,7 +712,9 @@ pub fn enqueue_actionable_ids_reporting(
                 }
             }
         };
-        return Ok(MirrorOutcome::Mirrored(queue_comp.replace_content(content, &new_body)));
+        return Ok(MirrorOutcome::Mirrored(
+            queue_comp.replace_content(content, &new_body),
+        ));
     }
 
     // Mixed block: insert each anchored id after its anchor's live head (in backlog
@@ -783,7 +785,9 @@ pub fn enqueue_actionable_ids_reporting(
         };
     }
 
-    Ok(MirrorOutcome::Mirrored(queue_comp.replace_content(content, &new_body)))
+    Ok(MirrorOutcome::Mirrored(
+        queue_comp.replace_content(content, &new_body),
+    ))
 }
 
 /// `#queuemirrororder`: project the backlog's declared order onto the queue mirror.
@@ -816,7 +820,7 @@ pub fn reorder_queue_mirror_in_content(
     }
 
     let components = element::parse(content)?;
-    let Some(queue_comp) = components.iter().find(|comp| comp.name == "queue") else {
+    let Some(queue_comp) = mirror_queue_component(&components) else {
         return Ok(None);
     };
     let body = &content[queue_comp.open_end..queue_comp.close_start];
@@ -882,10 +886,11 @@ pub fn reopen_actionable_id_in_content(content: &str, id: &str) -> anyhow::Resul
     anyhow::ensure!(!id.is_empty(), "reopened queue id must not be empty");
 
     let components = element::parse(content)?;
-    let queue_comp = components
-        .iter()
-        .find(|component| component.name == "queue")
-        .ok_or_else(|| anyhow::anyhow!("document has no agent:queue component"))?;
+    let queue_comp = mirror_queue_component(&components).ok_or_else(|| {
+        anyhow::anyhow!(
+            "document has no agent:run component (an agent:loop never receives mirrored ids)"
+        )
+    })?;
     let body = &content[queue_comp.open_end..queue_comp.close_start];
     let spans = document_queue::parse_spans(body)?;
     let mut live_present = false;
@@ -977,10 +982,11 @@ pub fn requeue_open_ids_in_content(
     }
 
     let components = element::parse(content)?;
-    let queue_comp = components
-        .iter()
-        .find(|component| component.name == "queue")
-        .ok_or_else(|| anyhow::anyhow!("document has no agent:queue component"))?;
+    let queue_comp = mirror_queue_component(&components).ok_or_else(|| {
+        anyhow::anyhow!(
+            "document has no agent:run component (an agent:loop never receives mirrored ids)"
+        )
+    })?;
     let body = &content[queue_comp.open_end..queue_comp.close_start];
     let mut live: HashSet<String> = HashSet::new();
     for (entry, _) in document_queue::parse_spans(body)? {
@@ -1013,6 +1019,16 @@ pub fn requeue_open_ids_in_content(
         content: Some(queue_comp.replace_content(content, &new_body)),
         restored,
         already_live,
+    })
+}
+
+/// `#loopnoinsert`: the queue the backlog mirror, reopen, and requeue write
+/// into: the first non-repeating `agent:run` in document order. An
+/// `agent:loop` is never a mirror target, so a backlog id never becomes a
+/// recurring loop row that every later pass restores.
+fn mirror_queue_component(components: &[element::Component]) -> Option<&element::Component> {
+    components.iter().find(|component| {
+        component.name == "queue" && !crate::queue_graph::is_loop_queue(component)
     })
 }
 
@@ -1676,6 +1692,72 @@ mod tests {
         let fresh = updated.find("- do [#fresh]").expect("fresh head present");
         let goal = updated.find("- /goal").unwrap();
         assert!(fresh < goal, "the follow-up goes to the head:\n{updated}");
+    }
+
+    /// `#loopnoinsert`: with an `agent:loop` above the `agent:run`, the backlog
+    /// mirror, reopen, and requeue all write into `agent:run`; the loop stays
+    /// byte-identical so no pass ever restores a mirrored id as a loop row.
+    #[test]
+    fn backlog_mirror_reopen_and_requeue_never_write_into_a_loop() {
+        let loop_block = concat!(
+            "<!-- agent:loop id=issues interval=1h -->\n",
+            "- poll issues\n",
+            "- ~~do [#reopen]~~\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let content = format!(
+            concat!(
+                "{}\n",
+                "<!-- agent:run id=main go -->\n",
+                "- ~~do [#reopen]~~\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:backlog priority queue -->\n",
+                "- [ ] [#fresh] new work\n",
+                "- [ ] [#reopen] reopened work\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            loop_block
+        );
+        let mirrored = enqueue_actionable_ids_in_content(
+            &content,
+            &["fresh".into()],
+            FollowUpQueuePlacement::Prepend,
+        )
+        .unwrap()
+        .expect("the fresh id must enqueue");
+        assert!(mirrored.starts_with(loop_block), "{mirrored}");
+        assert!(
+            mirrored.contains("<!-- agent:run id=main go -->\n- do [#fresh]\n"),
+            "{mirrored}"
+        );
+
+        let reopened = reopen_actionable_id_in_content(&content, "reopen")
+            .unwrap()
+            .expect("the struck run copy reopens");
+        assert!(reopened.starts_with(loop_block), "{reopened}");
+        assert!(
+            reopened.contains("<!-- agent:run id=main go -->\n- do [#reopen]\n"),
+            "{reopened}"
+        );
+
+        let only_loop = concat!(
+            "<!-- agent:loop id=issues interval=1h -->\n",
+            "- poll issues\n",
+            "<!-- /agent:loop -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#fresh] new work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(
+            enqueue_actionable_ids_reporting(
+                only_loop,
+                &["fresh".into()],
+                FollowUpQueuePlacement::Prepend,
+                &[],
+            )
+            .unwrap(),
+            MirrorOutcome::Refused(MirrorRefusal::NoQueueComponent)
+        );
     }
 
     /// `#queueingressorder`: the priority graph is active at ingress, derived

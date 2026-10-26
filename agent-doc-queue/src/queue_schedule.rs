@@ -1018,7 +1018,25 @@ fn observe_inner(
     state.passes_completed = state.passes_completed.max(pass);
     state.last_pass_completed_secs = Some(now);
     let restore = if spec.loop_limit.is_loop() {
-        roster
+        match completed_heads {
+            // `#loopnoresurrect`: the restore set is the roster items whose
+            // struck-complete row is still in THIS loop's body when the pass
+            // completes. A roster item that is neither live nor struck here
+            // was removed or moved out of the loop (operator delete, a cut to
+            // `agent:run`, the done archive); its `ran` evidence keeps it in
+            // the roster while the pass runs, but it is never resurrected.
+            // On 2026-10-26 a 3-day pass restored 12 long-removed rows after
+            // the operator moved the loop's rows into `agent:run`.
+            Some(completed_heads) => {
+                let struck: std::collections::HashSet<QueueItemIdentity> =
+                    completed_heads.iter().map(|head| identity(head)).collect();
+                roster
+                    .into_iter()
+                    .filter(|item| struck.contains(&identity(item)))
+                    .collect()
+            }
+            None => roster,
+        }
     } else {
         Vec::new()
     };
@@ -1186,9 +1204,25 @@ pub fn plan_loop_restore_for_queue(
             _ => None,
         })
         .collect();
+    // `#loopnoresurrect`: only a roster item whose struck (`~~…~~`) row is
+    // still in this queue's body is restored. An item that is neither live
+    // nor struck here was removed or moved out of the loop after the pass
+    // completed (or before a retained restore landed); the restore never
+    // re-adds it, so done, archived, or relocated rows stay gone.
+    let struck: std::collections::HashSet<QueueItemIdentity> = spans
+        .iter()
+        .filter_map(|(entry, _)| match entry {
+            QueueEntry::Completed(prompt) => Some(identity(&prompt.text)),
+            _ => None,
+        })
+        .collect();
+    let mut seen_missing = std::collections::HashSet::new();
     let missing: Vec<&String> = roster
         .iter()
-        .filter(|item| !live.contains(&identity(item)))
+        .filter(|item| {
+            let id = identity(item);
+            !live.contains(&id) && struck.contains(&id) && seen_missing.insert(id)
+        })
         .collect();
     if missing.is_empty() {
         return Ok(None);
@@ -1580,11 +1614,12 @@ mod tests {
         );
     }
 
-    /// GH #327 pass 3: the closeout consume emptied the queue by rewriting the
-    /// body, so the claimed head was deleted outright with no struck copy.
-    /// Seeing it claimed is drain evidence that survives the erase.
+    /// GH #327 pass 3 is now held by struck-row retention: every binary drain
+    /// of a `loop` queue keeps the struck copy ([`queue_retains_struck_heads`]),
+    /// so a claimed head that completes leaves `~~#upgrade~~` behind and is
+    /// restored from it.
     #[test]
-    fn loop_item_seen_claimed_is_restored_after_its_row_is_erased() {
+    fn loop_item_seen_claimed_is_restored_from_its_retained_struck_row() {
         let spec = spec(&[("interval", "1h"), ("loop", "")]);
         let state = reconcile(None, &spec, 0);
         let (state, decision) = fire(state, &spec, 0, &facts(&["#upgrade"]), &UTC);
@@ -1592,7 +1627,7 @@ mod tests {
         let (state, outcome) =
             observe_with_completed(state, &spec, &heads(&["🚧 #upgrade"]), &[], 1);
         assert_eq!(outcome, ObserveOutcome::Unchanged);
-        let (state, outcome) = observe_with_completed(state, &spec, &[], &[], 2);
+        let (state, outcome) = observe_with_completed(state, &spec, &[], &heads(&["#upgrade"]), 2);
         assert_eq!(
             outcome,
             ObserveOutcome::Completed {
@@ -1603,10 +1638,33 @@ mod tests {
         assert_eq!(state.restore_pending, Some(heads(&["#upgrade"])));
     }
 
-    /// GH #327: once a struck copy proved the item ran, a later observation
-    /// where that row is gone (the drained-queue clear) still restores it.
+    /// `#loopnoresurrect`: a claimed row the operator then deletes (or cuts
+    /// into `agent:run`) leaves neither a live nor a struck copy in the loop.
+    /// Its `ran` evidence closes the pass but never resurrects the row.
     #[test]
-    fn loop_item_seen_struck_stays_owned_after_the_struck_row_is_cleared() {
+    fn loop_item_seen_claimed_then_removed_is_not_resurrected() {
+        let spec = spec(&[("interval", "1h"), ("loop", "")]);
+        let state = reconcile(None, &spec, 0);
+        let (state, _) = fire(state, &spec, 0, &facts(&["#upgrade"]), &UTC);
+        let (state, _) = observe_with_completed(state, &spec, &heads(&["🚧 #upgrade"]), &[], 1);
+        let (state, outcome) = observe_with_completed(state, &spec, &[], &[], 2);
+        assert_eq!(
+            outcome,
+            ObserveOutcome::Completed {
+                pass: 1,
+                restore: Vec::new(),
+            }
+        );
+        assert_eq!(state.restore_pending, None);
+        assert_eq!(state.window, ScheduleWindow::Closed);
+    }
+
+    /// GH #327 + `#loopnoresurrect`: a struck copy proves the item ran and
+    /// keeps it in the roster, but once that struck row is gone from the loop
+    /// (nothing in the binary erases a loop's struck rows, so the operator
+    /// removed it) only the items still struck in the loop are restored.
+    #[test]
+    fn loop_item_whose_struck_row_was_removed_is_not_restored() {
         let spec = spec(&[("interval", "1h"), ("loop", "")]);
         let state = reconcile(None, &spec, 0);
         let (state, _) = fire(state, &spec, 0, &facts(&["#upgrade", "poll"]), &UTC);
@@ -1622,7 +1680,7 @@ mod tests {
             outcome,
             ObserveOutcome::Completed {
                 pass: 1,
-                restore: heads(&["#upgrade", "poll"]),
+                restore: heads(&["poll"]),
             }
         );
     }
@@ -1862,12 +1920,15 @@ mod tests {
     }
 
     #[test]
-    fn restore_reappends_consumed_items_and_drops_struck_copies() {
+    fn restore_reappends_struck_items_and_never_resurrects_removed_ones() {
+        // `b` is in the roster but has neither a live nor a struck row: it was
+        // removed from the loop, so the restore leaves it gone
+        // (`#loopnoresurrect`).
         let content = doc("loop", "- ~~a~~\n- keep me\n");
         let restored = plan_loop_restore(&content, &heads(&["a", "b", "keep me"]))
             .unwrap()
             .unwrap();
-        assert_eq!(restored, doc("loop", "- keep me\n- a\n- b\n"));
+        assert_eq!(restored, doc("loop", "- keep me\n- a\n"));
         assert_eq!(
             plan_loop_restore(&restored, &heads(&["a", "b"])).unwrap(),
             None
@@ -1952,5 +2013,133 @@ mod tests {
         assert_eq!(status.current_pass, Some(1));
         assert_eq!(status.next_run_secs, Some(600));
         assert_eq!(status.loop_limit, LoopLimit::Passes(2));
+    }
+
+    /// `#loopnoresurrect` on the 2026-10-26 `agent-doc-bugs.md` shape: an
+    /// `agent:run id="main"` queue above an `agent:loop id=issues` loop. Pass 5
+    /// ran for three days and its roster collected one-off rows that had been
+    /// struck and removed from the loop long before. The operator then cut the
+    /// loop's five rows into `agent:run`. The pass completes, but nothing is
+    /// restored: neither the long-removed rows nor the ones just moved to
+    /// `agent:run`, and no byte of either queue changes.
+    #[test]
+    fn two_queue_doc_loop_pass_never_resurrects_removed_or_moved_rows() {
+        let before_move = "## Queue: Main\n\
+<!-- agent:run id=\"main\" subagents priority go -->\n\
+- 🚧 [#subagent:strikeformat#1] The strikethrough is malformed.\n\
+<!-- /agent:run -->\n\
+\n\
+## Run: Issues\n\
+<!-- agent:loop id=issues interval=1h priority -->\n\
+- 📥 do [#layoutunprovenliveverify]\n\
+- 📥 do [#grokqueuesubagents]\n\
+- 🔄 release + publish\n\
+- 📥 We need to work on making agent-doc easy to onboard.\n\
+<!-- /agent:loop -->\n";
+        let after_move = "## Queue: Main\n\
+<!-- agent:run id=\"main\" subagents priority go -->\n\
+- 🚧 [#subagent:strikeformat#1] The strikethrough is malformed.\n\
+- 📥 do [#layoutunprovenliveverify]\n\
+- 📥 do [#grokqueuesubagents]\n\
+- 🔄 release + publish\n\
+- 📥 We need to work on making agent-doc easy to onboard.\n\
+<!-- /agent:run -->\n\
+\n\
+## Run: Issues\n\
+<!-- agent:loop id=issues interval=1h priority -->\n\
+<!-- /agent:loop -->\n";
+        let historical = [
+            "Watch https://github.com/btakita/agent-doc/issues for new issues.",
+            "do [#gh363]",
+            "do [#upgradeideatest]",
+            "do [#latestbetadownload]",
+            "Register agent-doc at https://plugins.jetbrains.com/plugin/add#intellij.",
+            "[#coder-remote-install-02805]: done: but still not syncing",
+        ];
+        let spec = spec(&[("interval", "1h"), ("loop", "")]);
+        let state = reconcile(None, &spec, 0);
+        let (state, decision) = fire(state, &spec, 0, &facts(&historical), &UTC);
+        assert_eq!(decision, FireDecision::Opened);
+        // Each historical row ran (struck) and was later removed from the loop;
+        // the current rows joined the roster while the pass stayed open.
+        let (mut state, _) = observe_with_completed(
+            state,
+            &spec,
+            &live_heads_for_queue(before_move, "issues").unwrap(),
+            &heads(&historical),
+            1,
+        );
+        if let ScheduleWindow::Open { roster, .. } = &state.window {
+            assert_eq!(roster.len(), historical.len() + 4, "{roster:?}");
+        } else {
+            panic!("pass closed early: {:?}", state.window);
+        }
+        state = observe_with_completed(
+            state,
+            &spec,
+            &live_heads_for_queue(before_move, "issues").unwrap(),
+            &completed_heads_for_queue(before_move, "issues").unwrap(),
+            2,
+        )
+        .0;
+        let (state, outcome) = observe_with_completed(
+            state,
+            &spec,
+            &live_heads_for_queue(after_move, "issues").unwrap(),
+            &completed_heads_for_queue(after_move, "issues").unwrap(),
+            3,
+        );
+        assert_eq!(
+            outcome,
+            ObserveOutcome::Completed {
+                pass: 1,
+                restore: Vec::new(),
+            }
+        );
+        assert_eq!(state.restore_pending, None);
+
+        // A restore roster already retained in state.db before this fix (the
+        // 16-item `restore_pending` of the incident) is a no-op against the
+        // document: nothing in it is struck in the loop.
+        let mut stale_roster = heads(&historical);
+        stale_roster.extend(live_heads_for_queue(before_move, "issues").unwrap());
+        assert_eq!(
+            plan_loop_restore_for_queue(after_move, "issues", &stale_roster).unwrap(),
+            None
+        );
+        assert_eq!(
+            plan_loop_restore_for_queue(before_move, "issues", &stale_roster).unwrap(),
+            None
+        );
+    }
+
+    /// `#loopnoresurrect`: a struck loop row is still restored in place, and the
+    /// sibling `agent:run` queue is never a source or a target.
+    #[test]
+    fn two_queue_doc_loop_restore_reopens_only_its_own_struck_rows() {
+        let content = "<!-- agent:run id=\"main\" -->\n\
+- ~~poll issues~~\n\
+- ship it\n\
+<!-- /agent:run -->\n\
+<!-- agent:loop id=issues interval=1h -->\n\
+- ~~poll issues~~\n\
+<!-- /agent:loop -->\n";
+        let restored = plan_loop_restore_for_queue(
+            content,
+            "issues",
+            &heads(&["poll issues", "ship it", "do [#gh363]"]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            restored,
+            "<!-- agent:run id=\"main\" -->\n\
+- ~~poll issues~~\n\
+- ship it\n\
+<!-- /agent:run -->\n\
+<!-- agent:loop id=issues interval=1h -->\n\
+- poll issues\n\
+<!-- /agent:loop -->\n"
+        );
     }
 }

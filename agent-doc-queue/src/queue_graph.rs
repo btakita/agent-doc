@@ -479,6 +479,56 @@ pub fn selected_component<'a>(
         .map(|block| block.component))
 }
 
+/// Whether `component` is a repeating queue (`agent:loop`, or a legacy
+/// `agent:run loop` / `agent:queue loop`). Loop rows are operator-authored
+/// recurring work; binary-originated items never land in one
+/// (`#loopnoinsert`).
+pub fn is_loop_queue(component: &Component) -> bool {
+    component.name == "queue"
+        && component
+            .attrs
+            .contains_key(crate::queue_schedule::QUEUE_LOOP_ATTR)
+}
+
+/// `#loopnoinsert`: the queue a binary-originated insertion (queue add,
+/// worker follow-ups, backlog mirror, reopen/requeue) lands in.
+///
+/// The selected queue when it is a non-repeating `agent:run`; otherwise the
+/// first non-repeating queue in document order. `None` when the document has
+/// only loops (or no queue): callers refuse rather than writing into a loop,
+/// because a loop pass keeps every row it ran as recurring work.
+pub fn insertion_component<'a>(
+    content: &str,
+    components: &'a [Component],
+) -> Result<Option<&'a Component>> {
+    let queues = QueueSet::parse(content, components)?;
+    if let Some(selected) = queues.selected()
+        && !is_loop_queue(selected.component)
+    {
+        return Ok(Some(selected.component));
+    }
+    Ok(queues
+        .blocks()
+        .iter()
+        .map(|block| block.component)
+        .find(|component| !is_loop_queue(component)))
+}
+
+/// [`insertion_component`]'s queue id.
+pub fn insertion_queue_id(content: &str, components: &[Component]) -> Result<Option<String>> {
+    let queues = QueueSet::parse(content, components)?;
+    if let Some(selected) = queues.selected()
+        && !is_loop_queue(selected.component)
+    {
+        return Ok(Some(selected.id.clone()));
+    }
+    Ok(queues
+        .blocks()
+        .iter()
+        .find(|block| !is_loop_queue(block.component))
+        .map(|block| block.id.clone()))
+}
+
 pub fn component_for_id<'a>(
     content: &str,
     components: &'a [Component],

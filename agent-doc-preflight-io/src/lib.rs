@@ -5200,8 +5200,24 @@ pub fn run_queue_maintenance_with_coin_gate(
     // held ids and run them, silently upgrading a `start` drain into a
     // continuous backlog loop.
     let mut backlog_ids_held_out_of_queue = 0usize;
-    if let Some(sync_request) =
-        agent_doc_queue::backlog_sync::collect_backlog_queue_sync(&components, &content)
+    // `#loopnoinsert`: the mirror writes into the SELECTED queue. When every
+    // `agent:run` head is claimed, selection falls through to an `agent:loop`;
+    // a backlog id mirrored there becomes a recurring loop row that every later
+    // pass restores (2026-10-26: 12 one-off rows resurrected into `issues`).
+    // Skip the mirror for a selected loop; it lands in `agent:run` on the next
+    // pass that selects one.
+    let selected_queue_is_loop = agent_doc_queue::queue_graph::is_loop_queue(&comp);
+    if selected_queue_is_loop
+        && agent_doc_queue::backlog_sync::collect_backlog_queue_sync(&components, &content)
+            .is_some()
+    {
+        eprintln!(
+            "[preflight] queue: backlog mirror skipped for agent:loop id `{selected_queue_id}`; loops never receive mirrored ids (#loopnoinsert)"
+        );
+    }
+    if let Some(sync_request) = (!selected_queue_is_loop)
+        .then(|| agent_doc_queue::backlog_sync::collect_backlog_queue_sync(&components, &content))
+        .flatten()
     {
         let mode = sync_request.mode;
         source_queue_priority = sync_request.priority;
@@ -10015,6 +10031,66 @@ mod tests {
                     .lines()
                     .any(|l| l.contains("⏭\u{fe0f}") && l.contains("[#sy71]")),
             "the skipped #sy71 head must carry the ⏭️ marker:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_never_mirrors_backlog_ids_into_a_selected_loop() {
+        // `#loopnoinsert`: with `agent:run id=main` drained, queue selection
+        // falls through to the `issues` loop. The backlog mirror used to write
+        // `do [#fresh]` into that loop, where every later pass restored it as
+        // a recurring row (2026-10-26, tasks/agent-doc/agent-doc-bugs.md).
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let loop_block = concat!(
+            "## Run: Issues\n",
+            "<!-- agent:loop id=issues interval=1h priority -->\n",
+            "- Watch https://github.com/btakita/agent-doc/issues for new issues.\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Queue: Main\n",
+                "<!-- agent:run id=\"main\" subagents priority go -->\n",
+                "- ~~do [#older]~~\n",
+                "<!-- /agent:run -->\n\n",
+                "{}\n",
+                "<!-- agent:backlog priority queue -->\n",
+                "- [ ] [#fresh] one-off work filed by the loop's watch item\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            loop_block
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let loop_start = updated.find("<!-- agent:loop").unwrap();
+        let loop_body = updated[loop_start..]
+            .split("<!-- /agent:loop -->")
+            .next()
+            .unwrap();
+        assert!(
+            !loop_body.contains("#fresh"),
+            "a backlog id never becomes a loop row:\n{updated}"
+        );
+        // Only the operator's row (with its lifecycle projection) remains.
+        assert_eq!(
+            loop_body.lines().filter(|line| line.starts_with("- ")).count(),
+            1,
+            "{updated}"
         );
     }
 

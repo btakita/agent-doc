@@ -29,7 +29,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release, PyPI serves 0.35.553, all six native archives promoted to their stable target channels, and Homebrew is bumped. Post-release `origin/main` is `fc9c0be086` (unreleased, ships in the next release): the `#claimrowmigrate` claim-row fix, the Marketplace retained-version fix, GH #375 (JetBrains 0.2.828/0.2.829/0.2.830), GH #373, GH #374, and the cross-queue claim-marker projection fix; all are installed locally and the three issues are closed.
+Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release. Post-release `origin/main` is `d14f33a01e` and is installed locally: the claim-row and cross-queue claim-marker fixes, id/occurrence merge pairing, the Marketplace retained-version fix, the controller test-gate flake fix, and GH #373, #374 and #375 (all three closed; JetBrains 0.2.828/0.2.829/0.2.830). Release v0.35.554 with these changes is in its `make check` gate.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
